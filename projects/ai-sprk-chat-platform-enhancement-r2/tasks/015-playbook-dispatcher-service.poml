@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-015" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>PlaybookDispatcher Service — Two-Stage Intent Matching (Vector Search + LLM Refinement)</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, search</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates the core PlaybookDispatcher service with two-stage AI matching; central component for FR-06, FR-07, FR-08; downstream tasks R2-018 and R2-019 depend on this</rigor-reason>
+    <dependencies>[003, 006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a new class `PlaybookDispatcher` in `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/`
+    (factory-instantiated, NOT DI-registered) that performs two-stage playbook intent matching.
+
+    **Stage 1 — Vector Similarity Search**:
+    - Generate an embedding for the user's message text using Azure OpenAI `text-embedding-3-large`
+    - Query the `playbook-embeddings` AI Search index (created in Task R2-003) using hybrid search
+    - Pre-filter by `recordType` matching `ChatHostContext.RecordType` (reduces candidate set)
+    - Return top 5 candidates by combined RRF score (or vector-only if no keyword match)
+    - Timeout: 1.5 seconds maximum for the vector search stage
+
+    **Stage 2 — LLM Refinement + Parameter Extraction**:
+    - If Stage 1 returns 0 candidates: return `DispatchResult.NoMatch`
+    - If Stage 1 returns exactly 1 candidate with score &gt;= 0.85: skip Stage 2, return match directly
+    - Otherwise: send a compact prompt to the execution IChatClient asking it to:
+      a. Select the best matching playbook from the candidates list (or "none")
+      b. Extract any parameter values mentioned in the user message (e.g., recipient name, date)
+      c. Return as structured JSON: `{ "playbookId": "...", "confidence": 0.0-1.0, "parameters": {} }`
+    - Timeout: 0.5 seconds for Stage 2 (fast LLM call with small prompt)
+    - Total NFR-04 budget: 2 seconds for both stages combined
+
+    **Output**:
+    ```csharp
+    public record DispatchResult(
+        bool Matched,
+        string? PlaybookId,
+        double ConfidenceScore,
+        Dictionary&lt;string, string&gt; ExtractedParameters,
+        string OutputType,         // text | dialog | navigation | download | insert
+        bool RequiresConfirmation);
+    ```
+
+    **Class design**:
+    ```csharp
+    public class PlaybookDispatcher
+    {
+        public PlaybookDispatcher(SemanticSearchService searchService, IChatClient executionClient,
+            ILogger&lt;PlaybookDispatcher&gt; logger) { ... }
+
+        public Task&lt;DispatchResult&gt; DispatchAsync(string userMessage, ChatHostContext context,
+            CancellationToken cancellationToken = default);
+    }
+    ```
+
+    The `PlaybookDispatcher` is called by `SprkChatAgent` when user messages should be evaluated for
+    playbook intent before generating a standard chat response.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    `PlaybookDispatcher` exists in `Services/Ai/Chat/`, is factory-instantiated, performs two-stage
+    matching within 2 seconds (NFR-04), and returns a `DispatchResult` with playbook ID, confidence,
+    extracted parameters, output type, and confirmation requirement. "Send analysis by email to John"
+    matches the email playbook with `{"recipient": "John"}` extracted (FR-06).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-06, FR-07, FR-08, NFR-04 (2s matching budget)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — factory instantiation pattern, DI budget, ChatHostContext">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="SemanticSearchService — existing AI Search integration to use for vector search">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+    <file purpose="Agent factory — factory instantiation pattern to follow">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="Analysis scopes pattern — understanding the three-tier scope system for context">../.claude/patterns/ai/analysis-scopes.md</file>
+    <file purpose="Playbook architecture — JPS schema and output types reference">docs/architecture/playbook-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">MUST NOT register PlaybookDispatcher in DI — instantiate via SprkChatAgentFactory; DI budget already at 16 (over limit)</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext for recordType pre-filtering; MUST extend BFF only</constraint>
+    <constraint source="ADR-014">MUST cache dispatch results with version-keyed cache entries (playbook catalog version); MUST scope cache by tenant; MUST NOT cache per-user message (each message is unique)</constraint>
+    <constraint source="ADR-016">MUST bound concurrency on AI Search and LLM calls; MUST return 503 if AI Search is overloaded</constraint>
+    <constraint source="spec NFR-04">Vector search + LLM refinement MUST complete within 2 seconds combined</constraint>
+    <constraint source="spec FR-18">Output type and requiresConfirmation MUST come from the JPS JSON definition (execution-time behavior), NOT from a static field — read the playbook's JPS at match time</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+    <patterns>
+      <pattern>SemanticSearchService hybrid search: `searchService.SearchAsync(query, indexName: "playbook-embeddings", filter: $"recordType eq '{context.RecordType}'", top: 5)` — follow existing search patterns</pattern>
+      <pattern>Fast LLM call for parameter extraction: use a compact system prompt with the candidate list embedded as JSON, ask for structured JSON output; set MaxTokens=200 for fast response</pattern>
+      <pattern>Confidence threshold for Stage 2 skip: score &gt;= 0.85 with single candidate → direct match; avoids LLM call for high-confidence single matches</pattern>
+      <pattern>CompoundIntentDetector pattern: PlaybookDispatcher follows a similar two-stage pattern to CompoundIntentDetector — read it to understand the decision pattern before implementing</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The PlaybookDispatcher is the centerpiece of SprkChat R2's "copilot-quality" intent recognition.
+      When a user types "send this analysis by email to the client" in SprkChat, the dispatcher:
+      1. Embeds the message and searches the `playbook-embeddings` index for email-related playbooks
+      2. If multiple candidates (email follow-up, email summary, email notification), asks the LLM
+         to select the best match given the full user message
+      3. Extracts "client" as the `recipient` parameter
+      4. Returns the matched email playbook with `requiresConfirmation: true` (from JPS)
+      5. Task R2-018 (PlaybookOutputHandler) then opens the email composer Code Page pre-populated
+
+      The two-stage approach is essential for both accuracy and performance: vector search handles
+      the semantic matching quickly, while LLM refinement handles ambiguous multi-candidate cases
+      with parameter extraction. Single high-confidence matches skip Stage 2 to stay within NFR-04.
+
+      `CompoundIntentDetector` (existing) handles a different use case — it detects whether the
+      AI's own plan-preview response requires confirmation before execution. `PlaybookDispatcher`
+      handles user natural language → playbook intent recognition. They are complementary.
+    </background>
+    <dependencies>
+      Depends on Task R2-003 (playbook-embeddings AI Search index must exist) and R2-006 (Phase 1
+      deployment). Safe to run in parallel with Group A tasks (R2-010 through R2-014). Tasks R2-018
+      and R2-019 depend on this. Task R2-016 (embedding pipeline) is an independent sibling in Group B.
+      Own files: `Services/Ai/Chat/PlaybookDispatcher.cs`, `Models/Ai/Chat/DispatchResult.cs`.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `CompoundIntentDetector.cs` to understand the two-stage detection pattern used in this codebase before implementing PlaybookDispatcher</step>
+    <step order="1">Read `SemanticSearchService.cs` to understand the search API — confirm index name configuration, filter syntax, and hybrid search parameters</step>
+    <step order="2">Read `SprkChatAgentFactory.cs` to understand the factory instantiation pattern for new services</step>
+    <step order="3">Read `docs/architecture/playbook-architecture.md` to understand JPS output node types and requiresConfirmation field location</step>
+    <step order="4">Create `DispatchResult.cs` record model in `Models/Ai/Chat/`</step>
+    <step order="5">Create `PlaybookDispatcher.cs` in `Services/Ai/Chat/` with the constructor taking `SemanticSearchService`, execution `IChatClient`, and `ILogger`</step>
+    <step order="6">Implement Stage 1: generate embedding for user message, query `playbook-embeddings` index with recordType filter, collect top 5 candidates with 1.5s timeout</step>
+    <step order="7">Implement Stage 2 bypass: if single candidate with score &gt;= 0.85, skip LLM refinement and return direct match</step>
+    <step order="8">Implement Stage 2 LLM refinement: build compact prompt with candidate list, call execution IChatClient with MaxTokens=200, parse structured JSON output for playbookId, confidence, parameters</step>
+    <step order="9">Read matched playbook's JPS definition to populate `OutputType` and `RequiresConfirmation` in the result</step>
+    <step order="10">Wire `PlaybookDispatcher` into `SprkChatAgentFactory` using factory instantiation pattern</step>
+    <step order="11">Add timing telemetry to verify NFR-04 (2s total) — log duration of each stage at Debug level</step>
+    <step order="12">Run `dotnet build` and verify no errors</step>
+    <step order="13">Update TASK-INDEX.md: change task R2-015 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs — two-stage playbook intent matching service</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs — dispatch result model with matched playbook, confidence, parameters, output type, confirmation flag</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs — updated to factory-instantiate PlaybookDispatcher</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With a `playbook-embeddings` index containing an email playbook, "send this by email to John" returns a DispatchResult with Matched=true and ExtractedParameters containing "recipient"="John"</criterion>
+    <criterion testable="true">A message with no semantic match to any playbook returns DispatchResult with Matched=false</criterion>
+    <criterion testable="true">Total dispatch time (both stages) completes within 2 seconds under normal load (NFR-04)</criterion>
+    <criterion testable="true">When a single candidate has score &gt;= 0.85, Stage 2 LLM call is NOT made (verify via logging)</criterion>
+    <criterion testable="true">PlaybookDispatcher is NOT in the DI container registrations (factory instantiation only)</criterion>
+    <criterion testable="true">DispatchResult.OutputType and RequiresConfirmation are populated from the JPS definition (not hardcoded)</criterion>
+    <criterion testable="true">recordType pre-filter correctly excludes playbooks for other entity types from candidates</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `playbook-embeddings` index schema (from Task R2-003) should have fields: `id`, `playbookId`,
+    `name`, `description`, `contentVector3072` (the embedding), `recordType`, `entityType`, `tags`.
+    Confirm these field names before writing the search query — use the notes from R2-003 if available.
+
+    For the Stage 2 LLM prompt, keep it very compact to stay within the 0.5s time budget. The prompt
+    should be &lt;500 tokens: list candidates as a numbered JSON array and ask for structured selection.
+    Do not include full playbook descriptions — just names and short tags.
+
+    The LLM structured output for parameter extraction can use function calling / tool use if the
+    IChatClient implementation supports it, or can use a JSON-constrained prompt. Check how
+    `CompoundIntentDetector` handles structured output to follow the established pattern.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group B — depends on R2-003 (playbook-embeddings index) and R2-006 (Phase 1 deployment). Safe to run in parallel with Group A tasks. Tasks R2-018 and R2-019 depend on this task. Own files: PlaybookDispatcher.cs, DispatchResult.cs.</protocol>
+  </execution>
+</task>

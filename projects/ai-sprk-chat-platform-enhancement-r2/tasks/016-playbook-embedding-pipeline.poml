@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-016" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Playbook Embedding Pipeline — Index Playbooks into AI Search on Create/Update</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, search</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates background embedding pipeline triggered by Dataverse playbook changes; integrates Azure OpenAI embedding generation with AI Search index writes; correctness is critical for PlaybookDispatcher Stage 1</rigor-reason>
+    <dependencies>[003, 006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a background embedding pipeline that indexes playbooks into the `playbook-embeddings` AI
+    Search index whenever a playbook is created or updated. This feeds Stage 1 of the PlaybookDispatcher.
+
+    **Trigger mechanism**:
+    - Dataverse plugin or webhook calls a new BFF API endpoint `POST /api/ai/playbooks/{playbookId}/index`
+      after create/update. The BFF endpoint processes this asynchronously (fire-and-forget after
+      enqueuing, returns `202 Accepted` immediately).
+    - The actual embedding generation and indexing runs in the background via the existing
+      `BackgroundService` (ADR-001) or a new `IBackgroundTaskQueue` enqueue pattern — follow the
+      existing pattern in the BFF for background processing.
+
+    **Embedding generation**:
+    - Concatenate the following playbook fields into a single text document for embedding:
+      `{name}\n{description}\n{triggerPhrases}\n{tags}`
+      where `triggerPhrases` is the `sprk_triggerPhrases` field from Dataverse (newline-delimited)
+    - Generate embedding via Azure OpenAI `text-embedding-3-large` (3072 dimensions) — use the
+      existing embedding client in the BFF
+
+    **Index write**:
+    - Before writing, delete any existing document with the same `playbookId` from the index to
+      prevent duplicates (de-duplicate by field filter, not by document ID)
+    - Write to `playbook-embeddings` index with fields:
+      `id` (GUID), `playbookId`, `name`, `recordType`, `entityType`, `tags`, `contentVector3072`
+    - Use the existing `SemanticSearchService` or Azure AI Search SDK for the index write
+
+    **Error handling**:
+    - Log embedding generation failures at Warning level with playbook ID (no content)
+    - Do not surface indexing failures to the API caller — the response is always `202 Accepted`
+    - If embedding fails, leave the old index entry (stale is better than missing)
+
+    **Endpoint**: `POST /api/ai/playbooks/{playbookId}/index`
+    - Body: none (playbookId in route is sufficient — fetch full playbook from Dataverse)
+    - Returns: `202 Accepted` immediately
+    - Authorization: internal service-to-service (Dataverse plugin calls this with a service account token)
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    When a playbook is created or updated in Dataverse, the BFF receives a trigger, enqueues the
+    embedding generation, and eventually writes the embedding to the `playbook-embeddings` AI Search
+    index. PlaybookDispatcher Stage 1 vector search returns the indexed playbook as a candidate within
+    seconds of the playbook being saved.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-18 (trigger metadata fields), playbook embedding index requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — DI budget, background processing pattern, ADR constraints">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="SemanticSearchService — existing AI Search integration for index writes">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+    <file purpose="Existing indexing services — background processing patterns in use">src/server/api/Sprk.Bff.Api/Services/Ai/Indexing/</file>
+    <file purpose="Minimal API endpoint definition pattern">../.claude/patterns/api/endpoint-definition.md</file>
+    <file purpose="AI architecture — dual IChatClient, background service pattern">docs/architecture/AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API for the trigger endpoint; background processing MUST use BackgroundService or IBackgroundTaskQueue pattern — MUST NOT use Azure Functions</constraint>
+    <constraint source="ADR-010">MUST NOT add new DI registrations for this feature if possible — wire into existing indexing infrastructure</constraint>
+    <constraint source="ADR-014">Embedding results MUST be cached with version-keyed keys if reused; MUST NOT cache them per-message (embeddings are per-playbook, not per-user-message)</constraint>
+    <constraint source="ADR-015">MUST NOT log playbook content or trigger phrases — log only playbook ID and indexing metadata</constraint>
+    <constraint source="ADR-016">Embedding API calls MUST be rate-limited; MUST bound concurrent indexing operations</constraint>
+    <constraint source="spec">Index write MUST de-duplicate: delete existing entry for playbookId before writing new one</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Indexing/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-implementation-reference.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+    <patterns>
+      <pattern>Fire-and-forget endpoint pattern: validate and enqueue in the endpoint handler; return 202 immediately; process in IHostedService or Channel consumer; follow existing pattern in Sprk.Bff.Api for async job processing</pattern>
+      <pattern>AI Search document upload: `searchIndexClient.GetSearchClient("playbook-embeddings").UploadDocumentsAsync(new[] { doc })` — follow SemanticSearchService indexing pattern</pattern>
+      <pattern>De-duplication: `searchClient.DeleteDocumentsAsync("playbookId", new[] { playbookId })` before uploading new document — or use merge-or-upload with playbookId as the document key</pattern>
+      <pattern>Embedding generation: use the raw detection IChatClient (or the embedding model endpoint) — check if an embedding-specific client already exists in the agent factory</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The PlaybookDispatcher (Task R2-015) uses the `playbook-embeddings` AI Search index for Stage 1
+      vector similarity search. For this to work, each playbook must have its embedding pre-computed
+      and indexed. Task R2-003 created the index schema and initially indexed existing playbooks.
+      This task creates the ongoing maintenance pipeline: whenever a playbook is created or updated
+      (by an admin in the playbook management UI), its embedding is refreshed in the index.
+
+      The unresolved question in the spec about synchronous vs async indexing: the answer for R2 is
+      async (fire-and-forget). The trigger endpoint returns 202 immediately; the caller (Dataverse
+      plugin or webhook) does not wait for indexing to complete. There will be a brief window
+      (seconds to minutes) of eventual consistency after a playbook update.
+
+      The existing `Services/Ai/Indexing/` directory may already contain document indexing infrastructure
+      from R1 — reuse its patterns for the background processing queue and AI Search client usage.
+    </background>
+    <dependencies>
+      Depends on Task R2-003 (playbook-embeddings AI Search index) and R2-006 (Phase 1 deployment).
+      Independent of Group A tasks and other Group B tasks — safe for parallel execution. Does not
+      need to complete before PlaybookDispatcher (R2-015) can be implemented since R2-015 uses the
+      index that R2-003 pre-populated. Own files: new `PlaybookIndexingService.cs` and the trigger
+      endpoint handler.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `Services/Ai/Indexing/` to understand existing indexing infrastructure and background processing patterns</step>
+    <step order="1">Read `SemanticSearchService.cs` to understand how to write documents to AI Search indices</step>
+    <step order="2">Determine how embedding generation is currently done (check for an embedding client or text-embedding-3-large integration in the existing BFF)</step>
+    <step order="3">Create `PlaybookIndexingService.cs` in `Services/Ai/Indexing/` with a method `IndexPlaybookAsync(string playbookId, CancellationToken ct)`</step>
+    <step order="4">Implement Dataverse fetch: retrieve playbook record by ID including `sprk_triggerPhrases`, `sprk_recordType`, `sprk_entityType`, `sprk_tags` fields</step>
+    <step order="5">Implement text concatenation for embedding: `{name}\n{description}\n{triggerPhrases}\n{tags}`</step>
+    <step order="6">Call embedding model to generate 3072-dimension vector for the concatenated text</step>
+    <step order="7">Implement de-duplication: delete existing `playbook-embeddings` entry for this playbookId (use merge-or-upload pattern if available in AI Search SDK)</step>
+    <step order="8">Write new document to `playbook-embeddings` index with all required fields</step>
+    <step order="9">Create `POST /api/ai/playbooks/{playbookId}/index` Minimal API endpoint that enqueues indexing and returns 202 Accepted immediately</step>
+    <step order="10">Wire error handling: catch embedding/indexing exceptions, log Warning with playbookId only (no content), leave stale entry in place on failure</step>
+    <step order="11">Run `dotnet build` and verify no errors</step>
+    <step order="12">Update TASK-INDEX.md: change task R2-016 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Indexing/PlaybookIndexingService.cs — background service that generates embeddings and writes to playbook-embeddings index</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ (new file or addition) — POST /api/ai/playbooks/{playbookId}/index trigger endpoint</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`POST /api/ai/playbooks/{playbookId}/index` returns `202 Accepted` within 100ms (before embedding generation starts)</criterion>
+    <criterion testable="true">After the endpoint is called, the playbook appears in the `playbook-embeddings` index within 30 seconds (eventual consistency)</criterion>
+    <criterion testable="true">If the same playbookId is indexed twice, only one entry exists in the index (de-duplication working)</criterion>
+    <criterion testable="true">If embedding generation fails, the BFF logs a Warning with playbookId but does NOT propagate the error to the HTTP caller</criterion>
+    <criterion testable="true">No playbook content (name, description, trigger phrases) appears in logs beyond the playbookId identifier (ADR-015)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Check whether the Azure OpenAI text-embedding-3-large deployment name is configured in the BFF
+    `appsettings.json` or `AiOptions`. Use the existing configuration rather than hardcoding the
+    deployment name. The deployment name from `docs/architecture/auth-AI-azure-resources.md` is
+    the reference — use it.
+
+    The `POST /api/ai/playbooks/{playbookId}/index` endpoint will eventually be called by a Dataverse
+    plugin (post-create/post-update on `sprk_analysisplaybook`). For Phase 2, the plugin wiring is
+    not required — just the endpoint. Document the expected call pattern in
+    `notes/016-playbook-indexing-trigger.md` for the Dataverse plugin developer.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group B — depends on R2-003 and R2-006. Safe to run in parallel with R2-015 and all Group A tasks. Independent — does not block or depend on other Group B tasks. Own files: PlaybookIndexingService.cs (new), playbook index endpoint (new file or addition).</protocol>
+  </execution>
+</task>

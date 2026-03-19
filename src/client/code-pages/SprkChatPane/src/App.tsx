@@ -616,7 +616,7 @@ export const App: React.FC<AppProps> = ({
         <SprkChat
           sessionId={activeSessionId || undefined}
           playbookId={activeContext.playbookId || undefined}
-          documentId={undefined}
+          documentId={activeContext.sourceFileId || activeContext.entityId || undefined}
           analysisId={activeContext.analysisId || undefined}
           apiBaseUrl={apiBaseUrl}
           accessToken={authState.token}

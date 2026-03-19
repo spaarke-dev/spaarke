@@ -19,7 +19,14 @@
  */
 
 import { useCallback, useState, useRef } from 'react';
-import type { IChatAction, ChatActionCategory, IHostContext } from '../types';
+import type {
+  IChatAction,
+  ChatActionCategory,
+  IHostContext,
+  IPendingAction,
+  IDialogOpenPayload,
+  INavigatePayload,
+} from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -187,6 +194,159 @@ const handleSummarize: ActionHandler = async (_action, context) => {
 const handleSearch: ActionHandler = async (_action, context) => {
   context.setInputValue('Search for: ');
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// dialog_open SSE Event Handler (Task R2-039)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Opens a Code Page dialog via Xrm.Navigation.navigateTo.
+ *
+ * Pre-populated field values are serialized as a URL query string and passed
+ * via the `data` parameter. Only executes in Dataverse context where Xrm is
+ * available; in non-Dataverse environments (Storybook, dev) logs a warning.
+ *
+ * @see ADR-006 — MUST use Xrm.Navigation.navigateTo with pageType="webresource"
+ * @see dialog-patterns.md — Pattern 1: Opening a React Code Page Dialog
+ */
+export function openCodePageDialog(payload: IDialogOpenPayload): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = (window as any).Xrm;
+
+  if (!xrm?.Navigation?.navigateTo) {
+    console.warn(
+      '[useActionHandlers] Xrm.Navigation.navigateTo not available — dialog_open event ignored.',
+      'targetPage:', payload.targetPage,
+      'Environment may be Storybook, dev, or non-Dataverse context.'
+    );
+    return;
+  }
+
+  // Serialize prePopulateFields as URL query string per ADR-006
+  const data = new URLSearchParams(payload.prePopulateFields).toString();
+
+  xrm.Navigation.navigateTo(
+    {
+      pageType: 'webresource',
+      webresourceName: payload.targetPage,
+      data,
+    },
+    {
+      target: 2, // dialog
+      width: { value: payload.width ?? 85, unit: '%' },
+      height: { value: payload.height ?? 85, unit: '%' },
+    }
+  ).catch((err: unknown) => {
+    console.error('[useActionHandlers] Failed to open Code Page dialog:', err);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// navigate SSE Event Handler (Task R2-052)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Navigates to a target page or URL via Xrm.Navigation.
+ *
+ * For Code Page targets (targetPage set): opens via navigateTo with pageType="webresource".
+ * For external URLs (url set): opens via Xrm.Navigation.openUrl.
+ * Parameters are passed as URL query string data.
+ *
+ * Only executes in Dataverse context where Xrm is available; in non-Dataverse
+ * environments (Storybook, dev) logs a warning.
+ *
+ * @see ADR-006 — MUST use Xrm.Navigation.navigateTo with pageType="webresource"
+ */
+export function navigateToTarget(payload: INavigatePayload): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = (window as any).Xrm;
+
+  if (!xrm?.Navigation) {
+    console.warn(
+      '[useActionHandlers] Xrm.Navigation not available — navigate event ignored.',
+      'targetPage:', payload.targetPage,
+      'url:', payload.url,
+      'Environment may be Storybook, dev, or non-Dataverse context.'
+    );
+    return;
+  }
+
+  // If an explicit URL is provided, open it directly
+  if (payload.url) {
+    xrm.Navigation.openUrl(payload.url);
+    return;
+  }
+
+  // If a Code Page target is provided, open via navigateTo (ADR-006)
+  if (payload.targetPage) {
+    const data = new URLSearchParams(payload.parameters).toString();
+
+    xrm.Navigation.navigateTo(
+      {
+        pageType: 'webresource',
+        webresourceName: payload.targetPage,
+        data,
+      },
+      {
+        target: 1, // inline navigation (not dialog)
+      }
+    ).catch((err: unknown) => {
+      console.error('[useActionHandlers] Failed to navigate to Code Page:', err);
+    });
+    return;
+  }
+
+  console.warn(
+    '[useActionHandlers] navigate event has neither url nor targetPage — ignoring.',
+    'parameters:', payload.parameters
+  );
+}
+
+/**
+ * Dispatches a confirmed action to the BFF API.
+ *
+ * Called after the user clicks Confirm in the ActionConfirmationDialog.
+ * Sends POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm.
+ */
+export async function dispatchConfirmedAction(
+  pendingAction: IPendingAction,
+  apiBaseUrl: string,
+  accessToken: string
+): Promise<{ success: boolean; message: string }> {
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  const url = `${baseUrl}/api/ai/chat/sessions/${pendingAction.sessionId}/actions/${pendingAction.actionId}/confirm`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        actionId: pendingAction.actionId,
+        parameters: pendingAction.parameters,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return {
+        success: false,
+        message: `Action failed (${response.status}): ${errorText}`,
+      };
+    }
+
+    const result = await response.json().catch(() => ({}));
+    return {
+      success: true,
+      message: result.message || `${pendingAction.actionName} completed successfully.`,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return { success: false, message: `Action dispatch failed: ${message}` };
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook

@@ -20,13 +20,29 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// </param>
 /// <param name="KnowledgeSources">Knowledge sources scoped to this analysis context.</param>
 /// <param name="AnalysisContext">Contextual metadata about the analysis record (type, matter, practice area).</param>
+/// <param name="Commands">
+/// Dynamic command catalog resolved by <see cref="Services.Ai.Chat.DynamicCommandResolver"/> (R2-019/R2-020).
+/// Contains system, playbook, and scope-contributed slash commands. Null when command resolution is unavailable.
+/// </param>
+/// <param name="SearchGuidance">
+/// Scope-level search guidance from <c>sprk_searchGuidance</c> on the active scope(s).
+/// Consumed by <see cref="Services.Ai.Chat.Tools.WebSearchTools"/> for scope-guided web search (FR-10).
+/// Null when no scopes have search guidance configured.
+/// </param>
+/// <param name="ScopeMetadata">
+/// Lightweight metadata about the active scope(s): name, description, and focus area.
+/// Null when no scopes are active for this analysis context.
+/// </param>
 public record AnalysisChatContextResponse(
     string DefaultPlaybookId,
     string DefaultPlaybookName,
     List<AnalysisPlaybookInfo> AvailablePlaybooks,
     List<InlineActionInfo> InlineActions,
     List<AnalysisKnowledgeSourceInfo> KnowledgeSources,
-    AnalysisContextInfo AnalysisContext);
+    AnalysisContextInfo AnalysisContext,
+    IReadOnlyList<CommandEntry>? Commands = null,
+    string? SearchGuidance = null,
+    AnalysisScopeMetadata? ScopeMetadata = null);
 
 /// <summary>
 /// Lightweight playbook descriptor in the analysis context response.
@@ -93,3 +109,20 @@ public record AnalysisContextInfo(
     string? PracticeArea,
     string? SourceFileId,
     string? SourceContainerId);
+
+/// <summary>
+/// Lightweight metadata about an active scope associated with the analysis context.
+///
+/// Provides human-readable scope information (name, description, focus area) for
+/// the client UI and AI grounding. Resolved from <c>sprk_scope</c> records in
+/// Dataverse by <see cref="Services.Ai.Chat.AnalysisChatContextResolver"/>.
+/// </summary>
+/// <param name="ScopeId">Dataverse GUID string of the <c>sprk_scope</c> record.</param>
+/// <param name="ScopeName">Display name of the scope (<c>sprk_name</c>).</param>
+/// <param name="Description">Optional scope description for context grounding.</param>
+/// <param name="FocusArea">Optional focus area tag for scope-specific behaviour.</param>
+public record AnalysisScopeMetadata(
+    string ScopeId,
+    string ScopeName,
+    string? Description = null,
+    string? FocusArea = null);

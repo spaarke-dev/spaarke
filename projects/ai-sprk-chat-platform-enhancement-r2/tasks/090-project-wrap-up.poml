@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-090" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Project Wrap-Up — Quality Gates, Cleanup, Documentation, Final Verification</title>
+    <status>completed</status>
+    <phase>6</phase>
+    <tags>documentation, wrap-up</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Project wrap-up and documentation task. Tags include documentation and wrap-up. No code implementation — only quality gate invocation, repo cleanup, README update, and lessons-learned documentation. MINIMAL rigor appropriate.</rigor-reason>
+    <dependencies>[067]</dependencies>
+  </metadata>
+
+  <prompt>
+    Complete the SprkChat Platform Enhancement R2 project: run `code-review` and `adr-check` quality gates, run `repo-cleanup`, update README.md status to "Complete" and progress to 100%, verify all 16 graduation criteria from README.md are checked off, and document lessons learned in `notes/lessons-learned.md`.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    README.md shows Status: Complete and Progress: 100%. All 16 graduation criteria are marked checked. code-review passes with no blocking issues. adr-check passes with no ADR violations. repo-cleanup finds no ephemeral files. notes/lessons-learned.md documents key lessons from R2 development. TASK-INDEX.md shows all tasks as completed (✅).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — all 16 graduation criteria">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project overview — README status and graduation criteria checklist">projects/ai-sprk-chat-platform-enhancement-r2/README.md</file>
+    <file purpose="Project AI context — completion criteria">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Task index — verify all tasks are complete">projects/ai-sprk-chat-platform-enhancement-r2/tasks/TASK-INDEX.md</file>
+    <file purpose="code-review skill">../.claude/skills/code-review/SKILL.md</file>
+    <file purpose="adr-check skill">../.claude/skills/adr-check/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md skills">MUST run code-review skill (not manual inspection) — use the skill for structured review</constraint>
+    <constraint source="CLAUDE.md skills">MUST run adr-check skill (not manual ADR lookup) — use the skill for structured ADR compliance check</constraint>
+    <constraint source="spec">All 16 graduation criteria MUST be individually verified — do not bulk-check without evidence</constraint>
+    <constraint source="spec">lessons-learned.md MUST be substantive — at least 5 key lessons with actionable notes for future R3 work</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/README.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/tasks/TASK-INDEX.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/notes/067-final-acceptance-results.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern>README.md graduation criteria: locate the checklist section in README.md, verify each criterion is checked off based on Phase 5 acceptance results (notes/067-final-acceptance-results.md)</pattern>
+      <pattern>repo-cleanup: invoke /repo-cleanup skill to identify and remove ephemeral files, working notes, and temporary artifacts that should not be committed long-term</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      All 6 phases of SprkChat R2 are complete. Phase 5 (R2-067) confirmed all 16 success criteria pass. This final task closes out the project by running quality gates, updating project documentation to reflect completion status, and capturing lessons learned for future development.
+
+      The lessons-learned document is particularly important for R3 planning — R2 introduced streaming, playbook dispatch, and multi-document context. Lessons about what worked well (parallel execution groups, metadata-driven approach) and what was harder than expected (SSE cancellation propagation, token budget enforcement) will help plan R3.
+    </background>
+    <dependencies>
+      Depends on R2-067 (Phase 5 final deployment and acceptance). This is the last task in the project.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Verify all previous tasks are complete: read TASK-INDEX.md and confirm all tasks 001-067 show ✅ status</step>
+    <step order="1">Run code-review skill on the R2 changes: invoke /code-review — review the summary for any blocking issues that need fixing before marking complete</step>
+    <step order="2">Run adr-check skill: invoke /adr-check — verify no ADR violations in R2 implementation; fix any violations found</step>
+    <step order="3">Run /repo-cleanup — identify any ephemeral working files in projects/ai-sprk-chat-platform-enhancement-r2/notes/ that should be archived or removed</step>
+    <step order="4">Read README.md to find the graduation criteria checklist — compare each criterion against notes/067-final-acceptance-results.md</step>
+    <step order="5">Update README.md: mark all 16 graduation criteria as checked; update Status field to "Complete"; update Progress to 100%</step>
+    <step order="6">Update CLAUDE.md project status section: Status → Complete, Last Updated → today's date, Current Task → none</step>
+    <step order="7">Write notes/lessons-learned.md with at least 5 key lessons including: SSE streaming approach, token budget management, parallel execution groups effectiveness, metadata-driven dispatch vs static tables, and any surprises encountered</step>
+    <step order="8">Update TASK-INDEX.md: change task R2-090 status to completed; verify all 90 tasks show ✅</step>
+    <step order="9">Make a final git commit with message "feat(ai-sprk-chat-r2): complete implementation — SprkChat Platform Enhancement R2"</step>
+    <step order="10">Prompt user: project is complete — ready to run /merge-to-master when ready to merge work/ai-sprk-chat-workspace-companion into master</step>
+  </steps>
+
+  <tools>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="docs">README.md — updated to Status: Complete, Progress: 100%, all 16 graduation criteria checked</artifact>
+    <artifact type="docs">CLAUDE.md — updated status section reflecting project completion</artifact>
+    <artifact type="docs">notes/lessons-learned.md — substantive lessons for R3 planning (at least 5 key lessons)</artifact>
+    <artifact type="config">TASK-INDEX.md — all tasks ✅ complete</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TASK-INDEX.md shows all tasks 001-090 with ✅ status (no 🔲 pending tasks)</criterion>
+    <criterion testable="true">README.md Status field reads "Complete" and Progress reads "100%"</criterion>
+    <criterion testable="true">All 16 graduation criteria in README.md are checked off</criterion>
+    <criterion testable="true">code-review passes with no blocking issues</criterion>
+    <criterion testable="true">adr-check passes with no ADR violations</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists with at least 5 documented lessons</criterion>
+    <criterion testable="true">Final git commit created with all wrap-up changes</criterion>
+  </acceptance-criteria>
+</task>

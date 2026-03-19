@@ -71,7 +71,9 @@ public sealed record DocumentStreamTokenEvent(
 /// Signals completion of a streaming write operation.
 /// Sent once after all <see cref="DocumentStreamTokenEvent"/> events for a given operation.
 ///
-/// On success: <see cref="Cancelled"/> is false, error fields are null.
+/// On success: <see cref="Cancelled"/> is false, error fields are null, <see cref="ContentHash"/>
+/// contains a SHA-256 hash of the final assembled content prefixed with "sha256:" for integrity
+/// verification by the client (spec FR-04).
 /// On cancellation: <see cref="Cancelled"/> is true, error fields are null, partial tokens preserved.
 /// On error (ADR-019): <see cref="ErrorCode"/> and <see cref="ErrorMessage"/> are populated
 /// with a stable code and user-friendly message; <see cref="Cancelled"/> is false.
@@ -79,12 +81,18 @@ public sealed record DocumentStreamTokenEvent(
 /// <param name="OperationId">Matches the operation started by <see cref="DocumentStreamStartEvent"/>.</param>
 /// <param name="Cancelled">Whether the operation was cancelled before completion.</param>
 /// <param name="TotalTokens">Total number of tokens emitted during the operation.</param>
+/// <param name="ContentHash">
+/// SHA-256 hash of the final assembled content, prefixed with "sha256:" (e.g. "sha256:a1b2c3...").
+/// Enables the client to verify that the reconstructed document matches the BFF's computation.
+/// Null on cancellation or error. ADR-014: only the hash is retained, not the content.
+/// </param>
 /// <param name="ErrorCode">Stable error code for programmatic handling (e.g. "LLM_STREAM_FAILED"). Null on success.</param>
 /// <param name="ErrorMessage">User-friendly error message. Null on success. MUST NOT contain document content (ADR-015).</param>
 public sealed record DocumentStreamEndEvent(
     [property: JsonPropertyName("operationId")] Guid OperationId,
     [property: JsonPropertyName("cancelled")] bool Cancelled,
     [property: JsonPropertyName("totalTokens")] int TotalTokens,
+    [property: JsonPropertyName("contentHash")] string? ContentHash = null,
     [property: JsonPropertyName("errorCode")] string? ErrorCode = null,
     [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null) : DocumentStreamEvent
 {

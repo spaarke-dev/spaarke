@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-006" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Deploy Phase 1 — Dataverse Schema, AI Search Index, Shared Library Build Verification</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <tags>deploy, dataverse, azure-ai, foundation</tags>
+    <estimated-effort>small</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment and verification task — no code file modification. Runs deployment scripts, verifies infrastructure, validates schema accessibility. STANDARD rigor applies: has explicit constraints, multiple verification steps, gates Phase 2 and 3 from starting.</rigor-reason>
+    <dependencies>[R2-001, R2-002, R2-003, R2-004, R2-005]</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify and confirm that all Phase 1 deliverables are correctly deployed to the dev environment before Phase 2 (BFF API services) and Phase 3 (frontend UI) work begins. This is the Phase 1 gate task.
+
+    **Verification checklist to execute**:
+
+    1. **Dataverse schema** (from R2-001):
+       - Verify all 6 new fields are accessible via the Dataverse Web API
+       - Verify sprk_capabilities multi-select options are queryable
+       - Verify trigger metadata fields have been populated with seed data (from R2-005)
+
+    2. **JPS schema extensions** (from R2-002):
+       - Verify TypeScript compilation of PlaybookBuilder passes (0 errors)
+       - Verify dotnet build of Sprk.Bff.Api passes (0 errors)
+       - Confirm OutputType C# enum and TypeScript union include all 5 output types
+
+    3. **AI Search index** (from R2-003):
+       - Verify playbook-embeddings index exists in spaarke-search-dev
+       - Verify vector field dimensions (3072) and HNSW configuration
+       - Verify index is queryable (run a test vector search — can be zero-vector to confirm schema is valid)
+
+    4. **Shared markdown utility** (from R2-004):
+       - Verify renderMarkdown() is exported from @spaarke/ui-components
+       - Verify npm build of Spaarke.UI.Components passes (0 errors)
+       - Confirm DOMPurify and marked are in package.json dependencies
+
+    5. **Playbook trigger metadata** (from R2-005):
+       - Verify all sprk_analysisplaybook records have non-empty trigger metadata
+       - Count records with populated sprk_triggerPhrases — should equal total playbook count
+
+    **On successful verification**: Create a Phase 1 sign-off commit. Update CLAUDE.md project status to indicate Phase 2 and 3 can begin.
+  </prompt>
+
+  <role>Senior full-stack developer with Dataverse and Azure AI expertise</role>
+
+  <goal>
+    All 5 Phase 1 tasks are confirmed working in the dev environment. A verification report is recorded in notes/006-phase1-verification.md. TASK-INDEX.md is updated to show Phase 1 complete. The CLAUDE.md project status is updated to "Phase 1 complete — ready for Phase 2 and 3 parallel execution".
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — Phase 1 deliverables and acceptance criteria">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — Phase 1 deliverable list, parallel execution readiness criteria">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Notes from R2-001 — actual field names deployed to Dataverse">projects/ai-sprk-chat-platform-enhancement-r2/notes/001-dataverse-schema-field-names.md</file>
+    <file purpose="Notes from R2-005 — playbook seed data applied">projects/ai-sprk-chat-platform-enhancement-r2/notes/005-playbook-seed-data.md</file>
+    <file purpose="Dataverse deploy skill — understand deployment verification steps">../.claude/skills/dataverse-deploy/SKILL.md</file>
+    <file purpose="Azure AI resources — AI Search service name and endpoint for verification commands">docs/architecture/auth-AI-azure-resources.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="plan.md">Phase 2 Group A+B and Phase 3 Group C+D+E MUST NOT begin until this Phase 1 gate task is complete — all downstream tasks depend on schema, index, and shared utility being deployed</constraint>
+    <constraint source="spec">Verification MUST include a live query to the Dataverse Web API confirming all 6 schema fields are accessible — not just confirming the creation scripts ran successfully</constraint>
+    <constraint source="spec">Verification MUST include a live az search index show command confirming the playbook-embeddings index exists with correct configuration — not just confirming the provisioning script ran</constraint>
+    <constraint source="spec MUST">MUST NOT log document or playbook content during verification queries — use $select to retrieve only field metadata, not full content values</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/notes/001-dataverse-schema-field-names.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/notes/005-playbook-seed-data.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern>Dataverse field verification: GET /api/data/v9.2/EntityDefinitions(LogicalName='entity')/Attributes(LogicalName='field') — returns 200 with field metadata if field exists</pattern>
+      <pattern>AI Search index verification: az search index show --name playbook-embeddings --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2</pattern>
+      <pattern>Shared library build: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npm run build</pattern>
+      <pattern>BFF build: dotnet build src/server/api/Sprk.Bff.Api/</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 1 consists of 5 independent tasks (R2-001 through R2-005) that can be executed in parallel by different developers or agents. This gate task ensures everything is integrated and working before the much larger Phase 2 (BFF API, 16 tasks) and Phase 3 (frontend UI, 16 tasks) begin. The verification is deliberately thorough because missing infrastructure (a missing AI Search field, an incorrectly named Dataverse field) would cause silent failures deep in Phase 2 implementation.
+
+      The parallel execution strategy (plan.md) allows Phase 2 Group A, Group B, Phase 3 Group C, D, and E to all start simultaneously after this gate passes. A partial Phase 1 failure should be corrected here rather than discovered later when 5 parallel agent teams hit the broken dependency.
+    </background>
+    <dependencies>
+      Depends on all of: R2-001 (Dataverse schema), R2-002 (JPS extensions), R2-003 (AI Search index), R2-004 (shared markdown utility), R2-005 (seed data). This is the last Phase 1 task. Phase 2 and Phase 3 tasks begin after this completes.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read notes/001-dataverse-schema-field-names.md and notes/005-playbook-seed-data.md to understand what was deployed in previous tasks</step>
+    <step order="1">Verify Dataverse schema fields — run Web API queries for all 6 fields on sprk_scope and sprk_analysisplaybook; confirm HTTP 200 for each</step>
+    <step order="2">Verify sprk_capabilities multi-select options — GET /api/data/v9.2/GlobalOptionSetDefinitions?$filter=Name eq 'sprk_scope_sprk_capabilities' (or equivalent) and confirm 5+ option values exist</step>
+    <step order="3">Verify seed data coverage — GET /api/data/v9.2/sprk_analysisplaybooks?$select=sprk_name,sprk_triggerphrases&amp;$filter=sprk_triggerphrases ne null — count should equal total playbook count</step>
+    <step order="4">Verify AI Search index — az search index show --name playbook-embeddings --service-name spaarke-search-dev; confirm vector field contentVector3072 with 3072 dimensions</step>
+    <step order="5">Verify BFF builds cleanly — dotnet build src/server/api/Sprk.Bff.Api/ — expect 0 errors, confirm JPS model classes include OutputType enum</step>
+    <step order="6">Verify Spaarke.UI.Components builds cleanly — cd src/client/shared/Spaarke.UI.Components &amp;&amp; npm run build — expect 0 errors, confirm renderMarkdown is in dist exports</step>
+    <step order="7">Write verification report to projects/ai-sprk-chat-platform-enhancement-r2/notes/006-phase1-verification.md documenting each check: PASS/FAIL, actual values observed, any discrepancies found</step>
+    <step order="8">If any verification fails: create a follow-up note in the verification report describing the failure and which prior task needs remediation — do NOT mark R2-006 complete until all checks pass</step>
+    <step order="9">Update projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md project status to "Phase 1 complete — Phase 2 and Phase 3 parallel execution ready"</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-006 status to completed and mark Phase 1 as complete</step>
+    <step order="11">Create a git commit: "chore(r2-phase1): Phase 1 foundation complete — schema, index, shared utility deployed"</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>pac</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="docs">projects/ai-sprk-chat-platform-enhancement-r2/notes/006-phase1-verification.md — verification report with PASS/FAIL for each Phase 1 deliverable</artifact>
+    <artifact type="docs">Updated CLAUDE.md — project status updated to Phase 1 complete</artifact>
+    <artifact type="config">Updated TASK-INDEX.md — Phase 1 tasks all marked completed</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 Dataverse field verification queries return HTTP 200 — no 404s for missing fields</criterion>
+    <criterion testable="true">sprk_scope.sprk_capabilities OptionSet has at least 5 option values</criterion>
+    <criterion testable="true">GET sprk_analysisplaybooks filtered to null sprk_triggerPhrases returns 0 records (all seeded)</criterion>
+    <criterion testable="true">az search index show for playbook-embeddings returns 200 with contentVector3072 field at 3072 dimensions</criterion>
+    <criterion testable="true">dotnet build Sprk.Bff.Api exits with code 0</criterion>
+    <criterion testable="true">npm run build Spaarke.UI.Components exits with code 0 and dist contains renderMarkdown export</criterion>
+    <criterion testable="true">notes/006-phase1-verification.md exists and records PASS for all verification steps</criterion>
+    <criterion testable="true">CLAUDE.md project status updated to Phase 1 complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a verification-only task — do not write new code or make schema changes here. If a verification fails, the failing prior task (R2-001 through R2-005) must be re-opened and fixed. Use the notes file to clearly document what failed and what specific remediation is needed.
+
+    The git commit at the end of this task creates a clear checkpoint in the branch history separating Phase 1 foundation work from Phase 2/3 implementation. Phase 2 and Phase 3 tasks should reference this commit in their notes as the "Phase 1 baseline".
+
+    After this task completes, the parallel execution strategy activates: Phase 2 Group A (R2-010 through R2-014) and Group B (R2-015 through R2-019) can start simultaneously with Phase 3 Group C (R2-030 through R2-034), Group D (R2-035 through R2-039), and Group E (R2-040 through R2-045).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>DEPENDS ON R2-001, R2-002, R2-003, R2-004, R2-005. Do not start until all five prior tasks are marked completed in TASK-INDEX.md. This is a verification gate — be thorough. Phase 2 and Phase 3 development depends on this task passing cleanly.</protocol>
+  </execution>
+</task>

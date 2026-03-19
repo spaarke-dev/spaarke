@@ -115,7 +115,19 @@ public static class RateLimitingModule
                 });
             });
 
-            // 8. AI Batch - Moderate limit for background summarization enqueue
+            // 8. AI Upload - Strict limit for document uploads (ADR-016: 5 uploads/minute/user)
+            options.AddPolicy("ai-upload", context =>
+            {
+                var userId = GetUserId(context);
+                return RateLimitPartition.GetFixedWindowLimiter(userId, _ => new FixedWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 5,
+                    QueueLimit = 0
+                });
+            });
+
+            // 9. AI Batch - Moderate limit for background summarization enqueue
             options.AddPolicy("ai-batch", context =>
             {
                 var userId = GetUserId(context);
@@ -128,12 +140,60 @@ public static class RateLimitingModule
                 });
             });
 
+            // 10. AI Persist - SPE persistence operations (ADR-016: 20 req/min/user)
+            options.AddPolicy("ai-persist", context =>
+            {
+                var userId = GetUserId(context);
+                return RateLimitPartition.GetFixedWindowLimiter(userId, _ => new FixedWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 20,
+                    QueueLimit = 2
+                });
+            });
+
+            // 11. AI Export - Word/PDF export operations (ADR-016: 10 exports/min/user)
+            options.AddPolicy("ai-export", context =>
+            {
+                var userId = GetUserId(context);
+                return RateLimitPartition.GetFixedWindowLimiter(userId, _ => new FixedWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 10,
+                    QueueLimit = 2
+                });
+            });
+
+            // 12. AI Indexing - Playbook embedding indexing (ADR-016: 30 req/min, tenant-scoped)
+            options.AddPolicy("ai-indexing", context =>
+            {
+                var tenantId = context.User?.FindFirst("tid")?.Value
+                    ?? context.Request.Headers["X-Tenant-Id"].FirstOrDefault()
+                    ?? GetUserId(context);
+                return RateLimitPartition.GetFixedWindowLimiter(tenantId, _ => new FixedWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 30,
+                    QueueLimit = 5
+                });
+            });
+
+            // 13. AI Context - Read-heavy context resolution endpoints (ADR-016: 60 req/min/user)
+            options.AddPolicy("ai-context", context =>
+            {
+                var userId = GetUserId(context);
+                return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 60,
+                    QueueLimit = 5,
+                    SegmentsPerWindow = 6
+                });
+            });
+
             // ProblemDetails JSON response for rate limit rejections
             options.OnRejected = async (context, cancellationToken) =>
             {
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                context.HttpContext.Response.ContentType = "application/problem+json";
-
                 var retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfterValue)
                     ? retryAfterValue.TotalSeconds
                     : 60;
@@ -150,7 +210,13 @@ public static class RateLimitingModule
                     retryAfter = $"{retryAfter} seconds"
                 };
 
-                await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
+                // ADR-019: Response MUST use Content-Type: application/problem+json.
+                // Serialize manually instead of using WriteAsJsonAsync, which would
+                // override the content type to application/json.
+                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.HttpContext.Response.ContentType = "application/problem+json; charset=utf-8";
+                var json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(problemDetails);
+                await context.HttpContext.Response.Body.WriteAsync(json, cancellationToken);
 
                 var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
                 logger.LogWarning(

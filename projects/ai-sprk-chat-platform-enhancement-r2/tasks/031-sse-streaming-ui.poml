@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-031" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>SSE Token-by-Token Streaming UI in SprkChat</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <tags>frontend, streaming</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies useSseStream.ts hook and SprkChat.tsx (54KB core component). Streaming state management, AbortController cancellation, and typing indicator are complex UX concerns. Frontend streaming tag. Multiple files modified across hooks and components.</rigor-reason>
+    <dependencies>[004, 006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Enhance the `useSseStream` hook for true token-by-token progressive rendering in SprkChat. Add a typing indicator (animated dots) while waiting for the first token. Implement smooth text accumulation in the message bubble without flickering. Handle `typing_start` and `typing_end` SSE events from the BFF. Support cancellation via AbortController when the user takes a cancellation action during streaming.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    SprkChat displays a typing indicator (animated dots) after a user sends a message, then transitions smoothly to token-by-token text accumulation as the AI streams its response. The text accumulates without visible flicker or re-layout. User can cancel mid-stream. The streaming state is cleanly managed in the hook with proper cleanup on unmount and cancellation.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-09 SSE streaming, NFR-01 first token &lt;500ms">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — streaming architecture, MUST rules">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Hook to enhance — current SSE consumption implementation">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+    <file purpose="Main component — where streaming state is consumed">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="ADR-021 — Fluent v9 semantic tokens, dark mode">../.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file purpose="SSE streaming canonical pattern from BFF">../.claude/patterns/ai/streaming-endpoints.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-01">First token MUST be visible within 500ms of user sending a message — minimize state update batching delays</constraint>
+    <constraint source="spec MUST">MUST NOT cache streaming tokens (ADR-014) — do not persist in-progress token accumulation to any cache or storage</constraint>
+    <constraint source="ADR-021">Typing indicator animation MUST use Fluent v9 motion tokens — no custom CSS animations using hard-coded timing</constraint>
+    <constraint source="spec">Cancellation via AbortController MUST propagate to the BFF SSE connection — not just hide the UI</constraint>
+    <constraint source="spec">MUST handle SSE error events gracefully — show error state in chat, do not crash the component</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/ai/streaming-endpoints.md — SSE event types from BFF: token, done, error, typing_start, typing_end</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The existing `useSseStream` hook performs POST-based SSE (not EventSource, since EventSource only supports GET). R1 implemented the basic streaming plumbing but did not add typing indicators or per-token rendering — messages appeared all at once. R2 requires copilot-quality streaming UX: animated typing indicator before first token, then smooth character-by-character accumulation.
+
+      The BFF SSE endpoint (task R2-010) emits these event types: `typing_start` (AI is processing, show indicator), `token` (append to accumulator), `typing_end` (indicator off), `done` (streaming complete, finalize message), `error` (show error state). The frontend hook must handle all of these.
+
+      SprkChat.tsx manages the `messages` state array. During streaming, an in-progress assistant message should appear in the messages list with an `isStreaming: true` flag, accumulating tokens. On `done`, the message is finalized.
+    </background>
+    <dependencies>
+      Depends on R2-004 (shared library baseline) and R2-006 (Phase 1 deploy for any foundation changes). Can run in parallel with R2-030, R2-032, R2-033. Task R2-033 (plan preview streaming) depends on the patterns established here. Task R2-050 (SSE integration) depends on this task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read useSseStream.ts to understand the current POST-based SSE implementation, event handling, and return shape</step>
+    <step order="1">Read SprkChat.tsx message state management — understand how messages are added and updated in the messages array</step>
+    <step order="2">Read streaming-endpoints.md pattern to understand all SSE event types the BFF emits and their payloads</step>
+    <step order="3">Enhance useSseStream to handle typing_start event: set isTyping=true state, expose via hook return</step>
+    <step order="4">Enhance useSseStream to handle token events: accumulate token text into streamingContent string, trigger React state update per token for real-time rendering</step>
+    <step order="5">Enhance useSseStream to handle typing_end and done events: finalize the accumulated message, clear isTyping and streamingContent</step>
+    <step order="6">Add AbortController support to useSseStream: expose a cancel() function; call abort() on the AbortController signal to terminate the fetch stream; clean up on component unmount</step>
+    <step order="7">Create a TypingIndicator component with animated dots using Fluent v9 motion tokens — three dots with staggered fade/scale animation</step>
+    <step order="8">Update SprkChat.tsx to show TypingIndicator when useSseStream returns isTyping=true</step>
+    <step order="9">Update SprkChat.tsx to render the in-progress streaming message with accumulated tokens as a special message bubble (isStreaming flag) that updates without re-mounting</step>
+    <step order="10">Add a cancel button (Fluent v9 Button) visible during streaming — calls the cancel() function from useSseStream</step>
+    <step order="11">Handle error events: display an error message in the chat and clear streaming state cleanly</step>
+    <step order="12">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="13">Update TASK-INDEX.md: change task R2-031 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">useSseStream.ts — enhanced hook with typing_start/token/done/error event handling, AbortController cancellation, isTyping and streamingContent states</artifact>
+    <artifact type="code">TypingIndicator.tsx — animated three-dot indicator component using Fluent v9 motion tokens</artifact>
+    <artifact type="code">SprkChat.tsx — updated to show TypingIndicator, render streaming message bubble, expose cancel button</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After sending a message, typing indicator (animated dots) appears immediately — visible before first token arrives</criterion>
+    <criterion testable="true">Token-by-token text appears progressively in the assistant message bubble — no flicker or full re-render on each token</criterion>
+    <criterion testable="true">Cancel button appears during streaming; clicking it aborts the SSE connection and clears in-progress message</criterion>
+    <criterion testable="true">SSE error events result in an error message in chat — component does not crash</criterion>
+    <criterion testable="true">On component unmount, the AbortController aborts any active stream — no memory leaks</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+    <criterion testable="true">Typing indicator uses Fluent v9 motion tokens — no hard-coded animation timing values</criterion>
+  </acceptance-criteria>
+</task>

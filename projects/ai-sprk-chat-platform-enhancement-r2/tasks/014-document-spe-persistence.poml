@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-014" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Document SPE Persistence Endpoint — Save Uploaded Documents to Matter's SPE Container</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, api</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates a new Minimal API endpoint that integrates SpeFileStore upload with ChatHostContext resolution; FR-14 requirement</rigor-reason>
+    <dependencies>[013]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a new BFF API endpoint that allows users to optionally persist a previously-uploaded chat
+    document to the matter's SharePoint Embedded (SPE) container.
+
+    **Endpoint**: `POST /api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist`
+    - Body: `{ "filename": "optional-override-name.pdf" }` (optional — defaults to original uploaded filename)
+
+    **Processing**:
+    1. Authorize request: verify caller owns `sessionId` via endpoint filter
+    2. Retrieve the original binary content of the uploaded file from Redis:
+       key `doc-upload:{sessionId}:{documentId}` — if not found, return `404 Not Found` ProblemDetails
+    3. Resolve the matter's SPE container ID from `ChatHostContext` (which flows through the pipeline
+       from the chat session's entity context)
+    4. Call `SpeFileStore.UploadFileAsync(containerId, filename, content, contentType)` to persist
+    5. Return `201 Created` with SPE file metadata:
+       ```json
+       {
+         "speFileId": "...",
+         "filename": "...",
+         "url": "https://...",
+         "sizeBytes": N,
+         "uploadedAt": "..."
+       }
+       ```
+
+    **Authorization**: Same `ChatSessionAuthorizationFilter` as the upload endpoint plus a check that
+    the session's `ChatHostContext` has a valid SPE container ID.
+
+    **Idempotency**: If the same `documentId` has already been persisted (check Redis for a
+    `doc-persist:{sessionId}:{documentId}` marker), return `200 OK` with the existing SPE file
+    metadata rather than uploading again.
+
+    **Note**: This endpoint does NOT delete the session-scoped Redis entry — the uploaded document
+    continues to be available for AI context until the session expires naturally (per NFR-06).
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    A working `POST /api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist` endpoint that
+    retrieves an uploaded document from session-scoped Redis and uploads it to the matter's SPE container
+    via `SpeFileStore`, returning the SPE file metadata. Saved documents appear in the matter's file
+    browser (FR-14).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-14 (optional SPE persist), design decision for session-scoped vs SPE storage">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, ChatHostContext flow, SpeFileStore pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="SpeFileStore facade — upload method signatures and container resolution">src/server/api/Sprk.Bff.Api/Services/Storage/SpeFileStore.cs</file>
+    <file purpose="Existing chat endpoints — authorization filter and ChatHostContext resolution patterns">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="Minimal API endpoint definition pattern">../.claude/patterns/api/endpoint-definition.md</file>
+    <file purpose="Authorization endpoint filter pattern">../.claude/patterns/api/endpoint-filters.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — no controllers</constraint>
+    <constraint source="ADR-007">MUST use SpeFileStore.UploadFileAsync for all SPE writes — MUST NOT call Graph SDK directly</constraint>
+    <constraint source="ADR-008">MUST apply authorization endpoint filter — session ownership + SPE container access verification</constraint>
+    <constraint source="ADR-013">MUST flow `ChatHostContext` for SPE container ID resolution — the container ID is NOT hardcoded; it comes from the chat session's entity context</constraint>
+    <constraint source="ADR-019">MUST return ProblemDetails for all error responses (404, 403, 500)</constraint>
+    <constraint source="spec NFR-06">MUST NOT delete the session-scoped Redis upload on persist — session storage is separate from SPE persistence; both can coexist</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Storage/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern>SpeFileStore upload: `await _speFileStore.UploadFileAsync(containerId, filename, stream, contentType, cancellationToken)` — containerId comes from ChatHostContext.ContainerId</pattern>
+      <pattern>Redis binary retrieval: stored bytes are the original file binary (not extracted text) — check the upload endpoint Redis storage format before reading; may need separate Redis key for the original binary vs extracted text</pattern>
+      <pattern>Idempotency marker: `doc-persist:{sessionId}:{documentId}` key in Redis stores the SPE file metadata JSON; check for existence before re-uploading</pattern>
+      <pattern>ChatHostContext resolution: look at how existing chat endpoints retrieve and use ChatHostContext — follow the same pattern (likely via IHttpContextAccessor or endpoint parameter)</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      When a user uploads a document to SprkChat for analysis, the document lives temporarily in
+      session-scoped Redis. After analysis, the user may want to save it to the matter's official
+      file store (SPE container) so it appears in the AnalysisWorkspace file browser. This endpoint
+      provides the "save to matter files" action.
+
+      Key design decisions from the spec owner (clarification captured in spec.md):
+      - Upload is session-scoped throwaway by default
+      - Persist is an explicit user action ("save this to the matter files")
+      - Both can coexist — session storage continues after persist
+
+      The Redis binary storage note: Task R2-013 stores the EXTRACTED TEXT in Redis (for AI context).
+      This task needs the ORIGINAL BINARY for SPE upload. Therefore R2-013 should also store the
+      original binary with a separate key pattern, or this task needs to re-read the original upload.
+      Check R2-013's implementation and document the binary storage key in `notes/013-document-upload-endpoint.md`.
+    </background>
+    <dependencies>
+      Strictly depends on Task R2-013 (upload endpoint must exist first; binary storage key must be
+      established). Safe to run in parallel with all other Group A and Group B tasks (owns only the
+      persist endpoint handler file). Task R2-042 (UI "save to matter files" action) in Phase 3 depends
+      on this endpoint being available.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read the completed `ChatDocumentEndpoints.cs` from R2-013 to understand how the original binary is stored in Redis (key pattern and data format)</step>
+    <step order="1">If R2-013 did not store the original binary in Redis (only extracted text), add binary storage with key `doc-binary:{sessionId}:{documentId}` to R2-013's upload endpoint implementation</step>
+    <step order="2">Read `SpeFileStore.cs` to confirm the `UploadFileAsync` method signature</step>
+    <step order="3">Add the persist endpoint handler to `ChatDocumentEndpoints.cs` (same file as R2-013 for cohesion)</step>
+    <step order="4">Implement Redis lookup for the original binary: retrieve `doc-binary:{sessionId}:{documentId}` — return 404 if not found</step>
+    <step order="5">Resolve `ChatHostContext.ContainerId` from the session context — follow the existing pattern in `ChatEndpoints.cs`</step>
+    <step order="6">Implement idempotency check: look for `doc-persist:{sessionId}:{documentId}` in Redis; if found, return 200 with stored metadata</step>
+    <step order="7">Call `SpeFileStore.UploadFileAsync` with the binary content, filename, and container ID</step>
+    <step order="8">Store SPE metadata in Redis with key `doc-persist:{sessionId}:{documentId}` and 4-hour TTL (same as session)</step>
+    <step order="9">Return `201 Created` with `SpeFilePersistResponse` (speFileId, filename, url, sizeBytes, uploadedAt)</step>
+    <step order="10">Apply authorization endpoint filter and rate limiting</step>
+    <step order="11">Run `dotnet build` and verify no errors</step>
+    <step order="12">Update TASK-INDEX.md: change task R2-014 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs — persist endpoint added to the upload endpoint file</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SpeFilePersistResponse.cs — SPE file metadata response model</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`POST /api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist` returns `201 Created` with SPE file metadata when document exists in Redis</criterion>
+    <criterion testable="true">Calling the endpoint a second time with the same documentId returns `200 OK` with the same SPE file metadata (idempotent)</criterion>
+    <criterion testable="true">If documentId does not exist in Redis, the endpoint returns `404 Not Found` with ProblemDetails body</criterion>
+    <criterion testable="true">The persisted file is retrievable via the SPE container and appears in AnalysisWorkspace file browser (manual verification)</criterion>
+    <criterion testable="true">The session-scoped Redis key `doc-upload:{sessionId}:{documentId}` still exists after a successful persist (session storage not deleted)</criterion>
+    <criterion testable="true">Calling without valid session authorization returns `401 Unauthorized` from the endpoint filter</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `SpeFileStore.UploadFileAsync` method requires a container ID. Verify that `ChatHostContext`
+    carries the SPE container ID for the matter/entity in scope. If it does not, check whether
+    `PlaybookChatContextProvider` resolves it — the container ID may need to be added to `ChatHostContext`
+    as part of this task or a preceding one. This is a potential blocker — investigate early in step 0.
+
+    The Word Online URL returned from this endpoint for .docx files would be of the form:
+    `https://[tenant].sharepoint.com/_layouts/15/Doc.aspx?sourcedoc={fileId}` — this pattern is used
+    by Task R2-022 (Open in Word endpoint) as well. Document the URL construction pattern in
+    `notes/014-spe-persistence-urls.md` for R2-022 to reuse.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group A — depends on R2-013. Safe to run in parallel with Group B tasks. Own file: ChatDocumentEndpoints.cs (persist endpoint addition), SpeFilePersistResponse.cs (new).</protocol>
+  </execution>
+</task>

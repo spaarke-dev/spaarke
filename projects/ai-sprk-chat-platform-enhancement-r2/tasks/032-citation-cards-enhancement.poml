@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-032" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Citation Cards Enhancement for Web Search Sources</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChatCitationPopover.tsx and requires extending types.ts for web citation type. Frontend tag, .tsx file modification. Needs new visual distinction between document and web citations per ADR-021.</rigor-reason>
+    <dependencies>[030]</dependencies>
+  </metadata>
+
+  <prompt>
+    Extend `SprkChatCitationPopover` to handle web search citations (URL, title, snippet) in addition to existing document citations. Implement inline numbered citation markers `[N]` in rendered markdown that trigger the popover. Add visual distinction between document citations (internal SPE files) and web citations (external URLs with clickable links). The popover for web citations shows: source title, URL (clickable, opens new tab), and a text snippet.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Chat messages with web search results show inline `[1]`, `[2]` citation markers in the rendered markdown. Clicking a citation number opens a Fluent v9 popover showing either: (a) for web sources — title, URL as clickable link, snippet; or (b) for document sources — existing document citation info. Document and web citations are visually distinguishable (different icon and/or accent color). All styles use Fluent v9 semantic tokens.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-10 web search citations, FR-01 markdown rendering">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, ADR constraints">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Component to extend — existing citation popover">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+    <file purpose="Chat message types — extend for web citation type">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    <file purpose="ADR-021 — Fluent v9 design system requirements">../.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file purpose="ADR-015 — data minimization, what citation data to include">../.claude/adr/ADR-015-ai-data-governance.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent v9 Popover component — no custom popup implementations</constraint>
+    <constraint source="ADR-021">Web vs document citation distinction MUST use Fluent v9 semantic color tokens — no hard-coded colors</constraint>
+    <constraint source="ADR-015">Citation snippets MUST NOT include full document content — snippets are limited to the text excerpt returned with search results</constraint>
+    <constraint source="spec">Inline citation markers MUST be rendered inside the renderMarkdown() output — integrate with markdown rendering pipeline from R2-030</constraint>
+    <constraint source="spec">External URLs in web citations MUST open in a new tab (target="_blank" with rel="noopener noreferrer")</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Fluent v9 Popover pattern: import Popover, PopoverTrigger, PopoverSurface from @fluentui/react-components — use controlled open/close state</pattern>
+      <pattern>Inline citation rendering: renderMarkdown() custom token renderer for [N] notation — convert to clickable span with data-citation-id attribute</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The existing SprkChatCitationPopover handles document citations (references to SPE files). R2 adds web search synthesis (task R2-017 BFF), where AI responses include numbered citations like `[1]` referring to web search results. The frontend must: (1) render `[N]` citation markers as clickable inline elements within the markdown output, (2) associate citation numbers with citation metadata from the message, (3) show a popover with appropriate content for the citation type.
+
+      The BFF (task R2-017) will include a `citations` array in the chat response alongside the text content. Each citation has: `id` (number), `type` ("document" | "web"), and either document metadata or `{ url, title, snippet }` for web results.
+    </background>
+    <dependencies>
+      Depends on R2-030 (renderMarkdown integration) — citation markers are injected during markdown rendering. Can run in parallel with R2-031, R2-033. Task R2-055 (web search integration) depends on this task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChatCitationPopover.tsx to understand the existing citation popover implementation and props</step>
+    <step order="1">Read types.ts to understand the current citation type shape and message structure</step>
+    <step order="2">Extend the citation type in types.ts: add CitationType discriminated union with DocumentCitation and WebCitation variants; WebCitation has url, title, snippet fields</step>
+    <step order="3">Update SprkChatMessageRenderer (from R2-030) to pass a citations map to the renderMarkdown() call so [N] markers can be resolved to interactive elements</step>
+    <step order="4">Extend renderMarkdown() (or add a post-processing step) to replace [N] text patterns with clickable span elements that carry data-citation-id={N} and trigger the popover</step>
+    <step order="5">Update SprkChatCitationPopover to accept the new CitationType union — render DocumentCitation content as before</step>
+    <step order="6">Add WebCitation rendering in SprkChatCitationPopover: show title (text), URL as anchor (opens new tab, rel="noopener noreferrer"), snippet as body text</step>
+    <step order="7">Add visual distinction: document citations use a Fluent v9 document icon + colorBrandBackground2 accent; web citations use a globe icon + colorPaletteBerryBackground2 or equivalent semantic token</step>
+    <step order="8">Wire popover open/close state to the citation marker click events in SprkChatMessageRenderer</step>
+    <step order="9">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-032 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">types.ts — extended with WebCitation type and CitationType discriminated union</artifact>
+    <artifact type="code">SprkChatCitationPopover.tsx — extended to handle both document and web citation types with visual distinction</artifact>
+    <artifact type="code">SprkChatMessageRenderer.tsx — updated to wire [N] citation markers to popover triggers</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Chat messages with web search citations show inline [1], [2] markers as clickable superscript elements</criterion>
+    <criterion testable="true">Clicking a web citation marker opens a Fluent v9 popover showing title, clickable URL, and snippet</criterion>
+    <criterion testable="true">Clicking a document citation marker opens the existing document citation popover (unchanged behavior)</criterion>
+    <criterion testable="true">Web citation URL opens in a new browser tab</criterion>
+    <criterion testable="true">Web and document citation popovers have distinct visual indicators (different icon or accent color using Fluent v9 tokens)</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+    <criterion testable="true">Citation markers render correctly in dark mode — no hard-coded colors</criterion>
+  </acceptance-criteria>
+</task>

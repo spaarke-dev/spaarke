@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-039" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>HITL vs Autonomous Execution UX — Action Confirmation Dialog</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChat.tsx for HITL confirmation dialog and autonomous execution feedback. Handles dialog_open SSE event for Code Page navigation via Xrm.Navigation.navigateTo. Frontend and fluent-ui tags, .tsx modification. ADR-006 Code Page dialog pattern applies.</rigor-reason>
+    <dependencies>[036]</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the HITL vs autonomous execution UX for playbook action responses. When an action has `requiresConfirmation: true`, show a Fluent v9 confirmation dialog before executing. When `requiresConfirmation: false`, execute directly and show a success/error toast. Handle the `dialog_open` SSE event by opening a Code Page dialog via `Xrm.Navigation.navigateTo` with pre-populated field data passed via URL params or data attribute.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Actions with requiresConfirmation=true show a Fluent v9 Dialog with a summary of the proposed action and Confirm/Cancel buttons before execution. Actions with requiresConfirmation=false execute directly and show a Fluent v9 toast notification with success or error. The dialog_open SSE event opens the correct Code Page dialog via Xrm.Navigation.navigateTo with pre-populated fields from the playbook output's prePopulateFields map.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-07, FR-08 HITL vs autonomous execution, dialog_open event">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, Code Page dialog pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Main component — action handler integration">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="Action handlers hook — existing action handling patterns">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts</file>
+    <file purpose="ADR-006 — Code Pages for standalone dialogs, Xrm.Navigation.navigateTo pattern">../.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    <file purpose="Dialog patterns — Code Page dialog opening via Xrm.Navigation">../.claude/patterns/pcf/dialog-patterns.md</file>
+    <file purpose="ADR-021 — Fluent v9 Dialog and Toast components">../.claude/adr/ADR-021-fluent-design-system.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">MUST use Xrm.Navigation.navigateTo with pageType="webresource" for Code Page dialogs — not custom modal overlays wrapping Code Page iframes</constraint>
+    <constraint source="ADR-006">Pre-populated fields MUST be passed via the data parameter of Xrm.Navigation.navigateTo — URL-encode the field values as a query string</constraint>
+    <constraint source="ADR-021">Confirmation dialog MUST use Fluent v9 Dialog component — not window.confirm() or custom modal</constraint>
+    <constraint source="ADR-021">Success/error feedback MUST use Fluent v9 Toast/Toaster component — not alert() or custom notification banners</constraint>
+    <constraint source="spec FR-08">requiresConfirmation=false actions MUST execute directly without user interaction — do not show a dialog for autonomous actions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern>Code Page dialog pattern: Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: "sprk_emailcomposer", data: `recipient=${encodeURIComponent(recipient)}&amp;subject=${encodeURIComponent(subject)}` }, { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } })</pattern>
+      <pattern>dialog_open SSE event payload: { targetPage: string, prePopulateFields: Record&lt;string, string&gt; } — serialize prePopulateFields as URL query string for the data parameter</pattern>
+      <pattern>Fluent v9 Toast: import useToastController, Toast, ToastTitle from @fluentui/react-components — call dispatchToast() for transient notifications</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R2 introduces the Playbook Dispatcher (BFF task R2-015) that matches user intent to playbook actions and returns typed outputs. When the dispatcher determines a dialog output is needed, it sends a `dialog_open` SSE event with the target Code Page name and pre-populated field values (extracted from the user's message by the LLM). The frontend must open the correct Code Page dialog.
+
+      For autonomous actions (requiresConfirmation=false), the BFF executes directly and sends success/error events — the frontend just needs to show appropriate feedback. For HITL actions, a confirmation dialog shows a summary and lets the user approve before the BFF proceeds.
+
+      The `useActionHandlers` hook in R1 handles some action routing — this task extends it or adds a new handler for the dialog_open event type.
+    </background>
+    <dependencies>
+      Depends on R2-036 (slash command menu, which surfaces the commands that trigger playbook actions). Task R2-052 (playbook dispatch end-to-end integration) depends on this.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read useActionHandlers.ts to understand existing action handling patterns and what action types are already handled</step>
+    <step order="1">Read dialog-patterns.md to confirm the correct Xrm.Navigation.navigateTo pattern for Code Page dialogs with pre-populated data</step>
+    <step order="2">Add a handler for dialog_open SSE events in useActionHandlers: extract targetPage and prePopulateFields, serialize prePopulateFields as URL query string, call Xrm.Navigation.navigateTo</step>
+    <step order="3">Create a confirmation dialog state in SprkChat: pendingAction state holds the proposed action summary when requiresConfirmation=true</step>
+    <step order="4">Build the ActionConfirmationDialog component (or use Fluent v9 Dialog inline): shows action description, extracted parameters (e.g., "Send to: john@example.com"), Confirm and Cancel buttons</step>
+    <step order="5">Wire requiresConfirmation=true path: on action proposal, set pendingAction state → render ActionConfirmationDialog → on Confirm, dispatch action to BFF; on Cancel, clear pendingAction</step>
+    <step order="6">Wire requiresConfirmation=false path: action executes immediately, BFF sends success/error event → show Fluent v9 Toast notification</step>
+    <step order="7">Add Toaster to SprkChat for autonomous action feedback: import useToastController, Toaster from @fluentui/react-components</step>
+    <step order="8">Test that Xrm.Navigation.navigateTo is conditionally called (only in Dataverse context) — add a guard for environments where Xrm is not available (e.g., storybook/dev)</step>
+    <step order="9">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-039 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">useActionHandlers.ts — extended with dialog_open SSE event handler, Xrm.Navigation.navigateTo invocation</artifact>
+    <artifact type="code">SprkChat.tsx — updated with ActionConfirmationDialog state, Toaster for autonomous action feedback</artifact>
+    <artifact type="code">ActionConfirmationDialog.tsx (new component or inline) — Fluent v9 Dialog showing action summary with Confirm/Cancel</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Actions with requiresConfirmation=true show a Fluent v9 Dialog with action description and extracted parameters before executing</criterion>
+    <criterion testable="true">Clicking Confirm in the dialog triggers the action; clicking Cancel dismisses without executing</criterion>
+    <criterion testable="true">Actions with requiresConfirmation=false execute immediately and show a Fluent v9 Toast on success or failure</criterion>
+    <criterion testable="true">dialog_open SSE event triggers Xrm.Navigation.navigateTo with the correct webresourceName and pre-populated data</criterion>
+    <criterion testable="true">Pre-populated fields are passed as URL-encoded data parameter to Xrm.Navigation.navigateTo</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

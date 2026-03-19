@@ -47,7 +47,7 @@ public class IntentClassificationService : IIntentClassificationService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
 
-        _logger.LogDebug("Classifying intent for message: {Message}", message);
+        _logger.LogDebug("Classifying intent for message (length={MessageLength})", message.Length);
 
         try
         {

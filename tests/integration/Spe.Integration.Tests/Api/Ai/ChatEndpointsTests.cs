@@ -496,7 +496,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             {
                 var chatClient = MockChatClient.Object;
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
             });
 
             // Register IChatClient mock for RefineText endpoint and SprkChatAgentFactory.

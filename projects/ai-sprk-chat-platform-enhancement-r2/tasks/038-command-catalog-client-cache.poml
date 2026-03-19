@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-038" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Client-Side Command Catalog Caching</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <tags>frontend</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Adds client-side caching to useChatContextMapping hook. No new .tsx components — primarily a hook enhancement with cache invalidation logic. STANDARD rigor: new logic with explicit constraints, no architectural changes.</rigor-reason>
+    <dependencies>[035]</dependencies>
+  </metadata>
+
+  <prompt>
+    Add session-scoped client-side caching to the command resolution in `useChatContextMapping`. Cache the resolved command catalog per session to avoid redundant API calls on component re-renders. Invalidate the cache on context switch (playbook change or scope change) or when the session ends. Do not use localStorage or sessionStorage — keep the cache in React state/ref within the hook lifecycle.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    The /api/ai/chat/sessions/{id}/commands endpoint is called at most once per session unless the context changes. Re-renders of SprkChat do not trigger redundant API calls. Cache is invalidated correctly on playbook or scope changes. Cache is cleared on session end (component unmount). No commands are served from a stale cache after a context switch.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-17 command catalog cached in Redis (BFF), client-side caching is additional optimization">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — caching rules, ADR-014 constraints">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Hook to extend — add caching layer">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+    <file purpose="ADR-014 — caching rules, no streaming token cache, version cache keys">../.claude/adr/ADR-014-ai-caching.md</file>
+    <file purpose="Distributed cache pattern — for reference on what BFF already caches">../.claude/patterns/caching/distributed-cache.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">MUST NOT cache streaming tokens — this task caches command catalog only (non-streaming, non-auth data)</constraint>
+    <constraint source="ADR-014">Cache keys MUST include session-scoping: cache key = sessionId + playbookId + scopeId</constraint>
+    <constraint source="spec">MUST invalidate cache on context switch (playbook or scope change) — stale commands from a previous context are incorrect</constraint>
+    <constraint source="spec">MUST NOT use localStorage or sessionStorage — cache must be in-memory within React hook state/ref to avoid cross-session data leakage</constraint>
+    <constraint source="spec">Cache lifetime is session-scoped: cleared on component unmount</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+    </files>
+    <patterns>
+      <pattern>In-memory cache in React hook: use useRef to hold a Map&lt;string, CommandCatalog&gt; where key = sessionId+playbookId+scopeId — Map persists across renders without causing re-renders</pattern>
+      <pattern>Cache invalidation on dependency change: useEffect dependency array on [sessionId, playbookId, scopeId] — clear cached entry for old key before fetching with new key</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The command resolution added in R2-035 calls the BFF on every session init and context change. Without client-side caching, React re-renders (e.g., from chat message state updates) could trigger redundant API calls. The BFF already caches the command catalog server-side via Redis with a 5-minute TTL (task R2-019), but client-side caching further reduces latency and network traffic.
+
+      The cache is intentionally simple — a Map in a React ref keyed by session+playbook+scope. No external cache libraries are needed. The BFF is the source of truth; this is a performance optimization only.
+    </background>
+    <dependencies>
+      Depends on R2-035 (base command resolution). Can run in parallel with R2-036 and R2-037.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read useChatContextMapping.ts (after R2-035 changes) to understand current fetch logic and dependency tracking</step>
+    <step order="1">Add a useRef-based cache Map to the hook: Map&lt;string, ResolvedCommandCatalog&gt; where key = `${sessionId}:${playbookId}:${scopeId}`</step>
+    <step order="2">Before calling the commands endpoint, check if a valid cache entry exists for the current key — if so, return cached result immediately (no network call)</step>
+    <step order="3">After successful fetch, store the result in the cache Map under the current key</step>
+    <step order="4">On context change (sessionId, playbookId, or scopeId change), detect stale entries — clear the old key's cache entry before fetching with the new key</step>
+    <step order="5">On component unmount (useEffect cleanup), clear the entire cache ref to prevent memory accumulation</step>
+    <step order="6">Add a forceRefresh mechanism: expose a refreshCommands() function from the hook that clears the current key's cache and re-fetches — useful for testing and manual invalidation</step>
+    <step order="7">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="8">Update TASK-INDEX.md: change task R2-038 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">useChatContextMapping.ts — updated with in-memory cache Map, cache hit/miss logic, invalidation on context change, cleanup on unmount</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Second call to fetch commands for the same session+playbook+scope returns cached result without making a network request</criterion>
+    <criterion testable="true">Changing playbook invalidates the cache and triggers a fresh fetch for the new playbook context</criterion>
+    <criterion testable="true">Changing scope invalidates the cache and triggers a fresh fetch</criterion>
+    <criterion testable="true">Component unmount clears the cache ref — no stale entries remain</criterion>
+    <criterion testable="true">refreshCommands() function bypasses cache and fetches fresh data</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

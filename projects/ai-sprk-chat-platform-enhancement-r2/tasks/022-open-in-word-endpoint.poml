@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-022" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Open in Word Endpoint — Markdown to DOCX, SPE Upload, Word Online URL</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, api</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates a new Minimal API endpoint integrating DocxExportService, SpeFileStore upload, and Word Online URL construction; FR-15 requirement; multiple ADRs apply</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a new BFF API endpoint that converts analysis output (markdown) to a DOCX file, uploads
+    it to the matter's SPE container, and returns a Word Online URL for opening in Word directly.
+
+    **Endpoint**: `POST /api/ai/chat/export/word`
+    - Body:
+      ```json
+      {
+        "content": "# Analysis Title\n\nMarkdown content...",
+        "filename": "Analysis-2026-03-17.docx",
+        "sessionId": "...",
+        "metadata": { "matterName": "...", "analysisDate": "..." }
+      }
+      ```
+    - Returns `201 Created`:
+      ```json
+      {
+        "speFileId": "...",
+        "filename": "Analysis-2026-03-17.docx",
+        "wordOnlineUrl": "https://[tenant].sharepoint.com/_layouts/15/Doc.aspx?sourcedoc={fileId}",
+        "sizeBytes": N,
+        "generatedAt": "..."
+      }
+      ```
+
+    **Processing pipeline**:
+    1. Validate request: content must be non-empty; filename must end in `.docx`
+    2. Resolve `ChatHostContext` from the session to get SPE container ID
+    3. Call `DocxExportService.GenerateAsync(content, filename, metadata)` to produce a .docx byte array
+       - Extend `DocxExportService` if needed to support markdown-to-DOCX conversion (existing service
+         may already generate DOCX via OpenXML SDK — verify and extend for markdown input)
+    4. Upload .docx byte array to SPE container via `SpeFileStore.UploadFileAsync(containerId, filename, bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")`
+    5. Construct Word Online URL: `https://{tenantSharePointDomain}/_layouts/15/Doc.aspx?sourcedoc={speFileId}`
+    6. Return 201 Created with the response body
+
+    **DocxExportService extension**: The existing `DocxExportService` likely generates DOCX from
+    structured data. Extend it with a `GenerateFromMarkdownAsync(string markdown, string title)` method
+    that:
+    - Parses markdown using a lightweight approach (no need for a full markdown parser — just handle
+      headings #/##/###, bold **text**, and paragraph breaks)
+    - Maps to OpenXML paragraph styles (Heading1, Heading2, Normal)
+    - Applies the Spaarke document template (check if a template .docx exists in the project)
+
+    **Authorization**: `ChatSessionAuthorizationFilter` — session must belong to the caller.
+    **Rate limiting**: Apply ADR-016 rate limiting.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    A working `POST /api/ai/chat/export/word` endpoint that generates a DOCX from markdown content,
+    uploads it to the matter's SPE container, and returns a Word Online URL. User clicks "Open in Word"
+    button → Word Online opens with formatted analysis content (FR-15).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-15 (Open in Word), Word Online URL construction">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — SpeFileStore pattern, ChatHostContext flow, MUST rules">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="DocxExportService — existing DOCX generation service to extend">src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs</file>
+    <file purpose="SpeFileStore facade — upload method and container resolution">src/server/api/Sprk.Bff.Api/Services/Storage/SpeFileStore.cs</file>
+    <file purpose="SPE persistence endpoint from R2-014 — URL construction pattern reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+    <file purpose="Minimal API endpoint definition pattern">../.claude/patterns/api/endpoint-definition.md</file>
+    <file purpose="Authorization endpoint filter pattern">../.claude/patterns/api/endpoint-filters.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — no MVC controllers</constraint>
+    <constraint source="ADR-007">MUST use SpeFileStore.UploadFileAsync for the SPE upload — MUST NOT call Microsoft Graph SDK directly</constraint>
+    <constraint source="ADR-008">MUST apply authorization endpoint filter for session ownership verification</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext for SPE container ID resolution — container ID MUST NOT be hardcoded</constraint>
+    <constraint source="spec assumption">"Basic Spaarke document template (header/footer/logo) exists or will be created during implementation" — if a template does not exist, create a minimal one as part of this task</constraint>
+    <constraint source="spec">MUST use the existing DocxExportService (OpenXML SDK) — MUST NOT introduce a new DOCX generation library</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Storage/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern>Word Online URL construction: `https://{tenantSharePointHostname}/_layouts/15/Doc.aspx?sourcedoc={speFileId}&amp;action=default` where tenantSharePointHostname comes from ChatHostContext or appsettings</pattern>
+      <pattern>OpenXML heading paragraph: `new Paragraph(new ParagraphProperties(new ParagraphStyleId { Val = "Heading1" }), new Run(new Text(headingText)))` — use OpenXML SDK style IDs for heading levels</pattern>
+      <pattern>Markdown parsing for DOCX: simple line-by-line: if line starts with `# ` → Heading1, `## ` → Heading2, `### ` → Heading3, else Normal paragraph; handle `**bold**` via Run properties</pattern>
+      <pattern>SpeFileStore upload returns a file metadata object with the SPE file ID — use this ID in the Word Online URL construction</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      "Open in Word" is a key UX feature for legal professionals who want to refine AI-generated
+      analysis in Microsoft Word Online. The workflow is:
+      1. AI generates analysis in SprkChat
+      2. User clicks "Open in Word" button (Phase 3 Task R2-044)
+      3. Frontend calls this BFF endpoint with the chat message content as markdown
+      4. BFF generates .docx, uploads to matter's SPE container
+      5. BFF returns Word Online URL
+      6. Frontend opens the URL in a new tab
+
+      The `DocxExportService` already exists from R1 — it generates DOCX for some purpose. Extending
+      it for markdown input means adding a `GenerateFromMarkdownAsync` method that handles the
+      common markdown patterns used in AI-generated analysis: headings, bold, paragraphs, numbered
+      lists, and bullet lists.
+
+      Word Online requires the file to be in a SharePoint site the user has access to. SPE containers
+      associated with matter records satisfy this requirement — the user's Dataverse security role
+      already governs SPE access for their matters.
+
+      From `notes/014-spe-persistence-urls.md` (R2-014 output): the Word Online URL pattern and
+      SPE file ID format should already be documented — reference it before implementing step 5.
+    </background>
+    <dependencies>
+      Depends on Task R2-006 (Phase 1 deployment complete). Sequential. Safe to run after R2-021.
+      Task R2-024 (rate limiting) and R2-057 (Open in Word integration) depend on this task.
+      Own files: new Word export endpoint handler file, `DocxExportService.cs` (markdown extension).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `DocxExportService.cs` to understand the current DOCX generation implementation and OpenXML SDK usage patterns</step>
+    <step order="1">Read `SpeFileStore.cs` and `notes/014-spe-persistence-urls.md` (if exists from R2-014) for Word Online URL construction pattern</step>
+    <step order="2">Verify or create the Spaarke DOCX template: check for an existing template file in `Resources/` or `Assets/` — if none exists, create a minimal template with Spaarke header/footer text</step>
+    <step order="3">Add `GenerateFromMarkdownAsync(string markdown, string title, ExportMetadata metadata)` method to `DocxExportService`</step>
+    <step order="4">Implement markdown-to-OpenXML conversion: handle `#`/`##`/`###` headings, `**bold**`, bullet lists (`- item`), numbered lists (`1. item`), and plain paragraphs</step>
+    <step order="5">Create `WordExportRequest` and `WordExportResponse` models</step>
+    <step order="6">Create the Word export endpoint handler (new file `ChatWordExportEndpoints.cs` or addition to existing endpoint file)</step>
+    <step order="7">Implement the 5-step pipeline: validate → resolve context → generate DOCX → upload to SPE → construct Word Online URL</step>
+    <step order="8">Apply authorization endpoint filter and rate limiting</step>
+    <step order="9">Register the endpoint in the application</step>
+    <step order="10">Run `dotnet build` and verify no errors</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-022 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs — extended with GenerateFromMarkdownAsync method for markdown-to-DOCX conversion</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatWordExportEndpoints.cs (or addition to existing) — POST /api/ai/chat/export/word endpoint handler</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/WordExportRequest.cs — request model with content, filename, sessionId, metadata</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/WordExportResponse.cs — response model with speFileId, wordOnlineUrl, sizeBytes, generatedAt</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`POST /api/ai/chat/export/word` with valid markdown content returns `201 Created` with a `wordOnlineUrl` field</criterion>
+    <criterion testable="true">The generated .docx file is accessible in the matter's SPE container file browser after the call</criterion>
+    <criterion testable="true">The `wordOnlineUrl` opens the file in Word Online when navigated to in a browser</criterion>
+    <criterion testable="true">Markdown headings (`# Title`) are rendered as DOCX Heading1 style in the generated file</criterion>
+    <criterion testable="true">Calling with empty `content` returns `422 Unprocessable Entity` with ProblemDetails</criterion>
+    <criterion testable="true">Calling without valid session authorization returns `401 Unauthorized`</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The tenant SharePoint hostname for Word Online URL construction is likely in the form
+    `{tenantName}.sharepoint.com`. This may be derivable from the SPE container's tenant context
+    in `ChatHostContext`, or it may be configured in appsettings as `SharePoint:TenantHostname`.
+    Check `SpeFileStore.cs` for how SPE URLs are constructed for other operations to find the
+    tenant hostname.
+
+    The spec assumption about a "basic Spaarke document template" — if no template file exists,
+    create a minimal one: document header with "SPAARKE - CONFIDENTIAL" text, document footer with
+    page number, Calibri font, standard margins. Store the template as an embedded resource in the
+    BFF project (`Resources/DocxTemplate.docx`) and use it as the base for all export operations.
+
+    The markdown-to-OpenXML conversion does NOT need to be exhaustive — focus on the markdown
+    patterns that AI models actually produce in analysis output: headings, bold, paragraphs, and
+    simple bullet/numbered lists. Tables and code blocks can be treated as plain paragraphs if
+    the OpenXML implementation is complex to set up in this iteration.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Sequential — depends on R2-006. Runs after R2-021. Tasks R2-024 (rate limiting) and R2-057 (integration) depend on this. Own files: DocxExportService.cs (extension), ChatWordExportEndpoints.cs (new), WordExportRequest.cs (new), WordExportResponse.cs (new).</protocol>
+  </execution>
+</task>

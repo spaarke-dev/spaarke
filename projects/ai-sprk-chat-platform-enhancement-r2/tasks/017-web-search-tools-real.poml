@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-017" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Real Web Search Implementation — Replace Mock with Bing API, Scope-Guided Search, Citation Generation</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, search</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — replaces mock WebSearchTools with real Bing API integration including scope-guided search and citation generation; ADR-015 and ADR-016 constraints apply</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace the mock `WebSearchTools.cs` implementation (GitHub #232) with a real Bing Web Search API
+    integration that produces scope-guided search results with numbered citations.
+
+    **Architecture**:
+    - The class signature and AI tool registration remain the same — callers do not change
+    - Add a fallback: if Bing API key (`BingSearch:ApiKey`) is not configured in settings,
+      log a Warning and fall back to mock results (graceful degradation)
+    - Configuration: `BingSearch:ApiKey`, `BingSearch:Endpoint` (default to Bing v7 endpoint),
+      `BingSearch:MaxResults` (default 10)
+
+    **Scope-guided search** (FR-10):
+    - Before executing the search, read `ChatHostContext.ScopeSearchGuidance` (the `sprk_searchGuidance`
+      field from the active scope, populated by `AnalysisChatContextResolver`)
+    - If search guidance is non-empty, prepend it to the search query as a site/domain directive:
+      e.g., guidance "prioritize Westlaw and LexisNexis" → query becomes
+      `"Westlaw OR LexisNexis {originalQuery}"` or instruction-style depending on Bing's best approach
+    - If no guidance, execute the query verbatim
+
+    **Citation generation**:
+    - For each Bing result (up to `MaxResults`), create a `CitationContext` with:
+      - `SourceUrl`: the result URL
+      - `Title`: the result display name
+      - `Snippet`: the result snippet text (truncated to 500 chars)
+      - `ConfidenceScore`: based on Bing result rank (1st = 0.95, 2nd = 0.90, ..., 10th = 0.50)
+      - `SourceType`: `"[External Source]"` (per ADR-015 — mark all web results clearly)
+    - Return citations alongside the search result text
+
+    **Result composition**:
+    - Synthesize Bing results into a single AI-readable text block with inline `[N]` markers
+    - The `WebSearchTools` method returns both the synthesized text AND the citations list
+    - The AI model uses the synthesized text in its response; the citations list is sent to the
+      client via SSE `citations` event (existing event type)
+
+    **Rate limiting**: Bing API calls are bounded — max 2 concurrent search calls per user per ADR-016.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    `WebSearchTools.cs` uses real Bing Web Search API when configured, falls back gracefully to mock
+    when not configured, prepends scope search guidance to queries, and returns `CitationContext` list
+    alongside synthesized results. Legal research queries prioritize authoritative legal sources per scope
+    guidance (FR-10).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-10 (scope-guided web search with citations), ADR-015 (external source marking)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — ChatHostContext, ADR constraints, scope guidance flow">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Existing mock WebSearchTools — class to replace while preserving interface">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</file>
+    <file purpose="CitationContext model — existing model to populate">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/CitationContext.cs</file>
+    <file purpose="Analysis scopes pattern — how scope search guidance flows to tools">../.claude/patterns/ai/analysis-scopes.md</file>
+    <file purpose="AI architecture reference — tool registration and ChatHostContext flow">docs/architecture/ai-implementation-reference.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">MUST read scope search guidance from ChatHostContext (flowed through the pipeline) — MUST NOT query Dataverse directly from the tool implementation</constraint>
+    <constraint source="ADR-015">MUST mark all web search results as `[External Source]` in the CitationContext.SourceType — MUST NOT present web results as internal Spaarke data</constraint>
+    <constraint source="ADR-016">Bing API calls MUST be rate-limited; MUST bound concurrent calls to max 2 per user; MUST return graceful degradation (mock) if rate limit is hit, not an error</constraint>
+    <constraint source="spec FR-10">Search synthesis MUST return numbered inline citations; MUST be guided by `sprk_searchGuidance` from the active scope</constraint>
+    <constraint source="spec MUST">MUST NOT log search query content or result snippets at any log level above Debug — search queries may contain sensitive case-related terms (ADR-015)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/CitationContext.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>docs/architecture/ai-implementation-reference.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+    <patterns>
+      <pattern>Bing Web Search v7 API: `GET https://api.bing.microsoft.com/v7.0/search?q={query}&amp;count={n}` with `Ocp-Apim-Subscription-Key: {apiKey}` header — returns JSON with `webPages.value[]`</pattern>
+      <pattern>Graceful API key check: `if (string.IsNullOrEmpty(_options.ApiKey)) { _logger.LogWarning("Bing API key not configured — using mock results"); return MockSearch(query); }`</pattern>
+      <pattern>Scope guidance query prepend: if guidance contains domain/site directives, use Bing's `site:` operator for domain restriction; for general guidance prepend as a free-text qualifier</pattern>
+      <pattern>Citation confidence by rank: position 1 → 0.95, position N → max(0.50, 0.95 - (N-1)*0.05) — linear decay from first to tenth result</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      WebSearchTools.cs was marked as a mock in GitHub issue #232 during R1 development. It returns
+      placeholder results that the AI model uses to demonstrate the citation pattern, but it does not
+      actually call any search API. R2 replaces this with real Bing Web Search API integration.
+
+      The "scope-guided" aspect (FR-10) is important for legal workflows: a Legal Research scope
+      might have `sprk_searchGuidance = "Prioritize authoritative legal databases: Westlaw, LexisNexis,
+      court opinion repositories"`. This guidance, when prepended to the search query, produces more
+      relevant results for legal professionals than a generic web search.
+
+      Note from spec unresolved questions: Bing Web Search API has rate limits and the expected query
+      volume is unknown. The ADR-016 bounded concurrency (max 2 concurrent) is the initial
+      safeguard. Caching of search results (same query within a short window) may be added in a
+      future iteration — do NOT add response caching in this task (per ADR-014 — cache only final
+      outcomes, not intermediate search results used in streaming generation).
+    </background>
+    <dependencies>
+      Depends on Task R2-006 (Phase 1 deployment). Independent of all other Group B tasks — safe for
+      parallel execution. The `ScopeSearchGuidance` in ChatHostContext is populated by R2-020
+      (AnalysisChatContextResolver real implementation), but this task should gracefully handle the
+      case where guidance is null or empty (treat as no guidance). Own file: `Tools/WebSearchTools.cs`
+      only.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read the current `WebSearchTools.cs` mock to understand the tool method signatures, return types, and how ChatHostContext is accessed</step>
+    <step order="1">Read `CitationContext.cs` to understand the model structure and what fields need to be populated</step>
+    <step order="2">Read `.claude/patterns/ai/analysis-scopes.md` to understand how `ScopeSearchGuidance` flows through `ChatHostContext`</step>
+    <step order="3">Add `BingSearchOptions` configuration model and register it (if adding a DI registration is needed, check ADR-010 budget; prefer static configuration read to avoid adding a new registration)</step>
+    <step order="4">Implement `BingWebSearchClient` as a private inner class or a simple `HttpClient`-based method within `WebSearchTools` — do NOT create a separate DI-registered service</step>
+    <step order="5">Implement API key check and mock fallback as the first step of the search method</step>
+    <step order="6">Implement scope guidance query modification: read `chatHostContext.ScopeSearchGuidance`, apply query prepend/modification if non-empty</step>
+    <step order="7">Implement Bing API call with `HttpClient`, parse response JSON, extract `webPages.value[]` results</step>
+    <step order="8">Create `CitationContext` list from results with position-based confidence scores and `[External Source]` marker</step>
+    <step order="9">Synthesize results into numbered text block: `[1] {title}: {snippet}\n[2]...`</step>
+    <step order="10">Ensure rate limiting: add SemaphoreSlim with maxCount=2 as a static/singleton field to bound concurrent Bing calls</step>
+    <step order="11">Run `dotnet build` and verify no errors</step>
+    <step order="12">Update TASK-INDEX.md: change task R2-017 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs — real Bing Web Search implementation with scope guidance, citation generation, and mock fallback</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Options/BingSearchOptions.cs (or similar) — configuration model for Bing API key and endpoint</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With Bing API key configured, a web search returns real Bing results (not mock placeholders)</criterion>
+    <criterion testable="true">Without Bing API key configured, the tool falls back to mock results with a Warning log (no exception thrown)</criterion>
+    <criterion testable="true">With `ScopeSearchGuidance = "Westlaw LexisNexis"`, the actual Bing query includes these terms prepended (verify via Debug-level query logging)</criterion>
+    <criterion testable="true">Each search result produces a CitationContext with SourceType = "[External Source]"</criterion>
+    <criterion testable="true">The first result has ConfidenceScore = 0.95; the 10th result has ConfidenceScore &lt;= 0.55</criterion>
+    <criterion testable="true">No more than 2 concurrent Bing API calls are in-flight simultaneously (bounded by SemaphoreSlim or equivalent)</criterion>
+    <criterion testable="true">Search query text and result snippets do NOT appear in logs at Info or higher levels (ADR-015)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Bing Web Search API v7 endpoint is `https://api.bing.microsoft.com/v7.0/search`. If the
+    project is already using Azure AI Search (which it is), there may be an `HttpClient` factory
+    configured. Register a named `HttpClient` for Bing in the DI setup ONLY if the project already
+    uses `IHttpClientFactory` — do NOT add a new DI registration for a standalone HttpClient if
+    it would push the count higher.
+
+    Check `appsettings.json` and `appsettings.Development.json` for the existing configuration
+    structure to decide where to add `BingSearch:ApiKey`. The key value in development should be
+    in `config/local.json` (gitignored) per the security guidelines.
+
+    From spec unresolved questions: search result caching is NOT in scope for R2. If the same
+    user sends the same query twice, Bing is called twice. This is intentional — search results
+    may change, and caching introduces freshness concerns that are deferred to a future iteration.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group B — depends on R2-006. Independent of other Group B tasks (R2-015, R2-016, R2-018, R2-019) — safe for parallel execution. Own file: WebSearchTools.cs only.</protocol>
+  </execution>
+</task>

@@ -106,6 +106,7 @@ public static class EndpointMappingExtensions
         {
             app.MapAnalysisEndpoints();
             app.MapPlaybookEndpoints();
+            app.MapPlaybookEmbeddingEndpoints();
             app.MapAiPlaybookBuilderEndpoints();
             app.MapScopeEndpoints();
             app.MapNodeEndpoints();
@@ -117,6 +118,13 @@ public static class EndpointMappingExtensions
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
         app.MapChatEndpoints();
+        try { app.MapChatDocumentEndpoints(); }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("EndpointMapping");
+            logger.LogError(ex, "MapChatDocumentEndpoints FAILED — document upload endpoints will be unavailable");
+        }
+        app.MapChatWordExportEndpoints();
         app.MapAnalysisChatContextEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

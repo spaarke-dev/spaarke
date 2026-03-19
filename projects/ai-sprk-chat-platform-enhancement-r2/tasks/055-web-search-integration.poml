@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-055" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Web Search Integration — BFF Search to Citation Cards</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <tags>integration, ai</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration task wiring BFF web search (R2-017) to frontend citation cards (R2-032). Tags include ai and integration. Tests scope guidance influence on search results and citation rendering accuracy. ADR-015 data minimization applies to citation snippets.</rigor-reason>
+    <dependencies>[017, 032]</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the BFF web search service (R2-017) to the frontend citation card rendering (R2-032). Verify AI-composed responses include numbered inline citations that open web source popovers when clicked. Verify that scope `sprk_searchGuidance` influences search results — legal scopes should return results from authoritative legal sources. Test citation rendering in dark mode.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    SprkChat web search queries return AI-composed responses with numbered inline citations `[1]`, `[2]`. Clicking a citation opens a Fluent v9 popover showing the web source title, URL (clickable), and snippet. Legal Research scope guidance causes search results to prioritize legal databases. Citations render correctly in dark mode.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-10 web search synthesis with citations, scope search guidance">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — web search architecture, scope guidance pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF web search service — R2-017 implementation">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/WebSearchTools.cs</file>
+    <file purpose="Frontend citation popover — R2-032 implementation">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+    <file purpose="ADR-015 — citation snippets must not include full document content">../.claude/adr/ADR-015-ai-data-governance.md</file>
+    <file purpose="Analysis scopes pattern — searchGuidance field usage">../.claude/patterns/ai/analysis-scopes.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-10">Search results MUST be guided by scope sprk_searchGuidance — verify different scopes produce different source prioritization</constraint>
+    <constraint source="ADR-015">Citation snippets MUST be limited to the text excerpt from search results — not full web page content</constraint>
+    <constraint source="spec">Web citations MUST include: title, URL, snippet — verify BFF returns all three fields in the citations array</constraint>
+    <constraint source="ADR-021">Citation popovers MUST render correctly in dark mode — test with both themes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/WebSearchTools.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatCitationPopover.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+    </files>
+    <patterns>
+      <pattern>Web search trigger: user asks a question requiring current information (e.g., "what is the current status of Smith v. Jones case?") — should trigger web search tool</pattern>
+      <pattern>Citation format in AI response: BFF includes [1] markers in AI response text and a separate citations array [{id:1, type:"web", url:"...", title:"...", snippet:"..."}]</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R2-017 (Phase 2) implements the enhanced WebSearchTools with Bing API integration and scope guidance. R2-032 (Phase 3) implements the citation card UI. This integration task verifies they work together. If Bing API is not yet provisioned (identified as a risk in plan.md), the BFF mock from R2-017 development phase should still work for UI testing.
+    </background>
+    <dependencies>
+      Depends on R2-017 (BFF web search) and R2-032 (citation cards). Both must be complete before this task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read WebSearchTools.cs (from R2-017) to understand how citations are structured in the BFF response</step>
+    <step order="1">Confirm the BFF response format matches what R2-032 expects in types.ts — verify citation object shape matches WebCitation type</step>
+    <step order="2">Send a test query in SprkChat that triggers web search (a question about current events) — verify AI response contains [N] citation markers</step>
+    <step order="3">Verify citation markers in the rendered markdown are clickable (from R2-032 implementation)</step>
+    <step order="4">Click a citation marker — verify popover opens with title, URL, and snippet</step>
+    <step order="5">Click the URL in the popover — verify it opens in a new browser tab</step>
+    <step order="6">Verify scope guidance: set up Legal Research scope with searchGuidance, query in that context — verify results reference legal sources vs standard web search</step>
+    <step order="7">Test citation rendering in dark mode: switch to dark theme and verify popover styles render correctly with no invisible text</step>
+    <step order="8">Fix any format mismatches between BFF citation response and frontend WebCitation type</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-055 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Any fixes to citation type alignment between BFF and frontend</artifact>
+    <artifact type="docs">notes/055-web-search-integration-findings.md — citation rendering results, scope guidance behavior, issues found</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Web search queries return AI responses with inline numbered citation markers [1], [2]</criterion>
+    <criterion testable="true">Clicking a citation marker opens a Fluent v9 popover with title, URL, and snippet</criterion>
+    <criterion testable="true">Citation URL opens in a new browser tab</criterion>
+    <criterion testable="true">Legal Research scope guidance influences search results to prioritize legal sources</criterion>
+    <criterion testable="true">Citation popovers render correctly in dark mode</criterion>
+  </acceptance-criteria>
+</task>

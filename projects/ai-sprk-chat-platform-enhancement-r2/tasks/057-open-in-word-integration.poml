@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-057" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Open in Word Integration — Export Button to Word Online</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <tags>integration</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration task wiring frontend export button (R2-044) to BFF Word export endpoint (R2-022). Tags include integration. Tests DocxExportService + SpeFileStore upload + Word Online URL return. Requires matter context (containerId) for SPE upload.</rigor-reason>
+    <dependencies>[022, 044]</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the "Open in Word" button (R2-044) to the BFF Word export endpoint (R2-022). Verify: clicking the button calls the BFF, the BFF generates a .docx from the chat content, uploads it to SPE, and returns a Word Online URL. Verify the URL opens Word Online with the formatted document content. Test error handling for SPE upload failure.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Clicking "Open in Word" in SprkChat generates a .docx from the current session content, uploads it to the matter's SPE container, and opens it in Word Online in a new browser tab. The Word document has the analysis content formatted with headings and sections (not raw markdown). SPE upload failure shows an error toast without crashing the chat session.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-15 Open in Word, Word Online URL pattern">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — DocxExportService, SpeFileStore pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF Word export endpoint — R2-022 implementation">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file purpose="Frontend export button — R2-044 implementation">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="ADR-013 — SpeFileStore for file operations">../.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="ADR-007 — SpeFileStore facade pattern">../.claude/adr/ADR-007-spefilestore.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-007">MUST use SpeFileStore facade for SPE upload — no direct Microsoft Graph calls in the export endpoint</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext (containerId) to the export endpoint — required for SPE container identification</constraint>
+    <constraint source="spec FR-15">Word Online URL MUST be a valid SharePoint "view in Word" URL — verify format is correct for the dev SPE environment</constraint>
+    <constraint source="spec">Export failure MUST show error toast — not crash or show raw error in chat</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern>Word Online URL format: https://{tenant}.sharepoint.com/sites/{siteName}/_layouts/15/Doc.aspx?sourcedoc={fileId}&amp;action=default — verify BFF constructs this correctly from SpeFileStore upload response</pattern>
+      <pattern>Error test: use an invalid containerId to simulate SPE upload failure — verify frontend shows error toast not unhandled exception</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      DocxExportService already exists from R1 (generates .docx using OpenXML SDK). Task R2-022 extended it to upload the generated .docx to SPE and return the Word Online URL. Task R2-044 added the frontend button. This integration task validates the complete flow in the dev environment.
+    </background>
+    <dependencies>
+      Depends on R2-022 (BFF Word export endpoint) and R2-044 (frontend export button). Both must be complete.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Open SprkChat on an analysis record with a matter context (containerId available) — verify the "Open in Word" button is enabled</step>
+    <step order="1">Click "Open in Word" — verify loading state appears on the button (Spinner icon)</step>
+    <step order="2">Verify BFF receives the request with correct sessionId and containerId — check network request in browser DevTools</step>
+    <step order="3">Wait for response — verify Word Online URL is returned and window.open is called with the URL</step>
+    <step order="4">Verify the opened Word Online tab shows the document with formatted content (not raw markdown)</step>
+    <step order="5">Verify the uploaded .docx appears in the matter's SPE file browser (visible in the file list)</step>
+    <step order="6">Test error path: temporarily break the SPE containerId (use invalid value) — verify error toast appears and loading state clears</step>
+    <step order="7">Fix any issues found: incorrect URL format, CORS issues, containerId not flowing correctly, SPE upload failures</step>
+    <step order="8">Update TASK-INDEX.md: change task R2-057 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Any fixes to BFF Word export endpoint (URL construction, SPE upload, containerId handling)</artifact>
+    <artifact type="code">Any fixes to frontend export handler (error handling, URL opening)</artifact>
+    <artifact type="docs">notes/057-word-export-findings.md — export test results, issues found</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Clicking "Open in Word" calls BFF and Word Online URL opens in a new tab</criterion>
+    <criterion testable="true">Opened Word Online document shows formatted content (headings, lists — not raw markdown symbols)</criterion>
+    <criterion testable="true">Generated .docx file is visible in the matter's SPE file browser</criterion>
+    <criterion testable="true">SPE upload failure results in error toast notification without crashing the chat session</criterion>
+    <criterion testable="true">Button loading state clears after success or failure</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-023" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>SSE Write-Back Enhancement — Stream Write-Back Content as document_stream Events</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, streaming</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — enhances WorkingDocumentTools write-back to emit new SSE event types for cross-pane streaming delivery; FR-04 requirement; depends on R2-010 SSE infrastructure</rigor-reason>
+    <dependencies>[010]</dependencies>
+  </metadata>
+
+  <prompt>
+    Enhance the write-back streaming pipeline so that when `WorkingDocumentTools.WriteBackToWorkingDocumentAsync`
+    executes, the content streams to the client via SSE events instead of being returned as a single
+    large response.
+
+    **New SSE event types** (add to ChatStreamEvent):
+    - `document_stream_start`: emitted once at the beginning of write-back, contains target document info:
+      `{ "documentId": "...", "filename": "...", "operation": "replace|append|insert" }`
+    - `document_stream_token`: emitted for each content chunk during write-back streaming:
+      `{ "content": "...partial text...", "position": N }`
+    - `document_stream_end`: emitted once at completion with content integrity hash:
+      `{ "documentId": "...", "contentHash": "sha256:...", "totalTokens": N }`
+
+    **Implementation**:
+    1. Modify `WorkingDocumentTools.WriteBackToWorkingDocumentAsync` to accept a write-back event
+       callback: `Func&lt;ChatStreamEvent, Task&gt; onEvent` parameter
+    2. In the chat endpoint streaming pipeline (ChatEndpoints.cs), pass a callback that writes each
+       write-back event to the response stream as an SSE frame
+    3. Emit `document_stream_start` before AI generation for the write-back content
+    4. For each AI response token during write-back mode, emit `document_stream_token` (in addition
+       to the regular `token` event so the user sees the content in chat as well)
+    5. Compute SHA-256 hash of the final assembled content and emit `document_stream_end`
+
+    **Ordering guarantee**: `document_stream_start` MUST precede all `document_stream_token` events;
+    `document_stream_end` MUST be emitted after all tokens and before `done`.
+
+    **Client use**: The SprkChatPane frontend (Phase 3 Task R2-051) forwards `document_stream_*`
+    events to `SprkChatBridge` for BroadcastChannel delivery to the AnalysisWorkspace Lexical editor.
+    The BFF responsibility is solely correct event emission — frontend routing is Phase 3/4 work.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    When `WorkingDocumentTools` executes write-back, the SSE stream contains `document_stream_start`,
+    `document_stream_token` events with content chunks, and `document_stream_end` with SHA-256 hash.
+    Editor updates without page refresh; user sees streaming progress in chat (FR-04).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-04 (write-back via SSE + BroadcastChannel), FR-09 (streaming)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — SprkChatBridge, BroadcastChannel event types, SSE pipeline">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="WorkingDocumentTools — write-back implementation to enhance with event callback">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+    <file purpose="ChatEndpoints — SSE emission pipeline from R2-010 to integrate write-back events">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="SprkChatAgent — tool execution callback pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+    <file purpose="SSE streaming canonical pattern">../.claude/patterns/ai/streaming-endpoints.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">MUST NOT cache streaming write-back tokens — `document_stream_token` events are write-through only; cache only the final `document_stream_end` content hash for idempotency verification</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext through write-back operations — target document ID and operation type come from the chat session context, not from hardcoded values</constraint>
+    <constraint source="ADR-015">MUST NOT log the write-back content in `document_stream_token` events at Info or higher log levels — log only document ID, position index, and token count metadata</constraint>
+    <constraint source="spec FR-04">Write-back content MUST stream token-by-token — the client MUST NOT receive a single large write-back payload; progressive streaming is the requirement</constraint>
+    <constraint source="spec">MUST preserve ordering: document_stream_start → document_stream_token(s) → document_stream_end → done — out-of-order events break client-side document reconstruction</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Write-back event callback injection: modify tool method signature to `WriteBackToWorkingDocumentAsync(content, context, Func&lt;ChatStreamEvent, Task&gt; onEvent, CancellationToken ct)` — the endpoint passes its SSE write function as `onEvent`</pattern>
+      <pattern>SHA-256 content hash: `Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(finalContent)))` — prefix with "sha256:" for clarity in the `document_stream_end` payload</pattern>
+      <pattern>Position tracking: maintain a `position` counter incremented by `chunk.Length` for each document_stream_token emission — enables client-side ordering verification</pattern>
+      <pattern>Dual emission during write-back: each token during write-back mode emits BOTH a `token` event (for display in chat) AND a `document_stream_token` event (for editor routing) — check if this is the desired behavior or if they should be separate</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R1 implemented write-back as a complete operation: the AI generates the full content,
+      then sends it to the Lexical editor in one message via BroadcastChannel. R2 streams the write-back
+      content token-by-token via SSE, matching the streaming quality of the chat responses.
+
+      The `SprkChatBridge` on the frontend already handles BroadcastChannel events. It needs new event
+      type handlers for `document_stream_start/token/end` (Phase 3 Task R2-051). The BFF responsibility
+      is ensuring these events are emitted in the correct order with the correct data format.
+
+      The content hash in `document_stream_end` enables the client to verify that the reconstructed
+      document content matches what the BFF computed — a lightweight integrity check that prevents
+      partial writes from being applied to the editor if SSE events were lost.
+
+      Task R2-010 established the SSE streaming infrastructure and event types. This task adds the
+      write-back specific event types on top of that foundation.
+    </background>
+    <dependencies>
+      Depends on Task R2-010 (SSE streaming infrastructure and event emission pattern). Sequential.
+      Does not depend on R2-011 through R2-022. Task R2-051 (Phase 4 write-back integration) depends
+      on this task. Own files: `Tools/WorkingDocumentTools.cs` (callback addition), `ChatEndpoints.cs`
+      (write-back callback wiring), `Models/Ai/Chat/ChatStreamEvent.cs` (new event type discriminators).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `WorkingDocumentTools.cs` to understand the current write-back implementation and how it generates content</step>
+    <step order="1">Read `SprkChatAgent.cs` and `ChatEndpoints.cs` to understand how tool execution currently integrates with the SSE stream</step>
+    <step order="2">Add `document_stream_start`, `document_stream_token`, and `document_stream_end` event type discriminators to `ChatStreamEvent`</step>
+    <step order="3">Modify `WriteBackToWorkingDocumentAsync` method signature to accept `Func&lt;ChatStreamEvent, Task&gt; onEvent` callback parameter</step>
+    <step order="4">Implement `document_stream_start` emission at the beginning of the write-back operation</step>
+    <step order="5">Implement `document_stream_token` emission for each content chunk during AI generation — track position counter</step>
+    <step order="6">Implement SHA-256 hash computation on the final assembled content</step>
+    <step order="7">Implement `document_stream_end` emission with hash and total token count</step>
+    <step order="8">Update `ChatEndpoints.cs` streaming pipeline to pass the SSE write function as the `onEvent` callback to `WorkingDocumentTools`</step>
+    <step order="9">Update `SprkChatAgent` tool invocation to thread the callback through the tool execution path</step>
+    <step order="10">Verify event ordering in the stream: start → tokens → end → done (add assertion or test to confirm)</step>
+    <step order="11">Run `dotnet build` and verify no errors</step>
+    <step order="12">Update TASK-INDEX.md: change task R2-023 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs — enhanced with write-back event callback and document_stream_* event emission</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatStreamEvent.cs — updated with document_stream_start, document_stream_token, document_stream_end event type discriminators</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs — updated to pass SSE write callback to WorkingDocumentTools</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs — updated to thread write-back callback through tool execution</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A write-back operation emits `document_stream_start` as the first write-back event in the SSE stream</criterion>
+    <criterion testable="true">Multiple `document_stream_token` events are emitted with sequential position values (0, N, 2N, ...) during write-back content generation</criterion>
+    <criterion testable="true">`document_stream_end` is emitted after all tokens with a non-empty `contentHash` field starting with "sha256:"</criterion>
+    <criterion testable="true">The ordering is guaranteed: no `document_stream_token` arrives before `document_stream_start`, and `document_stream_end` arrives after all tokens</criterion>
+    <criterion testable="true">`done` event follows `document_stream_end` (write-back events precede stream termination)</criterion>
+    <criterion testable="true">No write-back content text appears in logs at Info or higher level (ADR-015)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The exact mechanism for injecting the callback into `WorkingDocumentTools` depends on how the
+    tool is currently constructed. If it's instantiated by `SprkChatAgentFactory.ResolveTools()`,
+    the callback can be passed either as a constructor argument (for the write-back session) or as
+    a method parameter. Prefer method parameter injection to avoid making the tool stateful.
+
+    The `position` counter in `document_stream_token` should represent the character offset of the
+    chunk in the final assembled content, not an event sequence number. This allows the client to
+    reconstruct the document in order even if SSE events arrive out of sequence (though SSE is
+    ordered by design).
+
+    Document the `document_stream_*` event payload schemas in `notes/023-writeback-sse-events.md`
+    for Phase 3 Task R2-051 (write-back integration) and for the `SprkChatBridge` frontend
+    implementation to consume.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Sequential — depends on R2-010 (SSE infrastructure). Runs after R2-022. Task R2-051 (Phase 4) depends on this. Own files: WorkingDocumentTools.cs (callback addition), ChatStreamEvent.cs (new event types), ChatEndpoints.cs (callback wiring), SprkChatAgent.cs (threading).</protocol>
+  </execution>
+</task>

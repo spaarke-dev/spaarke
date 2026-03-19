@@ -31,11 +31,35 @@ import {
 } from '@fluentui/react-components';
 import {
   DocumentRegular,
+  GlobeRegular,
   OpenRegular,
   CheckmarkCircleRegular,
   ErrorCircleRegular,
   RecordRegular,
 } from '@fluentui/react-icons';
+import type { CitationSourceType } from './types';
+import { renderMarkdown as renderMarkdownHtml, SPRK_MARKDOWN_CSS } from '../../services/renderMarkdown';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Markdown CSS injection (one-time, idempotent)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SPRK_MARKDOWN_STYLE_ID = 'sprk-markdown-styles';
+
+/**
+ * Injects the SPRK_MARKDOWN_CSS stylesheet into the document <head> once.
+ * Uses an idempotent check via a data attribute to avoid duplicate injection
+ * when multiple instances of the component mount.
+ */
+function ensureMarkdownCssInjected(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(SPRK_MARKDOWN_STYLE_ID)) return;
+
+  const style = document.createElement('style');
+  style.id = SPRK_MARKDOWN_STYLE_ID;
+  style.textContent = SPRK_MARKDOWN_CSS;
+  document.head.appendChild(style);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Structured Response Data Types
@@ -45,10 +69,19 @@ import {
 export interface ICitationRef {
   /** 1-based index matching [N] markers in response text */
   index: number;
-  /** Display title of the source document */
+  /** Display title of the source document or web page */
   title: string;
-  /** Dataverse document GUID for linking */
-  documentId: string;
+  /** Dataverse document GUID for linking (optional for web citations) */
+  documentId?: string;
+  /**
+   * Citation source type discriminator.
+   * - 'document' (default) — internal SPE document reference
+   * - 'web' — external web search result
+   * When absent, defaults to 'document' for backward compatibility.
+   */
+  sourceType?: CitationSourceType;
+  /** Full URL of the web search result. Present when sourceType is 'web'. */
+  url?: string;
 }
 
 /** Response data for markdown card type. */
@@ -145,7 +178,6 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   },
 
@@ -159,7 +191,6 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
-    whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   },
   citationsSuper: {
@@ -197,6 +228,10 @@ const useStyles = makeStyles({
   },
   sourceIcon: {
     color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+  },
+  webSourceIcon: {
+    color: tokens.colorPaletteBerryForeground1,
     flexShrink: 0,
   },
 
@@ -300,10 +335,18 @@ const CITATION_MARKER_REGEX = /\[(\d+)\]/g;
 // Sub-renderers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function renderMarkdown(data: IMarkdownResponse, styles: ReturnType<typeof useStyles>): React.ReactElement {
+function renderMarkdownCard(data: IMarkdownResponse, styles: ReturnType<typeof useStyles>): React.ReactElement {
+  if (!data.text) {
+    return React.createElement('div', { className: styles.markdownRoot });
+  }
+
+  const html = renderMarkdownHtml(data.text);
   return (
     <div className={styles.markdownRoot}>
-      <Text className={styles.markdownText}>{data.text}</Text>
+      <div
+        className={styles.markdownText}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </div>
   );
 }
@@ -315,60 +358,64 @@ function renderCitations(data: ICitationsResponse, styles: ReturnType<typeof use
     citationMap.set(c.index, c);
   }
 
-  // Parse [N] markers into inline superscript links
-  const parseTextWithCitations = (text: string): React.ReactNode[] => {
-    const nodes: React.ReactNode[] = [];
-    let lastIndex = 0;
-    CITATION_MARKER_REGEX.lastIndex = 0;
-
-    let match: RegExpExecArray | null;
-    while ((match = CITATION_MARKER_REGEX.exec(text)) !== null) {
-      const citationIndex = parseInt(match[1], 10);
+  // Render the text body as markdown, then inject superscript citation links.
+  // Citation markers [N] survive markdown parsing (they are not consumed by marked).
+  // After rendering to HTML, we replace [N] with styled <sup> elements.
+  const renderCitationsHtml = (text: string): string => {
+    if (!text) return '';
+    let html = renderMarkdownHtml(text);
+    // Replace [N] markers in the rendered HTML with superscript citation links
+    html = html.replace(/\[(\d+)\]/g, (_match, num) => {
+      const citationIndex = parseInt(num, 10);
       const citation = citationMap.get(citationIndex);
-
-      if (match.index > lastIndex) {
-        nodes.push(text.slice(lastIndex, match.index));
-      }
-
       if (citation) {
-        nodes.push(
-          React.createElement(
-            'sup',
-            { key: `cit-${citationIndex}-${match.index}`, className: styles.citationsSuper },
-            `[${citationIndex}]`
-          )
-        );
-      } else {
-        nodes.push(match[0]);
+        return `<sup class="${styles.citationsSuper}">[${citationIndex}]</sup>`;
       }
-
-      lastIndex = match.index + match[0].length;
-    }
-
-    if (lastIndex < text.length) {
-      nodes.push(text.slice(lastIndex));
-    }
-
-    return nodes.length > 0 ? nodes : [text];
+      return _match;
+    });
+    return html;
   };
 
   return (
     <div className={styles.citationsRoot}>
-      <Text className={styles.citationsText}>{parseTextWithCitations(data.text)}</Text>
+      <div
+        className={styles.citationsText}
+        dangerouslySetInnerHTML={{ __html: renderCitationsHtml(data.text) }}
+      />
       {data.citations.length > 0 && (
         <div className={styles.sourcesList}>
           <div className={styles.sourcesHeading}>Sources</div>
-          {data.citations.map((c) => (
-            <div key={c.documentId} className={styles.sourceItem}>
-              <DocumentRegular className={styles.sourceIcon} />
-              <span>
-                [{c.index}]&nbsp;
-                <Link href={`#doc-${c.documentId}`} title={c.title}>
-                  {c.title}
-                </Link>
-              </span>
-            </div>
-          ))}
+          {data.citations.map((c) => {
+            const isWeb = c.sourceType === 'web';
+            const key = isWeb ? `web-${c.index}` : (c.documentId ?? `doc-${c.index}`);
+
+            return (
+              <div key={key} className={styles.sourceItem}>
+                {isWeb ? (
+                  <GlobeRegular className={styles.webSourceIcon} />
+                ) : (
+                  <DocumentRegular className={styles.sourceIcon} />
+                )}
+                <span>
+                  [{c.index}]&nbsp;
+                  {isWeb && c.url ? (
+                    <Link
+                      href={c.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={c.title}
+                    >
+                      {c.title}
+                    </Link>
+                  ) : (
+                    <Link href={`#doc-${c.documentId}`} title={c.title}>
+                      {c.title}
+                    </Link>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -380,9 +427,18 @@ function renderDiff(
   styles: ReturnType<typeof useStyles>,
   onOpenDiff?: (proposedText: string) => void
 ): React.ReactElement {
+  const diffHtml = data.summary ? renderMarkdownHtml(data.summary) : '';
+
   return (
     <div className={styles.diffRoot}>
-      <Text className={styles.diffSummaryText}>{data.summary}</Text>
+      {diffHtml ? (
+        <div
+          className={styles.diffSummaryText}
+          dangerouslySetInnerHTML={{ __html: diffHtml }}
+        />
+      ) : (
+        <Text className={styles.diffSummaryText}>{data.summary}</Text>
+      )}
       <div className={styles.diffActions}>
         <Button
           appearance="outline"
@@ -476,7 +532,14 @@ function renderActionConfirmation(
           {isSuccess ? 'Completed' : 'Failed'}
         </Badge>
       </div>
-      <Text className={styles.confirmationSummary}>{data.summary}</Text>
+      {data.summary ? (
+        <div
+          className={styles.confirmationSummary}
+          dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(data.summary) }}
+        />
+      ) : (
+        <Text className={styles.confirmationSummary}>{data.summary}</Text>
+      )}
     </div>
   );
 }
@@ -514,6 +577,12 @@ export const SprkChatMessageRenderer: React.FC<ISprkChatMessageRendererProps> = 
 }) => {
   const styles = useStyles();
 
+  // Inject the SPRK_MARKDOWN_CSS stylesheet once on first mount.
+  // Uses an idempotent helper so multiple instances don't duplicate the <style> tag.
+  React.useEffect(() => {
+    ensureMarkdownCssInjected();
+  }, []);
+
   switch (responseType) {
     case 'citations':
       return renderCitations(data as ICitationsResponse, styles);
@@ -530,7 +599,7 @@ export const SprkChatMessageRenderer: React.FC<ISprkChatMessageRendererProps> = 
     case 'markdown':
     default:
       // Unknown responseType falls back to markdown — no error
-      return renderMarkdown(data as IMarkdownResponse, styles);
+      return renderMarkdownCard(data as IMarkdownResponse, styles);
   }
 };
 

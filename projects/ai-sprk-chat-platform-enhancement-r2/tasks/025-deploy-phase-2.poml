@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-025" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Deploy Phase 2 — BFF API Build, Test, and Deployment to Dev Environment</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>deploy, azure, bff-api</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task — STANDARD rigor applies; follows the established bff-deploy skill pattern; requires test verification and smoke tests but not full implementation rigor</rigor-reason>
+    <dependencies>[010, 011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024]</dependencies>
+  </metadata>
+
+  <prompt>
+    Build, test, and deploy all Phase 2 BFF API changes to the dev environment. Verify the new
+    endpoints and services are accessible and functioning after deployment.
+
+    **Build and test**:
+    1. Run `dotnet build src/server/api/Sprk.Bff.Api/` — MUST succeed with no errors
+    2. Run `dotnet test tests/Sprk.Bff.Api.Tests/` (or equivalent test project) — MUST pass; new failures
+       introduced by Phase 2 work must be fixed before deployment
+    3. Run `dotnet format --verify-no-changes` — verify code formatting compliance
+
+    **Deploy**:
+    4. Run `scripts/Deploy-BffApi.ps1` to publish and deploy to the dev App Service (`spe-api-dev-67e2xz`)
+    5. Verify deployment success: check App Service health (`GET /healthz`) returns 200
+
+    **Smoke tests** (manual verification after deployment):
+    6. SSE streaming: send a test chat message and verify token-by-token streaming in the response
+    7. Document upload: upload a small PDF (test fixture) to `POST /api/ai/chat/sessions/{sessionId}/documents`
+       and verify 202 Accepted response with documentId
+    8. Playbook dispatch: verify `POST /api/ai/playbooks/{playbookId}/index` endpoint is accessible
+       (returns 202 for a valid playbookId, 404 for non-existent)
+    9. Word export: send a test markdown payload to `POST /api/ai/chat/export/word` and verify
+       201 Created response with wordOnlineUrl
+    10. Verify typing_start/typing_end SSE events appear in a streaming response
+
+    **Rollback criteria**: If health check fails or any smoke test returns 5xx, roll back by
+    redeploying the previous build artifact. Document rollback in `notes/025-deployment-log.md`.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    Phase 2 BFF API changes are deployed to the dev environment. All smoke tests pass. The dev
+    environment is ready for Phase 3 frontend development and Phase 4 integration testing.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — NFR-01 through NFR-08, deployment environment details">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — deployment approach, BFF endpoint, App Service name">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF API deployment script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="BFF deploy skill — deployment procedure">../.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="Azure resource documentation — App Service name, health check endpoint">docs/architecture/auth-azure-resources.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec">MUST run `dotnet test` and verify all tests pass before deployment — no deployment with failing tests</constraint>
+    <constraint source="CLAUDE.md">MUST use `scripts/Deploy-BffApi.ps1` for BFF deployment — do NOT use `az webapp deploy` directly without the script</constraint>
+    <constraint source="spec">BFF API endpoint: `https://spe-api-dev-67e2xz.azurewebsites.net` — health check: `GET /healthz`</constraint>
+    <constraint source="spec">If deployment fails (health check 5xx), MUST roll back before marking task complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+    </files>
+    <patterns>
+      <pattern>BFF deploy sequence: dotnet publish → copy artifacts → Deploy-BffApi.ps1 → verify health check — follow the bff-deploy SKILL.md procedure exactly</pattern>
+      <pattern>Health check verification: `curl -s https://spe-api-dev-67e2xz.azurewebsites.net/healthz` should return `{"status":"Healthy"}` within 60 seconds of deployment</pattern>
+      <pattern>Smoke test for SSE endpoint: use curl with `--no-buffer -H "Accept: text/event-stream"` to observe token streaming in terminal output</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 2 introduces 16 tasks worth of BFF API changes: new endpoints (document upload, SPE persist,
+      Word export, playbook index), new services (DocumentContextService, PlaybookDispatcher,
+      PlaybookOutputHandler, DynamicCommandResolver, AnalysisChatContextResolver), and enhanced
+      existing services (WebSearchTools, WorkingDocumentTools, ChatEndpoints, DocxExportService).
+
+      This deployment task consolidates all Phase 2 work into a single dev environment deployment
+      so that Phase 3 frontend development can target the deployed API. Phase 3 and Phase 4 tasks
+      require the Phase 2 endpoints to be live in the dev environment.
+
+      The `scripts/Deploy-BffApi.ps1` script handles the publish, package, and App Service deployment
+      steps. The bff-deploy SKILL.md contains the full deployment procedure. Follow it.
+    </background>
+    <dependencies>
+      Depends on ALL Phase 2 implementation tasks: R2-010 through R2-024. This is the last Phase 2
+      task. Phase 3 tasks (R2-030 through R2-045) and Phase 4 tasks depend on this deployment
+      completing successfully.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Load `.claude/skills/bff-deploy/SKILL.md` to confirm the exact deployment procedure for this environment</step>
+    <step order="1">Run `dotnet build src/server/api/Sprk.Bff.Api/ --configuration Release` — fix any build errors before proceeding</step>
+    <step order="2">Run `dotnet test` (or the equivalent test command for this project) — fix any new test failures introduced by Phase 2 changes</step>
+    <step order="3">Run `dotnet format --verify-no-changes src/server/api/Sprk.Bff.Api/` — fix formatting issues if any</step>
+    <step order="4">Run `scripts/Deploy-BffApi.ps1` to deploy to the dev App Service</step>
+    <step order="5">Wait for deployment to complete; verify health check: `GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz` returns 200</step>
+    <step order="6">Smoke test SSE streaming: send a test message and observe token-by-token response</step>
+    <step order="7">Smoke test document upload: POST a test PDF to the upload endpoint, verify 202 Accepted</step>
+    <step order="8">Smoke test playbook indexing: POST to `/api/ai/playbooks/{knownPlaybookId}/index`, verify 202 Accepted</step>
+    <step order="9">Smoke test Word export: POST test markdown to `/api/ai/chat/export/word`, verify 201 Created with wordOnlineUrl</step>
+    <step order="10">If any smoke test returns 5xx: investigate logs in App Service, fix the issue, re-deploy (do NOT mark task complete with failing smoke tests)</step>
+    <step order="11">Create a git commit with all Phase 2 BFF changes: `git add` the modified/new files, commit with message summarizing Phase 2 BFF implementation</step>
+    <step order="12">Document deployment outcome in `notes/025-deployment-log.md`: timestamp, build version, smoke test results</step>
+    <step order="13">Update TASK-INDEX.md: change task R2-025 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+    <tool>az</tool>
+    <tool>pwsh</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="config">Phase 2 BFF API deployed to `spe-api-dev-67e2xz.azurewebsites.net`</artifact>
+    <artifact type="docs">notes/025-deployment-log.md — deployment log with timestamp, build version, and smoke test results</artifact>
+    <artifact type="code">Git commit — all Phase 2 BFF API implementation changes committed</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build` returns exit code 0 with no errors</criterion>
+    <criterion testable="true">`dotnet test` passes with no new failures (existing failures are pre-existing and documented)</criterion>
+    <criterion testable="true">`GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz` returns HTTP 200 after deployment</criterion>
+    <criterion testable="true">Chat streaming endpoint returns `typing_start` event followed by `token` events (SSE smoke test)</criterion>
+    <criterion testable="true">Document upload endpoint returns `202 Accepted` with a `documentId` in the response body</criterion>
+    <criterion testable="true">Word export endpoint returns `201 Created` with a `wordOnlineUrl` field</criterion>
+    <criterion testable="true">All Phase 2 BFF changes are committed to git on the `work/ai-sprk-chat-workspace-companion` branch</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The App Service `spe-api-dev-67e2xz` is in resource group `spe-infrastructure-westus2`.
+    The `scripts/Deploy-BffApi.ps1` script handles the complete deployment — do not try to
+    deploy manually unless the script fails and the SKILL.md has documented fallback steps.
+
+    For smoke tests, you will need a valid test session ID and user credentials. Check
+    `docs/guides/` for the dev environment test credentials or request them from the team if
+    they are not documented. Alternatively, run the smoke tests with the integration test
+    infrastructure if it supports testing against the deployed dev environment.
+
+    After successful deployment, notify the Phase 3 frontend developer that the Phase 2 BFF
+    endpoints are live and ready for integration. Provide the endpoint URLs and the SSE event
+    contract from `notes/018-new-sse-event-types.md` and `notes/023-writeback-sse-events.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 final task — depends on ALL R2-010 through R2-024. Load bff-deploy SKILL.md in Step 0. Run tests before deploy. Verify deployment health before marking complete. This task gates Phase 3 and Phase 4 work.</protocol>
+  </execution>
+</task>

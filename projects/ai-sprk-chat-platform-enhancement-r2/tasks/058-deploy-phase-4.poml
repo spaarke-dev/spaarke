@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-058" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Deploy Phase 4 — Full Stack BFF API and Frontend Web Resources</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <tags>deploy, azure, dataverse</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task following bff-deploy and code-page-deploy skills. Tags include deploy, azure, dataverse. STANDARD rigor for deployment with explicit steps. Full stack deployment after all Phase 4 integration fixes are complete.</rigor-reason>
+    <dependencies>[050, 051, 052, 053, 054, 055, 056, 057]</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy all Phase 4 integration changes to the dev environment: deploy BFF API changes via `scripts/Deploy-BffApi.ps1`, rebuild and redeploy SprkChatPane and AnalysisWorkspace web resources via the code-page-deploy skill. Verify the full integrated stack works end-to-end in the deployed environment: SSE streaming, write-back, playbook dispatch, dynamic commands, document upload, and Open in Word.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    All Phase 4 integration fixes are deployed to the dev environment. BFF API is updated with fixed integration code. SprkChatPane and AnalysisWorkspace web resources are updated. End-to-end smoke tests pass in the deployed environment: SSE streaming, write-back to Lexical editor, playbook dispatch dialog handoff, dynamic slash commands, document upload, and Open in Word all work correctly.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — affected areas and deployment targets">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — deployment scripts and skills">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF deploy script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="BFF deploy skill">../.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="Code page deploy skill">../.claude/skills/code-page-deploy/SKILL.md</file>
+    <file purpose="Dataverse deploy skill">../.claude/skills/dataverse-deploy/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md">MUST use scripts/Deploy-BffApi.ps1 for BFF deployment — not manual az webapp deploy commands</constraint>
+    <constraint source="CLAUDE.md">MUST use code-page-deploy skill for SprkChatPane and AnalysisWorkspace builds — not manual webpack commands</constraint>
+    <constraint source="spec">MUST verify all integration flows post-deploy — deployment without verification is incomplete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern>BFF deploy: read bff-deploy SKILL.md for the correct deploy invocation for this environment (Azure App Service: spe-api-dev-67e2xz)</pattern>
+      <pattern>Code page deploy: webpack build → inline-html → pac pcf push / pac solution import for each code page</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 4 integration tasks (050-057) fixed any issues discovered during end-to-end wiring. This deployment task applies all those fixes to the deployed dev environment so that Phase 5 testing can run against the deployed stack rather than local dev servers.
+    </background>
+    <dependencies>
+      Depends on all Phase 4 integration tasks (050-057) being complete. This is the final Phase 4 task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read bff-deploy SKILL.md to confirm the correct deployment invocation for the BFF API</step>
+    <step order="1">Run dotnet build src/server/api/Sprk.Bff.Api/ to verify clean build before deploying</step>
+    <step order="2">Deploy BFF API via scripts/Deploy-BffApi.ps1 — verify deployment completes successfully</step>
+    <step order="3">Verify BFF health check: GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz returns 200</step>
+    <step order="4">Build and deploy SprkChatPane via code-page-deploy skill</step>
+    <step order="5">Build and deploy AnalysisWorkspace via code-page-deploy skill</step>
+    <step order="6">Publish Dataverse customizations</step>
+    <step order="7">Smoke test SSE streaming: send a chat message and verify token-by-token streaming response in deployed SprkChatPane</step>
+    <step order="8">Smoke test dynamic commands: open SprkChat and verify slash menu shows grouped categories</step>
+    <step order="9">Smoke test document upload: drag a PDF and verify processing feedback appears</step>
+    <step order="10">Note any post-deploy issues in notes/058-deploy-phase-4-findings.md</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-058 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>pac</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="config">BFF API deployed to spe-api-dev-67e2xz Azure App Service with Phase 4 integration fixes</artifact>
+    <artifact type="config">SprkChatPane web resource updated in Dataverse</artifact>
+    <artifact type="config">AnalysisWorkspace web resource updated in Dataverse</artifact>
+    <artifact type="docs">notes/058-deploy-phase-4-findings.md — deployment results, smoke test results</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz returns HTTP 200</criterion>
+    <criterion testable="true">SSE streaming works in deployed SprkChatPane (token-by-token response visible)</criterion>
+    <criterion testable="true">Slash menu shows grouped categories in deployed environment</criterion>
+    <criterion testable="true">Document drag-and-drop upload shows processing feedback in deployed environment</criterion>
+    <criterion testable="true">No JavaScript errors in browser console for deployed SprkChatPane</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-063" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Document Upload End-to-End Tests</title>
+    <status>completed</status>
+    <phase>5</phase>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task for document upload pipeline. Tags include testing and integration-test. STANDARD rigor: new test files, tests NFR-02 processing time, file type validation, SPE persistence, and NFR-06 session cleanup. Explicit constraints drive test cases.</rigor-reason>
+    <dependencies>[056]</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the document upload pipeline covering: processing time (NFR-02: &lt;15 seconds for &lt;50 pages), file type validation (accept PDF/DOCX/TXT/MD, reject others), optional SPE persistence, and session cleanup (NFR-06: uploaded docs deleted when session ends). Tests use real Document Intelligence for processing time validation and mock Document Intelligence for unit-speed tests.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Integration tests exist and pass for: upload endpoint accepts PDF/DOCX/TXT/MD and rejects other types, Document Intelligence processing completes within 15 seconds for a 40-page test PDF, SPE persistence endpoint saves to the correct container, and session cleanup deletes session-scoped uploads on session end.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-13, FR-14, NFR-02, NFR-06 upload requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — upload architecture, session cleanup">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF upload endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file purpose="BFF SPE persistence endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file purpose="Text extraction pattern — Document Intelligence routing">../.claude/patterns/ai/text-extraction.md</file>
+    <file purpose="ADR-015 — no document content logging">../.claude/adr/ADR-015-ai-data-governance.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-02">Processing time test MUST use a real &lt;50 page PDF via Document Intelligence — mock-only tests do not validate NFR-02</constraint>
+    <constraint source="spec NFR-06">Session cleanup test MUST verify actual deletion — check temp storage after session end, not just in-memory state</constraint>
+    <constraint source="spec">File type validation test MUST cover: accept .pdf, .docx, .txt, .md; reject .jpg, .exe, .zip</constraint>
+    <constraint source="ADR-015">Tests MUST NOT log or assert on extracted document text content — only assert on metadata (page count, documentId, status)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>tests/</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Test PDF: include a small (5-page) test PDF in the test fixtures directory for processing time tests — use a copyright-free sample document</pattern>
+      <pattern>Session cleanup test: create session, upload document, explicitly end the session (DELETE /api/ai/chat/sessions/{id}), verify document storage no longer contains the file</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Upload integration was verified manually in R2-056. This Phase 5 task creates automated tests for the upload pipeline. The processing time test (NFR-02) requires real Document Intelligence and should be marked as [Category("SlowTests")] to allow running separately from unit tests.
+    </background>
+    <dependencies>
+      Depends on R2-056 (upload integration verified). Phase 5, runs after R2-058.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Locate or create a test fixtures directory with a small test PDF (under 10 pages) and a test DOCX file</step>
+    <step order="1">Write test: Upload_AcceptsPdf — upload a .pdf file, assert HTTP 200 and documentId returned</step>
+    <step order="2">Write test: Upload_AcceptsDocx — upload a .docx file, assert HTTP 200</step>
+    <step order="3">Write test: Upload_AcceptsTxt — upload a .txt file, assert HTTP 200</step>
+    <step order="4">Write test: Upload_RejectsJpg — upload a .jpg file, assert HTTP 400 with error message</step>
+    <step order="5">Write test: Upload_RejectsOversized — upload a file exceeding 50MB (or a mock that claims to be oversized), assert HTTP 400</step>
+    <step order="6">Write test (SlowTest): ProcessingTime_UnderFifteenSeconds — upload a real PDF, await processing_complete event, assert elapsed time under 15 seconds (mark [Trait("Category", "SlowTests")])</step>
+    <step order="7">Write test: SpePersistence_SavesFile — after upload, call persist endpoint with a valid containerId, assert file appears in SPE container metadata</step>
+    <step order="8">Write test: SessionCleanup_DeletesUploadedDoc — upload document, delete session, verify document no longer accessible via GET /api/ai/chat/sessions/{id}/documents/{docId}</step>
+    <step order="9">Run fast tests: dotnet test tests/ --filter "Upload" --trait "Category!=SlowTests" — verify all pass</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-063 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">UploadIntegrationTests.cs — xUnit tests for file type validation, processing time, SPE persistence, session cleanup</artifact>
+    <artifact type="config">tests/fixtures/ — small test PDF and DOCX for processing tests</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test --filter "Upload" --trait "Category!=SlowTests" exits with 0 failures</criterion>
+    <criterion testable="true">Upload_AcceptsPdf, Upload_AcceptsDocx, Upload_AcceptsTxt tests pass</criterion>
+    <criterion testable="true">Upload_RejectsJpg and Upload_RejectsOversized tests pass (400 responses)</criterion>
+    <criterion testable="true">SessionCleanup_DeletesUploadedDoc test passes</criterion>
+    <criterion testable="true">SpePersistence_SavesFile test passes (when run with valid Azure credentials)</criterion>
+  </acceptance-criteria>
+</task>

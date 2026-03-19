@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-001" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Dataverse Schema Extensions — Scope Capabilities, Playbook Trigger Metadata, Scope Search Guidance</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <tags>dataverse, schema, foundation</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema creation work — no .cs/.ts code modification, but creates new fields on existing Dataverse entities that all subsequent tasks depend on. STANDARD rigor applies for schema/infrastructure tasks with explicit field specifications.</rigor-reason>
+    <dependencies>[]</dependencies>
+  </metadata>
+
+  <prompt>
+    Add six new fields to existing Dataverse entities to support the SprkChat R2 feature set:
+    (1) `sprk_capabilities` multi-select option set on `sprk_scope` — declares what tools/actions the scope contributes independently of any active playbook.
+    (2) `sprk_searchGuidance` multiline text on `sprk_scope` — free-text guidance for how AI web search should be scoped (e.g., "prioritize authoritative legal databases: Westlaw, LexisNexis").
+    (3) `sprk_triggerPhrases` multiline text on `sprk_analysisplaybook` — newline-delimited natural language phrases used to match this playbook during semantic search seeding and exact-match fallback.
+    (4) `sprk_recordType` text (single line) on `sprk_analysisplaybook` — e.g., "matter", "project", "event". Used for pre-filter in playbook dispatcher queries.
+    (5) `sprk_entityType` text (single line) on `sprk_analysisplaybook` — Dataverse logical entity name (e.g., "sprk_analysisoutput"). Enables scoped metadata-driven dispatch.
+    (6) `sprk_tags` multiline text on `sprk_analysisplaybook` — comma-delimited tags for grouping and filtering playbooks without a separate tag entity.
+
+    All fields must be added to the existing Dataverse solution that contains `sprk_scope` and `sprk_analysisplaybook`. Use the Dataverse Web API approach (not PAC CLI) per project documentation.
+  </prompt>
+
+  <role>Senior full-stack developer with Dataverse and Azure AI expertise</role>
+
+  <goal>
+    All six fields exist in Dataverse, are accessible via the Web API, and have been added to the correct solution. `sprk_scope.sprk_capabilities` is a functional multi-select option set with initial option values defined (at minimum: search=100000000, analyze=100000001, web_search=100000002, write_back=100000003, summarize=100000004). All other fields are text/multiline fields.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — full field definitions and FR-10, FR-11, FR-16, FR-17, FR-18">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, entity names, architecture decisions">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Dataverse entity operations pattern — how to create/update fields via Web API">../.claude/patterns/dataverse/entity-operations.md</file>
+    <file purpose="Dataverse Web API client usage pattern">../.claude/patterns/dataverse/web-api-client.md</file>
+    <file purpose="How-to guide for creating/updating Dataverse schema">docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-11">sprk_scope.sprk_capabilities MUST be a multi-select option set (not a simple text field) so that scope tools can be queried as Dataverse option set values</constraint>
+    <constraint source="spec FR-18">Trigger metadata fields (sprk_triggerPhrases, sprk_recordType, sprk_entityType, sprk_tags) MUST be stored on sprk_analysisplaybook for queryable metadata-driven matching — NOT in JPS JSON</constraint>
+    <constraint source="spec MUST">MUST NOT create static playbook relationship tables — these fields enable metadata-driven matching without new junction entities</constraint>
+    <constraint source="docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md">MUST use Dataverse Web API (EntityDefinitions/Attributes endpoints) — NOT PAC CLI for schema creation</constraint>
+    <constraint source="spec">All fields MUST be added to the same Dataverse solution as sprk_analysisplaybook and sprk_scope</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>docs/ai-knowledge/catalogs/scope-model-index.json</file>
+    </files>
+    <patterns>
+      <pattern>Dataverse multi-select option set creation via Web API: POST to EntityDefinitions(LogicalName='entity')/Attributes with @odata.type "#Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata"</pattern>
+      <pattern>Existing sprk_analysisplaybook field patterns: review ChatDataverseRepository.cs to understand current field naming conventions before adding new fields</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R2 introduces metadata-driven playbook discovery (no static relationship tables) and scope-level capability declarations. This requires adding fields to existing Dataverse entities before any BFF or frontend code can query them. The `sprk_scope` entity currently does not have a capabilities field — scopes only contribute context via playbooks. R2 changes this so scopes declare their own tools. The `sprk_analysisplaybook` entity currently has `sprk_playbookcapabilities` (integer option set) for AI action capabilities, but no trigger metadata for semantic matching. Task R2-005 (seed data) depends on these fields existing first.
+    </background>
+    <dependencies>
+      No dependencies — this is the first task in Phase 1. Task R2-005 depends on this task completing successfully. Task R2-006 (deployment) will deploy these schema changes to dev.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md to confirm the correct Web API approach for field creation in this environment</step>
+    <step order="1">Read .claude/patterns/dataverse/entity-operations.md and .claude/patterns/dataverse/web-api-client.md to understand the established patterns</step>
+    <step order="2">Check existing fields on sprk_scope by querying EntityDefinitions(LogicalName='sprk_scope')/Attributes — confirm sprk_capabilities does not already exist</step>
+    <step order="3">Check existing fields on sprk_analysisplaybook — confirm the four trigger metadata fields do not already exist</step>
+    <step order="4">Create sprk_capabilities MultiSelectPicklistAttributeMetadata on sprk_scope with option values: search=100000000, analyze=100000001, web_search=100000002, write_back=100000003, summarize=100000004</step>
+    <step order="5">Create sprk_searchGuidance MemoAttributeMetadata (multiline text, max length 4000) on sprk_scope</step>
+    <step order="6">Create sprk_triggerPhrases MemoAttributeMetadata (multiline text, max length 4000) on sprk_analysisplaybook</step>
+    <step order="7">Create sprk_recordType StringAttributeMetadata (single line text, max length 100) on sprk_analysisplaybook</step>
+    <step order="8">Create sprk_entityType StringAttributeMetadata (single line text, max length 100) on sprk_analysisplaybook</step>
+    <step order="9">Create sprk_tags MemoAttributeMetadata (multiline text, max length 2000) on sprk_analysisplaybook</step>
+    <step order="10">Add all new fields to the existing Dataverse solution (PublishXml or add to solution via Web API)</step>
+    <step order="11">Verify each field is accessible via Web API: GET /api/data/v9.2/sprk_scopes?$select=sprk_capabilities,sprk_searchguidance and GET /api/data/v9.2/sprk_analysisplaybooks?$select=sprk_triggerphrases,sprk_recordtype,sprk_entitytype,sprk_tags</step>
+    <step order="12">Update TASK-INDEX.md: change task R2-001 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>pac</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="config">sprk_scope entity — new fields: sprk_capabilities (multi-select), sprk_searchGuidance (memo)</artifact>
+    <artifact type="config">sprk_analysisplaybook entity — new fields: sprk_triggerPhrases (memo), sprk_recordType (text), sprk_entityType (text), sprk_tags (memo)</artifact>
+    <artifact type="docs">notes/001-dataverse-schema-field-names.md — documents actual logical names discovered during creation (for downstream tasks)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_scope')/Attributes(LogicalName='sprk_capabilities') returns HTTP 200 with AttributeType = MultiSelectPicklist</criterion>
+    <criterion testable="true">GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_scope')/Attributes(LogicalName='sprk_searchguidance') returns HTTP 200 with AttributeType = Memo</criterion>
+    <criterion testable="true">GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_analysisplaybook')/Attributes(LogicalName='sprk_triggerphrases') returns HTTP 200 with AttributeType = Memo</criterion>
+    <criterion testable="true">GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_analysisplaybook')/Attributes(LogicalName='sprk_recordtype') returns HTTP 200 with AttributeType = String</criterion>
+    <criterion testable="true">GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_analysisplaybook')/Attributes(LogicalName='sprk_entitytype') returns HTTP 200 with AttributeType = String</criterion>
+    <criterion testable="true">GET /api/data/v9.2/EntityDefinitions(LogicalName='sprk_analysisplaybook')/Attributes(LogicalName='sprk_tags') returns HTTP 200 with AttributeType = Memo</criterion>
+    <criterion testable="true">sprk_scope.sprk_capabilities option set has at minimum 5 options (search, analyze, web_search, write_back, summarize) each with distinct integer values in the 100000000+ range</criterion>
+    <criterion testable="true">All six fields are included in the Dataverse solution (verify via solution component query)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Dataverse logical name for a field named "sprk_capabilities" will resolve to lowercase "sprk_capabilities" in the API. When reading multi-select option set values via the BFF (ADR-013 Dataverse repository pattern), the field returns as a collection of OptionSetValue integers — follow the existing pattern in ChatDataverseRepository.cs for how sprk_playbookcapabilities is read today.
+
+    If sprk_searchGuidance already exists under a different name (check scope-model-index.json), use the existing field rather than creating a duplicate. Document actual field names found in notes/001-dataverse-schema-field-names.md so tasks R2-005, R2-019, R2-020, and R2-021 can reference them correctly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>No dependencies — can start immediately. Read DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md FIRST to confirm the correct approach for this environment.</protocol>
+  </execution>
+</task>

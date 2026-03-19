@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-021" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Scope Capabilities Service — Scope-Contributed Commands Independent of Active Playbook</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, dataverse</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — integrates scope capabilities into the command catalog to enable scope-level tool contributions independent of playbook; FR-11 requirement; depends on R2-019 and R2-020</rigor-reason>
+    <dependencies>[001, 019, 020]</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement scope capability command contribution so that scopes can add commands to the SprkChat
+    slash menu independently of which playbook is active.
+
+    **Problem being solved**: Task R2-019 already builds a command catalog from playbooks and scopes,
+    but the scope command contribution may have been implemented as a simple capability-to-command
+    mapping using hardcoded values. This task ensures the full scope capability pipeline works
+    end-to-end with real Dataverse data and integrates cleanly with `DynamicCommandResolver`.
+
+    **Implementation tasks**:
+    1. Verify that `DynamicCommandResolver` correctly reads `sprk_scope.sprk_capabilities` (multi-select
+       option set created in R2-001) from the Dataverse query. If R2-019 used placeholder data or
+       the field wasn't accessible yet, implement the real query now.
+
+    2. Extend the capability-to-command mapping to support custom labels from scope metadata:
+       - Read `sprk_scope.sprk_name` alongside capabilities — use it as the command category label
+       - Example: "Legal Research" scope contributes commands labeled as "[Legal Research] Search"
+
+    3. Integrate with `AnalysisChatContextResolver` (R2-020): the resolved `ChatAnalysisContext.Commands`
+       should contain scope-contributed commands merged with playbook commands from `DynamicCommandResolver`.
+       Verify the merge occurs correctly and there are no duplicate commands (deduplicate by `Id`).
+
+    4. Add scope-contributed commands to `PlaybookChatContextProvider` system prompt context:
+       - The AI model should know what scope capabilities are active so it can suggest relevant slash
+         commands in its responses
+       - Add a brief `### Active Capabilities` section to the system prompt listing scope commands
+
+    5. Verify FR-11 end-to-end: a Legal Research scope with `sprk_capabilities = [web_search, analyze]`
+       contributes `/web-search` and `/analyze` to the command catalog regardless of the active playbook.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    Scope capabilities correctly contribute commands to the SprkChat command catalog independent of
+    the active playbook. Legal Research scope adds `/search-legal-database` (or `/web-search`) without
+    a playbook change (FR-11). The AI model is aware of active scope capabilities via the system prompt.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-11 (scope capabilities independent of playbook), success criterion 10">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — scope system, MUST rules, ChatHostContext">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="DynamicCommandResolver — command catalog builder to verify and enhance">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs</file>
+    <file purpose="AnalysisChatContextResolver — integration point for merged command catalog">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    <file purpose="PlaybookChatContextProvider — system prompt builder to add capability context">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+    <file purpose="Analysis scopes pattern — three-tier scope system and capability definitions">../.claude/patterns/ai/analysis-scopes.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">Scope capability data MUST be cached via Redis in DynamicCommandResolver — no per-message Dataverse queries for scope data</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext for scope association — scope queries MUST be filtered to the current session's active scopes</constraint>
+    <constraint source="ADR-015">MUST NOT add scope configuration data (scope names, descriptions) to system prompt in a way that could expose sensitive tenant configuration — use only capability labels, not full scope configuration</constraint>
+    <constraint source="spec FR-11">`sprk_scope.sprk_capabilities` MUST be a multi-select field (created in R2-001) — the capability values MUST come from Dataverse, not from a static configuration file</constraint>
+    <constraint source="spec MUST">Scope commands MUST appear in the catalog regardless of active playbook — the independence from playbook is the core requirement of FR-11</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>docs/ai-knowledge/catalogs/scope-model-index.json</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Scope command category label: `{scopeName} — {capabilityLabel}` displayed in the slash menu category; e.g., "Legal Research — Search the Web" for web_search capability from Legal Research scope</pattern>
+      <pattern>Deduplication by ID: `commands.GroupBy(c => c.Id).Select(g => g.First()).ToList()` — last wins for duplicates, but prefer lower-priority: scope over playbook over system for same ID conflicts</pattern>
+      <pattern>System prompt capability section: `"### Active Capabilities\n" + string.Join("\n", commands.Select(c => $"- {c.Trigger}: {c.Description}"))` — compact list kept under 200 tokens</pattern>
+      <pattern>Scope association query: check scope-model-index.json for how scopes are associated with analysis types — the association may be via `sprk_analysisplaybook.sprk_scopeid` or a separate relationship</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R1 had no concept of scope-contributed commands. The command list was static. R2's
+      three-tier command system (system/playbook/scope) requires scopes to contribute commands that
+      persist regardless of playbook changes. The Legal Research scope example from the spec:
+      if a lawyer switches from the "Case Analysis" playbook to the "Settlement Summary" playbook,
+      the `/search-legal-database` command from the Legal Research scope should remain available.
+
+      This task verifies and completes the scope capability pipeline that R2-019 started. If R2-019
+      implemented scope commands correctly with real Dataverse data, this task primarily adds:
+      1. Scope name as category label for commands
+      2. System prompt awareness of active capabilities
+      3. End-to-end verification that FR-11 is satisfied
+
+      The `scope-model-index.json` knowledge file documents the existing scope catalog. Cross-reference
+      it to understand scope structure before writing Dataverse queries.
+    </background>
+    <dependencies>
+      Depends on R2-001 (sprk_capabilities field), R2-019 (DynamicCommandResolver), and R2-020
+      (AnalysisChatContextResolver). Sequential — cannot run in parallel. No downstream tasks in Phase 2
+      depend on this task (it is an enhancement to existing Phase 2 services). Phase 4 integration
+      tasks will verify FR-11 end-to-end. Own files: `DynamicCommandResolver.cs` (scope enhancement),
+      `PlaybookChatContextProvider.cs` (capability section addition).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read the completed `DynamicCommandResolver.cs` from R2-019 to verify if scope capability querying is correctly implemented with live Dataverse data</step>
+    <step order="1">Read `docs/ai-knowledge/catalogs/scope-model-index.json` and `.claude/patterns/ai/analysis-scopes.md` to understand existing scope structure</step>
+    <step order="2">If R2-019's scope capability query uses placeholder data or dummy values: replace with real Dataverse query for `sprk_scope` records with `$select=sprk_scopeid,sprk_name,sprk_capabilities`</step>
+    <step order="3">Update the capability-to-command mapping in `DynamicCommandResolver` to include the scope name in the command's `Category` label: `"{scopeName} — {defaultLabel}"`</step>
+    <step order="4">Verify that `AnalysisChatContextResolver.ChatAnalysisContext.Commands` includes scope-contributed commands alongside playbook commands (no silent omission)</step>
+    <step order="5">Add `### Active Capabilities` section to `PlaybookChatContextProvider` system prompt — compact list of active scope commands within ~200 tokens</step>
+    <step order="6">Write a verification scenario: create/configure a test scope with `sprk_capabilities = [100000002]` (web_search) and verify `/web-search` appears in the catalog for a session associated with that scope</step>
+    <step order="7">Verify deduplication: if both a playbook and a scope contribute a command with the same ID, only one entry appears (scope wins over playbook for same ID)</step>
+    <step order="8">Run `dotnet build` and verify no errors</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-021 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs — enhanced with scope name category labels and verified real Dataverse query for sprk_capabilities</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs — updated with Active Capabilities section in system prompt</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A scope with `sprk_capabilities = [100000002]` (web_search) contributes `/web-search` command to the catalog regardless of active playbook</criterion>
+    <criterion testable="true">The `/web-search` command in the catalog has `Category` containing the scope name (e.g., "Legal Research — Search the Web")</criterion>
+    <criterion testable="true">Changing the active playbook for a session does NOT remove scope-contributed commands from the catalog</criterion>
+    <criterion testable="true">The system prompt for a SprkChat session includes an `### Active Capabilities` section listing active scope commands</criterion>
+    <criterion testable="true">If a playbook and scope both contribute a command with the same ID, only one entry appears in the catalog (deduplication working)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The scope association with analysis sessions needs careful investigation. Scopes are associated
+    with analysis types at the Dataverse schema level. Check `scope-model-index.json` for the
+    relationship between analyses and their scopes. If the association is via a lookup field on
+    `sprk_analysisoutput`, include `$expand=sprk_scopeid` in the analysis query in R2-020.
+
+    This task is primarily a verification and integration task for the scope capability pipeline
+    started in R2-019. If R2-019 implemented everything correctly and R2-001's schema changes
+    deployed successfully, this task may be lighter than estimated. The `large`/`medium` estimate
+    is for the case where R2-019's scope implementation needs fixing or the Dataverse query
+    for multi-select option set values needs adjustment.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Sequential — depends on R2-001, R2-019, and R2-020. Cannot run in parallel with any dependency. Last sequential task before R2-022. Own files: DynamicCommandResolver.cs (enhancement), PlaybookChatContextProvider.cs (system prompt addition).</protocol>
+  </execution>
+</task>

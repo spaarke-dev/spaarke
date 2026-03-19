@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-010" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>SSE Streaming Enhancement — Token-by-Token Chat Response Streaming with Typing Indicators</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, api, ai, streaming</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — modifies ChatEndpoints.cs and SprkChatAgent streaming pipeline; introduces new SSE event types consumed by the frontend; correctness is critical for all Phase 3 and Phase 4 work</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Enhance the existing SSE streaming implementation in `ChatEndpoints.cs` and `SprkChatAgent.cs` to deliver
+    production-quality token-by-token streaming with the following improvements:
+
+    1. **Content-Type enforcement**: Ensure the chat streaming endpoint sets `Content-Type: text/event-stream`,
+       `Cache-Control: no-cache`, `Connection: keep-alive`, and `X-Accel-Buffering: no` response headers.
+
+    2. **New event types**: Add `typing_start` and `typing_end` SSE events emitted around the AI generation
+       cycle (typing_start when the request is received and the model begins generating, typing_end when the
+       final `done` event is emitted or an `error` occurs).
+
+    3. **IAsyncEnumerable streaming**: Verify `SprkChatAgent.SendMessageAsync` yields tokens as
+       `IAsyncEnumerable&lt;ChatStreamEvent&gt;` and that `ChatEndpoints.cs` iterates this via `await foreach`
+       without buffering, writing each `data: {json}\n\n` frame immediately via `HttpResponse.WriteAsync` +
+       `HttpResponse.Body.FlushAsync`.
+
+    4. **Cancellation**: Pass `HttpContext.RequestAborted` as the `CancellationToken` throughout the streaming
+       pipeline so that if the client disconnects mid-stream, the AI model call is cancelled and resources
+       are released cleanly.
+
+    5. **Error event**: On any exception during streaming, emit a single `event: error\ndata: {"message":"..."}\n\n`
+       frame and close the response cleanly. Never surface stack traces in the SSE error data.
+
+    6. **Existing event types**: Preserve all existing SSE event types: `token`, `done`, `error`,
+       `suggestions`, `citations`, `plan_preview`, `plan_step_start`, `plan_step_complete`.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    The chat streaming endpoint correctly sets `text/event-stream` headers, emits `typing_start` at request
+    receipt and `typing_end` at stream completion, streams each token individually without buffering, cancels
+    cleanly on client disconnect, and emits well-formed `error` events on exceptions. All existing SSE event
+    types continue to work unchanged.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-04, FR-09, NFR-01, NFR-08 requirements for SSE streaming">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules for SSE, DI budget, architecture decisions">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Existing chat endpoint — current SSE implementation to enhance">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="Core chat agent — IAsyncEnumerable streaming source">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+    <file purpose="SSE streaming canonical pattern — headers, frame format, error handling">../.claude/patterns/ai/streaming-endpoints.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API endpoint pattern — no controllers, no Azure Functions</constraint>
+    <constraint source="ADR-013">MUST extend the existing BFF; MUST NOT introduce a separate streaming service</constraint>
+    <constraint source="ADR-014">MUST NOT cache streaming tokens — write each token frame directly to the response stream; cache only final outcomes</constraint>
+    <constraint source="ADR-016">MUST apply rate limiting to the streaming endpoint; MUST NOT allow unbounded concurrent model calls</constraint>
+    <constraint source="spec NFR-01">SSE first token MUST be visible within 500ms of the user sending a message — no pre-buffering allowed</constraint>
+    <constraint source="spec NFR-08">MUST NOT cache streaming tokens per ADR-014 — streaming is write-through only</constraint>
+    <constraint source="spec MUST">MUST stream via `text/event-stream` content type — never buffer the full response before sending</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+    <patterns>
+      <pattern>SSE frame format: `data: {json}\n\n` — each frame must end with double newline; use `event: {type}\ndata: {json}\n\n` for named event types</pattern>
+      <pattern>Flush after each frame: call `HttpResponse.Body.FlushAsync(cancellationToken)` immediately after `WriteAsync` to prevent response buffering by ASP.NET or reverse proxy</pattern>
+      <pattern>Disable response buffering: set `X-Accel-Buffering: no` header for nginx/YARP reverse proxy pass-through</pattern>
+      <pattern>Clean cancellation: wrap `await foreach` in try/catch for OperationCanceledException; close response cleanly without emitting error event on client disconnect</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R1 established the BFF chat endpoint and `SprkChatAgent` pipeline. The existing implementation
+      may already have partial SSE streaming, but R2 requires hardening for production: proper headers to
+      prevent proxy buffering, typing indicators for copilot-quality UX (NFR-01: first token &lt; 500ms),
+      and clean cancellation when users navigate away. The `typing_start`/`typing_end` events are new — the
+      frontend (Task R2-031) will use them to show/hide the typing animation in the chat UI. All Phase 3
+      and Phase 4 integration work depends on this task establishing the correct SSE contract.
+    </background>
+    <dependencies>
+      Depends on Task R2-006 (Phase 1 deployment complete). Safe to run in parallel with Tasks
+      R2-011 through R2-019 (Groups A and B) as this task owns `ChatEndpoints.cs` streaming additions
+      and `SprkChatAgent.cs` event emission — no file conflicts with document context services.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `ChatEndpoints.cs` and `SprkChatAgent.cs` to understand the current SSE implementation, existing event types, and where streaming logic lives</step>
+    <step order="1">Read `.claude/patterns/ai/streaming-endpoints.md` to confirm the canonical SSE header and frame pattern for this codebase</step>
+    <step order="2">In `ChatEndpoints.cs`, add the four required response headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, `X-Accel-Buffering: no`</step>
+    <step order="3">Define or extend `ChatStreamEvent` model to include `typing_start` and `typing_end` event type discriminators alongside existing types (token, done, error, suggestions, citations, plan_preview, plan_step_start, plan_step_complete)</step>
+    <step order="4">In the streaming endpoint handler, emit `typing_start` event immediately after request validation and before calling `SprkChatAgent.SendMessageAsync`</step>
+    <step order="5">Verify the `await foreach` loop over `IAsyncEnumerable&lt;ChatStreamEvent&gt;` calls `HttpResponse.WriteAsync` + `HttpResponse.Body.FlushAsync` for every token without buffering</step>
+    <step order="6">Pass `HttpContext.RequestAborted` as `CancellationToken` to `SprkChatAgent.SendMessageAsync` and propagate it through the full agent call chain</step>
+    <step order="7">Add try/catch around the streaming loop: on `OperationCanceledException` close cleanly (no error event); on other exceptions emit `event: error\ndata: {"message":"An error occurred during generation"}\n\n`</step>
+    <step order="8">Emit `typing_end` event immediately before the final `done` event in the normal completion path, and also in the exception catch path before closing</step>
+    <step order="9">Verify rate limiting is applied to the streaming endpoint (check existing rate limit filter registration; add if missing per ADR-016)</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/` and confirm no build errors</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-010 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs — enhanced with SSE headers, typing_start/typing_end events, cancellation, error event emission</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs — updated to emit typing_start/typing_end events and propagate CancellationToken</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatStreamEvent.cs (or equivalent) — updated with new event type discriminators</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">HTTP response from the chat streaming endpoint includes `Content-Type: text/event-stream` header</criterion>
+    <criterion testable="true">HTTP response includes `Cache-Control: no-cache`, `Connection: keep-alive`, and `X-Accel-Buffering: no` headers</criterion>
+    <criterion testable="true">First SSE frame received by client within 500ms of sending a message (NFR-01) — measure via curl timing or integration test</criterion>
+    <criterion testable="true">`typing_start` event emitted before any `token` events in the stream</criterion>
+    <criterion testable="true">`typing_end` event emitted after the final `token` event and before the `done` event</criterion>
+    <criterion testable="true">When client disconnects mid-stream, the AI model call is cancelled and no further frames are written (verify via CancellationToken propagation)</criterion>
+    <criterion testable="true">On AI service exception, the stream emits exactly one `event: error\ndata: {...}\n\n` frame with no stack trace in the data payload</criterion>
+    <criterion testable="true">All existing SSE event types (token, done, suggestions, citations, plan_preview, plan_step_start, plan_step_complete) continue to work as before</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors or warnings introduced by this task</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `X-Accel-Buffering: no` header is required for nginx/YARP deployments to prevent the reverse proxy
+    from buffering the SSE stream. Without it, the client sees the entire response at once rather than
+    token-by-token. The Azure App Service front-end uses YARP — this header is essential.
+
+    Do NOT introduce a new DI registration for any helper class added in this task. If a `SseWriter` or
+    similar helper is needed, use a static class or a local function in the endpoint handler to stay within
+    the ADR-010 ≤15 registration budget (currently at 16, already over — factory pattern only for new services).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group A — safe to start after Phase 1 (Task R2-006) completes. Run in parallel with R2-011 through R2-014. This task owns ChatEndpoints.cs streaming section and SprkChatAgent event emission — no conflicts with document context service files.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-013" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Document Upload Endpoint — Multipart Upload with Document Intelligence Processing and Session-Scoped Storage</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, api, ai, document-intelligence</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates a new Minimal API endpoint with file upload, Document Intelligence processing, Redis session storage, and DocumentContextService integration; multiple ADR constraints apply; FR-13 requirement</rigor-reason>
+    <dependencies>[011]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a new BFF API endpoint that accepts user-uploaded documents, processes them via Document
+    Intelligence for text extraction, stores extracted content in session-scoped Redis, and injects
+    the content into the SprkChat conversation context.
+
+    **Endpoint**: `POST /api/ai/chat/sessions/{sessionId}/documents`
+    - Content-Type: `multipart/form-data`
+    - Form field: `file` (binary)
+    - Form field: `filename` (string, optional — fallback to original name)
+
+    **File type validation**: Accept only PDF, DOCX, TXT, MD. Reject others with
+    `422 Unprocessable Entity` using `ProblemDetails` format.
+
+    **File size limit**: 50MB maximum. Reject larger files with `413 Request Entity Too Large`.
+
+    **Processing pipeline**:
+    1. Read multipart form data from the request
+    2. Validate file type and size
+    3. Route to Document Intelligence (`DocumentIntelligenceExtractor` or equivalent) for text extraction
+       — this is the same service used for SPE documents, reuse it
+    4. Store extracted text in Redis with key pattern: `doc-upload:{sessionId}:{documentId}` and
+       TTL matching session lifetime (default 4 hours). This is session-scoped storage per NFR-06.
+    5. Generate a `documentId` (GUID) for the uploaded file — this ID is used in subsequent calls
+    6. Call `DocumentContextService.InjectDocumentContextAsync(sessionId, documentId, [])` to
+       pre-warm the chunk index for the document
+    7. Return `202 Accepted` with processing status body:
+       ```json
+       {
+         "documentId": "...",
+         "filename": "...",
+         "status": "processing|ready",
+         "pageCount": N,
+         "tokenEstimate": N,
+         "wasTruncated": false
+       }
+       ```
+
+    **Authorization**: Apply `ChatSessionAuthorizationFilter` (or equivalent) to verify the caller
+    owns the sessionId before processing the upload.
+
+    **Rate limiting**: Apply upload-specific rate limit (lower than chat rate limit — max 5 uploads
+    per minute per user) per ADR-016.
+
+    **Session cleanup**: When the session ends (expiry or explicit close), the Redis keys for uploaded
+    documents MUST auto-expire with the session TTL to satisfy NFR-06.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    A working `POST /api/ai/chat/sessions/{sessionId}/documents` endpoint that accepts PDF/DOCX/TXT/MD
+    files up to 50MB, extracts text via Document Intelligence, stores extracted content in session-scoped
+    Redis, and returns document metadata. Dragging a PDF into chat makes its content available for AI
+    reasoning within ~10 seconds (FR-13, NFR-02).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-13, NFR-02 (15s processing), NFR-06 (session cleanup), ADR constraints">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, endpoint patterns, DI budget">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Existing chat endpoints — patterns to follow for new endpoint registration">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="Text extraction services — reuse existing Document Intelligence integration">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtraction/</file>
+    <file purpose="Minimal API endpoint definition pattern">../.claude/patterns/api/endpoint-definition.md</file>
+    <file purpose="Authorization endpoint filter pattern">../.claude/patterns/api/endpoint-filters.md</file>
+    <file purpose="Redis distributed cache pattern">../.claude/patterns/caching/distributed-cache.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern — `app.MapPost(...)` — no MVC controllers</constraint>
+    <constraint source="ADR-008">MUST apply authorization endpoint filter — MUST NOT use global middleware for session ownership verification</constraint>
+    <constraint source="ADR-009">MUST use `IDistributedCache` (Redis) for session-scoped document storage — MUST NOT store extracted text in memory or on disk</constraint>
+    <constraint source="ADR-015">MUST NOT log extracted document text content — log only document ID, file name (without content), page count, token estimate</constraint>
+    <constraint source="ADR-016">MUST apply rate limiting — upload endpoint needs stricter limit (5 uploads/minute/user) than the chat endpoint</constraint>
+    <constraint source="spec NFR-06">Session-scoped upload storage MUST auto-delete when session expires — Redis TTL must be set to session lifetime</constraint>
+    <constraint source="spec NFR-02">Text extraction MUST complete within 15 seconds for documents under 50 pages</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtraction/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DocumentContextService.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+    </files>
+    <patterns>
+      <pattern>Multipart form data in Minimal API: use `IFormFile file = context.Request.Form.Files["file"]` via `IFormFileCollection` bound via parameter binding — check existing multipart patterns in the codebase</pattern>
+      <pattern>Redis TTL for session-scoped data: `_cache.SetAsync(key, data, new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(4) })`</pattern>
+      <pattern>ProblemDetails for validation errors: `TypedResults.Problem(detail: "...", statusCode: 422, title: "Unprocessable Entity")` from Microsoft.AspNetCore.Http</pattern>
+      <pattern>Redis key pattern: `doc-upload:{sessionId}:{documentId}` — sessionId scoping ensures auto-cleanup when session TTL expires</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Users need to bring their own documents into SprkChat conversations — not just documents already
+      in the matter's SPE container. This endpoint accepts arbitrary file uploads, extracts text via
+      Document Intelligence (the same infrastructure already used for SPE documents), stores the extracted
+      content in session-scoped Redis, and hands off to DocumentContextService for context injection.
+
+      Session-scoped storage (NFR-06) is a security and privacy requirement: uploaded documents should
+      not persist beyond the chat session. Redis TTL-based expiry is the correct mechanism — no cleanup
+      job or event needed.
+
+      The endpoint returns `202 Accepted` with a processing status because Document Intelligence can
+      take several seconds for large documents. The `status` field may be `"processing"` initially,
+      and the client can poll or receive the final status via SSE. For simplicity in R2, processing
+      is synchronous (await the extraction) and always returns `"ready"` in the response. The async
+      polling pattern is deferred to a future iteration.
+    </background>
+    <dependencies>
+      Depends on Task R2-011 (DocumentContextService). Safe to run in parallel with R2-012 and all
+      Group B tasks. Task R2-014 (SPE persistence) depends on this task. Own files: new upload endpoint
+      handler in `Api/Ai/ChatEndpoints.cs` (upload section) or a new `ChatDocumentEndpoints.cs` file.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `ChatEndpoints.cs` and the existing `TextExtraction/` service implementations to understand the current Document Intelligence integration patterns</step>
+    <step order="1">Read `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md`, and `.claude/patterns/caching/distributed-cache.md`</step>
+    <step order="2">Decide whether to add the upload endpoint to `ChatEndpoints.cs` or create a new `ChatDocumentEndpoints.cs` — prefer a new file for clean separation if the existing file is large</step>
+    <step order="3">Implement file type and size validation — return ProblemDetails 422 for invalid types, 413 for oversized files</step>
+    <step order="4">Implement Document Intelligence text extraction via the existing extractor service (reuse, do not re-implement)</step>
+    <step order="5">Generate a GUID `documentId` for the uploaded file</step>
+    <step order="6">Store extracted text in Redis with key `doc-upload:{sessionId}:{documentId}` and 4-hour TTL</step>
+    <step order="7">Call `DocumentContextService.InjectDocumentContextAsync` to pre-warm the chunk index</step>
+    <step order="8">Return `202 Accepted` with the document metadata response body (documentId, filename, status, pageCount, tokenEstimate, wasTruncated)</step>
+    <step order="9">Apply authorization endpoint filter for session ownership</step>
+    <step order="10">Apply upload-specific rate limit (5 uploads/minute/user)</step>
+    <step order="11">Register the new endpoint in the application endpoint registration (likely in `Program.cs` or route group registration)</step>
+    <step order="12">Run `dotnet build` and verify no errors</step>
+    <step order="13">Update TASK-INDEX.md: change task R2-013 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs (or ChatEndpoints.cs upload section) — new upload endpoint handler</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DocumentUploadResponse.cs — response model with documentId, filename, status, pageCount, tokenEstimate, wasTruncated</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`POST /api/ai/chat/sessions/{sessionId}/documents` with a valid PDF returns `202 Accepted` with documentId in the response body</criterion>
+    <criterion testable="true">Uploading a .exe or .zip file returns `422 Unprocessable Entity` with a ProblemDetails body</criterion>
+    <criterion testable="true">Uploading a file &gt; 50MB returns `413 Request Entity Too Large`</criterion>
+    <criterion testable="true">After upload, the Redis key `doc-upload:{sessionId}:{documentId}` exists with a TTL between 3.5 and 4 hours</criterion>
+    <criterion testable="true">Calling the endpoint without a valid session authorization returns `401 Unauthorized` from the endpoint filter</criterion>
+    <criterion testable="true">A 50-page PDF is processed (text extracted) within 15 seconds (NFR-02)</criterion>
+    <criterion testable="true">No extracted text content appears in application logs (ADR-015)</criterion>
+    <criterion testable="true">Sending 6 upload requests within one minute from the same user triggers rate limiting with `429 Too Many Requests` on the 6th request</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    For the multipart form data binding in Minimal API, check whether the project already has a
+    multipart binding helper or if `IFormFile` parameter binding is enabled via
+    `builder.Services.AddAntiforgery()` or similar. If not enabled globally, add it scoped to this
+    endpoint only.
+
+    The 15-second NFR-02 target for Document Intelligence applies to documents under 50 pages. Larger
+    documents (the upload limit is 50MB which could be hundreds of pages) may exceed this. Add a
+    configurable timeout with a graceful `504 Gateway Timeout` `ProblemDetails` response if Document
+    Intelligence does not respond within the configured limit (default 30 seconds for this endpoint).
+
+    Document this endpoint's behavior in `notes/013-document-upload-endpoint.md` for the frontend
+    tasks (R2-040, R2-041) that will implement the drag-and-drop upload UI.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group A — depends on R2-011. Safe to run in parallel with R2-012 and Group B tasks. Task R2-014 depends on this task. Own files: ChatDocumentEndpoints.cs (new) and DocumentUploadResponse.cs (new).</protocol>
+  </execution>
+</task>

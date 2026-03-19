@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-054" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Document Context Injection Integration — End-to-End Verification</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <tags>integration, ai</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration task verifying document context injection (R2-011, R2-012) works end-to-end. Tags include ai. Tests conversation-aware chunking, token budget enforcement, and multi-document analysis with 5+ documents. Post-compaction recovery context applies.</rigor-reason>
+    <dependencies>[011, 012]</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify document context injection end-to-end: document content is injected into the system prompt, conversation-aware chunking re-selects relevant chunks after each user message, multi-document analysis works with 5+ documents, and the 128K total token budget is never exceeded. Validate NFR-05 (token budget enforcement) and the behavior when the budget is exceeded.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    SprkChat sessions on analysis records with linked documents include relevant document chunks in the AI system prompt. Asking about different sections of a long document in sequence causes the BFF to re-select chunks relevant to the latest question. Multi-document analysis with 5 documents works correctly. Exceeding the 128K token limit results in graceful degradation (user notification) rather than an error crash.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-02, FR-03 document context, NFR-05 token budget">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — document context architecture, token budget partitioning">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="BFF document context service — R2-011 implementation">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file purpose="BFF multi-document aggregation — R2-012 implementation">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file purpose="AI architecture — context window partitioning">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="ADR-015 — data minimization, no document content logging">../.claude/adr/ADR-015-ai-data-governance.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-05">MUST NOT exceed 128K total context window — verify budget partitioning: 30K for documents, remaining for conversation history and system prompt</constraint>
+    <constraint source="spec FR-03">Conversation-aware chunking MUST re-select chunks after each user message — verify by asking about different document sections in sequence</constraint>
+    <constraint source="ADR-015">MUST NOT log extracted document text in BFF logs — verify no document content appears in Application Insights or console logs</constraint>
+    <constraint source="spec">Token budget exceeded MUST result in user notification in chat (graceful degradation) — not a 500 error or crash</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern>Test for conversation-aware chunking: use a long document (100+ pages), first ask about section 1, then ask about section 90 — verify AI response in the second question references section 90 content</pattern>
+      <pattern>Test for multi-document: select 5 documents in SprkChatContextSelector, ask a cross-reference question ("compare section 3 of document 1 with section 5 of document 3") — verify AI references both</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks R2-011 (document context injection) and R2-012 (multi-document aggregation) were implemented in Phase 2 BFF. This integration task validates them with real documents in the Dataverse dev environment. The key differentiator from R1 is conversation-aware chunking — R1 injected static chunks at session init, R2 re-evaluates chunks per turn.
+    </background>
+    <dependencies>
+      Depends on R2-011 (document context injection) and R2-012 (multi-document aggregation). Both Phase 2 BFF tasks must be complete.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Identify a test analysis record in the dev environment with a linked document that has 50+ pages (for chunking verification)</step>
+    <step order="1">Open SprkChat on the analysis record — ask about content from the first pages; verify AI response references document content (not generic knowledge)</step>
+    <step order="2">In the same session, ask about content from the last pages — verify AI response references the later pages content (proving conversation-aware re-selection)</step>
+    <step order="3">Check BFF logs: verify document text content is NOT logged (only metadata like documentId, chunk count, token count are acceptable)</step>
+    <step order="4">Test multi-document: select 5 documents using the multi-document selector (R2-043) — ask a cross-reference question; verify AI references content from multiple documents</step>
+    <step order="5">Verify token budget enforcement: create a scenario with very large documents that would exceed 30K doc context tokens — verify chunks are selected within budget (some content excluded)</step>
+    <step order="6">Test 128K total budget: construct a session with enough history + document context to approach the limit — verify graceful degradation message appears in chat rather than error</step>
+    <step order="7">Fix any issues found: chunking not re-selecting, multi-doc not aggregating, budget not enforced</step>
+    <step order="8">Update TASK-INDEX.md: change task R2-054 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Any fixes to document context injection or multi-document aggregation services</artifact>
+    <artifact type="docs">notes/054-document-context-findings.md — chunking behavior observed, token budget measurements, issues found</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AI can answer questions about specific document sections that were not in the initial context (conversation-aware re-selection working)</criterion>
+    <criterion testable="true">Multi-document analysis with 5 documents allows cross-reference questions</criterion>
+    <criterion testable="true">Document context never causes total context window to exceed 128K tokens</criterion>
+    <criterion testable="true">Exceeding token budget shows a user notification in chat, not a crash or 500 error</criterion>
+    <criterion testable="true">BFF logs do not contain extracted document text content</criterion>
+  </acceptance-criteria>
+</task>

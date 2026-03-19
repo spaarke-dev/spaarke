@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-044" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Open in Word Export Action Button</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SprkChat.tsx to add Word export action. Frontend and fluent-ui tags, .tsx modification. Requires BFF endpoint call, loading state, Window.open for Word Online URL. Error handling and ChatHostContext dependency.</rigor-reason>
+    <dependencies>[006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Add an "Open in Word" export action button to the SprkChat toolbar or as a message action on AI responses. The button triggers document export: calls the BFF Word export endpoint, shows a loading state while generating and uploading the .docx to SPE, then opens the returned Word Online URL in a new browser tab. Handle export failures with an error notification.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    An "Open in Word" button (WordDocument icon + label, Fluent v9 Button) appears in the chat toolbar. Clicking it calls POST /api/ai/chat/export/word with the current session's chat content. A loading spinner appears on the button during generation. On success, Word Online URL opens in a new tab. On failure, a Fluent v9 Toast error notification appears. Button is disabled when no matter context (containerId) is available for SPE upload.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-15 Open in Word, Word Online redirect">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — DocxExportService, SpeFileStore, Word Online pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Main component — toolbar button integration, ChatHostContext">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    <file purpose="ADR-013 — SpeFileStore for file operations, ChatHostContext flow">../.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="ADR-021 — Fluent v9 Button, Toast, loading states">../.claude/adr/ADR-021-fluent-design-system.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">MUST call BFF export endpoint — no direct SharePoint/OneDrive API calls from the frontend</constraint>
+    <constraint source="ADR-013">MUST include ChatHostContext (containerId, sessionId) in the export request — BFF needs context to know where to upload the .docx</constraint>
+    <constraint source="spec FR-15">Word Online URL MUST open in a new browser tab — do not navigate the current page</constraint>
+    <constraint source="ADR-021">Loading state MUST use Fluent v9 Button's built-in loading/disabled pattern with a Spinner icon — not a separate loading overlay</constraint>
+    <constraint source="spec">Export button MUST be disabled (not just hidden) when containerId is absent — user should see why (tooltip: "Open a matter to export to Word")</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern>BFF export endpoint (R2-022): POST /api/ai/chat/export/word — body: { sessionId, containerId, messages: [] } — response: { wordOnlineUrl: string }</pattern>
+      <pattern>Word Online URL pattern: opens at https://spaarkedev1.sharepoint.com/sites/.../..docx?web=1 — use window.open(url, "_blank", "noopener,noreferrer")</pattern>
+      <pattern>Fluent v9 Button loading state: set icon={Spinner} and disabled={isLoading} on the Button — shows spinner in place of the normal icon during loading</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The BFF has an existing `DocxExportService` (OpenXML SDK) that generates .docx from analysis content. Task R2-022 extends this to upload the generated .docx to SPE and return the Word Online URL. This task adds the frontend button that triggers the export and handles the async response.
+
+      The export includes the current chat session's conversation content formatted as a document. The BFF determines what content to include based on the sessionId. The Word Online URL is a SharePoint "view in Word" URL.
+    </background>
+    <dependencies>
+      Depends on R2-006 (Phase 1 deploy). Can run in parallel with R2-040, R2-041, R2-042, R2-043. Connects to BFF task R2-022 (Word export endpoint) during Phase 4 integration (task R2-057).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChat.tsx to identify the toolbar area and understand existing action button patterns in the chat UI</step>
+    <step order="1">Add isExporting state (boolean) and exportError state (string | null) to SprkChat.tsx</step>
+    <step order="2">Create handleExportToWord async function: POST to /api/ai/chat/export/word with { sessionId, containerId, messages }; await response; open wordOnlineUrl in new tab</step>
+    <step order="3">Add error handling in handleExportToWord: catch block sets exportError and shows Fluent v9 Toast via useToastController</step>
+    <step order="4">Add the "Open in Word" Button to the chat toolbar area: icon from @fluentui/react-icons (WordLogoFilled or DocumentArrowUp24Regular as fallback), label "Open in Word"</step>
+    <step order="5">Apply loading state: when isExporting is true, set the Button disabled and show Spinner icon in place of normal icon</step>
+    <step order="6">Add disabled state and tooltip when ChatHostContext.containerId is absent: Fluent v9 Tooltip wrapping the Button with content "Open a matter to export to Word"</step>
+    <step order="7">Add Toaster to SprkChat (if not already added from R2-039) and dispatch error toast on export failure</step>
+    <step order="8">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-044 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">SprkChat.tsx — "Open in Word" toolbar button with loading state, export handler, error toast integration</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An "Open in Word" button appears in the SprkChat toolbar</criterion>
+    <criterion testable="true">Clicking the button shows loading state (Spinner icon, button disabled)</criterion>
+    <criterion testable="true">On successful export, Word Online URL opens in a new browser tab</criterion>
+    <criterion testable="true">On export failure, a Fluent v9 Toast error notification appears</criterion>
+    <criterion testable="true">Button is disabled (not hidden) when no matter context — tooltip explains why</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

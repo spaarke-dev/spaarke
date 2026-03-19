@@ -60,6 +60,22 @@ public record SavePlaybookRequest
     /// N:N relationship with sprk_analysistool entity.
     /// </summary>
     public Guid[]? ToolIds { get; init; }
+
+    /// <summary>
+    /// Natural language phrases for semantic matching (R2).
+    /// Informational only — queryable matching uses Dataverse fields.
+    /// </summary>
+    public string[]? TriggerPhrases { get; init; }
+
+    /// <summary>
+    /// Record type filter (R2), e.g. "matter", "project".
+    /// </summary>
+    public string? RecordType { get; init; }
+
+    /// <summary>
+    /// Dataverse logical entity name filter (R2), e.g. "sprk_matter".
+    /// </summary>
+    public string? EntityType { get; init; }
 }
 
 /// <summary>
@@ -149,6 +165,22 @@ public record PlaybookResponse
     /// Associated tool IDs.
     /// </summary>
     public Guid[] ToolIds { get; init; } = [];
+
+    /// <summary>
+    /// Natural language phrases for semantic matching (R2).
+    /// Informational only — queryable matching uses Dataverse fields.
+    /// </summary>
+    public string[]? TriggerPhrases { get; init; }
+
+    /// <summary>
+    /// Record type filter (R2), e.g. "matter", "project".
+    /// </summary>
+    public string? RecordType { get; init; }
+
+    /// <summary>
+    /// Dataverse logical entity name filter (R2), e.g. "sprk_matter".
+    /// </summary>
+    public string? EntityType { get; init; }
 
     /// <summary>
     /// Record creation timestamp.

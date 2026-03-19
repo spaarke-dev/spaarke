@@ -172,11 +172,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var documentText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
         yield return AnalysisStreamChunk.Progress("text_extracted", "Preparing analysis...");
 
-        // Log extraction result for debugging
-        var textPreview = documentText.Length > 200 ? documentText[..200] + "..." : documentText;
+        // Log extraction result metadata only (ADR-015: MUST NOT log document content)
         _logger.LogInformation(
-            "Document text extracted: Length={TextLength}, Preview={Preview}",
-            documentText.Length, textPreview);
+            "Document text extracted: Length={TextLength}",
+            documentText.Length);
 
         // Check for extraction failure indicators
         if (documentText.Contains("No file content available") ||
@@ -184,7 +183,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             documentText.Contains("not supported") ||
             documentText.Contains("Failed to download"))
         {
-            _logger.LogWarning("Document extraction returned fallback message: {Message}", textPreview);
+            _logger.LogWarning("Document extraction returned fallback/error message for document (textLength={TextLength})", documentText.Length);
         }
 
         // 6. Process RAG knowledge sources (query Azure AI Search)

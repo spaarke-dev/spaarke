@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-066" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Security Audit — DOMPurify, Token Budget, Session Cleanup, Data Governance</title>
+    <status>completed</status>
+    <phase>5</phase>
+    <tags>testing, security</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security review task covering DOMPurify sanitization, token budget enforcement, ADR-015 data governance, and ADR-015 BroadcastChannel no-auth-tokens constraint. Tags include security. FULL rigor for security reviews — any gap could be a production security issue.</rigor-reason>
+    <dependencies>[058]</dependencies>
+  </metadata>
+
+  <prompt>
+    Conduct a security audit of all R2 changes. Verify: (1) DOMPurify sanitization is applied to all rendered markdown before `dangerouslySetInnerHTML`, (2) token budget enforcement prevents 128K context window overflow, (3) session-scoped upload cleanup occurs on session end (NFR-06), (4) no document content is logged (ADR-015), (5) no auth tokens flow through BroadcastChannel (ADR-015). Write automated tests for items 1, 3, and 5.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Security audit confirms: all markdown rendering paths apply DOMPurify, token budget enforcement is verified by test, session cleanup deletes all uploaded files, BFF logs contain no document text content, and BroadcastChannel messages contain no auth tokens. Any gaps found during audit are fixed and re-verified.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — NFR-05 token budget, NFR-06 session cleanup, security requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules including security constraints">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="ADR-015 — data minimization, no document logging, no auth tokens in BroadcastChannel">../.claude/adr/ADR-015-ai-data-governance.md</file>
+    <file purpose="ADR-014 — AI caching security (no auth decision caching)">../.claude/adr/ADR-014-ai-caching.md</file>
+    <file purpose="Markdown renderer with DOMPurify — R2-030 implementation">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+    <file purpose="BroadcastChannel bridge — R2-051 implementation">src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec MUST">MUST apply DOMPurify sanitization to ALL markdown rendering paths — not just the main chat message renderer</constraint>
+    <constraint source="ADR-015">MUST NOT log document content — grep BFF source for any logger calls that could include document text</constraint>
+    <constraint source="ADR-015">MUST NOT include auth tokens (Bearer, X-*, Cookie values) in BroadcastChannel messages</constraint>
+    <constraint source="spec NFR-06">Session cleanup MUST delete ALL session-scoped uploads — not just mark as deleted, but actually remove from storage</constraint>
+    <constraint source="spec">This is a security audit — if gaps are found, they MUST be fixed in this task (not deferred)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern>DOMPurify audit: search all .tsx files using dangerouslySetInnerHTML — verify each is preceded by DOMPurify.sanitize()</pattern>
+      <pattern>BroadcastChannel audit: inspect SprkChatBridge.ts emit calls — verify emitted payloads do not include Authorization headers, tokens, or session cookies</pattern>
+      <pattern>Document logging audit: grep BFF Services/Ai/ for _logger.Log* calls — verify none pass document text content as parameters</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R2 introduces several new surfaces for potential security issues: rendered markdown (XSS via unsanitized HTML), BroadcastChannel messages (potential auth token leakage), uploaded documents (session isolation), and BFF AI processing (document content in logs). This audit systematically checks each surface.
+    </background>
+    <dependencies>
+      Depends on R2-058 (all changes deployed). Final Phase 5 task before deployment. Runs after all other Phase 5 tests.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read ADR-015-ai-data-governance.md to confirm all data governance constraints that apply to R2</step>
+    <step order="1">DOMPurify audit: grep all .tsx files in SprkChat/ for "dangerouslySetInnerHTML" — list each occurrence and verify each is wrapped with DOMPurify.sanitize()</step>
+    <step order="2">Fix any dangerouslySetInnerHTML usage not preceded by DOMPurify.sanitize() — this is a mandatory security fix</step>
+    <step order="3">Write a security test: XssAttempt_BlockedByDomPurify — render a markdown string containing &lt;script&gt;alert('xss')&lt;/script&gt; and a &lt;img onerror=...&gt; tag, assert neither executes (no script tags in output)</step>
+    <step order="4">BroadcastChannel audit: inspect SprkChatBridge.ts emit implementations — verify no Authorization, Bearer token, Cookie, or session secret values appear in any emitted payloads</step>
+    <step order="5">Document logging audit: grep src/server/api/Sprk.Bff.Api/Services/Ai/ for _logger calls — verify no calls pass document text, email body, or user content as log parameters</step>
+    <step order="6">Session cleanup audit: trace the session end handler — verify it calls the cleanup service that removes all session-scoped uploaded documents from temp storage</step>
+    <step order="7">Write test: SessionEnd_DeletesAllUploadedDocuments — trigger session cleanup, verify temp storage is empty for that session</step>
+    <step order="8">Token budget audit: verify the 128K enforcement check runs for every message in the conversation — not just at session init</step>
+    <step order="9">Document all findings and fixes in notes/066-security-audit-report.md</step>
+    <step order="10">Run TypeScript compilation and dotnet build to verify all fixes compile: npx tsc --noEmit and dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-066 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">Fixed DOMPurify sanitization on any missed dangerouslySetInnerHTML usage</artifact>
+    <artifact type="code">Security tests: XssAttempt_BlockedByDomPurify, SessionEnd_DeletesAllUploadedDocuments</artifact>
+    <artifact type="docs">notes/066-security-audit-report.md — complete audit findings, gaps found, fixes applied</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All dangerouslySetInnerHTML usages in SprkChat components are preceded by DOMPurify.sanitize()</criterion>
+    <criterion testable="true">XssAttempt_BlockedByDomPurify test passes — script tags and onerror attributes are stripped</criterion>
+    <criterion testable="true">BroadcastChannel message inspection shows no auth tokens or session secrets</criterion>
+    <criterion testable="true">BFF document processing logs contain no document text content</criterion>
+    <criterion testable="true">SessionEnd_DeletesAllUploadedDocuments test passes</criterion>
+    <criterion testable="true">notes/066-security-audit-report.md exists and documents all findings</criterion>
+  </acceptance-criteria>
+</task>

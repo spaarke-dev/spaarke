@@ -39,6 +39,17 @@ export { QuickActionChips } from './QuickActionChips';
 // QuickActionChips types
 export type { IQuickActionChipsProps } from './QuickActionChips';
 
+// Upload zone (Phase 3E: drag-and-drop document upload)
+export { SprkChatUploadZone } from './SprkChatUploadZone';
+export type { ISprkChatUploadZoneProps, UploadedDocument } from './SprkChatUploadZone';
+
+// Document upload status (Phase 3E: upload processing feedback)
+export { SprkChatDocumentStatus } from './SprkChatDocumentStatus';
+
+// Word export button (Phase 3E: Open in Word action)
+export { SprkChatExportWord } from './SprkChatExportWord';
+export type { ISprkChatExportWordProps } from './SprkChatExportWord';
+
 // Hooks
 export { useSseStream } from './hooks/useSseStream';
 export { useChatSession } from './hooks/useChatSession';
@@ -70,6 +81,7 @@ export type {
   IHostContext,
   ICrossPaneSelection,
   ISprkChatSuggestionsProps,
+  CitationSourceType,
   ICitation,
   ICitationMarkerProps,
   ISprkChatCitationPopoverProps,
@@ -78,8 +90,12 @@ export type {
   IQuickAction,
   IRefineRequest,
   IDocumentInsertEvent,
+  DocumentProcessingStatus,
+  IDocumentStatusMessage,
+  IDocumentStatusChatMessage,
+  ISprkChatDocumentStatusProps,
 } from './types';
-export { CROSS_PANE_SELECTION_MAX_PREVIEW, DEFAULT_QUICK_ACTIONS } from './types';
+export { CROSS_PANE_SELECTION_MAX_PREVIEW, DEFAULT_QUICK_ACTIONS, DOCUMENT_PROCESSING_TIMEOUT_MS } from './types';
 export type { IUseChatPlaybooksResult } from './hooks/useChatPlaybooks';
 export type { UseSelectionListenerOptions, IUseSelectionListenerResult } from './hooks/useSelectionListener';
 

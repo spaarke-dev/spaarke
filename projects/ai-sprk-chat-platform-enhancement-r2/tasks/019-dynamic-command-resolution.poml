@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-019" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>DynamicCommandResolver — Metadata-Driven Command Catalog from Playbooks + Scopes with Redis Cache</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, ai, cache, redis</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates DynamicCommandResolver with Redis caching and metadata-driven Dataverse queries; FR-05, FR-17 requirements; no static relationship tables</rigor-reason>
+    <dependencies>[001, 006]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a new class `DynamicCommandResolver` in `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/`
+    (factory-instantiated, NOT DI-registered) that builds a command catalog from metadata-driven
+    Dataverse queries with Redis caching.
+
+    **Command catalog entry**:
+    ```csharp
+    public record CommandEntry(
+        string Id,           // slash command identifier, e.g., "search-legal-database"
+        string Label,        // display label, e.g., "Search Legal Database"
+        string Description,  // tooltip/aria description
+        string Trigger,      // the slash command string, e.g., "/search-legal-database"
+        string Category,     // "system" | "playbook" | "scope"
+        string Source);      // playbookId or scopeId that contributed this command
+    ```
+
+    **Three command sources** (no static relationship tables):
+    1. **System commands**: hardcoded base set (`/help`, `/clear`, `/export`) — always present
+    2. **Playbook commands**: query `sprk_analysisplaybook` filtered by `sprk_recordType = context.RecordType`
+       — each playbook's `sprk_triggerPhrases` field provides slash command suggestions
+    3. **Scope capability commands**: query active scopes for `sprk_capabilities` values — each
+       capability option set value maps to a command entry (see mapping below)
+
+    **Capability → command mapping**:
+    - `search` (100000000) → `{ id: "search", label: "Search", trigger: "/search", category: "scope" }`
+    - `analyze` (100000001) → `{ id: "analyze", label: "Analyze Document", trigger: "/analyze", category: "scope" }`
+    - `web_search` (100000002) → `{ id: "web-search", label: "Search the Web", trigger: "/web-search", category: "scope" }`
+    - `write_back` (100000003) → `{ id: "write-back", label: "Write to Document", trigger: "/write-back", category: "scope" }`
+    - `summarize` (100000004) → `{ id: "summarize", label: "Summarize", trigger: "/summarize", category: "scope" }`
+
+    **Redis cache**:
+    - Cache key: `cmd-catalog:{tenantId}:{recordType}`
+    - TTL: 5 minutes
+    - On cache miss: query Dataverse, build catalog, cache result
+    - On cache hit: return cached result directly
+
+    **Class design**:
+    ```csharp
+    public class DynamicCommandResolver
+    {
+        public DynamicCommandResolver(IDataverseRepository dataverse, IDistributedCache cache,
+            ILogger&lt;DynamicCommandResolver&gt; logger) { ... }
+
+        public Task&lt;IReadOnlyList&lt;CommandEntry&gt;&gt; ResolveCommandsAsync(ChatHostContext context,
+            CancellationToken cancellationToken = default);
+    }
+    ```
+
+    **NFR-03**: Full resolution must complete within 3 seconds with Redis cache hit.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    `DynamicCommandResolver` returns a complete command catalog from three sources (system, playbook,
+    scope) with 5-minute Redis cache and tenant-scoped cache keys. Different analysis record types
+    show different available commands (FR-05). Adding a new playbook with matching record type makes
+    its commands appear in SprkChat without configuration after cache expiry (FR-17).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-05, FR-17 (dynamic commands, no static tables), NFR-03 (3s resolution)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — DI budget, factory pattern, Redis pattern, MUST rules">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="AnalysisChatContextResolver stub — existing context resolution pattern to understand">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    <file purpose="Redis distributed cache pattern — IDistributedCache usage">../.claude/patterns/caching/distributed-cache.md</file>
+    <file purpose="Dataverse entity operations — querying sprk_analysisplaybook and sprk_scope">../.claude/patterns/dataverse/entity-operations.md</file>
+    <file purpose="Analysis scopes pattern — three-tier scope system and capability definitions">../.claude/patterns/ai/analysis-scopes.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">MUST use `IDistributedCache` (Redis) for command catalog caching — MUST NOT use MemoryCache or static dictionaries</constraint>
+    <constraint source="ADR-010">MUST NOT register `DynamicCommandResolver` in DI — factory instantiation only; DI budget already at 16</constraint>
+    <constraint source="ADR-013">MUST flow `ChatHostContext` for tenant and record type filtering; cache key MUST include tenantId for tenant isolation</constraint>
+    <constraint source="ADR-014">MUST scope cache keys by tenant: `cmd-catalog:{tenantId}:{recordType}` — MUST NOT use per-user cache keys (catalog is shared across users of same tenant/record type)</constraint>
+    <constraint source="spec MUST">MUST NOT create static playbook relationship tables — the catalog MUST be built dynamically from Dataverse queries filtered by recordType metadata</constraint>
+    <constraint source="spec NFR-03">Full command resolution MUST complete within 3 seconds WITH Redis cache; Dataverse query path may take longer on cache miss</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern>Redis get-or-set pattern: `var cached = await _cache.GetStringAsync(key, ct); if (cached != null) return JsonSerializer.Deserialize&lt;T&gt;(cached); var result = await BuildCatalogAsync(context, ct); await _cache.SetStringAsync(key, JsonSerializer.Serialize(result), options, ct); return result;`</pattern>
+      <pattern>Tenant-scoped cache key: extract tenantId from ChatHostContext or HttpContext; use format `cmd-catalog:{tenantId}:{recordType}` to prevent cross-tenant data bleed</pattern>
+      <pattern>Dataverse playbook query filter: `$filter=sprk_recordtype eq '{context.RecordType}' and statecode eq 0` — active playbooks only, matching record type</pattern>
+      <pattern>Capability option set reading: multi-select field returns as comma-delimited integers in OData response — split and map to CommandEntry records using the fixed mapping table</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R1 had static slash commands hardcoded in the frontend. R2 makes them dynamic: the
+      command catalog is assembled at session init from Dataverse metadata. This means:
+      - A legal matter session shows `/search-legal-database` (from Legal Research scope's capabilities)
+      - A project session shows `/generate-status-report` (from Project playbooks)
+      - Both sessions show `/help`, `/clear`, `/export` (system commands)
+
+      No static relationship tables: the connection between "which commands appear for this record type"
+      is derived from:
+      1. Playbook records filtered by `sprk_recordType`
+      2. Scope capability option set values on active scopes
+
+      Redis caching with 5-minute TTL prevents redundant Dataverse queries on every message. The catalog
+      is tenant-scoped (not user-scoped) because commands are based on configuration, not user permissions.
+
+      Task R2-021 (ScopeCapabilitiesService) will further refine scope command contribution — this task
+      provides the initial implementation that R2-021 will integrate with.
+    </background>
+    <dependencies>
+      Depends on Task R2-001 (Dataverse schema with sprk_capabilities field and sprk_recordType field)
+      and R2-006 (Phase 1 deployment). Independent of other Group B tasks — safe for parallel execution.
+      Task R2-020 (AnalysisChatContextResolver) and R2-021 (ScopeCapabilities) depend on this task's
+      output. Own files: `Services/Ai/Chat/DynamicCommandResolver.cs`, `Models/Ai/Chat/CommandEntry.cs`.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `AnalysisChatContextResolver.cs` stub to understand the existing context resolution pattern before implementing the resolver</step>
+    <step order="1">Read `.claude/patterns/caching/distributed-cache.md` and `.claude/patterns/dataverse/entity-operations.md`</step>
+    <step order="2">Create `CommandEntry.cs` record model in `Models/Ai/Chat/`</step>
+    <step order="3">Create `DynamicCommandResolver.cs` in `Services/Ai/Chat/` with constructor taking `IDataverseRepository`, `IDistributedCache`, and `ILogger`</step>
+    <step order="4">Implement the system commands list (hardcoded base: `/help`, `/clear`, `/export`)</step>
+    <step order="5">Implement Redis cache check at the start of `ResolveCommandsAsync`: return cached catalog if hit</step>
+    <step order="6">Implement Dataverse query for playbooks filtered by `sprk_recordType = context.RecordType` — retrieve `sprk_triggerphrases` and `sprk_name` fields</step>
+    <step order="7">Build playbook command entries from the first trigger phrase of each playbook (converted to a slug for the trigger/id)</step>
+    <step order="8">Implement Dataverse query for active scopes with `sprk_capabilities` field — retrieve the multi-select integer values</step>
+    <step order="9">Map capability option set integers to `CommandEntry` records using the fixed mapping table</step>
+    <step order="10">Merge system + playbook + scope commands into a single list; store in Redis with 5-minute TTL and `cmd-catalog:{tenantId}:{recordType}` key</step>
+    <step order="11">Wire `DynamicCommandResolver` into `SprkChatAgentFactory` using factory instantiation</step>
+    <step order="12">Run `dotnet build` and verify no errors</step>
+    <step order="13">Update TASK-INDEX.md: change task R2-019 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs — metadata-driven command catalog resolver with Redis caching</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/CommandEntry.cs — command catalog entry record model</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs — updated to factory-instantiate DynamicCommandResolver</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For a "matter" record type, the command catalog includes commands from playbooks with `sprk_recordType = "matter"` but NOT from "project" playbooks</criterion>
+    <criterion testable="true">System commands (`/help`, `/clear`, `/export`) appear in every catalog regardless of record type</criterion>
+    <criterion testable="true">A scope with `sprk_capabilities = [100000002, 100000004]` (web_search, summarize) contributes `/web-search` and `/summarize` to the catalog</criterion>
+    <criterion testable="true">Second call to `ResolveCommandsAsync` with same tenantId+recordType returns result from Redis (cache hit) within 100ms</criterion>
+    <criterion testable="true">Redis cache key follows the pattern `cmd-catalog:{tenantId}:{recordType}` with 5-minute TTL (verify TTL in Redis)</criterion>
+    <criterion testable="true">Adding a new playbook with matching recordType causes the new command to appear after cache TTL expiry (no code change needed)</criterion>
+    <criterion testable="true">DynamicCommandResolver is NOT in the DI container (factory instantiation only)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The `IDataverseRepository` in this context likely refers to whatever Dataverse access abstraction
+    exists in the BFF. Check `AnalysisChatContextResolver.cs` and existing service classes to find the
+    correct interface name — it may be `IChatDataverseRepository`, `IDataverseClient`, or similar.
+    Use the existing abstraction; do NOT create a new Dataverse access class.
+
+    For converting trigger phrases to slash command slugs: take the first phrase, convert to lowercase,
+    replace spaces with hyphens, strip non-alphanumeric characters except hyphens. E.g.,
+    "Send analysis by email" → "send-analysis-by-email" → trigger `/send-analysis-by-email`.
+    Cap the trigger length at 50 characters.
+
+    The `sprk_triggerPhrases` field is newline-delimited (from Task R2-001). Use only the FIRST phrase
+    for the slash command trigger — subsequent phrases are for semantic matching in PlaybookDispatcher,
+    not for slash command generation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group B — depends on R2-001 (Dataverse schema) and R2-006 (Phase 1 deployment). Independent of R2-015, R2-016, R2-017, R2-018. Tasks R2-020 and R2-021 depend on this. Own files: DynamicCommandResolver.cs (new), CommandEntry.cs (new).</protocol>
+  </execution>
+</task>

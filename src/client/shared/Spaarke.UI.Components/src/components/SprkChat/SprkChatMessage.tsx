@@ -21,11 +21,29 @@
 import * as React from 'react';
 import { makeStyles, shorthands, tokens, mergeClasses, Text, Spinner, Button } from '@fluentui/react-components';
 import { ArrowExportRegular } from '@fluentui/react-icons';
-import { ISprkChatMessageProps, ICitation } from './types';
+import { ISprkChatMessageProps, ICitation, IDocumentStatusChatMessage } from './types';
 import { CitationMarker } from './SprkChatCitationPopover';
 import { SprkChatMessageRenderer } from './SprkChatMessageRenderer';
+import { SprkChatDocumentStatus } from './SprkChatDocumentStatus';
 import { PlanPreviewCard } from './PlanPreviewCard';
 import type { PlanStep } from './PlanPreviewCard';
+import { renderMarkdown as renderMarkdownHtml, SPRK_MARKDOWN_CSS } from '../../services/renderMarkdown';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Markdown CSS injection (shared with SprkChatMessageRenderer, idempotent)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SPRK_MARKDOWN_STYLE_ID = 'sprk-markdown-styles';
+
+function ensureMarkdownCssInjected(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(SPRK_MARKDOWN_STYLE_ID)) return;
+
+  const style = document.createElement('style');
+  style.id = SPRK_MARKDOWN_STYLE_ID;
+  style.textContent = SPRK_MARKDOWN_CSS;
+  document.head.appendChild(style);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -61,6 +79,12 @@ const useStyles = makeStyles({
   messageContent: {
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
+  },
+  /** Container for markdown-rendered assistant message content. */
+  markdownContent: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+    wordBreak: 'break-word',
   },
   timestamp: {
     fontSize: tokens.fontSizeBase100,
@@ -269,6 +293,16 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    */
   onEditPlan?: (editMessage: string) => void;
   /**
+   * Whether the plan is currently being executed (SSE stream active).
+   * When true, PlanPreviewCard shows step execution icons and the Cancel Execution button.
+   */
+  isPlanExecuting?: boolean;
+  /**
+   * Called when the user clicks Cancel Execution during plan execution.
+   * MUST abort the SSE stream via AbortController (spec MUST rule).
+   */
+  onCancelExecution?: () => void;
+  /**
    * Called when the user clicks the "Insert" button on an AI response message.
    * Receives the text content to insert. SprkChat.tsx dispatches this as a
    * `document_insert` BroadcastChannel event for the AnalysisWorkspace editor
@@ -280,6 +314,23 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    * @see IDocumentInsertEvent in types.ts
    */
   onInsert?: (content: string) => void;
+  /**
+   * Called when the user clicks "Save to matter files" on a completed document
+   * status message. SprkChat.tsx calls the BFF persist endpoint and updates the
+   * message's persistenceState accordingly.
+   *
+   * Only passed for document_status messages when ChatHostContext.containerId is truthy.
+   *
+   * @param documentId - The session document ID to persist to SPE.
+   * @see spec-FR-14 — Optional SPE persistence for uploaded documents
+   */
+  onSaveToMatterFiles?: (documentId: string) => void;
+  /**
+   * Whether the host context has a containerId (SPE container available).
+   * When false/undefined, the "Save to matter files" button is hidden on
+   * document_status messages.
+   */
+  hasContainerId?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,7 +391,11 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   onProceed,
   onCancel,
   onEditPlan,
+  isPlanExecuting,
+  onCancelExecution,
   onInsert,
+  onSaveToMatterFiles,
+  hasContainerId,
 }) => {
   const styles = useStyles();
   const isUser = message.role === 'User';
@@ -360,10 +415,47 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
     return message.content;
   }, [message.content, citations, isAssistant, isStreaming]);
 
+  // Inject markdown CSS once on first mount (idempotent — shared with SprkChatMessageRenderer)
+  React.useEffect(() => {
+    ensureMarkdownCssInjected();
+  }, []);
+
+  // Render assistant messages as markdown HTML (headings, bold, code blocks, etc.)
+  // User messages are rendered as plain text to avoid unexpected formatting.
+  // During streaming, render as plain text to avoid re-parsing on every token.
+  const markdownHtml = React.useMemo(() => {
+    if (isAssistant && !isStreaming && message.content && !(citations && citations.length > 0)) {
+      return renderMarkdownHtml(message.content);
+    }
+    return null;
+  }, [message.content, isAssistant, isStreaming, citations]);
+
   // ── Structured response rendering ──────────────────────────────────────────
 
   const responseType = message.metadata?.responseType;
   const isStructured = isAssistant && responseType != null && responseType !== '';
+
+  // ── Document status rendering (FR-14: Save to matter files) ────────────────
+  // When the message carries document_status metadata, render SprkChatDocumentStatus
+  // with the save-to-matter-files action button (only when containerId is available).
+  if (responseType === 'document_status') {
+    const docMsg = message as IDocumentStatusChatMessage;
+    if (docMsg.documentStatus) {
+      return (
+        <div
+          className={styles.structuredContainer}
+          role="listitem"
+          aria-label={`Document status: ${docMsg.documentStatus.fileName}`}
+        >
+          <SprkChatDocumentStatus
+            status={docMsg.documentStatus}
+            onSaveToMatterFiles={onSaveToMatterFiles}
+            hasContainerId={hasContainerId}
+          />
+        </div>
+      );
+    }
+  }
 
   // PlanPreviewCard gate — only when not currently streaming the plan
   if (isStructured && responseType === 'plan_preview' && !isStreaming) {
@@ -383,18 +475,17 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
         <PlanPreviewCard
           planTitle={message.metadata?.planTitle ?? 'Proposed Plan'}
           steps={planSteps}
-          isExecuting={false}
+          isExecuting={isPlanExecuting ?? false}
           onProceed={onProceed ?? (() => {
-            // TRACKED: task 072 wires BFF plan approval endpoint
-            console.log('[SprkChatMessage] onProceed stub — wired in task 072');
+            console.log('[SprkChatMessage] onProceed stub');
           })}
           onCancel={onCancel ?? (() => {
             console.log('[SprkChatMessage] onCancel stub');
           })}
           onEditPlan={onEditPlan ?? ((editMessage) => {
-            // Edit plan sends a new user message — parent (SprkChat) handles via normal send
             console.log('[SprkChatMessage] onEditPlan stub — edit message:', editMessage);
           })}
+          onCancelExecution={onCancelExecution}
         />
         {onInsert && message.content && (
           <div className={styles.messageActions}>
@@ -461,7 +552,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
     );
   }
 
-  // ── Plain text rendering (legacy behaviour — no regression) ────────────────
+  // ── Plain text rendering (with markdown for assistant messages) ──────────────
 
   // Insert button: only for completed (non-streaming) assistant messages with content.
   // The button is NOT rendered for user messages (spec-2D: "Insert button MUST only
@@ -470,7 +561,14 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
 
   return (
     <div className={containerClass} role="listitem" aria-label={`${message.role} message`}>
-      <Text className={styles.messageContent}>{renderedContent}</Text>
+      {markdownHtml ? (
+        <div
+          className={styles.markdownContent}
+          dangerouslySetInnerHTML={{ __html: markdownHtml }}
+        />
+      ) : (
+        <Text className={styles.messageContent}>{renderedContent}</Text>
+      )}
 
       {isStreaming && !message.content && (
         <div className={styles.streamingIndicator}>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-064" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Context Resolver End-to-End Tests</title>
+    <status>completed</status>
+    <phase>5</phase>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task for AnalysisChatContextResolver and command catalog caching. Tags include testing and integration-test. STANDARD rigor: new test files, NFR-03 timing constraint, Redis cache verification, capability accuracy tests.</rigor-reason>
+    <dependencies>[053]</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the `AnalysisChatContextResolver` and command catalog caching covering: initialization time (NFR-03: &lt;3 seconds with Redis), capability accuracy per playbook (correct tools/commands returned for given playbook), and cache invalidation (changed playbook yields fresh commands after cache TTL or explicit invalidation). Tests mock Dataverse queries for determinism.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    Integration tests exist and pass for: context resolver assembles full session context (capabilities, commands, documents, search guidance) in under 3 seconds with Redis cache warm, different playbooks return different capability sets, cache returns stale-free results after invalidation, and Redis TTL (5-minute) is correctly configured for the command catalog.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-16, FR-17, NFR-03 context resolver requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — AnalysisChatContextResolver architecture, Redis cache">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="AnalysisChatContextResolver implementation">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    <file purpose="ADR-009 — Redis-first caching, IDistributedCache">../.claude/adr/ADR-009-redis-caching.md</file>
+    <file purpose="ADR-014 — cache key versioning, tenant scoping">../.claude/adr/ADR-014-ai-caching.md</file>
+    <file purpose="Distributed cache pattern">../.claude/patterns/caching/distributed-cache.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-03">Initialization time test MUST measure with Redis cache warm (cache populated before timing test) — assert under 3 seconds</constraint>
+    <constraint source="ADR-014">Cache key test MUST verify tenant scoping — two different tenants must not share cache entries</constraint>
+    <constraint source="spec FR-16">Capability accuracy test MUST verify different playbooks return different capability sets — not the same generic set for all</constraint>
+    <constraint source="ADR-009">Tests MUST use IDistributedCache — verify the resolver uses IDistributedCache (not in-memory Dictionary) for caching</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+      <file>tests/</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+    </files>
+    <patterns>
+      <pattern>IDistributedCache test double: use Microsoft.Extensions.Caching.Memory.MemoryDistributedCache for in-process testing without Redis infrastructure</pattern>
+      <pattern>Cache key tenant scoping test: resolve context for tenantA and tenantB, verify cache entries are separate (different keys)</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      AnalysisChatContextResolver was replaced from a stub in R2-020. Command catalog caching was implemented in R2-019. Dynamic command integration was verified in R2-053. This test task creates automated tests for the resolver and caching behavior.
+    </background>
+    <dependencies>
+      Depends on R2-053 (command integration verified). Phase 5, after R2-058.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read AnalysisChatContextResolver.cs to understand its dependencies and cache usage pattern</step>
+    <step order="1">Set up test fixtures with mock Dataverse playbook data for two different playbooks with different capability sets</step>
+    <step order="2">Write test: ContextResolver_InitializesWithinThreeSeconds — resolve context with warm cache, assert elapsed time under 3000ms</step>
+    <step order="3">Write test: CapabilityAccuracy_DifferentPlaybooksDifferentCapabilities — resolve for PlaybookA and PlaybookB, assert returned capability sets differ</step>
+    <step order="4">Write test: CacheHit_ReturnsCachedResult — resolve twice, verify second call does not hit Dataverse (mock Dataverse query is called only once)</step>
+    <step order="5">Write test: CacheInvalidation_AfterContextChange — resolve, change playbook, resolve again, verify fresh Dataverse query occurs</step>
+    <step order="6">Write test: TenantScoping_SeparateCacheEntries — resolve for tenantA and tenantB, verify cache keys are different (tenant-scoped per ADR-014)</step>
+    <step order="7">Write test: CacheTtl_FiveMinutes — verify the cache entry TTL is set to 5 minutes (300 seconds) in the IDistributedCache SetAsync call</step>
+    <step order="8">Run tests: dotnet test tests/ --filter "ContextResolver" — verify all pass</step>
+    <step order="9">Update TASK-INDEX.md: change task R2-064 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">ContextResolverIntegrationTests.cs — xUnit tests for initialization time, capability accuracy, cache hit/miss, tenant scoping, TTL</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test --filter "ContextResolver" exits with 0 failures</criterion>
+    <criterion testable="true">ContextResolver_InitializesWithinThreeSeconds test passes</criterion>
+    <criterion testable="true">CapabilityAccuracy_DifferentPlaybooksDifferentCapabilities test passes</criterion>
+    <criterion testable="true">CacheHit_ReturnsCachedResult test passes (Dataverse queried only once)</criterion>
+    <criterion testable="true">TenantScoping_SeparateCacheEntries test passes</criterion>
+    <criterion testable="true">CacheTtl_FiveMinutes test passes (correct TTL configured)</criterion>
+  </acceptance-criteria>
+</task>

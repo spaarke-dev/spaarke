@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-004" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Shared renderMarkdown() Utility in @spaarke/ui-components</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <tags>frontend, fluent-ui, shared-library, foundation</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates shared utility in @spaarke/ui-components that all UI surfaces (chat, editor, Word export) will depend on. Modifies .ts/.tsx files; ADR-012 (shared library), ADR-021 (Fluent v9, dark mode) must be strictly observed. Consolidates existing markdownToHtml.ts to avoid divergence.</rigor-reason>
+    <dependencies>[]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a single canonical `renderMarkdown()` function in `@spaarke/ui-components` that becomes the one markdown rendering pipeline across all SprkChat surfaces (chat messages, plan previews, editor insertion, and eventually Word export).
+
+    **Function signature**:
+    ```typescript
+    export function renderMarkdown(markdown: string, options?: RenderMarkdownOptions): string
+    ```
+
+    **RenderMarkdownOptions interface**:
+    - `allowHtml?: boolean` — default false (DOMPurify strips tags by default for security)
+    - `breaks?: boolean` — default true (treat single newlines as &lt;br&gt;)
+    - `theme?: "light" | "dark" | "auto"` — default "auto" (CSS class applied to wrapper, uses Fluent v9 semantic tokens)
+
+    **Implementation requirements**:
+    1. Use `marked` library for markdown parsing (evaluate if already present; if not, add as dependency)
+    2. Use `dompurify` library for HTML sanitization (add as dependency if not present)
+    3. Apply Fluent v9 semantic token CSS styles via a `sprk-markdown` CSS class on the wrapper — NO hard-coded colors (ADR-021)
+    4. Supported rendering: headings (h1-h4), bold, italic, code (inline and block), fenced code blocks, ordered and unordered lists, tables, hyperlinks (target="_blank" rel="noopener noreferrer")
+    5. Code block syntax highlighting: use a lightweight highlighter compatible with the Fluent v9 theme (e.g., highlight.js with a Fluent-compatible theme, or custom token-colored CSS)
+    6. Dark mode: CSS styles MUST use Fluent v9 semantic color tokens (e.g., `colorNeutralForeground1`, `colorNeutralBackground1`, `colorBrandForeground1`) so dark mode works via FluentProvider theme switching — NOT via `prefers-color-scheme` media query
+    7. Export `renderMarkdown` from the `@spaarke/ui-components` package index
+
+    **Consolidation**: The existing `src/client/code-pages/AnalysisWorkspace/src/services/markdownToHtml.ts` implements a subset of this functionality. Read it first, incorporate any handling it has, then deprecate it in favor of the shared utility (add a comment pointing to the new location — do NOT delete it in this task, to avoid breaking AnalysisWorkspace before it is updated in Phase 3).
+  </prompt>
+
+  <role>Senior full-stack developer with Dataverse and Azure AI expertise</role>
+
+  <goal>
+    `renderMarkdown(markdown)` is exported from `@spaarke/ui-components`, produces sanitized HTML string from markdown input, applies Fluent v9 semantic token CSS, and passes dark mode visual verification. TypeScript compilation succeeds with 0 errors. The `markdownToHtml.ts` in AnalysisWorkspace is annotated as deprecated pointing to the new shared utility.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-01, markdown standardization MUST rules, single parser requirement">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — shared library rules, ADR references">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Shared component library structure — understand export patterns and file organization">src/client/shared/Spaarke.UI.Components/src/</file>
+    <file purpose="Existing markdown utility to consolidate">src/client/code-pages/AnalysisWorkspace/src/services/markdownToHtml.ts</file>
+    <file purpose="ADR-012 — shared component library requirements, callback-based props, React 18 compatibility">../.claude/adr/ADR-012-shared-components.md</file>
+    <file purpose="ADR-021 — Fluent v9 design system, semantic tokens, dark mode requirement">../.claude/adr/ADR-021-fluent-design-system.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">MUST be added to @spaarke/ui-components shared library — NOT duplicated in individual code pages or PCF controls</constraint>
+    <constraint source="ADR-021">MUST use Fluent v9 semantic color tokens — MUST NOT hard-code any color values (hex, rgb, rgba). MUST support dark mode via FluentProvider theme switching</constraint>
+    <constraint source="spec MUST">MUST use single markdown parser across all surfaces — marked is preferred per spec assumptions. Do NOT introduce a second parser (no markdown-it if marked is used)</constraint>
+    <constraint source="spec MUST">MUST sanitize rendered HTML via DOMPurify before any dangerouslySetInnerHTML usage — security requirement prevents XSS from AI-generated content</constraint>
+    <constraint source="spec">renderMarkdown() returns a sanitized HTML string — the caller decides how to render it (typically dangerouslySetInnerHTML). The function itself does NOT return JSX.</constraint>
+    <constraint source="ADR-022">React 18 compatible — shared library targets React 18. Do not use React 16-only APIs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+    <patterns>
+      <pattern>Shared library export pattern: check src/client/shared/Spaarke.UI.Components/src/index.ts (or the main export file) to understand how new utilities are exported. Follow the same barrel export pattern.</pattern>
+      <pattern>Fluent v9 semantic tokens: import from "@fluentui/react-components" — tokens like colorNeutralForeground1 are available as CSS custom properties. For CSS-in-string usage, use makeStyles or inject a style tag with token variable references.</pattern>
+      <pattern>DOMPurify usage in TypeScript: import DOMPurify from "dompurify" — call DOMPurify.sanitize(html, { USE_PROFILES: { html: true } }) after marked parsing</pattern>
+      <pattern>Existing markdownToHtml.ts: read the existing implementation before writing the new one — incorporate any edge cases it handles</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R1 renders AI chat messages as plain text — markdown symbols are visible to users (e.g., **bold** renders as literal asterisks). R2 requires consistent markdown rendering across: (1) SprkChat chat bubbles, (2) PlanPreviewCard, (3) write-back content before insertion into Lexical editor, and (4) Word export generation. Having a single shared utility prevents the current situation where markdownToHtml.ts exists in AnalysisWorkspace but is not used by SprkChat.
+
+      The CSS approach: renderMarkdown() wraps the generated HTML in a div with class "sprk-markdown". A companion CSS string (or makeStyles object) provides styles for all markdown elements using Fluent v9 CSS custom property tokens. When the FluentProvider switches to a dark theme, the token values change and the markdown styles update automatically — no separate dark mode CSS needed.
+    </background>
+    <dependencies>
+      No task dependencies — can start immediately in parallel with R2-001, R2-002, and R2-003. Phase 3 Group C (R2-030 SprkChatMessageRenderer integration) depends on this utility being available in @spaarke/ui-components.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read src/client/code-pages/AnalysisWorkspace/src/services/markdownToHtml.ts to understand what the existing utility handles — incorporate its patterns</step>
+    <step order="1">Read src/client/shared/Spaarke.UI.Components/src/ directory structure to understand how services and utilities are organized and exported</step>
+    <step order="2">Check if `marked` is already in package.json dependencies for Spaarke.UI.Components or any code page — if present, confirm version and reuse; if not, add marked@^12.x</step>
+    <step order="3">Check if `dompurify` and `@types/dompurify` are already in any package.json — add to Spaarke.UI.Components/package.json if not present</step>
+    <step order="4">Create src/client/shared/Spaarke.UI.Components/src/services/renderMarkdown.ts implementing the renderMarkdown() function with marked + DOMPurify + Fluent v9 CSS token styles</step>
+    <step order="5">Create the sprk-markdown CSS styles using Fluent v9 semantic tokens: headings use colorNeutralForeground1, code blocks use colorNeutralBackground3 background and colorNeutralForeground1 text, links use colorBrandForeground1, tables use colorNeutralStroke1 borders. Export styles as a CSS string or makeStyles-compatible object.</step>
+    <step order="6">Add export for renderMarkdown to the shared library barrel index (src/client/shared/Spaarke.UI.Components/src/index.ts or services/index.ts)</step>
+    <step order="7">Add a @deprecated JSDoc comment to src/client/code-pages/AnalysisWorkspace/src/services/markdownToHtml.ts pointing to the new shared utility location — do NOT delete or modify its behavior yet</step>
+    <step order="8">Run TypeScript compilation for Spaarke.UI.Components: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npm run build (or tsc --noEmit) — verify 0 errors</step>
+    <step order="9">Write a quick manual verification: create a test input with headings, bold, code block, list, table, and link — confirm the output HTML is sanitized and contains expected elements</step>
+    <step order="10">Update TASK-INDEX.md: change task R2-004 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/client/shared/Spaarke.UI.Components/src/services/renderMarkdown.ts — canonical renderMarkdown() utility with RenderMarkdownOptions</artifact>
+    <artifact type="code">src/client/shared/Spaarke.UI.Components/src/services/markdownStyles.ts — Fluent v9 semantic token CSS for .sprk-markdown elements (if separated from renderMarkdown.ts)</artifact>
+    <artifact type="code">Updated barrel export in Spaarke.UI.Components index — renderMarkdown exported from @spaarke/ui-components</artifact>
+    <artifact type="code">Deprecated annotation added to AnalysisWorkspace/src/services/markdownToHtml.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">import { renderMarkdown } from "@spaarke/ui-components" resolves without TypeScript errors</criterion>
+    <criterion testable="true">renderMarkdown("**bold** and _italic_") returns HTML containing &lt;strong&gt; and &lt;em&gt; elements (no raw asterisks or underscores)</criterion>
+    <criterion testable="true">renderMarkdown("&lt;script&gt;alert('xss')&lt;/script&gt;") returns sanitized HTML with the script tag removed (DOMPurify active)</criterion>
+    <criterion testable="true">renderMarkdown("```typescript\nconst x = 1;\n```") returns HTML containing a &lt;code&gt; block element</criterion>
+    <criterion testable="true">Generated HTML contains no hard-coded color values (no hex codes, no rgb(), no named colors) — all colors via CSS custom property references (var(--colorNeutralForeground1) or equivalent)</criterion>
+    <criterion testable="true">npm run build (or tsc --noEmit) in Spaarke.UI.Components exits with 0 type errors</criterion>
+    <criterion testable="true">markdownToHtml.ts in AnalysisWorkspace has a @deprecated JSDoc comment pointing to the new shared utility</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DOMPurify requires a browser DOM environment (window/document) at runtime. In the BFF (server-side rendering for Word export), this will not be available — for Word export (task R2-022), a server-side markdown-to-OpenXML conversion will be needed instead. The renderMarkdown() function is for client-side rendering only. Document this limitation in a JSDoc comment on the function.
+
+    For the Fluent v9 CSS token approach: Fluent v9 CSS custom properties are injected into the DOM by FluentProvider as `--colorNeutralForeground1` etc. The CSS in sprk-markdown class can reference these directly as CSS custom properties. The makeStyles approach is also valid if the component using renderMarkdown wraps output in a makeStyles-styled element.
+
+    The `marked` library renderer can be customized to add the `sprk-markdown` wrapper class automatically — consider using `marked.use({ renderer: customRenderer })` to add target="_blank" to links and appropriate CSS classes to elements, rather than post-processing the HTML string.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>No dependencies — can start immediately in parallel with R2-001, R2-002, and R2-003. Read the existing markdownToHtml.ts FIRST to avoid reinventing handling it already does.</protocol>
+  </execution>
+</task>

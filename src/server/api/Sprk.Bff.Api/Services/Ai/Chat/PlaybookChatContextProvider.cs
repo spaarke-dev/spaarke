@@ -1,6 +1,7 @@
 using System.Text;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using System.Linq;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -395,6 +396,90 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
         var wordCount = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
         return (int)Math.Ceiling(wordCount * 1.3);
+    }
+
+    /// <summary>
+    /// Appends an <c>### Active Capabilities</c> section to the system prompt listing
+    /// scope-contributed commands so the AI model is aware of available slash commands.
+    ///
+    /// Called by <see cref="SprkChatAgentFactory"/> after resolving the command catalog
+    /// from <see cref="DynamicCommandResolver"/>. Only scope-category commands are included
+    /// (system and playbook commands are not repeated here).
+    ///
+    /// ADR-015: Only capability labels and trigger strings are included — no scope
+    /// configuration data (descriptions, internal IDs) is exposed in the prompt.
+    ///
+    /// Budget: kept under ~200 tokens to avoid crowding the 8K system prompt budget.
+    /// </summary>
+    /// <param name="systemPrompt">The current system prompt to append to.</param>
+    /// <param name="commands">The full command catalog from <see cref="DynamicCommandResolver"/>.</param>
+    /// <returns>The enriched system prompt with an Active Capabilities section, or unchanged if no scope commands.</returns>
+    internal static string AppendActiveCapabilities(
+        string systemPrompt,
+        IReadOnlyList<CommandEntry>? commands)
+    {
+        if (commands is null || commands.Count == 0)
+        {
+            return systemPrompt;
+        }
+
+        // Filter to scope-contributed commands only (Category is not "system" or "playbook")
+        var scopeCommands = commands
+            .Where(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
+                     && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (scopeCommands.Count == 0)
+        {
+            return systemPrompt;
+        }
+
+        var sb = new StringBuilder(systemPrompt);
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.AppendLine("### Active Capabilities");
+        sb.AppendLine("The following scope-contributed commands are available. You may suggest these to the user when relevant:");
+
+        foreach (var cmd in scopeCommands)
+        {
+            sb.AppendLine($"- {cmd.Trigger}: {cmd.Description}");
+        }
+
+        // Guard: ensure the capabilities section stays within ~200 tokens
+        var capabilitiesSection = sb.ToString()[systemPrompt.Length..];
+        var capabilityTokens = EstimateTokenCount(capabilitiesSection);
+
+        if (capabilityTokens > 200)
+        {
+            // Truncate to first N commands that fit within budget
+            sb = new StringBuilder(systemPrompt);
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("### Active Capabilities");
+
+            var tokenCount = EstimateTokenCount("### Active Capabilities\n");
+            foreach (var cmd in scopeCommands)
+            {
+                var line = $"- {cmd.Trigger}: {cmd.Description}\n";
+                var lineTokens = EstimateTokenCount(line);
+                if (tokenCount + lineTokens > 190) // Leave margin
+                {
+                    break;
+                }
+                tokenCount += lineTokens;
+                sb.Append(line);
+            }
+        }
+
+        var result = sb.ToString();
+        var totalTokens = EstimateTokenCount(result);
+        if (totalTokens > MaxSystemPromptTokenBudget)
+        {
+            // If adding capabilities would exceed the total budget, skip them
+            return systemPrompt;
+        }
+
+        return result;
     }
 
     /// <summary>

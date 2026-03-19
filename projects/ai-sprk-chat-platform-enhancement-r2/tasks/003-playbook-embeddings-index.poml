@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-003" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Create playbook-embeddings AI Search Index and BFF Embedding Generation Utility</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <tags>ai, azure-ai, search, foundation, bff-api</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new Azure infrastructure (AI Search index) AND new BFF C# service code for embedding generation. Tags include ai and bff-api; creates new .cs files; 9+ steps. PlaybookDispatcher (R2-015) depends on this index existing and the embedding utility being callable.</rigor-reason>
+    <dependencies>[]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a dedicated Azure AI Search index named `playbook-embeddings` for semantic playbook matching, and implement the BFF utility that generates embeddings from playbook content and indexes them into this index.
+
+    **Index schema** (`infrastructure/ai-search/playbook-embeddings.json`):
+    - `id` (Edm.String, key)
+    - `playbookId` (Edm.String, filterable, retrievable)
+    - `playbookName` (Edm.String, searchable, retrievable)
+    - `description` (Edm.String, searchable, retrievable)
+    - `triggerPhrases` (Collection(Edm.String), searchable, retrievable)
+    - `recordType` (Edm.String, filterable, retrievable)
+    - `entityType` (Edm.String, filterable, retrievable)
+    - `tags` (Collection(Edm.String), filterable, retrievable)
+    - `contentVector3072` (Collection(Edm.Single), 3072 dimensions, HNSW vector profile — text-embedding-3-large)
+
+    **BFF embedding generation utility** (`src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbeddingService.cs`):
+    - Method: `IndexPlaybookAsync(string playbookId, PlaybookEmbeddingDocument document, CancellationToken ct)`
+    - Generates embedding by calling Azure OpenAI `text-embedding-3-large` with content composed of: playbookName + description + triggerPhrases (joined) + tags
+    - Uploads document with embedding to the `playbook-embeddings` index via Azure AI Search SDK
+    - Method: `SearchPlaybooksAsync(string query, string? recordTypeFilter, int topK, CancellationToken ct)` — vector search against the index, returns `PlaybookSearchResult[]`
+    - Does NOT register in DI — instantiated via factory per ADR-010 DI budget constraint
+  </prompt>
+
+  <role>Senior full-stack developer with Dataverse and Azure AI expertise</role>
+
+  <goal>
+    The `playbook-embeddings` index exists in Azure AI Search (`spaarke-search-dev`) with the correct schema and vector configuration. `PlaybookEmbeddingService.cs` compiles cleanly and provides both indexing and search methods. The index is queryable via vector similarity search using `text-embedding-3-large` embeddings.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — playbook embedding index design, dedicated index decision, NFR-04">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — DI budget constraint, ADR-010 factory instantiation pattern">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Azure AI resources — AI Search endpoint, OpenAI endpoint, model deployments">docs/architecture/auth-AI-azure-resources.md</file>
+    <file purpose="SSE and AI Search patterns — how existing search services are structured">../.claude/patterns/ai/streaming-endpoints.md</file>
+    <file purpose="ADR-013 — extend BFF, SpeFileStore, ChatHostContext flow">../.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="ADR-014 — no streaming token cache, version cache keys, tenant scope">../.claude/adr/ADR-014-ai-caching.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">MUST extend Sprk.Bff.Api — no separate AI microservice. PlaybookEmbeddingService lives in Services/Ai/</constraint>
+    <constraint source="ADR-010">DI registrations currently at 16 (over ≤15 limit). PlaybookEmbeddingService MUST NOT be registered in DI directly — use factory instantiation pattern: SprkChatAgentFactory.ResolveTools() or a dedicated PlaybookEmbeddingServiceFactory that creates instances without AddSingleton/AddScoped</constraint>
+    <constraint source="ADR-014">MUST version cache keys when caching embedding results. MUST scope cache keys by tenant. MUST NOT cache streaming tokens (not applicable here — embeddings are cacheable final values)</constraint>
+    <constraint source="spec">Dedicated index — separate from document RAG index (spaarke-rag-knowledge, spaarke-rag-documents). Do NOT share schema with existing indexes.</constraint>
+    <constraint source="spec NFR-04">Vector search + LLM refinement MUST complete within 2 seconds total for playbook matching</constraint>
+    <constraint source="docs/architecture/auth-AI-azure-resources.md">MUST use spaarke-search-dev AI Search service and spaarke-openai-dev Azure OpenAI deployment. Model: text-embedding-3-large (3072 dimensions)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+    <patterns>
+      <pattern>Existing AI Search index schema: read infrastructure/ai-search/ for existing index JSON files — follow the same HNSW vector profile configuration used by spaarke-rag-knowledge</pattern>
+      <pattern>Existing AI Search service usage in BFF: read src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs for the established pattern for querying Azure AI Search from C#</pattern>
+      <pattern>Existing Azure OpenAI embedding usage: search Services/Ai/ for existing embedding generation code to reuse — do not create a second embedding client if one already exists</pattern>
+      <pattern>Factory instantiation pattern (ADR-010): see SprkChatAgentFactory.cs for how tools are instantiated without DI registration</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R2 introduces PlaybookDispatcher (task R2-015) which matches user natural language to the right playbook via two-stage process: (1) vector similarity search against this dedicated index, then (2) LLM refinement to extract parameters. The dedicated index is required for clean separation from the document RAG index — playbooks are ~100 short documents vs potentially 100K+ document chunks. The index is populated at playbook create/update time by PlaybookEmbeddingService (task R2-016 handles the trigger wiring; this task creates the index and the core service).
+
+      The existing SemanticSearchService.cs provides the pattern for Azure AI Search queries in the BFF codebase. Follow that pattern exactly, adapting it for the new `playbook-embeddings` index schema.
+    </background>
+    <dependencies>
+      No task dependencies — can start immediately in parallel with R2-001 and R2-002. Task R2-015 (PlaybookDispatcher) and R2-016 (embedding pipeline) both depend on this task completing first.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SemanticSearchService.cs and any existing AI Search index JSON files in infrastructure/ai-search/ to understand established patterns</step>
+    <step order="1">Read docs/architecture/auth-AI-azure-resources.md to confirm AI Search service name, endpoint, and available OpenAI model deployments</step>
+    <step order="2">Check infrastructure/ai-search/ for existing index provisioning script or CLI commands used to create indexes (e.g., Provision-AiSearchIndexes.ps1 or similar)</step>
+    <step order="3">Create infrastructure/ai-search/playbook-embeddings.json with the full index schema: all fields defined in the task prompt, vector search configuration referencing text-embedding-3-large 3072-dim HNSW profile</step>
+    <step order="4">Create or update the index provisioning script to create the playbook-embeddings index on spaarke-search-dev via Azure CLI (`az search index create`) or REST API</step>
+    <step order="5">Execute the provisioning script to create the index in the dev environment</step>
+    <step order="6">Verify the index exists: az search index show --name playbook-embeddings --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2</step>
+    <step order="7">Create src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbeddingService.cs implementing IndexPlaybookAsync and SearchPlaybooksAsync following the SemanticSearchService pattern</step>
+    <step order="8">Create PlaybookEmbeddingDocument and PlaybookSearchResult model classes in Models/Ai/ with fields matching the index schema</step>
+    <step order="9">Verify PlaybookEmbeddingService does NOT have an AddSingleton/AddScoped registration — it must be factory-instantiated. Add a comment explaining ADR-010 factory constraint.</step>
+    <step order="10">Run dotnet build src/server/api/Sprk.Bff.Api/ to verify 0 compilation errors</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-003 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="config">infrastructure/ai-search/playbook-embeddings.json — Index schema definition with vector configuration</artifact>
+    <artifact type="config">Index created on spaarke-search-dev Azure AI Search service</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbeddingService.cs — IndexPlaybookAsync + SearchPlaybooksAsync</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookEmbeddingDocument.cs — Document model for index upload</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookSearchResult.cs — Search result model</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az search index show --name playbook-embeddings --service-name spaarke-search-dev returns HTTP 200 with field list matching the schema</criterion>
+    <criterion testable="true">playbook-embeddings index has a vector field named contentVector3072 with 3072 dimensions and HNSW algorithm configuration</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ exits with code 0</criterion>
+    <criterion testable="true">PlaybookEmbeddingService.cs has no AddSingleton, AddScoped, or AddTransient extension — confirmed factory-instantiated</criterion>
+    <criterion testable="true">PlaybookEmbeddingService.SearchPlaybooksAsync accepts a recordTypeFilter parameter and applies it as a filter expression to the AI Search query</criterion>
+    <criterion testable="true">PlaybookEmbeddingDocument model has all fields matching the index schema: id, playbookId, playbookName, description, triggerPhrases, recordType, entityType, tags, contentVector3072</criterion>
+    <criterion testable="true">Index schema file committed to infrastructure/ai-search/playbook-embeddings.json</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The DI budget constraint (ADR-010) is critical here — the BFF is already at 16 non-framework DI registrations. PlaybookEmbeddingService should follow the same instantiation pattern as other tools in SprkChatAgentFactory.cs, where services are created with `new PlaybookEmbeddingService(searchClient, embeddingClient)` rather than injected from the DI container.
+
+    For the content composition used to generate embeddings in IndexPlaybookAsync: concatenate playbookName, description, all triggerPhrases (joined with " | "), and tags (joined with ", "). This produces a single text blob that represents the playbook's intent for embedding. Token limit for text-embedding-3-large is 8191 tokens — truncate if necessary.
+
+    The SearchPlaybooksAsync topK parameter should default to 5 — the PlaybookDispatcher needs only the top candidates for LLM refinement.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>No dependencies — can start immediately in parallel with R2-001 and R2-002. Read SemanticSearchService.cs FIRST to understand the existing Azure AI Search pattern used in the BFF before writing new code.</protocol>
+  </execution>
+</task>

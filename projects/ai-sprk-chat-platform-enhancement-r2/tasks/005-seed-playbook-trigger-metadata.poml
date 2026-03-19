@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-005" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Seed Playbook Trigger Metadata — Populate Existing Playbooks with triggerPhrases, recordType, entityType, tags</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <tags>dataverse, ai, foundation</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data seeding task — no code file modification (.cs/.ts/.tsx). Creates/updates a deployment script and populates Dataverse records. STANDARD rigor applies: creates new files, has explicit constraints from the schema design.</rigor-reason>
+    <dependencies>[R2-001]</dependencies>
+  </metadata>
+
+  <prompt>
+    Read all existing `sprk_analysisplaybook` records from Dataverse and populate the four new trigger metadata fields (added in task R2-001) with appropriate values for each playbook. Then create a reusable deployment/seeding script that can be run again after new playbooks are added.
+
+    **Per playbook, determine and set**:
+    - `sprk_triggerPhrases` (multiline text, newline-delimited): 5-10 natural language phrases a user might say to invoke this playbook. Derive from the playbook's name, description, and its existing `sprk_playbookcapabilities` values. Example for an "Email Communication" playbook: "send analysis by email\nsend this to the client\nemail summary to John\nshare analysis via email\ncompose an email with this content"
+    - `sprk_recordType` (text): the record type this playbook applies to — e.g., "matter", "project", "event", "contact" — inferred from playbook name and existing usage context
+    - `sprk_entityType` (text): the Dataverse logical entity name — e.g., "sprk_analysisoutput", "incident", "contact" — inferred from playbook context
+    - `sprk_tags` (text, comma-delimited): 3-8 classification tags — e.g., "communication,email,external,client-facing"
+
+    **Seeding script** (`scripts/Seed-PlaybookTriggerMetadata.ps1`):
+    - Reads all sprk_analysisplaybook records via Dataverse Web API
+    - For each playbook with empty trigger metadata fields: applies the seeded values
+    - Idempotent: only updates records where the fields are null/empty (does not overwrite manually-set values)
+    - Logs each update with playbook name and field values applied
+    - Accepts `-DryRun` switch parameter to preview changes without writing
+
+    Apply seed data to the dev Dataverse environment (`https://spaarkedev1.crm.dynamics.com`) after confirming schema fields exist.
+  </prompt>
+
+  <role>Senior full-stack developer with Dataverse and Azure AI expertise</role>
+
+  <goal>
+    All existing `sprk_analysisplaybook` records in the dev environment have non-empty values for `sprk_triggerPhrases`, `sprk_recordType`, `sprk_entityType`, and `sprk_tags`. The seeding script (`scripts/Seed-PlaybookTriggerMetadata.ps1`) is committed and idempotent. Task R2-016 (playbook embedding pipeline) can query these fields to generate embeddings.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-05, FR-06, FR-17, FR-18, metadata-driven matching requirements">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — metadata-driven matching, no static tables MUST rule">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Scope model catalog — existing playbook names, descriptions, and associations to understand what to seed">docs/ai-knowledge/catalogs/scope-model-index.json</file>
+    <file purpose="Existing playbook deployment script — understand PowerShell patterns used for Dataverse operations">scripts/Deploy-Playbook.ps1</file>
+    <file purpose="Dataverse entity operations pattern — Web API PATCH for updating records">../.claude/patterns/dataverse/entity-operations.md</file>
+    <file purpose="Notes from R2-001 — actual field logical names confirmed during schema creation">projects/ai-sprk-chat-platform-enhancement-r2/notes/001-dataverse-schema-field-names.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec MUST">MUST NOT create static relationship tables — seeding trigger metadata into the existing Dataverse fields enables metadata-driven matching without new junction tables</constraint>
+    <constraint source="spec FR-17">Command catalog is auto-generated at session init from metadata-driven queries — these seeded values are the foundation for that query to return meaningful results</constraint>
+    <constraint source="spec">Seeding script MUST be idempotent — running it twice does not overwrite manually-curated metadata that was set after the first run</constraint>
+    <constraint source="spec">MUST NOT log full playbook content to console — log only playbook names and field keys updated (ADR-015 data minimization principle)</constraint>
+    <constraint source="R2-001">Field names must use the actual logical names confirmed during R2-001 execution — read notes/001-dataverse-schema-field-names.md before writing any Dataverse queries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>docs/ai-knowledge/catalogs/scope-model-index.json</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+    </files>
+    <patterns>
+      <pattern>Dataverse Web API PATCH for record update: PATCH /api/data/v9.2/sprk_analysisplaybooks(id) with JSON body containing only changed fields</pattern>
+      <pattern>Idempotent seeding: query records with $filter=sprk_triggerphrases eq null OR sprk_triggerphrases eq '' before applying updates — only update empty fields</pattern>
+      <pattern>PowerShell Dataverse pattern: follow Deploy-Playbook.ps1 for authentication (use existing auth helper functions) and HTTP request patterns</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      After task R2-001 creates the schema fields, existing playbook records have null values in all four new fields. The PlaybookDispatcher (task R2-015) and playbook embedding pipeline (task R2-016) both depend on these fields having meaningful values to enable semantic search and metadata-driven dispatch. This seeding task provides the initial values so Phase 2 development can use realistic data.
+
+      The scope-model-index.json file contains the current catalog of playbooks, scopes, and their relationships — use it to understand what playbooks exist and derive appropriate trigger phrases and record types. For a playbook named "Matter Summary Analysis", appropriate trigger phrases might include "summarize this matter", "give me a summary of the matter", "what are the key facts in this matter", "create a matter summary".
+
+      Quality of trigger phrases matters: they will be embedded into the playbook-embeddings index (task R2-016) and used for vector similarity matching. Phrases should be diverse (different vocabulary) and represent how real users would phrase requests, not just variations on the playbook name.
+    </background>
+    <dependencies>
+      Depends on R2-001 completing first (schema fields must exist before records can be updated). Can run immediately after R2-001 is complete. Task R2-016 (playbook embedding pipeline) depends on this task having populated the fields so embeddings can be generated from real data.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read notes/001-dataverse-schema-field-names.md (created by R2-001) to get the confirmed logical field names before writing any queries</step>
+    <step order="1">Read scripts/Deploy-Playbook.ps1 to understand the existing PowerShell Dataverse authentication and HTTP patterns used in this project</step>
+    <step order="2">Read docs/ai-knowledge/catalogs/scope-model-index.json to enumerate all existing playbooks, their names, descriptions, and associated entity/record types</step>
+    <step order="3">For each playbook found in the catalog: draft triggerPhrases (5-10 diverse phrases), recordType (matter/project/event/contact/etc.), entityType (Dataverse logical name), and tags (3-8 comma-delimited tags)</step>
+    <step order="4">Create scripts/Seed-PlaybookTriggerMetadata.ps1 with: auth setup (following Deploy-Playbook.ps1 pattern), query for all sprk_analysisplaybook records, filter to only those with empty trigger metadata fields, idempotent update logic, -DryRun switch, per-record logging (name + fields updated, not content)</step>
+    <step order="5">Run the script with -DryRun first to verify the correct records are identified and the planned values are correct</step>
+    <step order="6">Run the script without -DryRun against spaarkedev1 to apply seed data</step>
+    <step order="7">Verify by querying Dataverse: GET /api/data/v9.2/sprk_analysisplaybooks?$select=sprk_name,sprk_triggerphrases,sprk_recordtype,sprk_entitytype,sprk_tags — confirm all records have non-empty values</step>
+    <step order="8">Update TASK-INDEX.md: change task R2-005 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>pac</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">scripts/Seed-PlaybookTriggerMetadata.ps1 — idempotent seeding script with -DryRun support</artifact>
+    <artifact type="config">All sprk_analysisplaybook records in spaarkedev1 have populated trigger metadata fields</artifact>
+    <artifact type="docs">projects/ai-sprk-chat-platform-enhancement-r2/notes/005-playbook-seed-data.md — documents seed values applied to each playbook for reference by Phase 2 tasks</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/data/v9.2/sprk_analysisplaybooks?$select=sprk_name,sprk_triggerphrases returns 0 records with null or empty sprk_triggerphrases after seeding</criterion>
+    <criterion testable="true">GET /api/data/v9.2/sprk_analysisplaybooks?$select=sprk_name,sprk_recordtype returns 0 records with null or empty sprk_recordtype after seeding</criterion>
+    <criterion testable="true">Seed-PlaybookTriggerMetadata.ps1 -DryRun runs without error and outputs a preview of planned changes</criterion>
+    <criterion testable="true">Running Seed-PlaybookTriggerMetadata.ps1 a second time produces 0 updates (idempotent — skips records that already have values)</criterion>
+    <criterion testable="true">Each playbook's sprk_triggerPhrases contains at least 5 newline-delimited phrases</criterion>
+    <criterion testable="true">No playbook content (JPS JSON, full description text) is written to script console output — only names and field keys</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The quality of trigger phrases directly impacts PlaybookDispatcher accuracy in production. Invest time in making phrases diverse and natural — avoid mechanical variations like "run [playbook name]" repeated five times. Think about what a lawyer, project manager, or paralegal would actually say in a chat interface.
+
+    For the `sprk_entityType` field: if the playbook applies to matter analysis outputs, the entity type is likely "sprk_analysisoutput". If it applies to contacts or cases, use those entity names. Check the scope-model-index.json and existing playbook JPS definitions to infer the correct entity type for each playbook.
+
+    The seeding script will become part of the standard playbook deployment workflow — when a new playbook is created, its trigger metadata should be populated before it is deployed. Document this in the script's header comments.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>DEPENDS ON R2-001. Do not start until R2-001 is marked completed and notes/001-dataverse-schema-field-names.md exists. Read that notes file FIRST to get confirmed field names.</protocol>
+  </execution>
+</task>

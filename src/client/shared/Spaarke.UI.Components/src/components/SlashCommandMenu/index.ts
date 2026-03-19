@@ -19,6 +19,7 @@
 export { SlashCommandMenu } from './SlashCommandMenu';
 export type {
   SlashCommandCategory,
+  SlashCommandSource,
   SlashCommand,
   SlashCommandMenuProps,
 } from './slashCommandMenu.types';

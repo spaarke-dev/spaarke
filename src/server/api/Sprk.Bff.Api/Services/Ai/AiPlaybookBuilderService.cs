@@ -281,7 +281,7 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
         BuilderRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Processing builder message: {Message}", request.Message);
+        _logger.LogInformation("Processing builder message (length={MessageLength})", request.Message.Length);
 
         // Build canvas context
         var canvasContext = new CanvasContext
@@ -602,7 +602,7 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
         CanvasContext? canvasContext,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Classifying intent for message: {Message}", message);
+        _logger.LogDebug("Classifying intent for message (length={MessageLength})", message.Length);
 
         // Use AI-powered classification
         var aiResult = await ClassifyIntentWithAiAsync(
@@ -823,7 +823,7 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "Failed to deserialize AI response: {Response}", jsonContent);
+            _logger.LogWarning(ex, "Failed to deserialize AI response (length={ResponseLength})", jsonContent?.Length ?? 0);
             throw;
         }
     }

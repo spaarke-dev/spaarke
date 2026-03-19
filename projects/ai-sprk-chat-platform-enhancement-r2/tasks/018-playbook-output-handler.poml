@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-018" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>PlaybookOutputHandler — Typed Output Routing (text/dialog/navigation/download/insert) with HITL vs Autonomous Execution</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>large</estimated-effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF API code implementation — creates PlaybookOutputHandler that routes five output types with HITL vs autonomous logic and emits new SSE event types; integrates with CompoundIntentDetector; FR-07, FR-08 requirements</rigor-reason>
+    <dependencies>[015]</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a new class `PlaybookOutputHandler` in `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/`
+    (factory-instantiated, NOT DI-registered) that handles the five typed output types from
+    `DispatchResult` and routes to either HITL dialog or autonomous execution.
+
+    **Five output types** (from JPS `output` node):
+    1. `text` — AI generates a natural language response; no special routing; standard chat response flow
+    2. `dialog` — Opens a Code Page dialog pre-populated with AI-extracted field data
+    3. `navigation` — Client-side redirect to a Dataverse record or external URL
+    4. `download` — Server generates a file (PDF/DOCX); client receives download link
+    5. `insert` — Content is inserted into the active editor (Lexical/working document)
+
+    **HITL vs autonomous routing** (from `DispatchResult.RequiresConfirmation`):
+    - `RequiresConfirmation = true` → emit `dialog_open` SSE event (new event type) with:
+      ```json
+      { "codePage": "sprk_emailcomposer", "fields": { "to": "...", "subject": "..." }, "playbookId": "..." }
+      ```
+      The client (SprkChatPane) receives this event and calls `Xrm.Navigation.navigateTo` to open the Code Page.
+    - `RequiresConfirmation = false` → execute the action autonomously via an appropriate AI tool
+      (e.g., for `text` output: just stream the response; for `download`: call `DocxExportService`)
+      and emit a `plan_step_complete` SSE event with the result.
+
+    **Integration with CompoundIntentDetector**:
+    - If `OutputType = "text"` and the AI response is a multi-step plan, `CompoundIntentDetector`
+      already handles the plan_preview gate — `PlaybookOutputHandler` should defer to it for `text` output
+    - For non-`text` outputs, `PlaybookOutputHandler` takes over routing entirely
+
+    **Class design**:
+    ```csharp
+    public class PlaybookOutputHandler
+    {
+        public PlaybookOutputHandler(CompoundIntentDetector intentDetector, DocxExportService docxExport,
+            ILogger&lt;PlaybookOutputHandler&gt; logger) { ... }
+
+        public Task HandleAsync(DispatchResult dispatch, ChatHostContext context,
+            IAsyncEnumerable&lt;ChatStreamEvent&gt; agentStream,
+            Func&lt;ChatStreamEvent, Task&gt; emitSseEvent,
+            CancellationToken cancellationToken = default);
+    }
+    ```
+
+    **New SSE event type**: Add `dialog_open` to the `ChatStreamEvent` discriminators. The `data`
+    payload matches the structure shown above.
+  </prompt>
+
+  <role>Senior .NET developer with Azure AI and Minimal API expertise</role>
+
+  <goal>
+    `PlaybookOutputHandler` correctly routes all five output types. A playbook with `dialog` output
+    type and `RequiresConfirmation=true` emits a `dialog_open` SSE event with pre-populated fields.
+    A playbook with `RequiresConfirmation=false` executes autonomously and emits `plan_step_complete`.
+    Email playbook opens email composer Code Page with AI-generated content (FR-07, FR-08).
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-07 (typed outputs), FR-08 (HITL vs autonomous), ADR-006 (Code Pages for dialogs)">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — factory pattern, MUST rules, CompoundIntentDetector integration">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="CompoundIntentDetector — plan preview gate pattern to integrate with">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+    <file purpose="PlaybookDispatcher result — DispatchResult model from R2-015">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs</file>
+    <file purpose="DocxExportService — download output type implementation">src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs</file>
+    <file purpose="Playbook architecture — JPS output node type schema and field names">docs/architecture/playbook-architecture.md</file>
+    <file purpose="SSE streaming pattern — new event type addition">../.claude/patterns/ai/streaming-endpoints.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">MUST use Code Pages for dialog output type — `dialog_open` event MUST reference a `webresourceName` (Code Page name), NOT a model-driven app dialog or JavaScript alert</constraint>
+    <constraint source="ADR-010">MUST NOT add PlaybookOutputHandler to DI — factory instantiation only</constraint>
+    <constraint source="ADR-013">MUST flow `ChatHostContext` into the output handler for entity-scoped Code Page navigation and file operations</constraint>
+    <constraint source="ADR-014">MUST NOT cache intermediate AI-generated field values used for dialog pre-population — they are ephemeral, session-specific</constraint>
+    <constraint source="spec FR-07">MUST support all five output types: text, dialog, navigation, download, insert — incomplete implementation is not acceptable</constraint>
+    <constraint source="spec FR-08">HITL path MUST open dialog for human review; autonomous path MUST execute directly without dialog — both paths MUST emit appropriate SSE completion events</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern>dialog_open SSE event format: `event: dialog_open\ndata: {"codePage":"sprk_emailcomposer","fields":{"to":"...","subject":"..."},"playbookId":"..."}\n\n` — client uses this to call Xrm.Navigation.navigateTo</pattern>
+      <pattern>Factory instantiation for handler: `var handler = new PlaybookOutputHandler(intentDetector, docxExport, logger)` — resolved from SprkChatAgentFactory with existing instances</pattern>
+      <pattern>Autonomous execution confirmation event: `event: plan_step_complete\ndata: {"step":"dispatch","status":"completed","result":"..."}\n\n` — reuse existing plan step event type</pattern>
+      <pattern>text output delegation: if OutputType="text", pass agentStream directly to CompoundIntentDetector and do not intercept — preserve existing plan_preview gate behavior</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      PlaybookDispatcher (R2-015) identifies the user's intent and extracts parameters. PlaybookOutputHandler
+      (this task) decides what to DO with that match. The separation of concerns is:
+      - PlaybookDispatcher: who? (which playbook, what parameters)
+      - PlaybookOutputHandler: what? (how to act on the matched playbook's output type)
+
+      The `dialog_open` SSE event is new in R2 and drives the HITL Code Page handoff pattern that is
+      the centerpiece of the R2 specification. The frontend (Phase 3 Task R2-039) will handle this
+      event by calling `Xrm.Navigation.navigateTo` with the Code Page name and pre-populated data.
+
+      For the autonomous path (`RequiresConfirmation=false`), the handler executes the action directly.
+      For `text` output: just stream the response normally. For `download`: generate file via
+      `DocxExportService`. For `insert`: emit insert content via an existing or new SSE event.
+      For `navigation`: emit a navigation SSE event with the target URL/record.
+
+      The `CompoundIntentDetector` integration is for the `text` output type only — it handles the
+      case where the AI's text response is itself a multi-step plan that needs user confirmation before
+      execution. Non-`text` outputs bypass `CompoundIntentDetector`.
+    </background>
+    <dependencies>
+      Strictly depends on Task R2-015 (PlaybookDispatcher and DispatchResult model must exist). Safe
+      to run in parallel with R2-016, R2-017, and Group A tasks. Task R2-019 is independent. Own files:
+      `Services/Ai/Chat/PlaybookOutputHandler.cs`, updates to `ChatStreamEvent` model for new event types.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read `CompoundIntentDetector.cs` and `DocxExportService.cs` to understand existing detection and export patterns before implementing the handler</step>
+    <step order="1">Read `docs/architecture/playbook-architecture.md` to confirm JPS output node field names and how `requiresConfirmation` is stored</step>
+    <step order="2">Add `dialog_open` event type to `ChatStreamEvent` discriminators (alongside existing event types from R2-010)</step>
+    <step order="3">Create `PlaybookOutputHandler.cs` in `Services/Ai/Chat/` with the constructor taking `CompoundIntentDetector`, `DocxExportService`, and `ILogger`</step>
+    <step order="4">Implement `HandleAsync` method with switch on `dispatch.OutputType`</step>
+    <step order="5">Implement `text` branch: delegate to `CompoundIntentDetector` for plan detection; stream agent response normally</step>
+    <step order="6">Implement `dialog` branch: if `RequiresConfirmation=true`, emit `dialog_open` event with Code Page name and `dispatch.ExtractedParameters` as pre-populated fields; if `false`, determine if autonomous execution is feasible for the specific action type</step>
+    <step order="7">Implement `navigation` branch: emit a new `navigate` SSE event with target URL/record constructed from `dispatch.ExtractedParameters` and `ChatHostContext`</step>
+    <step order="8">Implement `download` branch: call `DocxExportService` with AI-generated content; emit download link via SSE or return as regular response</step>
+    <step order="9">Implement `insert` branch: emit AI-generated content via `document_stream_start/token/end` events (used by write-back in R2-023)</step>
+    <step order="10">Wire `PlaybookOutputHandler` into `SprkChatAgentFactory` using factory instantiation</step>
+    <step order="11">Wire `SprkChatAgent` to call `PlaybookDispatcher.DispatchAsync` and then `PlaybookOutputHandler.HandleAsync` when a dispatch match is found</step>
+    <step order="12">Run `dotnet build` and verify no errors</step>
+    <step order="13">Update TASK-INDEX.md: change task R2-018 status to completed (🔲 → ✅)</step>
+  </steps>
+
+  <tools>
+    <tool>dotnet</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs — typed output routing handler with HITL/autonomous logic</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatStreamEvent.cs — updated with dialog_open event type discriminator</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs — updated to invoke PlaybookDispatcher → PlaybookOutputHandler when dispatch match found</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs — updated to factory-instantiate PlaybookOutputHandler</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">When PlaybookDispatcher returns a match with OutputType="dialog" and RequiresConfirmation=true, the SSE stream contains a `dialog_open` event with `codePage` and `fields` properties</criterion>
+    <criterion testable="true">When PlaybookDispatcher returns a match with OutputType="text" and RequiresConfirmation=false, the response streams normally via the standard chat flow</criterion>
+    <criterion testable="true">When PlaybookDispatcher returns OutputType="download", a file download link is returned to the client (not a dialog)</criterion>
+    <criterion testable="true">When PlaybookDispatcher returns no match (Matched=false), the handler falls through to the standard SprkChatAgent response flow unchanged</criterion>
+    <criterion testable="true">PlaybookOutputHandler is NOT in the DI container (factory instantiation verified)</criterion>
+    <criterion testable="true">`dialog_open` event data includes the pre-populated field values extracted by PlaybookDispatcher (ExtractedParameters mapped to Code Page field names)</criterion>
+    <criterion testable="true">`dotnet build` passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Code Page name for the `dialog` output type comes from the JPS definition — it is stored as
+    a field in the playbook's output node (e.g., `output.codePage: "sprk_emailcomposer"`). The
+    `PlaybookDispatcher` reads this from JPS and includes it in `DispatchResult.OutputType` context.
+    Verify how the code page name flows from JPS to `DispatchResult` — it may need to be a separate
+    field on the result model (e.g., `DispatchResult.CodePageName`) rather than embedded in OutputType.
+
+    The `navigate` SSE event type (for `navigation` output) is also new. Add it alongside `dialog_open`
+    in the `ChatStreamEvent` discriminators in step 2. Document both new event types in
+    `notes/018-new-sse-event-types.md` for the frontend Phase 3 tasks to consume.
+
+    For autonomous actions (RequiresConfirmation=false), the handler should emit a brief confirmation
+    text response to the user: "I've completed {action}." This keeps the user informed even when no
+    dialog opens. Use the agent stream to emit this as a standard `token` event followed by `done`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 2 Group B — depends on R2-015 (PlaybookDispatcher). Safe to run in parallel with R2-016, R2-017, and Group A tasks. R2-019 is independent. Own files: PlaybookOutputHandler.cs (new), ChatStreamEvent.cs (update), SprkChatAgent.cs (dispatch wiring), SprkChatAgentFactory.cs (instantiation).</protocol>
+  </execution>
+</task>

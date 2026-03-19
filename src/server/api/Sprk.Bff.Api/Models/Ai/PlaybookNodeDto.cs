@@ -1,7 +1,32 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 
 namespace Sprk.Bff.Api.Models.Ai;
+
+/// <summary>
+/// Output types for DeliverOutput nodes (R2).
+/// Determines how the PlaybookDispatcher presents the final result to the user.
+/// Serialized as camelCase strings in JPS JSON.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum OutputType
+{
+    /// <summary>Inline text/markdown response in chat.</summary>
+    Text,
+
+    /// <summary>Open a Code Page dialog (targetPage required).</summary>
+    Dialog,
+
+    /// <summary>Navigate to a record or page.</summary>
+    Navigation,
+
+    /// <summary>Generate a downloadable file.</summary>
+    Download,
+
+    /// <summary>Insert content into the current document context.</summary>
+    Insert
+}
 
 /// <summary>
 /// Response model for playbook node operations.
@@ -105,6 +130,35 @@ public record PlaybookNodeDto
     public Guid[] KnowledgeIds { get; init; } = [];
 
     /// <summary>
+    /// Whether this node requires human confirmation before execution (R2).
+    /// When true, PlaybookDispatcher opens HITL confirmation UI before executing.
+    /// When false, executes autonomously. Default is determined by OutputType
+    /// in PlaybookDispatcher (dialog → true, text → false).
+    /// Null means use default behavior based on output type.
+    /// </summary>
+    public bool? RequiresConfirmation { get; init; }
+
+    /// <summary>
+    /// Typed output for DeliverOutput nodes (R2).
+    /// Determines how the PlaybookDispatcher presents the result.
+    /// Only applicable when NodeType is Output.
+    /// </summary>
+    public OutputType? OutputType { get; init; }
+
+    /// <summary>
+    /// Code Page web resource name for dialog/navigation outputs (R2).
+    /// Example: "sprk_emailcomposer". Only used when OutputType is Dialog or Navigation.
+    /// </summary>
+    public string? TargetPage { get; init; }
+
+    /// <summary>
+    /// Field name → AI-extracted value mapping for pre-populating target dialogs (R2).
+    /// Keys are field names on the target Code Page; values are variable references
+    /// or literal values from the playbook execution context.
+    /// </summary>
+    public Dictionary<string, string>? PrePopulateFields { get; init; }
+
+    /// <summary>
     /// Record creation timestamp.
     /// </summary>
     public DateTime CreatedOn { get; init; }
@@ -204,6 +258,26 @@ public record CreateNodeRequest
     /// Tool IDs to associate with this node.
     /// </summary>
     public Guid[]? ToolIds { get; init; }
+
+    /// <summary>
+    /// Whether this node requires human confirmation before execution (R2).
+    /// </summary>
+    public bool? RequiresConfirmation { get; init; }
+
+    /// <summary>
+    /// Typed output for DeliverOutput nodes (R2).
+    /// </summary>
+    public OutputType? OutputType { get; init; }
+
+    /// <summary>
+    /// Code Page web resource name for dialog/navigation outputs (R2).
+    /// </summary>
+    public string? TargetPage { get; init; }
+
+    /// <summary>
+    /// Field name → value mapping for pre-populating target dialogs (R2).
+    /// </summary>
+    public Dictionary<string, string>? PrePopulateFields { get; init; }
 }
 
 /// <summary>
@@ -287,6 +361,26 @@ public record UpdateNodeRequest
     /// Tool IDs to associate with this node (replaces existing).
     /// </summary>
     public Guid[]? ToolIds { get; init; }
+
+    /// <summary>
+    /// Whether this node requires human confirmation before execution (R2).
+    /// </summary>
+    public bool? RequiresConfirmation { get; init; }
+
+    /// <summary>
+    /// Typed output for DeliverOutput nodes (R2).
+    /// </summary>
+    public OutputType? OutputType { get; init; }
+
+    /// <summary>
+    /// Code Page web resource name for dialog/navigation outputs (R2).
+    /// </summary>
+    public string? TargetPage { get; init; }
+
+    /// <summary>
+    /// Field name → value mapping for pre-populating target dialogs (R2).
+    /// </summary>
+    public Dictionary<string, string>? PrePopulateFields { get; init; }
 }
 
 /// <summary>

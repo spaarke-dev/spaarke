@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-030" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Integrate renderMarkdown() into SprkChatMessageRenderer</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <tags>frontend, fluent-ui, shared-library</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx files in the shared component library (SprkChatMessageRenderer.tsx). Frontend tag, code modification, impacts all chat message rendering across multiple message types. Dark mode compliance required per ADR-021.</rigor-reason>
+    <dependencies>[004]</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace the raw text rendering in SprkChatMessageRenderer.tsx with the shared `renderMarkdown()` utility created in task R2-004. Apply markdown rendering to all message types: user messages, AI responses, and plan previews. Ensure code blocks have syntax highlighting, DOMPurify sanitization is applied before `dangerouslySetInnerHTML`, and all rendered HTML uses Fluent v9 semantic CSS tokens for dark mode compliance.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    SprkChatMessageRenderer renders markdown as formatted HTML (headings, bold, italic, code blocks with highlighting, lists, tables) across all message types. No raw markdown symbols (**, #, `, etc.) are visible in the chat UI. Dark mode renders correctly using Fluent v9 semantic tokens. DOMPurify is applied before any `dangerouslySetInnerHTML` usage.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-01 markdown rendering requirement">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — MUST rules, ADR constraints">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Component to modify — current raw text rendering logic">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+    <file purpose="Fluent v9 design system — semantic token usage, dark mode requirement">../../../.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file purpose="Shared component library ADR — renderMarkdown usage pattern">../../../.claude/adr/ADR-012-shared-components.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec MUST">MUST use single markdown parser — the shared renderMarkdown() utility created in task R2-004 (not a separate parser)</constraint>
+    <constraint source="spec MUST">MUST sanitize rendered markdown HTML via DOMPurify before dangerouslySetInnerHTML</constraint>
+    <constraint source="ADR-021">MUST use Fluent v9 semantic tokens for all styles applied to rendered markdown — no hard-coded colors</constraint>
+    <constraint source="ADR-021">MUST support dark mode — rendered HTML must render correctly in both light and dark Fluent themes</constraint>
+    <constraint source="ADR-012">MUST import renderMarkdown from @spaarke/ui-components shared library — do not duplicate the utility</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/markdownToHtml.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/pcf/theme-management.md — Fluent v9 semantic token usage for custom styles</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SprkChat R1 renders chat messages as plain text strings. Raw markdown symbols (**, #, `, etc.) are visible to users in AI responses. Task R2-004 (Phase 1, Group none) creates a shared `renderMarkdown()` utility using `marked` + DOMPurify with Fluent v9 CSS token styling. This task integrates that utility into SprkChatMessageRenderer so all message types display formatted HTML. The existing AnalysisWorkspace code page has a `markdownToHtml.ts` utility — R2-004 unifies and replaces this with a single pipeline.
+
+      SprkChatMessageRenderer handles rendering of: (1) user messages, (2) AI assistant responses, (3) plan preview content, and (4) error messages. User messages may contain markdown if user pastes formatted text. AI responses will contain markdown headings, lists, code blocks, and tables.
+    </background>
+    <dependencies>
+      Depends on R2-004 (renderMarkdown utility in shared library). Can run in parallel with R2-031, R2-032, R2-033 (same parallel group C) since each modifies different files. Task R2-034 (dark mode audit) depends on this task.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read SprkChatMessageRenderer.tsx to understand current rendering logic, message type handling, and component structure</step>
+    <step order="1">Read types.ts in the SprkChat folder to understand SprkChatMessage type — identify the content field and message role/type discriminators</step>
+    <step order="2">Locate the renderMarkdown() export from R2-004 in the shared library — confirm its import path and API signature</step>
+    <step order="3">Read ADR-021-fluent-design-system.md to understand which semantic tokens to use for rendered markdown styles (text colors, code block backgrounds, link colors)</step>
+    <step order="4">Replace raw text rendering in SprkChatMessageRenderer with renderMarkdown() for AI assistant messages — apply DOMPurify output via dangerouslySetInnerHTML</step>
+    <step order="5">Apply renderMarkdown() to user messages (users may paste markdown-formatted text)</step>
+    <step order="6">Apply renderMarkdown() to plan preview content within PlanPreviewCard if rendered through SprkChatMessageRenderer</step>
+    <step order="7">Ensure code blocks in rendered markdown have syntax highlighting — verify the renderMarkdown() utility applies highlight.js or equivalent</step>
+    <step order="8">Add makeStyles / CSS-in-JS styles using Fluent v9 tokens for markdown container: proper heading sizes, link colors, code block background using colorNeutralBackground2, border colors using colorNeutralStroke2</step>
+    <step order="9">Run TypeScript compilation check: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="10">Visually verify in dev environment: send a chat message with markdown content — confirm formatted output</step>
+    <step order="11">Update TASK-INDEX.md: change task R2-030 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">SprkChatMessageRenderer.tsx — updated to render markdown HTML for all message types via renderMarkdown()</artifact>
+    <artifact type="code">Fluent v9 token-based CSS styles for markdown container (makeStyles or inline tokens)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Chat messages containing **bold**, # headings, `code`, and - lists render as formatted HTML — no raw markdown symbols visible</criterion>
+    <criterion testable="true">Code blocks in AI responses show syntax highlighting with appropriate language detection</criterion>
+    <criterion testable="true">Rendered HTML is sanitized via DOMPurify — script tags and event handlers stripped</criterion>
+    <criterion testable="true">Dark mode: all rendered markdown styles use Fluent v9 semantic tokens — no hard-coded hex colors</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors after changes</criterion>
+    <criterion testable="true">User messages with markdown content render formatted (bold, lists, etc.)</criterion>
+    <criterion testable="true">Plan preview content renders formatted markdown</criterion>
+  </acceptance-criteria>
+</task>

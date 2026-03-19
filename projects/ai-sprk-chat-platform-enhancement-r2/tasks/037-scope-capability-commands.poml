@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R2-037" project="SprkChat Platform Enhancement R2">
+  <metadata>
+    <title>Surface Scope Capability Commands in Slash Menu</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <tags>frontend</tags>
+    <estimated-effort>medium</estimated-effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies useChatContextMapping.ts to add scope capability resolution, extending R2-035. Frontend tag, .ts file modification. Logic for scope-independent command contribution requires careful merging with playbook commands to avoid duplicates.</rigor-reason>
+    <dependencies>[035]</dependencies>
+  </metadata>
+
+  <prompt>
+    Add scope-contributed commands to the slash menu independently of the active playbook. The `useChatContextMapping` hook should include scope capability commands from `sprk_scope.sprk_capabilities` in the resolved command list, with source="scope" and a sourceLabel of the scope name. Scope commands appear alongside playbook commands without duplication — if both a scope and a playbook contribute the same logical command, only one entry shows with combined attribution.
+  </prompt>
+
+  <role>Senior full-stack developer</role>
+
+  <goal>
+    When the session context has an active scope with capabilities (e.g., Legal Research scope with web_search and search capabilities), those capabilities appear in the slash menu as commands with source="scope". Scope commands appear regardless of which playbook is active. Duplicate commands between scope and playbook are deduplicated.
+  </goal>
+
+  <inputs>
+    <file purpose="Project specification — FR-11 scope capabilities independent of playbooks">projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+    <file purpose="Project AI context — scope capabilities architecture">projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+    <file purpose="Hook to extend — scope command inclusion">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+    <file purpose="Slash command types — source and sourceLabel fields">src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+    <file purpose="Analysis scopes pattern — scope capability model">../.claude/patterns/ai/analysis-scopes.md</file>
+    <file purpose="ADR-013 — flow ChatHostContext through pipeline">../.claude/adr/ADR-013-ai-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-11">Scope commands MUST appear regardless of which playbook is active — scope capabilities are independent of playbook</constraint>
+    <constraint source="spec MUST">MUST NOT create static relationship tables between scopes and commands — scope command resolution must be metadata-driven</constraint>
+    <constraint source="ADR-013">MUST flow ChatHostContext through the scope command resolution — scope resolution uses entity context to determine which scopes are active</constraint>
+    <constraint source="spec">Deduplication MUST be performed client-side for commands that exist in both scope and playbook — prefer playbook version when both exist, mark both as sources</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/spec.md</file>
+      <file>projects/ai-sprk-chat-platform-enhancement-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/slashCommandMenu.types.ts</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern>BFF command endpoint (R2-019) already separates scope commands from playbook commands in the response — the frontend hook needs to preserve this distinction in the merged list</pattern>
+      <pattern>Scope capability to command mapping: the BFF R2-021 maps sprk_scope.sprk_capabilities option values to slash command definitions</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R2-035 wires the command resolution endpoint to the slash menu. That endpoint returns both playbook commands and scope commands from the BFF. This task ensures scope commands maintain their identity (source="scope") through the resolution pipeline and appear correctly in the slash menu even when no specific playbook is active or when the active playbook does not contribute overlapping commands.
+
+      Example: A Legal Research scope declares web_search capability → contributes `/search-legal-database` command with source="scope", sourceLabel="Legal Research". This command appears in the slash menu whenever a matter analysis record is open, regardless of active playbook.
+    </background>
+    <dependencies>
+      Depends on R2-035 (source discriminator and base command resolution). Can run in parallel with R2-036, R2-038. Connects to BFF task R2-021 (scope capabilities service) during Phase 4 integration.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0">Read useChatContextMapping.ts (after R2-035 changes) to understand how scope commands are currently handled in the API response</step>
+    <step order="1">Read analysis-scopes.md pattern to understand the three-tier scope system and how scope capabilities relate to command contributions</step>
+    <step order="2">Confirm the BFF /api/ai/chat/sessions/{id}/commands response structure includes a scopeCommands array separate from playbookCommands (or combined with source field)</step>
+    <step order="3">Verify scope commands returned from BFF include sourceLabel (scope name) — if not, check what data is available to construct the label</step>
+    <step order="4">Update merging logic in useChatContextMapping: ensure scope commands (source="scope") are merged into resolvedCommands without being overwritten by playbook commands</step>
+    <step order="5">Implement deduplication: if a scope and playbook both contribute a command with the same key/name, keep one entry and annotate with combined source information</step>
+    <step order="6">Verify scope commands remain in resolvedCommands after a playbook context change — they should not be removed when playbook switches</step>
+    <step order="7">Run TypeScript compilation: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npx tsc --noEmit — verify 0 errors</step>
+    <step order="8">Update TASK-INDEX.md: change task R2-037 status to completed</step>
+  </steps>
+
+  <tools>
+    <tool>npm</tool>
+    <tool>git</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="code">useChatContextMapping.ts — updated merging logic to properly include scope commands independently of active playbook</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scope commands appear in the slash menu regardless of which playbook is active</criterion>
+    <criterion testable="true">Scope commands have source="scope" and a non-empty sourceLabel (scope name)</criterion>
+    <criterion testable="true">Switching the active playbook does not remove scope commands from the slash menu</criterion>
+    <criterion testable="true">Duplicate commands between scope and playbook appear only once in the merged list</criterion>
+    <criterion testable="true">TypeScript compilation passes with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

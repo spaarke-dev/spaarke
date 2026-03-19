@@ -9,7 +9,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import { IChatSseEvent, IChatSseEventData, ICitation, IUseSseStreamResult } from '../types';
+import { IChatSseEvent, IChatSseEventData, ICitation, IDocumentStreamSseEvent, IUseSseStreamResult } from '../types';
 
 /**
  * Parse a single SSE data line into a ChatSseEvent.
@@ -82,12 +82,29 @@ export function useSseStream(): IUseSseStreamResult {
   const [isDone, setIsDone] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [isTyping, setIsTyping] = useState<boolean>(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [citations, setCitations] = useState<ICitation[]>([]);
   // Phase 2F: stores planId from plan_preview SSE event so SprkChat can call /plan/approve
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
   // Phase 2F: full plan_preview data (planTitle, steps) used to set message metadata
   const [pendingPlanData, setPendingPlanData] = useState<IChatSseEventData | null>(null);
+
+  // Task R2-039/R2-052: stores the latest action/dialog/navigate event data for SprkChat to handle.
+  // Follows the same pattern as pendingPlanId — SprkChat watches via useEffect.
+  const [pendingActionEvent, setPendingActionEvent] = useState<{
+    type: 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate';
+    data: IChatSseEventData;
+  } | null>(null);
+
+  // Task R2-051: Callback ref for document stream event forwarding.
+  // Uses a ref (not state) because document_stream_token events arrive at high
+  // frequency (one per AI-generated token). React state batching would coalesce
+  // multiple token events in a single render frame, causing lost tokens.
+  // The callback ref is invoked synchronously from the fetch loop, ensuring
+  // every token is forwarded to SprkChatBridge without loss.
+  // SECURITY (ADR-015): Only content tokens and structural metadata are forwarded.
+  const onDocumentStreamEventRef = useRef<((event: IDocumentStreamSseEvent) => void) | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -97,11 +114,26 @@ export function useSseStream(): IUseSseStreamResult {
       abortControllerRef.current = null;
     }
     setIsStreaming(false);
+    setIsTyping(false);
   }, []);
 
   const clearSuggestions = useCallback(() => {
     setSuggestions([]);
   }, []);
+
+  // Task R2-039: clear the pending action event after SprkChat has handled it
+  const clearPendingActionEvent = useCallback(() => {
+    setPendingActionEvent(null);
+  }, []);
+
+  // Task R2-051: Register/unregister the document stream event callback.
+  // SprkChat.tsx calls this once during setup to wire bridge forwarding.
+  const setOnDocumentStreamEvent = useCallback(
+    (handler: ((event: IDocumentStreamSseEvent) => void) | null) => {
+      onDocumentStreamEventRef.current = handler;
+    },
+    []
+  );
 
   /**
    * Extract tenant ID from JWT access token for X-Tenant-Id header.
@@ -128,10 +160,12 @@ export function useSseStream(): IUseSseStreamResult {
     setIsDone(false);
     setError(null);
     setIsStreaming(true);
+    setIsTyping(false);
     setSuggestions([]);
     setCitations([]);
     setPendingPlanId(null);
     setPendingPlanData(null);
+    setPendingActionEvent(null);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -152,6 +186,10 @@ export function useSseStream(): IUseSseStreamResult {
 
         if (!response.ok) {
           const errorText = await response.text();
+          // ADR-016: Show user-friendly message for rate limiting (429)
+          if (response.status === 429) {
+            throw new Error('You are sending messages too quickly. Please wait a moment and try again.');
+          }
           throw new Error(`Chat request failed (${response.status}): ${errorText}`);
         }
 
@@ -185,10 +223,16 @@ export function useSseStream(): IUseSseStreamResult {
                 continue;
               }
 
-              if (event.type === 'token' && event.content) {
+              if (event.type === 'typing_start') {
+                setIsTyping(true);
+              } else if (event.type === 'token' && event.content) {
+                // First token arrives — hide typing indicator, show content
+                setIsTyping(false);
                 accumulated += event.content;
                 // Use functional update to ensure correct state
                 setContent(accumulated);
+              } else if (event.type === 'typing_end') {
+                setIsTyping(false);
               } else if (event.type === 'suggestions') {
                 const suggestionsData = parseSuggestions(event);
                 if (suggestionsData.length > 0) {
@@ -202,10 +246,61 @@ export function useSseStream(): IUseSseStreamResult {
                 // 2. Call /plan/approve on "Proceed" with the correct planId
                 setPendingPlanId(event.data.planId);
                 setPendingPlanData(event.data);
+              } else if (
+                event.type === 'action_confirmation' ||
+                event.type === 'action_success' ||
+                event.type === 'action_error' ||
+                event.type === 'dialog_open' ||
+                event.type === 'navigate'
+              ) {
+                // Task R2-039/R2-052: Store action/dialog/navigate event for SprkChat to handle via useEffect.
+                // SprkChat watches pendingActionEvent and dispatches to the appropriate handler
+                // (confirmation dialog, toast, Code Page navigateTo, or Xrm navigation).
+                setPendingActionEvent({
+                  type: event.type as 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate',
+                  data: event.data || {},
+                });
+              } else if (
+                event.type === 'document_stream_start' ||
+                event.type === 'document_stream_token' ||
+                event.type === 'document_stream_end'
+              ) {
+                // Task R2-051: BFF write-back SSE → callback → SprkChatBridge → editor.
+                // Invokes callback synchronously (no React state) to ensure every token
+                // is forwarded without loss from React batch coalescing.
+                // ADR-015: Only content tokens and structural metadata — no auth tokens.
+                const handler = onDocumentStreamEventRef.current;
+                if (handler) {
+                  const raw = event as unknown as Record<string, unknown>;
+                  if (event.type === 'document_stream_start') {
+                    handler({
+                      type: 'document_stream_start',
+                      operationId: (raw.operationId as string) || '',
+                      targetPosition: (raw.targetPosition as string) || 'cursor',
+                      operationType: (raw.operationType as 'insert' | 'replace' | 'diff') || 'insert',
+                    });
+                  } else if (event.type === 'document_stream_token') {
+                    handler({
+                      type: 'document_stream_token',
+                      operationId: (raw.operationId as string) || '',
+                      token: (raw.content as string) || (raw.token as string) || '',
+                      index: (raw.index as number) || 0,
+                    });
+                  } else if (event.type === 'document_stream_end') {
+                    handler({
+                      type: 'document_stream_end',
+                      operationId: (raw.operationId as string) || '',
+                      cancelled: (raw.cancelled as boolean) || false,
+                      totalTokens: (raw.totalTokens as number) || 0,
+                    });
+                  }
+                }
               } else if (event.type === 'done') {
                 setIsDone(true);
                 setIsStreaming(false);
+                setIsTyping(false);
               } else if (event.type === 'error') {
+                setIsTyping(false);
                 throw new Error(event.content || 'Stream error');
               }
               // plan_step_start / plan_step_complete: no state update needed here —
@@ -223,9 +318,14 @@ export function useSseStream(): IUseSseStreamResult {
             if (!event) {
               continue;
             }
-            if (event.type === 'token' && event.content) {
+            if (event.type === 'typing_start') {
+              setIsTyping(true);
+            } else if (event.type === 'token' && event.content) {
+              setIsTyping(false);
               accumulated += event.content;
               setContent(accumulated);
+            } else if (event.type === 'typing_end') {
+              setIsTyping(false);
             } else if (event.type === 'suggestions') {
               const suggestionsData = parseSuggestions(event);
               if (suggestionsData.length > 0) {
@@ -236,25 +336,75 @@ export function useSseStream(): IUseSseStreamResult {
             } else if (event.type === 'plan_preview' && event.data?.planId) {
               setPendingPlanId(event.data.planId);
               setPendingPlanData(event.data);
+            } else if (
+              event.type === 'action_confirmation' ||
+              event.type === 'action_success' ||
+              event.type === 'action_error' ||
+              event.type === 'dialog_open' ||
+              event.type === 'navigate'
+            ) {
+              // Task R2-052: Store action/dialog/navigate event for SprkChat to handle via useEffect.
+              // Mirrors the main SSE parser block (R2-039/R2-052) — must include 'navigate'.
+              setPendingActionEvent({
+                type: event.type as 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate',
+                data: event.data || {},
+              });
+            } else if (
+              event.type === 'document_stream_start' ||
+              event.type === 'document_stream_token' ||
+              event.type === 'document_stream_end'
+            ) {
+              // Task R2-051: Same callback forwarding as in the main loop.
+              const handler = onDocumentStreamEventRef.current;
+              if (handler) {
+                const raw = event as unknown as Record<string, unknown>;
+                if (event.type === 'document_stream_start') {
+                  handler({
+                    type: 'document_stream_start',
+                    operationId: (raw.operationId as string) || '',
+                    targetPosition: (raw.targetPosition as string) || 'cursor',
+                    operationType: (raw.operationType as 'insert' | 'replace' | 'diff') || 'insert',
+                  });
+                } else if (event.type === 'document_stream_token') {
+                  handler({
+                    type: 'document_stream_token',
+                    operationId: (raw.operationId as string) || '',
+                    token: (raw.content as string) || (raw.token as string) || '',
+                    index: (raw.index as number) || 0,
+                  });
+                } else if (event.type === 'document_stream_end') {
+                  handler({
+                    type: 'document_stream_end',
+                    operationId: (raw.operationId as string) || '',
+                    cancelled: (raw.cancelled as boolean) || false,
+                    totalTokens: (raw.totalTokens as number) || 0,
+                  });
+                }
+              }
             } else if (event.type === 'done') {
               setIsDone(true);
+              setIsTyping(false);
             } else if (event.type === 'error') {
+              setIsTyping(false);
               setError(new Error(event.content || 'Stream error'));
             }
           }
         }
 
         setIsStreaming(false);
+        setIsTyping(false);
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') {
           // Stream was cancelled by user, not an error
           setIsStreaming(false);
+          setIsTyping(false);
           return;
         }
 
         const errorObj = err instanceof Error ? err : new Error('Unknown stream error');
         setError(errorObj);
         setIsStreaming(false);
+        setIsTyping(false);
       }
     };
 
@@ -266,13 +416,19 @@ export function useSseStream(): IUseSseStreamResult {
     isDone,
     error,
     isStreaming,
+    isTyping,
     suggestions,
     citations,
     pendingPlanId,
     pendingPlanData,
+    pendingActionEvent,
+    pendingDocumentStreamEvent: null, // Deprecated: use setOnDocumentStreamEvent callback instead
     startStream,
     cancelStream,
     clearSuggestions,
+    clearPendingActionEvent,
+    clearPendingDocumentStreamEvent: () => {}, // No-op: callback pattern doesn't need clearing
+    setOnDocumentStreamEvent,
   };
 }
 
@@ -291,5 +447,8 @@ function mapSseCitations(items: NonNullable<IChatSseEvent['data']>['citations'])
     page: item.page ?? undefined,
     excerpt: item.excerpt,
     chunkId: item.chunkId,
+    sourceType: item.sourceType,
+    url: item.url,
+    snippet: item.snippet,
   }));
 }

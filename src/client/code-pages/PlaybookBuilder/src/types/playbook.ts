@@ -27,6 +27,28 @@ export enum PlaybookNodeType {
 }
 
 // ---------------------------------------------------------------------------
+// Output Type Enum (R2 — typed output dispatch for PlaybookDispatcher)
+// ---------------------------------------------------------------------------
+
+/**
+ * Output types for DeliverOutput nodes.
+ * Determines how the PlaybookDispatcher presents the final result to the user.
+ *
+ *   text       — inline text/markdown response in chat
+ *   dialog     — open a Code Page dialog (targetPage required)
+ *   navigation — navigate to a record or page
+ *   download   — generate a downloadable file
+ *   insert     — insert content into the current document context
+ */
+export enum OutputType {
+  Text = 'text',
+  Dialog = 'dialog',
+  Navigation = 'navigation',
+  Download = 'download',
+  Insert = 'insert',
+}
+
+// ---------------------------------------------------------------------------
 // Dataverse sprk_nodetype — Coarse Node Category (4 values)
 // ---------------------------------------------------------------------------
 
@@ -151,8 +173,19 @@ export interface PlaybookNodeData {
   timeoutSeconds?: number;
   retryCount?: number;
 
+  // HITL / autonomous execution flag (R2)
+  // When true, PlaybookDispatcher opens confirmation UI before executing.
+  // When false, executes autonomously. Default behavior is determined by
+  // outputType in PlaybookDispatcher (dialog → true, text → false).
+  requiresConfirmation?: boolean;
+
   // Type-specific config (maps to sprk_configjson)
   conditionJson?: string;
+
+  // Deliver Output config — typed output (R2)
+  outputType?: OutputType;
+  targetPage?: string;
+  prePopulateFields?: Record<string, string>;
 
   // Deliver Output config
   deliveryType?: 'markdown' | 'html' | 'text' | 'json';
@@ -277,3 +310,25 @@ export const NODE_TYPE_INFO: NodeTypeInfo[] = [
     category: 'logic',
   },
 ];
+
+// ---------------------------------------------------------------------------
+// JPS Root-Level Trigger Metadata (R2 — informational, not for dispatch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Trigger metadata stored at the JPS root level of a playbook definition.
+ * Used for execution-time behavior reference only. Queryable matching
+ * uses Dataverse fields (sprk_analysisplaybook columns), NOT these values.
+ *
+ * All fields are optional for backward compatibility.
+ */
+export interface PlaybookTriggerMetadata {
+  /** Natural language phrases for semantic matching (informational). */
+  triggerPhrases?: string[];
+
+  /** Record type filter, e.g. "matter", "project". */
+  recordType?: string;
+
+  /** Dataverse logical entity name filter, e.g. "sprk_matter". */
+  entityType?: string;
+}

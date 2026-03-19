@@ -26,6 +26,7 @@ public partial class DocxExportService : IExportService
     private const string TitleStyleId = "Title";
     private const string Heading1StyleId = "Heading1";
     private const string Heading2StyleId = "Heading2";
+    private const string Heading3StyleId = "Heading3";
     private const string NormalStyleId = "Normal";
     private const string TableStyleId = "TableGrid";
 
@@ -150,6 +151,12 @@ public partial class DocxExportService : IExportService
         styles.Append(CreateStyle(Heading2StyleId, "Heading 2", new RunProperties(
             new Bold(),
             new FontSize { Val = "28" }, // 14pt
+            new Color { Val = "404040" })));
+
+        // Heading 3
+        styles.Append(CreateStyle(Heading3StyleId, "Heading 3", new RunProperties(
+            new Bold(),
+            new FontSize { Val = "24" }, // 12pt
             new Color { Val = "404040" })));
 
         stylesPart.Styles = styles;
@@ -545,6 +552,276 @@ public partial class DocxExportService : IExportService
 
     [GeneratedRegex(@"[<>:""/\\|?*]")]
     private static partial Regex InvalidFileNameCharsRegex();
+
+    [GeneratedRegex(@"\*\*(.+?)\*\*")]
+    private static partial Regex BoldMarkdownRegex();
+
+    #endregion
+
+    #region Markdown-to-DOCX Export (FR-15: Open in Word)
+
+    /// <summary>
+    /// Generates a DOCX document from markdown content for the "Open in Word" feature (FR-15).
+    /// Handles common AI-generated markdown patterns: headings (#/##/###), bold (**text**),
+    /// bullet lists (- item), numbered lists (1. item), and plain paragraphs.
+    /// </summary>
+    /// <param name="markdown">Markdown content to convert (typically AI-generated analysis output).</param>
+    /// <param name="title">Document title for the title page and metadata.</param>
+    /// <param name="metadata">Optional metadata dictionary (e.g. matterName, analysisDate) for document properties.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Byte array containing the generated .docx file.</returns>
+    public Task<byte[]> GenerateFromMarkdownAsync(
+        string markdown,
+        string title,
+        Dictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Generating DOCX from markdown: Title={Title}, ContentLength={Length}",
+            title, markdown.Length);
+
+        using var stream = new MemoryStream();
+
+        using (var document = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document, autoSave: true))
+        {
+            var mainPart = document.AddMainDocumentPart();
+            mainPart.Document = new Document();
+            var body = mainPart.Document.AppendChild(new Body());
+
+            // Add styles (reuse existing style definitions)
+            AddStyleDefinitions(mainPart);
+
+            // Add document properties
+            var props = document.AddCoreFilePropertiesPart();
+            using (var writer = new StreamWriter(props.GetStream()))
+            {
+                var creator = metadata?.GetValueOrDefault("createdBy") ?? "Spaarke AI";
+                writer.Write($@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes""?>
+<cp:coreProperties xmlns:cp=""http://schemas.openxmlformats.org/package/2006/metadata/core-properties""
+                   xmlns:dc=""http://purl.org/dc/elements/1.1/""
+                   xmlns:dcterms=""http://purl.org/dc/terms/"">
+    <dc:title>{EscapeXml(title)}</dc:title>
+    <dc:creator>{EscapeXml(creator)}</dc:creator>
+    <dc:description>AI-generated analysis — exported from SprkChat</dc:description>
+    <dcterms:created>{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}</dcterms:created>
+</cp:coreProperties>");
+            }
+
+            // Title
+            body.Append(CreateParagraph(title, TitleStyleId));
+
+            // Metadata subtitle (matter name, date)
+            if (metadata is not null)
+            {
+                var metadataLine = string.Join(" | ", metadata
+                    .Where(kv => !string.Equals(kv.Key, "createdBy", StringComparison.OrdinalIgnoreCase))
+                    .Select(kv => $"{kv.Key}: {kv.Value}"));
+                if (!string.IsNullOrWhiteSpace(metadataLine))
+                {
+                    var subtitlePara = CreateParagraph(metadataLine, NormalStyleId);
+                    subtitlePara.ParagraphProperties = new ParagraphProperties(
+                        new SpacingBetweenLines { After = "200" });
+                    body.Append(subtitlePara);
+                }
+            }
+
+            body.Append(CreateHorizontalRule());
+
+            // Parse and append markdown content
+            var paragraphs = ParseMarkdownToParagraphs(markdown);
+            foreach (var para in paragraphs)
+            {
+                body.Append(para);
+            }
+
+            // Footer
+            body.Append(CreateHorizontalRule());
+            var footerPara = new Paragraph(
+                new ParagraphProperties(
+                    new Justification { Val = JustificationValues.Center },
+                    new SpacingBetweenLines { Before = "200" }),
+                new Run(
+                    new RunProperties(
+                        new FontSize { Val = "18" },
+                        new Color { Val = "808080" }),
+                    new Text($"Generated by Spaarke AI \u2022 {DateTime.UtcNow:MMMM d, yyyy}")));
+            body.Append(footerPara);
+
+            mainPart.Document.Save();
+        }
+
+        var bytes = stream.ToArray();
+
+        _logger.LogInformation("DOCX generated from markdown: Title={Title}, Size={Size} bytes",
+            title, bytes.Length);
+
+        return Task.FromResult(bytes);
+    }
+
+    /// <summary>
+    /// Parses markdown text into OpenXML paragraphs.
+    /// Handles: # Heading1, ## Heading2, ### Heading3, **bold**, - bullets, 1. numbered lists,
+    /// and plain paragraphs. Designed for AI-generated analysis output patterns.
+    /// </summary>
+    private static List<OpenXmlElement> ParseMarkdownToParagraphs(string markdown)
+    {
+        var elements = new List<OpenXmlElement>();
+        var lines = markdown.Split('\n');
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+
+            // Skip empty lines (they just add spacing)
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var trimmed = line.TrimStart();
+
+            // Headings (### before ## before # to match correctly)
+            if (trimmed.StartsWith("### "))
+            {
+                elements.Add(CreateParagraph(trimmed[4..], Heading3StyleId));
+            }
+            else if (trimmed.StartsWith("## "))
+            {
+                elements.Add(CreateParagraph(trimmed[3..], Heading2StyleId));
+            }
+            else if (trimmed.StartsWith("# "))
+            {
+                elements.Add(CreateParagraph(trimmed[2..], Heading1StyleId));
+            }
+            // Bullet list items
+            else if (trimmed.StartsWith("- ") || trimmed.StartsWith("* "))
+            {
+                var bulletText = trimmed[2..];
+                elements.Add(CreateBulletParagraph(bulletText));
+            }
+            // Numbered list items
+            else if (NumberedListRegex().IsMatch(trimmed))
+            {
+                var match = NumberedListRegex().Match(trimmed);
+                var listText = match.Groups[1].Value;
+                elements.Add(CreateNumberedParagraph(listText, match.Value[..match.Value.IndexOf('.')]));
+            }
+            // Normal paragraph (may contain **bold** inline formatting)
+            else
+            {
+                elements.Add(CreateFormattedParagraph(trimmed, NormalStyleId));
+            }
+        }
+
+        return elements;
+    }
+
+    /// <summary>
+    /// Creates a paragraph with inline bold formatting support (**text**).
+    /// </summary>
+    private static Paragraph CreateFormattedParagraph(string text, string styleId)
+    {
+        var para = new Paragraph(
+            new ParagraphProperties(new ParagraphStyleId { Val = styleId }));
+
+        // Split text by **bold** markers and create runs.
+        // Regex.Split with a capturing group interleaves captured groups at odd indices.
+        var parts = BoldMarkdownRegex().Split(text);
+
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (!string.IsNullOrEmpty(parts[i]))
+            {
+                // Check if this part is a bold match (captured group)
+                // Regex.Split interleaves captured groups between splits
+                if (i % 2 == 1)
+                {
+                    // Odd indices are captured bold groups
+                    var boldRun = new Run(
+                        new RunProperties(new Bold()),
+                        new Text(parts[i]) { Space = SpaceProcessingModeValues.Preserve });
+                    para.Append(boldRun);
+                }
+                else
+                {
+                    var normalRun = new Run(
+                        new Text(parts[i]) { Space = SpaceProcessingModeValues.Preserve });
+                    para.Append(normalRun);
+                }
+            }
+        }
+
+        return para;
+    }
+
+    /// <summary>
+    /// Creates a bullet list paragraph with a Unicode bullet character prefix.
+    /// </summary>
+    private static Paragraph CreateBulletParagraph(string text)
+    {
+        var para = new Paragraph(
+            new ParagraphProperties(
+                new ParagraphStyleId { Val = NormalStyleId },
+                new Indentation { Left = "720", Hanging = "360" },
+                new SpacingBetweenLines { Before = "40", After = "40" }));
+
+        // Add bullet character
+        para.Append(new Run(
+            new Text("\u2022  ") { Space = SpaceProcessingModeValues.Preserve }));
+
+        // Add formatted text (may contain bold)
+        AppendFormattedRuns(para, text);
+
+        return para;
+    }
+
+    /// <summary>
+    /// Creates a numbered list paragraph with the number prefix.
+    /// </summary>
+    private static Paragraph CreateNumberedParagraph(string text, string number)
+    {
+        var para = new Paragraph(
+            new ParagraphProperties(
+                new ParagraphStyleId { Val = NormalStyleId },
+                new Indentation { Left = "720", Hanging = "360" },
+                new SpacingBetweenLines { Before = "40", After = "40" }));
+
+        // Add number prefix
+        para.Append(new Run(
+            new Text($"{number}.  ") { Space = SpaceProcessingModeValues.Preserve }));
+
+        // Add formatted text (may contain bold)
+        AppendFormattedRuns(para, text);
+
+        return para;
+    }
+
+    /// <summary>
+    /// Appends runs to a paragraph, handling **bold** inline formatting.
+    /// </summary>
+    private static void AppendFormattedRuns(Paragraph para, string text)
+    {
+        var parts = BoldMarkdownRegex().Split(text);
+
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (string.IsNullOrEmpty(parts[i])) continue;
+
+            if (i % 2 == 1)
+            {
+                para.Append(new Run(
+                    new RunProperties(new Bold()),
+                    new Text(parts[i]) { Space = SpaceProcessingModeValues.Preserve }));
+            }
+            else
+            {
+                para.Append(new Run(
+                    new Text(parts[i]) { Space = SpaceProcessingModeValues.Preserve }));
+            }
+        }
+    }
+
+    [GeneratedRegex(@"^\d+\.\s+(.+)$")]
+    private static partial Regex NumberedListRegex();
 
     #endregion
 }

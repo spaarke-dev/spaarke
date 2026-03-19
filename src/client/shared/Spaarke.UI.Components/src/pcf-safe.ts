@@ -31,8 +31,7 @@ export { AiSummaryPopover } from './components/AiSummaryPopover';
 // ─── Hooks (PCF-safe — React 16 compatible) ────────────────────────────────
 export { useAiSummary } from './hooks';
 export type { DocumentSummaryState, SummaryStatus, SummaryDocument, ExtractedEntities } from './hooks';
-export { useSseStream } from './hooks';
-export type { SseStreamStatus, UseSseStreamOptions } from './hooks';
+// Note: useSseStream is React 18+ only (uses SprkChat internals) — NOT pcf-safe
 
 // ─── Services (no React dependency) ────────────────────────────────────────
 export {
@@ -47,7 +46,7 @@ export type { SdapApiClientOptions, OnUnauthorizedCallback } from './services/do
 // ─── Types (no React dependency) ────────────────────────────────────────────
 export type { MiniGraphNode, MiniGraphEdge } from './types/MiniGraphTypes';
 export type { ILookupItem } from './types/LookupTypes';
-export type { DrillInteraction } from './components/DatasetGrid/types';
+export type { DrillInteraction } from './types/DrillInteractionTypes';
 
 // ─── Utilities (no React dependency) ────────────────────────────────────────
 export { createLogger } from './utils/logger';
