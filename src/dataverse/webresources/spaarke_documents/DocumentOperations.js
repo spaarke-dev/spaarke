@@ -88,17 +88,16 @@ Spaarke.Documents.getApiBaseUrl = function () {
 
         // Determine environment based on Dataverse URL
         if (clientUrl.includes('spaarkedev1.crm.dynamics.com')) {
-            // DEV environment - use localhost for now (Azure App Service not deployed yet)
-            return "https://localhost:7073";
+            return "https://spe-api-dev-67e2xz.azurewebsites.net";
+        } else if (clientUrl.includes('spaarke-demo.crm.dynamics.com')) {
+            return "https://spaarke-bff-prod.azurewebsites.net";
         } else if (clientUrl.includes('spaarkeuat.crm.dynamics.com')) {
-            // UAT environment
             return "https://spaarke-bff-uat.azurewebsites.net";
         } else if (clientUrl.includes('spaarkeprod.crm.dynamics.com')) {
-            // PROD environment
             return "https://spaarke-bff-prod.azurewebsites.net";
         } else {
-            // Local development - use localhost
-            return "https://localhost:7073";
+            // Local development
+            return "https://localhost:5001";
         }
     } catch (error) {
         console.error("Error determining API base URL:", error);
