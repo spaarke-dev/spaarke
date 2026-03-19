@@ -1,14 +1,16 @@
 # Deploy SPE Admin App Web Resource to Dataverse
-# Builds the Vite app for the target environment, then uploads sprk_speadmin.
+# Builds the Vite app (single universal build) and uploads sprk_speadmin.
 # Creates the web resource if it does not exist, updates it if it does.
+#
+# The BFF URL is resolved at RUNTIME via Dataverse environment detection
+# (ENVIRONMENT_BFF_MAP in bffConfig.ts), so a single build works in dev + prod.
 #
 # SYNOPSIS
 #   Deploy-SpeAdminApp.ps1 [-Environment <dev|prod>]
 # PARAMETERS
-#   -Environment  Target environment: 'dev' (default) or 'prod'
-#                 Controls both the Vite build mode (BFF URL) and the Dataverse org URL.
+#   -Environment  Target Dataverse org: 'dev' (default) or 'prod'
 # DEPENDENCIES
-#   Azure CLI (az login), Node.js/npm, speadmin.html will be built by this script
+#   Azure CLI (az login), Node.js/npm
 # USAGE
 #   .\scripts\Deploy-SpeAdminApp.ps1           # dev (default)
 #   .\scripts\Deploy-SpeAdminApp.ps1 -Environment dev
@@ -22,11 +24,9 @@ $ErrorActionPreference = 'Stop'
 
 # ── Environment config ────────────────────────────────────────────────────────
 if ($Environment -eq 'prod') {
-    $orgUrl    = 'https://spaarke.crm.dynamics.com'   # update to actual prod org URL
-    $viteMode  = 'production'
+    $orgUrl = 'https://spaarke-demo.crm.dynamics.com'
 } else {
-    $orgUrl    = 'https://spaarkedev1.crm.dynamics.com'
-    $viteMode  = 'development'
+    $orgUrl = 'https://spaarkedev1.crm.dynamics.com'
 }
 
 Write-Host '====================================='
@@ -41,15 +41,14 @@ $appDir      = Join-Path $repoRoot 'src\solutions\SpeAdminApp'
 $filePath    = Join-Path $appDir 'dist\speadmin.html'
 
 Write-Host '[1/5] Building SPE Admin App...'
-Write-Host "      Mode: $viteMode (BFF URL from .env.$viteMode)"
+Write-Host "      Universal build — BFF URL resolved at runtime via Dataverse env detection"
 Push-Location $appDir
 try {
-    npx vite build --mode $viteMode
+    npx vite build
     if ($LASTEXITCODE -ne 0) { throw "vite build failed (exit $LASTEXITCODE)" }
     # Rename dist/index.html → dist/speadmin.html
-    node --input-type=module -e "import{renameSync}from'fs';renameSync('dist/index.html','dist/speadmin.html');" 2>$null
-    if (-not (Test-Path (Join-Path $appDir 'dist\speadmin.html'))) {
-        # Already named speadmin.html (vite may have renamed it already)
+    if (Test-Path 'dist\index.html') {
+        Rename-Item 'dist\index.html' 'dist\speadmin.html' -Force
     }
 } finally {
     Pop-Location
