@@ -23,10 +23,13 @@
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@types/d3-force": "^3.0.10",
     "@types/diff": "^7.0.2",
+    "@types/dompurify": "^3.0.5",
     "@types/react-window": "^1.8.8",
     "d3-force": "^3.0.0",
     "diff": "^8.0.3",
+    "dompurify": "^3.3.3",
     "lexical": "^0.41.0",
+    "marked": "^17.0.4",
     "react-window": "^1.8.11"
   },
   "devDependencies": {
