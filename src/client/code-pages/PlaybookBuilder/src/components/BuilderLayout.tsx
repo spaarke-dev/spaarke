@@ -43,6 +43,7 @@ import { useAiAssistantStore } from '../stores/aiAssistantStore';
 import { useExecutionStore } from '../stores/executionStore';
 import { useScopeStore } from '../stores/scopeStore';
 import { useModelStore } from '../stores/modelStore';
+import { useTemplateStore } from '../stores/templateStore';
 import { syncNodesToDataverse } from '../services/playbookNodeSync';
 import { createRecord, updateRecord } from '../services/dataverseClient';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -54,6 +55,7 @@ import type { PlaybookNodeType } from '../types/canvas';
 
 interface BuilderLayoutProps {
   playbookId: string;
+  apiBaseUrl: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +260,7 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
+export function BuilderLayout({ playbookId, apiBaseUrl }: BuilderLayoutProps): JSX.Element {
   const styles = useStyles();
 
   // Playbook loading
@@ -302,11 +304,13 @@ export function BuilderLayout({ playbookId }: BuilderLayoutProps): JSX.Element {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load scope data on mount
+  // Initialize stores with BFF API URL on mount
   useEffect(() => {
     useScopeStore.getState().loadAllScopes();
     useModelStore.getState().loadModelDeployments();
-  }, []);
+    useTemplateStore.getState().setApiBaseUrl(apiBaseUrl);
+    useAiAssistantStore.getState().setServiceConfig({ apiBaseUrl });
+  }, [apiBaseUrl]);
 
   // Save handler
   const handleSave = useCallback(async () => {

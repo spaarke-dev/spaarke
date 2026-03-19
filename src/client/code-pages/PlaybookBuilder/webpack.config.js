@@ -17,8 +17,9 @@ module.exports = (env) => {
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.jsx'],
       alias: {
-        // Resolve workspace dependency to shared library source for bundling
+        // Resolve workspace dependencies to shared library source for bundling
         '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
+        '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
       },
       modules: [
         path.resolve(__dirname, 'node_modules'),
@@ -45,6 +46,7 @@ module.exports = (env) => {
           include: [
             path.resolve(__dirname, 'src'),
             path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
+            path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
           ],
         },
         {
