@@ -4,6 +4,7 @@ import { BuilderLayout } from './components/BuilderLayout';
 
 interface AppProps {
   playbookId: string;
+  apiBaseUrl: string;
 }
 
 const useStyles = makeStyles({
@@ -27,7 +28,7 @@ const useStyles = makeStyles({
   },
 });
 
-export function App({ playbookId }: AppProps): JSX.Element {
+export function App({ playbookId, apiBaseUrl }: AppProps): JSX.Element {
   const styles = useStyles();
   const auth = useAuth();
 
@@ -51,5 +52,5 @@ export function App({ playbookId }: AppProps): JSX.Element {
     );
   }
 
-  return <BuilderLayout playbookId={playbookId} />;
+  return <BuilderLayout playbookId={playbookId} apiBaseUrl={apiBaseUrl} />;
 }

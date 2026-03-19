@@ -79,6 +79,8 @@ Spaarke.MatterKpi._getApiBaseUrl = function () {
 
         if (clientUrl.indexOf("spaarkedev1.crm.dynamics.com") !== -1) {
             return "https://spe-api-dev-67e2xz.azurewebsites.net";
+        } else if (clientUrl.indexOf("spaarke-demo.crm.dynamics.com") !== -1) {
+            return "https://spaarke-bff-prod.azurewebsites.net";
         } else if (clientUrl.indexOf("spaarkeuat.crm.dynamics.com") !== -1) {
             return "https://spaarke-bff-uat.azurewebsites.net";
         } else if (clientUrl.indexOf("spaarkeprod.crm.dynamics.com") !== -1) {

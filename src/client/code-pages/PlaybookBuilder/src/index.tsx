@@ -62,6 +62,22 @@ function resolvePlaybookId(): string {
 const playbookId = resolvePlaybookId();
 
 // ---------------------------------------------------------------------------
+// BFF API base URL resolution
+// ---------------------------------------------------------------------------
+
+function resolveApiBaseUrl(): string {
+  // 1. Explicit URL parameter
+  const urlApi = appParams.get('apiBaseUrl');
+  if (urlApi) return urlApi;
+
+  // 2. Default to the known dev BFF API endpoint
+  // In production, this would be read from a Dataverse environment variable.
+  return 'https://spe-api-dev-67e2xz.azurewebsites.net';
+}
+
+const apiBaseUrl = resolveApiBaseUrl();
+
+// ---------------------------------------------------------------------------
 // ThemeRoot -- wrapper that uses useThemeDetection hook
 // ---------------------------------------------------------------------------
 
@@ -77,7 +93,7 @@ function ThemeRoot(): JSX.Element {
 
   return (
     <FluentProvider theme={theme} style={{ height: '100%' }}>
-      <App playbookId={playbookId} />
+      <App playbookId={playbookId} apiBaseUrl={apiBaseUrl} />
     </FluentProvider>
   );
 }
