@@ -2,9 +2,13 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Superseded** — demoted to pattern (2026-03-19) |
 | Date | 2026-01-02 |
+| Updated | 2026-03-19 |
 | Authors | Spaarke Engineering |
+| Superseded By | [`.claude/patterns/ui/choice-dialog-pattern.md`](../../.claude/patterns/ui/choice-dialog-pattern.md) |
+
+> **Note**: This ADR described a UI component pattern, not an architectural decision. It has been demoted to a pattern document. The `ChoiceDialog` component in `@spaarke/ui-components` is unchanged — only the governance level changed. The ADR number (023) is retained to avoid renumbering dependencies.
 
 ---
 

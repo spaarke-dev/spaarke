@@ -1,53 +1,49 @@
-# ADR-006: Anti-Legacy-JS — PCF for Form Controls, React Code Pages for Dialogs (Concise)
+# ADR-006: UI Surface Architecture — Code Pages, PCF, and Web Resources (Concise)
 
-> **Status**: Accepted (Revised 2026-02-23)
-> **Domain**: PCF/Frontend Architecture
-> **Last Updated**: 2026-02-23
+> **Status**: Accepted (Revised 2026-03-19)
+> **Domain**: Frontend Architecture
+> **Last Updated**: 2026-03-19
 
 ---
 
 ## Decision
 
-ADR-006 is fundamentally an **anti-legacy-JavaScript rule**, not an anti-React rule. It prevents untestable "random JS" sprinkled across Dataverse forms, poor lifecycle management, and UI logic becoming a shadow runtime inside Dataverse.
+All Spaarke frontend UI is built using **three surface types**, each chosen based on the hosting context — not as a blanket preference. Code Pages are the **default** for new UI; PCF is used only when Dataverse form binding is required.
 
-**Two-tier architecture:**
+| UI Surface | Technology | React | Location | When to Use |
+|-----------|------------|-------|----------|-------------|
+| **Code Page** (dialog, wizard, full page, side pane) | Standalone HTML web resource (Vite + React 19) | 19 (bundled) | `src/solutions/{Name}/` | **Default for all new UI** — standalone dialogs, wizards, pages, panels |
+| **PCF control** (form-embedded) | PCF (TypeScript/React) | 16/17 (platform) | `src/client/pcf/` | Only when Dataverse form binding is needed (bound properties, `updateView()` lifecycle) |
+| **Ribbon/command script** | Thin JS (invocation only) | N/A | Webresource JS | Invoke `navigateTo` to open Code Pages; no business logic |
+| **Shared components** | React library | peer `>=16.14.0` | `src/client/shared/Spaarke.UI.Components/` | Consumed by all surfaces |
 
-| UI Surface | Technology | Location |
-|-----------|------------|----------|
-| Field-bound form controls | **PCF** (React 16/17 platform library) | `src/client/pcf/` |
-| Standalone dialog / custom page | **React Code Page** (React 18, bundled) | `src/client/code-pages/` |
-| Dataset list views (form-embedded) | Dataset PCF | `src/client/pcf/UniversalDatasetGrid/` |
-| Shared UI components | React library (React 18-compatible) | `src/client/shared/Spaarke.UI.Components/` |
-| Office add-ins | React 18 | `src/client/office-addins/` |
-| Ribbon/command bar | Thin JS (invocation only) | Webresource JS |
+### Legacy Anti-Pattern Rule (Still Active)
+
+**No new legacy JavaScript web resources.** This means no jQuery, no framework-free JS with business logic, no ad hoc scripts. This rule is the origin of ADR-006 and remains in effect.
 
 ---
 
-## What Is a React Code Page?
+## Code Page as Default Surface
 
-A **React Code Page** is an HTML web resource that bundles its own React 18 + Fluent v9. It is opened as a dialog or page via Xrm.Navigation, not embedded in a form.
+A **Code Page** is a standalone React 19 app deployed as a Dataverse HTML web resource. It bundles its own React, Fluent v9, and shared library components.
 
-**When to use React Code Page (not PCF):**
-- No Dataverse form binding needed (document ID passed via URL parameter)
-- Complex standalone UI: multi-step wizards, graph visualizations, rich panels
-- Benefits from React 18 concurrent features (smooth animations, Suspense)
-- Opening via `navigateTo` as a dialog — no custom page wrapper needed
+**Use a Code Page when:**
+- Building any new dialog, wizard, panel, or full-page UI
+- The UI needs to be reusable from multiple contexts (workspace, entity forms, command bars, Power Pages SPA)
+- You want React 19 features (concurrent rendering, Suspense, `useId`)
+- The component should be independently deployable
 
-**Code Page entry point pattern:**
+**Code Page entry pattern:**
 ```typescript
-// src/client/code-pages/DocumentRelationshipViewer/index.tsx
-import { createRoot } from "react-dom/client";  // React 18
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import { App } from "./App";
+import { createRoot } from "react-dom/client";
+import { FluentProvider } from "@fluentui/react-components";
+import { detectTheme, parseDataParams } from "@spaarke/ui-components/utils";
 
-// Parameters passed via Xrm.Navigation data string
-const params = new URLSearchParams(window.location.search);
-const documentId = params.get("documentId") ?? "";
-
-const root = createRoot(document.getElementById("root")!);
-root.render(
-    <FluentProvider theme={webLightTheme}>
-        <App documentId={documentId} />
+const params = parseDataParams();
+const theme = detectTheme();
+createRoot(document.getElementById("root")!).render(
+    <FluentProvider theme={theme}>
+        <App {...params} />
     </FluentProvider>
 );
 ```
@@ -55,42 +51,48 @@ root.render(
 **Opening a Code Page as a dialog:**
 ```typescript
 Xrm.Navigation.navigateTo(
-    {
-        pageType: "webresource",
-        webresourceName: "sprk_documentrelationshipviewer",
-        data: `documentId=${documentId}`,
-    },
-    { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } }
+    { pageType: "webresource", webresourceName: "sprk_creatematterwizard", data: encodedParams },
+    { target: 2, width: { value: 70, unit: "%" }, height: { value: 70, unit: "%" } }
 );
+```
+
+---
+
+## PCF: Only When Form Binding Is Required
+
+Use a **PCF control** only when the UI must:
+- Read/write Dataverse bound properties on a form
+- Participate in the `updateView()` lifecycle
+- Be embedded directly on an entity form as a field or subgrid replacement
+
+**PCF does NOT get React 19** — the platform injects React 16/17. If you need React 19, use a Code Page instead.
+
+```typescript
+// PCF entry — React 16 API only
+public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
+    return React.createElement(FluentProvider, { theme },
+        React.createElement(MyComponent, { context })
+    );
+}
 ```
 
 ---
 
 ## Constraints
 
-### ✅ MUST
+### MUST
 
-- **MUST** use PCF for field-bound form controls (bound properties, `updateView()` lifecycle)
-- **MUST** use React Code Page for standalone dialogs and custom pages
-- **MUST** place PCF controls in `src/client/pcf/`
-- **MUST** place Code Pages in `src/client/code-pages/`
-- **MUST** keep ribbon/command bar scripts minimal (invocation only)
+- **MUST** use Code Page for all new standalone dialogs, wizards, and full-page UI
+- **MUST** use PCF only for form-embedded controls requiring bound properties
+- **MUST** keep ribbon/command bar scripts minimal (invocation only — call `navigateTo`, nothing else)
+- **MUST** use `@spaarke/ui-components` shared library for reusable components
 
-### ❌ MUST NOT
+### MUST NOT
 
-- **MUST NOT** create legacy JavaScript webresources (no-framework JS, jQuery, ad hoc scripts)
+- **MUST NOT** create legacy JavaScript web resources (no-framework JS, jQuery, ad hoc scripts)
 - **MUST NOT** add business logic to ribbon scripts
-- **MUST NOT** make remote calls from ribbon scripts (call BFF instead)
-- **MUST NOT** use a PCF + custom page wrapper when a Code Page achieves the same result more simply
-
----
-
-## Why Not PCF for Dialogs?
-
-PCF controls cannot be opened directly as dialogs — they require a container (entity form or custom page). Using a custom page as a PCF wrapper adds:
-- Power Apps Studio dependency for parameter wiring (`Param()` formula)
-- React 16/17 ceiling (no concurrent features, no React 18)
-- No actual benefit: the dialog doesn't use form binding or `updateView()` lifecycle
+- **MUST NOT** use a PCF + custom page wrapper when a Code Page achieves the same result
+- **MUST NOT** embed complex dialog UI inline in a PCF when it should be a standalone Code Page (extract to Code Page for reusability)
 
 ---
 
@@ -98,10 +100,10 @@ PCF controls cannot be opened directly as dialogs — they require a container (
 
 | ADR | Relationship |
 |-----|--------------|
-| [ADR-011](ADR-011-dataset-pcf.md) | Dataset PCF (form-embedded) vs Code Page list views |
 | [ADR-012](ADR-012-shared-components.md) | Shared component library consumed by both PCF and Code Pages |
 | [ADR-021](ADR-021-fluent-design-system.md) | Fluent v9 for all surfaces; React version differs by surface |
 | [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF platform libraries (field-bound controls only) |
+| [ADR-026](ADR-026-full-page-custom-page-standard.md) | Build tooling standard for Code Pages (Vite + singlefile) |
 
 ---
 
@@ -111,4 +113,4 @@ PCF controls cannot be opened directly as dialogs — they require a container (
 
 ---
 
-**Lines**: ~100
+**Lines**: ~110

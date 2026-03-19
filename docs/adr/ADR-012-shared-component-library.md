@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** (Revised) |
 | Date | 2025-10-03 |
-| Updated | 2026-02-23 |
+| Updated | 2026-03-19 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 5 - Universal Dataset PCF |
 
@@ -13,411 +13,305 @@
 ## Related AI Context
 
 **AI-Optimized Versions** (load these for efficient context):
-- [ADR-012 Concise](../../.claude/adr/ADR-012-shared-components.md) - ~110 lines, decision + constraints
+- [ADR-012 Concise](../../.claude/adr/ADR-012-shared-components.md) - ~150 lines, decision + constraints + service architecture
 - [PCF Constraints](../../.claude/constraints/pcf.md) - MUST/MUST NOT rules for PCF development
 - [React Hooks Pattern](../../.claude/patterns/pcf/react-hooks.md) - Shared hooks examples
 
-**When to load this full ADR**: Component examples, directory structure, governance model
+**When to load this full ADR**: Component examples, directory structure, governance model, service portability details
 
 ---
 
 ## Context
 
-Spaarke is building multiple front-end surfaces:
+Spaarke builds multiple front-end surfaces:
 1. **PCF Controls** (model-driven app forms — field-bound) - TypeScript/React 16/17 (platform-provided)
-2. **React Code Pages** (standalone dialogs/pages opened via navigateTo) - TypeScript/React 18 (bundled)
-3. **Office Add-ins** - TypeScript/React 18 (bundled)
-4. **Future React SPA** (planned) - React/TypeScript
+2. **React Code Pages** (standalone dialogs/pages opened via navigateTo) - TypeScript/React 19 (bundled)
+3. **Office Add-ins** - TypeScript/React 19 (bundled)
+4. **Power Pages SPA** (external portal) - React 19 (bundled)
 
 Without a shared component library, we risk:
 - **Code duplication** - Implementing the same UI components multiple times
 - **Inconsistent UX** - Different look-and-feel across surfaces
 - **Maintenance burden** - Fixing bugs or updating styles in multiple places
-- **Slow development** - Rebuilding common patterns repeatedly
-- **Violated DRY principle** - Not leveraging existing work
+- **No reusability** - Wizard components trapped inside specific solutions, unreachable from other contexts
 
 ### Current State
 - **BFF API** (`src/server/api/Sprk.Bff.Api/`) - .NET backend
 - **PCF Controls** (`src/client/pcf/`) - React/TypeScript
-- **Shared library location** (`src/client/shared/Spaarke.UI.Components/`) - shared React/TS library
+- **Code Pages** (`src/solutions/`) - Standalone React 19 apps
+- **Shared library** (`src/client/shared/Spaarke.UI.Components/`) - shared React/TS library
+- **Power Pages SPA** (`src/client/external-spa/`) - External portal
 
 ---
 
 ## Decision
 
-**We will maintain a shared TypeScript/React component library at `src/client/shared/Spaarke.UI.Components/` that provides:**
+**Maintain a shared TypeScript/React component library at `src/client/shared/Spaarke.UI.Components/` as the single source of truth for all reusable UI.**
 
-1. **Reusable React components** (Fluent UI v9 based)
-2. **Shared TypeScript utilities** (formatters, transformers, validators)
-3. **Common types and interfaces** (DTOs, domain models)
-4. **Theme definitions** (Spaarke light/dark themes)
-5. **Shared hooks** (data fetching, caching, state management)
-
-**This library will:**
-- Be consumed by PCF controls as an NPM package (local workspace or private registry)
-- Be consumed by future React SPA
-- Be version-controlled separately but deployed together
-- Follow Fluent UI v9 design system exclusively
-- Maintain strict TypeScript typing
+The library provides:
+1. **Reusable React components** (Fluent UI v9 based) — including shells, wizards, grids, dialogs
+2. **Domain-specific wizard content** — entity creation wizards, upload wizards (with abstracted data access)
+3. **Shared TypeScript utilities** (formatters, transformers, validators)
+4. **Common types and interfaces** (DTOs, domain models, service abstractions)
+5. **Theme definitions** (Spaarke light/dark themes)
+6. **Shared hooks** (data fetching, caching, state management)
+7. **Shared services** (with abstracted dependencies — see Service Architecture)
 
 ### UI/UX Standards (Required)
 
 | Rule | Requirement |
 |------|-------------|
-| **Fluent UI everywhere** | All custom UI must use Fluent UI v9 components and design tokens as the primary UI/UX system (no bespoke component systems). |
-| **Power Apps MDA fit** | Any custom UI embedded in model-driven apps must match the model-driven look/feel and interaction patterns (density, typography, spacing, dialogs, command patterns, focus/keyboard behavior). |
-| **No hard-coded styling** | No hard-coded colors or “pixel-perfect” one-off styling that diverges from Fluent tokens; prefer semantic tokens and theming. |
-| **Dark-mode compatible** | Everything we build (components, icons, illustrations) must render correctly in dark mode and high-contrast scenarios even if MDA dark mode is not officially shipped everywhere. |
-| **Accessibility** | WCAG-aligned behavior (keyboard nav, focus states, contrast). Treat this as a release requirement for shared components. |
+| **Fluent UI everywhere** | All custom UI must use Fluent UI v9 components and design tokens |
+| **Power Apps MDA fit** | Custom UI embedded in model-driven apps must match MDA patterns |
+| **No hard-coded styling** | No hard-coded colors — use semantic tokens and theming |
+| **Dark-mode compatible** | Everything must render correctly in dark mode and high-contrast |
+| **Accessibility** | WCAG-aligned behavior (keyboard nav, focus states, contrast) |
 
-**Note:** If these requirements need to govern *all* UI surfaces (PCF, custom pages, webresources, icons/theme assets) beyond this shared library, create a dedicated ADR (e.g., “UI Theming + Dark Mode Compatibility”) to avoid scattering rules across multiple ADRs.
+---
+
+## Service Architecture: Portability Through Abstraction
+
+### The Evolution
+
+The original ADR-012 (v1.3) required "callback-based props with zero service dependencies." This constraint was too rigid — the shared library already contained services (`CommandRegistry`, `FetchXmlService`, `EntityCreationService`) that worked correctly because they used abstracted dependencies, not direct platform API calls.
+
+**The real principle**: shared components and services must be **portable across runtime contexts** (Dataverse model-driven app, Power Pages SPA, unit tests). This is achieved through dependency abstraction, not by banning services entirely.
+
+### Service Portability Tiers
+
+| Tier | Description | In Shared Library? | Examples |
+|------|-------------|-------------------|----------|
+| **Pure logic** | No I/O, no platform APIs, no side effects | Yes | Validators, formatters, reducers, transformers, field mapping rules |
+| **Abstracted I/O** | Accepts data service interface via props or constructor; never calls platform APIs directly | Yes | Wizard orchestrators, entity creation services, upload coordinators, playbook services |
+| **Platform-bound** | Directly calls `Xrm.WebApi`, `ComponentFramework`, `window.parent.Xrm`, or BFF endpoints | **No** — keep in consumer | Code Page `main.tsx`, PCF `index.ts`, ribbon scripts, SPA API clients |
+
+### The IDataService Abstraction
+
+Services that need to read/write Dataverse data accept an interface, not a concrete API:
+
+```typescript
+// Defined in @spaarke/ui-components/types
+export interface IDataService {
+  createRecord(entityName: string, data: Record<string, unknown>): Promise<string>;
+  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
+  updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<void>;
+  deleteRecord(entityName: string, id: string): Promise<void>;
+}
+
+export interface IUploadService {
+  uploadFile(containerId: string, file: File, onProgress?: (pct: number) => void): Promise<string>;
+  getContainerIdForEntity(entityName: string, entityId: string): Promise<string>;
+}
+
+export interface INavigationService {
+  openRecord(entityName: string, entityId: string): void;
+  openDialog(webresourceName: string, data: string, options?: { width: number; height: number }): Promise<void>;
+  closeDialog(): void;
+}
+```
+
+### Adapter Pattern (Consumers Provide Implementations)
+
+```typescript
+// ✅ Code Page main.tsx — Xrm.WebApi adapter
+const xrmDataService: IDataService = {
+  createRecord: (entity, data) => Xrm.WebApi.createRecord(entity, data).then(r => r.id),
+  retrieveRecord: (entity, id, opts) => Xrm.WebApi.retrieveRecord(entity, id, opts),
+  retrieveMultipleRecords: (entity, opts) => Xrm.WebApi.retrieveMultipleRecords(entity, opts),
+  updateRecord: (entity, id, data) => Xrm.WebApi.updateRecord(entity, id, data),
+  deleteRecord: (entity, id) => Xrm.WebApi.deleteRecord(entity, id),
+};
+
+// ✅ Power Pages SPA — BFF API adapter
+const bffDataService: IDataService = {
+  createRecord: (entity, data) =>
+    authenticatedFetch(`/api/${entity}`, { method: "POST", body: JSON.stringify(data) })
+      .then(r => r.json()).then(j => j.id),
+  retrieveRecord: (entity, id, opts) =>
+    authenticatedFetch(`/api/${entity}/${id}?${opts || ""}`).then(r => r.json()),
+  // ...
+};
+
+// ✅ Unit tests — mock adapter
+const mockDataService: IDataService = {
+  createRecord: jest.fn().mockResolvedValue("mock-id"),
+  retrieveRecord: jest.fn().mockResolvedValue({ name: "Test" }),
+  retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
+  updateRecord: jest.fn().mockResolvedValue(undefined),
+  deleteRecord: jest.fn().mockResolvedValue(undefined),
+};
+```
+
+### Wizard Component Example
+
+```typescript
+// ✅ Shared library — portable wizard component
+export interface ICreateMatterWizardProps {
+  dataService: IDataService;
+  uploadService: IUploadService;
+  navigationService: INavigationService;
+  currentUserId: string;
+  embedded?: boolean;  // true = skip Fluent Dialog (Dataverse chrome provides it)
+  onClose: () => void;
+}
+
+export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = (props) => {
+  // All data access goes through props.dataService
+  // All file uploads go through props.uploadService
+  // All navigation goes through props.navigationService
+  // Zero direct platform API calls
+  return <WizardShell embedded={props.embedded} ... />;
+};
+```
+
+### What Goes Where (Decision Guide)
+
+| In Shared Library (`@spaarke/ui-components`) | In Consumer (Code Page / PCF / SPA) |
+|----------------------------------------------|--------------------------------------|
+| `WizardShell`, `CreateRecordWizard`, `PlaybookLibraryShell` | `main.tsx` — platform init, `createRoot`, theme detection |
+| Entity-specific wizard components (steps, forms) | `IDataService` adapter (Xrm.WebApi or BFF) |
+| Service interfaces (`IDataService`, `IUploadService`) | `IUploadService` adapter (SDAP client or BFF) |
+| Business logic (validation, field defaults, transformations) | `INavigationService` adapter (Xrm.Navigation or SPA router) |
+| Upload coordination (dedup, validation, progress tracking) | Auth initialization (`@spaarke/auth`) |
+| Entity schema maps (configurable, not hard-coded) | `navigateTo` / dialog opening code |
 
 ---
 
 ## Architecture
 
-### Directory Structure
+### Directory Structure (Current + Planned)
 
 ```
 src/client/shared/Spaarke.UI.Components/
-├── package.json                    # NPM package definition
-├── tsconfig.json                   # Shared TypeScript config
-├── .eslintrc.json                  # Shared linting rules
+├── package.json                    # @spaarke/ui-components v2.0.0
+├── tsconfig.json                   # ES2020 target, React JSX, strict mode
 ├── src/
-│   ├── components/                 # Reusable React components
-│   │   ├── layout/
-│   │   │   ├── WizardDialog/       # Multi-step wizard for Code Page dialogs
-│   │   │   ├── SidePanel/          # Slide-in filter/detail panel
-│   │   │   └── PageLayout/         # Top-level page wrapper
-│   │   ├── data/
-│   │   │   ├── DataGrid/           # Generic data grid
-│   │   │   │   ├── DataGrid.tsx
-│   │   │   │   ├── DataGrid.types.ts
-│   │   │   │   └── index.ts
-│   │   │   ├── FilterPanel/        # Filter panel component
-│   │   │   └── CommandBar/         # Command bar with actions
-│   │   ├── feedback/
-│   │   │   ├── LoadingState/       # Loading placeholder
-│   │   │   ├── EmptyState/         # Empty data state
-│   │   │   └── ErrorState/         # Error state with retry
-│   │   ├── EntityPicker/           # Dataverse entity picker
-│   │   ├── FileUploader/           # File upload component
-│   │   ├── StatusBadge/            # Status indicator badges
-│   │   └── index.ts                # Barrel export
-│   ├── hooks/                      # Shared React hooks
-│   │   ├── useDataverseFetch.ts    # Dataverse Web API fetching
-│   │   ├── usePagination.ts        # Pagination logic
-│   │   ├── useSelection.ts         # Selection management
-│   │   └── index.ts
-│   ├── services/                   # Business logic services
-│   │   ├── EntityMetadataService.ts
-│   │   ├── FormatterService.ts
-│   │   ├── ValidationService.ts
-│   │   └── index.ts
-│   ├── types/                      # Shared TypeScript types
-│   │   ├── dataverse.ts            # Dataverse types
-│   │   ├── common.ts               # Common DTOs
-│   │   └── index.ts
-│   ├── theme/                      # Fluent UI themes
-│   │   ├── spaarkeLight.ts
-│   │   ├── spaarkeDark.ts
-│   │   └── index.ts
-│   ├── utils/                      # Utility functions
-│   │   ├── formatters.ts           # Date, number, currency formatters
-│   │   ├── transformers.ts         # Data transformers
-│   │   ├── validators.ts           # Validation helpers
-│   │   └── index.ts
-│   └── index.ts                    # Main entry point
-├── __tests__/                      # Component tests
+│   ├── index.ts                    # Main barrel export
+│   │
 │   ├── components/
-│   ├── hooks/
-│   └── utils/
-└── README.md                       # Library documentation
+│   │   ├── Wizard/                 # Shell: multi-step wizard frame
+│   │   ├── CreateRecordWizard/     # Generic record-creation boilerplate
+│   │   ├── PlaybookLibraryShell/   # (PLANNED) Playbook browsing/execution shell
+│   │   │
+│   │   ├── CreateMatterWizard/     # (EXTRACTING) Matter wizard content
+│   │   ├── CreateProjectWizard/    # (EXTRACTING) Project wizard content
+│   │   ├── CreateEventWizard/      # (EXTRACTING) Event wizard content
+│   │   ├── CreateTodoWizard/       # (EXTRACTING) Todo wizard content
+│   │   ├── CreateWorkAssignmentWizard/ # (EXTRACTING) Work assignment wizard
+│   │   ├── DocumentUploadWizard/   # (EXTRACTING) Upload wizard content
+│   │   ├── SummarizeFilesWizard/   # (EXTRACTING) Summarize wizard content
+│   │   ├── FindSimilarDialog/      # (EXTRACTING) Semantic search dialog
+│   │   │
+│   │   ├── DatasetGrid/            # Multi-view dataset renderer
+│   │   ├── Toolbar/                # Command/action bar
+│   │   ├── PageChrome/             # Page header (OOB parity)
+│   │   ├── SidePane/               # Slide-in panel
+│   │   ├── ChoiceDialog/           # Simple choice dialog
+│   │   ├── LookupField/            # Search-as-you-type lookup
+│   │   ├── FileUpload/             # Drag-and-drop upload zone
+│   │   ├── SendEmailDialog/        # Email composition
+│   │   ├── RichTextEditor/         # Lexical WYSIWYG (Code Pages only)
+│   │   ├── SprkChat/               # SSE streaming chat
+│   │   ├── DiffCompareView/        # AI diff viewer
+│   │   ├── AiSummaryPopover/       # AI summary popover
+│   │   ├── AiFieldTag/             # AI badge for pre-filled fields
+│   │   ├── AiProgressStepper/      # Multi-step AI progress
+│   │   ├── InlineAiToolbar/        # Floating toolbar on selection
+│   │   ├── SlashCommandMenu/       # Command palette via /
+│   │   ├── MiniGraph/              # Lightweight relationship graph
+│   │   └── RelationshipCountCard/  # Relationship count with drill
+│   │
+│   ├── hooks/                      # 18 shared React hooks
+│   ├── services/                   # 19+ shared services (abstracted I/O)
+│   ├── types/                      # 14 type files + service interfaces
+│   ├── theme/                      # Spaarke brand, light/dark themes
+│   ├── utils/                      # Formatters, helpers, theme detection
+│   └── icons/                      # Fluent v9 icon registry
+│
+├── dist/                           # Compiled output (tsc)
+├── __tests__/                      # Component tests
+└── __mocks__/                      # Jest mock fixtures
 ```
 
-### Consumption Pattern
+### Consumption Patterns
 
-**PCF Control (`src/client/pcf/UniversalDatasetGrid/`):**
-
-PCF controls use the **platform-provided** React 16/17 and Fluent v9 — do NOT bundle React in PCF output (see ADR-022).
-
+**PCF Control (React 16/17, platform-provided):**
 ```json
-// package.json
 {
   "dependencies": {
-    "@spaarke/ui-components": "workspace:*"
-    // NO React/Fluent here — platform-provided at runtime
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {
     "@types/react": "^16.14.0",
-    "@types/react-dom": "^16.9.0",
     "react": "^16.14.0",
-    "react-dom": "^16.14.0",
     "@fluentui/react-components": "^9.46.0"
   }
 }
 ```
 
-```typescript
-// index.ts - PCF entry point (React 16/17 APIs — ReactDOM.render, not createRoot)
-import * as React from "react";
-import * as ReactDOM from "react-dom";  // NOT react-dom/client
-import { DataGrid, formatters } from "@spaarke/ui-components";
-import { FluentProvider } from "@fluentui/react-components";
-import { spaarkeLight } from "@spaarke/ui-components/theme";
-
-export class UniversalDataset implements ComponentFramework.StandardControl<IInputs, IOutputs> {
-  public updateView(context: ComponentFramework.Context<IInputs>): void {
-    ReactDOM.render(  // React 16 API — NOT createRoot()
-      React.createElement(FluentProvider, { theme: spaarkeLight },
-        React.createElement(DataGrid, {
-          data: transformedData,
-          formatters: formatters,
-          onAction: handleAction
-        })
-      ),
-      this.container
-    );
-  }
-}
-```
-
-**React Code Page (`src/client/code-pages/`):**
-
-React Code Pages bundle their own React 18 — use React 18 `createRoot()` and list React/Fluent as regular `dependencies`.
-
+**Code Page (React 19, bundled):**
 ```json
-// package.json
 {
   "dependencies": {
-    "@spaarke/ui-components": "workspace:*",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "@fluentui/react-components": "^9.46.0",
-    "@fluentui/react-icons": "^2.0.0"
+    "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@fluentui/react-components": "^9.54.0"
   }
 }
 ```
 
-```typescript
-// index.tsx - Code Page entry point (React 18)
-import { createRoot } from "react-dom/client";  // React 18 — allowed in Code Pages
-import { FluentProvider, webLightTheme } from "@fluentui/react-components";
-import { DataGrid } from "@spaarke/ui-components";
-
-createRoot(document.getElementById("root")!).render(
-  <FluentProvider theme={webLightTheme}>
-    <DataGrid data={data} />
-  </FluentProvider>
-);
-```
-
----
-
-## Component Library Setup
-
-### Package Configuration
-
-**src/shared/Spaarke.UI.Components/package.json:**
-
-The shared library is consumed by **both** PCF controls (React 16/17, platform-provided) and React Code Pages (React 18, bundled). The `peerDependencies` range must therefore accept React `>=16.14.0` so both consumers can satisfy the peer requirement. Development and testing use React 18.
-
+**Power Pages SPA (React 19, bundled):**
 ```json
 {
-  "name": "@spaarke/ui-components",
-  "version": "1.0.0",
-  "description": "Shared React/TypeScript component library for Spaarke",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "scripts": {
-    "build": "tsc",
-    "test": "jest",
-    "lint": "eslint src --ext .ts,.tsx",
-    "prepublishOnly": "npm run build"
-  },
-  "peerDependencies": {
-    "@fluentui/react-components": "^9.46.2",
-    "react": ">=16.14.0",
-    "react-dom": ">=16.14.0"
-  },
-  "devDependencies": {
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "typescript": "^5.3.3",
-    "jest": "^29.7.0",
-    "@testing-library/react": "^14.0.0"
+  "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
-}
-```
-
-**Workspace Configuration (root package.json):**
-```json
-{
-  "workspaces": [
-    "src/client/shared/Spaarke.UI.Components",
-    "src/client/pcf/*"
-  ]
 }
 ```
 
 ---
 
-## Component Development Guidelines
+## PCF Import Pattern (Critical)
 
-### 1. **Component Design Principles**
+PCF controls **must use deep imports** to avoid pulling in Lexical/RichTextEditor which requires `react/jsx-runtime` (unavailable in React 16):
 
-**✅ DO:**
-- Build components that work in ANY context (PCF, SPA, add-ins)
-- Accept configuration via props (no hard-coded behavior)
-- Use Fluent UI v9 components exclusively
-- Export TypeScript types alongside components
-- Write unit tests for all components
-- Document props with JSDoc comments
-
-**❌ DON'T:**
-- Reference PCF-specific APIs directly (pass context as props)
-- Hard-code Dataverse entity names or schemas
-- Mix styling systems (Fluent v9 only, no custom CSS)
-- Export components without tests
-
-### 2. **Example: Reusable DataGrid Component**
-
-**src/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx:**
 ```typescript
-import * as React from "react";
-import {
-  DataGrid as FluentDataGrid,
-  DataGridHeader,
-  DataGridRow,
-  DataGridHeaderCell,
-  DataGridBody,
-  DataGridCell,
-  TableCellLayout
-} from "@fluentui/react-components";
+// ✅ PCF — deep import
+import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
+import { AiSummaryPopover } from "@spaarke/ui-components/dist/components/AiSummaryPopover";
 
-export interface IColumn {
-  key: string;
-  name: string;
-  fieldName: string;
-  minWidth?: number;
-  maxWidth?: number;
-  isResizable?: boolean;
-}
+// ❌ PCF — barrel import pulls in ALL components (breaks on jsx-runtime)
+import { FindSimilarDialog } from "@spaarke/ui-components";
 
-export interface IDataGridProps<T = any> {
-  items: T[];
-  columns: IColumn[];
-  onItemClick?: (item: T) => void;
-  onSelectionChange?: (selectedKeys: string[]) => void;
-  loading?: boolean;
-  emptyMessage?: string;
-}
-
-export function DataGrid<T extends { id: string }>(props: IDataGridProps<T>) {
-  const { items, columns, onItemClick, loading, emptyMessage = "No records found" } = props;
-
-  if (loading) {
-    return <div>Loading...</div>;
-  }
-
-  if (items.length === 0) {
-    return <div>{emptyMessage}</div>;
-  }
-
-  return (
-    <FluentDataGrid items={items} columns={columns}>
-      <DataGridHeader>
-        <DataGridRow>
-          {columns.map(col => (
-            <DataGridHeaderCell key={col.key}>{col.name}</DataGridHeaderCell>
-          ))}
-        </DataGridRow>
-      </DataGridHeader>
-      <DataGridBody>
-        {items.map(item => (
-          <DataGridRow
-            key={item.id}
-            onClick={() => onItemClick?.(item)}
-            style={{ cursor: onItemClick ? "pointer" : "default" }}
-          >
-            {columns.map(col => (
-              <DataGridCell key={col.key}>
-                <TableCellLayout truncate>
-                  {(item as any)[col.fieldName]?.toString() ?? "-"}
-                </TableCellLayout>
-              </DataGridCell>
-            ))}
-          </DataGridRow>
-        ))}
-      </DataGridBody>
-    </FluentDataGrid>
-  );
-}
+// ✅ Code Pages / SPA — barrel is safe (React 19 has jsx-runtime)
+import { FindSimilarDialog, WizardShell, CreateMatterWizard } from "@spaarke/ui-components";
 ```
 
-**Usage in PCF Control:**
-```typescript
-import { DataGrid, IColumn } from "@spaarke/ui-components";
+---
 
-const columns: IColumn[] = [
-  { key: "name", name: "Name", fieldName: "name" },
-  { key: "status", name: "Status", fieldName: "statuscode" }
-];
+## Component Ownership & Governance
 
-<DataGrid
-  items={datasetItems}
-  columns={columns}
-  onItemClick={item => context.navigation.openForm({ entityId: item.id })}
-/>
-```
+### When to Add to Shared Library
 
-### 3. **Reusable Hooks Example**
+| Add to Shared Library | Keep in Consumer |
+|----------------------|------------------|
+| Used by 2+ modules/surfaces | Truly module-specific rendering |
+| Core Spaarke UX pattern (wizard, shell, grid) | Platform bootstrap (`main.tsx`, PCF `index.ts`) |
+| Service with abstracted dependencies | Concrete platform API calls |
+| Entity-specific wizard content (steps, forms) | One-off experimental UI |
+| Business rules and validations | — |
 
-**src/shared/Spaarke.UI.Components/src/hooks/usePagination.ts:**
-```typescript
-import { useState, useCallback } from "react";
+### Migration Path (Existing Code → Shared Library)
 
-export interface IPaginationState {
-  currentPage: number;
-  pageSize: number;
-  totalRecords: number;
-  hasNextPage: boolean;
-  hasPreviousPage: boolean;
-}
-
-export function usePagination(initialPageSize: number = 25) {
-  const [state, setState] = useState<IPaginationState>({
-    currentPage: 1,
-    pageSize: initialPageSize,
-    totalRecords: 0,
-    hasNextPage: false,
-    hasPreviousPage: false
-  });
-
-  const nextPage = useCallback(() => {
-    if (state.hasNextPage) {
-      setState(prev => ({ ...prev, currentPage: prev.currentPage + 1 }));
-    }
-  }, [state.hasNextPage]);
-
-  const previousPage = useCallback(() => {
-    if (state.hasPreviousPage) {
-      setState(prev => ({ ...prev, currentPage: prev.currentPage - 1 }));
-    }
-  }, [state.hasPreviousPage]);
-
-  const setTotalRecords = useCallback((total: number) => {
-    setState(prev => ({
-      ...prev,
-      totalRecords: total,
-      hasNextPage: prev.currentPage * prev.pageSize < total,
-      hasPreviousPage: prev.currentPage > 1
-    }));
-  }, []);
-
-  return { state, nextPage, previousPage, setTotalRecords };
-}
-```
+1. **Abstract**: Replace direct `Xrm.WebApi` calls with `IDataService` interface
+2. **Extract**: Move to `src/client/shared/Spaarke.UI.Components/src/components/`
+3. **Test**: Add unit tests using mock data service adapter
+4. **Document**: Add JSDoc and update component inventory
+5. **Replace**: Update consumers to import from `@spaarke/ui-components`
 
 ---
 
@@ -425,315 +319,57 @@ export function usePagination(initialPageSize: number = 25) {
 
 ### Positive
 
-✅ **Code Reuse**
-- Write once, use everywhere (PCF, SPA, add-ins)
-- Reduced development time for new features
-- Consistent behavior across surfaces
-
-✅ **Maintainability**
-- Single source of truth for common components
-- Bug fixes propagate to all consumers
-- Centralized testing
-
-✅ **Consistency**
-- Unified UX across all Spaarke surfaces
-- Single theme definition
-- Shared design patterns
-
-✅ **Quality**
-- Higher test coverage (shared tests benefit all consumers)
-- Better TypeScript typing
-- Reusable best practices
-
-✅ **Developer Experience**
-- Clear separation of concerns
-- Well-documented, versioned components
-- Easy to onboard new developers
+- **Single source of truth**: Update wizard logic once, all consumers get the update
+- **Cross-context reuse**: Same wizard works in Dataverse, Power Pages SPA, and tests
+- **Testability**: Mock adapters make services fully unit-testable
+- **Independent deployment**: Code Page wrappers are thin (~30-50 LOC); shared library carries the logic
+- **Consistent UX**: Unified design across all surfaces
 
 ### Negative
 
-❌ **Initial Setup Effort**
-- Requires workspace configuration
-- Need to extract and generalize existing code
-- Learning curve for component library patterns
-
-❌ **Version Management**
-- Must coordinate versions across consumers
-- Breaking changes require careful migration
-- Need semantic versioning discipline
-
-❌ **Build Complexity**
-- Shared library must build before consumers
-- CI/CD pipeline needs additional steps
-- Workspace linking for local development
-
-### Mitigation Strategies
-
-**For Setup Effort:**
-- Start small: Extract 3-5 core components initially
-- Document component library patterns
-- Provide templates for new components
-
-**For Version Management:**
-- Use semantic versioning strictly (semver)
-- Maintain CHANGELOG.md
-- Test breaking changes in consumers before release
-
-**For Build Complexity:**
-- Use NPM workspaces for local linking
-- Automate builds in CI/CD
-- Provide clear build documentation
-
----
-
-## Operationalization
-
-### Phase 1: Library Setup (Sprint 5)
-
-**Create library structure:**
-```bash
-mkdir -p src/shared/Spaarke.UI.Components/src/{components,hooks,services,types,theme,utils}
-cd src/shared/Spaarke.UI.Components
-npm init -y
-npm install --save-peer @fluentui/react-components react react-dom
-npm install --save-dev typescript @types/react @types/react-dom
-```
-
-**Initialize workspace:**
-```json
-// Root package.json
-{
-  "private": true,
-  "workspaces": [
-    "src/shared/Spaarke.UI.Components",
-    "power-platform/pcf/UniversalDataset"
-  ]
-}
-```
-
-**Link in PCF project:**
-```bash
-cd power-platform/pcf/UniversalDataset
-npm install @spaarke/ui-components@workspace:*
-```
-
-### Phase 2: Extract Core Components (Sprint 5)
-
-**Priority 1 - Extract to shared library:**
-1. **DataGrid** - Generic data grid (from UniversalDataset GridView)
-2. **Formatters** - Date, number, currency formatters
-3. **Transformers** - Data transformation utilities
-4. **Theme** - Spaarke light/dark themes
-5. **Types** - Common TypeScript interfaces
-
-**Priority 2 - Build in shared library:**
-1. **CommandBar** - Action toolbar
-2. **StatusBadge** - Status indicators
-3. **EntityPicker** - Dataverse entity picker
-
-### Phase 3: PCF Control Integration (Sprint 5)
-
-**Update UniversalDataset to consume shared library:**
-```typescript
-// Before: Local implementation
-import { GridView } from "./src/components/views/GridView";
-
-// After: Shared library
-import { DataGrid } from "@spaarke/ui-components";
-```
-
-### Development Workflow
-
-**Making changes to shared library:**
-```bash
-# 1. Edit component in src/shared/Spaarke.UI.Components/
-# 2. Build library
-cd src/shared/Spaarke.UI.Components
-npm run build
-
-# 3. Test in PCF control (automatically linked via workspace)
-cd ../../../power-platform/pcf/UniversalDataset
-npm run start  # Changes reflected immediately
-```
-
-### Publishing Strategy
-
-**Local development:**
-- Use NPM workspaces (no publishing needed)
-- Automatic linking via `workspace:*` protocol
-
-**Production deployment:**
-- Option A: Publish to private NPM registry (Azure Artifacts)
-- Option B: Publish to GitHub Packages
-- Option C: Keep workspace-linked (deploy together)
-
-**Recommended:** Start with workspace linking, move to private registry when SPA is added
-
----
-
-## Component Ownership & Governance
-
-### Who Owns Components?
-
-**Shared Library Team** (rotating ownership):
-- Reviews PRs to shared components
-- Ensures quality, tests, documentation
-- Coordinates breaking changes
-
-### When to Add a Component?
-
-**✅ Add to shared library when:**
-- Component used by 2+ modules
-- Component represents core Spaarke UX pattern
-- Component has clear, reusable API
-
-**❌ Keep in module when:**
-- Component is module-specific (PCF-only logic)
-- Component is experimental/proof-of-concept
-- Component has tight coupling to module context
-
-### Migration Path
-
-**Existing code → Shared library:**
-1. Generalize: Remove module-specific dependencies
-2. Extract: Move to `src/shared/Spaarke.UI.Components/src/components/`
-3. Test: Add unit tests
-4. Document: Add JSDoc and README entry
-5. Replace: Update consumers to import from `@spaarke/ui-components`
-
----
-
-## Examples of Shared Components
-
-### 1. StatusBadge (Reusable across modules)
-
-**src/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx:**
-```typescript
-import * as React from "react";
-import { Badge } from "@fluentui/react-components";
-
-export interface IStatusBadgeProps {
-  status: "pending" | "inprogress" | "completed" | "failed";
-  label: string;
-}
-
-const colorMap = {
-  pending: "warning",
-  inprogress: "informative",
-  completed: "success",
-  failed: "danger"
-} as const;
-
-export const StatusBadge: React.FC<IStatusBadgeProps> = ({ status, label }) => (
-  <Badge appearance="filled" color={colorMap[status]}>
-    {label}
-  </Badge>
-);
-```
-
-**Usage in PCF:**
-```typescript
-import { StatusBadge } from "@spaarke/ui-components";
-
-<StatusBadge status="completed" label="Approved" />
-```
-
-**Usage in future SPA:**
-```typescript
-import { StatusBadge } from "@spaarke/ui-components";
-
-<StatusBadge status="inprogress" label="Processing" />
-```
-
-### 2. Formatters (Pure utility functions)
-
-**src/shared/Spaarke.UI.Components/src/utils/formatters.ts:**
-```typescript
-export const formatters = {
-  date: (value: Date | string): string => {
-    const date = typeof value === "string" ? new Date(value) : value;
-    return new Intl.DateTimeFormat("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    }).format(date);
-  },
-
-  currency: (value: number, currencyCode: string = "USD"): string => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currencyCode
-    }).format(value);
-  },
-
-  number: (value: number): string => {
-    return new Intl.NumberFormat("en-US").format(value);
-  }
-};
-```
-
----
-
-## Success Metrics
-
-**Code Reuse:**
-- \>70% of UI components shared between PCF and SPA
-- <10% code duplication across modules
-
-**Development Velocity:**
-- 50% faster feature development using shared components
-- New module can use 80% shared components
-
-**Quality:**
-- 90%+ test coverage on shared components
-- Zero runtime errors from shared library (first 3 months)
-
-**Consistency:**
-- 100% Fluent UI v9 compliance
-- Single theme definition used everywhere
+- **Abstraction overhead**: `IDataService` pattern adds indirection vs direct `Xrm.WebApi` calls
+- **Version coordination**: Breaking changes in shared library require updating all consumers
+- **Build order**: Shared library must build before consumers
+- **Initial extraction effort**: Moving wizard content from LegalWorkspace to shared library
 
 ---
 
 ## Compliance Checklist
 
-Use this as a **pass/fail** review gate for PRs that add or change shared components.
+Use as a **pass/fail** review gate for PRs that add or change shared components.
 
-**Design system & UX**
-- Uses Fluent UI v9 components and tokens; no alternate UI framework introduced.
-- Matches model-driven app interaction patterns when embedded (dialogs, spacing/density, typography, command patterns).
+**Design system & UX:**
+- Uses Fluent UI v9 components and tokens exclusively
+- Matches model-driven app interaction patterns when embedded
 
-**Theming (including dark mode)**
-- No hard-coded colors (including inline styles); styling is token/semantic-token driven.
-- Component renders correctly with both `spaarkeLight` and `spaarkeDark` themes.
-- Icons/visuals work in dark mode and high-contrast (e.g., use `currentColor`/tokens; avoid fixed-color SVGs unless variants are provided).
+**Theming:**
+- No hard-coded colors; styling is token-driven
+- Renders correctly with both `spaarkeLight` and `spaarkeDark` themes
+- Icons/visuals work in dark mode and high-contrast
 
-**Accessibility**
-- Keyboard navigation works end-to-end; visible focus states are preserved.
-- Text/icon contrast meets accessibility expectations in light, dark, and high-contrast.
+**Accessibility:**
+- Keyboard navigation works; visible focus states preserved
+- Text/icon contrast meets WCAG 2.1 AA
 
-**Packaging & API hygiene**
-- Public exports are intentional (barrel exports); no accidental deep import dependencies.
-- Component APIs are typed; breaking changes are versioned appropriately.
-- Shared library does not take dependencies on app-specific modules (keep it reusable across PCF/Code Pages/SPA).
-- Library `peerDependencies` specifies `"react": ">=16.14.0"` — NOT `^18.x` — so both PCF (React 16/17) and Code Pages (React 18) can consume the library.
-- Components do NOT use React 18-only APIs (e.g., `useId`, `useDeferredValue`, concurrent features) when targeting PCF consumption; if React 18 APIs are used, document that the component is Code Page / SPA only.
+**Service architecture:**
+- No direct platform API calls (`Xrm.WebApi`, `ComponentFramework`)
+- Data access goes through `IDataService` or similar abstraction
+- Service is testable with mock adapter
+
+**Packaging:**
+- Public exports are intentional (barrel exports)
+- TypeScript types exported alongside components
+- Library `peerDependencies` specifies `"react": ">=16.14.0"`
+- Components targeting PCF do NOT use React 18/19-only APIs
 
 ---
 
 ## Related ADRs
 
-- [ADR-006: Prefer PCF Controls Over Web Resources](./ADR-006-prefer-pcf-over-webresources.md) - PCF development strategy
-- [ADR-011: Dataset PCF Over Subgrids](./ADR-011-dataset-pcf-over-subgrids.md) - Reusability principles for PCF
-- [ADR-010: DI Minimalism](./ADR-010-di-minimalism.md) - Service abstraction principles
-
----
-
-## References
-
-- [NPM Workspaces Documentation](https://docs.npmjs.com/cli/v8/using-npm/workspaces)
-- [TypeScript Handbook - Modules](https://www.typescriptlang.org/docs/handbook/modules.html)
-- [Fluent UI React v9](https://react.fluentui.dev/)
-- [Component Library Best Practices](https://blog.bitsrc.io/how-to-build-a-react-component-library-d92a2da8eab9)
+- [ADR-006: UI Surface Architecture](./ADR-006-prefer-pcf-over-webresources.md) - Code Pages as default surface
+- [ADR-021: Fluent UI v9 Design System](./ADR-021-fluent-ui-design-system.md) - Design system standard
+- [ADR-022: PCF Platform Libraries](./ADR-022-pcf-platform-libraries.md) - React version by surface
+- [ADR-026: Full-Page Custom Page Standard](./ADR-026-full-page-custom-page-standard.md) - Build tooling
 
 ---
 
@@ -742,15 +378,7 @@ Use this as a **pass/fail** review gate for PRs that add or change shared compon
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2025-10-03 | 1.0 | Initial ADR creation | Spaarke Engineering |
-| 2025-12-12 | 1.1 | Added explicit UI/UX standards and compliance checklist (Fluent + MDA fit + dark-mode compatibility) | Spaarke Engineering |
-| 2026-02-23 | 1.2 | Updated for two-tier architecture (ADR-006 revision): PCF consumption uses React 16 devDependency (not React 18); Code Page consumption uses React 18; library peerDependencies widened to `>=16.14.0`; added WizardDialog and SidePanel to directory structure; added Code Page consumption pattern. | Spaarke Engineering |
-| 2026-03-10 | 1.3 | Updated component inventory to reflect v2.0.0 (16 component groups, 10 hooks, 8 services). Added PCF deep import pattern guidance. Added callback-based props constraint. Created companion guide: `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md`. | Spaarke Engineering |
-
----
-
-**Next Actions:**
-1. ✅ Document ADR-012 (this document)
-2. 🔄 Update Sprint 5 implementation plan to include shared library setup
-3. 🔄 Create `src/shared/Spaarke.UI.Components/` directory structure
-4. 🔄 Extract core components from UniversalDataset PCF
-5. 🔄 Set up NPM workspace configuration
+| 2025-12-12 | 1.1 | Added UI/UX standards and compliance checklist | Spaarke Engineering |
+| 2026-02-23 | 1.2 | Updated for two-tier architecture; PCF React 16, Code Pages React 18; widened peerDeps | Spaarke Engineering |
+| 2026-03-10 | 1.3 | Updated component inventory to v2.0.0. Added PCF deep import pattern. Added callback-based props constraint. | Spaarke Engineering |
+| 2026-03-19 | 2.0 | **Major revision**: Replaced rigid "zero service dependencies / callback-based only" constraint with **service portability tiers** and `IDataService` abstraction pattern. Added domain wizard components (CreateMatter, CreateProject, etc.) to shared library inventory as extraction targets. Added IDataService, IUploadService, INavigationService interface definitions. Updated React version to 19 per ADR-021. Added Power Pages SPA as consumer. Added adapter pattern examples (Xrm, BFF, mock). Updated compliance checklist for service architecture. | Spaarke Engineering |
