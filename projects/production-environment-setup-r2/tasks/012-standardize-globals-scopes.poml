@@ -12,7 +12,12 @@
   </metadata>
 
   <prompt>
-    Standardize window global names across all components: use __SPAARKE_BFF_BASE_URL__ everywhere (SpeAdminApp uses __SPAARKE_BFF_URL__ — inconsistent). Standardize BFF scope format to user_impersonation everywhere (DocumentRelationshipViewer PCF uses SDAP.Access — inconsistent).
+    Standardize window global names across all components: use __SPAARKE_BFF_BASE_URL__ everywhere. Known inconsistencies from prior CORS hotfix:
+    - SpeAdminApp bffConfig.ts uses __SPAARKE_BFF_URL__ (missing _BASE_)
+    - @spaarke/auth config.ts resolveConfig() uses __SPAARKE_BFF_URL__ (missing _BASE_)
+    - LegalWorkspace, DocumentUploadWizard, AnalysisWorkspace bffConfig.ts use __SPAARKE_BFF_BASE_URL__ (correct)
+    Standardize BFF scope format to user_impersonation everywhere (DocumentRelationshipViewer PCF uses SDAP.Access — inconsistent).
+    Also remove the hardcoded BFF_API_SCOPE constant from LegalWorkspace bffConfig.ts (api://1e40baad-.../user_impersonation) — this will be resolved at runtime via resolveRuntimeConfig().
   </prompt>
 
   <role>TypeScript developer with cross-module consistency experience</role>
@@ -29,6 +34,9 @@
   <knowledge>
     <files>
       <file>src/client/shared/Spaarke.Auth/src/config.ts</file>
+      <file>src/solutions/LegalWorkspace/src/config/bffConfig.ts</file>
+      <file>src/solutions/SpeAdminApp/src/config/bffConfig.ts</file>
+      <file>src/solutions/DocumentUploadWizard/src/config/bffConfig.ts</file>
       <file>.claude/constraints/auth.md</file>
     </files>
   </knowledge>
@@ -50,8 +58,9 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">grep for __SPAARKE_BFF_URL__[^_] returns zero hits (variant eliminated)</criterion>
+    <criterion testable="true">grep for __SPAARKE_BFF_URL__[^_] returns zero hits (variant eliminated from @spaarke/auth and SpeAdminApp)</criterion>
     <criterion testable="true">grep for SDAP.Access returns zero hits</criterion>
+    <criterion testable="true">grep for "api://1e40baad" in bffConfig.ts files returns zero hits (hardcoded scope removed)</criterion>
     <criterion testable="true">All affected modules build successfully</criterion>
   </acceptance-criteria>
 </task>

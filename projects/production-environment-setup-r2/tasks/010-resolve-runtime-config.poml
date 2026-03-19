@@ -13,6 +13,7 @@
 
   <prompt>
     Add a resolveRuntimeConfig() function to @spaarke/auth that queries Dataverse Environment Variables (sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId) via REST API at runtime. This replaces build-time .env.production resolution for code pages. Also investigate Xrm.Utility.getGlobalContext() for MSAL client ID pre-auth bootstrap.
+    CONTEXT: Several code pages (LegalWorkspace, DocumentUploadWizard, SpeAdminApp) currently have bffConfig.ts files from a prior CORS hotfix that resolve BFF URL via window globals (__SPAARKE_BFF_BASE_URL__ or __SPAARKE_BFF_URL__). resolveRuntimeConfig() supersedes this pattern entirely — downstream tasks will delete those bffConfig.ts files and use resolveRuntimeConfig() instead. The existing resolveConfig() in config.ts also has an inconsistent window global key (__SPAARKE_BFF_URL__ missing _BASE_) — ensure resolveRuntimeConfig() uses the canonical __SPAARKE_BFF_BASE_URL__ name.
   </prompt>
 
   <role>Senior TypeScript developer with MSAL and Dataverse REST API experience</role>

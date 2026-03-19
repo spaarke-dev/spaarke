@@ -10,7 +10,12 @@
   </metadata>
 
   <prompt>
-    Replace the hardcoded org-to-BFF URL mapping in sprk_subgrid_parent_rollup.js (lines 59-66: "if (org === 'spaarkedev1') url = ...") with a Dataverse Environment Variable query for sprk_BffApiBaseUrl. This is CRITICAL — new customer orgs currently fall back to dev URL.
+    Replace the hardcoded org-to-BFF URL mapping in sprk_subgrid_parent_rollup.js with a Dataverse Environment Variable query for sprk_BffApiBaseUrl. This is CRITICAL — new customer orgs currently fall back to dev URL.
+    ACTUAL PATTERN (from prior CORS hotfix): The file uses inline if-else chains with getClientUrl() hostname matching, NOT a named map object:
+      if (clientUrl.indexOf("spaarkedev1.crm.dynamics.com") !== -1) return "https://spe-api-dev-67e2xz.azurewebsites.net";
+      else if (clientUrl.indexOf("spaarkeuat.crm.dynamics.com") !== -1) return "https://spaarke-bff-uat.azurewebsites.net";
+      else if (clientUrl.indexOf("spaarkeprod.crm.dynamics.com") !== -1) return "https://spaarke-bff-prod.azurewebsites.net";
+    Note: includes UAT and prod entries, not just dev. All must be replaced with env var query.
   </prompt>
 
   <role>JavaScript developer with Dataverse web resource experience</role>
@@ -42,7 +47,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">No hardcoded "spaarkedev1" or org-to-URL mapping in the file</criterion>
+    <criterion testable="true">No hardcoded "spaarkedev1", "spaarkeuat", "spaarkeprod", or org-to-URL mapping in the file</criterion>
     <criterion testable="true">BFF URL resolved from Dataverse Environment Variables</criterion>
     <criterion testable="true">Result is cached to avoid repeated queries</criterion>
   </acceptance-criteria>

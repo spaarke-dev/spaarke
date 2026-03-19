@@ -1,8 +1,8 @@
 # Task Index: Production Environment Setup R2
 
 > **Last Updated**: 2026-03-18
-> **Total Tasks**: 38
-> **Status**: 0/38 complete
+> **Total Tasks**: 39
+> **Status**: 0/39 complete
 
 ---
 
@@ -70,6 +70,7 @@
 | 044 | Fix sprk_aichatcontextmap_ribbon.js | 🔲 | 5 | 010 | 1h |
 | 045 | Parameterize Office add-in auth config | 🔲 | 5 | 010 | 3h |
 | 046 | Fix ribbon webresource JS files | 🔲 | 5 | 010 | 2h |
+| 047 | Fix KPI JS webresources (3 files) | 🔲 | 5 | 010 | 2h |
 
 ## Phase 6: Validation & Cleanup (Tasks 050-090)
 
@@ -92,7 +93,7 @@
 | 2 | 010, 011, 012 | Phase 1 | 2-3 | Shared libs — 012 depends on 010 |
 | 3 | 020-028 | Task 010 | Up to 9 | All code pages — fully independent |
 | 4 | 030-037 | Task 011 | Up to 8 | All PCF controls — fully independent |
-| 5 | 040-046 | Task 010 | Up to 7 | Legacy JS + add-ins — fully independent |
+| 5 | 040-047 | Task 010 | Up to 8 | Legacy JS + add-ins — fully independent |
 | 6 | 050-053 | Phase 1-5 | 2-3 | Validation + cleanup — some sequential |
 | 6-final | 090 | All | 1 | Must be last |
 

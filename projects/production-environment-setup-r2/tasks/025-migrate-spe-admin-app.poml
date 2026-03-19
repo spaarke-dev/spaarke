@@ -11,6 +11,7 @@
 
   <prompt>
     Migrate SpeAdminApp solution (src/solutions/SpeAdminApp/) from build-time .env.production config to runtime Dataverse Environment Variable resolution using resolveRuntimeConfig() from @spaarke/auth. NOTE: SpeAdminApp uses Vite (not webpack) — update vite.config.ts instead of webpack.config.js. Replace all import.meta.env references to BFF URL and MSAL Client ID with runtime resolution at bootstrap.
+    IMPORTANT: SpeAdminApp has a bffConfig.ts (src/solutions/SpeAdminApp/src/config/bffConfig.ts) from the prior CORS hotfix that uses window.__SPAARKE_BFF_URL__ (NOTE: inconsistent key — missing _BASE_). This file must be replaced by resolveRuntimeConfig() — delete bffConfig.ts and update all imports.
   </prompt>
 
   <role>React developer with Dataverse web resource experience</role>
@@ -38,7 +39,7 @@
 
   <steps>
     <step order="1" name="Read current bootstrap">Read SpeAdminApp entry point (main.tsx). Identify all import.meta.env references for BFF URL and MSAL Client ID.</step>
-    <step order="2" name="Replace with runtime resolution">Replace import.meta.env references with resolveRuntimeConfig() call. Update bootstrap sequence to await config before render.</step>
+    <step order="2" name="Replace with runtime resolution">Replace import.meta.env references and bffConfig.ts imports with resolveRuntimeConfig() call. Delete bffConfig.ts. Update bootstrap sequence to await config before render.</step>
     <step order="3" name="Clean .env.production">Remove BFF URL and MSAL client ID from .env.production (or remove file if empty).</step>
     <step order="4" name="Update vite.config.ts">Remove any define entries in vite.config.ts that injected BFF URL or MSAL client ID at build time.</step>
     <step order="5" name="Build and verify">Run npm run build from SpeAdminApp directory. Verify bundle doesn't contain hardcoded dev URLs.</step>
@@ -55,5 +56,6 @@
     <criterion testable="true">.env.production does not contain BFF URL or MSAL client ID</criterion>
     <criterion testable="true">npm run build succeeds (Vite build)</criterion>
     <criterion testable="true">Built bundle does not contain "spe-api-dev" or hardcoded MSAL client ID</criterion>
+    <criterion testable="true">bffConfig.ts is deleted and no imports reference it</criterion>
   </acceptance-criteria>
 </task>
