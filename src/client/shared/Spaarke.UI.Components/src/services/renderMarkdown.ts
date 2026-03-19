@@ -18,7 +18,7 @@
  * @see ADR-021 — Fluent v9 design system, dark mode
  */
 
-import { marked, type MarkedOptions, type Renderer } from 'marked';
+import { marked, type MarkedOptions } from 'marked';
 import DOMPurify from 'dompurify';
 
 // ---------------------------------------------------------------------------
@@ -220,22 +220,28 @@ export const SPRK_MARKDOWN_CSS = `
 `.trim();
 
 // ---------------------------------------------------------------------------
-// Custom renderer
+// Custom renderer (marked v17+ API — token-based methods)
 // ---------------------------------------------------------------------------
 
 /**
- * Build a custom marked renderer that:
- * 1. Opens links in a new tab with security attributes
- * 2. Applies no hard-coded colors (ADR-021)
+ * Configure marked with a custom renderer that opens links in a new tab
+ * with security attributes. Uses `marked.use()` which is the v17+ API
+ * for renderer customization.
  */
-function createRenderer(): Partial<Renderer> {
-  return {
-    link({ href, title, text }): string {
-      const titleAttr = title ? ` title="${title}"` : '';
-      return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+function configureMarkedRenderer(): void {
+  marked.use({
+    renderer: {
+      link({ href, title, tokens }): string {
+        const titleAttr = title ? ` title="${title}"` : '';
+        const text = this.parser.parseInline(tokens);
+        return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+      },
     },
-  };
+  });
 }
+
+// Run once at module load
+configureMarkedRenderer();
 
 // ---------------------------------------------------------------------------
 // DOMPurify configuration
@@ -305,11 +311,10 @@ export function renderMarkdown(
   const classPrefix = options?.classPrefix ?? 'sprk-markdown';
   const breaks = options?.breaks ?? true;
 
-  // Configure marked
+  // Configure marked (renderer is set globally via marked.use() at module load)
   const markedOptions: MarkedOptions = {
     breaks,
     gfm: true, // GitHub Flavored Markdown (tables, strikethrough, etc.)
-    renderer: createRenderer() as Renderer,
   };
 
   // Parse markdown to HTML
