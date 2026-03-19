@@ -8,13 +8,14 @@ import {
   webLightTheme,
 } from "@fluentui/react-components";
 import { useMsal } from "@azure/msal-react";
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { APP_VERSION } from "./config";
 import { AppHeader } from "./components/AppHeader";
 import { AuthGuard } from "./components/AuthGuard";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
 import { ProjectPage } from "./pages/ProjectPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import type { PortalUser } from "./types";
 
 const useStyles = makeStyles({
@@ -46,7 +47,6 @@ const useStyles = makeStyles({
 
 /**
  * Map an MSAL account to the PortalUser shape used by AppHeader and pages.
- * MSAL account claims: name, username (UPN/email), localAccountId, tenantId.
  */
 function accountToPortalUser(account: ReturnType<typeof useMsal>["accounts"][0] | undefined): PortalUser | null {
   if (!account) return null;
@@ -61,21 +61,70 @@ function accountToPortalUser(account: ReturnType<typeof useMsal>["accounts"][0] 
 }
 
 /**
- * Root App component for the Secure Project Workspace SPA.
+ * Inner shell — needs to be inside HashRouter to use useNavigate.
+ */
+const AppShell: React.FC<{
+  isDark: boolean;
+  onToggleDark: () => void;
+  portalUser: PortalUser | null;
+}> = ({ isDark, onToggleDark, portalUser }) => {
+  const styles = useStyles();
+  const navigate = useNavigate();
+
+  return (
+    <div className={styles.root}>
+      <AppHeader
+        isDark={isDark}
+        onToggleDark={onToggleDark}
+        portalUser={portalUser}
+        onSettingsClick={() => navigate("/settings")}
+      />
+
+      <main className={styles.content}>
+        <AuthGuard>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<WorkspaceHomePage />} />
+              <Route path="/project/:id" element={<ProjectPage />} />
+              <Route
+                path="/settings"
+                element={
+                  <SettingsPage
+                    isDark={isDark}
+                    onToggleDark={onToggleDark}
+                    portalUser={portalUser}
+                  />
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </ErrorBoundary>
+        </AuthGuard>
+      </main>
+
+      <footer className={styles.footer}>
+        <Text size={100} style={{ color: tokens.colorNeutralForeground4 }}>
+          v{APP_VERSION}
+        </Text>
+      </footer>
+    </div>
+  );
+};
+
+/**
+ * Root App component for the Secure External Workspace SPA.
  *
  * Provides:
  * - FluentProvider with Fluent UI v9 light/dark theming (ADR-021)
- * - Dark mode toggle synced to OS preference with manual override
- * - HashRouter (required for Power Pages single-page hosting — all navigation is hash-based)
+ * - Dark mode defaults to OS preference; manual override via toggle and settings page
+ * - HashRouter (required for Power Pages single-page hosting)
  * - AuthGuard: redirects unauthenticated users to Entra B2B login via MSAL
- * - Routes for WorkspaceHomePage (#/) and ProjectPage (#/project/:id)
- * - ErrorBoundary wrapping all route content for graceful error handling
- * - AppHeader with user info (from MSAL account) and theme toggle
- *
- * See ADR-022 for React 18 Code Page pattern.
- * See notes/auth-migration-b2b-msal.md for auth architecture.
+ * - Routes for WorkspaceHomePage (#/), ProjectPage (#/project/:id), SettingsPage (#/settings)
+ * - ErrorBoundary wrapping all route content
+ * - AppHeader with Spaarke logo, user settings link, and theme toggle
  */
 export const App: React.FC = () => {
+  // Default: light mode unless the OS explicitly prefers dark.
   const [isDark, setIsDark] = React.useState(
     () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false
   );
@@ -84,9 +133,8 @@ export const App: React.FC = () => {
   const portalUser = accountToPortalUser(accounts[0]);
 
   const theme = isDark ? webDarkTheme : webLightTheme;
-  const styles = useStyles();
 
-  // Listen for OS-level color scheme changes
+  // Track OS-level color scheme changes
   React.useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
@@ -97,32 +145,11 @@ export const App: React.FC = () => {
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <HashRouter>
-        <div className={styles.root}>
-          <AppHeader
-            isDark={isDark}
-            onToggleDark={() => setIsDark((prev) => !prev)}
-            portalUser={portalUser}
-          />
-
-          <main className={styles.content}>
-            <AuthGuard>
-              <ErrorBoundary>
-                <Routes>
-                  <Route path="/" element={<WorkspaceHomePage />} />
-                  <Route path="/project/:id" element={<ProjectPage />} />
-                  {/* Redirect any unknown hash paths back to home */}
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </ErrorBoundary>
-            </AuthGuard>
-          </main>
-
-          <footer className={styles.footer}>
-            <Text size={100} style={{ color: tokens.colorNeutralForeground4 }}>
-              v{APP_VERSION}
-            </Text>
-          </footer>
-        </div>
+        <AppShell
+          isDark={isDark}
+          onToggleDark={() => setIsDark((prev) => !prev)}
+          portalUser={portalUser}
+        />
       </HashRouter>
     </FluentProvider>
   );
