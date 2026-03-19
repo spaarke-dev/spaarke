@@ -1,0 +1,62 @@
+<task id="UDSS-011" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Extract CreateEvent wizard to shared library + Code Page wrapper</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>shared-library, wizard, event, code-page, vite</tags>
+    <dependencies>001, 002, 004</dependencies>
+    <parallel-group>phase2-wizard-extraction</parallel-group>
+  </metadata>
+
+  <prompt>
+    Move the CreateEvent wizard (4 files) from LegalWorkspace inline components to the
+    @spaarke/ui-components shared library, then create a standalone Vite Code Page wrapper
+    that hosts the wizard via navigateTo. The CreateEvent wizard creates sprk_event records
+    in Dataverse. After extraction, the wizard must be usable both as a shared library export
+    and as a standalone Code Page opened via Xrm.Navigation.navigateTo.
+  </prompt>
+
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, Vite, and Dataverse Code Pages</role>
+
+  <goal>
+    CreateEvent wizard lives in @spaarke/ui-components/components/CreateEventWizard/ with 4 files,
+    a new src/solutions/CreateEventWizard/ Code Page exists and builds successfully via Vite,
+    and the wizard can be opened from Corporate Workspace via navigateTo.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction — refactor eventService.ts to implement IDataService interface</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages — single HTML output</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode support required</constraint>
+    <constraint source="ADR-006">Standalone dialogs must be Code Pages, not PCF wrappers</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateEvent/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Move 4 files from LegalWorkspace/src/components/CreateEvent/ to src/client/shared/src/components/CreateEventWizard/ — preserve all component logic</step>
+    <step id="2">Refactor eventService.ts to implement IDataService abstraction from shared library — replace direct Xrm.WebApi calls with interface methods</step>
+    <step id="3">Export CreateEventWizard from @spaarke/ui-components package index</step>
+    <step id="4">Create src/solutions/CreateEventWizard/ Code Page project with Vite config, viteSingleFile plugin, package.json, tsconfig.json</step>
+    <step id="5">Create Code Page index.tsx that reads URL params (parentId, parentType), wraps wizard in FluentProvider + DialogShell</step>
+    <step id="6">Run npm install and npm run build in both shared library and Code Page — fix any compilation errors</step>
+    <step id="7">Verify single HTML file output exists in dist/ and is deployable as a Dataverse web resource</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>4 wizard files exist in @spaarke/ui-components/components/CreateEventWizard/</criterion>
+    <criterion>eventService.ts implements IDataService interface</criterion>
+    <criterion>CreateEventWizard is exported from shared library package index</criterion>
+    <criterion>src/solutions/CreateEventWizard/ builds successfully with Vite producing a single HTML file</criterion>
+    <criterion>No remaining CreateEvent component files in LegalWorkspace/src/components/</criterion>
+    <criterion>npm run build succeeds with zero errors in both shared library and Code Page</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,56 @@
+<task id="UDSS-001" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Define IDataService, IUploadService, INavigationService interfaces</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>shared-library, types, architecture</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Define the core service abstraction interfaces (IDataService, IUploadService, INavigationService)
+    in the @spaarke/ui-components shared library types directory. These interfaces decouple wizard
+    components from direct Xrm.WebApi calls, enabling portability across Code Pages, PCF controls,
+    and test environments. IDataService covers CRUD operations, IUploadService handles file upload
+    and container resolution, and INavigationService wraps dialog and record navigation.
+  </prompt>
+
+  <role>Senior TypeScript developer with Dataverse platform experience</role>
+
+  <goal>
+    Three interface files exist in src/client/shared/Spaarke.UI.Components/src/types/, are exported
+    from the types barrel, and the project compiles cleanly with tsc --noEmit.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">All shared components must use service portability tiers — no direct Xrm.WebApi calls in shared library code.</constraint>
+    <constraint source="ADR-012">Interfaces must be generic enough to support Xrm, REST, and mock adapters without leaking platform types.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read existing types in src/client/shared/Spaarke.UI.Components/src/types/ to understand current type conventions and barrel structure.</step>
+    <step id="2">Create IDataService interface with methods: createRecord(entityName, data), retrieveRecord(entityName, id, select?, expand?), retrieveMultipleRecords(entityName, options?, maxPageSize?), updateRecord(entityName, id, data), deleteRecord(entityName, id). All methods return Promise.</step>
+    <step id="3">Create IUploadService interface with methods: uploadFile(entityName, recordId, fileAttributeName, file, containerType?), getContainerIdForEntity(entityName, recordId).</step>
+    <step id="4">Create INavigationService interface with methods: openRecord(entityName, recordId), openDialog(webResourceName, params, dialogOptions), closeDialog(returnValue?).</step>
+    <step id="5">Export all three interfaces from types/index.ts barrel file.</step>
+    <step id="6">Run tsc --noEmit to verify compilation succeeds with no type errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>IDataService interface exists with createRecord, retrieveRecord, retrieveMultipleRecords, updateRecord, deleteRecord methods.</criterion>
+    <criterion>IUploadService interface exists with uploadFile and getContainerIdForEntity methods.</criterion>
+    <criterion>INavigationService interface exists with openRecord, openDialog, closeDialog methods.</criterion>
+    <criterion>All interfaces are exported from types/index.ts barrel.</criterion>
+    <criterion>tsc --noEmit passes with zero errors.</criterion>
+    <criterion>No direct Xrm type references in the interface definitions.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,62 @@
+<task id="UDSS-005" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Move CreateMatter wizard components to shared library, refactor to IDataService</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>shared-library, wizard, matter, refactor</tags>
+    <dependencies>UDSS-001, UDSS-002</dependencies>
+  </metadata>
+
+  <prompt>
+    Extract the CreateMatter wizard from the Corporate Workspace solution into the @spaarke/ui-components
+    shared library. This is the first wizard extraction and establishes the pattern for all subsequent
+    wizard migrations. The wizard currently uses direct Xrm.WebApi calls via matterService.ts — these
+    must be refactored to accept IDataService as a dependency. The component must support an "embedded"
+    prop for rendering inside Dataverse chrome (navigateTo modal) without its own window frame.
+  </prompt>
+
+  <role>Senior TypeScript/React developer with Dataverse form integration experience</role>
+
+  <goal>
+    CreateMatterWizard exists in @spaarke/ui-components/components/, accepts IDataService via props,
+    supports embedded mode, compiles cleanly, and existing tests pass.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">No direct Xrm.WebApi calls in shared library code — all data access must go through IDataService.</constraint>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 tokens exclusively — no hard-coded colors, no Fluent v8 components.</constraint>
+    <constraint source="ADR-012">Wizard components must accept services via props, not import them directly, to maintain portability across hosting contexts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read all files in src/solutions/LegalWorkspace/src/components/CreateMatter/ to understand the full component tree, service dependencies, and state management.</step>
+    <step id="2">Create @spaarke/ui-components/components/CreateMatterWizard/ directory in the shared library.</step>
+    <step id="3">Move component files from CreateMatter/ to CreateMatterWizard/, renaming the root component (WizardDialog.tsx to CreateMatterWizard.tsx or equivalent).</step>
+    <step id="4">Refactor matterService.ts to accept IDataService as a parameter instead of calling Xrm.WebApi directly. Update all CRUD calls to use the injected service.</step>
+    <step id="5">Update all internal imports to use shared library relative paths instead of solution-local paths.</step>
+    <step id="6">Add an "embedded" prop to the root component that controls whether the wizard renders its own dialog shell or assumes it is inside a Dataverse navigateTo modal with chrome.</step>
+    <step id="7">Export CreateMatterWizard and its props type from components/index.ts barrel.</step>
+    <step id="8">Run tsc --noEmit to verify TypeScript compilation succeeds with zero errors.</step>
+    <step id="9">Run existing unit tests to verify no regressions.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>CreateMatterWizard component exists in @spaarke/ui-components/components/CreateMatterWizard/.</criterion>
+    <criterion>No direct Xrm.WebApi calls exist in any file within the CreateMatterWizard directory.</criterion>
+    <criterion>matterService accepts IDataService and delegates all CRUD through it.</criterion>
+    <criterion>Component accepts "embedded" prop controlling dialog shell rendering.</criterion>
+    <criterion>Component and props type are exported from components/index.ts barrel.</criterion>
+    <criterion>tsc --noEmit passes with zero errors.</criterion>
+    <criterion>All existing tests pass without modification (or with minimal adapter changes).</criterion>
+  </acceptance-criteria>
+</task>

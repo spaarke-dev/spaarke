@@ -1,0 +1,55 @@
+<task id="UDSS-002" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Create Xrm.WebApi adapter implementing IDataService for Code Page consumers</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>shared-library, adapter, dataverse</tags>
+    <dependencies>UDSS-001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create concrete adapter implementations that bridge the IDataService, IUploadService, and
+    INavigationService interfaces to the Xrm.WebApi runtime. These adapters are used by Code Page
+    wrappers to inject platform-bound services into shared wizard components. Each adapter delegates
+    to the corresponding Xrm global API and handles type mapping between the generic interface
+    signatures and the Xrm-specific parameter shapes.
+  </prompt>
+
+  <role>Senior TypeScript developer with Dataverse Xrm.WebApi experience</role>
+
+  <goal>
+    Three adapter files exist in utils/adapters/, are exported from the utils barrel, compile
+    cleanly, and have complete JSDoc documentation on all public methods.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Adapters must implement the exact interface signatures from UDSS-001 — no additional Xrm-specific methods on the public API.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Create utils/adapters/xrmDataServiceAdapter.ts implementing IDataService with all CRUD methods delegating to Xrm.WebApi.</step>
+    <step id="2">Implement all IDataService methods (createRecord, retrieveRecord, retrieveMultipleRecords, updateRecord, deleteRecord) using Xrm.WebApi equivalents.</step>
+    <step id="3">Create utils/adapters/xrmUploadServiceAdapter.ts implementing IUploadService, delegating to Xrm.WebApi for file upload operations.</step>
+    <step id="4">Create utils/adapters/xrmNavigationServiceAdapter.ts implementing INavigationService, delegating to Xrm.Navigation for openForm, navigateTo, and close operations.</step>
+    <step id="5">Export all adapters from utils/index.ts barrel.</step>
+    <step id="6">Add JSDoc documentation to all public methods with parameter descriptions and return type explanations.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>xrmDataServiceAdapter.ts implements IDataService and compiles without errors.</criterion>
+    <criterion>xrmUploadServiceAdapter.ts implements IUploadService and compiles without errors.</criterion>
+    <criterion>xrmNavigationServiceAdapter.ts implements INavigationService and compiles without errors.</criterion>
+    <criterion>All adapters are exported from utils/index.ts.</criterion>
+    <criterion>All public methods have JSDoc comments.</criterion>
+    <criterion>No Xrm types leak into the public interface signatures.</criterion>
+  </acceptance-criteria>
+</task>

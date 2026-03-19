@@ -1,0 +1,59 @@
+<task id="UDSS-020" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Extract AnalysisBuilder App.tsx core into PlaybookLibraryShell shared component</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>shared-library, playbook, shell, refactor</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Extract the core logic from AnalysisBuilder App.tsx (~508 LOC) into a new PlaybookLibraryShell
+    shared component in @spaarke/ui-components. This shell encapsulates playbook browsing, scope
+    configuration, custom scope tab, and execution launch. It accepts IDataService for data access
+    portability, enabling reuse across Code Pages, Corporate Workspace, and Power Pages SPA.
+  </prompt>
+
+  <role>Senior TypeScript/React developer with shared library extraction experience</role>
+
+  <goal>
+    PlaybookLibraryShell exists in src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/,
+    is exported from the barrel, compiles cleanly, and encapsulates all playbook browsing/execution logic
+    from AnalysisBuilder without any direct Xrm.WebApi calls.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction — no direct Xrm.WebApi calls in shared library code.</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/AnalysisBuilder/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read AnalysisBuilder/src/App.tsx (~508 LOC) and identify all state, hooks, effects, and UI sections.</step>
+    <step id="2">Read shared Playbook components (PlaybookCardGrid, ScopeConfigurator) to understand existing shared surface.</step>
+    <step id="3">Create @spaarke/ui-components/components/PlaybookLibraryShell/ directory with index.ts barrel.</step>
+    <step id="4">Extract core logic: playbook browsing, scope configuration, custom scope tab, execution launch into PlaybookLibraryShell.tsx.</step>
+    <step id="5">Define IPlaybookLibraryShellProps interface with: entityType, entityId, allowedPlaybookIds, mode, embedded, intent, onComplete, onClose, dataService, playbookService.</step>
+    <step id="6">Refactor all data access to accept IDataService — remove any direct Xrm.WebApi calls.</step>
+    <step id="7">Export PlaybookLibraryShell and IPlaybookLibraryShellProps from the components barrel.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>PlaybookLibraryShell component exists in src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/.</criterion>
+    <criterion>IPlaybookLibraryShellProps is defined with all required props (entityType, entityId, allowedPlaybookIds, mode, embedded, intent, onComplete, onClose, dataService, playbookService).</criterion>
+    <criterion>No direct Xrm.WebApi calls exist in the shared component.</criterion>
+    <criterion>Component is exported from the ui-components barrel.</criterion>
+    <criterion>tsc --noEmit passes with zero errors.</criterion>
+    <criterion>Playbook browsing, scope configuration, custom scope tab, and execution launch logic are all encapsulated.</criterion>
+  </acceptance-criteria>
+</task>

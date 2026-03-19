@@ -1,0 +1,52 @@
+<task id="UDSS-032" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Integrate PlaybookLibraryShell in Power Pages SPA</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>spa, playbook</tags>
+    <dependencies>020, 030</dependencies>
+  </metadata>
+
+  <prompt>
+    Integrate PlaybookLibraryShell into the Power Pages SPA. Import the component from
+    @spaarke/ui-components, configure it with an external-user playbook filter to limit
+    visible playbooks to those appropriate for external users, and pass the bffDataService
+    adapter. Test playbook browsing and execution in the SPA context.
+  </prompt>
+
+  <role>Senior TypeScript/React developer with SPA and playbook experience</role>
+
+  <goal>
+    PlaybookLibraryShell renders in the Power Pages SPA with external-user filtering and
+    BFF data service, and playbook browsing and execution work end-to-end.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/</file>
+      <file>src/client/external-spa/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Import PlaybookLibraryShell from @spaarke/ui-components in the SPA.</step>
+    <step id="2">Configure with allowedPlaybookIds or external-user playbook filter to limit visible playbooks.</step>
+    <step id="3">Pass bffDataService adapter as the dataService prop.</step>
+    <step id="4">Test playbook browsing — only external-user-appropriate playbooks should appear.</step>
+    <step id="5">Test playbook execution flow end-to-end in SPA context.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>PlaybookLibraryShell is imported from @spaarke/ui-components in SPA.</criterion>
+    <criterion>External-user playbook filter is configured and limits visible playbooks.</criterion>
+    <criterion>bffDataService adapter is passed and used for all data operations.</criterion>
+    <criterion>Playbook browsing shows only external-user-appropriate playbooks.</criterion>
+    <criterion>Playbook execution works end-to-end in SPA context.</criterion>
+  </acceptance-criteria>
+</task>

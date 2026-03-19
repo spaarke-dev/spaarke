@@ -1,0 +1,55 @@
+<task id="UDSS-034" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Deploy and verify SPA integration</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>deploy, verification, spa, phase-gate</tags>
+    <dependencies>031, 032, 033</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy the Power Pages SPA with integrated shared components (DocumentUploadWizard,
+    PlaybookLibraryShell) and verify end-to-end functionality. This is the Phase 4 gate —
+    all SPA integration tests must pass before proceeding to Phase 5. Verify theme handling,
+    upload flows, playbook browsing, and BFF adapter communication.
+  </prompt>
+
+  <role>DevOps engineer and QA tester with Power Pages SPA deployment experience</role>
+
+  <goal>
+    Power Pages SPA is deployed with shared components, and all integration tests pass
+    for document upload, playbook library, and theme handling.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/power-page-deploy/SKILL.md</file>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+      <file>src/client/external-spa/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Build the Power Pages SPA with integrated shared components.</step>
+    <step id="2">Deploy SPA to Dataverse dev environment via Deploy-ExternalWorkspaceSpa.ps1.</step>
+    <step id="3">Test: Document upload wizard opens and completes upload flow in SPA.</step>
+    <step id="4">Test: Playbook library opens, shows external-user playbooks, and executes playbook.</step>
+    <step id="5">Test: Theme handling — light and dark mode render correctly.</step>
+    <step id="6">Test: BFF adapter communication — all API calls route correctly through BFF.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Power Pages SPA builds and deploys successfully.</criterion>
+    <criterion>Document upload wizard functions end-to-end in SPA.</criterion>
+    <criterion>Playbook library shows external-user playbooks and allows execution.</criterion>
+    <criterion>Light and dark mode render correctly for all shared components.</criterion>
+    <criterion>BFF adapter routes all API calls through BFF endpoints correctly.</criterion>
+    <criterion>No console errors or broken UI in deployed SPA.</criterion>
+  </acceptance-criteria>
+</task>

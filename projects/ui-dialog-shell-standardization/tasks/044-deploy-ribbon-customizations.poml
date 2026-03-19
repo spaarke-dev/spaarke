@@ -1,0 +1,51 @@
+<task id="UDSS-044" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Deploy all ribbon customizations</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, ribbon</tags>
+    <dependencies>041, 042, 043</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy all ribbon customizations for sprk_matter, sprk_project, and sprk_event to the
+    Dataverse dev environment. Ensure all solutions import cleanly, customizations publish
+    without errors, and command bar buttons appear on each entity form. This consolidates
+    the ribbon deployment into a single task to avoid multiple solution import cycles.
+  </prompt>
+
+  <role>DevOps engineer with Dataverse solution deployment experience</role>
+
+  <goal>
+    All ribbon customizations are deployed and published in Dataverse dev environment,
+    with command bar buttons visible on sprk_matter, sprk_project, and sprk_event forms.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">No legacy JS webresources for UI — buttons launch Code Pages via navigateTo.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Import the solution containing sprk_matter ribbon customizations and publish.</step>
+    <step id="2">Import the solution containing sprk_project ribbon customizations and publish.</step>
+    <step id="3">Import the solution containing sprk_event ribbon customizations and publish.</step>
+    <step id="4">Verify command bar buttons appear on each entity form in the dev environment.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All ribbon solutions import without errors.</criterion>
+    <criterion>All customizations publish without errors.</criterion>
+    <criterion>sprk_matter form shows Create Project, Create Event, Upload Document, Run Playbook buttons.</criterion>
+    <criterion>sprk_project form shows Create Event, Upload Document, Run Playbook buttons.</criterion>
+    <criterion>sprk_event form shows Upload Document and Run Playbook buttons.</criterion>
+  </acceptance-criteria>
+</task>

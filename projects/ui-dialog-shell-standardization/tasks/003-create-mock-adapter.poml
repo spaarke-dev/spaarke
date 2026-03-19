@@ -1,0 +1,49 @@
+<task id="UDSS-003" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Create mock IDataService adapter for unit testing</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>shared-library, testing, adapter</tags>
+    <dependencies>UDSS-001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create mock implementations of IDataService, IUploadService, and INavigationService using
+    jest.fn() stubs. These mocks allow wizard components to be unit tested without any Xrm runtime
+    dependency. Each mock should return sensible defaults (empty arrays, generated IDs) and expose
+    the underlying jest mock functions for assertion in tests.
+  </prompt>
+
+  <role>TypeScript developer with Jest testing experience</role>
+
+  <goal>
+    Three mock files exist in __mocks__/, each implementing the corresponding interface with
+    jest.fn() stubs, and TypeScript confirms the mocks satisfy the interface contracts.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Mock adapters must implement the exact same interface as production adapters — type-level compatibility is enforced by TypeScript.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Create __mocks__/mockDataService.ts with jest.fn() stubs for all IDataService methods, returning sensible defaults (e.g., createRecord returns a generated GUID).</step>
+    <step id="2">Create __mocks__/mockUploadService.ts with jest.fn() stubs for uploadFile and getContainerIdForEntity.</step>
+    <step id="3">Create __mocks__/mockNavigationService.ts with jest.fn() stubs for openRecord, openDialog, closeDialog.</step>
+    <step id="4">Verify mock types satisfy the interface contracts by explicitly typing each mock as the corresponding interface and running tsc --noEmit.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>mockDataService.ts exists and implements IDataService with jest.fn() for all methods.</criterion>
+    <criterion>mockUploadService.ts exists and implements IUploadService with jest.fn() for all methods.</criterion>
+    <criterion>mockNavigationService.ts exists and implements INavigationService with jest.fn() for all methods.</criterion>
+    <criterion>All mocks are explicitly typed as their interface and pass tsc --noEmit.</criterion>
+    <criterion>Default return values are sensible (e.g., resolved promises, generated IDs).</criterion>
+  </acceptance-criteria>
+</task>

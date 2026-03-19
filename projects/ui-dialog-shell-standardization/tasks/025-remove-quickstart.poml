@@ -1,0 +1,54 @@
+<task id="UDSS-025" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Remove QuickStartWizardDialog and quickStartConfig from LegalWorkspace</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>corporate-workspace, cleanup, quickstart</tags>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove the QuickStart/ folder and all QuickStart-related code from the LegalWorkspace
+    (Corporate Workspace) solution. This includes the QuickStartWizardDialog component,
+    quickStartConfig.ts, the LazyQuickStartWizardDialog import, and any associated state
+    in WorkspaceGrid. The QuickStart functionality has been replaced by PlaybookLibraryShell
+    with intent pre-selection, launched via navigateTo from Get Started cards.
+  </prompt>
+
+  <role>Senior TypeScript developer with cleanup and refactoring experience</role>
+
+  <goal>
+    All QuickStart-related code is removed from LegalWorkspace with no broken imports,
+    and the Corporate Workspace builds and functions correctly without it.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/QuickStart/</file>
+      <file>src/solutions/LegalWorkspace/src/WorkspaceGrid.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/GetStarted/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Remove the QuickStart/ folder entirely from src/solutions/LegalWorkspace/src/.</step>
+    <step id="2">Remove LazyQuickStartWizardDialog import and related state from WorkspaceGrid.tsx.</step>
+    <step id="3">Update GetStarted component to not reference QuickStart.</step>
+    <step id="4">Verify no broken imports remain across the LegalWorkspace solution.</step>
+    <step id="5">Build LegalWorkspace and verify it compiles cleanly.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>QuickStart/ folder is completely removed from LegalWorkspace.</criterion>
+    <criterion>No imports or references to QuickStartWizardDialog remain in any file.</criterion>
+    <criterion>No imports or references to quickStartConfig remain in any file.</criterion>
+    <criterion>WorkspaceGrid.tsx has no QuickStart-related state or lazy imports.</criterion>
+    <criterion>LegalWorkspace builds successfully with zero errors.</criterion>
+  </acceptance-criteria>
+</task>

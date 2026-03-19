@@ -1,0 +1,59 @@
+<task id="UDSS-007" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Move CreateProject wizard components to shared library, refactor to IDataService</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>shared-library, wizard, project, refactor</tags>
+    <dependencies>UDSS-001, UDSS-002</dependencies>
+  </metadata>
+
+  <prompt>
+    Extract the CreateProject wizard from the Corporate Workspace solution into the @spaarke/ui-components
+    shared library, following the same pattern established by the CreateMatter extraction in UDSS-005.
+    The CreateProject wizard includes provisioning components (SharePoint site provisioning, container
+    setup) that must also be migrated. All direct Xrm.WebApi calls in projectService.ts must be
+    refactored to use IDataService. The component must support an "embedded" prop for navigateTo modal
+    hosting.
+  </prompt>
+
+  <role>Senior TypeScript/React developer with Dataverse and SharePoint provisioning experience</role>
+
+  <goal>
+    CreateProjectWizard exists in @spaarke/ui-components/components/, accepts IDataService via props,
+    supports embedded mode, includes provisioning components, and compiles cleanly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">No direct Xrm.WebApi calls in shared library code — all data access must go through IDataService.</constraint>
+    <constraint source="ADR-012">Follow the same extraction pattern established by CreateMatterWizard (UDSS-005) for consistency.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateProject/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read all files in src/solutions/LegalWorkspace/src/components/CreateProject/ to understand the component tree, provisioning flow, and service dependencies.</step>
+    <step id="2">Create @spaarke/ui-components/components/CreateProjectWizard/ directory in the shared library.</step>
+    <step id="3">Move component files from CreateProject/ to CreateProjectWizard/, renaming the root component (ProjectWizardDialog to CreateProjectWizard) and including all provisioning subcomponents.</step>
+    <step id="4">Refactor projectService.ts to accept IDataService as a parameter instead of calling Xrm.WebApi directly. Update all CRUD and provisioning calls to use the injected service.</step>
+    <step id="5">Update all internal imports to use shared library relative paths. Add "embedded" prop to control dialog shell rendering.</step>
+    <step id="6">Export CreateProjectWizard and its props type from components/index.ts barrel.</step>
+    <step id="7">Run tsc --noEmit to verify TypeScript compilation succeeds with zero errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>CreateProjectWizard component exists in @spaarke/ui-components/components/CreateProjectWizard/.</criterion>
+    <criterion>No direct Xrm.WebApi calls exist in any file within the CreateProjectWizard directory.</criterion>
+    <criterion>projectService accepts IDataService and delegates all CRUD through it.</criterion>
+    <criterion>Provisioning components are included and properly migrated.</criterion>
+    <criterion>Component accepts "embedded" prop controlling dialog shell rendering.</criterion>
+    <criterion>Component and props type are exported from components/index.ts barrel.</criterion>
+    <criterion>tsc --noEmit passes with zero errors.</criterion>
+  </acceptance-criteria>
+</task>

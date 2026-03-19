@@ -1,0 +1,62 @@
+<task id="UDSS-016" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Migrate DocumentUploadWizard from webpack to Vite</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>code-page, vite, migration, document-upload</tags>
+    <dependencies>004</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate the existing DocumentUploadWizard Code Page from webpack to Vite build tooling.
+    This is an existing standalone Code Page that already works but uses webpack. Convert it
+    to use Vite with vite-plugin-singlefile to align with the standardized Code Page build
+    pipeline established in Phase 1. Extract any shared content to the shared library if
+    reuse opportunities are identified.
+  </prompt>
+
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, Vite, and Dataverse Code Pages</role>
+
+  <goal>
+    DocumentUploadWizard builds and produces identical functionality using Vite instead of webpack,
+    with a single HTML file output via vite-plugin-singlefile, and all webpack configuration
+    files are removed.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile is the standard build tool for Code Pages</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode support required</constraint>
+    <constraint source="ADR-006">Code Page output must be a single deployable HTML web resource</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/DocumentUploadWizard/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read and understand src/solutions/DocumentUploadWizard/webpack.config.js — document all plugins, loaders, aliases, and special configuration</step>
+    <step id="2">Create vite.config.ts with viteSingleFile plugin — replicate all webpack functionality (aliases, environment variables, asset handling)</step>
+    <step id="3">Update package.json — remove webpack dependencies (webpack, webpack-cli, ts-loader, html-webpack-plugin, etc.), add Vite dependencies (vite, vite-plugin-singlefile)</step>
+    <step id="4">Update tsconfig.json for Vite compatibility — ensure module resolution and JSX settings align with Vite expectations</step>
+    <step id="5">Create or update index.html as Vite entry point — Vite uses index.html as entry, not a webpack HtmlWebpackPlugin template</step>
+    <step id="6">Remove webpack configuration files (webpack.config.js, any webpack-related config)</step>
+    <step id="7">Run npm install and npm run build — fix any compilation or bundling errors</step>
+    <step id="8">Compare Vite output with previous webpack output — verify same functionality, similar bundle size, single HTML file</step>
+    <step id="9">Test in Dataverse — deploy and verify upload wizard works end-to-end (file selection, upload progress, completion)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>webpack.config.js and all webpack dependencies are removed</criterion>
+    <criterion>vite.config.ts exists with viteSingleFile plugin configured</criterion>
+    <criterion>npm run build produces a single HTML file in dist/</criterion>
+    <criterion>Build output is functionally identical to webpack output</criterion>
+    <criterion>No webpack-related packages remain in package.json dependencies or devDependencies</criterion>
+    <criterion>DocumentUploadWizard works correctly when deployed to Dataverse</criterion>
+    <criterion>npm run build succeeds with zero errors</criterion>
+  </acceptance-criteria>
+</task>

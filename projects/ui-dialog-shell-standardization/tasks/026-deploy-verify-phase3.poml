@@ -1,0 +1,57 @@
+<task id="UDSS-026" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Deploy Phase 3 and verify PlaybookLibraryShell</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>deploy, verification, phase-gate</tags>
+    <dependencies>022, 024, 025</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy all Phase 3 artifacts: the refactored AnalysisBuilder, the new PlaybookLibrary Code Page,
+    and the updated Corporate Workspace. Verify that AnalysisBuilder still works identically,
+    PlaybookLibrary opens correctly from workspace cards, and intent pre-selection functions as
+    expected. This is the Phase 3 gate — all tests must pass before proceeding to Phase 4.
+  </prompt>
+
+  <role>DevOps engineer and QA tester with Dataverse deployment experience</role>
+
+  <goal>
+    All Phase 3 components are deployed to the dev environment, and manual verification confirms
+    AnalysisBuilder, PlaybookLibrary, and Corporate Workspace function correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-LegalWorkspaceCustomPage.ps1</file>
+      <file>scripts/Deploy-EventsPage.ps1</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Deploy refactored AnalysisBuilder (sprk_analysisbuilder) to Dataverse dev environment.</step>
+    <step id="2">Deploy new PlaybookLibrary Code Page (sprk_playbooklibrary) to Dataverse dev environment.</step>
+    <step id="3">Deploy updated Corporate Workspace (sprk_corporateworkspace) to Dataverse dev environment.</step>
+    <step id="4">Test: AnalysisBuilder opens and functions identically to pre-refactor version.</step>
+    <step id="5">Test: PlaybookLibrary opens from Corporate Workspace Get Started cards.</step>
+    <step id="6">Test: Intent pre-selection works — playbook auto-selected, scope locked, streamlined flow shown.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>AnalysisBuilder (sprk_analysisbuilder) is deployed and functions identically to pre-refactor.</criterion>
+    <criterion>PlaybookLibrary (sprk_playbooklibrary) is deployed and accessible via navigateTo.</criterion>
+    <criterion>Corporate Workspace Get Started cards open PlaybookLibrary with correct intents.</criterion>
+    <criterion>Intent pre-selection auto-selects playbook and shows streamlined flow.</criterion>
+    <criterion>No console errors or broken UI in any deployed component.</criterion>
+    <criterion>QuickStart wizard is fully removed — no remnants in deployed workspace.</criterion>
+  </acceptance-criteria>
+</task>

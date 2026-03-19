@@ -1,0 +1,63 @@
+<task id="UDSS-014" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Extract SummarizeFiles wizard to shared library + Code Page wrapper</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>shared-library, wizard, summarize, code-page, vite</tags>
+    <dependencies>001, 002, 004</dependencies>
+    <parallel-group>phase2-wizard-extraction</parallel-group>
+  </metadata>
+
+  <prompt>
+    Move the SummarizeFiles wizard (8 files) from LegalWorkspace inline components to the
+    @spaarke/ui-components shared library, then create a standalone Vite Code Page wrapper.
+    The SummarizeFiles wizard orchestrates AI-powered document summarization and may interact
+    with the BFF API for AI processing. Preserve all streaming and progress UI.
+  </prompt>
+
+  <role>Frontend developer with expertise in React 19, Fluent UI v9, Vite, and Dataverse Code Pages</role>
+
+  <goal>
+    SummarizeFiles wizard lives in @spaarke/ui-components/components/SummarizeFilesWizard/ with 8 files,
+    a new src/solutions/SummarizeFilesWizard/ Code Page exists and builds successfully via Vite,
+    and the wizard can be opened from Corporate Workspace via navigateTo.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction</constraint>
+    <constraint source="ADR-026">Vite + vite-plugin-singlefile for Code Pages — single HTML output</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode support required</constraint>
+    <constraint source="ADR-006">Standalone dialogs must be Code Pages, not PCF wrappers</constraint>
+    <constraint source="ADR-013">AI integration must go through BFF API — no direct Azure OpenAI calls from client</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/LegalWorkspace/src/components/SummarizeFiles/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Inventory all 8 files in SummarizeFiles/ — identify wizard steps, service layer, types, and streaming/progress components</step>
+    <step id="2">Move all 8 files to src/client/shared/src/components/SummarizeFilesWizard/ — preserve AI streaming UI and progress indicators</step>
+    <step id="3">Refactor summarize service to implement IDataService abstraction — preserve BFF API integration for AI processing</step>
+    <step id="4">Export SummarizeFilesWizard from @spaarke/ui-components package index</step>
+    <step id="5">Create src/solutions/SummarizeFilesWizard/ Code Page project with Vite config, viteSingleFile plugin, package.json, tsconfig.json</step>
+    <step id="6">Create Code Page index.tsx that reads URL params (documentIds, containerId), wraps wizard in FluentProvider + DialogShell</step>
+    <step id="7">Run npm install and npm run build in both shared library and Code Page — fix any compilation errors</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>8 wizard files exist in @spaarke/ui-components/components/SummarizeFilesWizard/</criterion>
+    <criterion>Summarize service implements IDataService interface</criterion>
+    <criterion>AI streaming and progress UI is preserved</criterion>
+    <criterion>SummarizeFilesWizard is exported from shared library package index</criterion>
+    <criterion>src/solutions/SummarizeFilesWizard/ builds successfully with Vite producing a single HTML file</criterion>
+    <criterion>No remaining SummarizeFiles component files in LegalWorkspace/src/components/</criterion>
+    <criterion>npm run build succeeds with zero errors in both shared library and Code Page</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,54 @@
+<task id="UDSS-024" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Update Corporate Workspace Get Started cards to open PlaybookLibraryShell via navigateTo</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>corporate-workspace, playbook, navigateTo</tags>
+    <dependencies>021, 023</dependencies>
+  </metadata>
+
+  <prompt>
+    Update the Corporate Workspace ActionCardHandlers.ts so that Get Started cards for playbook
+    intents use Xrm.Navigation.navigateTo to open the sprk_playbooklibrary Code Page with the
+    appropriate intent parameter. The 4 playbook cards remain inline in the workspace but now
+    trigger navigateTo instead of opening the QuickStart wizard directly. The navigateTo Promise
+    is awaited so the workspace can refetch data after the dialog closes.
+  </prompt>
+
+  <role>Senior TypeScript developer with Dataverse navigation experience</role>
+
+  <goal>
+    Playbook Get Started cards in Corporate Workspace open sprk_playbooklibrary via navigateTo
+    with intent param, and the workspace refetches data after dialog close.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Services must use IDataService abstraction.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only, React 19, dark mode required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/ActionCardHandlers.ts</file>
+      <file>src/solutions/LegalWorkspace/src/WorkspaceGrid.tsx</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Update ActionCardHandlers.ts to replace QuickStart wizard launch with navigateTo sprk_playbooklibrary.</step>
+    <step id="2">Pass intent param (email-compose, assign-counsel, meeting-schedule, etc.) as data param in navigateTo.</step>
+    <step id="3">Keep the 4 playbook cards inline in the workspace — they just trigger navigateTo now.</step>
+    <step id="4">Await navigateTo Promise and trigger workspace data refetch on dialog close.</step>
+    <step id="5">Test each card opens the correct intent in the PlaybookLibrary Code Page.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Playbook Get Started cards call navigateTo with sprk_playbooklibrary webresource.</criterion>
+    <criterion>Intent param is passed correctly for each card (email-compose, assign-counsel, meeting-schedule).</criterion>
+    <criterion>navigateTo Promise is awaited and workspace refetches data on dialog close.</criterion>
+    <criterion>Cards remain visually inline in the workspace grid.</criterion>
+    <criterion>No references to QuickStartWizardDialog remain in ActionCardHandlers.</criterion>
+  </acceptance-criteria>
+</task>

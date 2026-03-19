@@ -1,0 +1,54 @@
+<task id="UDSS-004" project="UI Dialog Shell Standardization">
+  <metadata>
+    <title>Extract detectTheme() and parseDataParams() into shared utilities</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>shared-library, utils</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Extract the theme detection logic (detectTheme) and the Xrm data parameter parsing logic
+    (parseDataParams) from existing Code Page solutions into the @spaarke/ui-components shared
+    utility layer. Currently these patterns are duplicated across LegalWorkspace, EventsPage, and
+    other solutions. Consolidating them ensures consistent dark mode detection, theme token
+    resolution, and URL/data parameter handling across all future Code Page wrappers.
+  </prompt>
+
+  <role>TypeScript developer with Fluent UI v9 theming experience</role>
+
+  <goal>
+    detectTheme() and parseDataParams() are available from @spaarke/ui-components/utils, duplicated
+    code is identified for future removal, and unit tests cover core scenarios.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Theme detection must return Fluent v9 theme objects (webLightTheme, webDarkTheme) — no v8 themes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/LegalWorkspace/src/</file>
+      <file>src/solutions/EventsPage/src/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read existing theme detection implementations in src/solutions/LegalWorkspace/ and src/solutions/EventsPage/ to identify common patterns and variations.</step>
+    <step id="2">Consolidate theme detection into @spaarke/ui-components/utils/themeDetection.ts with a detectTheme() function that checks Xrm isDarkMode, prefers-color-scheme media query, and returns the appropriate Fluent v9 theme object.</step>
+    <step id="3">Create parseDataParams.ts for parsing the Xrm data envelope (URL search params, base64 decode, JSON parse) with typed return values.</step>
+    <step id="4">Export both utilities from utils/index.ts barrel.</step>
+    <step id="5">Add unit tests for detectTheme (light mode, dark mode, no Xrm fallback) and parseDataParams (valid params, missing params, malformed input).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>detectTheme() exists in utils/themeDetection.ts and returns Fluent v9 theme objects.</criterion>
+    <criterion>parseDataParams() exists in utils/parseDataParams.ts with typed return values.</criterion>
+    <criterion>Both utilities are exported from utils/index.ts.</criterion>
+    <criterion>Unit tests exist and pass for both utilities covering happy path and edge cases.</criterion>
+    <criterion>Existing duplicated code in LegalWorkspace and EventsPage is documented for future cleanup.</criterion>
+  </acceptance-criteria>
+</task>
