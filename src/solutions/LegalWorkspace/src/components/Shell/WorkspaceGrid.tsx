@@ -16,7 +16,7 @@ import { DocumentsTab } from "../RecordCards/DocumentsTab";
 import { useDataverseService } from "../../hooks/useDataverseService";
 import { navigateToEntityList } from "../../utils/navigation";
 import {
-  createQuickStartHandlers,
+  createPlaybookHandlers,
 } from "../GetStarted/ActionCardHandlers";
 import type { IWebApi } from "../../types/xrm";
 
@@ -32,14 +32,6 @@ import type { IWebApi } from "../../types/xrm";
 // does not shift while the chunk loads.
 // ---------------------------------------------------------------------------
 
-const LazyWizardDialog = React.lazy(
-  () => import("../CreateMatter/WizardDialog")
-);
-
-const LazyProjectWizardDialog = React.lazy(
-  () => import("../CreateProject/ProjectWizardDialog")
-);
-
 const LazyGetStartedExpandDialog = React.lazy(() =>
   import("../GetStarted/GetStartedExpandDialog").then((m) => ({
     default: m.GetStartedExpandDialog,
@@ -50,30 +42,6 @@ const LazyQuickSummaryDashboardDialog = React.lazy(() =>
   import("../QuickSummary/QuickSummaryDashboardDialog").then((m) => ({
     default: m.QuickSummaryDashboardDialog,
   }))
-);
-
-const LazyQuickStartWizardDialog = React.lazy(
-  () => import("../QuickStart/QuickStartWizardDialog")
-);
-
-const LazySummarizeFilesDialog = React.lazy(
-  () => import("../SummarizeFiles/SummarizeFilesDialog")
-);
-
-const LazyFindSimilarDialog = React.lazy(
-  () => import("../FindSimilar/FindSimilarDialog")
-);
-
-const LazyEventWizardDialog = React.lazy(
-  () => import("../CreateEvent/EventWizardDialog")
-);
-
-const LazyTodoWizardDialog = React.lazy(
-  () => import("../CreateTodo/TodoWizardDialog")
-);
-
-const LazyWorkAssignmentWizardDialog = React.lazy(
-  () => import("../CreateWorkAssignment/WorkAssignmentWizardDialog")
 );
 
 const LazyCloseProjectDialog = React.lazy(
@@ -293,67 +261,144 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleDashboardClose = React.useCallback(() => setIsDashboardOpen(false), []);
 
   // -------------------------------------------------------------------------
-  // Create New Matter wizard dialog state
+  // Create New Matter — opens Code Page dialog via navigateTo (UDSS-009)
   // -------------------------------------------------------------------------
 
-  const [isWizardOpen, setIsWizardOpen] = React.useState(false);
-  const handleOpenWizard = React.useCallback(() => setIsWizardOpen(true), []);
-  const handleCloseWizard = React.useCallback(() => setIsWizardOpen(false), []);
+  const handleOpenWizard = React.useCallback(async () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm: any =
+        (window as any)?.Xrm ??
+        (window.parent as any)?.Xrm ??
+        (window.top as any)?.Xrm;
+      if (!xrm?.Navigation?.navigateTo) return;
 
-  // -------------------------------------------------------------------------
-  // Create New Project wizard dialog state
-  // -------------------------------------------------------------------------
-
-  const [isProjectWizardOpen, setIsProjectWizardOpen] = React.useState(false);
-  const handleOpenProjectWizard = React.useCallback(() => setIsProjectWizardOpen(true), []);
-  const handleCloseProjectWizard = React.useCallback(() => setIsProjectWizardOpen(false), []);
-
-  // -------------------------------------------------------------------------
-  // Summarize New File(s) wizard dialog state
-  // -------------------------------------------------------------------------
-
-  const [isSummarizeOpen, setIsSummarizeOpen] = React.useState(false);
-  const handleOpenSummarize = React.useCallback(() => setIsSummarizeOpen(true), []);
-  const handleCloseSummarize = React.useCallback(() => setIsSummarizeOpen(false), []);
-
-  // -------------------------------------------------------------------------
-  // Find Similar wizard dialog state
-  // -------------------------------------------------------------------------
-
-  const [isFindSimilarOpen, setIsFindSimilarOpen] = React.useState(false);
-  const handleOpenFindSimilar = React.useCallback(() => setIsFindSimilarOpen(true), []);
-  const handleCloseFindSimilar = React.useCallback(() => setIsFindSimilarOpen(false), []);
-
-  // -------------------------------------------------------------------------
-  // Create New Event wizard dialog state
-  // -------------------------------------------------------------------------
-
-  const [isEventWizardOpen, setIsEventWizardOpen] = React.useState(false);
-  const handleOpenEventWizard = React.useCallback(() => setIsEventWizardOpen(true), []);
-  const handleCloseEventWizard = React.useCallback(() => {
-    setIsEventWizardOpen(false);
-    feedRefetchRef.current?.();
+      await xrm.Navigation.navigateTo(
+        {
+          pageType: "webresource",
+          webresourceName: "sprk_creatematterwizard",
+        },
+        {
+          target: 2,
+          width: { value: 85, unit: "%" },
+          height: { value: 85, unit: "%" },
+          title: "Create New Matter",
+        }
+      );
+    } catch {
+      // User cancelled or dialog error — ignore
+    }
   }, []);
 
   // -------------------------------------------------------------------------
-  // Create New To Do wizard dialog state
+  // Create New Project — opens Code Page dialog via navigateTo (UDSS-009)
   // -------------------------------------------------------------------------
 
-  const [isTodoWizardOpen, setIsTodoWizardOpen] = React.useState(false);
-  const handleOpenTodoWizard = React.useCallback(() => setIsTodoWizardOpen(true), []);
-  const handleCloseTodoWizard = React.useCallback(() => {
-    setIsTodoWizardOpen(false);
-    todoRefetchRef.current?.();
+  const handleOpenProjectWizard = React.useCallback(async () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm: any =
+        (window as any)?.Xrm ??
+        (window.parent as any)?.Xrm ??
+        (window.top as any)?.Xrm;
+      if (!xrm?.Navigation?.navigateTo) return;
+
+      await xrm.Navigation.navigateTo(
+        {
+          pageType: "webresource",
+          webresourceName: "sprk_createprojectwizard",
+        },
+        {
+          target: 2,
+          width: { value: 85, unit: "%" },
+          height: { value: 85, unit: "%" },
+          title: "Create New Project",
+        }
+      );
+    } catch {
+      // User cancelled or dialog error — ignore
+    }
   }, []);
 
   // -------------------------------------------------------------------------
-  // Work Assignment wizard dialog state
+  // Summarize Files — opens Code Page dialog via navigateTo (UDSS-017)
   // -------------------------------------------------------------------------
 
-  const [isWorkAssignmentWizardOpen, setIsWorkAssignmentWizardOpen] = React.useState(false);
-  const handleOpenWorkAssignmentWizard = React.useCallback(() => setIsWorkAssignmentWizardOpen(true), []);
-  const handleCloseWorkAssignmentWizard = React.useCallback(() => {
-    setIsWorkAssignmentWizardOpen(false);
+  const handleOpenSummarize = React.useCallback(async (documentIds?: string[]) => {
+    try {
+      const data = documentIds ? `documentIds=${documentIds.join(",")}` : "";
+      await (window as any).Xrm?.Navigation?.navigateTo(
+        { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
+        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Summarize Files" }
+      );
+      docRefetchRef.current?.();
+    } catch {
+      docRefetchRef.current?.();
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Find Similar — opens Code Page dialog via navigateTo (UDSS-017)
+  // -------------------------------------------------------------------------
+
+  const handleOpenFindSimilar = React.useCallback(async (documentId?: string, containerId?: string) => {
+    try {
+      const data = `documentId=${documentId || ""}&containerId=${containerId || ""}`;
+      await (window as any).Xrm?.Navigation?.navigateTo(
+        { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
+        { target: 2, width: { value: 70, unit: "%" }, height: { value: 80, unit: "%" }, title: "Find Similar Documents" }
+      );
+      docRefetchRef.current?.();
+    } catch {
+      docRefetchRef.current?.();
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Create New Event — opens Code Page dialog via navigateTo (UDSS-017)
+  // -------------------------------------------------------------------------
+
+  const handleOpenEventWizard = React.useCallback(async () => {
+    try {
+      await (window as any).Xrm?.Navigation?.navigateTo(
+        { pageType: "webresource", webresourceName: "sprk_createeventwizard" },
+        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create New Event" }
+      );
+      feedRefetchRef.current?.();
+    } catch {
+      feedRefetchRef.current?.();
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Create New To Do — opens Code Page dialog via navigateTo (UDSS-017)
+  // -------------------------------------------------------------------------
+
+  const handleOpenTodoWizard = React.useCallback(async () => {
+    try {
+      await (window as any).Xrm?.Navigation?.navigateTo(
+        { pageType: "webresource", webresourceName: "sprk_createtodowizard" },
+        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create New To Do" }
+      );
+      todoRefetchRef.current?.();
+    } catch {
+      todoRefetchRef.current?.();
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Create Work Assignment — opens Code Page dialog via navigateTo (UDSS-017)
+  // -------------------------------------------------------------------------
+
+  const handleOpenWorkAssignmentWizard = React.useCallback(async () => {
+    try {
+      await (window as any).Xrm?.Navigation?.navigateTo(
+        { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard" },
+        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create Work Assignment" }
+      );
+    } catch {
+      // User cancelled or dialog error — ignore
+    }
   }, []);
 
   // -------------------------------------------------------------------------
@@ -390,27 +435,19 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, [handleOpenCloseProjectDialog]);
 
   // -------------------------------------------------------------------------
-  // Quick Start wizard dialog state
+  // Playbook handlers for email-compose & meeting-schedule cards (UDSS-024)
+  // Opens Playbook Library Code Page via Xrm.Navigation.navigateTo
   // -------------------------------------------------------------------------
 
-  const [wizardIntent, setWizardIntent] = React.useState<string | null>(null);
-  const handleOpenQuickStartWizard = React.useCallback((intent: string) => {
-    setWizardIntent(intent);
-  }, []);
-  const handleCloseQuickStartWizard = React.useCallback(() => {
-    setWizardIntent(null);
-  }, []);
-
-  // -------------------------------------------------------------------------
-  // Quick Start handlers for the 5 non-Create-Matter/Project cards
-  // -------------------------------------------------------------------------
-
-  const quickStartHandlers = React.useMemo(
+  const playbookHandlers = React.useMemo(
     () =>
-      createQuickStartHandlers({
-        onOpenWizard: handleOpenQuickStartWizard,
+      createPlaybookHandlers({
+        onDialogClose: () => {
+          feedRefetchRef.current?.();
+          todoRefetchRef.current?.();
+        },
       }),
-    [handleOpenQuickStartWizard]
+    []
   );
 
   // -------------------------------------------------------------------------
@@ -529,7 +566,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const cardClickHandlers = React.useMemo(
     () => ({
-      ...quickStartHandlers,
+      ...playbookHandlers,
       // Explicit handlers AFTER spread to prevent overwrite
       "create-new-matter": handleOpenWizard,
       "create-new-project": handleOpenProjectWizard,
@@ -537,7 +574,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "find-similar": handleOpenFindSimilar,
       "assign-to-counsel": handleOpenWorkAssignmentWizard,
     }),
-    [quickStartHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard]
+    [playbookHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard]
   );
 
   // -------------------------------------------------------------------------
@@ -740,51 +777,6 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         </React.Suspense>
       )}
 
-      {/* Create New Matter wizard dialog — rendered outside the grid so it
-          can overlay the full viewport regardless of grid position.
-          Lazy-loaded: chunk only fetched on first user interaction (Task 033). */}
-      {isWizardOpen && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazyWizardDialog open={isWizardOpen} onClose={handleCloseWizard} webApi={webApi} />
-        </React.Suspense>
-      )}
-
-      {/* Create New Project wizard dialog — single-step project creation.
-          Lazy-loaded: chunk only fetched on first user interaction. */}
-      {isProjectWizardOpen && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazyProjectWizardDialog open={isProjectWizardOpen} onClose={handleCloseProjectWizard} webApi={webApi} />
-        </React.Suspense>
-      )}
-
-      {/* Summarize New File(s) wizard dialog — dedicated file summary wizard.
-          Lazy-loaded: chunk only fetched on first user interaction. */}
-      {isSummarizeOpen && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazySummarizeFilesDialog open={isSummarizeOpen} onClose={handleCloseSummarize} webApi={webApi} />
-        </React.Suspense>
-      )}
-
-      {/* Find Similar wizard dialog — dedicated semantic search wizard.
-          Lazy-loaded: chunk only fetched on first user interaction. */}
-      {isFindSimilarOpen && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazyFindSimilarDialog open={isFindSimilarOpen} onClose={handleCloseFindSimilar} />
-        </React.Suspense>
-      )}
-
-      {/* Quick Start Playbook Wizard dialog — config-driven wizard for action cards.
-          Lazy-loaded: chunk only fetched on first user interaction. */}
-      {wizardIntent !== null && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazyQuickStartWizardDialog
-            open={wizardIntent !== null}
-            onClose={handleCloseQuickStartWizard}
-            intent={wizardIntent}
-          />
-        </React.Suspense>
-      )}
-
       {/* Quick Summary Dashboard dialog — Coming Soon placeholder */}
       {isDashboardOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
@@ -792,27 +784,6 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
             open={isDashboardOpen}
             onClose={handleDashboardClose}
           />
-        </React.Suspense>
-      )}
-
-      {/* Create New Event wizard dialog */}
-      {isEventWizardOpen && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazyEventWizardDialog open={isEventWizardOpen} onClose={handleCloseEventWizard} webApi={webApi} />
-        </React.Suspense>
-      )}
-
-      {/* Create New To Do wizard dialog */}
-      {isTodoWizardOpen && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazyTodoWizardDialog open={isTodoWizardOpen} onClose={handleCloseTodoWizard} webApi={webApi} />
-        </React.Suspense>
-      )}
-
-      {/* Work Assignment wizard dialog */}
-      {isWorkAssignmentWizardOpen && (
-        <React.Suspense fallback={<DialogLoadingFallback />}>
-          <LazyWorkAssignmentWizardDialog open={isWorkAssignmentWizardOpen} onClose={handleCloseWorkAssignmentWizard} webApi={webApi} />
         </React.Suspense>
       )}
 

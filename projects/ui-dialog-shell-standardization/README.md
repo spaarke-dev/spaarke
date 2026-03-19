@@ -1,5 +1,8 @@
 # UI Dialog & Shell Standardization
 
+> **Status**: Completed
+> **Completed**: 2026-03-19
+
 ## Quick Links
 
 - [Implementation Plan](plan.md)
@@ -7,6 +10,19 @@
 - [Design Specification](spec.md)
 - [Original Design](design.md)
 - [AI Context](CLAUDE.md)
+- [Lessons Learned](notes/lessons-learned.md)
+
+## Delivery Summary
+
+This project successfully extracted all wizard/dialog components from the Corporate Workspace into standalone, independently deployable Code Page web resources backed by shared library components. Key deliverables:
+
+- **IDataService abstraction layer** — All 7 wizards and 2 tool dialogs use runtime-injected data services (ADR-012 compliant)
+- **7 wizard extractions** — CreateMatter, CreateProject, CreateEvent, CreateTodo, CreateWorkAssignment, DocumentUpload, SummarizeFiles moved to `@spaarke/ui-components`
+- **2 tool dialog extractions** — FindSimilarDialog and PlaybookLibraryShell moved to shared library
+- **8 Code Page wrappers** — Thin Vite + React 19 entry points for Dataverse modal hosting
+- **Corporate Workspace restructured** — WorkspaceGrid uses `navigateTo` calls instead of inline dialogs
+- **Power Pages SPA integration** — BFF adapter pattern enables shared component reuse in external SPA
+- **Ribbon/command bar wiring** — Wizards launchable from entity main form command bars
 
 ## Overview
 
@@ -66,4 +82,4 @@ The Corporate Workspace (`sprk_corporateworkspace`) embeds 11 lazy-loaded React 
 
 ---
 
-*Project initialized: 2026-03-19*
+*Project initialized: 2026-03-19 | Completed: 2026-03-19*

@@ -1,16 +1,16 @@
 /**
  * ActionCardHandlers.ts
  *
- * Click handler functions for the 5 Quick Start action cards in the
+ * Click handler functions for the playbook-intent action cards in the
  * Legal Operations Workspace Get Started row.
  *
- * Each handler opens the QuickStartWizardDialog with the appropriate
- * intent string. The dialog is rendered by WorkspaceGrid.tsx.
+ * Each handler opens the Playbook Library Code Page via Xrm.Navigation.navigateTo,
+ * passing the entity context and intent as query parameters.
  *
  * Architecture:
  *   Pure TypeScript utility — no React, no side effects at import.
- *   Handlers are created via `createQuickStartHandlers(options)` so callers
- *   can inject the `onOpenWizard` callback.
+ *   Handlers are created via `createPlaybookHandlers(options)` so callers
+ *   can inject the refetch callback.
  */
 
 // ---------------------------------------------------------------------------
@@ -28,11 +28,9 @@ function logInfo(message: string, ...args: unknown[]): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Maps action card IDs (from getStartedConfig.ts) to QuickStart wizard intents
- * (from quickStartConfig.ts).
+ * Maps action card IDs (from getStartedConfig.ts) to Playbook Library intents.
  */
 const CARD_INTENT_MAP: Readonly<Record<string, string>> = {
-  "assign-to-counsel": "assign-counsel",
   "send-email-message": "email-compose",
   "schedule-new-meeting": "meeting-schedule",
 };
@@ -42,14 +40,14 @@ const CARD_INTENT_MAP: Readonly<Record<string, string>> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Options for `createQuickStartHandlers`.
+ * Options for `createPlaybookHandlers`.
  */
-export interface IQuickStartHandlerOptions {
+export interface IPlaybookHandlerOptions {
   /**
-   * Called when a Quick Start card is clicked. Receives the wizard intent string.
-   * The caller should set React state to open QuickStartWizardDialog with this intent.
+   * Called after the navigateTo dialog closes (whether successful or cancelled).
+   * Callers should use this to refetch workspace data.
    */
-  onOpenWizard: (intent: string) => void;
+  onDialogClose?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,43 +58,66 @@ export interface IQuickStartHandlerOptions {
  * Map of action card ID → click handler function.
  * Keys match the `id` field in ACTION_CARD_CONFIGS (getStartedConfig.ts).
  */
-export type QuickStartHandlerMap = Readonly<Record<string, () => void>>;
+export type PlaybookHandlerMap = Readonly<Record<string, () => void>>;
+
+// ---------------------------------------------------------------------------
+// navigateTo helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens the Playbook Library Code Page in a modal dialog via Xrm.Navigation.navigateTo.
+ */
+async function openPlaybookIntent(intent: string, onDialogClose?: () => void): Promise<void> {
+  try {
+    const data = `intent=${intent}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (window as any).Xrm?.Navigation?.navigateTo(
+      { pageType: "webresource", webresourceName: "sprk_playbooklibrary", data },
+      { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Playbook Library" }
+    );
+    onDialogClose?.();
+  } catch {
+    onDialogClose?.();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Factory function
 // ---------------------------------------------------------------------------
 
 /**
- * Creates click handlers for the 5 Quick Start action cards.
+ * Creates click handlers for the playbook-intent action cards.
  *
- * Each handler calls `onOpenWizard(intent)` with the card's mapped intent.
+ * Each handler calls `openPlaybookIntent(intent)` which opens the Playbook Library
+ * Code Page dialog via Xrm.Navigation.navigateTo.
  *
- * @param options - Injectable callbacks (onOpenWizard).
+ * @param options - Injectable callbacks (onDialogClose).
  * @returns An object map of card ID → click handler.
  *
  * @example
  * ```typescript
- * const handlers = createQuickStartHandlers({
- *   onOpenWizard: (intent) => setWizardIntent(intent),
+ * const handlers = createPlaybookHandlers({
+ *   onDialogClose: () => refetchData(),
  * });
  *
  * // Wire into GetStartedRow:
  * <GetStartedRow onCardClick={{ ...handlers, "create-new-matter": openWizard }} />
  * ```
  */
-export function createQuickStartHandlers(
-  options: IQuickStartHandlerOptions
-): QuickStartHandlerMap {
-  const { onOpenWizard } = options;
+export function createPlaybookHandlers(
+  options: IPlaybookHandlerOptions = {}
+): PlaybookHandlerMap {
+  const { onDialogClose } = options;
 
   const handlers: Record<string, () => void> = {};
 
   for (const [cardId, intent] of Object.entries(CARD_INTENT_MAP)) {
     handlers[cardId] = () => {
-      logInfo(`Card "${cardId}" clicked → opening wizard with intent "${intent}"`);
-      onOpenWizard(intent);
+      logInfo(`Card "${cardId}" clicked → opening Playbook Library with intent "${intent}"`);
+      void openPlaybookIntent(intent, onDialogClose);
     };
   }
 
   return handlers;
 }
+

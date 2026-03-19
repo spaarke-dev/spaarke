@@ -1,14 +1,108 @@
-# Theme Menu Ribbon Configuration
+# Dataverse Ribbon Customizations
 
-This folder contains the Ribbon XML for the Spaarke Theme Menu.
+This folder contains all Ribbon XML customizations for Spaarke entity forms and grids.
 
-## Overview
+## Folder Structure
 
-The Theme Menu adds a flyout submenu to the model-driven app command bar (More Commands) that allows users to switch between Auto, Light, and Dark themes.
+```
+ribbon/
+├── README.md                          # This file
+├── sprk_ThemeMenuRibbon.xml           # Application-level theme menu ribbon
+├── AnalysisRibbons/                   # sprk_analysis entity ribbons
+│   ├── Entities/sprk_analysis/
+│   │   ├── Entity.xml
+│   │   └── RibbonDiff.xml
+│   └── Other/
+│       ├── Customizations.xml
+│       └── Solution.xml
+├── CommunicationRibbons/              # sprk_communication entity ribbons
+│   ├── Entities/sprk_communication/
+│   ├── Other/
+│   └── [Content_Types].xml
+├── DocumentRibbons/                   # sprk_document entity ribbons
+│   ├── Entities/sprk_Document/
+│   │   ├── Entity.xml
+│   │   └── RibbonDiff.xml             # Check in/out, delete, download, send to index
+│   ├── Other/
+│   ├── customizations.xml
+│   ├── solution.xml
+│   └── [Content_Types].xml
+├── EmailRibbons/                      # email entity ribbons
+│   ├── Entities/email/
+│   └── Other/
+├── EventRibbons/                      # sprk_event entity ribbons
+│   ├── README.md                      # Event-specific documentation
+│   ├── RibbonDiffXml_sprk_event.xml   # Update Related button
+│   └── customizations.xml             # Wizard launcher buttons (UDSS-043)
+├── MatterRibbons/                     # sprk_matter entity ribbons
+│   ├── Entities/sprk_Matter/
+│   │   ├── Entity.xml
+│   │   └── RibbonDiff.xml             # Theme menu flyout
+│   ├── Other/
+│   │   ├── Customizations.xml
+│   │   └── Solution.xml
+│   └── customizations.xml             # Wizard launcher buttons (UDSS-041)
+├── ProjectRibbons/                    # sprk_project entity ribbons
+│   └── customizations.xml             # Wizard launcher buttons (UDSS-042)
+└── ThemeMenuRibbons/                  # Theme menu solution package
+    └── Other/
+```
 
-## Prerequisites
+## Wizard Ribbon Buttons (UDSS-041/042/043)
 
-Before configuring the ribbon, ensure the following web resources are deployed to Dataverse:
+The `customizations.xml` files in MatterRibbons, ProjectRibbons, and EventRibbons add wizard launcher buttons to entity form command bars. All buttons call functions from `sprk_wizard_commands.js`.
+
+### Button Inventory
+
+| Entity | Button | Function | Sequence |
+|--------|--------|----------|----------|
+| **Matter** | Create Project | `openCreateProjectWizard` | 200 |
+| **Matter** | Create Event | `openCreateEventWizard` | 210 |
+| **Matter** | Create To Do | `openCreateTodoWizard` | 220 |
+| **Matter** | Upload Documents | `openDocumentUploadWizard` | 230 |
+| **Matter** | Summarize Files | `openSummarizeFilesWizard` | 240 |
+| **Matter** | Find Similar | `openFindSimilarDialog` | 250 |
+| **Matter** | Playbook Library | `openPlaybookLibrary` | 260 |
+| **Project** | Upload Documents | `openDocumentUploadWizard` | 200 |
+| **Project** | Summarize Files | `openSummarizeFilesWizard` | 210 |
+| **Project** | Find Similar | `openFindSimilarDialog` | 220 |
+| **Project** | Playbook Library | `openPlaybookLibrary` | 230 |
+| **Event** | Upload Documents | `openDocumentUploadWizard` | 200 |
+| **Event** | Summarize Files | `openSummarizeFilesWizard` | 210 |
+| **Event** | Find Similar | `openFindSimilarDialog` | 220 |
+| **Event** | Playbook Library | `openPlaybookLibrary` | 230 |
+
+### Prerequisites
+
+| Web Resource | Description |
+|-------------|-------------|
+| `sprk_wizard_commands.js` | Wizard launcher JavaScript - contains all `Spaarke.Commands.Wizards.*` functions |
+
+### Display Rules
+
+All wizard buttons use these rules:
+- **DisplayRule**: `FormStateRule State="Existing"` -- buttons only appear on saved records (not new/create forms)
+- **EnableRule**: `FormStateRule State="Existing"` -- buttons are enabled only on existing records
+
+### Naming Convention
+
+All wizard ribbon IDs follow the pattern:
+```
+sprk.Wizard.{Entity}.{Action}.{Type}
+```
+
+Examples:
+- `sprk.Wizard.Matter.CreateProject.CustomAction`
+- `sprk.Wizard.Matter.CreateProject.Button`
+- `sprk.Wizard.Matter.CreateProject.Command`
+- `sprk.Wizard.Matter.Form.DisplayRule`
+- `sprk.Wizard.Matter.Form.EnableRule`
+
+## Theme Menu Ribbon
+
+The Theme Menu adds a flyout submenu to the command bar allowing users to switch between Auto, Light, and Dark themes.
+
+### Theme Menu Prerequisites
 
 | Web Resource | Source File | Description |
 |-------------|-------------|-------------|
@@ -19,62 +113,44 @@ Before configuring the ribbon, ensure the following web resources are deployed t
 | `sprk_ThemeLight16.svg` | `src/client/assets/icons/sprk_ThemeLight16.svg` | Light option icon |
 | `sprk_ThemeDark16.svg` | `src/client/assets/icons/sprk_ThemeDark16.svg` | Dark option icon |
 
-## Configuration Steps
+## Deployment
 
-### Option 1: Using Ribbon Workbench (Recommended)
+### Using Ribbon Workbench (Recommended)
 
-1. **Open XrmToolBox** and connect to your Dataverse environment
-2. **Launch Ribbon Workbench**
-3. **Load your solution** (e.g., SpaarkeCore)
-4. **Select "Application Ribbon"** from the entity dropdown
-5. **Locate "Mscrm.GlobalTab.MainTab.More"** in the ribbon structure
-6. **Add a FlyoutAnchor**:
-   - ID: `sprk.ThemeMenu.FlyoutAnchor`
-   - Label: "Theme"
-   - Image16x16: `$webresource:sprk_ThemeMenu16.svg`
-   - Image32x32: `$webresource:sprk_ThemeMenu32.svg`
-7. **Add Menu with MenuSection** inside the FlyoutAnchor
-8. **Add three Button elements** (NOT ToggleButton):
-   - Auto: calls `Spaarke.Theme.setTheme('auto')`
-   - Light: calls `Spaarke.Theme.setTheme('light')`
-   - Dark: calls `Spaarke.Theme.setTheme('dark')`
-9. **Create Command Definitions** with JavaScriptFunction actions
-10. **Publish** the customizations
+1. Open **XrmToolBox** and connect to your Dataverse environment
+2. Launch **Ribbon Workbench**
+3. Load the target solution (e.g., SpaarkeCore)
+4. Select the target entity from the entity dropdown
+5. Import the RibbonDiffXml from the appropriate `customizations.xml`
+6. **Publish** the customizations
 
-### Option 2: Import XML Directly
+### Using Solution Import
 
-If your solution supports XML import:
+1. Package the ribbon folder contents as an unmanaged solution ZIP
+2. Import via **Settings > Solutions > Import**
+3. Publish all customizations
 
-1. Open the solution in Solution Explorer
-2. Navigate to Application Ribbon
-3. Import `sprk_ThemeMenuRibbon.xml`
-4. Publish
+### Using ribbon-edit Skill
 
-## File Reference
+```bash
+/ribbon-edit
+```
 
-- `sprk_ThemeMenuRibbon.xml` - Complete RibbonDiffXml for the theme menu
-
-## Testing
-
-After publishing:
-
-1. Navigate to any form or view in the model-driven app
-2. Click the "..." (More Commands) button in the command bar
-3. Verify "Theme" appears with a submenu icon
-4. Click "Theme" and verify Auto, Light, Dark options appear
-5. Click each option and verify PCF controls update immediately
+The `ribbon-edit` skill automates solution export, XML modification, and re-import. See `.claude/skills/ribbon-edit/SKILL.md` for details.
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Menu not appearing | Check web resources are published; verify solution is correct |
-| JavaScript error on click | Verify `sprk_ThemeMenu.js` is published correctly |
-| Icons not showing | Verify SVG web resources are deployed with correct names |
-| Theme not changing | Check browser console for errors; verify PCF controls have theme listener |
+| Buttons not appearing | Verify `sprk_wizard_commands.js` web resource is published |
+| Buttons appear on new record forms | Check DisplayRule uses `FormStateRule State="Existing"` |
+| JavaScript error on click | Check browser console; verify web resource name matches |
+| Button ordering wrong | Adjust Sequence values in CustomAction elements |
+| Conflicts with existing buttons | Ensure Sequence values do not overlap with OOTB buttons |
 
 ## Related Files
 
-- [Spec Document](../../../projects/mda-darkmode-theme/spec.md) - Section 3.6 for detailed requirements
-- [Theme Menu JS](../../../src/client/webresources/js/sprk_ThemeMenu.js) - JavaScript handler
-- [SVG Icons](../../../src/client/assets/icons/) - Theme icons
+- Wizard commands JS: `src/client/webresources/js/sprk_wizard_commands.js`
+- Theme Menu JS: `src/client/webresources/js/sprk_ThemeMenu.js`
+- SVG Icons: `src/client/assets/icons/`
+- Ribbon Edit Skill: `.claude/skills/ribbon-edit/SKILL.md`

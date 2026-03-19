@@ -8,9 +8,17 @@
  * LegalWorkspace) and passes it in. This component just provides the dialog
  * shell with correct sizing and no scrollbars.
  *
- * Zero service dependencies — fully prop-based.
+ * Optional `embedded` prop hides the title bar chrome when the dialog is
+ * rendered inside a Dataverse form (e.g., as part of a PCF control panel).
+ *
+ * Optional `authenticatedFetch` and `bffBaseUrl` are accepted for forward
+ * compatibility with service-injected patterns but are not currently used
+ * by the iframe shell itself.
+ *
+ * Zero hard service dependencies — fully prop-based.
  *
  * @see ADR-021 for Fluent UI v9 requirements
+ * @see ADR-012 for shared component library patterns
  */
 
 import * as React from 'react';
@@ -26,6 +34,8 @@ import {
 } from '@fluentui/react-components';
 import { DismissRegular, ArrowExpandRegular } from '@fluentui/react-icons';
 
+import type { IDataService } from '../../types/serviceInterfaces';
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -37,6 +47,29 @@ export interface IFindSimilarDialogProps {
   onClose: () => void;
   /** The URL to load in the iframe. When null/undefined the iframe is not rendered. */
   url: string | null;
+  /**
+   * When true, hides the title bar chrome (expand / close buttons).
+   * Useful when the dialog is rendered inside a Dataverse form where
+   * the parent already provides navigation controls.
+   * @default false
+   */
+  embedded?: boolean;
+  /**
+   * Optional authenticated fetch function for forward compatibility
+   * with service-injection patterns. Not used by the iframe shell itself.
+   */
+  authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional BFF API base URL for forward compatibility with
+   * service-injection patterns. Not used by the iframe shell itself.
+   */
+  bffBaseUrl?: string;
+  /**
+   * Optional data service for forward compatibility with service-injection
+   * patterns. Not used by the iframe shell itself, but available for
+   * consumers that may extend this component.
+   */
+  dataService?: IDataService;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +122,12 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onClose, url }) => {
+export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
+  open,
+  onClose,
+  url,
+  embedded = false,
+}) => {
   const styles = useStyles();
 
   const handleExpand = React.useCallback(() => {
@@ -106,20 +144,22 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({ open, onC
       }}
     >
       <DialogSurface className={styles.surface}>
-        <div className={styles.titleBar}>
-          <Tooltip content="Open in new tab" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<ArrowExpandRegular />}
-              size="small"
-              onClick={handleExpand}
-              aria-label="Open in new tab"
-            />
-          </Tooltip>
-          <Tooltip content="Close" relationship="label">
-            <Button appearance="subtle" icon={<DismissRegular />} size="small" onClick={onClose} aria-label="Close" />
-          </Tooltip>
-        </div>
+        {!embedded && (
+          <div className={styles.titleBar}>
+            <Tooltip content="Open in new tab" relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<ArrowExpandRegular />}
+                size="small"
+                onClick={handleExpand}
+                aria-label="Open in new tab"
+              />
+            </Tooltip>
+            <Tooltip content="Close" relationship="label">
+              <Button appearance="subtle" icon={<DismissRegular />} size="small" onClick={onClose} aria-label="Close" />
+            </Tooltip>
+          </div>
+        )}
         <DialogBody className={styles.body}>
           {url && <iframe src={url} title="Document Relationships" className={styles.frame} />}
         </DialogBody>

@@ -5,16 +5,23 @@ import {
   tokens,
   Text,
   webDarkTheme,
-  webLightTheme,
 } from "@fluentui/react-components";
+import type { Theme } from "@fluentui/react-components";
 import { useMsal } from "@azure/msal-react";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import {
+  resolveCodePageTheme,
+  setupCodePageThemeListener,
+  setUserThemePreference,
+} from "@spaarke/ui-components";
 import { APP_VERSION } from "./config";
 import { AppHeader } from "./components/AppHeader";
 import { AuthGuard } from "./components/AuthGuard";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
 import { ProjectPage } from "./pages/ProjectPage";
+import { PlaybookLibraryPage } from "./pages/PlaybookLibraryPage";
+import { DocumentUploadPage } from "./pages/DocumentUploadPage";
 import type { PortalUser } from "./types";
 
 const useStyles = makeStyles({
@@ -64,8 +71,8 @@ function accountToPortalUser(account: ReturnType<typeof useMsal>["accounts"][0] 
  * Root App component for the Secure Project Workspace SPA.
  *
  * Provides:
- * - FluentProvider with Fluent UI v9 light/dark theming (ADR-021)
- * - Dark mode toggle synced to OS preference with manual override
+ * - FluentProvider with Fluent UI v9 light/dark theming via shared 4-level cascade (ADR-021)
+ * - Dark mode toggle persisted to localStorage and synced across tabs
  * - HashRouter (required for Power Pages single-page hosting — all navigation is hash-based)
  * - AuthGuard: redirects unauthenticated users to Entra B2B login via MSAL
  * - Routes for WorkspaceHomePage (#/) and ProjectPage (#/project/:id)
@@ -76,23 +83,32 @@ function accountToPortalUser(account: ReturnType<typeof useMsal>["accounts"][0] 
  * See notes/auth-migration-b2b-msal.md for auth architecture.
  */
 export const App: React.FC = () => {
-  const [isDark, setIsDark] = React.useState(
-    () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false
-  );
+  // Use shared 4-level theme cascade: localStorage > URL flags > navbar DOM > system preference.
+  // resolveCodePageTheme() handles all levels including system preference fallback when
+  // Dataverse context is unavailable (which is always the case for this external SPA).
+  const [theme, setTheme] = React.useState<Theme>(resolveCodePageTheme);
 
   const { accounts } = useMsal();
   const portalUser = accountToPortalUser(accounts[0]);
 
-  const theme = isDark ? webDarkTheme : webLightTheme;
+  const isDark = theme === webDarkTheme;
   const styles = useStyles();
 
-  // Listen for OS-level color scheme changes
+  // Listen for theme changes: localStorage (cross-tab), custom events (same-tab), system preference
   React.useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
+    const cleanup = setupCodePageThemeListener(setTheme);
+    return cleanup;
   }, []);
+
+  // Toggle persists to localStorage and dispatches custom event so all listeners (including
+  // other tabs and shared components) pick up the change via setupCodePageThemeListener.
+  const handleToggleDark = React.useCallback(() => {
+    const newPreference = isDark ? "light" : "dark";
+    setUserThemePreference(newPreference);
+    // setUserThemePreference dispatches THEME_CHANGE_EVENT which setupCodePageThemeListener
+    // handles, but we also set state directly for immediate UI response.
+    setTheme(resolveCodePageTheme());
+  }, [isDark]);
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -100,7 +116,7 @@ export const App: React.FC = () => {
         <div className={styles.root}>
           <AppHeader
             isDark={isDark}
-            onToggleDark={() => setIsDark((prev) => !prev)}
+            onToggleDark={handleToggleDark}
             portalUser={portalUser}
           />
 
@@ -110,6 +126,8 @@ export const App: React.FC = () => {
                 <Routes>
                   <Route path="/" element={<WorkspaceHomePage />} />
                   <Route path="/project/:id" element={<ProjectPage />} />
+                  <Route path="/playbooks/:entityType/:entityId" element={<PlaybookLibraryPage />} />
+                  <Route path="/upload" element={<DocumentUploadPage />} />
                   {/* Redirect any unknown hash paths back to home */}
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

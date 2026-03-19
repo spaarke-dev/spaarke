@@ -4,10 +4,9 @@
   "private": true,
   "description": "DocumentUploadWizard React Code Page — wizard dialog for uploading files to existing document records",
   "scripts": {
-    "build": "webpack --config webpack.config.js",
-    "build:dev": "webpack --config webpack.config.js --mode development",
-    "build:analyze": "webpack --config webpack.config.js --env analyze",
-    "dev": "webpack serve --config webpack.config.js --mode development --open",
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit"
   },
@@ -24,12 +23,9 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@types/xrm": "^9.0.0",
-    "esbuild-loader": "^4.4.2",
-    "terser-webpack-plugin": "^5.3.16",
+    "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.4.0",
-    "webpack": "^5.91.0",
-    "webpack-bundle-analyzer": "^5.2.0",
-    "webpack-cli": "^5.1.4",
-    "webpack-dev-server": "^5.0.4"
+    "vite": "^5.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
   }
 }

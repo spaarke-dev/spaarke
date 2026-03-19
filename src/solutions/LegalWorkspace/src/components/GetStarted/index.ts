@@ -11,11 +11,11 @@ export { ACTION_CARD_CONFIGS } from "./getStartedConfig";
 export type { IActionCardConfig } from "./getStartedConfig";
 
 export {
-  createQuickStartHandlers,
+  createPlaybookHandlers,
 } from "./ActionCardHandlers";
 export type {
-  IQuickStartHandlerOptions,
-  QuickStartHandlerMap,
+  IPlaybookHandlerOptions,
+  PlaybookHandlerMap,
 } from "./ActionCardHandlers";
 
 export { ANALYSIS_BUILDER_CONTEXTS } from "./analysisBuilderTypes";

@@ -70,5 +70,26 @@ export * from './AiProgressStepper';
 // InlineAiToolbar - Floating AI action toolbar that appears on text selection
 export * from './InlineAiToolbar';
 
+// CreateMatterWizard - Extracted matter creation wizard (IDataService abstraction)
+export * from './CreateMatterWizard';
+
+// CreateProjectWizard - Extracted project creation wizard (IDataService abstraction)
+export * from './CreateProjectWizard';
+
+// CreateEventWizard - Extracted event creation wizard (IDataService abstraction)
+export * from './CreateEventWizard';
+
+// CreateTodoWizard - Extracted todo creation wizard (IDataService, todoflag=true)
+export * from './CreateTodoWizard';
+
+// CreateWorkAssignmentWizard - Extracted work assignment wizard (WizardShell direct)
+export * from './CreateWorkAssignmentWizard';
+
+// SummarizeFilesWizard - Extracted file summarization wizard (IDataService abstraction)
+export * from './SummarizeFilesWizard';
+
 // SlashCommandMenu - Floating command palette triggered by '/' in SprkChat input
 export * from './SlashCommandMenu';
+
+// PlaybookLibraryShell - Shared playbook browsing + execution shell (extracted from AnalysisBuilder)
+export * from './PlaybookLibraryShell';
