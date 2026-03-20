@@ -1,15 +1,15 @@
 # ADR-026: Full-Page Custom Page Standard
 
-> **Status**: Accepted
+> **Status**: Accepted (Revised 2026-03-19)
 > **Date**: 2026-02-18
 > **Supersedes**: None
-> **Related**: ADR-006 (PCF over webresources), ADR-021 (Fluent v9), ADR-022 (PCF platform libraries)
+> **Related**: ADR-006 (UI Surface Architecture), ADR-021 (Fluent v9), ADR-022 (PCF platform libraries)
 
 ---
 
 ## Decision
 
-Full-page Dataverse surfaces (sitemap entries, navigation pages, side panes) use **standalone HTML web resources** built with Vite + React 18, not PCF controls.
+Full-page Dataverse surfaces (sitemap entries, navigation pages, side panes) and standalone dialogs/wizards use **standalone HTML web resources** built with Vite + React 19, not PCF controls.
 
 PCF controls remain the standard for **form-level** UI (fields, subgrids, tabs) per ADR-006.
 
@@ -17,11 +17,12 @@ PCF controls remain the standard for **form-level** UI (fields, subgrids, tabs) 
 
 ## Context
 
-PCF controls declare `<platform-library name="React" version="16.14.0" />`, which causes Dataverse to inject React 16 at runtime. React 18 APIs (`createRoot`, `useId()`, concurrent features) are unavailable regardless of where the PCF is placed — form or Custom Page.
+PCF controls declare `<platform-library name="React" version="16.14.0" />`, which causes Dataverse to inject React 16 at runtime. React 19 APIs (`createRoot`, `useId()`, concurrent features) are unavailable regardless of where the PCF is placed — form or Custom Page.
 
-Full-page surfaces need React 18 because:
-- Fluent UI v9 requires `useId()` (React 18 native) — workarounds for React 16 are fragile
+Full-page surfaces and standalone dialogs need React 19 because:
+- Fluent UI v9 requires `useId()` (React 18+ native) — workarounds for React 16 are fragile
 - Full-page apps benefit from concurrent rendering and Suspense
+- Wizard dialogs need to be independently deployable and reusable across contexts
 - No PCF lifecycle benefits apply (no field binding, no `notifyOutputChanged`)
 
 ---
@@ -31,9 +32,9 @@ Full-page surfaces need React 18 because:
 | Surface Type | Technology | React | Location |
 |-------------|-----------|-------|----------|
 | Form field/subgrid/tab | PCF control | 16 (platform) | `src/client/pcf/` |
-| Full navigation page | Standalone HTML | 18 (bundled) | `src/solutions/{PageName}/` |
-| Side pane | Standalone HTML | 18 (bundled) | `src/solutions/{PaneName}/` |
-| Dialog (simple) | PCF + Fluent | 16 (platform) | `src/client/pcf/` |
+| Full navigation page | Standalone HTML | 19 (bundled) | `src/solutions/{PageName}/` |
+| Side pane | Standalone HTML | 19 (bundled) | `src/solutions/{PaneName}/` |
+| Wizard / dialog (standalone) | Standalone HTML | 19 (bundled) | `src/solutions/{WizardName}/` |
 | Ribbon/command script | Minimal JS | N/A | `src/dataverse/webresources/` |
 
 ---
@@ -44,20 +45,20 @@ Full-page surfaces need React 18 because:
 |-----------|--------|-----------|
 | **Build tool** | Vite 5.x | `vite-plugin-singlefile` inlines all JS/CSS into one HTML file — required for Dataverse web resource deployment. Fastest dev server. ESBuild transpilation. |
 | **Single-file plugin** | `vite-plugin-singlefile` | Dataverse web resources are single files — no CDN, no separate .js/.css. This plugin is the only production-quality solution for this constraint. |
-| **React** | 18.x (self-bundled) | Enables `createRoot`, `useId()`, concurrent features. Bundled in `devDependencies` — Vite tree-shakes and inlines. |
+| **React** | 19.x (self-bundled) | Enables `createRoot`, `useId()`, concurrent features. Bundled in `devDependencies` — Vite tree-shakes and inlines. |
 | **UI library** | Fluent UI v9 (`@fluentui/react-components`) | ADR-021 mandate. Bundled (not platform-provided) to avoid version mismatch. |
 | **TypeScript** | 5.x strict mode | `moduleResolution: "bundler"` for Vite compatibility. `noEmit: true` — Vite handles transpilation. |
 | **Xrm access** | Frame-walk pattern | `window.parent.Xrm` — web resources run in iframes, must walk frame hierarchy to find Xrm global. |
 | **Theme** | ADR-021 4-level detection | localStorage → URL param → navbar DOM color → system `prefers-color-scheme`. |
 | **Navigation** | `Xrm.Navigation` / `postMessage` | No React Router — navigation targets are Dataverse forms/pages, not client-side routes. |
-| **Deployment** | `pac webresource push` | Single HTML file uploaded as Webpage (HTML) type web resource. |
+| **Deployment** | `pac webresource push` or deploy scripts | Single HTML file uploaded as Webpage (HTML) type web resource. |
 
 ### Why Not Alternatives?
 
 | Alternative | Why Not |
 |------------|---------|
-| PCF control | Platform injects React 16 — no React 18 APIs. No form lifecycle benefits for full pages. |
-| webpack | Requires 50+ lines of config for single-file output. No native plugin equivalent to `viteSingleFile`. |
+| PCF control | Platform injects React 16 — no React 19 APIs. No form lifecycle benefits for full pages. |
+| webpack | Requires 50+ lines of config for single-file output. No native plugin equivalent to `viteSingleFile`. Existing webpack-based Code Pages (DocumentUploadWizard) should migrate to Vite. |
 | Create React App | Deprecated. No single-file output. |
 | Next.js / Remix | Server-side rendering is irrelevant — this runs inside Dataverse iframes. |
 | esbuild (standalone) | No HTML inlining. Would require custom post-processing. |
@@ -66,10 +67,10 @@ Full-page surfaces need React 18 because:
 
 ## MUST Rules
 
-- **MUST** use Vite + `vite-plugin-singlefile` for all full-page Custom Page builds
+- **MUST** use Vite + `vite-plugin-singlefile` for all Code Page builds
 - **MUST** place projects under `src/solutions/{PageName}/`
-- **MUST** use React 18 via `devDependencies` (Vite bundles it)
-- **MUST** use `createRoot` from `react-dom/client` (React 18 entry point)
+- **MUST** use React 19 via `devDependencies` (Vite bundles it)
+- **MUST** use `createRoot` from `react-dom/client` (React 19 entry point)
 - **MUST** wrap all UI in `<FluentProvider theme={theme}>` as outermost element
 - **MUST** implement ADR-021 theme detection (4-level priority chain)
 - **MUST** include CSS reset in `index.html` for Dataverse iframe context
@@ -89,16 +90,36 @@ Full-page surfaces need React 18 because:
 
 ---
 
-## Affected Controls (Migration Required)
+## Code Page package.json (React 19)
 
-These PCF controls declare `platform-library React 16` but use `createRoot` (React 18). They must be migrated to this standard if they are full-page surfaces, or downgraded to React 16 APIs if they are form-level controls:
+```json
+{
+  "dependencies": {
+    "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
+    "@spaarke/auth": "file:../../client/shared/Spaarke.Auth"
+  },
+  "devDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "typescript": "~5.7.0",
+    "vite": "^5.4.0",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}
+```
 
-| Control | Current State | Surface Type | Action |
-|---------|--------------|--------------|--------|
-| LegalWorkspace | PCF + createRoot | Full page | Migrate to standalone HTML |
-| AnalysisWorkspace | PCF + createRoot | Full page | Migrate to standalone HTML |
-| AnalysisBuilder | PCF + createRoot | Full page | Migrate to standalone HTML |
-| SpeDocumentViewer | PCF + createRoot | Document viewer | Evaluate: full-page or form-level? |
+---
+
+## React 19 Migration Note
+
+Some existing Code Pages still reference React 18.x in their `package.json`. React 19 is backward-compatible — existing Code Pages using `createRoot` and standard hooks will work without code changes. Upgrade `package.json` versions opportunistically when touching these solutions:
+
+| Status | Solutions |
+|--------|-----------|
+| Already on React 19 | `DocumentRelationshipViewer`, `SprkChatPane`, `AnalysisWorkspace`, `SemanticSearch` |
+| Still on React 18 (upgrade when touched) | `LegalWorkspace`, `EventsPage`, `SpeAdminApp`, `AnalysisBuilder`, `DocumentUploadWizard`, `CalendarSidePane`, `TodoDetailSidePane` |
 
 ---
 
@@ -109,14 +130,16 @@ These PCF controls declare `platform-library React 16` but use `createRoot` (Rea
 | EventsPage | `src/solutions/EventsPage/` | Production (canonical reference) |
 | CalendarSidePane | `src/solutions/CalendarSidePane/` | Production |
 | EventDetailSidePane | `src/solutions/EventDetailSidePane/` | Production |
+| LegalWorkspace | `src/solutions/LegalWorkspace/` | Production |
+| DocumentUploadWizard | `src/solutions/DocumentUploadWizard/` | Production (migrate webpack → Vite) |
 
 ---
 
 ## Pattern File
 
-See [`.claude/patterns/webresource/full-page-custom-page.md`](../../patterns/webresource/full-page-custom-page.md) for the complete project template with all file contents.
+See [`.claude/patterns/webresource/full-page-custom-page.md`](../patterns/webresource/full-page-custom-page.md) for the complete project template with all file contents.
 
 ---
 
 **Lines**: ~130
-**Purpose**: Standardize full-page Dataverse Custom Page architecture
+**Purpose**: Standardize Code Page architecture (full pages, side panes, dialogs/wizards)

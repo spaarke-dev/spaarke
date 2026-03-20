@@ -2,8 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Accepted |
+| **Status** | Accepted (Revised 2026-03-19) |
 | **Date** | 2026-02-18 |
+| **Updated** | 2026-03-19 |
 | **Decision Makers** | Ralph Schroeder |
 | **Supersedes** | None |
 | **Related** | ADR-006, ADR-021, ADR-022 |
@@ -16,28 +17,28 @@ Spaarke builds custom UI surfaces for Dataverse Model-Driven Apps. These surface
 
 1. **Form-level controls**: Fields, subgrids, and tabs within existing Dataverse forms. These are well-served by PCF controls (ADR-006) using the platform-provided React 16 runtime (ADR-022).
 
-2. **Full-page surfaces**: Complete navigation pages, side panes, and dashboards that replace or extend the Model-Driven App's standard views. These need a richer UI framework (React 18, concurrent rendering, full Fluent UI v9 support).
+2. **Full-page surfaces**: Complete navigation pages, side panes, and dashboards that replace or extend the Model-Driven App's standard views. These need a richer UI framework (React 19, concurrent rendering, full Fluent UI v9 support).
 
 ### The Problem
 
-The project team initially built full-page surfaces as PCF controls with a documented "ADR exception" claiming Custom Pages could use React 18. This assumption proved incorrect:
+The project team initially built full-page surfaces as PCF controls with a documented "ADR exception" claiming Custom Pages could use React 19. This assumption proved incorrect:
 
 - PCF controls declare `<platform-library name="React" version="16.14.0" />` in their manifest
 - The Dataverse platform **always** injects React 16 at runtime when this declaration is present, regardless of where the PCF is hosted (form or Custom Page)
-- React 18 APIs (`createRoot`, `useId()`) do not exist in React 16
+- React 19 APIs (`createRoot`, `useId()`) do not exist in React 16
 - This produces `TypeError: createRoot is not a function` at runtime
 
-**Affected controls**: LegalWorkspace, AnalysisWorkspace, AnalysisBuilder, SpeDocumentViewer — all declare platform-library React 16 but import from `react-dom/client` (React 18).
+**Affected controls**: LegalWorkspace, AnalysisWorkspace, AnalysisBuilder, SpeDocumentViewer — all declare platform-library React 16 but import from `react-dom/client` (React 19).
 
 ### The Existing Solution
 
-The codebase already had a working pattern for full-page React 18 surfaces: the **EventsPage** and its companion side panes (CalendarSidePane, EventDetailSidePane). These use standalone HTML web resources built with Vite, bundling their own React 18 — completely independent of the PCF platform-library mechanism.
+The codebase already had a working pattern for full-page React 19 surfaces: the **EventsPage** and its companion side panes (CalendarSidePane, EventDetailSidePane). These use standalone HTML web resources built with Vite, bundling their own React 19 — completely independent of the PCF platform-library mechanism.
 
 ---
 
 ## Decision
 
-**Full-page Dataverse surfaces use standalone HTML web resources built with Vite + React 18.**
+**Full-page Dataverse surfaces use standalone HTML web resources built with Vite + React 19.**
 
 PCF controls remain the standard for form-level UI per ADR-006.
 
@@ -46,9 +47,9 @@ PCF controls remain the standard for form-level UI per ADR-006.
 | Surface Type | Technology | React Version | Project Location |
 |-------------|-----------|---------------|-----------------|
 | Form field, subgrid, tab | PCF control | 16 (platform-provided) | `src/client/pcf/` |
-| Full navigation page | Standalone HTML web resource | 18 (self-bundled) | `src/solutions/{PageName}/` |
-| Side pane | Standalone HTML web resource | 18 (self-bundled) | `src/solutions/{PaneName}/` |
-| Dialog (simple, 2-4 options) | PCF + Fluent v9 | 16 (platform-provided) | `src/client/pcf/` |
+| Full navigation page | Standalone HTML web resource | 19 (self-bundled) | `src/solutions/{PageName}/` |
+| Side pane | Standalone HTML web resource | 19 (self-bundled) | `src/solutions/{PaneName}/` |
+| Wizard / dialog (standalone) | Standalone HTML web resource | 19 (self-bundled) | `src/solutions/{WizardName}/` |
 | Ribbon/command script | Minimal JS | N/A | `src/dataverse/webresources/` |
 
 ---
@@ -71,11 +72,11 @@ PCF controls remain the standard for form-level UI per ADR-006.
 
 The decisive factor is `vite-plugin-singlefile`. Dataverse web resources are deployed as **single files** — there is no CDN, no separate .js/.css file hosting. This plugin inlines all JavaScript, CSS, fonts, and assets into one self-contained HTML file. No other build tool has a production-quality equivalent.
 
-### React 18 (Self-Bundled)
+### React 19 (Self-Bundled)
 
-React 18 is listed in `devDependencies` (not `dependencies`) because Vite bundles it into the output at build time. There is no runtime npm dependency.
+React 19 is listed in `devDependencies` (not `dependencies`) because Vite bundles it into the output at build time. There is no runtime npm dependency.
 
-React 18 enables:
+React 19 enables:
 - `createRoot` — the modern mounting API (required by Fluent v9 internally)
 - `useId()` — native unique ID generation (required by Fluent v9 for accessible labels)
 - Concurrent rendering — `useTransition`, `useDeferredValue` for responsive large lists
@@ -148,7 +149,7 @@ pac webresource push `
 
 - Use Vite + `vite-plugin-singlefile` for all full-page Custom Page builds
 - Place projects under `src/solutions/{PageName}/`
-- Use React 18 via `devDependencies` (Vite bundles it)
+- Use React 19 via `devDependencies` (Vite bundles it)
 - Use `createRoot` from `react-dom/client`
 - Wrap all UI in `<FluentProvider theme={theme}>` as outermost element
 - Implement ADR-021 theme detection (4-level priority chain)
@@ -170,7 +171,7 @@ pac webresource push `
 
 ### Positive
 
-- React 18 features available (createRoot, useId, concurrent rendering)
+- React 19 features available (createRoot, useId, concurrent rendering)
 - Consistent pattern across all full-page surfaces
 - Fast development cycle (Vite HMR)
 - No dependency on PCF platform-library versioning
@@ -187,10 +188,10 @@ pac webresource push `
 
 | Control | Current | Surface Type | Action |
 |---------|---------|-------------|--------|
-| LegalWorkspace | PCF + React 18 (broken) | Full page | Migrate to standalone HTML |
-| AnalysisWorkspace | PCF + React 18 (broken) | Full page | Migrate to standalone HTML |
-| AnalysisBuilder | PCF + React 18 (broken) | Full page | Migrate to standalone HTML |
-| SpeDocumentViewer | PCF + React 18 (broken) | Document viewer | Evaluate surface type, then migrate or downgrade |
+| LegalWorkspace | PCF + React 19 (broken) | Full page | Migrate to standalone HTML |
+| AnalysisWorkspace | PCF + React 19 (broken) | Full page | Migrate to standalone HTML |
+| AnalysisBuilder | PCF + React 19 (broken) | Full page | Migrate to standalone HTML |
+| SpeDocumentViewer | PCF + React 19 (broken) | Document viewer | Evaluate surface type, then migrate or downgrade |
 
 ---
 
@@ -210,4 +211,11 @@ See [`.claude/patterns/webresource/full-page-custom-page.md`](../../.claude/patt
 
 ---
 
-*Accepted: 2026-02-18*
+## Revision History
+
+| Date | Version | Changes | Author |
+|------|---------|---------|--------|
+| 2026-02-18 | 1.0 | Initial ADR creation | Ralph Schroeder |
+| 2026-03-19 | 1.1 | Updated React version from 18 to 19 per ADR-021. Added wizard/dialog row to surface matrix. Added React 19 migration note for existing Code Pages. Added DocumentUploadWizard webpack→Vite migration note. | Spaarke Engineering |
+
+*Accepted: 2026-02-18, Revised: 2026-03-19*

@@ -1,22 +1,22 @@
 # ADR-012: Shared Component Library (Concise)
 
-> **Status**: Accepted (Revised 2026-03-10)
-> **Domain**: PCF/Frontend Architecture
-> **Last Updated**: 2026-03-10
+> **Status**: Accepted (Revised 2026-03-19)
+> **Domain**: Frontend Architecture
+> **Last Updated**: 2026-03-19
 
 ---
 
 ## Decision
 
-Maintain a shared TypeScript/React component library at `src/client/shared/Spaarke.UI.Components/` for reuse across **both PCF controls and React Code Pages**. The library must be React 18-compatible (consumed by Code Pages), and tested against React 16/17 for PCF compatibility.
+Maintain a shared TypeScript/React component library at `src/client/shared/Spaarke.UI.Components/` as the **single source of truth** for all reusable UI — components, hooks, services, types, and themes. The library is consumed by PCF controls (React 16/17), Code Pages (React 19), and the Power Pages SPA.
 
-**Rationale**: Prevents code duplication, ensures consistent UX, and centralizes maintenance. The wizard, side panel, filter panel, and grid primitives are used by multiple surfaces — they belong in the shared library, not recreated per-dialog.
+**Rationale**: Prevents code duplication, ensures consistent UX, and centralizes maintenance. All wizard, dialog, shell, and grid components belong in the shared library — not duplicated per-solution.
 
 ---
 
 ## Constraints
 
-### ✅ MUST
+### MUST
 
 - **MUST** use Fluent UI v9 components exclusively
 - **MUST** import shared components via `@spaarke/ui-components`
@@ -25,25 +25,113 @@ Maintain a shared TypeScript/React component library at `src/client/shared/Spaar
 - **MUST** match model-driven app interaction patterns
 - **MUST** export TypeScript types alongside components
 - **MUST** achieve 90%+ test coverage on shared components
-- **MUST** author components to be React 18-compatible (used in Code Pages)
+- **MUST** author components to be React 19-compatible (used in Code Pages)
 - **MUST** verify React 16/17 compatibility for components consumed by PCF
-- **MUST** use callback-based props (zero service dependencies in shared components)
+- **MUST** use **runtime-context abstractions** for platform-specific operations (see Service Architecture below)
 
-### ❌ MUST NOT
+### MUST NOT
 
 - **MUST NOT** mix Fluent UI versions (v9 only)
 - **MUST NOT** reference PCF-specific APIs (`ComponentFramework.*`) in shared components
-- **MUST NOT** hard-code Dataverse entity names or schemas
+- **MUST NOT** hard-code Dataverse entity names or schemas as string literals (use configurable entity maps)
 - **MUST NOT** use custom CSS (Fluent tokens only)
-- **MUST NOT** use React 18-only APIs (`useTransition`, `useDeferredValue`) in components intended for PCF
+- **MUST NOT** use React 18/19-only APIs (`useTransition`, `useDeferredValue`) in components intended for PCF
 - **MUST NOT** export components without tests
-- **MUST NOT** import services directly — accept behavior via callback props
+- **MUST NOT** call `Xrm.WebApi` or other platform APIs directly — accept via abstraction
 
 ---
 
-## Component Inventory (v2.0.0)
+## Service Architecture: What Belongs in Shared Library
 
-### Components (16 groups)
+The original constraint ("zero service dependencies, callback-based only") was too rigid. The shared library already contains services (`CommandRegistry`, `FetchXmlService`, `EntityCreationService`, etc.) and this is correct — services with **abstracted dependencies** are portable and testable.
+
+### Service Portability Tiers
+
+| Tier | What It Means | OK in Shared Library? | Examples |
+|------|--------------|----------------------|----------|
+| **Pure logic** | No I/O, no platform APIs, no side effects | Yes | Validators, formatters, transformers, reducers |
+| **Abstracted I/O** | Accepts data service interface via props/constructor; never calls platform APIs directly | Yes | Wizard orchestrators, entity creation services, upload services |
+| **Platform-bound** | Calls `Xrm.WebApi`, `ComponentFramework`, `window.parent.Xrm` directly | **No** — keep in consumer | PCF `index.ts`, Code Page `main.tsx`, ribbon scripts |
+
+### The IDataService Pattern
+
+Services that need to read/write data accept an abstraction, not a concrete API:
+
+```typescript
+// ✅ Shared library — portable across Dataverse, SPA, tests
+interface IDataService {
+  createRecord(entityName: string, data: Record<string, unknown>): Promise<string>;
+  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
+  updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<void>;
+}
+
+// ✅ Wizard component accepts abstracted service
+interface ICreateMatterWizardProps {
+  dataService: IDataService;
+  uploadService: IUploadService;
+  onClose: () => void;
+  embedded?: boolean;
+}
+```
+
+**Consumers provide the concrete implementation:**
+
+```typescript
+// Code Page main.tsx — Xrm.WebApi adapter
+const xrmDataService: IDataService = {
+  createRecord: (entity, data) => Xrm.WebApi.createRecord(entity, data).then(r => r.id),
+  retrieveRecord: (entity, id, opts) => Xrm.WebApi.retrieveRecord(entity, id, opts),
+  // ...
+};
+
+// Power Pages SPA — BFF API adapter
+const bffDataService: IDataService = {
+  createRecord: (entity, data) => fetch(`/api/${entity}`, { method: "POST", body: JSON.stringify(data) }).then(r => r.json()),
+  // ...
+};
+
+// Unit tests — mock adapter
+const mockDataService: IDataService = { createRecord: jest.fn(), ... };
+```
+
+### What Goes Where
+
+| In Shared Library | In Consumer (Code Page / PCF / SPA) |
+|-------------------|-------------------------------------|
+| Wizard step components and orchestration | `main.tsx` entry point with platform init |
+| Entity-specific form components (CreateMatterStep, etc.) | `Xrm.WebApi` / BFF adapter implementation |
+| Upload service logic (dedup, validation, progress) | Platform-specific auth (`@spaarke/auth` init) |
+| Business rules (validation, field defaults) | `navigateTo` / dialog opening code |
+| Shell components (WizardShell, PlaybookLibraryShell) | Theme detection bootstrap |
+| Shared service interfaces (`IDataService`, `IUploadService`) | Concrete service implementations |
+
+---
+
+## Component Inventory (v2.0.0+)
+
+### Shell Components
+
+| Component | Description | PCF Safe? |
+|-----------|-------------|-----------|
+| WizardShell / Stepper / SuccessScreen | Multi-step wizard frame | Yes |
+| CreateRecordWizard | Record-creation boilerplate (file upload, follow-on steps) | Yes |
+| PlaybookLibraryShell (planned) | Playbook browsing, selection, execution | Code Pages only |
+
+### Domain Wizard Components (extracting from LegalWorkspace)
+
+| Component | Description | PCF Safe? |
+|-----------|-------------|-----------|
+| CreateMatterWizard | Matter creation wizard content | Yes |
+| CreateProjectWizard | Project creation wizard content | Yes |
+| CreateEventWizard | Event creation wizard content | Yes |
+| CreateTodoWizard | Todo creation wizard content | Yes |
+| CreateWorkAssignmentWizard | Work assignment wizard content | Yes |
+| DocumentUploadWizard | Document upload wizard content | Yes |
+| SummarizeFilesWizard | File summarization wizard content | Yes |
+| FindSimilarDialog | Semantic search dialog | Yes |
+
+### UI Components (16 groups)
 
 | Component | Description | PCF Safe? |
 |-----------|-------------|-----------|
@@ -53,9 +141,7 @@ Maintain a shared TypeScript/React component library at `src/client/shared/Spaar
 | CommandToolbar | Action bar | Yes |
 | PageChrome | Page header (OOB parity) | Yes |
 | ChoiceDialog | Simple choice dialog | Yes |
-| EventDueDateCard | Event date display | Yes |
 | SidePaneShell | Slide-in side panel | Yes |
-| WizardShell / Stepper / SuccessScreen | Multi-step wizard | Yes |
 | DiffCompareView | AI diff viewer | Yes |
 | LookupField | Search-as-you-type lookup | Yes |
 | SendEmailDialog | Email composition | Yes |
@@ -63,18 +149,12 @@ Maintain a shared TypeScript/React component library at `src/client/shared/Spaar
 | FindSimilarDialog | Iframe dialog shell | Yes (deep import) |
 | RichTextEditor | Lexical WYSIWYG | **No** (needs jsx-runtime) |
 | SprkChat | SSE streaming chat | Code Pages only |
+| FileUpload | Drag-and-drop upload zone | Yes |
+| AiFieldTag | AI badge for pre-filled fields | Yes |
 
-### Hooks (10)
+### Hooks (18), Services (19+), Types (14)
 
-`useDatasetMode`, `useHeadlessMode`, `useVirtualization`, `useKeyboardShortcuts`, `useEntityTypeConfig`, `useDirtyFields`, `useOptimisticSave`, `useWriteMode`, `useSseStream`, `useAiSummary`
-
-### Services (8)
-
-`CommandRegistry`, `CommandExecutor`, `FieldMappingService`, `EventTypeService`, `FetchXmlService`, `ViewService`, `ConfigurationService`, `SprkChatBridge`
-
-### Theme
-
-`spaarkeBrand` (BrandVariants #2173d7), `spaarkeLight`, `spaarkeDark`
+See full inventory in [docs/adr/ADR-012-shared-component-library.md](../../docs/adr/ADR-012-shared-component-library.md).
 
 ---
 
@@ -90,7 +170,7 @@ import { AiSummaryPopover } from "@spaarke/ui-components/dist/components/AiSumma
 // ❌ PCF — barrel import pulls in ALL components
 import { FindSimilarDialog } from "@spaarke/ui-components";
 
-// ✅ Code Pages — barrel is safe (React 18 has jsx-runtime)
+// ✅ Code Pages — barrel is safe (React 19 has jsx-runtime)
 import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 ```
 
@@ -98,12 +178,13 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 ## When to Add to Shared Library
 
-| Add to Shared Library | Keep in Module |
-|----------------------|----------------|
-| Used by 2+ modules/surfaces | Module-specific logic |
-| Core Spaarke UX pattern (wizard, side panel) | Experimental/POC |
-| Clear, callback-based API with props | Tight coupling to services/context |
-| Layout primitive | One-off dialog with unique flow |
+| Add to Shared Library | Keep in Consumer |
+|----------------------|------------------|
+| Used by 2+ modules/surfaces | Truly module-specific rendering logic |
+| Core Spaarke UX pattern (wizard, shell, grid) | Platform bootstrap code (`main.tsx`, PCF `index.ts`) |
+| Service with abstracted dependencies (`IDataService`) | Concrete platform API calls (`Xrm.WebApi`) |
+| Entity-specific wizard content (steps, forms) | One-off experimental UI |
+| Business rules (validation, defaults, transformations) | — |
 
 ---
 
@@ -111,10 +192,10 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 | ADR | Relationship |
 |-----|--------------|
-| [ADR-006](ADR-006-pcf-over-webresources.md) | Shared library consumed by both PCF and Code Pages |
-| [ADR-011](ADR-011-dataset-pcf.md) | DataGrid, CommandBar used by Dataset PCF |
+| [ADR-006](ADR-006-pcf-over-webresources.md) | Code Pages are default surface; shared library consumed by both |
 | [ADR-021](ADR-021-fluent-design-system.md) | All components use Fluent v9 tokens |
-| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF uses React 16 (platform); Code Pages use React 18 (bundled) |
+| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF uses React 16 (platform); Code Pages use React 19 (bundled) |
+| [ADR-026](ADR-026-full-page-custom-page-standard.md) | Build tooling for Code Pages (Vite + singlefile) |
 
 ---
 
@@ -125,4 +206,4 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 ---
 
-**Lines**: ~120
+**Lines**: ~150
