@@ -46,29 +46,70 @@ Spaarke.SubgridRollup._instances = {};
 Spaarke.SubgridRollup._version = "1.0.0";
 
 // =============================================================================
-// ENVIRONMENT DETECTION
+// ENVIRONMENT VARIABLE RESOLUTION
 // =============================================================================
 
+/** Cached BFF API base URL (module-level, shared across all instances). */
+Spaarke.SubgridRollup._cachedApiBaseUrl = null;
+
 /**
- * Determine the BFF API base URL based on the current Dataverse environment.
- * @returns {string} BFF API base URL
+ * Resolve the BFF API base URL from Dataverse Environment Variables.
+ * Queries environmentvariabledefinition + environmentvariablevalue for
+ * "sprk_BffApiBaseUrl". Caches the result in a module-level variable so
+ * subsequent calls (and multiple subgrid instances) skip the query.
+ *
+ * @returns {Promise<string>} BFF API base URL
+ * @throws {Error} If the environment variable is not configured
  */
 Spaarke.SubgridRollup._getApiBaseUrl = function () {
-    try {
-        var clientUrl = Xrm.Utility.getGlobalContext().getClientUrl();
-        if (clientUrl.indexOf("spaarkedev1.crm.dynamics.com") !== -1) {
-            return "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarke-demo.crm.dynamics.com") !== -1) {
-            return "https://spaarke-bff-prod.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeuat.crm.dynamics.com") !== -1) {
-            return "https://spaarke-bff-uat.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeprod.crm.dynamics.com") !== -1) {
-            return "https://spaarke-bff-prod.azurewebsites.net";
-        }
-        return "https://localhost:5001";
-    } catch (e) {
-        return "https://spe-api-dev-67e2xz.azurewebsites.net";
+    // Return cached value immediately (wrapped in resolved promise)
+    if (Spaarke.SubgridRollup._cachedApiBaseUrl) {
+        return Promise.resolve(Spaarke.SubgridRollup._cachedApiBaseUrl);
     }
+
+    var schemaName = "sprk_BffApiBaseUrl";
+
+    // Query the environment variable definition
+    return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=schemaname eq '" + schemaName + "'&$select=environmentvariabledefinitionid,defaultvalue"
+    ).then(function (definitionResult) {
+        if (!definitionResult.entities || definitionResult.entities.length === 0) {
+            throw new Error(
+                '[SubgridRollup] Required environment variable "' + schemaName + '" not found in Dataverse. ' +
+                'Ensure it is defined as an Environment Variable Definition in the solution.'
+            );
+        }
+
+        var definition = definitionResult.entities[0];
+        var definitionId = definition.environmentvariabledefinitionid;
+        var defaultValue = definition.defaultvalue || null;
+
+        // Query for an override value
+        return Xrm.WebApi.retrieveMultipleRecords(
+            "environmentvariablevalue",
+            "?$filter=_environmentvariabledefinitionid_value eq '" + definitionId + "'&$select=value"
+        ).then(function (valueResult) {
+            var finalValue = null;
+            if (valueResult.entities && valueResult.entities.length > 0) {
+                finalValue = valueResult.entities[0].value;
+            } else {
+                finalValue = defaultValue;
+            }
+
+            if (!finalValue) {
+                throw new Error(
+                    '[SubgridRollup] Environment variable "' + schemaName + '" has no value. ' +
+                    'Set a default value on the definition or create an Environment Variable Value override.'
+                );
+            }
+
+            // Cache for subsequent calls
+            Spaarke.SubgridRollup._cachedApiBaseUrl = finalValue;
+            console.log("[SubgridRollup] Resolved BFF URL from env var: " + finalValue);
+            return finalValue;
+        });
+    });
 };
 
 // =============================================================================
@@ -108,21 +149,27 @@ Spaarke.SubgridRollup.onLoad = function (executionContext, configJson) {
         var entityName = formContext.data.entity.getEntityName();
         var entityPath = config.entityPathMap[entityName] || entityName;
 
-        // Create instance state (supports multiple subgrids per form)
         var key = config.subgridName;
-        Spaarke.SubgridRollup._instances[key] = {
-            lastRowCount: -1,
-            refreshTimer: null,
-            config: config,
-            entityPath: entityPath,
-            apiBaseUrl: Spaarke.SubgridRollup._getApiBaseUrl()
-        };
 
-        // Wait for subgrid to render, then attach listener
-        Spaarke.SubgridRollup._waitForSubgrid(formContext, key, 0);
+        // Resolve BFF URL from Dataverse Environment Variables (async)
+        Spaarke.SubgridRollup._getApiBaseUrl().then(function (apiBaseUrl) {
+            // Create instance state (supports multiple subgrids per form)
+            Spaarke.SubgridRollup._instances[key] = {
+                lastRowCount: -1,
+                refreshTimer: null,
+                config: config,
+                entityPath: entityPath,
+                apiBaseUrl: apiBaseUrl
+            };
 
-        console.log("[SubgridRollup:" + key + "] v" + Spaarke.SubgridRollup._version +
-            " initialized for " + entityName + " (" + entityPath + ")");
+            // Wait for subgrid to render, then attach listener
+            Spaarke.SubgridRollup._waitForSubgrid(formContext, key, 0);
+
+            console.log("[SubgridRollup:" + key + "] v" + Spaarke.SubgridRollup._version +
+                " initialized for " + entityName + " (" + entityPath + ") → " + apiBaseUrl);
+        }).catch(function (error) {
+            console.error("[SubgridRollup:" + key + "] Failed to resolve BFF URL from environment variables:", error);
+        });
     } catch (error) {
         console.error("[SubgridRollup] Error in onLoad:", error);
     }

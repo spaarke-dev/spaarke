@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-03-18
 > **Total Tasks**: 39
-> **Status**: 0/39 complete
+> **Status**: 7/39 complete
 
 ---
 
@@ -18,18 +18,18 @@
 
 | # | Task | Status | Parallel Group | Dependencies | Est. |
 |---|------|--------|---------------|--------------|------|
-| 001 | Fix OfficeDocumentPersistence.cs hardcoded values | 🔲 | 1A | none | 2h |
-| 002 | Fix OfficeService.cs hardcoded values | 🔲 | 1A | none | 2h |
-| 003 | Fix appsettings CORS and add tokens | 🔲 | 1A | none | 1h |
-| 004 | Add Dataverse env var definitions to solution XML | 🔲 | 1B | none | 3h |
-| 005 | Parameterize infrastructure scripts | 🔲 | 1B | none | 2h |
+| 001 | Fix OfficeDocumentPersistence.cs hardcoded values | ✅ | 1A | none | 2h |
+| 002 | Fix OfficeService.cs hardcoded values | ✅ | 1A | none | 2h |
+| 003 | Fix appsettings CORS and add tokens | ✅ | 1A | none | 1h |
+| 004 | Add Dataverse env var definitions to solution XML | ✅ | 1B | none | 3h |
+| 005 | Parameterize infrastructure scripts | ✅ | 1B | none | 2h |
 
 ## Phase 2: Shared Library Core (Tasks 010-012) — CRITICAL PATH
 
 | # | Task | Status | Parallel Group | Dependencies | Est. |
 |---|------|--------|---------------|--------------|------|
-| 010 | Add resolveRuntimeConfig() to @spaarke/auth | 🔲 | 2 | Phase 1 | 4h |
-| 011 | Clean environmentVariables.ts defaults | 🔲 | 2 | none | 2h |
+| 010 | Add resolveRuntimeConfig() to @spaarke/auth | ✅ | 2 | Phase 1 | 4h |
+| 011 | Clean environmentVariables.ts defaults | ✅ | 2 | none | 2h |
 | 012 | Standardize window globals + scope format | 🔲 | 2 | 010 | 2h |
 
 ## Phase 3: Code Page Migration (Tasks 020-028) — ALL PARALLEL
@@ -63,7 +63,7 @@
 
 | # | Task | Status | Parallel Group | Dependencies | Est. |
 |---|------|--------|---------------|--------------|------|
-| 040 | Fix sprk_subgrid_parent_rollup.js | 🔲 | 5 | 010 | 2h |
+| 040 | Fix sprk_subgrid_parent_rollup.js | ✅ | 5 | 010 | 2h |
 | 041 | Fix sprk_emailactions.js | 🔲 | 5 | 010 | 1h |
 | 042 | Fix sprk_DocumentOperations.js | 🔲 | 5 | 010 | 1h |
 | 043 | Fix sprk_communication_send.js | 🔲 | 5 | 010 | 1h |
