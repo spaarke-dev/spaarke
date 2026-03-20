@@ -10,7 +10,7 @@
     <!-- Regarding Record Name (output for display) -->
     <property name="regardingRecordName" display-name-key="Regarding Record Name" description-key="Display name of the selected regarding record" of-type="SingleLine.Text" usage="bound" required="false" />
     <!-- BFF API Base URL for field mapping service -->
-    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API field mapping endpoints" of-type="SingleLine.Text" usage="input" required="false" default-value="https://spe-api-dev-67e2xz.azurewebsites.net/api" />
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API (resolved at runtime from Dataverse env var sprk_BffApiBaseUrl)" of-type="SingleLine.Text" usage="input" required="false" />
     <resources>
       <code path="index.ts" order="1" />
       <css path="styles.css" order="1" />

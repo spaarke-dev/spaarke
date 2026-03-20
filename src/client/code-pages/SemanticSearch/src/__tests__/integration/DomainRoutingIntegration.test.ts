@@ -32,6 +32,14 @@ jest.mock('../../services/authInit', () => ({
   isAuthenticated: jest.fn().mockReturnValue(true),
 }));
 
+jest.mock('@spaarke/auth', () => ({
+  resolveRuntimeConfig: jest.fn().mockResolvedValue({
+    bffBaseUrl: 'https://test-bff-api.example.com',
+    bffOAuthScope: 'api://test-app-id/user_impersonation',
+    msalClientId: 'test-client-id',
+  }),
+}));
+
 // Mock global fetch
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
 global.fetch = mockFetch as typeof global.fetch;
@@ -39,14 +47,15 @@ global.fetch = mockFetch as typeof global.fetch;
 // Import hooks AFTER mocks
 import { useSemanticSearch } from '../../hooks/useSemanticSearch';
 import { useRecordSearch } from '../../hooks/useRecordSearch';
-import { BFF_API_BASE_URL } from '../../services/apiBase';
+import { initializeRuntimeConfig } from '../../services/apiBase';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DOC_SEARCH_ENDPOINT = `${BFF_API_BASE_URL}/api/ai/search`;
-const RECORD_SEARCH_ENDPOINT = `${BFF_API_BASE_URL}/api/ai/search/records`;
+const TEST_BFF_URL = 'https://test-bff-api.example.com';
+const DOC_SEARCH_ENDPOINT = `${TEST_BFF_URL}/api/ai/search`;
+const RECORD_SEARCH_ENDPOINT = `${TEST_BFF_URL}/api/ai/search/records`;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -123,6 +132,10 @@ function createFetchResponse(body: unknown): Response {
 // ---------------------------------------------------------------------------
 
 describe('DomainRoutingIntegration', () => {
+  beforeAll(async () => {
+    await initializeRuntimeConfig();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });

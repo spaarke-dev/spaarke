@@ -29,7 +29,7 @@ import {
 } from '@fluentui/react-components';
 import { Dismiss24Regular, Open20Regular, DocumentRegular, SearchRegular } from '@fluentui/react-icons';
 import type { DocumentSearchResult } from '../types';
-import { BFF_API_BASE_URL, buildAuthHeaders } from '../services/apiBase';
+import { getBffBaseUrl, buildAuthHeaders } from '../services/apiBase';
 import { openEntityRecord } from './EntityRecordDialog';
 
 // =============================================
@@ -143,7 +143,7 @@ interface PreviewUrlResponse {
 
 async function fetchPreviewUrl(documentId: string): Promise<PreviewUrlResponse> {
   const headers = await buildAuthHeaders();
-  const response = await fetch(`${BFF_API_BASE_URL}/api/documents/${documentId}/preview-url`, { headers });
+  const response = await fetch(`${getBffBaseUrl()}/api/documents/${documentId}/preview-url`, { headers });
 
   if (!response.ok) {
     throw new Error(`Failed to load preview: ${response.status}`);

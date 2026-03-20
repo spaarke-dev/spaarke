@@ -17,7 +17,6 @@ import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, 
 import { SearchInput, FilterPanel, ResultsList, LoadingState, EmptyState, ErrorState } from './components';
 import { useSemanticSearch, useFilters } from './hooks';
 import { SemanticSearchApiService, NavigationService } from './services';
-import { initializeAuth } from './authInit';
 import { authenticatedFetch } from '@spaarke/auth';
 import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
@@ -135,6 +134,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   notifyOutputChanged,
   onDocumentSelect,
   isDarkMode = false,
+  authInitialized: authInitializedProp = false,
+  resolvedApiBaseUrl = '',
 }) => {
   const styles = useStyles();
 
@@ -142,7 +143,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const showFilters = context.parameters.showFilters?.raw ?? true;
   const compactMode = context.parameters.compactMode?.raw ?? false;
   const placeholder = context.parameters.placeholder?.raw ?? 'Search documents...';
-  const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? '';
+  // BFF API base URL resolved at runtime from Dataverse environment variables (via index.ts)
+  const apiBaseUrl = resolvedApiBaseUrl;
 
   // Auto-detect entity context from page (when on a record form)
   // Uses the record's GUID directly instead of relying on bound field
@@ -241,9 +243,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
   const navigationService = useMemo(() => new NavigationService(), []);
 
-  // Auth initialization state
-  const [isAuthInitialized, setIsAuthInitialized] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  // Auth state is driven by the authInitialized prop from index.ts
+  // (resolved from Dataverse environment variables at runtime)
+  const isAuthInitialized = authInitializedProp;
 
   // Filter state management — declared BEFORE auth effects so useEffect can reference filters
   const { filters, setFilters, clearFilters, hasActiveFilters } = useFilters();
@@ -251,20 +253,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Search state management — declared BEFORE auth effects so useEffect can reference search
   const { results, totalCount, isLoading, isLoadingMore, error, hasMore, query, search, loadMore, reset } =
     useSemanticSearch(apiService, searchScope, scopeId);
-
-  // Initialize @spaarke/auth on mount (replaces local MsalAuthProvider)
-  useEffect(() => {
-    const doInitAuth = async () => {
-      try {
-        await initializeAuth(apiBaseUrl);
-        setIsAuthInitialized(true);
-      } catch (err) {
-        console.error('[SemanticSearchControl] @spaarke/auth initialization failed:', err);
-        setAuthError(err instanceof Error ? err.message : 'Authentication initialization failed');
-      }
-    };
-    void doInitAuth();
-  }, [apiBaseUrl]);
 
   // Auto-load all documents once auth is ready (shows documents without requiring a search query).
   // search and filters intentionally omitted from deps — we only want to fire once on auth ready.
@@ -617,15 +605,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
   // Determine what content to show in main area
   const renderMainContent = () => {
-    // Auth error state
-    if (authError) {
-      return (
-        <div className={styles.centeredState}>
-          <ErrorState message={authError} retryable={false} onRetry={() => window.location.reload()} />
-        </div>
-      );
-    }
-
     // Auth initializing state
     if (!isAuthInitialized) {
       return (

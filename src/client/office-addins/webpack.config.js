@@ -16,12 +16,22 @@ const BUILD_DATE = new Date().toLocaleDateString('en-US', {
 });
 
 // Environment variables for add-in configuration
-// Defaults are hardcoded as fallback if .env is not loaded
+// All values REQUIRED — no dev-specific fallbacks.
+// Set in .env (local dev) or CI/CD pipeline environment variables.
+const REQUIRED_ENV_VARS = ['ADDIN_CLIENT_ID', 'TENANT_ID', 'BFF_API_CLIENT_ID', 'BFF_API_BASE_URL'];
+const missingVars = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
+if (missingVars.length > 0) {
+  throw new Error(
+    `[Office Add-in Webpack] Missing required environment variables: ${missingVars.join(', ')}.\n` +
+      `Copy .env.example to .env and set all values, or provide them via CI/CD pipeline.`
+  );
+}
+
 const ENV_CONFIG = {
-  ADDIN_CLIENT_ID: process.env.ADDIN_CLIENT_ID || 'c1258e2d-1688-49d2-ac99-a7485ebd9995',
-  TENANT_ID: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
-  BFF_API_CLIENT_ID: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
-  BFF_API_BASE_URL: process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net',
+  ADDIN_CLIENT_ID: process.env.ADDIN_CLIENT_ID,
+  TENANT_ID: process.env.TENANT_ID,
+  BFF_API_CLIENT_ID: process.env.BFF_API_CLIENT_ID,
+  BFF_API_BASE_URL: process.env.BFF_API_BASE_URL,
 };
 
 async function getHttpsOptions() {
@@ -130,9 +140,25 @@ module.exports = async (env, options) => {
           { from: './public/index.html', to: 'index.html' },
           { from: './public/auth-dialog.html', to: 'auth-dialog.html' },
           {
-            // Standardized manifest files (icy-desert SWA URLs)
+            // Standardized manifest files — parameterize resource URI and app IDs at build time
             from: mode === 'production' ? './outlook/outlook-manifest.xml' : './outlook/manifest.json',
-            to: mode === 'production' ? 'outlook/manifest.xml' : 'outlook/manifest.json'
+            to: mode === 'production' ? 'outlook/manifest.xml' : 'outlook/manifest.json',
+            transform: mode !== 'production'
+              ? (content) => {
+                  let manifest = content.toString();
+                  // Replace hardcoded app ID in "id" and "webApplicationInfo.id"
+                  manifest = manifest.replace(
+                    /"id":\s*"c1258e2d-1688-49d2-ac99-a7485ebd9995"/g,
+                    `"id": "${ENV_CONFIG.ADDIN_CLIENT_ID}"`
+                  );
+                  // Replace hardcoded resource URI (api://{BFF_API_CLIENT_ID})
+                  manifest = manifest.replace(
+                    /"resource":\s*"api:\/\/[a-f0-9-]+"/,
+                    `"resource": "api://${ENV_CONFIG.BFF_API_CLIENT_ID}"`
+                  );
+                  return manifest;
+                }
+              : undefined,
           },
           {
             from: './word/word-manifest.xml',

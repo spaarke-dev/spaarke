@@ -28,8 +28,10 @@ export interface IScopeConfigEditorAppProps {
   entityLogicalName: string;
   /** Current field value from the bound property */
   fieldValue: string;
-  /** BFF API base URL for handler discovery */
+  /** BFF API base URL for handler discovery (resolved at runtime from Dataverse env var) */
   apiBaseUrl: string;
+  /** Error message if BFF API URL could not be resolved from Dataverse env var */
+  apiBaseUrlError?: string;
   /** Callback when value changes — propagates to PCF output */
   onValueChange: (newValue: string) => void;
 }
@@ -69,6 +71,7 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
   entityLogicalName,
   fieldValue,
   apiBaseUrl,
+  apiBaseUrlError,
   onValueChange,
 }) => {
   const styles = useStyles();

@@ -505,6 +505,41 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ## Testing & Validation Scripts
 
+### `Validate-DeployedEnvironment.ps1`
+**Purpose:** Comprehensive validation of a deployed Spaarke environment — checks Dataverse Environment Variables (7 required), BFF API health, CORS origin configuration, and dev value leakage detection
+**Usage:** 🟢 Active - After deploying to any non-dev environment
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), PAC CLI (`pac auth create`), target Dataverse environment accessible
+**Owner:** DevOps Team
+**Last Used:** March 2026
+
+**When to Use:**
+- After deploying to production, staging, or demo environments
+- After updating Dataverse Environment Variable values
+- After changing BFF API CORS configuration
+- As final gate in the production environment setup checklist
+
+**Command:**
+```powershell
+# Validate with auto-detected BFF URL (reads from Dataverse env var)
+.\Validate-DeployedEnvironment.ps1 -DataverseUrl "https://myorg.crm.dynamics.com"
+
+# Validate with explicit BFF API URL
+.\Validate-DeployedEnvironment.ps1 -DataverseUrl "https://myorg.crm.dynamics.com" -BffApiUrl "https://api.spaarke.com"
+```
+
+**Checks:**
+- Dataverse Environment Variables: sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId, sprk_AzureOpenAiEndpoint, sprk_ShareLinkBaseUrl, sprk_SharePointEmbeddedContainerId
+- BFF API: /healthz and /ping return HTTP 200
+- CORS: BFF API allows requests from the Dataverse org URL
+- Dev Leakage: No dev-only values (spaarkedev1, spe-api-dev, 67e2xz, etc.) in env var values
+
+**Exit Codes:**
+- `0` — All checks pass (or pass with warnings)
+- `1` — One or more checks failed
+
+---
+
 ### `Test-SdapBffApi.ps1`
 **Purpose:** Test SDAP BFF API endpoints (health, auth, file operations)
 **Usage:** 🟢 Active - Validate API after deployment

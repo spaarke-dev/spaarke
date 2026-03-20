@@ -2,46 +2,104 @@
  * Authentication initialization for RelatedDocumentCount PCF Control.
  *
  * Uses @spaarke/auth shared library for centralized MSAL token management.
- * Mirrors SemanticSearchControl's authInit.ts pattern.
+ * All configuration values (Client ID, Tenant ID, BFF App ID) are resolved
+ * at runtime from Dataverse environment variables via environmentVariables.ts.
+ *
+ * No hardcoded CLIENT_ID, TENANT_ID, BFF_APP_ID, or redirect URI.
  *
  * @spaarke/auth has NO React dependency — safe for React 16 PCF controls.
  */
 
 import { initAuth } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
+import {
+  getApiBaseUrl,
+  getMsalClientId,
+  getBffApiAppId,
+  getTenantId,
+} from '../../shared/utils/environmentVariables';
 
 /**
- * Azure AD Application (Client) ID
- * From: Sparke DSM-SPE Dev 2 App Registration
+ * Get the Dataverse client URL from the Xrm global.
+ * Used as MSAL redirect URI (must match Azure AD app registration).
+ * Falls back to window.location.origin if Xrm is not available (e.g., test harness).
  */
-const CLIENT_ID = '170c98e1-d486-4355-bcbe-170454e0207c';
+function getClientUrl(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window as any).Xrm as
+      | {
+          Utility?: {
+            getGlobalContext?: () => { getClientUrl?: () => string };
+          };
+        }
+      | undefined;
+    const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+    if (url) return url.replace(/\/$/, '');
+  } catch {
+    // Xrm not available (test harness, dev mode)
+  }
+  return window.location.origin;
+}
 
 /**
- * Azure AD Tenant (Directory) ID
+ * Resolved runtime configuration values returned after auth initialization.
  */
-const TENANT_ID = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
-
-/**
- * BFF Application ID (for scope construction)
- */
-const BFF_APP_ID = '1e40baad-e065-4aea-a8d4-4b7ab273458c';
+export interface ResolvedAuthConfig {
+  /** BFF API base URL resolved from sprk_BffApiBaseUrl env var */
+  bffApiUrl: string;
+  /** Azure AD Tenant ID resolved from sprk_TenantId env var */
+  tenantId: string;
+}
 
 /**
  * Initialize @spaarke/auth with PCF-specific configuration.
  *
- * @param _bffApiUrl BFF API base URL (reserved for future use)
+ * Resolves all auth config from Dataverse environment variables:
+ * - sprk_MsalClientId -> MSAL Client (Application) ID
+ * - sprk_TenantId -> Azure AD Tenant (Directory) ID
+ * - sprk_BffApiAppId -> BFF API Application ID (for scope construction)
+ * - sprk_BffApiBaseUrl -> BFF API base URL
+ *
+ * Redirect URI is resolved from Xrm.Utility.getGlobalContext().getClientUrl().
+ *
+ * @param webApi - PCF WebAPI instance for querying Dataverse environment variables
+ * @returns Resolved config values (bffApiUrl, tenantId) for downstream use
  */
-export async function initializeAuth(_bffApiUrl: string): Promise<void> {
+export async function initializeAuth(webApi: ComponentFramework.WebApi): Promise<ResolvedAuthConfig> {
   console.info('[authInit] Initializing @spaarke/auth for RelatedDocumentCount...');
 
+  // Resolve all config from Dataverse environment variables (no hardcoded values)
+  const [clientId, tenantId, bffAppId, bffApiUrl] = await Promise.all([
+    getMsalClientId(webApi),
+    getTenantId(webApi),
+    getBffApiAppId(webApi),
+    getApiBaseUrl(webApi),
+  ]);
+
+  if (!clientId) {
+    throw new Error('[authInit] sprk_MsalClientId not configured in Dataverse environment variables.');
+  }
+  if (!tenantId) {
+    throw new Error('[authInit] sprk_TenantId not configured in Dataverse environment variables.');
+  }
+  if (!bffAppId) {
+    throw new Error('[authInit] sprk_BffApiAppId not configured in Dataverse environment variables.');
+  }
+
+  const redirectUri = getClientUrl();
+
   const config: IAuthConfig = {
-    clientId: CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-    redirectUri: 'https://spaarkedev1.crm.dynamics.com',
-    bffApiScope: `api://${BFF_APP_ID}/user_impersonation`,
+    clientId,
+    authority: `https://login.microsoftonline.com/${tenantId}`,
+    redirectUri,
+    bffApiScope: `api://${bffAppId}/user_impersonation`,
+    bffBaseUrl: bffApiUrl,
   };
 
   await initAuth(config);
 
   console.info('[authInit] @spaarke/auth initialized successfully for RelatedDocumentCount');
+
+  return { bffApiUrl, tenantId };
 }

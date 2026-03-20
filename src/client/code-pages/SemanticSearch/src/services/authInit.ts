@@ -1,25 +1,45 @@
 /**
  * Auth initialization for SemanticSearch Code Page.
  *
- * Uses @spaarke/auth shared library instead of local MsalAuthProvider.
- * This eliminates hardcoded tenant ID and redirect URI, making the
- * code page portable across Dataverse environments.
+ * Uses @spaarke/auth shared library with runtime configuration from
+ * Dataverse Environment Variables. No build-time .env.production values
+ * are used for BFF URL or MSAL Client ID.
  *
- * @spaarke/auth defaults:
+ * Bootstrap sequence:
+ *   1. resolveRuntimeConfig() queries Dataverse for sprk_BffApiBaseUrl,
+ *      sprk_BffApiAppId, and sprk_MsalClientId (uses session cookie, pre-auth)
+ *   2. initializeRuntimeConfig() caches the BFF base URL for apiBase.ts consumers
+ *   3. initAuth() initializes MSAL with the resolved clientId and bffApiScope
+ *
+ * @spaarke/auth defaults (still applied):
  *   - authority: https://login.microsoftonline.com/organizations (multi-tenant)
  *   - redirectUri: window.location.origin (auto-detected)
- *   - clientId: 170c98e1-d486-4355-bcbe-170454e0207c (same app registration)
- *   - bffApiScope: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
  */
 
-import { initAuth, getAuthProvider, authenticatedFetch } from '@spaarke/auth';
+import { initAuth, getAuthProvider, authenticatedFetch, resolveRuntimeConfig } from '@spaarke/auth';
+import { initializeRuntimeConfig } from './apiBase';
 
 /**
  * Initialize authentication. Call once at app startup before rendering.
- * Replaces msalAuthProvider.initialize() from the old local auth.
+ *
+ * 1. Resolves BFF URL, MSAL client ID, and BFF OAuth scope from Dataverse
+ *    environment variables at runtime (replaces build-time .env.production).
+ * 2. Caches the BFF base URL for API service clients.
+ * 3. Initializes MSAL with the resolved configuration.
  */
 export async function initializeAuth(): Promise<void> {
-  await initAuth();
+  // 1. Resolve runtime config from Dataverse environment variables
+  const runtimeConfig = await resolveRuntimeConfig();
+
+  // 2. Cache BFF base URL for apiBase.ts consumers (getBffBaseUrl)
+  await initializeRuntimeConfig();
+
+  // 3. Initialize MSAL with resolved values
+  await initAuth({
+    clientId: runtimeConfig.msalClientId,
+    bffApiScope: runtimeConfig.bffOAuthScope,
+    bffBaseUrl: runtimeConfig.bffBaseUrl,
+  });
 }
 
 /**

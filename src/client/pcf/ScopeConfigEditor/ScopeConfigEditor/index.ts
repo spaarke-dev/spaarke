@@ -21,6 +21,7 @@ import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import { FluentProvider, Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ScopeConfigEditorApp } from './components/ScopeConfigEditorApp';
+import { getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
@@ -65,6 +66,10 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
   // Output state
   private _updatedValue: string | undefined;
 
+  // Runtime-resolved API base URL (from Dataverse environment variable)
+  private _resolvedApiBaseUrl: string | undefined;
+  private _apiBaseUrlError: string | undefined;
+
   constructor() {
     // Initialization happens in init()
   }
@@ -86,6 +91,10 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
 
     // No system theme listener — theme is determined solely by Dataverse
     // URL param (themeOption=darkmode), not OS preference.
+
+    // Resolve BFF API base URL from Dataverse environment variable at runtime.
+    // Falls back to the PCF input property apiBaseUrl if the env var query fails.
+    this._resolveApiBaseUrl(context);
   }
 
   /**
@@ -97,7 +106,10 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
     this._theme = resolveTheme(context);
 
     const fieldValue = context.parameters.fieldValue?.raw ?? '';
-    const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
+
+    // Use runtime-resolved BFF URL from Dataverse environment variable.
+    // Falls back to the PCF input property if the env var hasn't been resolved yet.
+    const apiBaseUrl = this._resolvedApiBaseUrl ?? context.parameters.apiBaseUrl?.raw ?? '';
 
     // Detect entity type from form context
     const entityLogicalName = this._getEntityLogicalName(context);
@@ -106,6 +118,7 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
       entityLogicalName,
       fieldValue,
       apiBaseUrl,
+      apiBaseUrlError: this._apiBaseUrlError,
       onValueChange: this._handleValueChange.bind(this),
     });
 
@@ -133,6 +146,28 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
   // ─────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Resolve BFF API base URL from Dataverse environment variable (sprk_BffApiBaseUrl).
+   * This runs asynchronously during init and triggers a re-render when resolved.
+   */
+  private _resolveApiBaseUrl(context: ComponentFramework.Context<IInputs>): void {
+    getApiBaseUrl(context.webAPI)
+      .then((url) => {
+        this._resolvedApiBaseUrl = url;
+        this._apiBaseUrlError = undefined;
+        // Trigger re-render so updateView picks up the resolved URL
+        this._notifyOutputChanged();
+        return;
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Unknown error resolving BFF API URL';
+        console.error('[ScopeConfigEditor] Failed to resolve BFF API URL from environment variable:', message);
+        this._apiBaseUrlError = message;
+        // Still trigger re-render so the error can be displayed
+        this._notifyOutputChanged();
+      });
+  }
 
   /**
    * Detect the entity logical name from PCF context.

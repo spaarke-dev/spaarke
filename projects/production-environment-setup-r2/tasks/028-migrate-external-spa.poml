@@ -1,7 +1,7 @@
 <task id="ENV-028" project="Production Environment Setup R2">
   <metadata>
     <title>Migrate External SPA to runtime config resolution</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>3</phase>
     <tags>code-page, typescript, auth, config, vite, external-spa</tags>

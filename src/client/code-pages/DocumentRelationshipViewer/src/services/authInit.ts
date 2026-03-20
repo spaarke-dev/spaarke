@@ -5,21 +5,27 @@
  * This eliminates hardcoded tenant ID and redirect URI, making the
  * code page portable across Dataverse environments.
  *
+ * Runtime config (clientId, bffApiScope, bffBaseUrl) is resolved from
+ * Dataverse Environment Variables via resolveRuntimeConfig() in index.tsx
+ * and passed to initializeAuth() at bootstrap.
+ *
  * @spaarke/auth defaults:
  *   - authority: https://login.microsoftonline.com/organizations (multi-tenant)
  *   - redirectUri: window.location.origin (auto-detected)
- *   - clientId: 170c98e1-d486-4355-bcbe-170454e0207c (same app registration)
- *   - bffApiScope: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
  */
 
 import { initAuth, getAuthProvider, authenticatedFetch } from '@spaarke/auth';
+import type { IAuthConfig } from '@spaarke/auth';
 
 /**
- * Initialize authentication. Call once at app startup before rendering.
- * Replaces MsalAuthProvider.getInstance().initialize() from the old local auth.
+ * Initialize authentication with runtime-resolved config.
+ * Call once at app startup before rendering.
+ *
+ * @param config Auth config with clientId, bffApiScope, and bffBaseUrl
+ *               resolved from Dataverse Environment Variables.
  */
-export async function initializeAuth(): Promise<void> {
-  await initAuth();
+export async function initializeAuth(config?: IAuthConfig): Promise<void> {
+  await initAuth(config);
 }
 
 /**

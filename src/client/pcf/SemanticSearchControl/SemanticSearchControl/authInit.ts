@@ -4,34 +4,20 @@
  * Uses @spaarke/auth shared library for centralized MSAL token management.
  * This replaces the local MsalAuthProvider with the shared authenticatedFetch() pattern.
  *
- * @spaarke/auth has NO React dependency — safe for React 16 PCF controls.
+ * All configuration values are resolved at runtime from Dataverse environment variables
+ * and PCF manifest parameters. No hardcoded CLIENT_ID, TENANT_ID, or BFF URLs.
+ *
+ * @spaarke/auth has NO React dependency -- safe for React 16 PCF controls.
  *
  * Usage:
  *   import { initializeAuth } from './authInit';
- *   await initializeAuth(apiBaseUrl);
+ *   await initializeAuth(tenantId, clientAppId, bffAppId, bffApiUrl, dataverseUrl);
  *
  * Then use authenticatedFetch() from '@spaarke/auth' for all BFF API calls.
  */
 
 import { initAuth } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
-
-/**
- * Azure AD Application (Client) ID
- * From: Sparke DSM-SPE Dev 2 App Registration
- * This is the PCF CLIENT app, NOT the BFF API app.
- */
-const CLIENT_ID = '170c98e1-d486-4355-bcbe-170454e0207c';
-
-/**
- * Azure AD Tenant (Directory) ID
- */
-const TENANT_ID = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
-
-/**
- * BFF Application ID (for scope construction)
- */
-const BFF_APP_ID = '1e40baad-e065-4aea-a8d4-4b7ab273458c';
 
 /**
  * Initialize @spaarke/auth with PCF-specific configuration.
@@ -41,19 +27,29 @@ const BFF_APP_ID = '1e40baad-e065-4aea-a8d4-4b7ab273458c';
  * - Named scope format: api://<BFF_APP_ID>/user_impersonation
  * - Session storage for MSAL cache
  *
- * @param bffApiUrl BFF API base URL (from control parameters)
+ * @param tenantId Azure AD tenant ID (from Dataverse environment variable or manifest)
+ * @param clientAppId PCF Client Application ID for MSAL authentication
+ * @param bffAppId BFF Application ID (for scope construction)
+ * @param bffApiUrl BFF API base URL (from Dataverse environment variable)
+ * @param dataverseUrl Dataverse org URL for redirect URI (e.g. https://org.crm.dynamics.com)
  */
-export async function initializeAuth(bffApiUrl: string): Promise<void> {
+export async function initializeAuth(
+  tenantId: string,
+  clientAppId: string,
+  bffAppId: string,
+  bffApiUrl: string,
+  dataverseUrl: string
+): Promise<void> {
   console.info('[authInit] Initializing @spaarke/auth for SemanticSearchControl...');
 
   const config: IAuthConfig = {
-    clientId: CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    clientId: clientAppId,
+    authority: `https://login.microsoftonline.com/${tenantId}`,
     // CRITICAL: Static redirect URI matching Azure AD app registration
-    // Must be the Dataverse org URL, NOT window.location.origin
-    redirectUri: 'https://spaarkedev1.crm.dynamics.com',
+    // Resolved at runtime from Xrm.Utility.getGlobalContext().getClientUrl()
+    redirectUri: dataverseUrl,
     // Named scope: api://<BFF_APP_ID>/user_impersonation
-    bffApiScope: `api://${BFF_APP_ID}/user_impersonation`,
+    bffApiScope: `api://${bffAppId}/user_impersonation`,
     bffBaseUrl: bffApiUrl,
     // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
     proactiveRefresh: true,

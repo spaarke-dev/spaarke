@@ -29,7 +29,7 @@ import { navigateToEntity } from "../../utils/navigation";
 import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { getTenantId, authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
-import { getBffBaseUrl } from "../../config/bffConfig";
+import { getBffBaseUrl } from "../../config/runtimeConfig";
 import { AiSummaryPopover, type ISummaryData, FindSimilarDialog } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 

@@ -22,18 +22,27 @@ jest.mock('../../services/authInit', () => ({
   getAuthHeader: mockGetAuthHeader,
 }));
 
+jest.mock('@spaarke/auth', () => ({
+  resolveRuntimeConfig: jest.fn().mockResolvedValue({
+    bffBaseUrl: 'https://test-bff-api.example.com',
+    bffOAuthScope: 'api://test-app-id/user_impersonation',
+    msalClientId: 'test-client-id',
+  }),
+}));
+
 // Mock global fetch
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
 global.fetch = mockFetch as typeof global.fetch;
 
 import { search } from '../../services/SemanticSearchApiService';
-import { BFF_API_BASE_URL } from '../../services/apiBase';
+import { initializeRuntimeConfig } from '../../services/apiBase';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const EXPECTED_ENDPOINT = `${BFF_API_BASE_URL}/api/ai/search`;
+const TEST_BFF_URL = 'https://test-bff-api.example.com';
+const EXPECTED_ENDPOINT = `${TEST_BFF_URL}/api/ai/search`;
 
 const sampleRequest: DocumentSearchRequest = {
   query: 'financial agreements',
@@ -110,6 +119,10 @@ function createNetworkErrorResponse(status: number, statusText: string): Respons
 // ---------------------------------------------------------------------------
 
 describe('SemanticSearchApiService', () => {
+  beforeAll(async () => {
+    await initializeRuntimeConfig();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetAuthHeader.mockResolvedValue('Bearer test-token');

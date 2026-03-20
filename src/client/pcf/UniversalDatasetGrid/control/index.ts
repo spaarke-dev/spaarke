@@ -58,7 +58,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
 
       // Initialize MSAL authentication (Phase 1)
       // This will be async in the background; token acquisition happens in Phase 2
-      this.initializeMsalAsync(container);
+      this.initializeMsalAsync(context, container);
 
       // Store container reference for React 16 render calls (ADR-022)
       this.container = container;
@@ -197,13 +197,16 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
    *
    * @param container - PCF container element for error display
    */
-  private initializeMsalAsync(container: HTMLDivElement): void {
+  private initializeMsalAsync(
+    context: ComponentFramework.Context<IInputs>,
+    container: HTMLDivElement
+  ): void {
     (async () => {
       try {
         logger.info('Control', 'Initializing @spaarke/auth...');
 
-        // Initialize @spaarke/auth (replaces local MsalAuthProvider)
-        await initializeAuth();
+        // Initialize @spaarke/auth with runtime config from Dataverse env vars
+        await initializeAuth(context.webAPI);
         this.authInitialized = true;
 
         logger.info('Control', '@spaarke/auth initialized successfully');

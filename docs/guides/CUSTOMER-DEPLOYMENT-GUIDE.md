@@ -1,7 +1,7 @@
 # Spaarke Document Intelligence - Customer Deployment Guide
 
-> **Version**: 2.0
-> **Date**: January 2026
+> **Version**: 2.1
+> **Date**: March 2026
 > **Audience**: IT Administrators and Technical Staff
 
 ---
@@ -23,13 +23,16 @@ Before you begin, ensure you have:
 
 1. [Overview](#overview)
 2. [Architecture & Configuration Strategy](#architecture--configuration-strategy)
-3. [Prerequisites](#prerequisites)
-4. [Deployment Steps](#deployment-steps)
-5. [Configuration](#configuration)
-6. [Verification](#verification)
-7. [Troubleshooting](#troubleshooting)
-8. [Maintenance](#maintenance)
-9. [Appendix](#appendix)
+3. [Build Once, Deploy Anywhere](#build-once-deploy-anywhere)
+4. [Prerequisites](#prerequisites)
+5. [Deployment Steps](#deployment-steps)
+6. [Dataverse Environment Variables](#dataverse-environment-variables)
+7. [Validate Deployed Environment](#validate-deployed-environment)
+8. [Configuration](#configuration)
+9. [Verification](#verification)
+10. [Troubleshooting](#troubleshooting)
+11. [Maintenance](#maintenance)
+12. [Appendix](#appendix)
 
 ---
 
@@ -116,6 +119,26 @@ All customer-specific settings are defined as strongly-typed options classes:
 | `AiSearchOptions` | AI Search | Endpoint, AdminKey, IndexName |
 | `ServiceBusOptions` | Service Bus | ConnectionString |
 | `AnalysisOptions` | AI Analysis | CustomerTenantId, PromptFlowEndpoint |
+
+---
+
+## Build Once, Deploy Anywhere
+
+Spaarke uses an **environment-agnostic build** strategy. All client-side components — PCF controls, Code Pages, legacy JS webresources, and Office Add-ins — resolve their configuration at **runtime** from Dataverse Environment Variables. No environment-specific values are baked into any build artifact.
+
+**What this means for you:**
+
+- The same solution ZIP file (`Spaarke_DocumentIntelligence_managed.zip`) deploys to dev, UAT, staging, and production without modification.
+- After importing the solution, you set 7 Dataverse Environment Variables specific to your environment (see [Dataverse Environment Variables](#dataverse-environment-variables) below).
+- The `Provision-Customer.ps1` script sets all 7 variables automatically during onboarding.
+- After any configuration change, run `Validate-DeployedEnvironment.ps1` to confirm the environment is correctly configured (see [Validate Deployed Environment](#validate-deployed-environment) below).
+
+**How runtime resolution works:**
+
+At startup, each client component calls `resolveRuntimeConfig()` (from the `@spaarke/auth` shared library), which:
+1. Queries the Dataverse Web API to read all `sprk_*` Environment Variables
+2. Caches the result in memory for the session lifetime
+3. Throws a clear error if any required variable is missing (no silent dev fallbacks)
 
 ---
 
@@ -477,38 +500,44 @@ You should see `Spaarke Document Intelligence` in the list with status "Installe
 
 ---
 
-### Step 7: Configure Power Platform Environment Variables
+### Step 7: Set Dataverse Environment Variables
 
-After solution import, configure environment variables:
+After solution import, set the 7 required Dataverse Environment Variables. See the full [Dataverse Environment Variables](#dataverse-environment-variables) section for details on each variable.
 
-#### 7.1 Via Power Platform Admin Center (UI)
+#### 7.1 Automated (Recommended) — Provision-Customer.ps1
+
+If using the automated provisioning script, environment variables are set automatically in Step 8 of the pipeline:
+
+```powershell
+.\scripts\Provision-Customer.ps1 `
+    -CustomerId "contoso" `
+    -DisplayName "Contoso Legal" `
+    -TenantId "<CUSTOMER_TENANT_ID>" `
+    -ClientId "<client-id>" `
+    -ClientSecret "<secret>"
+```
+
+#### 7.2 Manual — Power Platform Admin Center (UI)
 
 1. Open **Power Platform Admin Center** (https://admin.powerplatform.microsoft.com)
 2. Navigate to **Environments** > Select your environment
 3. Open **Solutions** > **Spaarke Document Intelligence**
 4. Click **Environment Variables**
-5. Update these variables:
+5. Set all 7 variables per the [Dataverse Environment Variables](#dataverse-environment-variables) table below
 
-| Variable | Value |
-|----------|-------|
-| `sprk_BffApiBaseUrl` | `https://spe-api-prod-abc123.azurewebsites.net/api` |
-| `sprk_CustomerTenantId` | `<CUSTOMER_TENANT_ID>` |
-| `sprk_AzureOpenAiEndpoint` | `https://spaarke-openai-prod.openai.azure.com/` |
-| `sprk_SearchIndexName` | `spaarke-search-index` |
+#### 7.3 Manual — Power Platform CLI
 
-#### 7.2 Via Power Platform CLI (Alternative)
-
-```bash
-# Set BFF API Base URL
-pac env var set \
-  --name sprk_BffApiBaseUrl \
-  --value "https://spe-api-prod-abc123.azurewebsites.net/api"
-
-# Set Customer Tenant ID
-pac env var set \
-  --name sprk_CustomerTenantId \
-  --value "<CUSTOMER_TENANT_ID>"
+```powershell
+pac env var set --name sprk_BffApiBaseUrl --value "https://spe-api-prod-abc123.azurewebsites.net/api"
+pac env var set --name sprk_BffApiAppId --value "api://bff-api-prod-app-id"
+pac env var set --name sprk_MsalClientId --value "<MSAL_CLIENT_ID>"
+pac env var set --name sprk_TenantId --value "<CUSTOMER_TENANT_ID>"
+pac env var set --name sprk_AzureOpenAiEndpoint --value "https://spaarke-openai-prod.openai.azure.com/"
+pac env var set --name sprk_ShareLinkBaseUrl --value "https://app.spaarke.com/share"
+pac env var set --name sprk_SharePointEmbeddedContainerId --value "<SPE_CONTAINER_ID>"
 ```
+
+After setting variables (manually or automatically), run the validation script (see [Validate Deployed Environment](#validate-deployed-environment)) to confirm all variables are correctly configured.
 
 ---
 
@@ -531,6 +560,107 @@ If customer requires Office integration:
 Users should see:
 - **Outlook Web App**: "Save to Spaarke" button in email ribbon
 - **Word Online**: "Save to Spaarke" button in Home ribbon
+
+---
+
+## Dataverse Environment Variables
+
+These 7 variables are defined as part of the Spaarke Dataverse solution (in the solution XML). After solution import, their **values** must be set per environment. The `Provision-Customer.ps1` script sets them automatically; for manual deployments, use Step 7.2 or 7.3 above.
+
+| Variable | Schema Name | Purpose | Example Value |
+|----------|-------------|---------|---------------|
+| BFF API Base URL | `sprk_BffApiBaseUrl` | Base URL for all BFF API calls from client components | `https://spe-api-prod-abc123.azurewebsites.net/api` |
+| BFF API App ID | `sprk_BffApiAppId` | Azure AD App Registration ID for BFF API (used as OAuth scope audience) | `api://bff-api-prod-app-id` |
+| MSAL Client ID | `sprk_MsalClientId` | MSAL Client ID for Dataverse-hosted SPAs (Code Pages, External SPA) | `12345678-1234-1234-1234-123456789012` |
+| Tenant ID | `sprk_TenantId` | Azure AD Tenant ID for authentication | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
+| Azure OpenAI Endpoint | `sprk_AzureOpenAiEndpoint` | Azure OpenAI service endpoint for AI features | `https://spaarke-openai-prod.openai.azure.com/` |
+| Share Link Base URL | `sprk_ShareLinkBaseUrl` | Base URL for generating shareable document links | `https://app.spaarke.com/share` |
+| SPE Container ID | `sprk_SharePointEmbeddedContainerId` | SharePoint Embedded container ID for document storage | `b1c2d3e4-f5a6-7890-abcd-ef1234567890` |
+
+> **All 7 variables are required.** Client components will throw a clear configuration error at startup if any variable is missing or empty. There are no silent fallbacks to dev values.
+
+### Where Values Come From
+
+| Variable | Value Source |
+|----------|-------------|
+| `sprk_BffApiBaseUrl` | App Service URL from Azure deployment (`/api` suffix required) |
+| `sprk_BffApiAppId` | App Registration Application ID (or URI like `api://<guid>`) |
+| `sprk_MsalClientId` | App Registration Application ID for the Dataverse-hosted SPA |
+| `sprk_TenantId` | Customer's Azure AD Tenant ID |
+| `sprk_AzureOpenAiEndpoint` | Azure OpenAI resource endpoint from Azure Portal |
+| `sprk_ShareLinkBaseUrl` | Base URL for your deployed external SPA or share endpoint |
+| `sprk_SharePointEmbeddedContainerId` | SPE container ID from `Provision-Customer.ps1` output or Azure Portal |
+
+### Canonical Configuration Reference
+
+`Provision-Customer.ps1` writes an `environment-config.json` file to the customer's configuration folder after successful provisioning. This file is the **canonical reference** for all customer-specific configuration values:
+
+```json
+{
+  "customerId": "contoso",
+  "dataverseUrl": "https://contoso.crm.dynamics.com",
+  "bffApiUrl": "https://spe-api-prod-abc123.azurewebsites.net/api",
+  "bffApiAppId": "api://bff-api-prod-app-id",
+  "msalClientId": "12345678-1234-1234-1234-123456789012",
+  "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+  "azureOpenAiEndpoint": "https://spaarke-openai-prod.openai.azure.com/",
+  "shareLinkBaseUrl": "https://app.spaarke.com/share",
+  "speContainerId": "b1c2d3e4-f5a6-7890-abcd-ef1234567890"
+}
+```
+
+---
+
+## Validate Deployed Environment
+
+After any deployment or configuration change, run the validation script to confirm the environment is correctly configured:
+
+```powershell
+.\scripts\Validate-DeployedEnvironment.ps1 -DataverseUrl "https://contoso.crm.dynamics.com"
+```
+
+Or specify the BFF API URL explicitly:
+
+```powershell
+.\scripts\Validate-DeployedEnvironment.ps1 `
+    -DataverseUrl "https://contoso.crm.dynamics.com" `
+    -BffApiUrl "https://spe-api-prod-abc123.azurewebsites.net/api"
+```
+
+**Location**: `scripts/Validate-DeployedEnvironment.ps1`
+
+**What it checks (4 categories):**
+
+| Category | Checks Performed | Pass Criteria |
+|----------|-----------------|---------------|
+| **Env Vars** | All 7 Dataverse Environment Variables exist and have non-empty values | All 7 variables present with values |
+| **BFF API** | `GET /healthz` and `GET /ping` return HTTP 200 | Both endpoints healthy |
+| **CORS** | Preflight OPTIONS request includes Dataverse origin in `Access-Control-Allow-Origin` | Dataverse URL allowed |
+| **Dev Leakage** | Scans env var values for dev-only identifiers (known dev URLs, GUIDs, hostnames) | No dev values detected |
+
+**Expected output (all checks passing):**
+
+```
+====================================================================
+  RESULTS SUMMARY
+====================================================================
+
+  [PASS] Env Vars            Pass: 7  Fail: 0  Warn: 0
+  [PASS] BFF API             Pass: 2  Fail: 0  Warn: 0
+  [PASS] CORS                Pass: 1  Fail: 0  Warn: 0
+  [PASS] Dev Leakage         Pass: 6  Fail: 0  Warn: 0
+
+  Total:  16 checks
+  Pass:   16
+
+  VERDICT: PASSED - All checks successful. Environment is correctly configured.
+```
+
+**When to run:**
+- After initial solution import and environment variable configuration
+- After solution upgrades
+- After manual environment variable changes
+- Whenever verifying production readiness before go-live
 
 ---
 
@@ -815,7 +945,9 @@ Use this checklist to confirm everything is working:
 - [ ] App Service configured with customer-specific settings
 - [ ] API health check passes (`/healthz` returns "Healthy")
 - [ ] Power Platform solution imported
-- [ ] Environment variables configured in Dataverse
+- [ ] All 7 Dataverse Environment Variables configured (see [Dataverse Environment Variables](#dataverse-environment-variables))
+- [ ] `Validate-DeployedEnvironment.ps1` passes all 16 checks (see [Validate Deployed Environment](#validate-deployed-environment))
+- [ ] `environment-config.json` generated and saved as canonical config reference
 - [ ] Security roles assigned to users
 - [ ] Test document analysis completed successfully
 - [ ] Office add-ins deployed (if applicable)
@@ -955,14 +1087,19 @@ pac solution import \
 | `office-profile` | Generate AI document profile (summary, keywords) | ProfileSummaryWorker |
 | `office-indexing` | Index documents in Azure AI Search for RAG | IndexingWorkerHostedService |
 
-### D. Power Platform Environment Variables
+### D. Dataverse Environment Variables (Complete Reference)
+
+All 7 variables are required. See the [Dataverse Environment Variables](#dataverse-environment-variables) section for full descriptions.
 
 | Variable Name | Example Value | Description |
 |--------------|---------------|-------------|
-| `sprk_BffApiBaseUrl` | `https://spe-api-prod-abc123.azurewebsites.net/api` | BFF API base URL |
-| `sprk_CustomerTenantId` | `a221a95e-6abc-4434-aecc-e48338a1b2f2` | Customer's tenant ID |
-| `sprk_AzureOpenAiEndpoint` | `https://spaarke-openai-prod.openai.azure.com/` | Azure OpenAI endpoint |
-| `sprk_SearchIndexName` | `spaarke-search-index` | AI Search index name |
+| `sprk_BffApiBaseUrl` | `https://spe-api-prod-abc123.azurewebsites.net/api` | BFF API base URL for all client-to-BFF calls |
+| `sprk_BffApiAppId` | `api://bff-api-prod-app-id` | Azure AD App Registration ID for BFF API (OAuth scope audience) |
+| `sprk_MsalClientId` | `12345678-1234-1234-1234-123456789012` | MSAL Client ID for Dataverse-hosted SPAs |
+| `sprk_TenantId` | `a221a95e-6abc-4434-aecc-e48338a1b2f2` | Azure AD Tenant ID |
+| `sprk_AzureOpenAiEndpoint` | `https://spaarke-openai-prod.openai.azure.com/` | Azure OpenAI service endpoint |
+| `sprk_ShareLinkBaseUrl` | `https://app.spaarke.com/share` | Base URL for shareable document links |
+| `sprk_SharePointEmbeddedContainerId` | `b1c2d3e4-f5a6-7890-abcd-ef1234567890` | SPE container ID for document storage |
 
 ### E. Key URLs
 
@@ -986,6 +1123,6 @@ pac solution import \
 
 ---
 
-*Last Updated: January 27, 2026*
-*Version: 2.0*
+*Last Updated: March 20, 2026*
+*Version: 2.1*
 *Document Owner: Spaarke Engineering Team*

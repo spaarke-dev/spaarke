@@ -1,16 +1,25 @@
 # Update Theme Icons in Dataverse
 # This script updates the theme SVG web resources with new icon files
 
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
 $ErrorActionPreference = "Stop"
 
 # Get access token for Dataverse
-$token = az account get-access-token --resource "https://spaarkedev1.crm.dynamics.com" --query accessToken -o tsv
+$token = az account get-access-token --resource $DataverseUrl --query accessToken -o tsv
 if (-not $token) {
     Write-Error "Failed to get access token. Run 'az login' first."
     exit 1
 }
 
-$baseUrl = "https://spaarkedev1.crm.dynamics.com/api/data/v9.2"
+$baseUrl = "$DataverseUrl/api/data/v9.2"
 $headers = @{
     "Authorization" = "Bearer $token"
     "Accept" = "application/json"

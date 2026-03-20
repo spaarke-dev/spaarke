@@ -29,7 +29,7 @@ import {
 } from '../CreateMatter/matterService';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import { getSpeContainerIdFromBusinessUnit } from '../../services/xrmProvider';
 import type { IWebApi } from '../../types/xrm';

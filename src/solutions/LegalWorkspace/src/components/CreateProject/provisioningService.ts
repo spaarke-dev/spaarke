@@ -15,7 +15,7 @@
  *   - Returns result object — never throws
  */
 
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 
 // ---------------------------------------------------------------------------

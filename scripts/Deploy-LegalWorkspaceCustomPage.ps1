@@ -63,7 +63,7 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$Environment = "https://spaarkedev1.crm.dynamics.com",
+    [string]$Environment = $env:DATAVERSE_URL,
     [string]$SolutionZip = "",
     [switch]$SkipAuth,
     [switch]$SkipImport,
@@ -165,9 +165,9 @@ try {
         Write-Host "      Connected to: $ConnectedUrl" -ForegroundColor Green
 
         # Warn if wrong environment
-        if ($ConnectedUrl -notlike "*spaarkedev1*") {
+        if ($ConnectedUrl -ne $Environment) {
             Write-Host ""
-            Write-Host "  WARNING: Active auth is for '$ConnectedUrl', not spaarkedev1." -ForegroundColor Yellow
+            Write-Host "  WARNING: Active auth is for '$ConnectedUrl', not $Environment." -ForegroundColor Yellow
             Write-Host "  Expected: $Environment" -ForegroundColor Yellow
             Write-Host "  To switch: pac auth select --index <N> after running pac auth list" -ForegroundColor Yellow
             Write-Host ""
@@ -455,7 +455,7 @@ Write-Host "============================================================" -Foreg
 Write-Host ""
 Write-Host "  1. OPEN POWER APPS MAKER PORTAL" -ForegroundColor Cyan
 Write-Host "     https://make.powerapps.com" -ForegroundColor White
-Write-Host "     Select environment: Spaarke Dev (spaarkedev1)" -ForegroundColor White
+Write-Host "     Select environment: $Environment" -ForegroundColor White
 Write-Host ""
 Write-Host "  2. CREATE CUSTOM PAGE (first time only)" -ForegroundColor Cyan
 Write-Host "     Solutions > SpaarkeLegalWorkspace > + New > App > Page > Custom page" -ForegroundColor White

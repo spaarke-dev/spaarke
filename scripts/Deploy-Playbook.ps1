@@ -61,6 +61,8 @@ param(
     [ValidateSet('dev')]
     [string]$Environment = 'dev',
 
+    [string]$DataverseUrl = $env:DATAVERSE_URL,
+
     [switch]$DryRun,
 
     [switch]$Force
@@ -71,11 +73,12 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Environment URL resolution
 # ---------------------------------------------------------------------------
-$envMap = @{
-    'dev' = 'https://spaarkedev1.crm.dynamics.com'
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
 }
 
-$EnvironmentUrl = $envMap[$Environment]
+$EnvironmentUrl = $DataverseUrl
 $ApiBase = "$EnvironmentUrl/api/data/v9.2"
 
 # ---------------------------------------------------------------------------

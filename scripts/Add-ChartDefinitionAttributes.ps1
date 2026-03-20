@@ -1,6 +1,6 @@
 # Add missing attributes to sprk_chartdefinition entity
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com"
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL
 )
 
 $ErrorActionPreference = "Stop"

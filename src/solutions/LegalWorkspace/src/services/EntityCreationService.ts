@@ -7,7 +7,7 @@
  *
  * ```typescript
  * import { authenticatedFetch } from '../services/authInit';
- * import { getBffBaseUrl } from '../config/bffConfig';
+ * import { getBffBaseUrl } from '../config/runtimeConfig';
  *
  * const service = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
  * ```

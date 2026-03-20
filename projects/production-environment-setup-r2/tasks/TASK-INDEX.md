@@ -1,8 +1,8 @@
 # Task Index: Production Environment Setup R2
 
-> **Last Updated**: 2026-03-18
+> **Last Updated**: 2026-03-20
 > **Total Tasks**: 39
-> **Status**: 7/39 complete
+> **Status**: 39/39 complete
 
 ---
 
@@ -30,57 +30,57 @@
 |---|------|--------|---------------|--------------|------|
 | 010 | Add resolveRuntimeConfig() to @spaarke/auth | ✅ | 2 | Phase 1 | 4h |
 | 011 | Clean environmentVariables.ts defaults | ✅ | 2 | none | 2h |
-| 012 | Standardize window globals + scope format | 🔲 | 2 | 010 | 2h |
+| 012 | Standardize window globals + scope format | ✅ | 2 | 010 | 2h |
 
 ## Phase 3: Code Page Migration (Tasks 020-028) — ALL PARALLEL
 
 | # | Task | Status | Parallel Group | Dependencies | Est. |
 |---|------|--------|---------------|--------------|------|
-| 020 | Migrate AnalysisWorkspace (pilot) | 🔲 | 3 | 010 | 3h |
-| 021 | Migrate PlaybookBuilder | 🔲 | 3 | 010 | 2h |
-| 022 | Migrate SprkChatPane | 🔲 | 3 | 010 | 2h |
-| 023 | Migrate LegalWorkspace | 🔲 | 3 | 010 | 2h |
-| 024 | Migrate DocumentUploadWizard | 🔲 | 3 | 010 | 2h |
-| 025 | Migrate SpeAdminApp | 🔲 | 3 | 010 | 2h |
-| 026 | Migrate DocumentRelationshipViewer (code page) | 🔲 | 3 | 010 | 2h |
-| 027 | Migrate SemanticSearch (code page) | 🔲 | 3 | 010 | 2h |
-| 028 | Migrate External SPA | 🔲 | 3 | 010 | 2h |
+| 020 | Migrate AnalysisWorkspace (pilot) | ✅ | 3 | 010 | 3h |
+| 021 | Migrate PlaybookBuilder | ✅ | 3 | 010 | 2h |
+| 022 | Migrate SprkChatPane | ✅ | 3 | 010 | 2h |
+| 023 | Migrate LegalWorkspace | ✅ | 3 | 010 | 2h |
+| 024 | Migrate DocumentUploadWizard | ✅ | 3 | 010 | 2h |
+| 025 | Migrate SpeAdminApp | ✅ | 3 | 010 | 2h |
+| 026 | Migrate DocumentRelationshipViewer (code page) | ✅ | 3 | 010 | 2h |
+| 027 | Migrate SemanticSearch (code page) | ✅ | 3 | 010 | 2h |
+| 028 | Migrate External SPA | ✅ | 3 | 010 | 2h |
 
 ## Phase 4: PCF Control Migration (Tasks 030-037) — ALL PARALLEL
 
 | # | Task | Status | Parallel Group | Dependencies | Est. |
 |---|------|--------|---------------|--------------|------|
-| 030 | Migrate UniversalQuickCreate PCF | 🔲 | 4 | 011 | 2h |
-| 031 | Migrate DocumentRelationshipViewer PCF | 🔲 | 4 | 011 | 2h |
-| 032 | Migrate SemanticSearchControl PCF | 🔲 | 4 | 011 | 2h |
-| 033 | Migrate RelatedDocumentCount PCF | 🔲 | 4 | 011 | 2h |
-| 034 | Migrate UniversalDatasetGrid PCF | 🔲 | 4 | 011 | 2h |
-| 035 | Migrate EmailProcessingMonitor PCF | 🔲 | 4 | 011 | 2h |
-| 036 | Migrate AssociationResolver PCF | 🔲 | 4 | 011 | 2h |
-| 037 | Migrate ScopeConfigEditor PCF | 🔲 | 4 | 011 | 2h |
+| 030 | Migrate UniversalQuickCreate PCF | ✅ | 4 | 011 | 2h |
+| 031 | Migrate DocumentRelationshipViewer PCF | ✅ | 4 | 011 | 2h |
+| 032 | Migrate SemanticSearchControl PCF | ✅ | 4 | 011 | 2h |
+| 033 | Migrate RelatedDocumentCount PCF | ✅ | 4 | 011 | 2h |
+| 034 | Migrate UniversalDatasetGrid PCF | ✅ | 4 | 011 | 2h |
+| 035 | Migrate EmailProcessingMonitor PCF | ✅ | 4 | 011 | 2h |
+| 036 | Migrate AssociationResolver PCF | ✅ | 4 | 011 | 2h |
+| 037 | Migrate ScopeConfigEditor PCF | ✅ | 4 | 011 | 2h |
 
 ## Phase 5: Legacy JS + Office Add-ins (Tasks 040-046) — ALL PARALLEL
 
 | # | Task | Status | Parallel Group | Dependencies | Est. |
 |---|------|--------|---------------|--------------|------|
 | 040 | Fix sprk_subgrid_parent_rollup.js | ✅ | 5 | 010 | 2h |
-| 041 | Fix sprk_emailactions.js | 🔲 | 5 | 010 | 1h |
-| 042 | Fix sprk_DocumentOperations.js | 🔲 | 5 | 010 | 1h |
-| 043 | Fix sprk_communication_send.js | 🔲 | 5 | 010 | 1h |
-| 044 | Fix sprk_aichatcontextmap_ribbon.js | 🔲 | 5 | 010 | 1h |
-| 045 | Parameterize Office add-in auth config | 🔲 | 5 | 010 | 3h |
-| 046 | Fix ribbon webresource JS files | 🔲 | 5 | 010 | 2h |
-| 047 | Fix KPI JS webresources (3 files) | 🔲 | 5 | 010 | 2h |
+| 041 | Fix sprk_emailactions.js | ✅ | 5 | 010 | 1h |
+| 042 | Fix sprk_DocumentOperations.js | ✅ | 5 | 010 | 1h |
+| 043 | Fix sprk_communication_send.js | ✅ | 5 | 010 | 1h |
+| 044 | Fix sprk_aichatcontextmap_ribbon.js | ✅ | 5 | 010 | 1h |
+| 045 | Parameterize Office add-in auth config | ✅ | 5 | 010 | 3h |
+| 046 | Fix ribbon webresource JS files | ✅ | 5 | 010 | 2h |
+| 047 | Fix KPI JS webresources (3 files) | ✅ | 5 | 010 | 2h |
 
 ## Phase 6: Validation & Cleanup (Tasks 050-090)
 
 | # | Task | Status | Parallel Group | Dependencies | Est. |
 |---|------|--------|---------------|--------------|------|
-| 050 | Create Validate-DeployedEnvironment.ps1 | 🔲 | 6 | All Phase 1-5 | 4h |
-| 051 | Update Provision-Customer.ps1 | 🔲 | 6 | 004, 050 | 2h |
-| 052 | Batch parameterize remaining scripts | 🔲 | 6 | 005 | 4h |
-| 053 | Update deployment documentation | 🔲 | 6 | 050, 051 | 2h |
-| 090 | Project wrap-up | 🔲 | 6-final | All | 2h |
+| 050 | Create Validate-DeployedEnvironment.ps1 | ✅ | 6 | All Phase 1-5 | 4h |
+| 051 | Update Provision-Customer.ps1 | ✅ | 6 | 004, 050 | 2h |
+| 052 | Batch parameterize remaining scripts | ✅ | 6 | 005 | 4h |
+| 053 | Update deployment documentation | ✅ | 6 | 050, 051 | 2h |
+| 090 | Project wrap-up | ✅ | 6-final | All | 2h |
 
 ---
 

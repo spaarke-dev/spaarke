@@ -62,16 +62,14 @@ export class RelatedDocumentCount implements ComponentFramework.ReactControl<IIn
     // Read document ID from form context (not from bound field - field may not exist on entity)
     const pageContext = (context as unknown as { page?: { entityId?: string } }).page;
     const documentId = pageContext?.entityId ?? '';
-    const tenantId = context.parameters.tenantId?.raw ?? undefined;
-    const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? undefined;
     const cardTitle = context.parameters.cardTitle?.raw ?? undefined;
 
     // Create props for the main component
+    // Note: tenantId and apiBaseUrl are no longer passed as props — they are
+    // resolved at runtime from Dataverse environment variables inside the component.
     const props: IRelatedDocumentCountProps = {
       context,
       documentId,
-      tenantId: tenantId || undefined,
-      apiBaseUrl: apiBaseUrl || undefined,
       cardTitle: cardTitle || undefined,
       isDarkMode: this._theme === webDarkTheme,
     };

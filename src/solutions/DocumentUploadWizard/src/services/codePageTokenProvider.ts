@@ -76,12 +76,12 @@ export function resolveDataverseUrl(): string {
         }
     }
 
-    // Fallback: dev environment
-    console.warn(
+    // No fallback — fail loudly if Xrm context is unavailable.
+    // Runtime config should have been resolved via resolveRuntimeConfig() in main.tsx.
+    throw new Error(
         "[codePageTokenProvider] Xrm context not found. " +
-        "Falling back to dev Dataverse URL."
+        "Cannot resolve Dataverse URL. Ensure this code page is running inside a Dataverse web resource."
     );
-    return "https://spaarkedev1.crm.dynamics.com";
 }
 
 /**

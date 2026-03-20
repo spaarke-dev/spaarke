@@ -1,6 +1,15 @@
 # Deploy EventsPage Web Resource to Dataverse
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
 $ErrorActionPreference = 'Stop'
-$orgUrl = 'https://spaarkedev1.crm.dynamics.com'
+$orgUrl = $DataverseUrl
 
 Write-Host '====================================='
 Write-Host 'EventsPage Web Resource Deployment'

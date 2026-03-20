@@ -71,6 +71,8 @@ param(
     })]
     [string]$Environment = 'dev',
 
+    [string]$DataverseUrl = $env:DATAVERSE_URL,
+
     [string]$Token,
 
     [string]$BackupPath,
@@ -83,16 +85,13 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Environment URL resolution
 # ---------------------------------------------------------------------------
-$EnvironmentUrls = @{
-    'dev'  = 'https://spaarkedev1.crm.dynamics.com'
-    'test' = 'https://spaarketest1.crm.dynamics.com'
-    'prod' = 'https://spaarkeprod1.crm.dynamics.com'
-}
-
-if ($EnvironmentUrls.ContainsKey($Environment)) {
-    $EnvironmentUrl = $EnvironmentUrls[$Environment]
-} else {
+if ($DataverseUrl) {
+    $EnvironmentUrl = $DataverseUrl
+} elseif ($Environment -match '^https://') {
     $EnvironmentUrl = $Environment.TrimEnd('/')
+} else {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
 }
 
 # ---------------------------------------------------------------------------

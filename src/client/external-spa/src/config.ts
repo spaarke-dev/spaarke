@@ -6,42 +6,89 @@
  * They authenticate with their existing Microsoft 365 credentials (SSO).
  *
  * Values are loaded from environment files:
- *   .env.development — local dev / dev environment
- *   .env.production  — production build
+ *   .env.development — local dev (committed, safe values)
+ *   .env.production  — CI/CD token substitution (#{VAR_NAME}# placeholders)
+ *
+ * IMPORTANT: This SPA runs on Power Pages, NOT inside a Dataverse web resource.
+ * Xrm context is NOT available, so resolveRuntimeConfig() from @spaarke/auth
+ * cannot be used. Environment-specific values are injected via CI/CD token
+ * substitution into .env.production before the Vite build runs.
+ *
+ * No hardcoded dev fallbacks — production builds fail loudly if CI/CD
+ * substitution has not replaced the #{...}# tokens.
  *
  * See: docs/architecture/power-pages-spa-guide.md
  * See: notes/auth-migration-b2b-msal.md
  */
 
-/** BFF API base URL */
-export const BFF_API_URL: string =
-  (import.meta.env.VITE_BFF_API_URL as string | undefined) ??
-  "https://spe-api-dev-67e2xz.azurewebsites.net";
+// ---------------------------------------------------------------------------
+// Environment variable helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a required Vite environment variable. Throws if missing or still
+ * contains an un-substituted CI/CD token placeholder (#{...}#).
+ */
+function requireEnvVar(key: string, label: string): string {
+  const value = import.meta.env[key] as string | undefined;
+
+  if (!value) {
+    throw new Error(
+      `[ExternalSPA] Missing required environment variable '${key}' (${label}). ` +
+        "Ensure .env.development exists for local dev, or CI/CD token substitution " +
+        "has run against .env.production before the Vite build."
+    );
+  }
+
+  // Detect un-substituted CI/CD token placeholders like #{BFF_API_URL}#
+  if (/^#\{.+\}#$/.test(value)) {
+    throw new Error(
+      `[ExternalSPA] Environment variable '${key}' (${label}) still contains ` +
+        `CI/CD placeholder '${value}'. Token substitution must run before build.`
+    );
+  }
+
+  return value;
+}
+
+// ---------------------------------------------------------------------------
+// Exported configuration constants
+// ---------------------------------------------------------------------------
+
+/** BFF API base URL — injected via .env.development or CI/CD token substitution. */
+export const BFF_API_URL: string = requireEnvVar(
+  "VITE_BFF_API_URL",
+  "BFF API base URL"
+);
 
 /**
  * MSAL client ID for the SPA app registration (spaarke-external-access-SPA).
- * App registration: f306885a-8251-492c-8d3e-34d7b476ffd0
- * Tenant: a221a95e-6abc-4434-aecc-e48338a1b2f2 (main Spaarke workforce tenant)
+ * Injected via .env.development or CI/CD token substitution.
  */
-export const MSAL_CLIENT_ID: string =
-  (import.meta.env.VITE_MSAL_CLIENT_ID as string | undefined) ??
-  "f306885a-8251-492c-8d3e-34d7b476ffd0";
+export const MSAL_CLIENT_ID: string = requireEnvVar(
+  "VITE_MSAL_CLIENT_ID",
+  "MSAL SPA client ID"
+);
 
 /**
  * Entra tenant ID (main Spaarke workforce tenant).
  * External users are B2B guests in this tenant — SSO with Microsoft 365 credentials.
+ * Injected via .env.development or CI/CD token substitution.
  */
-export const MSAL_TENANT_ID: string =
-  (import.meta.env.VITE_MSAL_TENANT_ID as string | undefined) ??
-  "a221a95e-6abc-4434-aecc-e48338a1b2f2";
+export const MSAL_TENANT_ID: string = requireEnvVar(
+  "VITE_MSAL_TENANT_ID",
+  "Entra tenant ID"
+);
 
 /**
  * BFF API OAuth scope for token acquisition.
- * Defined on SDAP-BFF-SPE-API app registration (1e40baad-e065-4aea-a8d4-4b7ab273458c).
+ * Defined on SDAP-BFF-SPE-API app registration.
+ * Injected via .env.development or CI/CD token substitution.
  */
-export const MSAL_BFF_SCOPE: string =
-  (import.meta.env.VITE_MSAL_BFF_SCOPE as string | undefined) ??
-  "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/SDAP.Access";
+export const MSAL_BFF_SCOPE: string = requireEnvVar(
+  "VITE_MSAL_BFF_SCOPE",
+  "BFF API OAuth scope"
+);
 
 /** App version — update on each release */
 export const APP_VERSION = "1.0.0";

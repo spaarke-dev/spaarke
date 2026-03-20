@@ -21,7 +21,7 @@ import type { IContact, ILookupItem } from '../../types/entities';
 import type { IWebApi, WebApiEntity } from '../../types/xrm';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress } from '../../services/EntityCreationService';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 
 // ---------------------------------------------------------------------------

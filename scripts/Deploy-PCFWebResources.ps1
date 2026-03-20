@@ -1,12 +1,20 @@
 # Deploy PCF Web Resources to Dataverse
 
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "PCF Web Resources Deployment" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Hardcoded org URL
-$orgUrl = "https://spaarkedev1.crm.dynamics.com"
+$orgUrl = $DataverseUrl
 Write-Host "[1/5] Using Dataverse environment..."
 Write-Host "      $orgUrl" -ForegroundColor Green
 Write-Host ""

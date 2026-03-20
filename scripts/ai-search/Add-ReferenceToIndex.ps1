@@ -24,7 +24,7 @@ param(
     [string[]]$Keywords = @(),
     [string]$KnowledgeTypeId,                # GUID of the content category lookup (Standards, Regulations, etc.)
     [string]$Version = "1.0",
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [string]$SearchServiceName = "spaarke-search-dev",
     [string]$SearchIndexName = "spaarke-rag-references",
     [string]$OpenAiEndpoint = "https://spaarke-openai-dev.openai.azure.com/",

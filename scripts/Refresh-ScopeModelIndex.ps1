@@ -43,6 +43,8 @@ param(
     [ValidateSet('dev')]
     [string]$Environment = 'dev',
 
+    [string]$DataverseUrl = $env:DATAVERSE_URL,
+
     [string]$OutputFile = 'docs/ai-knowledge/catalogs/scope-model-index.json'
 )
 
@@ -51,11 +53,12 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Environment URL resolution
 # ---------------------------------------------------------------------------
-$EnvironmentUrls = @{
-    'dev' = 'https://spaarkedev1.crm.dynamics.com'
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
 }
 
-$EnvironmentUrl = $EnvironmentUrls[$Environment]
+$EnvironmentUrl = $DataverseUrl
 
 # ---------------------------------------------------------------------------
 # Resolve paths

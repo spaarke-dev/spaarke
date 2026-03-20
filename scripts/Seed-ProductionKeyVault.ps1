@@ -30,6 +30,7 @@
 
 param(
     [string]$VaultName = "sprk-platform-prod-kv",
+    [string]$DataverseUrl = $env:DATAVERSE_URL,
     [bool]$SkipExisting = $true
 )
 
@@ -117,9 +118,9 @@ Set-VaultSecret -Name "ServiceBus-ConnectionString" `
     -IsPlaceholder $true
 
 Set-VaultSecret -Name "Dataverse-ServiceUrl" `
-    -Value "https://spaarkedev1.crm.dynamics.com" `
+    -Value ($DataverseUrl ?? "https://placeholder.crm.dynamics.com") `
     -Description "Dataverse environment URL (update for production Dataverse)" `
-    -IsPlaceholder $true
+    -IsPlaceholder (-not $DataverseUrl)
 
 # === SPE (SharePoint Embedded) ===
 Write-Host ""

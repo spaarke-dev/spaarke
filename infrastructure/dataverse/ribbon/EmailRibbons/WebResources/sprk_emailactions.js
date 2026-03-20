@@ -1,11 +1,17 @@
 /**
  * Spaarke Email Actions
- * Version: 1.0.0
+ * Version: 1.2.0
  * Description: Email form ribbon button handlers for Save to Document functionality
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
+ *
+ * Environment Variables (Dataverse):
+ *   sprk_BffApiBaseUrl  — BFF API base URL
+ *   sprk_BffApiAppId    — BFF API app registration ID (for OAuth scope)
+ *   sprk_MsalClientId   — MSAL client application ID
+ *   sprk_TenantId       — Azure AD tenant ID
  *
  * Copyright (c) 2025 Spaarke
  */
@@ -25,31 +31,158 @@ var Spaarke = window.Spaarke;
 // =============================================================================
 
 Spaarke.Email.Config = {
-    // BFF API URL - determined by environment
+    // BFF API URL — resolved at runtime from Dataverse environment variable
     bffApiUrl: null,
 
-    // MSAL Configuration (shared with Document operations)
+    // MSAL Configuration — resolved at runtime from Dataverse environment variables
     msal: {
-        // Client Application ID (SPE-File-Viewer-PCF app registration)
-        clientId: "b36e9b91-ee7d-46e6-9f6a-376871cc9d54",
-        // BFF Application ID (SDAP-BFF-SPE-API for scope construction)
-        bffAppId: "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-        // Azure AD Tenant ID
-        tenantId: "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-        // Authority URL
+        clientId: null,
+        bffAppId: null,
+        tenantId: null,
         get authority() {
-            return "https://login.microsoftonline.com/" + this.tenantId;
+            return this.tenantId ? "https://login.microsoftonline.com/" + this.tenantId : null;
         },
-        // BFF API scope
         get scope() {
-            return "api://" + this.bffAppId + "/SDAP.Access";
+            return this.bffAppId ? "api://" + this.bffAppId + "/SDAP.Access" : null;
         },
-        // Redirect URI - must match Azure AD app registration
-        redirectUri: "https://spaarkedev1.crm.dynamics.com"
+        // Redirect URI — derived from Dataverse client URL at runtime
+        redirectUri: null
     },
 
     // Version
-    version: "1.0.0"
+    version: "1.2.0"
+};
+
+// =============================================================================
+// ENVIRONMENT VARIABLE RESOLUTION
+// =============================================================================
+
+/**
+ * Cached config resolution state.
+ * @private
+ */
+Spaarke.Email._configResolved = false;
+Spaarke.Email._configResolvePromise = null;
+
+/**
+ * Resolve all configuration values from Dataverse Environment Variables.
+ * Caches results in Config object — subsequent calls return immediately.
+ *
+ * Uses Xrm.WebApi.retrieveMultipleRecords to query environmentvariabledefinition
+ * with expand to environmentvariablevalue. No npm packages required.
+ *
+ * @returns {Promise<void>} Resolves when all config values are loaded
+ */
+Spaarke.Email._resolveConfig = function () {
+    // Return cached result
+    if (Spaarke.Email._configResolved) {
+        return Promise.resolve();
+    }
+
+    // Deduplicate concurrent calls
+    if (Spaarke.Email._configResolvePromise) {
+        return Spaarke.Email._configResolvePromise;
+    }
+
+    Spaarke.Email._configResolvePromise = Spaarke.Email._queryEnvVars()
+        .then(function (envVars) {
+            // BFF API Base URL (required)
+            var bffUrl = envVars["sprk_BffApiBaseUrl"];
+            if (!bffUrl) {
+                throw new Error(
+                    "[Spaarke.Email] Environment variable 'sprk_BffApiBaseUrl' not found in Dataverse. " +
+                    "Ensure the SpaarkeCore solution is imported and the variable has a value."
+                );
+            }
+            Spaarke.Email.Config.bffApiUrl = bffUrl.replace(/\/+$/, "");
+
+            // BFF App ID (required — used for OAuth scope)
+            var bffAppId = envVars["sprk_BffApiAppId"];
+            if (!bffAppId) {
+                throw new Error(
+                    "[Spaarke.Email] Environment variable 'sprk_BffApiAppId' not found in Dataverse. " +
+                    "Ensure the SpaarkeCore solution is imported and the variable has a value."
+                );
+            }
+            Spaarke.Email.Config.msal.bffAppId = bffAppId;
+
+            // MSAL Client ID (required)
+            var msalClientId = envVars["sprk_MsalClientId"];
+            if (!msalClientId) {
+                throw new Error(
+                    "[Spaarke.Email] Environment variable 'sprk_MsalClientId' not found in Dataverse. " +
+                    "Ensure the SpaarkeCore solution is imported and the variable has a value."
+                );
+            }
+            Spaarke.Email.Config.msal.clientId = msalClientId;
+
+            // Tenant ID (required)
+            var tenantId = envVars["sprk_TenantId"];
+            if (!tenantId) {
+                throw new Error(
+                    "[Spaarke.Email] Environment variable 'sprk_TenantId' not found in Dataverse. " +
+                    "Ensure the SpaarkeCore solution is imported and the variable has a value."
+                );
+            }
+            Spaarke.Email.Config.msal.tenantId = tenantId;
+
+            // Redirect URI — derived from Dataverse client URL (always matches current org)
+            try {
+                var clientUrl = Xrm.Utility.getGlobalContext().getClientUrl();
+                Spaarke.Email.Config.msal.redirectUri = clientUrl;
+            } catch (e) {
+                console.warn("[Spaarke.Email] Could not resolve redirectUri from Xrm context:", e);
+                Spaarke.Email.Config.msal.redirectUri = window.location.origin;
+            }
+
+            Spaarke.Email._configResolved = true;
+            console.log("[Spaarke.Email] Config resolved — BFF URL:", Spaarke.Email.Config.bffApiUrl);
+        })
+        .catch(function (error) {
+            // Clear promise so next call retries
+            Spaarke.Email._configResolvePromise = null;
+            console.error("[Spaarke.Email] Config resolution failed:", error);
+            throw error;
+        });
+
+    return Spaarke.Email._configResolvePromise;
+};
+
+/**
+ * Query Dataverse Environment Variables for all required config values.
+ * Uses Xrm.WebApi with $expand to get definition + override value in one call.
+ *
+ * @returns {Promise<Object>} Map of schemaName -> resolved value
+ * @private
+ */
+Spaarke.Email._queryEnvVars = function () {
+    var schemaNames = ["sprk_BffApiBaseUrl", "sprk_BffApiAppId", "sprk_MsalClientId", "sprk_TenantId"];
+    var filter = schemaNames.map(function (name) {
+        return "schemaname eq '" + name + "'";
+    }).join(" or ");
+
+    var query = "?$filter=" + filter +
+        "&$select=schemaname,defaultvalue" +
+        "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)";
+
+    return Xrm.WebApi.retrieveMultipleRecords("environmentvariabledefinition", query)
+        .then(function (result) {
+            var envVars = {};
+            if (result.entities && result.entities.length > 0) {
+                for (var i = 0; i < result.entities.length; i++) {
+                    var definition = result.entities[i];
+                    var schemaName = definition.schemaname;
+                    // Override value takes precedence over default
+                    var values = definition.environmentvariabledefinition_environmentvariablevalue;
+                    if (values && values.length > 0 && values[0].value) {
+                        envVars[schemaName] = values[0].value;
+                    } else if (definition.defaultvalue) {
+                        envVars[schemaName] = definition.defaultvalue;
+                    }
+                }
+            }
+            return envVars;
+        });
 };
 
 // =============================================================================
@@ -57,29 +190,15 @@ Spaarke.Email.Config = {
 // =============================================================================
 
 /**
- * Initialize the module
- * Determines BFF API URL based on environment
+ * Initialize the module.
+ * Resolves all configuration from Dataverse Environment Variables.
+ * @returns {Promise<boolean>} True if initialization succeeded
  */
-Spaarke.Email.init = function() {
+Spaarke.Email.init = async function () {
     try {
-        // Determine environment from Dataverse URL
-        var globalContext = Xrm.Utility.getGlobalContext();
-        var clientUrl = globalContext.getClientUrl();
-
-        if (clientUrl.includes('spaarkedev1.crm.dynamics.com')) {
-            Spaarke.Email.Config.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.includes('spaarkeuat.crm.dynamics.com')) {
-            Spaarke.Email.Config.bffApiUrl = "https://spe-api-uat.azurewebsites.net";
-        } else if (clientUrl.includes('spaarkeprod.crm.dynamics.com')) {
-            Spaarke.Email.Config.bffApiUrl = "https://spe-api-prod.azurewebsites.net";
-        } else {
-            // Default to dev
-            Spaarke.Email.Config.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-        }
-
+        await Spaarke.Email._resolveConfig();
         console.log("[Spaarke.Email] Initialized v" + Spaarke.Email.Config.version);
         console.log("[Spaarke.Email] BFF API URL:", Spaarke.Email.Config.bffApiUrl);
-
         return true;
     } catch (error) {
         console.error("[Spaarke.Email] Init failed:", error);
@@ -127,12 +246,15 @@ Spaarke.Email._loadMsalLibrary = function() {
  * Initialize MSAL instance
  * @returns {Promise<msal.PublicClientApplication>}
  */
-Spaarke.Email._initMsal = function() {
+Spaarke.Email._initMsal = async function() {
+    // Ensure config is resolved first
+    await Spaarke.Email._resolveConfig();
+
     // Reuse Document module's MSAL instance if available
     if (Spaarke.Document && Spaarke.Document._msalInstance) {
         console.log("[Spaarke.Email] Reusing Document module's MSAL instance");
         Spaarke.Email._msalInstance = Spaarke.Document._msalInstance;
-        return Promise.resolve(Spaarke.Email._msalInstance);
+        return Spaarke.Email._msalInstance;
     }
 
     if (Spaarke.Email._msalInitPromise) {
@@ -343,9 +465,15 @@ Spaarke.Email.Utils = {
 Spaarke.Email.saveToDocument = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Email.Config.bffApiUrl) {
-        Spaarke.Email.init();
+    // Ensure config is resolved (async init)
+    try {
+        await Spaarke.Email._resolveConfig();
+    } catch (configError) {
+        console.error("[Spaarke.Email] Config resolution failed:", configError);
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to initialize email actions: " + configError.message
+        });
+        return;
     }
 
     try {
@@ -458,6 +586,55 @@ Spaarke.Email.saveToDocument = async function(primaryControl) {
 // =============================================================================
 
 /**
+ * Enable rule for "Save to Document" button
+ * Returns true if email is completed (statecode = 1)
+ *
+ * Note: Enable rules must be synchronous. Config resolution is triggered
+ * as a side effect but does not block the return value.
+ *
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Email.canSaveToDocument = function(primaryControl) {
+    // Trigger async config resolution (side effect — does not block)
+    if (!Spaarke.Email._configResolved) {
+        Spaarke.Email._resolveConfig().catch(function (err) {
+            console.warn("[Spaarke.Email] Background config resolution failed:", err.message);
+        });
+    }
+
+    try {
+        var formContext = primaryControl;
+        if (!formContext || !formContext.getAttribute) {
+            // Fallback for ribbon DisplayRules that don't pass context
+            if (typeof Xrm !== 'undefined' && Xrm.Page && Xrm.Page.getAttribute) {
+                formContext = Xrm.Page;
+            }
+        }
+
+        if (formContext && formContext.getAttribute) {
+            var statecodeAttr = formContext.getAttribute("statecode");
+            if (statecodeAttr) {
+                var statecode = statecodeAttr.getValue();
+                // Email statecode: 0 = Open, 1 = Completed, 2 = Canceled
+                var isCompleted = statecode === 1;
+                console.log("[Spaarke.Email] canSaveToDocument - statecode:", statecode, "isCompleted:", isCompleted);
+                return isCompleted;
+            } else {
+                console.log("[Spaarke.Email] canSaveToDocument - statecode attribute not found");
+            }
+        } else {
+            console.log("[Spaarke.Email] canSaveToDocument - No form context available");
+        }
+    } catch (e) {
+        console.log("[Spaarke.Email] canSaveToDocument error:", e);
+    }
+
+    // Default to disabled (hide button until we know email is completed)
+    return false;
+};
+
+/**
  * Check if email is already archived (has associated sprk_document)
  * Used as DisplayRule - returns false to SHOW button, true to HIDE
  * @param {object} [primaryControl] - Form context (optional)
@@ -544,49 +721,6 @@ Spaarke.Email._checkEmailArchivedAsync = async function(emailId) {
 Spaarke.Email.canArchiveEmail = function(primaryControl) {
     // Show button only if email is NOT already archived
     return !Spaarke.Email.isEmailArchived(primaryControl);
-};
-
-/**
- * Enable rule for "Archive Email" button
- * Returns true if email is completed (statecode = 1) AND not already archived
- * @param {object} [primaryControl] - Form context (optional)
- * @returns {boolean}
- */
-Spaarke.Email.canSaveToDocument = function(primaryControl) {
-    // Initialize on ribbon load
-    if (!Spaarke.Email.Config.bffApiUrl) {
-        Spaarke.Email.init();
-    }
-
-    try {
-        var formContext = primaryControl;
-        if (!formContext || !formContext.getAttribute) {
-            // Fallback for ribbon DisplayRules that don't pass context
-            if (typeof Xrm !== 'undefined' && Xrm.Page && Xrm.Page.getAttribute) {
-                formContext = Xrm.Page;
-            }
-        }
-
-        if (formContext && formContext.getAttribute) {
-            var statecodeAttr = formContext.getAttribute("statecode");
-            if (statecodeAttr) {
-                var statecode = statecodeAttr.getValue();
-                // Email statecode: 0 = Open, 1 = Completed, 2 = Canceled
-                var isCompleted = statecode === 1;
-                console.log("[Spaarke.Email] canSaveToDocument - statecode:", statecode, "isCompleted:", isCompleted);
-                return isCompleted;
-            } else {
-                console.log("[Spaarke.Email] canSaveToDocument - statecode attribute not found");
-            }
-        } else {
-            console.log("[Spaarke.Email] canSaveToDocument - No form context available");
-        }
-    } catch (e) {
-        console.log("[Spaarke.Email] canSaveToDocument error:", e);
-    }
-
-    // Default to disabled (hide button until we know email is completed)
-    return false;
 };
 
 // =============================================================================

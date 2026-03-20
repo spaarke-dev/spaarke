@@ -1,6 +1,15 @@
 # Export the ThemeMenuRibbons solution to check ribbon definition
 
-$orgUrl = "https://spaarkedev1.crm.dynamics.com"
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$orgUrl = $DataverseUrl
 $solutionName = "ThemeMenuRibbons"
 $outputPath = "c:\code_files\spaarke\infrastructure\dataverse\ribbon\temp\ThemeMenuRibbons_current.zip"
 

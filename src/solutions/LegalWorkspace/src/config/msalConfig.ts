@@ -25,13 +25,13 @@ import { LogLevel } from '@azure/msal-browser';
 // ---------------------------------------------------------------------------
 
 /**
- * Client App ID — defaults to "Sparke DSM-SPE Dev 2" app registration.
- * Override via window global for customer tenant deployments.
+ * Client App ID — resolved at runtime from Dataverse Environment Variables.
+ * The bootstrap in main.tsx calls resolveRuntimeConfig() which sets
+ * window.__SPAARKE_MSAL_CLIENT_ID__ before MSAL is initialized.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CLIENT_ID: string = (window as any).__SPAARKE_MSAL_CLIENT_ID__
-  || (import.meta.env.VITE_MSAL_CLIENT_ID as string | undefined)
-  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Set VITE_MSAL_CLIENT_ID in .env.development or .env.production.'); })();
+import { getMsalClientId } from './runtimeConfig';
+
+const CLIENT_ID: string = getMsalClientId();
 
 /**
  * Redirect URI — auto-detected from current page origin.

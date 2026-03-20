@@ -1,4 +1,13 @@
-$token = az account get-access-token --resource "https://spaarkedev1.crm.dynamics.com" --query "accessToken" -o tsv
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$token = az account get-access-token --resource $DataverseUrl --query "accessToken" -o tsv
 
 $headers = @{
     'Authorization' = "Bearer $token"
@@ -8,7 +17,7 @@ $headers = @{
 }
 
 $appId = "1e40baad-e065-4aea-a8d4-4b7ab273458c"  # BFF API App ID
-$baseUrl = "https://spaarkedev1.crm.dynamics.com/api/data/v9.2"
+$baseUrl = "$DataverseUrl/api/data/v9.2"
 
 Write-Host "Checking security roles for BFF API Application User" -ForegroundColor Cyan
 Write-Host "App ID: $appId" -ForegroundColor Gray

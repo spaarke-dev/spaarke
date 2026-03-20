@@ -238,7 +238,7 @@ const CodeMirrorEditor: React.FC<ICodeMirrorEditorProps> = ({
 
     const updateListener = EditorView.updateListener.of(update => {
       if (update.docChanged) {
-        const newValue = update.state.doc.toString();
+        const newValue: string = update.state.doc.toString();
         internalChangeRef.current = true;
         onChange(newValue);
       }

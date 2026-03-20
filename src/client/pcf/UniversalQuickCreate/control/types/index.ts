@@ -124,7 +124,7 @@ export const DEFAULT_GRID_CONFIG: GridConfiguration = {
     },
   ],
   sdapConfig: {
-    baseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
+    baseUrl: '', // Resolved at runtime from Dataverse env var sprk_BffApiBaseUrl
     timeout: 300000, // 5 minutes
   },
 };

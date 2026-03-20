@@ -16,6 +16,10 @@ export interface ISemanticSearchControlProps {
   onDocumentSelect: (documentId: string) => void;
   /** Whether the resolved Fluent theme is dark mode (from PCF context) */
   isDarkMode?: boolean;
+  /** Whether @spaarke/auth has been initialized (resolved from index.ts) */
+  authInitialized?: boolean;
+  /** BFF API base URL resolved at runtime from Dataverse environment variables */
+  resolvedApiBaseUrl?: string;
 }
 
 /**

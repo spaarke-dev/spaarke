@@ -6,21 +6,13 @@
            control-type="virtual">
 
     <external-service-usage enabled="true">
-      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
 
     <!-- Bound: placeholder field (PCF requires a bound property; actual document ID read from context.page.entityId) -->
     <property name="documentId" display-name-key="Document ID" description-key="Placeholder bound field - document ID is read from form context at runtime"
               of-type="SingleLine.Text" usage="bound" required="false" />
-
-    <!-- Input: Tenant ID for authentication -->
-    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID"
-              of-type="SingleLine.Text" usage="input" required="false" />
-
-    <!-- Input: API Base URL -->
-    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL"
-              of-type="SingleLine.Text" usage="input" required="false" />
 
     <!-- Input: Card title override -->
     <property name="cardTitle" display-name-key="Card Title" description-key="Title displayed on the count card"
@@ -35,6 +27,7 @@
 
     <feature-usage>
       <uses-feature name="Utility" required="true" />
+      <uses-feature name="WebAPI" required="true" />
     </feature-usage>
   </control>
 </manifest>

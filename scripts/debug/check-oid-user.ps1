@@ -1,4 +1,13 @@
-$token = az account get-access-token --resource "https://spaarkedev1.crm.dynamics.com" --query "accessToken" -o tsv
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$token = az account get-access-token --resource $DataverseUrl --query "accessToken" -o tsv
 
 $headers = @{
     'Authorization' = "Bearer $token"
@@ -8,7 +17,7 @@ $headers = @{
 }
 
 $oid = "c74ac1af-ff3b-46fb-83e7-3063616e959c"
-$baseUrl = "https://spaarkedev1.crm.dynamics.com/api/data/v9.2"
+$baseUrl = "$DataverseUrl/api/data/v9.2"
 
 Write-Host "Looking for Dataverse user with Azure AD Object ID: $oid" -ForegroundColor Cyan
 Write-Host ""

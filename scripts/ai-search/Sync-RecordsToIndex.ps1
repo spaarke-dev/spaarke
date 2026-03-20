@@ -18,7 +18,7 @@
 
 param(
     [string[]]$RecordTypes = @("matter", "project", "invoice"),
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [string]$SearchServiceName = "spaarke-search-dev",
     [string]$SearchIndexName = "spaarke-records-index",
     [string]$OpenAiEndpoint = "https://spaarke-openai-dev.openai.azure.com/",

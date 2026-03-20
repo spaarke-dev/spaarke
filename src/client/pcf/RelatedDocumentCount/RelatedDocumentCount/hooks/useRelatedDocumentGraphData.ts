@@ -18,8 +18,7 @@ import type { MiniGraphNode, MiniGraphEdge } from '@spaarke/ui-components/dist/t
 /** Maximum nodes to include in the mini preview (source + related). */
 const MAX_PREVIEW_NODES = 15;
 
-/** Default BFF API URL when not configured via PCF properties. */
-const DEFAULT_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
+// No hardcoded default — apiBaseUrl is resolved from Dataverse environment variables at runtime.
 
 // ─── API Response Types (minimal, matching BFF response shape) ───────
 
@@ -126,7 +125,12 @@ export function useRelatedDocumentGraphData(
     setError(null);
 
     try {
-      const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, '');
+      if (!apiBaseUrl) {
+        setError('BFF API URL not configured. Check Dataverse environment variables.');
+        setIsLoading(false);
+        return;
+      }
+      const baseUrl = apiBaseUrl.replace(/\/$/, '');
       const url = `${baseUrl}/api/ai/visualization/related/${documentId}?${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
 
       console.log('[useRelatedDocumentGraphData] Fetching count + graph:', {

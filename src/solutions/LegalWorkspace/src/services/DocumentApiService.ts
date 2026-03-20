@@ -2,7 +2,7 @@
  * DocumentApiService — BFF API calls for document preview and open links.
  *
  * Uses the existing authenticatedFetch() from bffAuthProvider.ts for Bearer
- * token authentication and getBffBaseUrl() from config/bffConfig.ts for
+ * token authentication and getBffBaseUrl() from config/runtimeConfig.ts for
  * API base URL resolution.
  *
  * API endpoints (same as SemanticSearch PCF):
@@ -11,7 +11,7 @@
  */
 
 import { authenticatedFetch } from './authInit';
-import { getBffBaseUrl } from '../config/bffConfig';
+import { getBffBaseUrl } from '../config/runtimeConfig';
 
 // ---------------------------------------------------------------------------
 // Response types

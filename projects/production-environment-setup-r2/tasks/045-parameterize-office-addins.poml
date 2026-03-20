@@ -1,7 +1,7 @@
 <task id="ENV-045" project="Production Environment Setup R2">
   <metadata>
     <title>Parameterize Office add-in auth config and manifests</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>5</phase>
     <tags>office-addins, auth, config</tags>

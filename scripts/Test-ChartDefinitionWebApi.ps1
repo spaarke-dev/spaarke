@@ -1,6 +1,6 @@
 # Test sprk_chartdefinition Web API query and create a sample record
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com"
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL
 )
 
 $ErrorActionPreference = "Stop"

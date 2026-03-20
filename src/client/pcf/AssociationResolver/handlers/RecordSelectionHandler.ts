@@ -108,7 +108,7 @@ function buildRecordUrl(entityLogicalName: string, recordId: string): string {
     if (xrm?.Utility?.getGlobalContext) {
       const globalContext = xrm.Utility.getGlobalContext();
 
-      // Get the org URL (e.g., https://spaarkedev1.crm.dynamics.com)
+      // Get the org URL dynamically (e.g., https://{org}.crm.dynamics.com)
       const clientUrl = globalContext.getClientUrl?.() || '';
 
       // Get the current app ID

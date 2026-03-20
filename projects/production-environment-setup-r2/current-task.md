@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-03-18
+> **Last Updated**: 2026-03-19
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,16 +10,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | — |
-| **Status** | none (project initialized, no task started) |
-| **Next Action** | Execute Phase 1 tasks (001-005) in parallel |
+| **Task** | 030 - Migrate UniversalQuickCreate PCF to runtime config resolution |
+| **Step** | COMPLETED |
+| **Status** | completed |
+| **Next Action** | Pick next pending task from TASK-INDEX.md |
 
 ### Files Modified This Session
-- `projects/production-environment-setup-r2/*` - Created - Project initialization artifacts
+- `src/client/pcf/UniversalQuickCreate/control/services/auth/msalConfig.ts` -- Complete rewrite: removed hardcoded CLIENT_ID, TENANT_ID, REDIRECT_URI, loginRequest scopes. Replaced with RuntimeMsalConfig interface and factory functions.
+- `src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts` -- Added configure() and getBffApiScopes() methods; initialize() uses runtime config.
+- `src/client/pcf/UniversalQuickCreate/control/services/SdapApiClientFactory.ts` -- Removed hardcoded SPE_BFF_API_SCOPES; uses getBffApiScopes().
+- `src/client/pcf/UniversalQuickCreate/control/index.ts` -- Resolves auth config from Dataverse env vars at runtime; no hardcoded URLs or scopes.
+- `src/client/pcf/UniversalQuickCreate/control/types/index.ts` -- Removed hardcoded BFF URL from DEFAULT_GRID_CONFIG.
+- `src/client/pcf/UniversalQuickCreate/control/ControlManifest.Input.xml` -- Removed hardcoded default-value for sdapApiBaseUrl.
 
 ### Critical Context
-Project initialized with parallel-optimized task structure. 55 tasks across 6 phases. Phase 1 tasks (001-005) can run in parallel immediately. Phase 2 is the critical path (shared library work blocks Phases 3-5).
+Task 030 complete. UniversalQuickCreate PCF no longer contains hardcoded CLIENT_ID, TENANT_ID, REDIRECT_URI, BFF URL, or BFF API App ID. All values resolved at runtime from Dataverse environment variables. Build produces no new TypeScript errors.
 
 ---
 
@@ -28,99 +33,11 @@ Project initialized with parallel-optimized task structure. 55 tasks across 6 ph
 | Field | Value |
 |-------|-------|
 | **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
+| **Task File** | -- |
+| **Title** | -- |
+| **Phase** | -- |
 | **Status** | none |
-| **Started** | — |
-
----
-
-## Progress
-
-### Completed Steps
-*No steps completed yet*
-
-### Current Step
-*No active step*
-
-### Files Modified (All Task)
-*No files modified yet*
-
-### Decisions Made
-*No decisions recorded yet*
-
----
-
-## Next Action
-
-**Next Step**: Begin Phase 1 - Execute tasks 001-005 in parallel
-
-**Pre-conditions**:
-- Project artifacts created (README, PLAN, CLAUDE.md, tasks)
-- Feature branch pushed to remote
-
-**Key Context**:
-- Phase 1 tasks are independent and can all run in parallel
-- Phase 2 (shared library) is the critical path — blocks Phases 3-5
-- See plan.md Parallel Execution Groups table for concurrency strategy
-
----
-
-## Blockers
-
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-03-18
-- Focus: Project initialization
-
-### Key Learnings
-*None yet*
-
-### Handoff Notes
-*No handoff notes*
-
----
-
-## Quick Reference
-
-### Project Context
-- **Project**: production-environment-setup-r2
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-001: Minimal API — Options pattern for config
-- ADR-006: PCF vs Code Page config strategy
-- ADR-010: DI minimalism — Options with ValidateOnStart()
-- ADR-022: PCF platform libraries — environmentVariables.ts
-
-### Knowledge Files Loaded
-- `src/client/shared/Spaarke.Auth/src/config.ts` — Auth config resolution
-- `src/client/pcf/shared/utils/environmentVariables.ts` — PCF env var queries
-- `src/server/api/Sprk.Bff.Api/appsettings.template.json` — Token substitution
-
----
-
-## Recovery Instructions
-
-**To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml`
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
-
-**Commands**:
-- `/project-continue` - Full project context reload + master sync
-- `/context-handoff` - Save current state before compaction
-- "where was I?" - Quick context recovery
+| **Started** | -- |
 
 ---
 

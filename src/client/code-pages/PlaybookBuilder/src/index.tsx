@@ -8,6 +8,11 @@
  *     { target: 2, width: { value: 95, unit: "%" }, height: { value: 95, unit: "%" } }
  *   )
  *
+ * Runtime configuration:
+ *   BFF API base URL and MSAL client ID are resolved at runtime from Dataverse
+ *   Environment Variables via resolveRuntimeConfig() from @spaarke/auth.
+ *   Build-time .env.production values are NOT used for these settings.
+ *
  * Theme detection follows 4-level priority:
  *   1. URL parameter (?theme=dark|light|highcontrast)
  *   2. Xrm frame-walk (Dataverse host theme)
@@ -22,6 +27,7 @@
 import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FluentProvider } from '@fluentui/react-components';
+import { resolveRuntimeConfig } from '@spaarke/auth';
 import { App } from './App';
 import { useThemeDetection } from './hooks/useThemeDetection';
 
@@ -62,26 +68,10 @@ function resolvePlaybookId(): string {
 const playbookId = resolvePlaybookId();
 
 // ---------------------------------------------------------------------------
-// BFF API base URL resolution
-// ---------------------------------------------------------------------------
-
-function resolveApiBaseUrl(): string {
-  // 1. Explicit URL parameter
-  const urlApi = appParams.get('apiBaseUrl');
-  if (urlApi) return urlApi;
-
-  // 2. Default to the known dev BFF API endpoint
-  // In production, this would be read from a Dataverse environment variable.
-  return 'https://spe-api-dev-67e2xz.azurewebsites.net';
-}
-
-const apiBaseUrl = resolveApiBaseUrl();
-
-// ---------------------------------------------------------------------------
 // ThemeRoot -- wrapper that uses useThemeDetection hook
 // ---------------------------------------------------------------------------
 
-function ThemeRoot(): JSX.Element {
+function ThemeRoot({ apiBaseUrl }: { apiBaseUrl: string }): JSX.Element {
   const { theme } = useThemeDetection(appParams);
 
   useEffect(() => {
@@ -99,10 +89,28 @@ function ThemeRoot(): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
-// Render
+// Bootstrap: resolve runtime config then render
 // ---------------------------------------------------------------------------
 
-const container = document.getElementById('root');
-if (!container) throw new Error('[PlaybookBuilder] Root container #root not found in DOM.');
+/**
+ * Async bootstrap: resolve BFF URL + MSAL client ID from Dataverse
+ * Environment Variables at runtime, set window globals for @spaarke/auth
+ * resolveConfig(), then render the application.
+ */
+async function bootstrap(): Promise<void> {
+  const container = document.getElementById('root');
+  if (!container) throw new Error('[PlaybookBuilder] Root container #root not found in DOM.');
 
-createRoot(container).render(<ThemeRoot />);
+  // Resolve BFF URL + MSAL client ID from Dataverse Environment Variables at runtime
+  const runtimeConfig = await resolveRuntimeConfig();
+  const apiBaseUrl = runtimeConfig.bffBaseUrl;
+
+  // Set window globals so @spaarke/auth resolveConfig() can pick them up
+  // when initAuth() is called later during authentication
+  window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
+  window.__SPAARKE_BFF_BASE_URL__ = runtimeConfig.bffBaseUrl;
+
+  createRoot(container).render(<ThemeRoot apiBaseUrl={apiBaseUrl} />);
+}
+
+bootstrap();

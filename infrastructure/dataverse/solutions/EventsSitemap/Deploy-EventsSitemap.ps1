@@ -31,7 +31,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [string]$Environment = "https://spaarkedev1.crm.dynamics.com",
+    [string]$Environment = $env:DATAVERSE_URL,
 
     [Parameter(Mandatory = $false)]
     [string]$CustomPageName = "sprk_eventspage",

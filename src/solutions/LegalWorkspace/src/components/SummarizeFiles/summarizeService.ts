@@ -3,7 +3,7 @@
  * Service layer for the Summarize New File(s) wizard.
  * Calls the BFF summarize endpoint with uploaded files via SSE stream.
  */
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
 import type { ISummarizeResult } from './summarizeTypes';

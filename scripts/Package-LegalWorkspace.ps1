@@ -62,7 +62,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Environment = "https://spaarkedev1.crm.dynamics.com",
+    [string]$Environment = $env:DATAVERSE_URL,
     [switch]$SkipBuild,
     [switch]$PackOnly,
     [switch]$Deploy,

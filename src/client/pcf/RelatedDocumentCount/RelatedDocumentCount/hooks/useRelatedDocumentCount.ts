@@ -43,8 +43,7 @@ export interface UseRelatedDocumentCountResult {
   refetch: () => void;
 }
 
-/** Default BFF API URL when not configured via PCF properties */
-const DEFAULT_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
+// No hardcoded default — apiBaseUrl is resolved from Dataverse environment variables at runtime.
 
 /**
  * Hook to fetch the count of semantically related documents.
@@ -93,7 +92,12 @@ export function useRelatedDocumentCount(
 
     try {
       // Build URL with countOnly=true for lightweight response
-      const baseUrl = (apiBaseUrl || DEFAULT_API_BASE_URL).replace(/\/$/, '');
+      if (!apiBaseUrl) {
+        setError('BFF API URL not configured. Check Dataverse environment variables.');
+        setIsLoading(false);
+        return;
+      }
+      const baseUrl = apiBaseUrl.replace(/\/$/, '');
       const url = `${baseUrl}/api/ai/visualization/related/${documentId}?countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ''}`;
 
       console.log('[useRelatedDocumentCount] Fetching count:', {

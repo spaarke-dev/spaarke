@@ -23,6 +23,7 @@ import { FileDeleteService } from '../services/FileDeleteService';
 import { FileReplaceService } from '../services/FileReplaceService';
 import { logger } from '../utils/logger';
 import { applyDateFilter } from '../utils/dateFilter';
+import { resolveBffApiUrl } from '../authInit';
 
 /**
  * Debounce utility to limit function call frequency
@@ -80,6 +81,23 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
 }) => {
   // Get dataset from context
   const dataset = context.parameters.dataset;
+
+  // Resolve BFF API base URL at runtime from Dataverse environment variables
+  const [resolvedBaseUrl, setResolvedBaseUrl] = React.useState<string>('');
+  React.useEffect(() => {
+    let cancelled = false;
+    resolveBffApiUrl(context.webAPI)
+      .then(url => {
+        if (!cancelled) {
+          logger.info('UniversalDatasetGridRoot', `Resolved BFF API URL: ${url}`);
+          setResolvedBaseUrl(url);
+        }
+      })
+      .catch(err => {
+        logger.error('UniversalDatasetGridRoot', 'Failed to resolve BFF API URL', err);
+      });
+    return () => { cancelled = true; };
+  }, [context.webAPI]);
 
   // Track previous filter to detect changes (avoid unnecessary re-filtering)
   const prevFilterRef = React.useRef<string | null>(null);
@@ -160,8 +178,8 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
 
       logger.info('UniversalDatasetGridRoot', `Downloading ${selectedRecordIds.length} file(s)`);
 
-      // Get SDAP API base URL from config
-      const baseUrl = config.sdapConfig.baseUrl;
+      // Get SDAP API base URL resolved at runtime from Dataverse env vars
+      const baseUrl = resolvedBaseUrl || config.sdapConfig.baseUrl;
 
       // Create API client and download service
       const apiClient = SdapApiClientFactory.create(baseUrl);
@@ -210,7 +228,7 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
     } catch (error) {
       logger.error('UniversalDatasetGridRoot', 'Download handler error', error);
     }
-  }, [selectedRecordIds, dataset, context, config]);
+  }, [selectedRecordIds, dataset, context, config, resolvedBaseUrl]);
 
   /**
    * Handle file delete command (shows confirmation dialog)
@@ -263,8 +281,8 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
     try {
       logger.info('UniversalDatasetGridRoot', `Confirming delete: ${fileToDelete.fileName}`);
 
-      // Get SDAP API base URL from config
-      const baseUrl = config.sdapConfig.baseUrl;
+      // Get SDAP API base URL resolved at runtime from Dataverse env vars
+      const baseUrl = resolvedBaseUrl || config.sdapConfig.baseUrl;
 
       // Create API client and delete service
       const apiClient = SdapApiClientFactory.create(baseUrl);
@@ -294,7 +312,7 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
       setDeleteDialogOpen(false);
       setFileToDelete(null);
     }
-  }, [fileToDelete, context, config, dataset, notifyOutputChanged]);
+  }, [fileToDelete, context, config, dataset, notifyOutputChanged, resolvedBaseUrl]);
 
   /**
    * Handle delete cancellation
@@ -339,8 +357,8 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
 
       logger.info('UniversalDatasetGridRoot', 'Starting file replace');
 
-      // Get SDAP API base URL from config
-      const baseUrl = config.sdapConfig.baseUrl;
+      // Get SDAP API base URL resolved at runtime from Dataverse env vars
+      const baseUrl = resolvedBaseUrl || config.sdapConfig.baseUrl;
 
       // Create API client and replace service
       const apiClient = SdapApiClientFactory.create(baseUrl);
@@ -364,7 +382,7 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
     } catch (error) {
       logger.error('UniversalDatasetGridRoot', 'Replace handler error', error);
     }
-  }, [selectedRecordIds, dataset, context, config, notifyOutputChanged]);
+  }, [selectedRecordIds, dataset, context, config, notifyOutputChanged, resolvedBaseUrl]);
 
   // Handle command execution
   const handleCommandExecute = React.useCallback(

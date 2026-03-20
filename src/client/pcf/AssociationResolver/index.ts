@@ -23,6 +23,7 @@ import * as React from 'react';
 import * as ReactDOM from 'react-dom'; // React 16 - NOT react-dom/client
 import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
 import { AssociationResolverApp } from './AssociationResolverApp';
+import { getApiBaseUrl } from '../shared/utils/environmentVariables';
 
 // Control version for footer display
 const CONTROL_VERSION = '1.0.6';
@@ -76,6 +77,9 @@ export class AssociationResolver implements ComponentFramework.StandardControl<I
   private _regardingRecordId = '';
   private _regardingRecordName = '';
 
+  // Runtime-resolved API base URL (from Dataverse environment variable)
+  private _resolvedApiBaseUrl = '';
+
   constructor() {
     // Constructor
   }
@@ -96,7 +100,35 @@ export class AssociationResolver implements ComponentFramework.StandardControl<I
     // Enable responsive container sizing
     context.mode.trackContainerResize(true);
 
+    // Resolve API base URL from Dataverse environment variable at runtime
+    this.resolveApiBaseUrl();
+
     // Initial render
+    this.renderComponent();
+  }
+
+  /**
+   * Resolve BFF API base URL from Dataverse environment variable.
+   * Falls back to manifest input property if env var query fails.
+   * No hardcoded dev URLs — fails loudly if not configured.
+   */
+  private async resolveApiBaseUrl(): Promise<void> {
+    try {
+      // Primary: Dataverse environment variable (sprk_BffApiBaseUrl)
+      this._resolvedApiBaseUrl = await getApiBaseUrl(this.context.webAPI);
+    } catch {
+      // Fallback: manifest input property (configured per-form, no hardcoded default)
+      const manifestValue = this.context.parameters.apiBaseUrl?.raw;
+      if (manifestValue) {
+        this._resolvedApiBaseUrl = manifestValue;
+      } else {
+        console.error(
+          '[AssociationResolver] BFF API base URL not configured. ' +
+          'Set the sprk_BffApiBaseUrl Dataverse environment variable or configure the apiBaseUrl control property.'
+        );
+      }
+    }
+    // Re-render with resolved URL
     this.renderComponent();
   }
 
@@ -171,7 +203,7 @@ export class AssociationResolver implements ComponentFramework.StandardControl<I
 
     const theme = resolveTheme(this.context);
     const regardingRecordType = this.getRecordTypeReference();
-    const apiBaseUrl = this.context.parameters.apiBaseUrl?.raw || 'https://spe-api-dev-67e2xz.azurewebsites.net/api';
+    const apiBaseUrl = this._resolvedApiBaseUrl || this.context.parameters.apiBaseUrl?.raw || '';
 
     // React 16: ReactDOM.render (NOT createRoot().render())
     ReactDOM.render(

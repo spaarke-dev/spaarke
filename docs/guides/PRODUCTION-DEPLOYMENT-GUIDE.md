@@ -43,12 +43,16 @@ When Claude Code is asked to "deploy to production" or "set up production enviro
 
 1. [Prerequisites](#1-prerequisites)
 2. [Architecture Overview](#2-architecture-overview)
+   - [Build Once, Deploy Anywhere](#build-once-deploy-anywhere)
+   - [Dataverse Environment Variables Reference](#dataverse-environment-variables-reference)
 3. [Phase 1: Deploy Shared Platform](#3-phase-1-deploy-shared-platform)
 4. [Phase 2: Entra ID App Registrations](#4-phase-2-entra-id-app-registrations)
 5. [Phase 3: Configure Secrets and App Settings](#5-phase-3-configure-secrets-and-app-settings)
 6. [Phase 4: Deploy BFF API](#6-phase-4-deploy-bff-api)
 7. [Phase 5: Custom Domain and SSL](#7-phase-5-custom-domain-and-ssl)
 8. [Phase 6: Provision First Customer](#8-phase-6-provision-first-customer)
+   - [Set Dataverse Environment Variables (Step 8 of provisioning)](#86-manual-environment-variable-setup-alternative)
+   - [Validate Deployed Environment (Step 13 of provisioning)](#85-validate-deployed-environment)
 9. [Phase 7: Verify Deployment](#9-phase-7-verify-deployment)
 10. [Day-2 Operations](#10-day-2-operations)
 11. [Rollback Procedures](#11-rollback-procedures)
@@ -177,6 +181,40 @@ All resources follow `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` (Ad
 | `sprk-{customer}-{env}-sbus` | `sprk-demo-prod-sbus` |
 
 > **Note**: Service Bus uses `-sbus` suffix, NOT `-sb` (reserved by Azure).
+
+### Build Once, Deploy Anywhere
+
+Spaarke uses an **environment-agnostic build** strategy. All client-side components (PCF controls, Code Pages, legacy JS webresources, Office Add-ins) resolve configuration at runtime from **Dataverse Environment Variables** — no environment-specific values are baked into any build artifact.
+
+**How it works:**
+
+1. **Build artifacts are identical** across dev, UAT, staging, and production. The same compiled PCF controls, Code Pages, and solution ZIPs are promoted through environments without rebuilding.
+2. **Runtime configuration resolution** — At startup, client components call `resolveRuntimeConfig()` (from `@spaarke/auth`) which queries Dataverse Environment Variables via the Web API and caches the result.
+3. **Seven canonical environment variables** define the complete runtime configuration per environment (see [Dataverse Environment Variables Reference](#dataverse-environment-variables-reference) below).
+4. **No dev defaults** — If an environment variable is missing, components fail loudly with a clear error message rather than silently falling back to dev values.
+
+**Benefits:**
+
+- Same solution ZIP deploys to every environment — no per-environment build pipelines
+- Configuration is visible and auditable in the Dataverse UI (Environment Variables section)
+- `Provision-Customer.ps1` sets all variables automatically during customer onboarding
+- `Validate-DeployedEnvironment.ps1` verifies correct configuration post-deployment
+
+### Dataverse Environment Variables Reference
+
+These 7 Dataverse Environment Variables are defined in the Spaarke solution and must be set for every deployment target:
+
+| Variable | Schema Name | Purpose | Example Value |
+|----------|-------------|---------|---------------|
+| BFF API Base URL | `sprk_BffApiBaseUrl` | Base URL for all BFF API calls from client components | `https://api.spaarke.com/api` |
+| BFF API App ID | `sprk_BffApiAppId` | Azure AD App Registration ID for BFF API (used as OAuth scope audience) | `api://bff-api-prod-app-id` |
+| MSAL Client ID | `sprk_MsalClientId` | MSAL Client ID for Dataverse-hosted SPAs (Code Pages, External SPA) | `12345678-1234-1234-1234-123456789012` |
+| Tenant ID | `sprk_TenantId` | Azure AD Tenant ID for authentication | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
+| Azure OpenAI Endpoint | `sprk_AzureOpenAiEndpoint` | Azure OpenAI service endpoint for AI features | `https://spaarke-openai-prod.openai.azure.com/` |
+| Share Link Base URL | `sprk_ShareLinkBaseUrl` | Base URL for generating shareable document links | `https://app.spaarke.com/share` |
+| SPE Container ID | `sprk_SharePointEmbeddedContainerId` | SharePoint Embedded container ID for document storage | `b1c2d3e4-f5a6-7890-abcd-ef1234567890` |
+
+> **Important**: These variables are defined as part of the Spaarke Dataverse solution (solution XML). After solution import, values must be set per environment — either via `Provision-Customer.ps1` (automated) or via the Power Platform Admin Center (manual).
 
 ---
 
@@ -562,9 +600,14 @@ curl https://api.spaarke.com/healthz
 | 5 | Create Dataverse environment via Admin API | 30s | Yes |
 | 6 | Wait for Dataverse provisioning | 5-15 min | Yes (waits) |
 | 7 | Import managed solutions (10 solutions in dependency order) | 5-10 min | Yes |
-| 8 | Provision SPE containers | 1-2 min | Yes |
-| 9 | Register in BFF API tenant registry | 15s | Yes |
-| 10 | Run smoke tests | 1-2 min | Yes |
+| 8 | Set Dataverse Environment Variables (7 required variables) | 30s | Yes |
+| 9 | Generate `environment-config.json` | 5s | Yes |
+| 10 | Provision SPE containers | 1-2 min | Yes |
+| 11 | Register in BFF API tenant registry | 15s | Yes |
+| 12 | Run smoke tests (`Test-Deployment.ps1`) | 1-2 min | Yes |
+| 13 | Validate deployed environment (`Validate-DeployedEnvironment.ps1`) | 30s | Yes |
+
+> **Step 8** sets all 7 Dataverse Environment Variables listed in the [Dataverse Environment Variables Reference](#dataverse-environment-variables-reference). Step 9 writes `environment-config.json` as the canonical configuration reference for the customer. Step 13 runs the full validation suite to confirm no configuration issues remain.
 
 The script is **idempotent and resumable**. If it fails at any step, re-run with `-ResumeFromStep`:
 
@@ -594,6 +637,76 @@ The script is **idempotent and resumable**. If it fails at any step, re-run with
 ```powershell
 .\scripts\Invite-DemoUsers.ps1
 ```
+
+### 8.5 Validate Deployed Environment
+
+**[AI]** After provisioning completes (or after any manual configuration changes), run the validation script to confirm the environment is correctly configured:
+
+```powershell
+.\scripts\Validate-DeployedEnvironment.ps1 -DataverseUrl "https://contoso.crm.dynamics.com"
+```
+
+Or with an explicit BFF API URL:
+
+```powershell
+.\scripts\Validate-DeployedEnvironment.ps1 `
+    -DataverseUrl "https://contoso.crm.dynamics.com" `
+    -BffApiUrl "https://api.spaarke.com/api"
+```
+
+**What it checks (4 categories):**
+
+| Category | Checks Performed | Pass Criteria |
+|----------|-----------------|---------------|
+| **Env Vars** | All 7 Dataverse Environment Variables exist and have non-empty values | All 7 variables present with values |
+| **BFF API** | `GET /healthz` and `GET /ping` return HTTP 200 | Both endpoints healthy |
+| **CORS** | Preflight OPTIONS request includes Dataverse origin in `Access-Control-Allow-Origin` | Dataverse URL allowed |
+| **Dev Leakage** | Scans env var values for dev-only identifiers (`spaarkedev1`, `spe-api-dev`, `67e2xz`, known dev GUIDs) | No dev values detected |
+
+**Expected output:**
+
+```
+====================================================================
+  RESULTS SUMMARY
+====================================================================
+
+  [PASS] Env Vars            Pass: 7  Fail: 0  Warn: 0
+  [PASS] BFF API             Pass: 2  Fail: 0  Warn: 0
+  [PASS] CORS                Pass: 1  Fail: 0  Warn: 0
+  [PASS] Dev Leakage         Pass: 6  Fail: 0  Warn: 0
+
+  Total:  16 checks
+  Pass:   16
+
+  VERDICT: PASSED - All checks successful. Environment is correctly configured.
+```
+
+> **When to run**: After initial provisioning, after solution upgrades, after manual env var changes, and as part of any deployment verification workflow.
+
+### 8.6 Manual Environment Variable Setup (Alternative)
+
+If not using `Provision-Customer.ps1`, set environment variables manually:
+
+**Via Power Platform Admin Center (UI):**
+
+1. Open **Power Platform Admin Center** (https://admin.powerplatform.microsoft.com)
+2. Navigate to **Environments** > Select your environment > **Solutions**
+3. Open the **Spaarke** solution > **Environment Variables**
+4. Set all 7 variables per the [Dataverse Environment Variables Reference](#dataverse-environment-variables-reference)
+
+**Via PAC CLI:**
+
+```powershell
+pac env var set --name sprk_BffApiBaseUrl --value "https://api.spaarke.com/api"
+pac env var set --name sprk_BffApiAppId --value "api://bff-api-prod-app-id"
+pac env var set --name sprk_MsalClientId --value "<msal-client-id>"
+pac env var set --name sprk_TenantId --value "<tenant-id>"
+pac env var set --name sprk_AzureOpenAiEndpoint --value "https://spaarke-openai-prod.openai.azure.com/"
+pac env var set --name sprk_ShareLinkBaseUrl --value "https://app.spaarke.com/share"
+pac env var set --name sprk_SharePointEmbeddedContainerId --value "<spe-container-id>"
+```
+
+After setting variables manually, always run the validation script (Section 8.5) to confirm correctness.
 
 ---
 
@@ -1512,11 +1625,15 @@ PHASE 7: DATAVERSE SOLUTIONS                                  [AI]
 PHASE 8: FIRST CUSTOMER                                      [AI]
   20. Provision-Customer.ps1 -CustomerId demo -WhatIf        (preview)
   21. Provision-Customer.ps1 -CustomerId demo                (provision, 20-30 min)
+      - Sets all 7 Dataverse Environment Variables (Step 8)
+      - Generates environment-config.json (Step 9)
+      - Runs Validate-DeployedEnvironment.ps1 (Step 13)
   22. Load-DemoSampleData.ps1                                (sample data)
   23. Invite-DemoUsers.ps1                                   (demo access)
 
 PHASE 9: VERIFY                                              [AI]
   24. Test-Deployment.ps1 -EnvironmentName prod              (17 smoke tests)
+  25. Validate-DeployedEnvironment.ps1 -DataverseUrl <url>   (env vars, CORS, leakage)
 ```
 
 **Total estimated time**: 3-5 hours (first deployment). Steps 1-2, 9-13, 17-18, 19-24 are fully automatable by Claude Code.
@@ -1543,8 +1660,9 @@ All scripts are in the `scripts/` directory:
 | `Load-DemoSampleData.ps1` | Load sample data for demo | (none) |
 | `Invite-DemoUsers.ps1` | B2B guest invitations for demo | (none) |
 | `Test-Deployment.ps1` | Smoke tests (17 tests, 6 groups) | `-EnvironmentName` |
+| `Validate-DeployedEnvironment.ps1` | Post-deployment validation (env vars, API health, CORS, dev leakage) | `-DataverseUrl`, `-BffApiUrl` (optional) |
 | `Rotate-Secrets.ps1` | Zero-downtime secret rotation | `-Scope`, `-SecretType`, `-CustomerId`, `-DryRun` |
 
 ---
 
-*This guide was written based on the production deployment completed in March 2026. All scripts are in `scripts/`. All lessons learned are from actual deployment execution.*
+*This guide was written based on the production deployment completed in March 2026. Updated March 19, 2026 to document environment-agnostic "Build Once, Deploy Anywhere" architecture, Dataverse Environment Variables reference, and Validate-DeployedEnvironment.ps1 validation script. All scripts are in `scripts/`. All lessons learned are from actual deployment execution.*

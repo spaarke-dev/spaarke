@@ -1,7 +1,7 @@
 <task id="ENV-046" project="Production Environment Setup R2">
   <metadata>
     <title>Fix ribbon webresource JS files in infrastructure/dataverse/ribbon/</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>5</phase>
     <tags>webresource, javascript, ribbon, config</tags>

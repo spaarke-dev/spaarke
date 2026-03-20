@@ -21,9 +21,14 @@
  *   documentId: data.documentId → parent Xrm lookup field (sprk_sourcedocumentid)
  *   tenantId:   data.tenantId → parent Xrm organizationSettings.tenantId
  *
+ * Runtime configuration:
+ *   BFF API base URL and MSAL client ID are resolved at runtime from Dataverse
+ *   Environment Variables via resolveRuntimeConfig() from @spaarke/auth.
+ *   Build-time .env.production values are NOT used for these settings.
+ *
  * Authentication:
- *   Token acquisition is handled by AuthProvider + authService.ts.
- *   The authService walks the frame hierarchy (window → parent → top) to find
+ *   Token acquisition is handled by AuthProvider + authInit.ts (which wraps @spaarke/auth).
+ *   The shared auth library walks the frame hierarchy (window -> parent -> top) to find
  *   Xrm.Utility.getGlobalContext() and acquire Bearer tokens for the BFF API.
  *
  * Theme detection follows 4-level priority:
@@ -40,6 +45,7 @@
 import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FluentProvider } from '@fluentui/react-components';
+import { resolveRuntimeConfig } from '@spaarke/auth';
 import { App } from './App';
 import { AuthProvider } from './context/AuthContext';
 import { useThemeDetection } from './hooks/useThemeDetection';
@@ -231,10 +237,27 @@ function ThemeRoot(): JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
-// Render
+// Bootstrap: resolve runtime config then render
 // ---------------------------------------------------------------------------
 
-const container = document.getElementById('root');
-if (!container) throw new Error('[AnalysisWorkspace] Root container #root not found in DOM.');
+/**
+ * Async bootstrap: resolve BFF URL + MSAL client ID from Dataverse
+ * Environment Variables at runtime, set window globals for @spaarke/auth
+ * resolveConfig(), then render the application.
+ */
+async function bootstrap(): Promise<void> {
+  const container = document.getElementById('root');
+  if (!container) throw new Error('[AnalysisWorkspace] Root container #root not found in DOM.');
 
-createRoot(container).render(<ThemeRoot />);
+  // Resolve BFF URL + MSAL client ID from Dataverse Environment Variables at runtime
+  const runtimeConfig = await resolveRuntimeConfig();
+
+  // Set window globals so @spaarke/auth resolveConfig() can pick them up
+  // when initAuth() is called later during authentication
+  window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
+  window.__SPAARKE_BFF_BASE_URL__ = runtimeConfig.bffBaseUrl;
+
+  createRoot(container).render(<ThemeRoot />);
+}
+
+bootstrap();

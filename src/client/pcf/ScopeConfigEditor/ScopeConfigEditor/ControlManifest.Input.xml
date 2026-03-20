@@ -23,7 +23,8 @@
     -->
 
     <external-service-usage enabled="true">
-      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <!-- Domain resolved at runtime from Dataverse environment variable sprk_BffApiBaseUrl -->
+      <domain>*.azurewebsites.net</domain>
     </external-service-usage>
 
     <!-- BOUND: The field content being edited (text value on the record) -->
@@ -31,9 +32,9 @@
               description-key="The bound field value (system prompt text, JSON config, etc.)"
               of-type="Multiple" usage="bound" required="false" />
 
-    <!-- INPUT: API Base URL for handler discovery -->
+    <!-- INPUT: API Base URL fallback (primary source: Dataverse env var sprk_BffApiBaseUrl) -->
     <property name="apiBaseUrl" display-name-key="API Base URL"
-              description-key="BFF API base URL for /api/ai/tools/handlers endpoint"
+              description-key="Fallback BFF API base URL. Primary source is Dataverse env var sprk_BffApiBaseUrl."
               of-type="SingleLine.Text" usage="input" required="false" />
 
     <!-- INPUT: Tenant ID for MSAL authentication -->

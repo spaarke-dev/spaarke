@@ -1,7 +1,7 @@
 <task id="ENV-041" project="Production Environment Setup R2">
   <metadata>
     <title>Fix sprk_emailactions.js — replace hardcoded BFF app ID with env var query</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>5</phase>
     <tags>webresource, javascript, config</tags>

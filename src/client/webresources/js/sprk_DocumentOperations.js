@@ -1,11 +1,17 @@
 /**
  * Spaarke Document Operations
- * Version: 1.26.1
+ * Version: 1.27.0
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
+ *
+ * Changes in 1.27.0:
+ * - Replaced hardcoded BFF app ID, MSAL client ID, tenant ID, redirect URI,
+ *   and BFF API URL with Dataverse Environment Variable queries
+ * - Added _resolveEnvironmentConfig() for async env var resolution with caching
+ * - BFF URL no longer uses org-to-URL mapping; reads sprk_BffApiBaseUrl env var
  *
  * Changes in 1.26.1:
  * - FIX: showChoiceDialog now uses window.top.document to escape iframe context
@@ -42,32 +48,31 @@ var Spaarke = window.Spaarke;
 // =============================================================================
 
 Spaarke.Document.Config = {
-    // BFF API URL - determined by environment
+    // BFF API URL - resolved from Dataverse Environment Variable (sprk_BffApiBaseUrl)
     bffApiUrl: null,
 
-    // MSAL Configuration
+    // MSAL Configuration - resolved from Dataverse Environment Variables at init time
     msal: {
-        // Client Application ID (SPE-File-Viewer-PCF app registration)
-        clientId: "b36e9b91-ee7d-46e6-9f6a-376871cc9d54",
-        // BFF Application ID (SDAP-BFF-SPE-API for scope construction)
-        bffAppId: "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-        // Azure AD Tenant ID
-        tenantId: "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+        // Client Application ID - resolved from sprk_MsalClientId env var
+        clientId: null,
+        // BFF Application ID - resolved from sprk_BffApiAppId env var
+        bffAppId: null,
+        // Azure AD Tenant ID - resolved from sprk_TenantId env var
+        tenantId: null,
         // Authority URL
         get authority() {
             return "https://login.microsoftonline.com/" + this.tenantId;
         },
-        // BFF API scope - CRITICAL: Use named scope, NOT .default or user_impersonation
+        // BFF API scope - CRITICAL: Use named scope, NOT .default
         get scope() {
-            return "api://" + this.bffAppId + "/SDAP.Access";
+            return "api://" + this.bffAppId + "/user_impersonation";
         },
-        // Redirect URI - CRITICAL: Must be static and match Azure AD app registration
-        // This must match the Dataverse org URL, NOT window.location.origin
-        redirectUri: "https://spaarkedev1.crm.dynamics.com"
+        // Redirect URI - resolved from Dataverse org URL at init time
+        redirectUri: null
     },
 
     // Version
-    version: "1.26.1",
+    version: "1.27.0",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -82,38 +87,172 @@ Spaarke.Document.Config = {
 };
 
 // =============================================================================
+// ENVIRONMENT VARIABLE RESOLUTION
+// =============================================================================
+
+/**
+ * Cached environment variable values (module-level cache)
+ * @private
+ */
+Spaarke.Document._envVarCache = {};
+Spaarke.Document._envVarLoading = false;
+Spaarke.Document._envVarResolved = false;
+
+/**
+ * Query a single Dataverse Environment Variable by schema name.
+ * Returns a Promise that resolves to the variable's value, or null if not found.
+ * @param {string} schemaName - The environment variable schema name (e.g., "sprk_BffApiAppId")
+ * @returns {Promise<string|null>}
+ * @private
+ */
+Spaarke.Document._getEnvironmentVariable = function(schemaName) {
+    return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=schemaname eq '" + schemaName + "'" +
+        "&$select=environmentvariabledefinitionid" +
+        "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
+    ).then(function(result) {
+        if (result.entities && result.entities.length > 0) {
+            var definition = result.entities[0];
+            var values = definition.environmentvariabledefinition_environmentvariablevalue;
+            if (values && values.length > 0 && values[0].value) {
+                return values[0].value;
+            }
+        }
+        return null;
+    });
+};
+
+/**
+ * Resolve all environment configuration from Dataverse Environment Variables.
+ * Queries sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId.
+ * Results are cached in Spaarke.Document._envVarCache and applied to Config.
+ *
+ * @returns {Promise<void>}
+ * @private
+ */
+Spaarke.Document._resolveEnvironmentConfig = function() {
+    if (Spaarke.Document._envVarResolved || Spaarke.Document._envVarLoading) {
+        return Promise.resolve();
+    }
+    Spaarke.Document._envVarLoading = true;
+
+    var envVars = [
+        { schema: "sprk_BffApiBaseUrl", key: "bffApiBaseUrl" },
+        { schema: "sprk_BffApiAppId", key: "bffApiAppId" },
+        { schema: "sprk_MsalClientId", key: "msalClientId" },
+        { schema: "sprk_TenantId", key: "tenantId" }
+    ];
+
+    var promises = envVars.map(function(ev) {
+        return Spaarke.Document._getEnvironmentVariable(ev.schema).then(function(value) {
+            if (value) {
+                Spaarke.Document._envVarCache[ev.key] = value;
+            }
+            return { key: ev.key, schema: ev.schema, value: value };
+        });
+    });
+
+    return Promise.all(promises).then(function(results) {
+        // Apply resolved values to Config
+        var cache = Spaarke.Document._envVarCache;
+
+        if (cache.bffApiBaseUrl) {
+            Spaarke.Document.Config.bffApiUrl = cache.bffApiBaseUrl.replace(/\/+$/, "");
+            console.log("[Spaarke.Document] BFF URL from env var:", Spaarke.Document.Config.bffApiUrl);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_BffApiBaseUrl environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        if (cache.bffApiAppId) {
+            Spaarke.Document.Config.msal.bffAppId = cache.bffApiAppId;
+            console.log("[Spaarke.Document] BFF App ID from env var:", cache.bffApiAppId);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_BffApiAppId environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        if (cache.msalClientId) {
+            Spaarke.Document.Config.msal.clientId = cache.msalClientId;
+            console.log("[Spaarke.Document] MSAL Client ID from env var:", cache.msalClientId);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_MsalClientId environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        if (cache.tenantId) {
+            Spaarke.Document.Config.msal.tenantId = cache.tenantId;
+            console.log("[Spaarke.Document] Tenant ID from env var:", cache.tenantId);
+        } else {
+            console.error("[Spaarke.Document] MISSING: sprk_TenantId environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
+        }
+
+        // Log missing variables summary
+        var missing = results.filter(function(r) { return !r.value; });
+        if (missing.length > 0) {
+            console.error("[Spaarke.Document] Missing environment variables: " +
+                missing.map(function(m) { return m.schema; }).join(", "));
+        }
+
+        Spaarke.Document._envVarResolved = true;
+        Spaarke.Document._envVarLoading = false;
+    }).catch(function(error) {
+        console.error("[Spaarke.Document] Environment variable resolution failed:", error);
+        Spaarke.Document._envVarLoading = false;
+    });
+};
+
+// =============================================================================
 // INITIALIZATION
 // =============================================================================
 
 /**
  * Initialize the module
- * Determines BFF API URL based on environment
+ * Resolves configuration from Dataverse Environment Variables
+ * @returns {Promise<boolean>} True if initialization succeeded
  */
 Spaarke.Document.init = function() {
     try {
-        // Determine environment from Dataverse URL
+        // Set redirect URI from Dataverse org URL (available without env var query)
         var globalContext = Xrm.Utility.getGlobalContext();
         var clientUrl = globalContext.getClientUrl();
+        // Remove trailing slash and use as redirect URI
+        Spaarke.Document.Config.msal.redirectUri = clientUrl.replace(/\/+$/, "");
 
-        if (clientUrl.includes('spaarkedev1.crm.dynamics.com')) {
-            Spaarke.Document.Config.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.includes('spaarkeuat.crm.dynamics.com')) {
-            Spaarke.Document.Config.bffApiUrl = "https://spe-api-uat.azurewebsites.net";
-        } else if (clientUrl.includes('spaarkeprod.crm.dynamics.com')) {
-            Spaarke.Document.Config.bffApiUrl = "https://spe-api-prod.azurewebsites.net";
-        } else {
-            // Default to dev
-            Spaarke.Document.Config.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-        }
+        console.log("[Spaarke.Document] Initializing v" + Spaarke.Document.Config.version);
 
-        console.log("[Spaarke.Document] Initialized v" + Spaarke.Document.Config.version);
-        console.log("[Spaarke.Document] BFF API URL:", Spaarke.Document.Config.bffApiUrl);
-
-        return true;
+        // Resolve all config from Dataverse Environment Variables (async)
+        return Spaarke.Document._resolveEnvironmentConfig().then(function() {
+            console.log("[Spaarke.Document] Initialized v" + Spaarke.Document.Config.version);
+            console.log("[Spaarke.Document] BFF API URL:", Spaarke.Document.Config.bffApiUrl);
+            return true;
+        }).catch(function(error) {
+            console.error("[Spaarke.Document] Init failed during env var resolution:", error);
+            return false;
+        });
     } catch (error) {
         console.error("[Spaarke.Document] Init failed:", error);
-        return false;
+        return Promise.resolve(false);
     }
+};
+
+/**
+ * Cached init promise to avoid duplicate initialization
+ * @private
+ */
+Spaarke.Document._initPromise = null;
+
+/**
+ * Ensure the module is initialized (resolves config from env vars).
+ * Safe to call multiple times - subsequent calls return the cached promise.
+ * @returns {Promise<void>}
+ */
+Spaarke.Document.ensureInitialized = function() {
+    if (Spaarke.Document._envVarResolved) {
+        return Promise.resolve();
+    }
+    if (!Spaarke.Document._initPromise) {
+        Spaarke.Document._initPromise = Spaarke.Document.init();
+    }
+    return Spaarke.Document._initPromise;
 };
 
 // =============================================================================
@@ -598,10 +737,8 @@ Spaarke.Document.getCheckoutStatus = async function(documentId, prefetchedToken)
         return cached;
     }
 
-    // Initialize if needed
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         // Use prefetched token if provided, otherwise get a new one
@@ -717,10 +854,8 @@ Spaarke.Document.refreshForm = function(formContext, documentId) {
 Spaarke.Document.checkoutDocument = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
@@ -829,10 +964,8 @@ Spaarke.Document.checkoutDocument = async function(primaryControl) {
 Spaarke.Document.checkinDocument = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
@@ -957,10 +1090,8 @@ Spaarke.Document.checkinDocument = async function(primaryControl) {
 Spaarke.Document.discardCheckout = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
@@ -1064,10 +1195,8 @@ Spaarke.Document.discardCheckout = async function(primaryControl) {
 Spaarke.Document.deleteDocument = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
@@ -1309,10 +1438,8 @@ Spaarke.Document.OFFICE_EXTENSIONS = [
 Spaarke.Document.openInWeb = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
@@ -1468,10 +1595,8 @@ Spaarke.Document.openInWeb = async function(primaryControl) {
 Spaarke.Document.openInDesktop = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
@@ -1627,10 +1752,8 @@ Spaarke.Document.openInDesktop = async function(primaryControl) {
 Spaarke.Document.downloadDocument = async function(primaryControl) {
     var formContext = primaryControl;
 
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var docInfo = Spaarke.Document.Utils.getDocumentInfo(formContext);
@@ -1756,10 +1879,9 @@ Spaarke.Document.refreshDocument = function(primaryControl) {
  * @returns {boolean}
  */
 Spaarke.Document.canCheckout = function(primaryControl) {
-    // Initialize on ribbon load
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Fire-and-forget: pre-resolve env config for later async calls
+    // (synchronous ribbon rules cannot await; config is used by async operations later)
+    Spaarke.Document.ensureInitialized();
 
     // For synchronous enable rules, check form attribute
     try {
@@ -1804,10 +1926,9 @@ Spaarke.Document.canCheckout = function(primaryControl) {
  * @returns {boolean}
  */
 Spaarke.Document.canCheckin = function(primaryControl) {
-    // Initialize on ribbon load
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Fire-and-forget: pre-resolve env config for later async calls
+    // (synchronous ribbon rules cannot await; config is used by async operations later)
+    Spaarke.Document.ensureInitialized();
 
     try {
         // Use provided context or fall back to Xrm.Page (deprecated but needed for ribbon rules)
@@ -2013,10 +2134,8 @@ Spaarke.Document.showReindexNotification = async function(trigger, count) {
  * @param {string[]} [selectedItemIds] - Selected record IDs (for grid/subgrid)
  */
 Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
-    // Initialize if not done
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Ensure environment config is resolved before proceeding
+    await Spaarke.Document.ensureInitialized();
 
     try {
         var documentIds = [];
@@ -2188,10 +2307,9 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
  * @returns {boolean}
  */
 Spaarke.Document.canSendToIndex = function(primaryControl) {
-    // Initialize on ribbon load
-    if (!Spaarke.Document.Config.bffApiUrl) {
-        Spaarke.Document.init();
-    }
+    // Fire-and-forget: pre-resolve env config for later async calls
+    // (synchronous ribbon rules cannot await; config is used by async operations later)
+    Spaarke.Document.ensureInitialized();
 
     try {
         // For form context, check if document has a file
