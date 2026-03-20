@@ -1,9 +1,11 @@
 /**
  * Find Similar Documents Dialog - Code Page Entry Point
  *
- * Thin wrapper that mounts the FindSimilarDialog component inside a
- * Dataverse modal dialog. Parses URL parameters (documentId, containerId),
- * resolves theme, and creates Xrm service adapters.
+ * Thin wrapper that renders the DocumentRelationshipViewer iframe directly
+ * inside a Dataverse modal dialog. Since Dataverse navigateTo already provides
+ * the modal chrome, this Code Page renders the iframe content without an
+ * additional Dialog shell. Parses URL parameters (documentId, containerId)
+ * and resolves theme.
  *
  * Opened via Xrm.Navigation.navigateTo with pageType: "webresource".
  * Web resource name: sprk_findsimilar
@@ -17,12 +19,9 @@
 
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import { FluentProvider } from "@fluentui/react-components";
+import { FluentProvider, Text } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/codePageTheme";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
-import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
-import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
-import { FindSimilarDialog } from "@spaarke/ui-components/components/FindSimilarDialog";
 
 function App() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
@@ -31,14 +30,6 @@ function App() {
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
   }, []);
-
-  const dataService = React.useMemo(() => createXrmDataService(), []);
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
-
-  const handleClose = React.useCallback(() => {
-    // Close the Dataverse modal dialog
-    navigationService.closeDialog({ confirmed: false });
-  }, [navigationService]);
 
   // Build the iframe URL from params passed via Xrm.Navigation.navigateTo data string
   const iframeUrl = React.useMemo(() => {
@@ -57,15 +48,17 @@ function App() {
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
-      <FindSimilarDialog
-        open={true}
-        onClose={handleClose}
-        url={iframeUrl}
-        embedded={true}
-        dataService={dataService}
-        bffBaseUrl={params.bffBaseUrl || ""}
-        authenticatedFetch={fetch.bind(window)}
-      />
+      {iframeUrl ? (
+        <iframe
+          src={iframeUrl}
+          style={{ width: "100%", height: "100%", border: "none" }}
+          title="Find Similar Documents"
+        />
+      ) : (
+        <div style={{ padding: 16 }}>
+          <Text>No document selected. Close this dialog and select a document first.</Text>
+        </div>
+      )}
     </FluentProvider>
   );
 }

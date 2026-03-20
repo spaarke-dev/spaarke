@@ -12,6 +12,15 @@
         height: 100%;
         overflow: hidden;
       }
+      /* Allow scroll but hide scrollbar chrome */
+      #root {
+        overflow: auto;
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none; /* IE/Edge */
+      }
+      #root::-webkit-scrollbar {
+        display: none; /* Chrome/Safari */
+      }
       #root > div {
         height: 100%;
       }

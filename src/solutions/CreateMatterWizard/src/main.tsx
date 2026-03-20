@@ -44,6 +44,7 @@ function App() {
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <CreateMatterWizard
+        open={true}
         dataService={dataService}
         uploadService={uploadService}
         navigationService={navigationService}
