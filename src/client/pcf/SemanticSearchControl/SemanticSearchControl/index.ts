@@ -98,15 +98,15 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<II
       const apiBaseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
 
       // Tenant ID -- from manifest or env var
-      const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId'));
+      const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
 
       // Client App ID -- from manifest or env var
       const clientAppId =
-        manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId'));
+        manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
 
       // BFF App ID -- from manifest or env var
       const bffAppId =
-        manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId'));
+        manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
 
       return { tenantId, clientAppId, bffAppId, apiBaseUrl };
     };
