@@ -13,10 +13,16 @@
  * See: notes/auth-migration-b2b-msal.md
  */
 
-/** BFF API base URL */
-export const BFF_API_URL: string =
-  (import.meta.env.VITE_BFF_API_URL as string | undefined) ??
-  "https://spe-api-dev-67e2xz.azurewebsites.net";
+/**
+ * BFF API base URL.
+ * In development (vite dev), use an empty string so bffApiCall constructs relative
+ * paths (/api/...) that Vite proxies to the real BFF server-side — no CORS needed.
+ * In production builds, use the configured URL directly.
+ */
+export const BFF_API_URL: string = import.meta.env.DEV
+  ? ""
+  : ((import.meta.env.VITE_BFF_API_URL as string | undefined) ??
+     "https://spe-api-dev-67e2xz.azurewebsites.net");
 
 /**
  * MSAL client ID for the SPA app registration (spaarke-external-access-SPA).

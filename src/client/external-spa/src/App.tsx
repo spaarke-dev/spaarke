@@ -22,7 +22,9 @@ const useStyles = makeStyles({
   root: {
     display: "flex",
     flexDirection: "column",
-    height: "100%",
+    // Use 100dvh to guarantee full viewport height regardless of parent container
+    // height in the Power Pages Code Site context (parent may be height: auto)
+    height: "100dvh",
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     overflow: "hidden",
@@ -32,6 +34,9 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     overflow: "auto",
+    // Hide scrollbar track but preserve mouse-wheel scrolling
+    scrollbarWidth: "none",
+    msOverflowStyle: "none",
   },
   footer: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
@@ -130,7 +135,9 @@ export const App: React.FC = () => {
   );
 
   const { accounts } = useMsal();
-  const portalUser = accountToPortalUser(accounts[0]);
+  const portalUser = import.meta.env.VITE_DEV_MOCK === "true"
+    ? { userName: "jane.smith@externalfirm.com", firstName: "Jane", lastName: "Smith", displayName: "Jane Smith (Mock)", tenantId: "mock" }
+    : accountToPortalUser(accounts[0]);
 
   const theme = isDark ? webDarkTheme : webLightTheme;
 

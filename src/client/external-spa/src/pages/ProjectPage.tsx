@@ -37,8 +37,6 @@ import {
   DocumentLibrary,
   EventsCalendar,
   SmartTodo,
-  AiToolbar,
-  SemanticSearch,
   InviteUserDialog,
 } from "../components";
 import { useAccessLevel } from "../hooks/useAccessLevel";
@@ -106,12 +104,6 @@ const useStyles = makeStyles({
   },
   fullWidth: {
     gridColumn: "1 / -1",
-  },
-  // Documents section
-  documentsSection: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalM,
   },
   // Calendar tab
   calendarTab: {
@@ -264,25 +256,10 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
 
       {/* DOCUMENTS */}
       <SectionCard title="Documents">
-        <div className={styles.documentsSection}>
-          {/* AI Toolbar — hidden for ViewOnly users (enforced inside AiToolbar) */}
-          <AiToolbar
-            projectId={projectId}
-            accessLevel={accessLevel}
-          />
-
-          {/* Semantic Search */}
-          <SemanticSearch
-            projectId={projectId}
-            accessLevel={accessLevel}
-          />
-
-          {/* Document Library — upload/download hidden for ViewOnly */}
-          <DocumentLibrary
-            projectId={projectId}
-            accessLevel={accessLevel}
-          />
-        </div>
+        <DocumentLibrary
+          projectId={projectId}
+          accessLevel={accessLevel}
+        />
       </SectionCard>
     </div>
   );

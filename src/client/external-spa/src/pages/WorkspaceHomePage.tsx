@@ -130,6 +130,11 @@ const useStyles = makeStyles({
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     ":last-child": { borderBottomStyle: "none" },
+    cursor: "pointer",
+    borderRadius: tokens.borderRadiusMedium,
+    ":hover": {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
   },
   itemIcon: {
     color: tokens.colorNeutralForeground3,
@@ -165,6 +170,11 @@ const useStyles = makeStyles({
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
     ":last-child": { borderBottomStyle: "none" },
+    cursor: "pointer",
+    borderRadius: tokens.borderRadiusMedium,
+    ":hover": {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
   },
   docIcon: {
     color: tokens.colorBrandForeground1,
@@ -238,7 +248,12 @@ interface ActivityItem {
   id: string;
   name: string;
   projectName: string;
+  projectId: string;
   relativeDate: string;
+}
+
+interface TaggedDocument extends ODataDocument {
+  _resolvedProjectId: string;
 }
 
 interface UpcomingItem {
@@ -429,10 +444,11 @@ const NotificationsPopover: React.FC<{ items: NotificationItem[] }> = ({ items }
 // Recent Activity section
 // ---------------------------------------------------------------------------
 
-const RecentActivitySection: React.FC<{ items: ActivityItem[]; isLoading: boolean }> = ({
-  items,
-  isLoading,
-}) => {
+const RecentActivitySection: React.FC<{
+  items: ActivityItem[];
+  isLoading: boolean;
+  onItemClick: (projectId: string) => void;
+}> = ({ items, isLoading, onItemClick }) => {
   const styles = useStyles();
   return (
     <SectionCard title="Recent Activity">
@@ -443,7 +459,14 @@ const RecentActivitySection: React.FC<{ items: ActivityItem[]; isLoading: boolea
       ) : (
         <div className={styles.itemList}>
           {items.map((item) => (
-            <div key={item.id} className={styles.itemRow}>
+            <div
+              key={item.id}
+              className={styles.itemRow}
+              onClick={() => onItemClick(item.projectId)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === "Enter" && onItemClick(item.projectId)}
+            >
               <CalendarRegular className={styles.itemIcon} fontSize={16} />
               <div className={styles.itemContent}>
                 <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
@@ -573,9 +596,10 @@ const MyMattersSection: React.FC = () => (
 // ---------------------------------------------------------------------------
 
 const MyDocumentsSection: React.FC<{
-  docs: ODataDocument[];
+  docs: TaggedDocument[];
   isLoading: boolean;
-}> = ({ docs, isLoading }) => {
+  onItemClick: (projectId: string) => void;
+}> = ({ docs, isLoading, onItemClick }) => {
   const styles = useStyles();
 
   return (
@@ -590,7 +614,14 @@ const MyDocumentsSection: React.FC<{
       ) : (
         <div>
           {docs.slice(0, 10).map((doc) => (
-            <div key={doc.sprk_documentid} className={styles.docRow}>
+            <div
+              key={doc.sprk_documentid}
+              className={styles.docRow}
+              onClick={() => onItemClick(doc._resolvedProjectId)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === "Enter" && onItemClick(doc._resolvedProjectId)}
+            >
               <FolderRegular className={styles.docIcon} fontSize={20} />
               <div className={styles.docInfo}>
                 <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
@@ -637,7 +668,7 @@ export const WorkspaceHomePage: React.FC = () => {
   const [upcomingLoading, setUpcomingLoading] = useState(false);
   const [projectDetails, setProjectDetails] = useState<ODataProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
-  const [allDocs, setAllDocs] = useState<ODataDocument[]>([]);
+  const [allDocs, setAllDocs] = useState<TaggedDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
 
   // Notifications — placeholder (future: query sprk_communication)
@@ -701,6 +732,7 @@ export const WorkspaceHomePage: React.FC = () => {
             id: e.sprk_eventid,
             name: e.sprk_name,
             projectName: e._sprk_projectid_value ?? "Unknown Project",
+            projectId: e._resolvedProjectId,
             relativeDate: formatRelativeDate(e.createdon),
           }))
         );
@@ -744,7 +776,7 @@ export const WorkspaceHomePage: React.FC = () => {
           $select: "sprk_documentid,sprk_name,sprk_documenttype,createdon,modifiedon",
           $orderby: "createdon desc",
           $top: 20,
-        })
+        }).then((docs) => docs.map((d) => ({ ...d, _resolvedProjectId: p.projectId })))
       )
     )
       .then((nested) => {
@@ -811,7 +843,7 @@ export const WorkspaceHomePage: React.FC = () => {
 
       {/* Row 1: Recent Activity + Upcoming (2-column) */}
       <div className={styles.twoColGrid}>
-        <RecentActivitySection items={recentActivity} isLoading={activityLoading} />
+        <RecentActivitySection items={recentActivity} isLoading={activityLoading} onItemClick={handleProjectClick} />
         <UpcomingSection items={upcomingItems} isLoading={upcomingLoading} />
       </div>
 
@@ -826,7 +858,7 @@ export const WorkspaceHomePage: React.FC = () => {
       <MyMattersSection />
 
       {/* Row 4: My Documents */}
-      <MyDocumentsSection docs={allDocs} isLoading={docsLoading} />
+      <MyDocumentsSection docs={allDocs} isLoading={docsLoading} onItemClick={handleProjectClick} />
     </PageContainer>
   );
 };
