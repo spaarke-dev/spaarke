@@ -24,6 +24,11 @@ interface AuthGuardProps {
 }
 
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
+  // In mock mode, skip MSAL entirely — render children as if authenticated.
+  if (import.meta.env.VITE_DEV_MOCK === "true") {
+    return <>{children}</>;
+  }
+
   const { instance, inProgress } = useMsal();
   const isAuthenticated = useIsAuthenticated();
 

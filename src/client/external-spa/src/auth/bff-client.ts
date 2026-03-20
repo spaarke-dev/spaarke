@@ -14,6 +14,7 @@
 import { BFF_API_URL } from "../config";
 import { acquireBffToken } from "./msal-auth";
 import { ApiError } from "../types";
+import { getMockResponse } from "../mocks/mock-service";
 
 // ---------------------------------------------------------------------------
 // Request / Response types for BFF endpoints
@@ -109,6 +110,10 @@ export async function bffApiCall<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  if (import.meta.env.VITE_DEV_MOCK === "true") {
+    return getMockResponse<T>(path, options);
+  }
+
   const token = await acquireBffToken();
   const response = await executeFetch(path, options, token);
 
@@ -137,6 +142,12 @@ async function executeFetch(
     "Authorization": `Bearer ${token}`,
     ...(options.headers as Record<string, string> | undefined),
   };
+
+  // FormData uploads must NOT have Content-Type set — the browser sets it
+  // automatically with the correct multipart/form-data boundary value.
+  if (options.body instanceof FormData) {
+    delete headers["Content-Type"];
+  }
 
   return fetch(url, {
     ...options,

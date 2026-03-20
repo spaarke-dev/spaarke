@@ -1,23 +1,23 @@
 /**
- * WorkspaceHomePage — external user's landing page for the Secure Project Workspace.
+ * WorkspaceHomePage — external user's landing page for the Secure External Workspace.
  *
- * Shows:
- *   - My Projects grid (from external context endpoint, GET /api/v1/external/me)
- *   - Recent Activity feed (last-modified events across accessible projects)
- *   - Upcoming Events/Tasks section (next 5 items with due dates)
- *   - Notifications panel (system notifications: invitation/access changes)
+ * Layout (matches mock-up):
+ * ┌──────────────────────────────────────────────────────────────┐
+ * │ My Workspace                          [Todo ✓] [Bell 🔔]    │
+ * │ Welcome back, {email}                                         │
+ * ├──────────────────┬───────────────────────────────────────────┤
+ * │ Recent Activity  │  Upcoming Events & Tasks                  │
+ * ├──────────────────┴───────────────────────────────────────────┤
+ * │ My Projects (N)                                               │
+ * ├───────────────────────────────────────────────────────────────┤
+ * │ My Matters                                                    │
+ * ├───────────────────────────────────────────────────────────────┤
+ * │ My Documents (N)                                              │
+ * └───────────────────────────────────────────────────────────────┘
  *
- * All data comes from pre-computed Dataverse records — no real-time AI calls.
+ * Notifications are accessed via the bell icon popover (not a sidebar panel).
  *
- * Design decisions:
- *   - Two-column layout on wide viewports; single column on narrow
- *   - Projects section spans full width (primary content)
- *   - Activity + Upcoming stacked in the right column beside Notifications
- *   - Fluent UI v9 design tokens used exclusively (ADR-021, no hard-coded colors)
- *   - Fluent UI v9 DataGrid used for project list (ADR-012 pattern;
- *     @spaarke/ui-components DatasetGrid components are PCF-specific)
- *
- * See: docs/architecture/power-pages-spa-guide.md
+ * Fluent UI v9 design tokens used exclusively (ADR-021, no hard-coded colors).
  */
 
 import * as React from "react";
@@ -33,7 +33,6 @@ import {
   MessageBarActions,
   Button,
   Badge,
-  Divider,
   DataGrid,
   DataGridHeader,
   DataGridHeaderCell,
@@ -43,6 +42,10 @@ import {
   TableColumnDefinition,
   createTableColumn,
   TableCellLayout,
+  Popover,
+  PopoverSurface,
+  PopoverTrigger,
+  Tooltip,
 } from "@fluentui/react-components";
 import {
   FolderRegular,
@@ -51,50 +54,49 @@ import {
   ArrowClockwiseRegular,
   CheckmarkCircleRegular,
   InfoRegular,
+  AlertBadgeRegular,
 } from "@fluentui/react-icons";
 
 import { useExternalContext } from "../hooks/useExternalContext";
-import { getProjects, getEvents } from "../api/web-api-client";
-import type { ODataEvent, ODataProject } from "../api/web-api-client";
-import { PageContainer, SectionCard } from "../components";
+import { getProjects, getEvents, getDocuments } from "../api/web-api-client";
+import type { ODataEvent, ODataProject, ODataDocument } from "../api/web-api-client";
+import { PageContainer } from "../components/PageContainer";
+import { SectionCard } from "../components/SectionCard";
 
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  layout: {
-    display: "grid",
-    gridTemplateColumns: "1fr",
-    gap: tokens.spacingVerticalL,
-    "@media (min-width: 900px)": {
-      gridTemplateColumns: "1fr 340px",
-    },
-  },
-  projectsSection: {
-    // Spans full width on narrow; left column on wide
-    "@media (min-width: 900px)": {
-      gridColumn: "1 / 2",
-    },
-  },
-  rightColumn: {
+  pageHeaderRow: {
     display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalL,
-    "@media (min-width: 900px)": {
-      gridColumn: "2 / 3",
-      gridRow: "1 / 3",
-    },
-  },
-  pageHeader: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalXS,
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     marginBottom: tokens.spacingVerticalM,
+  },
+  pageHeaderLeft: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+  },
+  pageHeaderIcons: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    paddingTop: tokens.spacingVerticalXS,
   },
   welcomeText: {
     color: tokens.colorNeutralForeground3,
   },
+  twoColGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: tokens.spacingHorizontalL,
+    "@media (max-width: 768px)": {
+      gridTemplateColumns: "1fr",
+    },
+  },
+  // Access level badge colors
   accessBadgeViewOnly: {
     backgroundColor: tokens.colorNeutralBackground4,
     color: tokens.colorNeutralForeground2,
@@ -110,114 +112,104 @@ const useStyles = makeStyles({
   projectNameCell: {
     cursor: "pointer",
     color: tokens.colorBrandForeground1,
+    ":hover": { textDecorationLine: "underline" },
+  },
+  // Activity / Upcoming list items
+  itemList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalS,
+  },
+  itemRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottomColor: tokens.colorNeutralStroke2,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    ":last-child": { borderBottomStyle: "none" },
+    cursor: "pointer",
+    borderRadius: tokens.borderRadiusMedium,
     ":hover": {
-      textDecorationLine: "underline",
+      backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
-  activityList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalS,
-    paddingTop: tokens.spacingVerticalS,
-  },
-  activityItem: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: tokens.spacingHorizontalS,
-    paddingBottom: tokens.spacingVerticalS,
-    borderBottomColor: tokens.colorNeutralStroke2,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    ":last-child": {
-      borderBottomStyle: "none",
-    },
-  },
-  activityIcon: {
+  itemIcon: {
     color: tokens.colorNeutralForeground3,
     marginTop: "2px",
     flexShrink: 0,
   },
-  activityContent: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalXXS,
-    minWidth: 0,
-  },
-  activityMeta: {
-    color: tokens.colorNeutralForeground3,
-  },
-  upcomingList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalS,
-    paddingTop: tokens.spacingVerticalS,
-  },
-  upcomingItem: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: tokens.spacingHorizontalS,
-    paddingBottom: tokens.spacingVerticalS,
-    borderBottomColor: tokens.colorNeutralStroke2,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    ":last-child": {
-      borderBottomStyle: "none",
-    },
-  },
-  upcomingIcon: {
+  itemIconBrand: {
     color: tokens.colorBrandForeground1,
     marginTop: "2px",
     flexShrink: 0,
   },
-  upcomingOverdueIcon: {
+  itemIconDanger: {
     color: tokens.colorStatusDangerForeground1,
     marginTop: "2px",
     flexShrink: 0,
   },
-  upcomingContent: {
+  itemContent: {
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
   },
-  dueDateNormal: {
-    color: tokens.colorNeutralForeground3,
-  },
-  dueDateOverdue: {
-    color: tokens.colorStatusDangerForeground1,
-  },
-  notificationList: {
+  itemMeta: { color: tokens.colorNeutralForeground3 },
+  dueDateOverdue: { color: tokens.colorStatusDangerForeground1 },
+  // Document list
+  docRow: {
     display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalS,
+    alignItems: "center",
+    gap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
-  },
-  notificationItem: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: tokens.spacingHorizontalS,
     paddingBottom: tokens.spacingVerticalS,
     borderBottomColor: tokens.colorNeutralStroke2,
     borderBottomWidth: "1px",
     borderBottomStyle: "solid",
-    ":last-child": {
-      borderBottomStyle: "none",
+    ":last-child": { borderBottomStyle: "none" },
+    cursor: "pointer",
+    borderRadius: tokens.borderRadiusMedium,
+    ":hover": {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
-  notificationIcon: {
+  docIcon: {
     color: tokens.colorBrandForeground1,
-    marginTop: "2px",
     flexShrink: 0,
   },
-  notificationContent: {
+  docInfo: {
     display: "flex",
     flexDirection: "column",
-    gap: tokens.spacingVerticalXXS,
+    gap: "2px",
+    flex: "1",
     minWidth: 0,
   },
-  notificationMeta: {
-    color: tokens.colorNeutralForeground3,
+  docMeta: { color: tokens.colorNeutralForeground3 },
+  // Notifications popover
+  notifPopover: {
+    minWidth: "300px",
+    maxWidth: "400px",
   },
+  notifEmpty: {
+    padding: tokens.spacingVerticalM,
+    color: tokens.colorNeutralForeground3,
+    textAlign: "center",
+  },
+  notifItem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    borderBottomColor: tokens.colorNeutralStroke2,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    ":last-child": { borderBottomStyle: "none" },
+  },
+  // Misc
   emptyState: {
     display: "flex",
     flexDirection: "column",
@@ -227,13 +219,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
     textAlign: "center",
   },
-  emptyStateIcon: {
-    color: tokens.colorNeutralForeground4,
-    fontSize: "32px",
-  },
-  emptyStateText: {
-    color: tokens.colorNeutralForeground3,
-  },
+  emptyStateText: { color: tokens.colorNeutralForeground3 },
   spinnerContainer: {
     display: "flex",
     justifyContent: "center",
@@ -247,7 +233,7 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Types for My Projects grid rows
+// Types
 // ---------------------------------------------------------------------------
 
 interface ProjectRow {
@@ -258,9 +244,24 @@ interface ProjectRow {
   lastActivity: string;
 }
 
-// ---------------------------------------------------------------------------
-// Types for Notifications (simulated from access context changes)
-// ---------------------------------------------------------------------------
+interface ActivityItem {
+  id: string;
+  name: string;
+  projectName: string;
+  projectId: string;
+  relativeDate: string;
+}
+
+interface TaggedDocument extends ODataDocument {
+  _resolvedProjectId: string;
+}
+
+interface UpcomingItem {
+  id: string;
+  name: string;
+  projectName: string;
+  dueDate: string | null | undefined;
+}
 
 interface NotificationItem {
   id: string;
@@ -270,73 +271,48 @@ interface NotificationItem {
 }
 
 // ---------------------------------------------------------------------------
-// Helper utilities
+// Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Format an access level string label for display.
- * Values come from ExternalUserContextResponse.projects[].accessLevel.
- */
 function formatAccessLevel(raw: string): string {
   switch (raw) {
-    case "ViewOnly":
-      return "View Only";
-    case "Collaborate":
-      return "Collaborate";
-    case "FullAccess":
-      return "Full Access";
-    default:
-      return raw;
+    case "ViewOnly": return "View Only";
+    case "Collaborate": return "Collaborate";
+    case "FullAccess": return "Full Access";
+    default: return raw;
   }
 }
 
-/**
- * Format a Dataverse ISO date string into a readable relative or absolute date.
- * Falls back to "—" when the value is null/undefined.
- */
 function formatRelativeDate(isoDate: string | null | undefined): string {
   if (!isoDate) return "—";
   const date = new Date(isoDate);
   if (isNaN(date.getTime())) return "—";
-
   const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   if (diffDays < 7) return `${diffDays} days ago`;
-
-  return date.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
-/**
- * Format a due date for upcoming items.
- * Returns { label, isOverdue } to allow conditional styling.
- */
 function formatDueDate(isoDate: string | null | undefined): { label: string; isOverdue: boolean } {
   if (!isoDate) return { label: "No due date", isOverdue: false };
   const date = new Date(isoDate);
   if (isNaN(date.getTime())) return { label: "Invalid date", isOverdue: false };
-
-  const now = new Date();
-  const isOverdue = date < now;
-
-  const formatted = date.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-
+  const isOverdue = date < new Date();
+  const formatted = date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
   return { label: isOverdue ? `Overdue — ${formatted}` : formatted, isOverdue };
 }
 
+function formatDocDate(isoDate: string | null | undefined): string {
+  if (!isoDate) return "";
+  const d = new Date(isoDate);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
 // ---------------------------------------------------------------------------
-// My Projects columns definition
+// Project columns
 // ---------------------------------------------------------------------------
 
 function buildProjectColumns(
@@ -350,10 +326,7 @@ function buildProjectColumns(
       renderHeaderCell: () => "Project Name",
       renderCell: (item) => (
         <TableCellLayout>
-          <Text
-            className={styles.projectNameCell}
-            onClick={() => onProjectClick(item.projectId)}
-          >
+          <Text className={styles.projectNameCell} onClick={() => onProjectClick(item.projectId)}>
             {item.name}
           </Text>
         </TableCellLayout>
@@ -365,9 +338,7 @@ function buildProjectColumns(
       renderHeaderCell: () => "Reference",
       renderCell: (item) => (
         <TableCellLayout>
-          <Text size={200} style={{ fontFamily: tokens.fontFamilyMonospace }}>
-            {item.reference}
-          </Text>
+          <Text size={200} style={{ fontFamily: tokens.fontFamilyMonospace }}>{item.reference}</Text>
         </TableCellLayout>
       ),
     }),
@@ -376,17 +347,12 @@ function buildProjectColumns(
       compare: (a, b) => a.accessLevel.localeCompare(b.accessLevel),
       renderHeaderCell: () => "Access Level",
       renderCell: (item) => {
-        let badgeClass = styles.accessBadgeViewOnly;
-        if (item.accessLevel === "Collaborate") badgeClass = styles.accessBadgeCollaborate;
-        if (item.accessLevel === "Full Access") badgeClass = styles.accessBadgeFullAccess;
+        let cls = styles.accessBadgeViewOnly;
+        if (item.accessLevel === "Collaborate") cls = styles.accessBadgeCollaborate;
+        if (item.accessLevel === "Full Access") cls = styles.accessBadgeFullAccess;
         return (
           <TableCellLayout>
-            <Badge
-              className={badgeClass}
-              appearance="filled"
-              size="medium"
-              shape="rounded"
-            >
+            <Badge className={cls} appearance="filled" size="medium" shape="rounded">
               {item.accessLevel}
             </Badge>
           </TableCellLayout>
@@ -399,9 +365,7 @@ function buildProjectColumns(
       renderHeaderCell: () => "Last Activity",
       renderCell: (item) => (
         <TableCellLayout>
-          <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-            {item.lastActivity}
-          </Text>
+          <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>{item.lastActivity}</Text>
         </TableCellLayout>
       ),
     }),
@@ -412,7 +376,6 @@ function buildProjectColumns(
 // Sub-components
 // ---------------------------------------------------------------------------
 
-/** Spinner centred inside a section card */
 const SectionSpinner: React.FC<{ label: string }> = ({ label }) => {
   const styles = useStyles();
   return (
@@ -422,39 +385,159 @@ const SectionSpinner: React.FC<{ label: string }> = ({ label }) => {
   );
 };
 
-interface EmptyStateProps {
-  message: string;
-  icon?: React.ReactElement;
-}
-
-/** Empty state shown when a section has no data */
-const EmptyState: React.FC<EmptyStateProps> = ({ message, icon }) => {
+const EmptyState: React.FC<{ message: string; icon?: React.ReactElement }> = ({ message, icon }) => {
   const styles = useStyles();
   return (
     <div className={styles.emptyState}>
-      {icon && <span className={styles.emptyStateIcon}>{icon}</span>}
-      <Text size={300} className={styles.emptyStateText}>
-        {message}
-      </Text>
+      {icon && <span style={{ color: tokens.colorNeutralForeground4, fontSize: "32px" }}>{icon}</span>}
+      <Text size={300} className={styles.emptyStateText}>{message}</Text>
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// My Projects section
+// Notifications popover
 // ---------------------------------------------------------------------------
 
-interface MyProjectsSectionProps {
+const NotificationsPopover: React.FC<{ items: NotificationItem[] }> = ({ items }) => {
+  const styles = useStyles();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={(_e, data) => setOpen(data.open)} positioning="below-end">
+      <PopoverTrigger disableButtonEnhancement>
+        <Tooltip content="Notifications" relationship="label">
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<AlertRegular />}
+            aria-label={`Notifications${items.length > 0 ? ` (${items.length})` : ""}`}
+          />
+        </Tooltip>
+      </PopoverTrigger>
+      <PopoverSurface className={styles.notifPopover}>
+        <Text size={400} weight="semibold" as="h2" style={{ display: "block", marginBottom: tokens.spacingVerticalS }}>
+          Notifications
+        </Text>
+        {items.length === 0 ? (
+          <div className={styles.notifEmpty}>
+            <Text size={300}>No notifications at this time.</Text>
+          </div>
+        ) : (
+          items.map((item) => (
+            <div key={item.id} className={styles.notifItem}>
+              <InfoRegular fontSize={16} style={{ color: tokens.colorBrandForeground1, marginTop: "2px", flexShrink: 0 }} />
+              <div>
+                <Text size={300} weight="medium" style={{ display: "block" }}>{item.message}</Text>
+                <Text size={200} style={{ display: "block" }}>{item.detail}</Text>
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>{item.date}</Text>
+              </div>
+            </div>
+          ))
+        )}
+      </PopoverSurface>
+    </Popover>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Recent Activity section
+// ---------------------------------------------------------------------------
+
+const RecentActivitySection: React.FC<{
+  items: ActivityItem[];
+  isLoading: boolean;
+  onItemClick: (projectId: string) => void;
+}> = ({ items, isLoading, onItemClick }) => {
+  const styles = useStyles();
+  return (
+    <SectionCard title="Recent Activity">
+      {isLoading ? (
+        <SectionSpinner label="Loading activity..." />
+      ) : items.length === 0 ? (
+        <EmptyState message="No recent activity found across your projects." icon={<CalendarRegular />} />
+      ) : (
+        <div className={styles.itemList}>
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className={styles.itemRow}
+              onClick={() => onItemClick(item.projectId)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === "Enter" && onItemClick(item.projectId)}
+            >
+              <CalendarRegular className={styles.itemIcon} fontSize={16} />
+              <div className={styles.itemContent}>
+                <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
+                  {item.name}
+                </Text>
+                <Text size={200} className={styles.itemMeta}>
+                  {item.projectName} · {item.relativeDate}
+                </Text>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Upcoming Events & Tasks section
+// ---------------------------------------------------------------------------
+
+const UpcomingSection: React.FC<{ items: UpcomingItem[]; isLoading: boolean }> = ({
+  items,
+  isLoading,
+}) => {
+  const styles = useStyles();
+  return (
+    <SectionCard title="Upcoming Events & Tasks">
+      {isLoading ? (
+        <SectionSpinner label="Loading upcoming items..." />
+      ) : items.length === 0 ? (
+        <EmptyState message="No upcoming events or tasks in the next 30 days." icon={<CheckmarkCircleRegular />} />
+      ) : (
+        <div className={styles.itemList}>
+          {items.map((item) => {
+            const { label, isOverdue } = formatDueDate(item.dueDate);
+            return (
+              <div key={item.id} className={styles.itemRow}>
+                <CalendarRegular
+                  className={isOverdue ? styles.itemIconDanger : styles.itemIconBrand}
+                  fontSize={16}
+                />
+                <div className={styles.itemContent}>
+                  <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
+                    {item.name}
+                  </Text>
+                  <Text size={200} className={isOverdue ? styles.dueDateOverdue : styles.itemMeta}>
+                    {label}
+                  </Text>
+                  <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                    {item.projectName}
+                  </Text>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </SectionCard>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// My Projects grid
+// ---------------------------------------------------------------------------
+
+const MyProjectsSection: React.FC<{
   rows: ProjectRow[];
   isLoading: boolean;
-  onProjectClick: (projectId: string) => void;
-}
-
-const MyProjectsSection: React.FC<MyProjectsSectionProps> = ({
-  rows,
-  isLoading,
-  onProjectClick,
-}) => {
+  onProjectClick: (id: string) => void;
+}> = ({ rows, isLoading, onProjectClick }) => {
   const styles = useStyles();
   const columns = buildProjectColumns(onProjectClick, styles);
 
@@ -486,9 +569,7 @@ const MyProjectsSection: React.FC<MyProjectsSectionProps> = ({
           <DataGridBody<ProjectRow>>
             {({ item, rowId }) => (
               <DataGridRow<ProjectRow> key={rowId}>
-                {({ renderCell }) => (
-                  <DataGridCell>{renderCell(item)}</DataGridCell>
-                )}
+                {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
               </DataGridRow>
             )}
           </DataGridBody>
@@ -499,153 +580,72 @@ const MyProjectsSection: React.FC<MyProjectsSectionProps> = ({
 };
 
 // ---------------------------------------------------------------------------
-// Recent Activity section
+// My Matters — placeholder (matter-level access is a future capability)
 // ---------------------------------------------------------------------------
 
-interface RecentActivityItem {
-  id: string;
-  name: string;
-  projectName: string;
-  relativeDate: string;
-}
+const MyMattersSection: React.FC = () => (
+  <SectionCard title="My Matters">
+    <div style={{ padding: tokens.spacingVerticalM, color: tokens.colorNeutralForeground3 }}>
+      <Text size={300}>Matter-level workspace access is coming soon.</Text>
+    </div>
+  </SectionCard>
+);
 
-interface RecentActivitySectionProps {
-  items: RecentActivityItem[];
+// ---------------------------------------------------------------------------
+// My Documents — flat list of documents across all accessible projects
+// ---------------------------------------------------------------------------
+
+const MyDocumentsSection: React.FC<{
+  docs: TaggedDocument[];
   isLoading: boolean;
-}
-
-const RecentActivitySection: React.FC<RecentActivitySectionProps> = ({
-  items,
-  isLoading,
-}) => {
+  onItemClick: (projectId: string) => void;
+}> = ({ docs, isLoading, onItemClick }) => {
   const styles = useStyles();
 
   return (
-    <SectionCard title="Recent Activity">
+    <SectionCard title={`My Documents${docs.length > 0 ? ` (${docs.length})` : ""}`}>
       {isLoading ? (
-        <SectionSpinner label="Loading activity..." />
-      ) : items.length === 0 ? (
+        <SectionSpinner label="Loading documents..." />
+      ) : docs.length === 0 ? (
         <EmptyState
-          message="No recent activity found across your projects."
-          icon={<CalendarRegular />}
+          message="No documents found across your projects."
+          icon={<FolderRegular />}
         />
       ) : (
-        <div className={styles.activityList}>
-          {items.map((item) => (
-            <div key={item.id} className={styles.activityItem}>
-              <CalendarRegular className={styles.activityIcon} fontSize={16} />
-              <div className={styles.activityContent}>
+        <div>
+          {docs.slice(0, 10).map((doc) => (
+            <div
+              key={doc.sprk_documentid}
+              className={styles.docRow}
+              onClick={() => onItemClick(doc._resolvedProjectId)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === "Enter" && onItemClick(doc._resolvedProjectId)}
+            >
+              <FolderRegular className={styles.docIcon} fontSize={20} />
+              <div className={styles.docInfo}>
                 <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
-                  {item.name}
+                  {doc.sprk_name}
                 </Text>
-                <Text size={200} className={styles.activityMeta}>
-                  {item.projectName} · {item.relativeDate}
-                </Text>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </SectionCard>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Upcoming Events/Tasks section
-// ---------------------------------------------------------------------------
-
-interface UpcomingItem {
-  id: string;
-  name: string;
-  projectName: string;
-  dueDate: string | null | undefined;
-  isTodo: boolean;
-}
-
-interface UpcomingSectionProps {
-  items: UpcomingItem[];
-  isLoading: boolean;
-}
-
-const UpcomingSection: React.FC<UpcomingSectionProps> = ({ items, isLoading }) => {
-  const styles = useStyles();
-
-  return (
-    <SectionCard title="Upcoming Events & Tasks">
-      {isLoading ? (
-        <SectionSpinner label="Loading upcoming items..." />
-      ) : items.length === 0 ? (
-        <EmptyState
-          message="No upcoming events or tasks in the next 30 days."
-          icon={<CheckmarkCircleRegular />}
-        />
-      ) : (
-        <div className={styles.upcomingList}>
-          {items.map((item) => {
-            const { label, isOverdue } = formatDueDate(item.dueDate);
-            return (
-              <div key={item.id} className={styles.upcomingItem}>
-                <CalendarRegular
-                  className={isOverdue ? styles.upcomingOverdueIcon : styles.upcomingIcon}
-                  fontSize={16}
-                />
-                <div className={styles.upcomingContent}>
-                  <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
-                    {item.name}
-                  </Text>
-                  <Text size={200} className={isOverdue ? styles.dueDateOverdue : styles.dueDateNormal}>
-                    {label}
-                  </Text>
-                  <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                    {item.projectName}
-                  </Text>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </SectionCard>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Notifications panel
-// ---------------------------------------------------------------------------
-
-interface NotificationsPanelProps {
-  items: NotificationItem[];
-}
-
-const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ items }) => {
-  const styles = useStyles();
-
-  return (
-    <SectionCard title="Notifications">
-      {items.length === 0 ? (
-        <EmptyState
-          message="No notifications at this time."
-          icon={<AlertRegular />}
-        />
-      ) : (
-        <div className={styles.notificationList}>
-          {items.map((item) => (
-            <div key={item.id} className={styles.notificationItem}>
-              <InfoRegular className={styles.notificationIcon} fontSize={16} />
-              <div className={styles.notificationContent}>
-                <Text size={300} weight="medium" style={{ display: "block" }}>
-                  {item.message}
-                </Text>
-                <Text size={200} style={{ display: "block" }}>
-                  {item.detail}
-                </Text>
-                <Text size={200} className={styles.notificationMeta}>
-                  {item.date}
+                <Text size={200} className={styles.docMeta}>
+                  {doc.sprk_documenttype && (
+                    <Badge appearance="tint" size="small" style={{ marginRight: tokens.spacingHorizontalXS }}>
+                      {doc.sprk_documenttype}
+                    </Badge>
+                  )}
+                  {doc.createdon && `Created: ${formatDocDate(doc.createdon)}`}
                 </Text>
               </div>
             </div>
           ))}
-          <Divider />
+          {docs.length > 10 && (
+            <Text
+              size={200}
+              style={{ color: tokens.colorNeutralForeground3, paddingTop: tokens.spacingVerticalS, display: "block" }}
+            >
+              Showing 10 of {docs.length} documents
+            </Text>
+          )}
         </div>
       )}
     </SectionCard>
@@ -653,91 +653,43 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ items }) => {
 };
 
 // ---------------------------------------------------------------------------
-// Main WorkspaceHomePage component
+// Main WorkspaceHomePage
 // ---------------------------------------------------------------------------
 
-/**
- * WorkspaceHomePage — external user landing page for the Secure Project Workspace SPA.
- *
- * Layout (wide viewport):
- * ┌─────────────────────────────────┬───────────────┐
- * │ My Projects (DataGrid, full     │ Notifications  │
- * │ width left col)                 │               │
- * ├─────────────────────────────────│               │
- * │ Recent Activity   Upcoming      │               │
- * └─────────────────────────────────┴───────────────┘
- */
 export const WorkspaceHomePage: React.FC = () => {
   const styles = useStyles();
   const navigate = useNavigate();
 
-  // ── Context (projects + user identity) ──────────────────────────────────
-  const {
-    context,
-    isLoading: contextLoading,
-    error: contextError,
-    refresh,
-  } = useExternalContext();
+  const { context, isLoading: contextLoading, error: contextError, refresh } = useExternalContext();
 
-  // ── Recent Activity (events across all accessible projects, last modified) ──
-  const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);
-  const [activityLoading, setActivityLoading] = useState<boolean>(false);
-
-  // ── Upcoming Events/Tasks ────────────────────────────────────────────────
+  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
   const [upcomingItems, setUpcomingItems] = useState<UpcomingItem[]>([]);
-  const [upcomingLoading, setUpcomingLoading] = useState<boolean>(false);
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
+  const [projectDetails, setProjectDetails] = useState<ODataProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [allDocs, setAllDocs] = useState<TaggedDocument[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
 
-  // ── Notifications ────────────────────────────────────────────────────────
-  // Notifications are derived from access context changes (invitation/grant).
-  // Currently shown as a simulated list since the Dataverse model does not have
-  // a dedicated notification table. Post-MVP: query sprk_communication records.
+  // Notifications — placeholder (future: query sprk_communication)
   const [notifications] = useState<NotificationItem[]>([]);
 
-  // ── Project details (name, reference, last modified) ────────────────────
-  const [projectDetails, setProjectDetails] = useState<ODataProject[]>([]);
-  const [projectsLoading, setProjectsLoading] = useState<boolean>(false);
-
+  // Fetch project detail records
   useEffect(() => {
-    if (!context || context.projects.length === 0) {
-      setProjectDetails([]);
-      return;
-    }
-
+    if (!context || context.projects.length === 0) { setProjectDetails([]); return; }
     let cancelled = false;
-
-    const fetchProjectDetails = async () => {
-      setProjectsLoading(true);
-      try {
-        // getProjects() is scoped by Power Pages table permissions to only the
-        // projects the authenticated contact can access — no additional filter needed.
-        const projects = await getProjects({
-          $select: "sprk_projectid,sprk_name,sprk_referencenumber,modifiedon",
-          $orderby: "sprk_name asc",
-        });
-        if (!cancelled) {
-          setProjectDetails(projects);
-        }
-      } catch {
-        // Non-fatal — project rows will fall back to IDs if details unavailable
-        if (!cancelled) setProjectDetails([]);
-      } finally {
-        if (!cancelled) setProjectsLoading(false);
-      }
-    };
-
-    void fetchProjectDetails();
+    setProjectsLoading(true);
+    getProjects({ $select: "sprk_projectid,sprk_name,sprk_referencenumber,modifiedon", $orderby: "sprk_name asc" })
+      .then((projects) => { if (!cancelled) setProjectDetails(projects); })
+      .catch(() => { if (!cancelled) setProjectDetails([]); })
+      .finally(() => { if (!cancelled) setProjectsLoading(false); });
     return () => { cancelled = true; };
   }, [context]);
 
-  // ── Derived: Project rows ────────────────────────────────────────────────
+  // Derived project rows
   const projectRows: ProjectRow[] = React.useMemo(() => {
     if (!context) return [];
-
-    // Build a lookup map from project details fetched from the Web API
-    const detailMap = new Map<string, ODataProject>(
-      projectDetails.map((p) => [p.sprk_projectid, p])
-    );
-
+    const detailMap = new Map(projectDetails.map((p) => [p.sprk_projectid, p]));
     return context.projects.map((p) => {
       const detail = detailMap.get(p.projectId);
       return {
@@ -750,128 +702,107 @@ export const WorkspaceHomePage: React.FC = () => {
     });
   }, [context, projectDetails]);
 
-  // ── Fetch events for activity + upcoming ────────────────────────────────
+  // Fetch events for activity + upcoming
   useEffect(() => {
     if (!context || context.projects.length === 0) return;
-
     let cancelled = false;
+    setActivityLoading(true);
+    setUpcomingLoading(true);
 
-    const fetchEvents = async () => {
-      setActivityLoading(true);
-      setUpcomingLoading(true);
-
+    const fetchAll = async () => {
       try {
-        // Fetch recent events from the first (or all) accessible projects.
-        // We use the last-modified date to build the Recent Activity feed, and
-        // filter by due date > now for the Upcoming section.
-        //
-        // Note: The Power Pages table permission chain limits results to only
-        // records the current contact is authorised to see. No additional
-        // client-side filtering is required.
-
-        const allEventPromises = context.projects.map((p) =>
-          getEvents(p.projectId, {
-            $select:
-              "sprk_eventid,sprk_name,sprk_duedate,sprk_status,sprk_todoflag,_sprk_projectid_value,createdon",
-            $orderby: "createdon desc",
-            $top: 20,
-          }).then((events) =>
-            events.map((e) => ({ ...e, _resolvedProjectId: p.projectId }))
+        const nested = await Promise.all(
+          context.projects.map((p) =>
+            getEvents(p.projectId, {
+              $select: "sprk_eventid,sprk_name,sprk_duedate,sprk_todoflag,_sprk_projectid_value,createdon",
+              $orderby: "createdon desc",
+              $top: 20,
+            }).then((evts) => evts.map((e) => ({ ...e, _resolvedProjectId: p.projectId })))
           )
         );
-
-        const allEventsNested = await Promise.all(allEventPromises);
         if (cancelled) return;
+        const all = nested.flat();
 
-        const allEvents = allEventsNested.flat();
-
-        // Recent Activity: last 10 items by createdon desc
-        const sortedByModified = [...allEvents].sort((a, b) => {
-          const aDate = a.createdon ? new Date(a.createdon).getTime() : 0;
-          const bDate = b.createdon ? new Date(b.createdon).getTime() : 0;
-          return bDate - aDate;
-        });
-
-        const activityItems: RecentActivityItem[] = sortedByModified
-          .slice(0, 10)
-          .map((e) => ({
+        const sorted = [...all].sort((a, b) =>
+          (b.createdon ? new Date(b.createdon).getTime() : 0) -
+          (a.createdon ? new Date(a.createdon).getTime() : 0)
+        );
+        setRecentActivity(
+          sorted.slice(0, 10).map((e) => ({
             id: e.sprk_eventid,
             name: e.sprk_name,
             projectName: e._sprk_projectid_value ?? "Unknown Project",
+            projectId: e._resolvedProjectId,
             relativeDate: formatRelativeDate(e.createdon),
-          }));
+          }))
+        );
 
-        setRecentActivity(activityItems);
-
-        // Upcoming: events with a future (or today) due date, next 5
         const now = new Date();
-        const upcoming: UpcomingItem[] = allEvents
-          .filter((e) => {
-            if (!e.sprk_duedate) return false;
-            const due = new Date(e.sprk_duedate);
-            return !isNaN(due.getTime());
-          })
-          .sort((a, b) => {
-            const aDate = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : 0;
-            const bDate = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : 0;
-            return aDate - bDate;
-          })
-          .filter((e) => {
-            // Show overdue items and future items (next 30 days)
-            const due = new Date(e.sprk_duedate!);
-            const diffDays =
-              (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-            return diffDays < 30; // within 30 days or overdue
-          })
-          .slice(0, 5)
-          .map((e) => ({
-            id: e.sprk_eventid,
-            name: e.sprk_name,
-            projectName: e._sprk_projectid_value ?? "Unknown Project",
-            dueDate: e.sprk_duedate,
-            isTodo: e.sprk_todoflag === true,
-          }));
-
-        setUpcomingItems(upcoming);
+        setUpcomingItems(
+          all
+            .filter((e) => e.sprk_duedate && !isNaN(new Date(e.sprk_duedate).getTime()))
+            .sort((a, b) =>
+              new Date(a.sprk_duedate!).getTime() - new Date(b.sprk_duedate!).getTime()
+            )
+            .filter((e) => (new Date(e.sprk_duedate!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24) < 30)
+            .slice(0, 5)
+            .map((e) => ({
+              id: e.sprk_eventid,
+              name: e.sprk_name,
+              projectName: e._sprk_projectid_value ?? "Unknown Project",
+              dueDate: e.sprk_duedate,
+            }))
+        );
       } catch {
-        // Activity and upcoming items are supplementary — don't block the page
-        // on failure. Sections will render empty states gracefully.
         setRecentActivity([]);
         setUpcomingItems([]);
       } finally {
-        if (!cancelled) {
-          setActivityLoading(false);
-          setUpcomingLoading(false);
-        }
+        if (!cancelled) { setActivityLoading(false); setUpcomingLoading(false); }
       }
     };
-
-    void fetchEvents();
-
-    return () => {
-      cancelled = true;
-    };
+    void fetchAll();
+    return () => { cancelled = true; };
   }, [context]);
 
-  // ── Navigate to project page ─────────────────────────────────────────────
-  const handleProjectClick = (projectId: string) => {
-    navigate(`/project/${projectId}`);
-  };
+  // Fetch documents across all accessible projects
+  useEffect(() => {
+    if (!context || context.projects.length === 0) { setAllDocs([]); return; }
+    let cancelled = false;
+    setDocsLoading(true);
 
-  // ── Render ───────────────────────────────────────────────────────────────
+    Promise.all(
+      context.projects.map((p) =>
+        getDocuments(p.projectId, {
+          $select: "sprk_documentid,sprk_name,sprk_documenttype,createdon,modifiedon",
+          $orderby: "createdon desc",
+          $top: 20,
+        }).then((docs) => docs.map((d) => ({ ...d, _resolvedProjectId: p.projectId })))
+      )
+    )
+      .then((nested) => {
+        if (!cancelled) {
+          const flat = nested.flat().sort((a, b) =>
+            (b.createdon ? new Date(b.createdon).getTime() : 0) -
+            (a.createdon ? new Date(a.createdon).getTime() : 0)
+          );
+          setAllDocs(flat);
+        }
+      })
+      .catch(() => { if (!cancelled) setAllDocs([]); })
+      .finally(() => { if (!cancelled) setDocsLoading(false); });
 
-  // Full page error (context failed to load)
+    return () => { cancelled = true; };
+  }, [context]);
+
+  const handleProjectClick = (projectId: string) => navigate(`/project/${projectId}`);
+
   if (contextError) {
     return (
       <PageContainer title="My Workspace">
         <MessageBar intent="error">
           <MessageBarBody>{contextError}</MessageBarBody>
           <MessageBarActions>
-            <Button
-              appearance="transparent"
-              icon={<ArrowClockwiseRegular />}
-              onClick={refresh}
-            >
+            <Button appearance="transparent" icon={<ArrowClockwiseRegular />} onClick={refresh}>
               Retry
             </Button>
           </MessageBarActions>
@@ -884,52 +815,50 @@ export const WorkspaceHomePage: React.FC = () => {
 
   return (
     <PageContainer>
-      {/* Page header */}
-      <div className={styles.pageHeader}>
-        <Text size={700} weight="semibold" as="h1">
-          My Workspace
-        </Text>
-        {displayName && (
-          <Text size={400} className={styles.welcomeText}>
-            Welcome back, {displayName}
+      {/* Page header with notification icons right-justified */}
+      <div className={styles.pageHeaderRow}>
+        <div className={styles.pageHeaderLeft}>
+          <Text size={700} weight="semibold" as="h1">
+            My Workspace
           </Text>
-        )}
-      </div>
-
-      {/* Two-column layout */}
-      <div className={styles.layout}>
-        {/* Left: My Projects (full-width project grid) */}
-        <div className={styles.projectsSection}>
-          <MyProjectsSection
-            rows={projectRows}
-            isLoading={contextLoading || projectsLoading}
-            onProjectClick={handleProjectClick}
-          />
+          {displayName && (
+            <Text size={400} className={styles.welcomeText}>
+              Welcome back, {displayName}
+            </Text>
+          )}
         </div>
 
-        {/* Right: Notifications panel (stacked, spans both rows on wide) */}
-        <div className={styles.rightColumn}>
-          <NotificationsPanel items={notifications} />
-        </div>
-
-        {/* Bottom-left row: Recent Activity + Upcoming */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: tokens.spacingHorizontalL,
-          }}
-        >
-          <RecentActivitySection
-            items={recentActivity}
-            isLoading={activityLoading}
-          />
-          <UpcomingSection
-            items={upcomingItems}
-            isLoading={upcomingLoading}
-          />
+        <div className={styles.pageHeaderIcons}>
+          <Tooltip content="Tasks" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<CheckmarkCircleRegular />}
+              aria-label="Tasks"
+            />
+          </Tooltip>
+          <NotificationsPopover items={notifications} />
         </div>
       </div>
+
+      {/* Row 1: Recent Activity + Upcoming (2-column) */}
+      <div className={styles.twoColGrid}>
+        <RecentActivitySection items={recentActivity} isLoading={activityLoading} onItemClick={handleProjectClick} />
+        <UpcomingSection items={upcomingItems} isLoading={upcomingLoading} />
+      </div>
+
+      {/* Row 2: My Projects */}
+      <MyProjectsSection
+        rows={projectRows}
+        isLoading={contextLoading || projectsLoading}
+        onProjectClick={handleProjectClick}
+      />
+
+      {/* Row 3: My Matters */}
+      <MyMattersSection />
+
+      {/* Row 4: My Documents */}
+      <MyDocumentsSection docs={allDocs} isLoading={docsLoading} onItemClick={handleProjectClick} />
     </PageContainer>
   );
 };

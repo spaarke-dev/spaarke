@@ -23,6 +23,7 @@ function removeModuleScriptType(): import("vite").Plugin {
   return {
     name: "remove-module-script-type",
     enforce: "post",
+    apply: "build", // Dev server needs type="module" for ES modules — only strip for production IIFE build
     transformIndexHtml(html) {
       // Replace type="module" with defer (not remove): defer preserves
       // "run after DOM is ready" semantics without the module flag that
@@ -48,7 +49,7 @@ function removeModuleScriptType(): import("vite").Plugin {
  */
 function resolveSharedLibDeps(): import("vite").Plugin {
   const sharedLibPaths = [
-    path.resolve(__dirname, "../../shared/Spaarke.UI.Components/src"),
+    path.resolve(__dirname, "../shared/Spaarke.UI.Components/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -102,11 +103,11 @@ export default defineConfig({
         "src/**/*.ts",
         path.resolve(
           __dirname,
-          "../../shared/Spaarke.UI.Components/src/**/*.tsx"
+          "../shared/Spaarke.UI.Components/src/**/*.tsx"
         ),
         path.resolve(
           __dirname,
-          "../../shared/Spaarke.UI.Components/src/**/*.ts"
+          "../shared/Spaarke.UI.Components/src/**/*.ts"
         ),
       ],
     }),
@@ -116,7 +117,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       "@spaarke/ui-components": path.resolve(
         __dirname,
-        "../../shared/Spaarke.UI.Components/src"
+        "../shared/Spaarke.UI.Components/src"
       ),
     },
     // Force deduplication for shared packages to avoid multiple React instances
@@ -158,6 +159,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      // Route BFF API calls through the dev server to avoid browser CORS restrictions.
+      // When VITE_BFF_API_URL is empty, bffApiCall uses relative /api/... paths
+      // which hit this proxy. Vite forwards server-to-server — no CORS needed.
+      "/api": {
+        target: "https://spe-api-dev-67e2xz.azurewebsites.net",
+        changeOrigin: true,
+        secure: true,
+      },
       "/_api": {
         target:
           process.env.VITE_PORTAL_URL ||

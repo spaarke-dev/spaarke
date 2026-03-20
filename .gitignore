@@ -113,3 +113,6 @@ query-documents.ps1
 api-logs/
 latest-logs/
 LogFiles/
+
+# Temporary download directories
+tmp-site-download/

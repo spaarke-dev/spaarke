@@ -12,9 +12,12 @@ import { App } from "./App";
 // See notes/auth-migration-b2b-msal.md for auth architecture details.
 
 async function main() {
-  // MSAL v3 requires explicit initialization before any token operations or rendering.
-  // This processes any auth redirect response (auth code → tokens) before the app mounts.
-  await msalInstance.initialize();
+  if (import.meta.env.VITE_DEV_MOCK !== "true") {
+    // MSAL v3 requires explicit initialization before any token operations or rendering.
+    // This processes any auth redirect response (auth code → tokens) before the app mounts.
+    // Skipped in mock mode — MSAL can hang/error on localhost without a registered redirect URI.
+    await msalInstance.initialize();
+  }
 
   const rootElement = document.getElementById("root");
   if (!rootElement) {

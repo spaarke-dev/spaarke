@@ -38,9 +38,6 @@ import {
   Tooltip,
   MessageBar,
   MessageBarBody,
-  Popover,
-  PopoverSurface,
-  PopoverTrigger,
   Divider,
 } from "@fluentui/react-components";
 import {
@@ -48,9 +45,12 @@ import {
   ArrowUploadRegular,
   HistoryRegular,
   DocumentRegular,
-  SparkleRegular,
   DismissRegular,
 } from "@fluentui/react-icons";
+// Deep component imports — avoids loading Virtualized* components that need react-window
+import { FileUploadZone, UploadedFileList } from "@spaarke/ui-components/components/FileUpload";
+import type { IUploadedFile, IFileValidationError } from "@spaarke/ui-components/components/FileUpload";
+import { AiSummaryPopover } from "@spaarke/ui-components/components/AiSummaryPopover";
 import { getDocuments, ODataDocument } from "../api/web-api-client";
 import { bffApiCall } from "../auth/bff-client";
 import { AccessLevel } from "../types";
@@ -108,23 +108,12 @@ const useStyles = makeStyles({
     flexShrink: "0",
     color: tokens.colorNeutralForeground3,
   },
-  summaryCell: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalXS,
-    maxWidth: "300px",
-  },
   summaryText: {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
-  },
-  summaryIcon: {
-    flexShrink: "0",
-    color: tokens.colorBrandForeground2,
   },
   emptyState: {
     display: "flex",
@@ -177,58 +166,10 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
   },
-  uploadInput: {
-    display: "none",
-  },
   uploadDialogContent: {
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalM,
-  },
-  uploadDropZone: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: "2px",
-    borderStyle: "dashed",
-    borderColor: tokens.colorNeutralStroke1,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingHorizontalXXL,
-    gap: tokens.spacingVerticalM,
-    cursor: "pointer",
-    backgroundColor: tokens.colorNeutralBackground2,
-    ":hover": {
-      backgroundColor: tokens.colorNeutralBackground3,
-      borderColor: tokens.colorBrandStroke1,
-    },
-  },
-  uploadDropZoneActive: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderColor: tokens.colorBrandStroke1,
-  },
-  uploadFileInfo: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalS,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-  },
-  uploadFileName: {
-    flex: "1",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  summaryPopoverContent: {
-    maxWidth: "400px",
-    padding: tokens.spacingHorizontalS,
-  },
-  summaryPopoverText: {
-    color: tokens.colorNeutralForeground1,
-    lineHeight: tokens.lineHeightBase400,
   },
   noSummaryText: {
     color: tokens.colorNeutralForeground3,
@@ -303,43 +244,7 @@ function canUploadOrDownload(accessLevel: AccessLevel): boolean {
   );
 }
 
-// ---------------------------------------------------------------------------
-// AI Summary popover sub-component
-// ---------------------------------------------------------------------------
-
-interface AiSummaryPopoverProps {
-  summary: string | null | undefined;
-}
-
-const AiSummaryCell: React.FC<AiSummaryPopoverProps> = ({ summary }) => {
-  const styles = useStyles();
-
-  if (!summary) {
-    return (
-      <Text className={styles.noSummaryText} size={200}>
-        No summary
-      </Text>
-    );
-  }
-
-  return (
-    <Popover withArrow>
-      <PopoverTrigger disableButtonEnhancement>
-        <div className={styles.summaryCell} title={summary}>
-          <SparkleRegular className={styles.summaryIcon} fontSize={14} />
-          <Text className={styles.summaryText} size={200}>
-            {summary}
-          </Text>
-        </div>
-      </PopoverTrigger>
-      <PopoverSurface className={styles.summaryPopoverContent}>
-        <Text size={200} className={styles.summaryPopoverText}>
-          {summary}
-        </Text>
-      </PopoverSurface>
-    </Popover>
-  );
-};
+// AiSummaryCell is now rendered inline using AiSummaryPopover from @spaarke/ui-components.
 
 // ---------------------------------------------------------------------------
 // Version history panel sub-component
@@ -485,62 +390,46 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
   onUploadComplete,
 }) => {
   const styles = useStyles();
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
-  const [isDragOver, setIsDragOver] = React.useState<boolean>(false);
+  const [selectedFiles, setSelectedFiles] = React.useState<IUploadedFile[]>([]);
+  const [validationErrors, setValidationErrors] = React.useState<IFileValidationError[]>([]);
   const [uploading, setUploading] = React.useState<boolean>(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
 
-  const handleFileSelect = (file: File) => {
-    setSelectedFile(file);
+  const handleFilesAccepted = (files: IUploadedFile[]) => {
+    // Replace existing selection — dialog uploads one file at a time
+    setSelectedFiles(files);
+    setValidationErrors([]);
     setUploadError(null);
   };
 
-  const handleFileInputChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = e.target.files?.[0];
-    if (file) handleFileSelect(file);
+  const handleValidationErrors = (errors: IFileValidationError[]) => {
+    setValidationErrors(errors);
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleFileSelect(file);
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragOver(false);
+  const handleRemoveFile = (fileId: string) => {
+    setSelectedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (selectedFiles.length === 0) return;
 
     setUploading(true);
     setUploadError(null);
 
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile);
+      formData.append("file", selectedFiles[0].file);
       formData.append("projectId", projectId);
 
-      // Use bffApiCall for authenticated upload — override Content-Type so browser
+      // Use bffApiCall for authenticated upload — omit Content-Type so the browser
       // sets the correct multipart/form-data boundary automatically.
       await bffApiCall<void>("/api/v1/external/documents/upload", {
         method: "POST",
         body: formData,
-        headers: {
-          // Intentionally omit Content-Type — fetch sets it with the correct boundary
-        },
+        headers: {},
       });
 
-      setSelectedFile(null);
+      setSelectedFiles([]);
       onUploadComplete();
       onClose();
     } catch (err) {
@@ -555,7 +444,8 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
 
   const handleDialogClose = () => {
     if (uploading) return;
-    setSelectedFile(null);
+    setSelectedFiles([]);
+    setValidationErrors([]);
     setUploadError(null);
     onClose();
   };
@@ -590,56 +480,25 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
                 </MessageBar>
               )}
 
-              {!selectedFile ? (
-                <div
-                  className={`${styles.uploadDropZone}${isDragOver ? ` ${styles.uploadDropZoneActive}` : ""}`}
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onClick={() => fileInputRef.current?.click()}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      fileInputRef.current?.click();
-                    }
-                  }}
-                  aria-label="Drop a file here or click to select"
-                >
-                  <ArrowUploadRegular style={{ fontSize: "32px", color: tokens.colorNeutralForeground3 }} />
-                  <Text size={300} weight="semibold">
-                    Drop a file here
-                  </Text>
-                  <Text size={200} className={styles.emptyStateText}>
-                    or click to select a file from your computer
-                  </Text>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className={styles.uploadInput}
-                    onChange={handleFileInputChange}
-                    aria-hidden="true"
-                  />
-                </div>
-              ) : (
-                <div className={styles.uploadFileInfo}>
-                  <DocumentRegular fontSize={20} />
-                  <Text className={styles.uploadFileName} size={300}>
-                    {selectedFile.name}
-                  </Text>
-                  <Text size={200} className={styles.versionLabel}>
-                    {formatFileSize(selectedFile.size)}
-                  </Text>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<DismissRegular />}
-                    onClick={() => setSelectedFile(null)}
-                    disabled={uploading}
-                    aria-label="Remove selected file"
-                  />
-                </div>
+              {validationErrors.length > 0 && (
+                <MessageBar intent="warning">
+                  <MessageBarBody>
+                    {validationErrors.map((e) => `${e.fileName}: ${e.reason}`).join(" · ")}
+                  </MessageBarBody>
+                </MessageBar>
               )}
+
+              <FileUploadZone
+                onFilesAccepted={handleFilesAccepted}
+                onValidationErrors={handleValidationErrors}
+                disabled={uploading}
+              />
+
+              <UploadedFileList
+                files={selectedFiles}
+                onRemove={handleRemoveFile}
+                disabled={uploading}
+              />
             </div>
           </DialogContent>
         </DialogBody>
@@ -648,7 +507,7 @@ const UploadDialog: React.FC<UploadDialogProps> = ({
             appearance="primary"
             icon={uploading ? <Spinner size="tiny" /> : <ArrowUploadRegular />}
             onClick={() => void handleUpload()}
-            disabled={!selectedFile || uploading}
+            disabled={selectedFiles.length === 0 || uploading}
           >
             {uploading ? "Uploading…" : "Upload"}
           </Button>
@@ -838,9 +697,30 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         compare: (a, b) =>
           (a.sprk_summary ?? "").localeCompare(b.sprk_summary ?? ""),
         renderHeaderCell: () => "AI Summary",
-        renderCell: (item) => (
-          <AiSummaryCell summary={item.sprk_summary} />
-        ),
+        renderCell: (item) => {
+          if (!item.sprk_summary) {
+            return (
+              <Text className={styles.noSummaryText} size={200}>
+                No summary
+              </Text>
+            );
+          }
+          return (
+            <AiSummaryPopover
+              trigger={
+                <Button appearance="subtle" size="small" style={{ maxWidth: "300px" }}>
+                  <Text className={styles.summaryText} size={200}>
+                    {item.sprk_summary}
+                  </Text>
+                </Button>
+              }
+              onFetchSummary={() =>
+                Promise.resolve({ summary: item.sprk_summary ?? null, tldr: null })
+              }
+              positioning="before"
+            />
+          );
+        },
       }),
 
       // --- Actions ---
@@ -889,6 +769,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       styles.documentName,
       styles.documentNameIcon,
       styles.noSummaryText,
+      styles.summaryText,
       styles.versionLabel,
       styles.actionButtons,
     ]
