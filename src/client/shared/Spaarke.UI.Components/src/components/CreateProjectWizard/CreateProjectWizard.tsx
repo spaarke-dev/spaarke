@@ -152,7 +152,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   dataService,
   uploadService: _uploadService,
   navigationService,
-  embedded: _embedded,
+  embedded,
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
@@ -413,6 +413,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       onClose={onClose}
       webApi={webApiAdapter}
       config={config}
+      embedded={embedded}
     />
   );
 };

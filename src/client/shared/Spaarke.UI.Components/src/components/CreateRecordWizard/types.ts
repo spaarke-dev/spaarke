@@ -184,6 +184,8 @@ export interface ICreateRecordWizardProps {
   };
   /** Entity-specific wizard configuration. */
   config: ICreateRecordWizardConfig;
+  /** When true, renders without Dialog wrapper (Dataverse modal provides chrome). */
+  embedded?: boolean;
 }
 
 // ---------------------------------------------------------------------------

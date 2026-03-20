@@ -120,7 +120,7 @@ const EMPTY_SEARCH = () => Promise.resolve([] as ILookupItem[]);
 // CreateRecordWizard
 // ---------------------------------------------------------------------------
 
-export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, onClose, config }) => {
+export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, onClose, config, embedded }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
@@ -485,6 +485,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     <WizardShell
       ref={shellRef}
       open={open}
+      embedded={embedded}
+      hideTitle={embedded}
       title={config.title}
       ariaLabel={config.title}
       steps={stepConfigs}

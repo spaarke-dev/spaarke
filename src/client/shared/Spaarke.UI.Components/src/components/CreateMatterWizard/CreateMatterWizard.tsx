@@ -106,6 +106,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   authenticatedFetch,
   bffBaseUrl,
   navigationService,
+  embedded,
   resolveSpeContainerId,
 }) => {
   // -- Entity-specific form state --
@@ -299,6 +300,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       onClose={onClose}
       webApi={webApiAdapter}
       config={config}
+      embedded={embedded}
     />
   );
 };

@@ -148,7 +148,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   onClose,
   dataService,
   navigationService,
-  embedded: _embedded,
+  embedded,
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
@@ -346,6 +346,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       onClose={onClose}
       webApi={webApiAdapter}
       config={config}
+      embedded={embedded}
     />
   );
 };
