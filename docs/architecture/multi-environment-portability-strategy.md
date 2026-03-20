@@ -114,23 +114,50 @@ private const int SignalTypeBudgetExceeded = 100000000;
 
 ### Purpose and Scope
 
-Environment variables handle **runtime configuration** that varies by environment but NOT by customer tenant.
+Spaarke uses **two distinct env var mechanisms** depending on whether config is consumed by the **BFF API (server-side)** or **client components (browser-side)**:
 
 | Configuration Type | Storage Mechanism | Varies By Environment | Varies By Tenant | Example |
 |-------------------|-------------------|----------------------|------------------|---------|
-| **Authentication** | Environment variables | ✅ Yes (DEV/QA/PROD) | ❌ No | `TENANT_ID`, `API_APP_ID`, `API_CLIENT_SECRET` |
-| **Azure Resources** | Environment variables | ✅ Yes (DEV/QA/PROD) | ❌ No | `DATAVERSE_URL`, `REDIS_CONNECTION_STRING` |
-| **Feature Flags** | Environment variables | ✅ Yes (DEV/QA/PROD) | ❌ No | `ENABLE_AI_FEATURES`, `ENABLE_REDIS` |
-| **AI Configuration** | Environment variables | ✅ Yes (DEV/QA/PROD) | ❌ No | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_KEY` |
+| **Client auth config** | **Dataverse Environment Variables** | ✅ Yes (per environment) | ✅ Yes (per customer) | `sprk_BffApiBaseUrl`, `sprk_MsalClientId` |
+| **Server auth/infra** | Azure App Service config + Key Vault | ✅ Yes (DEV/QA/PROD) | ❌ No (shared BFF) | `DATAVERSE_URL`, `REDIS_CONNECTION_STRING` |
+| **Feature Flags** | Azure App Service config | ✅ Yes (DEV/QA/PROD) | ❌ No | `ENABLE_AI_FEATURES`, `ENABLE_REDIS` |
+| **AI Configuration** | Azure App Service config + Key Vault | ✅ Yes (DEV/QA/PROD) | ❌ No | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_KEY` |
 | **Business Rules** | Dataverse Environment Variables | ❌ No | ✅ Yes (per tenant) | Budget thresholds, classification confidence |
 
-### Environment Variables Used in Spaarke
+> **Key Insight**: Client-side components (code pages, PCF controls, Office add-ins) cannot safely read Azure App Service settings. They run in the browser inside a Dataverse page. Instead, they call `resolveRuntimeConfig()` from `@spaarke/auth` at startup — this queries the 7 Dataverse Environment Variables via the REST API using session cookie auth (before MSAL is initialized).
+
+---
+
+### 4a. Client-Side Config: Dataverse Environment Variables (7 vars)
+
+Set once per Dataverse environment. All client components resolve these at runtime. No hardcoded values ship in the solution package.
+
+| Variable | Purpose | Example (DEV) | Example (PROD) |
+|----------|---------|---------------|----------------|
+| `sprk_BffApiBaseUrl` | BFF API base URL | `https://spe-api-dev-67e2xz.azurewebsites.net` | `https://api.spaarke.com` |
+| `sprk_BffApiAppId` | BFF API OAuth audience (app client ID) | `1e40baad-...` | `1e40baad-...` (same or different) |
+| `sprk_MsalClientId` | UI MSAL client ID for Entra ID sign-in | `some-dev-client-id` | `some-prod-client-id` |
+| `sprk_TenantId` | Entra ID tenant ID | `a221a95e-...` | `a221a95e-...` (same) |
+| `sprk_AzureOpenAiEndpoint` | Azure OpenAI endpoint | `https://spaarke-openai-dev.openai.azure.com/` | `https://spaarke-openai-prod.openai.azure.com/` |
+| `sprk_ShareLinkBaseUrl` | Base URL for document share links | `https://spaarke.app/doc` | `https://spaarke.app/doc` |
+| `sprk_SharePointEmbeddedContainerId` | SPE Container ID for this environment | `dev-container-id` | `prod-container-id` |
+
+**How they're set**: Via `Provision-Customer.ps1` step 8, Power Platform Admin Center, or `pac env var set` CLI.
+
+**How they're read**: `resolveRuntimeConfig()` in `@spaarke/auth` — queries Dataverse REST API at startup, caches in memory for session lifetime.
+
+**Fail behavior**: If any required variable is missing, `resolveRuntimeConfig()` throws an error and the page fails to load with a clear message. There are no silent fallbacks to dev values.
+
+---
+
+### 4b. Server-Side Config: Azure App Service + Key Vault
+
+These configure the BFF API (Sprk.Bff.Api) running in Azure App Service.
 
 #### Core Authentication (Required)
 
 | Variable | Purpose | Example (DEV) | Example (PROD) |
 |----------|---------|---------------|----------------|
-| `TENANT_ID` | Azure AD tenant for authentication | `a221a95e-6abc-...` | `a221a95e-6abc-...` (same) |
 | `API_APP_ID` | BFF API app registration client ID | `1e40baad-e065-...` | `1e40baad-e065-...` (same or different) |
 | `API_CLIENT_SECRET` | Client secret for app authentication | `***` (Key Vault) | `***` (Key Vault) |
 
@@ -161,7 +188,7 @@ Environment variables handle **runtime configuration** that varies by environmen
 | `DocumentIntelligence:Enabled` | Enable AI features | `false` | `true` | `true` |
 | `Analysis:EnableMultiDocumentAnalysis` | Enable multi-doc analysis | `false` | `true` | `true` |
 
-### How Environment Variables Are Loaded
+### How Server-Side Variables Are Loaded
 
 1. **Azure App Service Configuration** (PROD)
    - Set in Azure Portal → App Service → Configuration → Application Settings
@@ -318,9 +345,10 @@ curl https://spe-api-prod-xyz789.azurewebsites.net/healthz
 | **Alternate Keys** | `sprk_playbookcode = "PB-013"` | Dataverse field | ❌ No | ❌ No | Solution export/import |
 | **Primary Keys** | `sprk_playbookid = GUID` | Dataverse (auto) | ✅ Yes (regenerates) | ❌ No | Auto-generated on import |
 | **Option Set Values** | `InvoiceStatus = 100000001` | Dataverse metadata | ❌ No | ❌ No | Solution export/import |
-| **Environment Variables** | `DATAVERSE_URL` | App Service config | ✅ Yes | ❌ No | Set per environment |
+| **Client Auth Config** | `sprk_BffApiBaseUrl`, `sprk_MsalClientId` | Dataverse env var | ✅ Yes | ✅ Yes | Set per environment via Provision-Customer.ps1 |
+| **Server Env Variables** | `DATAVERSE_URL`, `REDIS_CONNECTION_STRING` | App Service config | ✅ Yes | ❌ No | Set per environment |
 | **Secrets** | `API_CLIENT_SECRET` | Azure Key Vault | ✅ Yes | ❌ No | Set per environment |
-| **Dataverse Env Vars** | `sprk_BudgetWarningPercentage` | Dataverse env var | ❌ No | ✅ Yes | Set per tenant |
+| **Business Config** | `sprk_BudgetWarningPercentage` | Dataverse env var | ❌ No | ✅ Yes | Set per tenant |
 | **Feature Flags** | `Redis:Enabled` | App Service config | ✅ Yes | ❌ No | Set per environment |
 
 ---
@@ -363,10 +391,11 @@ curl https://spe-api-prod-xyz789.azurewebsites.net/healthz
 |-------------|----------|---------|
 | Reference a **specific Dataverse record** across environments | **Alternate Keys** | Playbook lookup by code |
 | Store **choice values** that are part of data model | **Option Set Values** | Invoice status, signal type |
-| Configure **Azure resource endpoints** per environment | **Environment Variables** | Dataverse URL, Redis connection |
-| Store **secrets** (keys, passwords) | **Azure Key Vault** + Environment Variables | OpenAI API key |
+| Configure **client-side auth/API endpoints** (browser components) | **Dataverse Environment Variables** | `sprk_BffApiBaseUrl`, `sprk_MsalClientId` — resolved at runtime by `resolveRuntimeConfig()` |
+| Configure **server-side Azure endpoints** (BFF API) | **Azure App Service config** | Dataverse URL, Redis connection |
+| Store **secrets** (keys, passwords) | **Azure Key Vault** + App Service config | OpenAI API key |
 | Configure **business rules** that vary per tenant | **Dataverse Environment Variables** | Budget thresholds |
-| Toggle **features** per environment | **Environment Variables** (feature flags) | Enable Redis in PROD only |
+| Toggle **features** per environment | **App Service config** (feature flags) | Enable Redis in PROD only |
 | Toggle **features** per tenant | **Dataverse Environment Variables** | Enable AI for Tenant A only |
 
 ---

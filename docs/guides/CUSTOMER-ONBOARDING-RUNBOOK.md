@@ -1,7 +1,7 @@
 # Customer Onboarding Runbook
 
-> **Version**: 1.0
-> **Last Updated**: 2026-03-13
+> **Version**: 1.1
+> **Last Updated**: 2026-03-20
 > **Owner**: Platform Operations
 > **Applies To**: Spaarke Production Environments
 > **Related Scripts**: `Provision-Customer.ps1`, `Test-Deployment.ps1`, `Decommission-Customer.ps1`
@@ -125,7 +125,7 @@ pac auth create --url "https://spaarke-{customerId}.crm.dynamics.com" `
 
 ### 3a. Script Overview
 
-`Provision-Customer.ps1` orchestrates 10 steps in sequence:
+`Provision-Customer.ps1` orchestrates 13 steps in sequence:
 
 | Step | Action | Duration | Idempotent |
 |------|--------|----------|------------|
@@ -136,9 +136,12 @@ pac auth create --url "https://spaarke-{customerId}.crm.dynamics.com" `
 | 5 | Create Dataverse environment via Power Platform Admin API | ~2 min | Yes |
 | 6 | Wait for Dataverse environment provisioning | ~5-15 min | Yes |
 | 7 | Import managed solutions (`Deploy-DataverseSolutions.ps1`) | ~5 min | Yes |
-| 8 | Provision SPE containers | ~1 min | Yes |
-| 9 | Register customer in BFF API tenant registry | ~10s | Yes |
-| 10 | Run smoke tests (`Test-Deployment.ps1`) | ~2 min | Yes |
+| 8 | **Set Dataverse Environment Variables** (7 vars — BFF URL, app IDs, tenant, etc.) | ~30s | Yes |
+| 9 | **Generate `environment-config.json`** (canonical config reference) | ~5s | Yes |
+| 10 | Provision SPE containers | ~1 min | Yes |
+| 11 | Register customer in BFF API tenant registry | ~10s | Yes |
+| 12 | Run smoke tests (`Test-Deployment.ps1`) | ~2 min | Yes |
+| 13 | **Run `Validate-DeployedEnvironment.ps1`** (env vars, health, CORS, dev leakage) | ~1 min | Yes |
 
 ### 3b. Preview Mode (Recommended First)
 
@@ -171,7 +174,11 @@ Review the output to confirm:
     -EnvironmentName "prod" `
     -Location "westus2" `
     -DataverseRegion "unitedstates" `
-    -BffApiBaseUrl "https://api.spaarke.com"
+    -BffApiBaseUrl "https://api.spaarke.com" `
+    -BffApiAppId "<bff-api-app-registration-client-id>" `
+    -MsalClientId "<ui-msal-client-id>" `
+    -AzureOpenAiEndpoint "https://spaarke-openai-prod.openai.azure.com/" `
+    -ShareLinkBaseUrl "https://spaarke.app/doc"
 ```
 
 **All parameters:**
@@ -188,10 +195,14 @@ Review the output to confirm:
 | `-Location` | No | `westus2` | Azure region |
 | `-PlatformKeyVaultName` | No | `sprk-platform-prod-kv` | Shared platform Key Vault |
 | `-PlatformResourceGroup` | No | `rg-spaarke-platform-prod` | Shared platform resource group |
-| `-BffApiBaseUrl` | No | `https://api.spaarke.com` | BFF API URL for tenant registration |
+| `-BffApiBaseUrl` | No | `https://api.spaarke.com` | BFF API base URL (stored as Dataverse env var `sprk_BffApiBaseUrl`) |
+| `-BffApiAppId` | No | — | BFF API app registration client ID (stored as `sprk_BffApiAppId`) |
+| `-MsalClientId` | No | — | UI MSAL client ID (stored as `sprk_MsalClientId`) |
+| `-AzureOpenAiEndpoint` | No | — | Azure OpenAI endpoint URL (stored as `sprk_AzureOpenAiEndpoint`) |
+| `-ShareLinkBaseUrl` | No | — | Base URL for document share links (stored as `sprk_ShareLinkBaseUrl`) |
 | `-DataverseRegion` | No | `unitedstates` | Power Platform region for Dataverse |
-| `-ResumeFromStep` | No | 0 (auto-detect) | Resume from specific step (1-10) |
-| `-SkipDataverse` | No | `$false` | Skip Dataverse steps 5-7 |
+| `-ResumeFromStep` | No | 0 (auto-detect) | Resume from specific step (1-13) |
+| `-SkipDataverse` | No | `$false` | Skip Dataverse steps 5-9 |
 
 ### 3d. Resuming After Failure
 
@@ -241,9 +252,45 @@ Review this log for troubleshooting if any step fails.
 
 ## 4. Post-Provisioning Verification
 
-### 4a. Automated Smoke Tests
+### 4a. Validate Deployed Environment
 
-The provisioning script runs `Test-Deployment.ps1` as its final step. You can also run it independently:
+The provisioning script runs `Validate-DeployedEnvironment.ps1` as its final step (step 13). You can also run it independently to verify any environment:
+
+```powershell
+.\scripts\Validate-DeployedEnvironment.ps1 `
+    -DataverseUrl "https://spaarke-acme.crm.dynamics.com" `
+    -BffApiUrl "https://api.spaarke.com"
+```
+
+**Validation checks performed:**
+
+| Check | What It Verifies | Critical |
+|-------|-----------------|----------|
+| Dataverse Environment Variables | All 7 vars set and non-empty | Yes |
+| BFF API health | `/healthz` returns 200 `Healthy` | Yes |
+| BFF API ping | `/ping` returns 200 | Yes |
+| CORS | BFF accepts requests from Dataverse origin | Yes |
+| Dev value leakage | Zero hardcoded dev URLs/IDs in environment | Yes |
+
+The script exits with code 0 (pass) or 1 (fail). In CI/CD pipelines, a non-zero exit halts the pipeline.
+
+**The 7 Dataverse Environment Variables set by step 8:**
+
+| Variable | Purpose |
+|----------|---------|
+| `sprk_BffApiBaseUrl` | BFF API base URL for all client components |
+| `sprk_BffApiAppId` | BFF API app registration client ID (OAuth audience) |
+| `sprk_MsalClientId` | MSAL client ID for Entra ID sign-in |
+| `sprk_TenantId` | Entra ID tenant ID |
+| `sprk_AzureOpenAiEndpoint` | Azure OpenAI endpoint for AI features |
+| `sprk_ShareLinkBaseUrl` | Base URL for document share links |
+| `sprk_SharePointEmbeddedContainerId` | SPE Container ID for this customer |
+
+> **How they're used**: At page load, all client components (code pages, PCF controls, Office add-ins) call `resolveRuntimeConfig()` from `@spaarke/auth`. This function queries these Dataverse env vars via the REST API using session cookie auth, caches the result in memory, and makes the values available to all components. No hardcoded URLs ship in the solution package.
+
+### 4b. Automated Smoke Tests
+
+The provisioning script runs `Test-Deployment.ps1` as its penultimate step (step 12). You can also run it independently:
 
 ```powershell
 .\scripts\Test-Deployment.ps1 `
@@ -483,9 +530,12 @@ If provisioning succeeds but customer onboarding is cancelled:
 | Step 4 fails (Key Vault) | Access policy or naming collision | Verify RBAC roles on Key Vault | Platform team |
 | Step 5-6 fails (Dataverse) | License, quota, or API limitation | Check Power Platform Admin Center for errors | Power Platform admin |
 | Step 7 fails (solutions) | Solution dependency or version conflict | Check `pac solution list` for partial imports | Platform team |
-| Step 8 fails (SPE) | Graph API permissions | Verify app registration has SPE permissions | Platform team |
-| Step 9 fails (tenant registry) | BFF API unreachable or auth error | Check `https://api.spaarke.com/healthz` | Platform team |
-| Step 10 fails (smoke tests) | One or more services not ready | Re-run: `.\scripts\Test-Deployment.ps1 -CustomerId acme -Verbose` | See specific test group |
+| Step 8 fails (env vars) | Dataverse not ready or permission issue | Verify app user has System Administrator role | Platform team |
+| Step 9 fails (config file) | Write permission or path issue | Check `logs/provisioning/` directory exists | Operator |
+| Step 10 fails (SPE) | Graph API permissions | Verify app registration has SPE permissions | Platform team |
+| Step 11 fails (tenant registry) | BFF API unreachable or auth error | Check `https://api.spaarke.com/healthz` | Platform team |
+| Step 12 fails (smoke tests) | One or more services not ready | Re-run: `.\scripts\Test-Deployment.ps1 -CustomerId acme -Verbose` | See specific test group |
+| Step 13 fails (validation) | Env vars missing or dev values leaked | Run `Validate-DeployedEnvironment.ps1 -Verbose` and fix each reported failure | Platform team |
 
 ### 8b. Post-Provisioning Issues
 

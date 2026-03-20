@@ -780,9 +780,12 @@ return @{
 
 ### 7.1 Environment Variables Strategy
 
+Spaarke uses two config mechanisms: **Azure App Service config** (server-side BFF API) and **Dataverse Environment Variables** (client-side components — read at runtime via `resolveRuntimeConfig()`).
+
+#### Server-Side: Azure App Service + Key Vault (BFF API)
+
 | Variable | Source | Model 1 | Model 2 |
 |----------|--------|---------|---------|
-| `TENANT_ID` | Key Vault | Spaarke tenant | Customer tenant |
 | `API_APP_ID` | Key Vault | Shared app | Customer app |
 | `API_CLIENT_SECRET` | Key Vault | Per-env secret | Customer secret |
 | `DATAVERSE_URL` | App Settings | Per-customer | Customer env |
@@ -791,6 +794,22 @@ return @{
 | `SERVICEBUS_CONNECTION` | Key Vault | Shared | Customer |
 | `OPENAI_ENDPOINT` | App Settings | Shared | Customer BYOK |
 | `AI_SEARCH_ENDPOINT` | App Settings | Shared | Customer |
+
+#### Client-Side: Dataverse Environment Variables (7 vars, all client components)
+
+Set per Dataverse environment after solution import. Resolved at page load by `resolveRuntimeConfig()` in `@spaarke/auth`. No hardcoded values ship in the solution ZIP.
+
+| Variable | Purpose | Set By |
+|----------|---------|--------|
+| `sprk_BffApiBaseUrl` | BFF API base URL | `Provision-Customer.ps1` step 8 |
+| `sprk_BffApiAppId` | BFF API OAuth audience | `Provision-Customer.ps1` step 8 |
+| `sprk_MsalClientId` | MSAL client ID for UI sign-in | `Provision-Customer.ps1` step 8 |
+| `sprk_TenantId` | Entra ID tenant ID | `Provision-Customer.ps1` step 8 |
+| `sprk_AzureOpenAiEndpoint` | Azure OpenAI endpoint | `Provision-Customer.ps1` step 8 |
+| `sprk_ShareLinkBaseUrl` | Document share link base URL | `Provision-Customer.ps1` step 8 |
+| `sprk_SharePointEmbeddedContainerId` | SPE Container ID | After SPE provisioning (step 10) |
+
+> **Important for Model 2 deployments**: After `pac solution import`, the 7 Dataverse env vars must be set before the application is usable. The `Deploy-Model2-Full.ps1` script should call `Set-DataverseEnvVars` after step 7 (solution import). If using manual deployment, set these in Power Platform Admin Center → Environments → Environment Variables.
 
 ### 7.2 Customer-Specific Configuration (Model 1)
 
