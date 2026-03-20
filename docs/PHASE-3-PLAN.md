@@ -342,7 +342,7 @@ Create `CROSS-REFERENCE-MAP.md` in root to show all relationships:
 **Scope**: Repository structure, UX management, general architecture
 
 **Source Documents**:
-- Architecture: SPAARKE-REPOSITORY-ARCHITECTURE.md, SPAARKE-UX-MANAGEMENT.md, SPAARKE-AI-STRATEGY.md
+- Architecture: SPAARKE-REPOSITORY-ARCHITECTURE.md, ui-dialog-shell-architecture.md, SPAARKE-AI-STRATEGY.md
 
 **Tasks**:
 - [ ] **3.10.1** Review for accuracy and updates needed

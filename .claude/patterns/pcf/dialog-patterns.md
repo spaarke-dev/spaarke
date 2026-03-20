@@ -14,7 +14,7 @@ Before building a dialog, choose the right surface (see ADR-006):
 |-------------|------------|-----|
 | Opens from a PCF button, no form binding needed | **React Code Page** | Simpler param passing, React 18, no custom page wrapper |
 | Embedded panel inside a form (needs `updateView()`) | **PCF** | Requires Dataverse form lifecycle |
-| Multi-step wizard (Create Matter, Upload Document) | **React Code Page** | Complex UI benefits from React 18 + WizardDialog template |
+| Multi-step wizard (Create Matter, Upload Document) | **React Code Page** | Complex UI benefits from React 18 + WizardShell / CreateRecordWizard |
 | Graph/visualization dialog | **React Code Page** | Concurrent rendering, React 18 |
 
 ---
@@ -83,37 +83,60 @@ createRoot(document.getElementById("root")!).render(
 
 ---
 
-## Pattern 3: WizardDialog (Multi-Step Form)
+## Pattern 3: WizardShell & CreateRecordWizard (Multi-Step Form)
 
-Use the `WizardDialog` from `@spaarke/ui-components` for multi-step workflows.
+Use `WizardShell` from `@spaarke/ui-components` for multi-step wizard layouts. For record-creation wizards that follow the standard "Add Files -> Create Record -> Next Steps" flow, use `CreateRecordWizard` which provides boilerplate around `WizardShell`.
+
+### 3a. WizardShell (Low-Level)
+
+`WizardShell` is the raw multi-step container with stepper, navigation, and layout. Use it directly when your wizard has a non-standard step sequence (e.g., CreateWorkAssignmentWizard).
 
 ```tsx
-// src/client/code-pages/CreateMatterWizard/App.tsx
-import { WizardDialog } from "@spaarke/ui-components";
-import { DocumentAdd20Regular, FormNew20Regular, CheckmarkCircle20Regular } from "@fluentui/react-icons";
+import { WizardShell } from "@spaarke/ui-components";
+import { Briefcase20Regular, People20Regular, Calendar20Regular } from "@fluentui/react-icons";
 
-export const CreateMatterWizardApp: React.FC = () => {
-    const [activeStep, setActiveStep] = useState("files");
+export const WorkAssignmentWizardDialog: React.FC<Props> = ({ dataService, navigationService }) => {
+    const [activeStep, setActiveStep] = useState("info");
 
     return (
-        <WizardDialog
-            title="Create New Matter"
+        <WizardShell
+            title="Assign Work"
             steps={[
-                { id: "files",  label: "Add file(s)",    icon: <DocumentAdd20Regular /> },
-                { id: "record", label: "Create record",  icon: <FormNew20Regular /> },
-                { id: "next",   label: "Next Steps",     icon: <CheckmarkCircle20Regular /> },
+                { id: "info",   label: "Enter info",       icon: <Briefcase20Regular /> },
+                { id: "assign", label: "Assign work",      icon: <People20Regular /> },
+                { id: "event",  label: "Follow-on event",  icon: <Calendar20Regular /> },
             ]}
             activeStep={activeStep}
-            onCancel={() => window.history.back()}
-            onNext={() => setActiveStep(getNextStep(activeStep))}
-            onComplete={handleComplete}
+            onCancel={() => window.close()}
         >
-            {activeStep === "files"  && <AddFilesStep />}
-            {activeStep === "record" && <CreateRecordStep />}
-            {activeStep === "next"   && <NextStepsStep />}
-        </WizardDialog>
+            {activeStep === "info"   && <EnterInfoStep dataService={dataService} />}
+            {activeStep === "assign" && <AssignWorkStep dataService={dataService} />}
+            {activeStep === "event"  && <CreateFollowOnEventStep dataService={dataService} />}
+        </WizardShell>
     );
 };
+```
+
+### 3b. CreateRecordWizard (High-Level)
+
+`CreateRecordWizard` wraps `WizardShell` with standard record-creation boilerplate: file upload step, entity creation step, and next-steps/success screen. Use it for Matter, Project, Event, and Todo wizards.
+
+```tsx
+import { CreateRecordWizard } from "@spaarke/ui-components";
+
+// The wizard content components (CreateMatterStep, etc.) are passed as children.
+// CreateRecordWizard handles step navigation, file uploads, and success screen.
+export const CreateMatterWizard: React.FC<Props> = ({ dataService, uploadService, navigationService }) => (
+    <CreateRecordWizard
+        title="Create New Matter"
+        entityName="sprk_matter"
+        dataService={dataService}
+        uploadService={uploadService}
+        navigationService={navigationService}
+    >
+        {(stepProps) => <CreateMatterStep {...stepProps} />}
+    </CreateRecordWizard>
+);
 ```
 
 ---
@@ -198,6 +221,48 @@ The `navigateTo` promise in the calling PCF resolves when the dialog closes.
 
 ---
 
+## Pattern 7: Code Page Wizard Wrapper
+
+A Code Page wizard wrapper is a thin `main.tsx` entry point that bootstraps a shared-library wizard component. The wrapper handles platform-specific setup (React 18 `createRoot`, Fluent theme, adapter wiring) while all wizard logic lives in `@spaarke/ui-components`.
+
+```tsx
+// src/client/code-pages/CreateMatterWizard/main.tsx (thin wrapper — ~30 lines)
+import { createRoot } from "react-dom/client";
+import { FluentProvider, webLightTheme, webDarkTheme } from "@fluentui/react-components";
+import {
+    CreateMatterWizard,
+    createXrmDataService,
+    createXrmUploadService,
+    createXrmNavigationService,
+} from "@spaarke/ui-components";
+
+const params = new URLSearchParams(window.location.search);
+const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+const bffBaseUrl = params.get("bffBaseUrl") ?? "";
+
+// Wire platform adapters — shared wizard never touches Xrm directly
+const dataService = createXrmDataService();
+const uploadService = createXrmUploadService(bffBaseUrl);
+const navigationService = createXrmNavigationService();
+
+createRoot(document.getElementById("root")!).render(
+    <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
+        <CreateMatterWizard
+            matterId={params.get("matterId") ?? ""}
+            dataService={dataService}
+            uploadService={uploadService}
+            navigationService={navigationService}
+        />
+    </FluentProvider>
+);
+```
+
+**Key rule**: The Code Page wrapper contains **zero business logic** — it reads URL params, creates adapters, and renders the shared wizard. All wizard steps, validation, and orchestration live in the shared library.
+
+See also: [Full-Page Custom Page Template](../webresource/full-page-custom-page.md) for project structure and build tooling.
+
+---
+
 ## Canonical Implementations
 
 | File | Surface | Purpose |
@@ -213,7 +278,9 @@ The `navigateTo` promise in the calling PCF resolves when the dialog closes.
 1. **Prefer React Code Pages for dialogs** — simpler, React 18, no custom page wrapper
 2. **Pass parameters via URL** — `data: "key=value"` in navigateTo, read with URLSearchParams
 3. **For PCF close** — try multiple methods (navigateBack, ui.close, history, postMessage)
-4. **Use shared layout components** — WizardDialog, SidePanel from `@spaarke/ui-components`
+4. **Use shared layout components** — WizardShell, CreateRecordWizard, SidePanel from `@spaarke/ui-components`
+5. **Code Page wrappers are thin** — only platform bootstrap; all wizard logic in shared library
+6. **Wire adapters in the wrapper** — `createXrmDataService()`, `createXrmUploadService()`, `createXrmNavigationService()`
 
 ---
 
@@ -224,4 +291,4 @@ The `navigateTo` promise in the calling PCF resolves when the dialog closes.
 
 ---
 
-**Lines**: ~145
+**Lines**: ~250

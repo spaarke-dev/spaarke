@@ -55,45 +55,31 @@ The original constraint ("zero service dependencies, callback-based only") was t
 
 ### The IDataService Pattern
 
-Services that need to read/write data accept an abstraction, not a concrete API:
+Services that need to read/write data accept an abstraction, not a concrete API. Three core interfaces live in `types/`:
 
-```typescript
-// ✅ Shared library — portable across Dataverse, SPA, tests
-interface IDataService {
-  createRecord(entityName: string, data: Record<string, unknown>): Promise<string>;
-  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
-  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
-  updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<void>;
-}
+| Interface | Methods |
+|-----------|---------|
+| `IDataService` | `createRecord`, `retrieveRecord`, `retrieveMultipleRecords`, `updateRecord`, `deleteRecord` |
+| `IUploadService` | `uploadFile`, `getContainerIdForEntity` |
+| `INavigationService` | `openRecord`, `openDialog`, `closeDialog` |
 
-// ✅ Wizard component accepts abstracted service
-interface ICreateMatterWizardProps {
-  dataService: IDataService;
-  uploadService: IUploadService;
-  onClose: () => void;
-  embedded?: boolean;
-}
-```
+Supporting types: `UploadOptions`, `UploadResult`, `DialogOptions`, `DialogResult`.
 
-**Consumers provide the concrete implementation:**
+**Pre-built adapters** in `utils/adapters/` wire interfaces to concrete platforms:
 
-```typescript
-// Code Page main.tsx — Xrm.WebApi adapter
-const xrmDataService: IDataService = {
-  createRecord: (entity, data) => Xrm.WebApi.createRecord(entity, data).then(r => r.id),
-  retrieveRecord: (entity, id, opts) => Xrm.WebApi.retrieveRecord(entity, id, opts),
-  // ...
-};
+| Adapter Factory | Target Platform |
+|----------------|-----------------|
+| `createXrmDataService()` | Xrm.WebApi (Code Pages in Dataverse) |
+| `createXrmUploadService(bffBaseUrl)` | BFF API upload endpoints |
+| `createXrmNavigationService()` | Xrm.Navigation |
+| `createBffDataService(authFetch, bffBaseUrl)` | BFF API (Power Pages SPA) |
+| `createBffUploadService(authFetch, bffBaseUrl)` | BFF API (SPA) |
+| `createBffNavigationService(navigate?)` | SPA router |
+| `createMockDataService()` | jest.fn() stubs for unit tests |
+| `createMockUploadService()` | jest.fn() stubs |
+| `createMockNavigationService()` | jest.fn() stubs |
 
-// Power Pages SPA — BFF API adapter
-const bffDataService: IDataService = {
-  createRecord: (entity, data) => fetch(`/api/${entity}`, { method: "POST", body: JSON.stringify(data) }).then(r => r.json()),
-  // ...
-};
-
-// Unit tests — mock adapter
-const mockDataService: IDataService = { createRecord: jest.fn(), ... };
-```
+Consumers call the factory in their `main.tsx` and pass the result as props — shared components never touch platform APIs directly.
 
 ### What Goes Where
 
@@ -118,18 +104,27 @@ const mockDataService: IDataService = { createRecord: jest.fn(), ... };
 | CreateRecordWizard | Record-creation boilerplate (file upload, follow-on steps) | Yes |
 | PlaybookLibraryShell (planned) | Playbook browsing, selection, execution | Code Pages only |
 
-### Domain Wizard Components (extracting from LegalWorkspace)
+### Domain Wizard Components (extracted from LegalWorkspace)
 
-| Component | Description | PCF Safe? |
-|-----------|-------------|-----------|
-| CreateMatterWizard | Matter creation wizard content | Yes |
-| CreateProjectWizard | Project creation wizard content | Yes |
-| CreateEventWizard | Event creation wizard content | Yes |
-| CreateTodoWizard | Todo creation wizard content | Yes |
-| CreateWorkAssignmentWizard | Work assignment wizard content | Yes |
-| DocumentUploadWizard | Document upload wizard content | Yes |
-| SummarizeFilesWizard | File summarization wizard content | Yes |
-| FindSimilarDialog | Semantic search dialog | Yes |
+| Component | Files | PCF Safe? |
+|-----------|-------|-----------|
+| CreateMatterWizard | 17 files | Yes (uses CreateRecordWizard) |
+| CreateProjectWizard | 10 files | Yes (uses CreateRecordWizard) |
+| CreateEventWizard | 5 files | Yes (uses CreateRecordWizard) |
+| CreateTodoWizard | 5 files | Yes (uses CreateRecordWizard, todoflag=true) |
+| CreateWorkAssignmentWizard | 10 files | Yes (uses WizardShell directly) |
+| SummarizeFilesWizard | 9 files | Code Pages only |
+| PlaybookLibraryShell | 2 files | Code Pages only (intent pre-selection, browse/execute) |
+| DocumentUploadWizard | — | Yes |
+| FindSimilarDialog | — | Yes |
+
+### Utilities (utils/)
+
+| Utility | Description |
+|---------|-------------|
+| `resolveCodePageTheme()` | 4-level cascade: localStorage → URL param → navbar DOM → system preference |
+| `setupCodePageThemeListener(callback)` | Reactive theme change listener (cross-tab + system) |
+| `parseDataParams()` | Parse Xrm.Navigation.navigateTo data envelope + raw URL params |
 
 ### UI Components (16 groups)
 
@@ -152,7 +147,20 @@ const mockDataService: IDataService = { createRecord: jest.fn(), ... };
 | FileUpload | Drag-and-drop upload zone | Yes |
 | AiFieldTag | AI badge for pre-filled fields | Yes |
 
-### Hooks (18), Services (19+), Types (14)
+### Code Page Wrappers (in src/solutions/, NOT in shared library)
+
+| Wrapper | Web Resource | Description |
+|---------|-------------|-------------|
+| CreateMatterWizard | `sprk_creatematterwizard` | ~40 LOC thin wrapper |
+| CreateProjectWizard | `sprk_createprojectwizard` | ~40 LOC thin wrapper |
+| CreateEventWizard | `sprk_createeventwizard` | ~40 LOC thin wrapper |
+| CreateTodoWizard | `sprk_createtodowizard` | ~40 LOC thin wrapper |
+| CreateWorkAssignmentWizard | `sprk_createworkassignmentwizard` | ~40 LOC thin wrapper |
+| SummarizeFilesWizard | `sprk_summarizefileswizard` | ~40 LOC thin wrapper |
+| FindSimilarCodePage | `sprk_findsimilar` | Direct iframe rendering |
+| PlaybookLibrary | `sprk_playbooklibrary` | Supports intent param |
+
+### Hooks (18), Services (19+), Types (14+)
 
 See full inventory in [docs/adr/ADR-012-shared-component-library.md](../../docs/adr/ADR-012-shared-component-library.md).
 
@@ -206,4 +214,4 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 ---
 
-**Lines**: ~150
+**Lines**: ~217

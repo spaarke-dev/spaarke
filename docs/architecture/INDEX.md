@@ -45,7 +45,7 @@ This directory contains comprehensive architecture documentation covering system
 
 - [SPAARKE-AI-STRATEGY.md](SPAARKE-AI-STRATEGY.md)
 - [SPAARKE-REPOSITORY-ARCHITECTURE.md](SPAARKE-REPOSITORY-ARCHITECTURE.md)
-- [SPAARKE-UX-MANAGEMENT.md](SPAARKE-UX-MANAGEMENT.md)
+- [ui-dialog-shell-architecture.md](ui-dialog-shell-architecture.md)
 
 ### Infrastructure
 

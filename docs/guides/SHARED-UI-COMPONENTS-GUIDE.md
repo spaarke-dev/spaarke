@@ -3,7 +3,7 @@
 > **Version**: 2.0.0
 > **Location**: `src/client/shared/Spaarke.UI.Components/`
 > **ADR**: [ADR-012](../adr/ADR-012-shared-component-library.md)
-> **Last Updated**: 2026-03-10
+> **Last Updated**: 2026-03-19
 
 ---
 
@@ -59,6 +59,20 @@ import { AiSummaryPopover, FindSimilarDialog, WizardShell } from "@spaarke/ui-co
 
 ---
 
+## React Version Compatibility
+
+The shared library is consumed across multiple surfaces with different React runtimes:
+
+| Consumer | React Version | Entry Point | Import Pattern |
+|----------|--------------|-------------|----------------|
+| PCF Controls | React 16/17 (platform-provided, not bundled) | `ReactControl` or `StandardControl` | Deep imports only |
+| Code Pages | React 18/19 (bundled via webpack/Vite) | `createRoot()` | Barrel or deep imports |
+| Power Pages SPA | React 18 (bundled via Vite) | `createRoot()` | Barrel or deep imports |
+
+**Why this matters**: PCF controls run in a Dataverse form where React is injected by the platform (React 16/17). Code Pages and SPAs bundle their own React, so they can use any version. Components in the shared library must be authored to be React 19-compatible (latest) while maintaining React 16/17 compatibility for PCF consumers.
+
+---
+
 ## Consumer Patterns
 
 ### PCF Controls (React 16/17)
@@ -78,9 +92,9 @@ import { FindSimilarDialog } from "@spaarke/ui-components";
 
 **When is barrel import safe for PCF?** Only when the component and all its transitive dependencies are React 16-compatible. Currently, the RichTextEditor (Lexical) breaks barrel imports for PCF.
 
-### React Code Pages (React 18)
+### React Code Pages (React 18/19)
 
-Code Pages bundle React 18 via Vite/webpack. Barrel imports are safe:
+Code Pages bundle React 18/19 via Vite/webpack. Barrel imports are safe:
 
 ```typescript
 // ✅ Both work for Code Pages
@@ -88,17 +102,44 @@ import { AiSummaryPopover, FindSimilarDialog, WizardShell } from "@spaarke/ui-co
 import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSimilarDialog";
 ```
 
+### Power Pages SPA (React 18)
+
+The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel imports are safe. Uses BFF adapters instead of Xrm adapters.
+
 ### Import Path Summary
 
 | Consumer | Import Pattern | Why |
 |----------|---------------|-----|
 | PCF (React 16/17) | `@spaarke/ui-components/dist/components/{Name}` | Avoids pulling Lexical/jsx-runtime deps |
-| Code Page (React 18) | `@spaarke/ui-components` | Barrel is safe; React 18 has jsx-runtime |
-| LegalWorkspace (Vite) | `@spaarke/ui-components` | Barrel is safe; Vite tree-shakes |
+| Code Page (React 18/19) | `@spaarke/ui-components` | Barrel is safe; React 18+ has jsx-runtime |
+| Power Pages SPA (React 18) | `@spaarke/ui-components` | Barrel is safe; Vite tree-shakes |
 
 ---
 
 ## Component Inventory
+
+### Shell & Wizard Components (`src/components/`)
+
+| Component | Description | Consumers |
+|-----------|-------------|-----------|
+| **WizardShell** | Multi-step wizard container with stepper and navigation | Code Pages |
+| **WizardStepper** | Step indicator UI for wizards | Code Pages |
+| **WizardSuccessScreen** | Success state after wizard completion | Code Pages |
+| **CreateRecordWizard** | Record-creation boilerplate (file upload + create + next steps) wrapping WizardShell | Code Pages |
+| **PlaybookLibraryShell** | Playbook browsing, selection, and execution shell | Code Pages, SPA |
+| **SidePaneShell** | Reusable slide-in side panel layout | Code Pages |
+
+### Domain Wizard Components (`src/components/`)
+
+| Component | Description | Consumers |
+|-----------|-------------|-----------|
+| **CreateMatterWizard** | Matter creation wizard (uses CreateRecordWizard) | Code Pages |
+| **CreateProjectWizard** | Project creation wizard (uses CreateRecordWizard) | Code Pages |
+| **CreateEventWizard** | Event creation wizard (uses CreateRecordWizard) | Code Pages |
+| **CreateTodoWizard** | Todo creation wizard (uses CreateRecordWizard) | Code Pages |
+| **CreateWorkAssignmentWizard** | Work assignment wizard (uses WizardShell directly — different step sequence) | Code Pages |
+| **SummarizeFilesWizard** | File summarization wizard with AI analysis step | Code Pages |
+| **FindSimilarDialog** | Semantic search dialog shell for DocumentRelationshipViewer | PCF, Code Pages |
 
 ### UI Components (`src/components/`)
 
@@ -112,16 +153,11 @@ import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSi
 | **RichTextEditor** | Lexical-based WYSIWYG editor | Code Pages only* |
 | **ChoiceDialog** | Simple choice dialog | All |
 | **EventDueDateCard** | Event date display card | Code Pages |
-| **SidePaneShell** | Reusable slide-in side panel layout | Code Pages |
 | **SprkChat** | Streaming chat component with SSE | Code Pages |
 | **DiffCompareView** | AI revision diff (side-by-side + inline) | Code Pages |
 | **LookupField** | Search-as-you-type entity lookup | Code Pages |
 | **SendEmailDialog** | Email composition dialog with To lookup | Code Pages |
 | **AiSummaryPopover** | AI summary popover with lazy fetch and copy | PCF, Code Pages |
-| **FindSimilarDialog** | Iframe dialog shell for DocumentRelationshipViewer | PCF, Code Pages |
-| **WizardShell** | Multi-step wizard container with stepper | Code Pages |
-| **WizardStepper** | Step indicator UI for wizards | Code Pages |
-| **WizardSuccessScreen** | Success state after wizard completion | Code Pages |
 
 *\*RichTextEditor uses Lexical which requires `react/jsx-runtime` — not available in PCF React 16.*
 
@@ -162,7 +198,8 @@ import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSi
 | `ColumnRendererTypes` | Column renderer configs |
 | `EntityConfigurationTypes` | Entity-specific config |
 | `LookupTypes` | `ILookupItem` for search lookups |
-| `WebApiLike` | Dataverse WebAPI abstraction |
+| `WebApiLike` | Dataverse WebAPI abstraction (low-level) |
+| `serviceInterfaces` | `IDataService`, `IUploadService`, `INavigationService` (high-level service abstractions) |
 | `FetchXmlTypes` | FetchXML query types |
 | `ConfigurationTypes` | Configuration schemas |
 
@@ -181,6 +218,9 @@ import { FindSimilarDialog } from "@spaarke/ui-components/dist/components/FindSi
 | `themeDetection` | Detect Dataverse theme (dark/light) |
 | `themeStorage` | Persist theme preference |
 | `xrmContext` | Resolve Xrm global in various contexts |
+| `adapters/xrmDataServiceAdapter` | `createXrmDataService()`, `createXrmUploadService()`, `createXrmNavigationService()` |
+| `adapters/bffDataServiceAdapter` | `createBffDataService()`, `createBffUploadService()`, `createBffNavigationService()` |
+| `adapters/mockDataServiceAdapter` | `createMockDataService()`, `createMockUploadService()`, `createMockNavigationService()` |
 
 ### Icons (`src/icons/`)
 
@@ -216,6 +256,145 @@ Components never reference PCF APIs (`ComponentFramework.*`), Xrm globals, or en
 ### Fluent v9 Only
 
 All styling uses Fluent UI v9 `makeStyles`, `tokens`, and `shorthands`. No custom CSS files, no hard-coded colors.
+
+---
+
+## Service Abstractions (`IDataService`, `IUploadService`, `INavigationService`)
+
+Shared components need to perform data operations (CRUD, file upload, navigation) but must not call platform APIs directly. Three interfaces in `src/types/serviceInterfaces.ts` provide the abstraction layer:
+
+### IDataService
+
+High-level Dataverse entity operations. Components accept `IDataService` as a prop and call methods like `createRecord`, `retrieveRecord`, `retrieveMultipleRecords`, `updateRecord`, and `deleteRecord`.
+
+```typescript
+export interface IDataService {
+  createRecord(entityName: string, data: Record<string, unknown>): Promise<string>;
+  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+  retrieveMultipleRecords(entityName: string, options?: string): Promise<{ entities: Record<string, unknown>[] }>;
+  updateRecord(entityName: string, id: string, data: Record<string, unknown>): Promise<void>;
+  deleteRecord(entityName: string, id: string): Promise<void>;
+}
+```
+
+### IUploadService
+
+File upload operations abstracted from the underlying storage mechanism (SharePoint Embedded, Blob Storage, etc.):
+
+```typescript
+export interface IUploadService {
+  uploadFile(entityName: string, entityId: string, file: File, options?: UploadOptions): Promise<UploadResult>;
+  getContainerIdForEntity(entityName: string, entityId: string): Promise<string>;
+}
+```
+
+### INavigationService
+
+Navigation and dialog operations abstracted from `Xrm.Navigation`:
+
+```typescript
+export interface INavigationService {
+  openRecord(entityName: string, entityId: string): Promise<void>;
+  openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult>;
+  closeDialog(result?: unknown): void;
+}
+```
+
+### How Components Consume Services
+
+Services are passed as props from the consumer (Code Page wrapper, PCF control, or test harness). The shared component never imports platform APIs.
+
+```typescript
+// ✅ CORRECT — shared component accepts service via props
+interface ICreateMatterWizardProps {
+  matterId: string;
+  dataService: IDataService;
+  uploadService: IUploadService;
+  navigationService: INavigationService;
+}
+
+// ❌ WRONG — shared component imports Xrm directly
+import { getXrm } from "../utils/xrmContext"; // This belongs in the adapter, not the component
+```
+
+---
+
+## Adapter Pattern (Xrm, BFF, Mock)
+
+Pre-built adapter factories in `src/utils/adapters/` wire the service interfaces to concrete platforms. Consumers call the factory in their entry point and pass the result as props.
+
+### When to Use Each Adapter
+
+| Adapter | Factory Function | Use Case |
+|---------|-----------------|----------|
+| **Xrm** | `createXrmDataService()` | Code Pages running inside Dataverse (Xrm global available) |
+| | `createXrmUploadService(bffBaseUrl)` | File uploads via BFF API from a Code Page |
+| | `createXrmNavigationService()` | Navigation/dialogs from a Code Page |
+| **BFF** | `createBffDataService(authFetch, bffBaseUrl)` | Power Pages SPA (no Xrm, all data via BFF API) |
+| | `createBffUploadService(authFetch, bffBaseUrl)` | File uploads from the SPA |
+| | `createBffNavigationService(navigate?)` | SPA router navigation |
+| **Mock** | `createMockDataService()` | Unit tests with `jest.fn()` stubs |
+| | `createMockUploadService()` | Unit tests |
+| | `createMockNavigationService()` | Unit tests |
+
+### Example: Wiring Adapters in a Code Page
+
+```typescript
+// main.tsx — Code Page entry point
+import { createXrmDataService, createXrmUploadService, createXrmNavigationService } from "@spaarke/ui-components";
+
+const dataService = createXrmDataService();
+const uploadService = createXrmUploadService("https://spe-api-dev-67e2xz.azurewebsites.net");
+const navigationService = createXrmNavigationService();
+
+createRoot(document.getElementById("root")!).render(
+    <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
+        <CreateMatterWizard
+            dataService={dataService}
+            uploadService={uploadService}
+            navigationService={navigationService}
+        />
+    </FluentProvider>
+);
+```
+
+### Example: Wiring Adapters in a Test
+
+```typescript
+import { createMockDataService, createMockUploadService, createMockNavigationService } from "@spaarke/ui-components";
+
+const mockData = createMockDataService();
+const mockUpload = createMockUploadService();
+const mockNav = createMockNavigationService();
+
+render(
+    <FluentProvider theme={webLightTheme}>
+        <CreateMatterWizard dataService={mockData} uploadService={mockUpload} navigationService={mockNav} />
+    </FluentProvider>
+);
+
+expect(mockData.createRecord).toHaveBeenCalledWith("sprk_matter", expect.objectContaining({ sprk_name: "Test" }));
+```
+
+---
+
+## Code Page Wizard Wrapper Pattern
+
+Code Page wrappers are thin `main.tsx` entry points that bootstrap a shared-library wizard component. The wrapper handles platform-specific setup (React 18 `createRoot`, Fluent theme, adapter wiring) while all wizard logic lives in `@spaarke/ui-components`.
+
+**Key rule**: The Code Page wrapper contains **zero business logic**. It reads URL params, creates adapters, and renders the shared wizard.
+
+```
+src/client/code-pages/CreateMatterWizard/
+├── index.html          # HTML shell with #root div
+├── package.json        # React 18, Fluent v9, shared library dep
+├── main.tsx            # ~30 lines: createRoot + adapter wiring
+└── vite.config.ts      # Vite + singlefile (standard template)
+```
+
+All wizard steps, validation, entity creation logic, and orchestration are in the shared library (`src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/`).
+
+For the full project structure template and build tooling, see the [Full-Page Custom Page Template](../../.claude/patterns/webresource/full-page-custom-page.md) pattern. For dialog-specific patterns (opening, closing, parameter passing), see [Dialog Patterns](../../.claude/patterns/pcf/dialog-patterns.md).
 
 ---
 
@@ -263,6 +442,7 @@ Import in your consumer project. Remember: PCF uses deep imports, Code Pages use
 |---------|------|-------------|
 | 1.0.0 | Oct 2025 | Initial: DataGrid, SprkButton, themes, formatters |
 | 2.0.0 | Feb 2026 | Fluent v9 selective imports, WizardShell, SidePaneShell, RichTextEditor, SprkChat, DiffCompareView, LookupField, SendEmailDialog, AiSummaryPopover, FindSimilarDialog |
+| 2.1.0 | Mar 2026 | CreateRecordWizard, PlaybookLibraryShell, domain wizards (Matter, Project, Event, Todo, WorkAssignment, SummarizeFiles), IDataService/IUploadService/INavigationService interfaces, Xrm/BFF/Mock adapters |
 
 **Packaged tarballs**: `spaarke-ui-components-1.0.0.tgz`, `spaarke-ui-components-2.0.0.tgz`
 
@@ -288,8 +468,11 @@ Import in your consumer project. Remember: PCF uses deep imports, Code Pages use
 | ADR-012 (concise) | `.claude/adr/ADR-012-shared-components.md` |
 | ADR-021 (Fluent v9) | `docs/adr/ADR-021-fluent-design-system.md` |
 | ADR-022 (PCF platform libs) | `docs/adr/ADR-022-pcf-platform-libraries.md` |
+| Dialog Patterns | `.claude/patterns/pcf/dialog-patterns.md` |
+| Full-Page Custom Page Template | `.claude/patterns/webresource/full-page-custom-page.md` |
+| Service Interfaces (source) | `src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts` |
 | PCF Deployment Guide | `docs/guides/PCF-DEPLOYMENT-GUIDE.md` |
 
 ---
 
-*Last updated: 2026-03-10*
+*Last updated: 2026-03-19*
