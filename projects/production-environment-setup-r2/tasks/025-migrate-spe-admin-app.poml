@@ -1,0 +1,61 @@
+<task id="ENV-025" project="Production Environment Setup R2">
+  <metadata>
+    <title>Migrate SpeAdminApp to runtime config resolution</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>code-page, typescript, auth, config, vite</tags>
+    <parallel-group>3</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate SpeAdminApp solution (src/solutions/SpeAdminApp/) from build-time .env.production config to runtime Dataverse Environment Variable resolution using resolveRuntimeConfig() from @spaarke/auth. NOTE: SpeAdminApp uses Vite (not webpack) — update vite.config.ts instead of webpack.config.js. Replace all import.meta.env references to BFF URL and MSAL Client ID with runtime resolution at bootstrap.
+    IMPORTANT: SpeAdminApp has a bffConfig.ts (src/solutions/SpeAdminApp/src/config/bffConfig.ts) from the prior CORS hotfix that uses window.__SPAARKE_BFF_URL__ (NOTE: inconsistent key — missing _BASE_). This file must be replaced by resolveRuntimeConfig() — delete bffConfig.ts and update all imports.
+  </prompt>
+
+  <role>React developer with Dataverse web resource experience</role>
+
+  <goal>
+    SpeAdminApp resolves BFF URL and MSAL Client ID from Dataverse Environment Variables at runtime. Build-time .env.production values are no longer used for these settings. The Vite build succeeds and the resulting web resource runs correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Code pages are standalone React 18 dialogs — use createRoot</constraint>
+    <constraint source="ADR-022">Code pages bundle their own React 18 (not platform-provided)</constraint>
+    <constraint source="project">Uses Vite, not webpack — adjust config accordingly</constraint>
+    <constraint source="project">Keep .env.development for local dev workflow</constraint>
+    <constraint source="project">Must work in Dataverse iframe context</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/index.tsx</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current bootstrap">Read SpeAdminApp entry point (main.tsx). Identify all import.meta.env references for BFF URL and MSAL Client ID.</step>
+    <step order="2" name="Replace with runtime resolution">Replace import.meta.env references and bffConfig.ts imports with resolveRuntimeConfig() call. Delete bffConfig.ts. Update bootstrap sequence to await config before render.</step>
+    <step order="3" name="Clean .env.production">Remove BFF URL and MSAL client ID from .env.production (or remove file if empty).</step>
+    <step order="4" name="Update vite.config.ts">Remove any define entries in vite.config.ts that injected BFF URL or MSAL client ID at build time.</step>
+    <step order="5" name="Build and verify">Run npm run build from SpeAdminApp directory. Verify bundle doesn't contain hardcoded dev URLs.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/SpeAdminApp/src/main.tsx</output>
+    <output type="code">src/solutions/SpeAdminApp/.env.production</output>
+    <output type="code">src/solutions/SpeAdminApp/vite.config.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpeAdminApp resolves BFF URL from Dataverse at runtime</criterion>
+    <criterion testable="true">.env.production does not contain BFF URL or MSAL client ID</criterion>
+    <criterion testable="true">npm run build succeeds (Vite build)</criterion>
+    <criterion testable="true">Built bundle does not contain "spe-api-dev" or hardcoded MSAL client ID</criterion>
+    <criterion testable="true">bffConfig.ts is deleted and no imports reference it</criterion>
+  </acceptance-criteria>
+</task>

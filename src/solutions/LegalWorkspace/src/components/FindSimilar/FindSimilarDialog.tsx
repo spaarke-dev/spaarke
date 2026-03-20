@@ -12,7 +12,7 @@ import { FindSimilarDialog as SharedFindSimilarDialog } from '@spaarke/ui-compon
 import type { IFindSimilarServiceConfig, INavigationMessage } from '@spaarke/ui-components/components/FindSimilar/findSimilarTypes';
 import type { IFilePreviewServices } from '@spaarke/ui-components/components/FilePreview/filePreviewTypes';
 import { authenticatedFetch } from '../../services/authInit';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { navigateToEntity } from '../../utils/navigation';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
 import { copyDocumentLink, setWorkspaceFlag } from '../FilePreview/filePreviewService';

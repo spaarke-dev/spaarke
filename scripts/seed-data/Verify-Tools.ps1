@@ -1,6 +1,6 @@
 # Verify Tool records exist
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com"
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL
 )
 
 $token = az account get-access-token --resource $EnvironmentUrl --query 'accessToken' -o tsv

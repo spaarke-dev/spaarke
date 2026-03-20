@@ -1,5 +1,14 @@
-$env:DATAVERSE_URL = 'https://spaarkedev1.crm.dynamics.com'
-$token = az account get-access-token --resource $env:DATAVERSE_URL --query 'accessToken' -o tsv
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$env:DATAVERSE_URL = $DataverseUrl
+$token = az account get-access-token --resource $DataverseUrl --query 'accessToken' -o tsv
 $headers = @{
     'Authorization' = "Bearer $token"
     'Accept' = 'application/json'

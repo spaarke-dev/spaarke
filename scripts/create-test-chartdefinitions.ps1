@@ -1,6 +1,6 @@
 # Create test chart definition records for all visual types
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [switch]$DryRun
 )
 

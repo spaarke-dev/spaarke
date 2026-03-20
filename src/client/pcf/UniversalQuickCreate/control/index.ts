@@ -261,6 +261,7 @@ function setupThemeListener(
   };
 }
 import { MsalAuthProvider } from './services/auth/MsalAuthProvider';
+import { RuntimeMsalConfig } from './services/auth/msalConfig';
 import {
   MultiFileUploadService,
   FileUploadService,
@@ -269,6 +270,7 @@ import {
   PcfDataverseClient,
 } from '@spaarke/ui-components/src/services/document-upload';
 import { SdapApiClientFactory } from './services/SdapApiClientFactory';
+import { getApiBaseUrl, getEnvironmentVariable } from '../../shared/utils/environmentVariables';
 import { getEntityDocumentConfig, isEntitySupported, getSupportedEntities } from './config/EntityDocumentConfig';
 import { ParentContext } from './types';
 import { DocumentUploadForm } from './components/DocumentUploadForm';
@@ -395,8 +397,13 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
       // Step 2: Validate parent entity is supported
       this.validateParentEntity();
 
-      // Step 3: Initialize MSAL authentication
+      // Step 3: Initialize MSAL authentication (resolves config from env vars)
       await this.initializeMsalAsync();
+
+      // Step 3.5: Resolve BFF API base URL from Dataverse environment variable
+      const bffApiUrl = await getApiBaseUrl(context.webAPI);
+      this.apiBaseUrl = bffApiUrl;
+      logInfo('UniversalDocumentUpload', 'BFF API URL resolved from environment variable', { bffApiUrl });
 
       // Step 4: Initialize services
       this.initializeServices(context);
@@ -489,16 +496,43 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
   }
 
   /**
-   * Initialize MSAL authentication
+   * Initialize MSAL authentication with runtime-resolved config.
+   *
+   * Resolves CLIENT_ID from Dataverse environment variable sprk_MsalClientId,
+   * BFF API App ID URI from sprk_BffApiAppId, and redirect URI from Xrm context.
+   * No hardcoded values.
    */
   private async initializeMsalAsync(): Promise<void> {
     try {
       logInfo('UniversalDocumentUpload', 'Initializing MSAL authentication...');
 
+      // Resolve MSAL Client ID from Dataverse environment variable
+      // getEnvironmentVariable throws if not found, so result is always string
+      const clientId = (await getEnvironmentVariable(this.context.webAPI, 'sprk_MsalClientId')) as string;
+
+      // Resolve redirect URI from Dataverse client URL
+      const redirectUri = (Xrm as any).Utility.getGlobalContext().getClientUrl() as string;
+
+      // Resolve BFF API App ID URI from environment variable
+      const bffApiAppIdUri = (await getEnvironmentVariable(this.context.webAPI, 'sprk_BffApiAppId')) as string;
+
+      const runtimeConfig: RuntimeMsalConfig = {
+        clientId,
+        redirectUri,
+        bffApiAppIdUri,
+      };
+
+      logInfo('UniversalDocumentUpload', 'Runtime MSAL config resolved', {
+        clientId: clientId.substring(0, 8) + '...',
+        redirectUri,
+        bffApiAppIdUri,
+      });
+
       this.authProvider = MsalAuthProvider.getInstance();
+      this.authProvider.configure(runtimeConfig);
       await this.authProvider.initialize();
 
-      logInfo('UniversalDocumentUpload', 'MSAL authentication initialized ✅');
+      logInfo('UniversalDocumentUpload', 'MSAL authentication initialized');
 
       if (this.authProvider.isAuthenticated()) {
         const accountInfo = this.authProvider.getAccountDebugInfo();
@@ -515,7 +549,14 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
    */
   private initializeServices(context: ComponentFramework.Context<IInputs>): void {
     // Get API base URL
-    const rawApiUrl = context.parameters.sdapApiBaseUrl?.raw || 'spe-api-dev-67e2xz.azurewebsites.net/api';
+    // BFF API base URL already resolved from env var in initializeAsync step 3.5
+    const rawApiUrl = this.apiBaseUrl || context.parameters.sdapApiBaseUrl?.raw || '';
+    if (!rawApiUrl) {
+      throw new Error(
+        '[UniversalDocumentUpload] BFF API base URL not configured. ' +
+          'Ensure sprk_BffApiBaseUrl is defined as a Dataverse environment variable.'
+      );
+    }
     const apiBaseUrl =
       rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://') ? rawApiUrl : `https://${rawApiUrl}`;
 
@@ -537,11 +578,8 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     const navMapClient = new NavMapClient({
       baseUrl: navMapBaseUrl,
       getAccessToken: async () => {
-        // Reuse same MSAL auth as file operations
-        // Use same OAuth scope as msalConfig.ts (full application ID URI)
-        const token = await this.authProvider.getToken([
-          'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation',
-        ]);
+        // Reuse same MSAL auth as file operations — scopes from runtime config
+        const token = await this.authProvider.getToken(this.authProvider.getBffApiScopes());
         return token;
       },
       onUnauthorized: () => {
@@ -641,7 +679,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
    */
   private async getAuthToken(): Promise<string> {
     logInfo('UniversalDocumentUpload', 'Acquiring auth token for AI Summary');
-    const token = await this.authProvider.getToken(['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation']);
+    const token = await this.authProvider.getToken(this.authProvider.getBffApiScopes());
     return token;
   }
 

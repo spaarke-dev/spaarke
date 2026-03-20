@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-003" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix appsettings CORS configuration and add missing tokens</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>1</phase>
+    <tags>bff-api, config, infrastructure</tags>
+    <parallel-group>1A</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Ensure appsettings.Production.json CORS origins use token substitution (not hardcoded dev values). Add any missing token placeholders to appsettings.template.json (SHARE_LINK_BASE_URL, DATAVERSE_APP_ID). Fix the AiSearch endpoint placeholder that uses "[your-search-endpoint]" instead of #{...}# format.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Azure App Service configuration</role>
+
+  <goal>
+    All appsettings files use consistent #{TOKEN}# format for environment-specific values. Zero hardcoded dev references in production config.
+  </goal>
+
+  <constraints>
+    <constraint source="azure-deployment">CORS must include both .crm.dynamics.com and .api.crm.dynamics.com origins</constraint>
+    <constraint source="project">Token format must be #{TOKEN_NAME}# for CI/CD pipeline substitution</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.tokens.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Audit appsettings">Read all appsettings*.json files. Identify any hardcoded dev values or missing tokens.</step>
+    <step order="2" name="Fix CORS">Ensure CORS uses #{DATAVERSE_ORG_NAME}# tokens, not hardcoded org names.</step>
+    <step order="3" name="Add missing tokens">Add #{SHARE_LINK_BASE_URL}#, #{DATAVERSE_APP_ID}# to template. Fix AiSearch endpoint placeholder.</step>
+    <step order="4" name="Update tokens doc">Update appsettings.tokens.md with new token descriptions.</step>
+    <step order="5" name="Verify build">Run dotnet build.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.template.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.tokens.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero "spaarkedev1" in any appsettings*.json file</criterion>
+    <criterion testable="true">All environment-specific values use #{TOKEN}# format</criterion>
+    <criterion testable="true">AiSearch endpoint uses #{AI_SEARCH_ENDPOINT}# or similar token</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

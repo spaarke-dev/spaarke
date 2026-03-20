@@ -1,0 +1,48 @@
+<task id="ENV-046" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix ribbon webresource JS files in infrastructure/dataverse/ribbon/</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <tags>webresource, javascript, ribbon, config</tags>
+    <parallel-group>5</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Fix hardcoded BFF app IDs and URLs in ribbon webresource JS files under infrastructure/dataverse/ribbon/. These include CommunicationRibbons, DocumentRibbons, and EmailRibbons WebResources directories. Replace with Dataverse Environment Variable queries.
+  </prompt>
+
+  <role>JavaScript developer with Dataverse ribbon experience</role>
+
+  <goal>All ribbon JS webresources resolve BFF config from Dataverse Environment Variables. Zero hardcoded IDs or URLs.</goal>
+
+  <constraints>
+    <constraint source="ADR-006">No business logic in ribbon scripts</constraint>
+    <constraint source="project">Ribbon JS cannot import npm packages — use Xrm.WebApi inline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Find all ribbon JS">Search infrastructure/dataverse/ribbon/ for hardcoded 1e40baad or spaarkedev1.</step>
+    <step order="2" name="Replace each file">For each file, replace hardcoded values with Xrm.WebApi env var query (same pattern as task 040).</step>
+    <step order="3" name="Sync with src/solutions">Ensure changes are consistent between infrastructure/dataverse/ribbon/ copies and src/solutions/webresources/ copies.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">infrastructure/dataverse/ribbon/CommunicationRibbons/WebResources/*.js</output>
+    <output type="code">infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/*.js</output>
+    <output type="code">infrastructure/dataverse/ribbon/EmailRibbons/WebResources/*.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hardcoded "1e40baad" in ribbon JS files</criterion>
+    <criterion testable="true">Zero hardcoded "spaarkedev1" in ribbon JS files</criterion>
+    <criterion testable="true">Values resolved from Dataverse Environment Variables</criterion>
+  </acceptance-criteria>
+</task>

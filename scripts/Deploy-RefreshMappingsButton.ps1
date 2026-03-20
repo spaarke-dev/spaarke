@@ -24,7 +24,7 @@
 
 param(
     [Parameter(Mandatory = $false)]
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
 
     [Parameter(Mandatory = $false)]
     [string]$SolutionName = "spaarke_core"

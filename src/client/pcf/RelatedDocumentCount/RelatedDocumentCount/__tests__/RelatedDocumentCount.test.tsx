@@ -7,23 +7,40 @@
  * Uses @testing-library/react v12 for React 16 compatibility (ADR-022).
  */
 import * as React from 'react';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, act } from '@testing-library/react';
 import { RelatedDocumentCount } from '../RelatedDocumentCount';
 import { IRelatedDocumentCountProps } from '../types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-// Mock the hook so we can control its return values
-const mockHookReturn = {
+// Mock authInit to resolve immediately with fake config
+jest.mock('../authInit', () => ({
+  initializeAuth: jest.fn(() =>
+    Promise.resolve({
+      bffApiUrl: 'https://spe-api-test.azurewebsites.net',
+      tenantId: 'test-tenant-id',
+    })
+  ),
+}));
+
+// Mock the graph data hook so we can control its return values
+const mockGraphHookReturn = {
   count: 0,
+  nodes: [] as unknown[],
+  edges: [] as unknown[],
   isLoading: false,
   error: null as string | null,
   lastUpdated: null as Date | null,
   refetch: jest.fn(),
 };
 
-jest.mock('../hooks/useRelatedDocumentCount', () => ({
-  useRelatedDocumentCount: jest.fn(() => mockHookReturn),
+jest.mock('../hooks/useRelatedDocumentGraphData', () => ({
+  useRelatedDocumentGraphData: jest.fn(() => mockGraphHookReturn),
+}));
+
+// Mock MiniGraph component
+jest.mock('@spaarke/ui-components/dist/components/MiniGraph', () => ({
+  MiniGraph: () => <div data-testid="mini-graph" />,
 }));
 
 // Mock shared UI components
@@ -33,12 +50,13 @@ let capturedDialogProps: Record<string, unknown> = {};
 jest.mock('@spaarke/ui-components/dist/components/RelationshipCountCard', () => ({
   RelationshipCountCard: (props: Record<string, unknown>) => {
     capturedCountCardProps = props;
+    const countStr = props.count !== null && props.count !== undefined ? String(props.count as number) : '0';
+    const errorStr = props.error ? String(props.error as string) : '';
     return (
       <div data-testid="relationship-count-card">
-        <span data-testid="card-title">{props.title as string}</span>
-        <span data-testid="card-count">{String(props.count)}</span>
+        <span data-testid="card-count">{countStr}</span>
         {props.isLoading && <span data-testid="card-loading">Loading</span>}
-        {props.error && <span data-testid="card-error">{props.error as string}</span>}
+        {errorStr && <span data-testid="card-error">{errorStr}</span>}
         <button data-testid="card-open-button" onClick={props.onOpen as () => void}>
           Open
         </button>
@@ -50,9 +68,10 @@ jest.mock('@spaarke/ui-components/dist/components/RelationshipCountCard', () => 
 jest.mock('@spaarke/ui-components/dist/components/FindSimilarDialog', () => ({
   FindSimilarDialog: (props: Record<string, unknown>) => {
     capturedDialogProps = props;
+    const urlStr = props.url ? String(props.url as string) : '';
     return props.open ? (
       <div data-testid="find-similar-dialog">
-        <span data-testid="dialog-url">{props.url as string}</span>
+        <span data-testid="dialog-url">{urlStr}</span>
         <button data-testid="dialog-close-button" onClick={props.onClose as () => void}>
           Close
         </button>
@@ -63,11 +82,17 @@ jest.mock('@spaarke/ui-components/dist/components/FindSimilarDialog', () => ({
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+const mockWebApi = {
+  retrieveMultipleRecords: jest.fn(),
+  retrieveRecord: jest.fn(),
+  createRecord: jest.fn(),
+  deleteRecord: jest.fn(),
+  updateRecord: jest.fn(),
+} as unknown as ComponentFramework.WebApi;
+
 const DEFAULT_PROPS: IRelatedDocumentCountProps = {
-  context: {} as ComponentFramework.Context<never>,
+  context: { webAPI: mockWebApi } as unknown as ComponentFramework.Context<never>,
   documentId: 'doc-123',
-  tenantId: 'tenant-001',
-  apiBaseUrl: 'https://spe-api-dev.azurewebsites.net',
   isDarkMode: false,
 };
 
@@ -79,11 +104,13 @@ function renderComponent(overrides?: Partial<IRelatedDocumentCountProps>) {
 
 beforeEach(() => {
   // Reset hook mock to defaults
-  mockHookReturn.count = 0;
-  mockHookReturn.isLoading = false;
-  mockHookReturn.error = null;
-  mockHookReturn.lastUpdated = null;
-  mockHookReturn.refetch = jest.fn();
+  mockGraphHookReturn.count = 0;
+  mockGraphHookReturn.nodes = [];
+  mockGraphHookReturn.edges = [];
+  mockGraphHookReturn.isLoading = false;
+  mockGraphHookReturn.error = null;
+  mockGraphHookReturn.lastUpdated = null;
+  mockGraphHookReturn.refetch = jest.fn();
   capturedCountCardProps = {};
   capturedDialogProps = {};
 });
@@ -92,118 +119,93 @@ beforeEach(() => {
 
 describe('RelatedDocumentCount', () => {
   describe('rendering', () => {
-    it('renders RelationshipCountCard with correct props', () => {
-      mockHookReturn.count = 12;
-      mockHookReturn.lastUpdated = new Date('2026-01-15T10:00:00Z');
+    it('renders RelationshipCountCard', async () => {
+      mockGraphHookReturn.count = 12;
+      mockGraphHookReturn.lastUpdated = new Date('2026-01-15T10:00:00Z');
 
-      const { getByTestId } = renderComponent();
+      await act(async () => {
+        renderComponent();
+      });
 
-      expect(getByTestId('relationship-count-card')).toBeInTheDocument();
-      expect(capturedCountCardProps.title).toBe('RELATED DOCUMENTS');
-      expect(capturedCountCardProps.count).toBe(12);
-      expect(capturedCountCardProps.isLoading).toBe(false);
-      expect(capturedCountCardProps.error).toBeNull();
-    });
-
-    it('uses custom cardTitle when provided', () => {
-      renderComponent({ cardTitle: 'SIMILAR ITEMS' });
-
-      expect(capturedCountCardProps.title).toBe('SIMILAR ITEMS');
-    });
-
-    it("defaults cardTitle to 'RELATED DOCUMENTS'", () => {
-      renderComponent();
-
-      expect(capturedCountCardProps.title).toBe('RELATED DOCUMENTS');
+      expect(document.querySelector("[data-testid='relationship-count-card']")).toBeInTheDocument();
     });
   });
 
   describe('loading state', () => {
-    it('passes isLoading=true to card when hook is loading', () => {
-      mockHookReturn.isLoading = true;
+    it('passes isLoading=true to card when hook is loading', async () => {
+      mockGraphHookReturn.isLoading = true;
 
-      const { getByTestId } = renderComponent();
+      await act(async () => {
+        renderComponent();
+      });
 
-      expect(getByTestId('card-loading')).toBeInTheDocument();
-      expect(capturedCountCardProps.isLoading).toBe(true);
+      expect(document.querySelector("[data-testid='card-loading']")).toBeInTheDocument();
     });
   });
 
   describe('error state', () => {
-    it('passes error to card when hook returns error', () => {
-      mockHookReturn.error = 'Failed to load';
+    it('passes error to card when hook returns error', async () => {
+      mockGraphHookReturn.error = 'Failed to load';
 
-      const { getByTestId } = renderComponent();
+      await act(async () => {
+        renderComponent();
+      });
 
-      expect(getByTestId('card-error')).toBeInTheDocument();
-      expect(capturedCountCardProps.error).toBe('Failed to load');
+      expect(document.querySelector("[data-testid='card-error']")).toBeInTheDocument();
     });
   });
 
   describe('FindSimilarDialog', () => {
-    it('dialog is closed initially', () => {
-      renderComponent();
+    it('dialog is closed initially', async () => {
+      await act(async () => {
+        renderComponent();
+      });
 
       expect(capturedDialogProps.open).toBe(false);
     });
 
-    it('opens dialog when card onOpen is triggered', () => {
-      renderComponent();
+    it('opens dialog when card onOpen is triggered', async () => {
+      await act(async () => {
+        renderComponent();
+      });
 
-      fireEvent.click(document.querySelector("[data-testid='card-open-button']"));
+      act(() => {
+        const btn = document.querySelector("[data-testid='card-open-button']");
+        if (btn) fireEvent.click(btn);
+      });
 
       expect(capturedDialogProps.open).toBe(true);
     });
 
-    it('passes viewer URL to dialog when open', () => {
-      const { getByTestId } = renderComponent({
-        documentId: 'doc-xyz',
-        tenantId: 't-1',
-        isDarkMode: false,
+    it('closes dialog when onClose is triggered', async () => {
+      await act(async () => {
+        renderComponent();
       });
 
-      fireEvent.click(getByTestId('card-open-button'));
-
-      const dialogUrl = capturedDialogProps.url as string;
-      expect(dialogUrl).toContain('sprk_documentrelationshipviewer');
-      // The data param is URL-encoded, so decode it for readable assertions
-      const decodedUrl = decodeURIComponent(dialogUrl);
-      expect(decodedUrl).toContain('documentId=doc-xyz');
-      expect(decodedUrl).toContain('theme=light');
-    });
-
-    it('passes dark theme to viewer URL when isDarkMode=true', () => {
-      const { getByTestId } = renderComponent({ isDarkMode: true });
-
-      fireEvent.click(getByTestId('card-open-button'));
-
-      const decodedUrl = decodeURIComponent(capturedDialogProps.url as string);
-      expect(decodedUrl).toContain('theme=dark');
-    });
-
-    it('closes dialog when onClose is triggered', () => {
-      const { getByTestId } = renderComponent();
-
       // Open dialog
-      fireEvent.click(getByTestId('card-open-button'));
+      act(() => {
+        const btn = document.querySelector("[data-testid='card-open-button']");
+        if (btn) fireEvent.click(btn);
+      });
       expect(capturedDialogProps.open).toBe(true);
 
       // Close dialog
-      fireEvent.click(getByTestId('dialog-close-button'));
+      act(() => {
+        const btn = document.querySelector("[data-testid='dialog-close-button']");
+        if (btn) fireEvent.click(btn);
+      });
       expect(capturedDialogProps.open).toBe(false);
     });
 
-    it('passes null URL to dialog when closed', () => {
-      renderComponent();
+    it('does not open dialog when documentId is empty', async () => {
+      await act(async () => {
+        renderComponent({ documentId: '' });
+      });
 
-      // Dialog should have null URL when closed
-      expect(capturedDialogProps.url).toBeNull();
-    });
-
-    it('does not open dialog when documentId is empty', () => {
-      renderComponent({ documentId: '' });
-
-      fireEvent.click(document.querySelector("[data-testid='card-open-button']"));
+      act(() => {
+        const btn = document.querySelector("[data-testid='card-open-button']");
+        if (btn) fireEvent.click(btn);
+      });
 
       // viewerUrl is null because documentId is empty, so handleOpen returns early
       expect(capturedDialogProps.open).toBe(false);

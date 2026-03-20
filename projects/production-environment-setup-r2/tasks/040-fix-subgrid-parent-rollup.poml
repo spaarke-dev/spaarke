@@ -1,0 +1,54 @@
+<task id="ENV-040" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix sprk_subgrid_parent_rollup.js — replace org-to-BFF URL map with env var query</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <tags>webresource, javascript, config</tags>
+    <parallel-group>5</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded org-to-BFF URL mapping in sprk_subgrid_parent_rollup.js with a Dataverse Environment Variable query for sprk_BffApiBaseUrl. This is CRITICAL — new customer orgs currently fall back to dev URL.
+    ACTUAL PATTERN (from prior CORS hotfix): The file uses inline if-else chains with getClientUrl() hostname matching, NOT a named map object:
+      if (clientUrl.indexOf("spaarkedev1.crm.dynamics.com") !== -1) return "https://spe-api-dev-67e2xz.azurewebsites.net";
+      else if (clientUrl.indexOf("spaarkeuat.crm.dynamics.com") !== -1) return "https://spaarke-bff-uat.azurewebsites.net";
+      else if (clientUrl.indexOf("spaarkeprod.crm.dynamics.com") !== -1) return "https://spaarke-bff-prod.azurewebsites.net";
+    Note: includes UAT and prod entries, not just dev. All must be replaced with env var query.
+  </prompt>
+
+  <role>JavaScript developer with Dataverse web resource experience</role>
+
+  <goal>sprk_subgrid_parent_rollup.js resolves BFF URL from Dataverse Environment Variables at runtime. No hardcoded org-to-URL mapping remains.</goal>
+
+  <constraints>
+    <constraint source="ADR-006">No business logic in ribbon scripts; no remote calls from ribbon scripts</constraint>
+    <constraint source="project">Legacy JS webresources cannot import npm packages — use inline fetch</constraint>
+    <constraint source="project">Must work without @spaarke/auth (legacy JS context)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/webresources/sprk_subgrid_parent_rollup.js</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current code">Read sprk_subgrid_parent_rollup.js. Understand the org-to-URL mapping logic.</step>
+    <step order="2" name="Replace with env var query">Replace hardcoded map with Xrm.WebApi.retrieveMultipleRecords query for environmentvariabledefinition + environmentvariablevalue. Follow pattern from environmentVariables.ts but in vanilla JS.</step>
+    <step order="3" name="Add caching">Cache the resolved URL (sessionStorage or module-level variable) to avoid repeated queries.</step>
+    <step order="4" name="Remove hardcoded BFF app ID">Also replace hardcoded 1e40baad if present.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/webresources/sprk_subgrid_parent_rollup.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No hardcoded "spaarkedev1", "spaarkeuat", "spaarkeprod", or org-to-URL mapping in the file</criterion>
+    <criterion testable="true">BFF URL resolved from Dataverse Environment Variables</criterion>
+    <criterion testable="true">Result is cached to avoid repeated queries</criterion>
+  </acceptance-criteria>
+</task>

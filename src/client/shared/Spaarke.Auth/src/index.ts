@@ -7,6 +7,10 @@ export { AuthError, ApiError } from './errors';
 // Config
 export { resolveConfig, TOKEN_EXPIRY_BUFFER_MS, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
 
+// Runtime config (Dataverse environment variable resolution)
+export { resolveRuntimeConfig, clearRuntimeConfigCache } from './resolveRuntimeConfig';
+export type { IRuntimeConfig } from './resolveRuntimeConfig';
+
 // Token bridge
 export { publishToken, readBridgeToken, clearBridgeToken } from './tokenBridge';
 

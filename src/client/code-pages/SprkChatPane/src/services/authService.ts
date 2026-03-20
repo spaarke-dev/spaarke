@@ -19,7 +19,7 @@
  */
 
 import { PublicClientApplication } from '@azure/msal-browser';
-import { msalConfig, BFF_API_SCOPE } from '../config/msalConfig';
+import { msalConfig } from '../config/msalConfig';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -188,7 +188,12 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
   const msal = await ensureMsalInitialized();
   if (!msal) return null;
 
-  const scopes = [BFF_API_SCOPE];
+  const scope = window.__SPAARKE_BFF_API_SCOPE__;
+  if (!scope) {
+    console.warn(`${LOG_PREFIX} BFF API scope not configured. Ensure resolveRuntimeConfig() has been called before MSAL token acquisition.`);
+    return null;
+  }
+  const scopes = [scope];
 
   try {
     // Try acquireTokenSilent first (uses cached token / refresh token)

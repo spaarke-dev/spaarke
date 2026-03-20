@@ -30,7 +30,7 @@ import { searchMatterTypes, searchPracticeAreas } from './workAssignmentService'
 import type { ICreateWorkAssignmentFormState } from './formTypes';
 import type { IWebApi } from '../../types/xrm';
 import { authenticatedFetch } from '../../services/authInit';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 
 // ---------------------------------------------------------------------------
 // Props

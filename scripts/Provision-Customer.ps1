@@ -12,9 +12,12 @@
       5. Create Dataverse environment via Power Platform Admin API
       6. Wait for Dataverse environment provisioning
       7. Import managed solutions (Deploy-DataverseSolutions.ps1)
-      8. Provision SPE containers
-      9. Register customer in BFF API tenant registry
-      10. Run smoke tests (Test-Deployment.ps1)
+      8. Set Dataverse Environment Variables (7 required variables)
+      9. Generate environment-config.json
+      10. Provision SPE containers
+      11. Register customer in BFF API tenant registry
+      12. Run smoke tests (Test-Deployment.ps1)
+      13. Validate deployed environment (Validate-DeployedEnvironment.ps1)
 
     The script is idempotent — safe to re-run if partially failed (FR-10).
     Progress is tracked in a state file so the script can resume from the last
@@ -58,6 +61,22 @@
     Base URL of the BFF API for tenant registration and smoke tests.
     Default: https://api.spaarke.com
 
+.PARAMETER BffApiAppId
+    App registration (client ID) that the BFF API uses for Entra ID authentication.
+    Stored as Dataverse Environment Variable sprk_BffApiAppId.
+
+.PARAMETER MsalClientId
+    MSAL client ID for the Dataverse-hosted SPA (PCF controls and code pages).
+    Stored as Dataverse Environment Variable sprk_MsalClientId.
+
+.PARAMETER AzureOpenAiEndpoint
+    Azure OpenAI resource endpoint URL (e.g., https://myorg-openai-prod.openai.azure.com/).
+    Stored as Dataverse Environment Variable sprk_AzureOpenAiEndpoint.
+
+.PARAMETER ShareLinkBaseUrl
+    Base URL for generating shareable document links.
+    Stored as Dataverse Environment Variable sprk_ShareLinkBaseUrl.
+
 .PARAMETER DataverseRegion
     Region for Dataverse environment creation (default: unitedstates).
 
@@ -65,7 +84,7 @@
     Resume from a specific step number (1-10). Overrides state file detection.
 
 .PARAMETER SkipDataverse
-    Skip Dataverse provisioning steps (5-7). Use when Dataverse env already exists.
+    Skip Dataverse provisioning steps (5-8). Use when Dataverse env already exists.
 
 .PARAMETER WhatIf
     Show what would be provisioned without executing.
@@ -127,9 +146,19 @@ param(
 
     [string]$BffApiBaseUrl = 'https://api.spaarke.com',
 
+    [Parameter(Mandatory = $true)]
+    [string]$BffApiAppId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$MsalClientId,
+
+    [string]$AzureOpenAiEndpoint,
+
+    [string]$ShareLinkBaseUrl,
+
     [string]$DataverseRegion = 'unitedstates',
 
-    [ValidateRange(1, 10)]
+    [ValidateRange(1, 13)]
     [int]$ResumeFromStep = 0,
 
     [switch]$SkipDataverse
@@ -141,7 +170,7 @@ $ErrorActionPreference = "Stop"
 # CONFIGURATION
 # ============================================================================
 
-$TotalSteps = 10
+$TotalSteps = 13
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = (Resolve-Path "$ScriptRoot\..").Path
 $BicepTemplate = Join-Path $RepoRoot "infrastructure" "bicep" "customer.bicep"
@@ -326,12 +355,12 @@ function Invoke-Step1_ValidatePrerequisites {
                 Write-Log "PAC CLI: available ($script:PacExe)"
             }
             else {
-                Write-Log "PAC CLI not found. Dataverse steps (5-7) will require manual execution." -Level WARN
+                Write-Log "PAC CLI not found. Dataverse steps (5-8) will require manual execution." -Level WARN
                 Write-Log "Install: dotnet tool install --global Microsoft.PowerApps.CLI.Tool" -Level WARN
             }
         }
         catch {
-            Write-Log "PAC CLI not found. Dataverse steps (5-7) will require manual execution." -Level WARN
+            Write-Log "PAC CLI not found. Dataverse steps (5-8) will require manual execution." -Level WARN
             Write-Log "Install: dotnet tool install --global Microsoft.PowerApps.CLI.Tool" -Level WARN
         }
     }
@@ -828,13 +857,241 @@ function Invoke-Step7_ImportSolutions {
 }
 
 # ============================================================================
-# STEP 8: Provision SPE containers
+# STEP 8: Set Dataverse Environment Variables
 # ============================================================================
 
-function Invoke-Step8_ProvisionSPEContainers {
+function Invoke-Step8_SetDataverseEnvVars {
     param([PSCustomObject]$State)
 
-    Write-StepHeader 8 "Provisioning SPE container for root business unit"
+    Write-StepHeader 8 "Setting Dataverse Environment Variables"
+
+    if ($SkipDataverse) {
+        Write-Log "Dataverse env var setup skipped (-SkipDataverse flag)." -Level WARN
+        Complete-Step -State $State -StepNumber 8 -StepName "Set env vars (skipped)"
+        return
+    }
+
+    # Resolve the Dataverse instance URL from prior steps
+    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
+        $State.StepOutputs.DataverseInstanceUrl
+    } else {
+        $DataverseEnvUrl
+    }
+    $dataverseUrl = $dataverseUrl.TrimEnd('/')
+
+    # Resolve SPE container ID — may be available from Step 10 on re-runs, or from parameter
+    $speContainerId = $null
+    if ($State.StepOutputs.SpeContainerId) {
+        $speContainerId = $State.StepOutputs.SpeContainerId
+    }
+
+    # Build the 7 required environment variables
+    $envVars = [ordered]@{
+        sprk_BffApiBaseUrl                  = $BffApiBaseUrl
+        sprk_BffApiAppId                    = $BffApiAppId
+        sprk_MsalClientId                   = $MsalClientId
+        sprk_TenantId                       = $TenantId
+        sprk_AzureOpenAiEndpoint            = $AzureOpenAiEndpoint
+        sprk_ShareLinkBaseUrl               = $ShareLinkBaseUrl
+        sprk_SharePointEmbeddedContainerId  = $speContainerId
+    }
+
+    Write-Log "Target Dataverse: $dataverseUrl"
+    Write-Log "Environment Variables to set:"
+    foreach ($entry in $envVars.GetEnumerator()) {
+        $displayVal = if ([string]::IsNullOrWhiteSpace($entry.Value)) { "(empty — will skip)" } else {
+            if ($entry.Value.Length -gt 40) { $entry.Value.Substring(0, 40) + '...' } else { $entry.Value }
+        }
+        Write-Log "  $($entry.Key) = $displayVal"
+    }
+
+    # Acquire Dataverse access token
+    Write-Log "Acquiring Dataverse access token..."
+
+    $dvToken = az account get-access-token `
+        --resource $dataverseUrl `
+        --query accessToken -o tsv 2>&1
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dvToken)) {
+        Write-Log "Failed to acquire Dataverse token: $dvToken" -Level ERROR
+        throw "Cannot acquire Dataverse access token for environment variable setup."
+    }
+
+    $dvHeaders = @{
+        "Authorization"    = "Bearer $dvToken"
+        "Content-Type"     = "application/json"
+        "OData-MaxVersion" = "4.0"
+        "OData-Version"    = "4.0"
+    }
+
+    $setCount = 0
+    $skipCount = 0
+    $failCount = 0
+
+    foreach ($entry in $envVars.GetEnumerator()) {
+        $varName = $entry.Key
+        $varValue = $entry.Value
+
+        if ([string]::IsNullOrWhiteSpace($varValue)) {
+            Write-Log "Skipping '$varName' (no value provided)" -Level WARN
+            $skipCount++
+            continue
+        }
+
+        Write-Log "Setting '$varName'..."
+
+        try {
+            # 1. Find the environment variable definition by schema name
+            $filter = "schemaname eq '$varName'"
+            $defUrl = "$dataverseUrl/api/data/v9.2/environmentvariabledefinitions?`$filter=$filter&`$expand=environmentvariablevalues(`$select=environmentvariablevalueid,value)&`$select=environmentvariabledefinitionid,schemaname,defaultvalue"
+
+            $defResponse = Invoke-RestMethod -Uri $defUrl -Headers $dvHeaders -Method Get -ErrorAction Stop
+
+            if ($defResponse.value.Count -eq 0) {
+                Write-Log "'$varName' definition not found in Dataverse. Ensure solution import (Step 7) created it." -Level ERROR
+                $failCount++
+                continue
+            }
+
+            $definition = $defResponse.value[0]
+            $definitionId = $definition.environmentvariabledefinitionid
+
+            # 2. Check for existing value record
+            if ($definition.environmentvariablevalues -and $definition.environmentvariablevalues.Count -gt 0) {
+                # Update existing value record
+                $valueId = $definition.environmentvariablevalues[0].environmentvariablevalueid
+                $updateBody = @{ value = $varValue } | ConvertTo-Json
+
+                Invoke-RestMethod `
+                    -Uri "$dataverseUrl/api/data/v9.2/environmentvariablevalues($valueId)" `
+                    -Headers $dvHeaders `
+                    -Method Patch `
+                    -Body $updateBody `
+                    -ErrorAction Stop
+
+                Write-Log "'$varName' updated (existing value record)." -Level SUCCESS
+            }
+            else {
+                # Create new value record
+                $createBody = @{
+                    value = $varValue
+                    "EnvironmentVariableDefinitionId@odata.bind" = "/environmentvariabledefinitions($definitionId)"
+                } | ConvertTo-Json
+
+                Invoke-RestMethod `
+                    -Uri "$dataverseUrl/api/data/v9.2/environmentvariablevalues" `
+                    -Headers $dvHeaders `
+                    -Method Post `
+                    -Body $createBody `
+                    -ErrorAction Stop
+
+                Write-Log "'$varName' created (new value record)." -Level SUCCESS
+            }
+
+            $setCount++
+        }
+        catch {
+            Write-Log "Failed to set '$varName': $($_.Exception.Message)" -Level ERROR
+            if ($_.ErrorDetails.Message) {
+                Write-Log "Details: $($_.ErrorDetails.Message)" -Level ERROR
+            }
+            $failCount++
+        }
+    }
+
+    Write-Log "$setCount env vars set, $skipCount skipped, $failCount failed." -Level $(if ($failCount -gt 0) { 'WARN' } else { 'SUCCESS' })
+
+    if ($failCount -gt 0) {
+        Write-Log "Some environment variables failed to set. Set them manually in Dataverse > Settings > Environment Variables." -Level WARN
+    }
+
+    Complete-Step -State $State -StepNumber 8 -StepName "Set Dataverse env vars" `
+        -Outputs @{ EnvVarsSet = $setCount; EnvVarsSkipped = $skipCount; EnvVarsFailed = $failCount }
+}
+
+# ============================================================================
+# STEP 9: Generate environment-config.json
+# ============================================================================
+
+function Invoke-Step9_GenerateEnvironmentConfig {
+    param([PSCustomObject]$State)
+
+    Write-StepHeader 9 "Generating environment-config.json"
+
+    # Resolve all values for the config file
+    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
+        $State.StepOutputs.DataverseInstanceUrl
+    } else {
+        $DataverseEnvUrl
+    }
+
+    $speContainerId = if ($State.StepOutputs.SpeContainerId) {
+        $State.StepOutputs.SpeContainerId
+    } else {
+        $null
+    }
+
+    $config = [ordered]@{
+        '$schema'              = 'https://spaarke.com/schemas/environment-config.json'
+        generatedAt            = (Get-Date -Format 'o')
+        generatedBy            = 'Provision-Customer.ps1'
+        customer               = [ordered]@{
+            customerId         = $CustomerId
+            displayName        = $DisplayName
+            environmentName    = $EnvironmentName
+        }
+        dataverse              = [ordered]@{
+            url                = $dataverseUrl
+            environmentVariables = [ordered]@{
+                sprk_BffApiBaseUrl                  = $BffApiBaseUrl
+                sprk_BffApiAppId                    = $BffApiAppId
+                sprk_MsalClientId                   = $MsalClientId
+                sprk_TenantId                       = $TenantId
+                sprk_AzureOpenAiEndpoint            = if ($AzureOpenAiEndpoint) { $AzureOpenAiEndpoint } else { $null }
+                sprk_ShareLinkBaseUrl               = if ($ShareLinkBaseUrl) { $ShareLinkBaseUrl } else { $null }
+                sprk_SharePointEmbeddedContainerId  = $speContainerId
+            }
+        }
+        azure                  = [ordered]@{
+            resourceGroup      = $ResourceGroupName
+            keyVault           = if ($State.StepOutputs.KeyVaultName) { $State.StepOutputs.KeyVaultName } else { $KeyVaultName }
+            location           = $Location
+        }
+        bffApi                 = [ordered]@{
+            baseUrl            = $BffApiBaseUrl
+            appId              = $BffApiAppId
+        }
+    }
+
+    $configJson = $config | ConvertTo-Json -Depth 10
+    $configPath = Join-Path $RepoRoot "logs" "provisioning" "environment-config-$CustomerId-$EnvironmentName.json"
+
+    # Ensure output directory exists
+    $configDir = Split-Path $configPath -Parent
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+
+    $configJson | Set-Content -Path $configPath -Encoding UTF8
+    Write-Log "Environment config written to: $configPath" -Level SUCCESS
+
+    # Also write to a well-known path for downstream tools
+    $latestConfigPath = Join-Path $RepoRoot "logs" "provisioning" "environment-config.json"
+    $configJson | Set-Content -Path $latestConfigPath -Encoding UTF8
+    Write-Log "Latest config symlink: $latestConfigPath" -Level INFO
+
+    Complete-Step -State $State -StepNumber 9 -StepName "Generate environment-config.json" `
+        -Outputs @{ EnvironmentConfigPath = $configPath }
+}
+
+# ============================================================================
+# STEP 10: Provision SPE containers
+# ============================================================================
+
+function Invoke-Step10_ProvisionSPEContainers {
+    param([PSCustomObject]$State)
+
+    Write-StepHeader 10 "Provisioning SPE container for root business unit"
 
     # Each business unit gets one SPE container. During provisioning, we create
     # the container for the root BU. Additional BU containers are created via
@@ -915,7 +1172,7 @@ function Invoke-Step8_ProvisionSPEContainers {
     if ([string]::IsNullOrWhiteSpace($dataverseUrl)) {
         Write-Log "No Dataverse instance URL available. Cannot set sprk_containerid on business unit." -Level ERROR
         Write-Log "Container was created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (partial)" `
+        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
             -Outputs @{ SpeContainerId = $containerId }
         return
     }
@@ -930,7 +1187,7 @@ function Invoke-Step8_ProvisionSPEContainers {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dvToken)) {
         Write-Log "Failed to acquire Dataverse token: $dvToken" -Level WARN
         Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (partial)" `
+        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
             -Outputs @{ SpeContainerId = $containerId }
         return
     }
@@ -965,7 +1222,7 @@ function Invoke-Step8_ProvisionSPEContainers {
         if (-not [string]::IsNullOrWhiteSpace($rootBu.sprk_containerid)) {
             Write-Log "Root BU already has sprk_containerid: $($rootBu.sprk_containerid)" -Level WARN
             Write-Log "Skipping BU update. New container ID: $containerId (not applied)." -Level WARN
-            Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (BU already set)" `
+            Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (BU already set)" `
                 -Outputs @{ SpeContainerId = $rootBu.sprk_containerid }
             return
         }
@@ -973,7 +1230,7 @@ function Invoke-Step8_ProvisionSPEContainers {
     catch {
         Write-Log "Failed to query business units: $($_.Exception.Message)" -Level ERROR
         Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers (partial)" `
+        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
             -Outputs @{ SpeContainerId = $containerId }
         return
     }
@@ -999,18 +1256,18 @@ function Invoke-Step8_ProvisionSPEContainers {
 
     Write-Log "SPE provisioning complete. Container ID: $containerId" -Level SUCCESS
 
-    Complete-Step -State $State -StepNumber 8 -StepName "Provision SPE containers" `
+    Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers" `
         -Outputs @{ SpeContainerId = $containerId }
 }
 
 # ============================================================================
-# STEP 9: Register customer in BFF API tenant registry
+# STEP 11: Register customer in BFF API tenant registry
 # ============================================================================
 
-function Invoke-Step9_RegisterTenant {
+function Invoke-Step11_RegisterTenant {
     param([PSCustomObject]$State)
 
-    Write-StepHeader 9 "Registering customer in BFF API tenant registry"
+    Write-StepHeader 11 "Registering customer in BFF API tenant registry"
 
     $kvName = if ($State.StepOutputs.KeyVaultName) { $State.StepOutputs.KeyVaultName } else { $KeyVaultName }
 
@@ -1048,23 +1305,23 @@ function Invoke-Step9_RegisterTenant {
         Write-Log "Tenant '$CustomerId' registered in $PlatformKeyVaultName as '$secretName'." -Level SUCCESS
     }
 
-    Complete-Step -State $State -StepNumber 9 -StepName "Register tenant"
+    Complete-Step -State $State -StepNumber 11 -StepName "Register tenant"
 }
 
 # ============================================================================
-# STEP 10: Run smoke tests
+# STEP 12: Run smoke tests
 # ============================================================================
 
-function Invoke-Step10_RunSmokeTests {
+function Invoke-Step12_RunSmokeTests {
     param([PSCustomObject]$State)
 
-    Write-StepHeader 10 "Running smoke tests"
+    Write-StepHeader 12 "Running smoke tests"
 
     $testScript = Join-Path $ScriptRoot "Test-Deployment.ps1"
     if (-not (Test-Path $testScript)) {
         Write-Log "Test-Deployment.ps1 not found at: $testScript" -Level WARN
         Write-Log "Skipping smoke tests. Run manually after setup." -Level WARN
-        Complete-Step -State $State -StepNumber 10 -StepName "Smoke tests (skipped — script not found)"
+        Complete-Step -State $State -StepNumber 12 -StepName "Smoke tests (skipped — script not found)"
         return
     }
 
@@ -1098,7 +1355,63 @@ function Invoke-Step10_RunSmokeTests {
         Write-Log "Tests may need manual verification." -Level WARN
     }
 
-    Complete-Step -State $State -StepNumber 10 -StepName "Smoke tests"
+    Complete-Step -State $State -StepNumber 12 -StepName "Smoke tests"
+}
+
+# ============================================================================
+# STEP 13: Validate deployed environment
+# ============================================================================
+
+function Invoke-Step13_ValidateEnvironment {
+    param([PSCustomObject]$State)
+
+    Write-StepHeader 13 "Validating deployed environment"
+
+    $validateScript = Join-Path $ScriptRoot "Validate-DeployedEnvironment.ps1"
+    if (-not (Test-Path $validateScript)) {
+        Write-Log "Validate-DeployedEnvironment.ps1 not found at: $validateScript" -Level WARN
+        Write-Log "Skipping validation. Run manually after setup." -Level WARN
+        Complete-Step -State $State -StepNumber 13 -StepName "Validate environment (skipped — script not found)"
+        return
+    }
+
+    # Resolve the Dataverse instance URL
+    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
+        $State.StepOutputs.DataverseInstanceUrl
+    } else {
+        $DataverseEnvUrl
+    }
+
+    Write-Log "Target Dataverse: $dataverseUrl"
+    Write-Log "BFF API: $BffApiBaseUrl"
+    Write-Log "Calling Validate-DeployedEnvironment.ps1..."
+
+    $validateArgs = @{
+        DataverseUrl = $dataverseUrl
+    }
+
+    if ($BffApiBaseUrl) {
+        $validateArgs.BffApiUrl = $BffApiBaseUrl
+    }
+
+    try {
+        & $validateScript @validateArgs
+        $validateExitCode = $LASTEXITCODE
+
+        if ($validateExitCode -eq 0) {
+            Write-Log "Environment validation passed." -Level SUCCESS
+        }
+        else {
+            Write-Log "Environment validation completed with failures (exit code: $validateExitCode)." -Level WARN
+            Write-Log "Review validation output above. Some checks may require manual remediation." -Level WARN
+        }
+    }
+    catch {
+        Write-Log "Validation execution error: $($_.Exception.Message)" -Level WARN
+        Write-Log "Validation may need to be run manually." -Level WARN
+    }
+
+    Complete-Step -State $State -StepNumber 13 -StepName "Validate environment"
 }
 
 # ============================================================================
@@ -1125,14 +1438,19 @@ if ($WhatIfPreference) {
     if (-not $SkipDataverse) {
         Write-Host "    6. Dataverse Env:   $DataverseEnvName ($DataverseEnvUrl)" -ForegroundColor White
         Write-Host "    7. Solutions:       10 managed solutions (SpaarkeCore + features)" -ForegroundColor White
+        Write-Host "    8. Env Variables:   7 Dataverse Environment Variables" -ForegroundColor White
+        Write-Host "    9. Config JSON:     environment-config.json output" -ForegroundColor White
     }
     else {
         Write-Host "    6. Dataverse Env:   SKIPPED" -ForegroundColor DarkGray
         Write-Host "    7. Solutions:       SKIPPED" -ForegroundColor DarkGray
+        Write-Host "    8. Env Variables:   SKIPPED" -ForegroundColor DarkGray
+        Write-Host "    9. Config JSON:     environment-config.json output" -ForegroundColor White
     }
-    Write-Host "    8. SPE Containers:  On-demand via BFF API" -ForegroundColor White
-    Write-Host "    9. Tenant Registry: $PlatformKeyVaultName / Tenant-$CustomerId" -ForegroundColor White
-    Write-Host "   10. Smoke Tests:     Test-Deployment.ps1" -ForegroundColor White
+    Write-Host "   10. SPE Containers:  On-demand via BFF API" -ForegroundColor White
+    Write-Host "   11. Tenant Registry: $PlatformKeyVaultName / Tenant-$CustomerId" -ForegroundColor White
+    Write-Host "   12. Smoke Tests:     Test-Deployment.ps1" -ForegroundColor White
+    Write-Host "   13. Validation:      Validate-DeployedEnvironment.ps1" -ForegroundColor White
     Write-Host ""
     Write-Host "  State file: $StateFile" -ForegroundColor Gray
     Write-Host ""
@@ -1183,9 +1501,12 @@ try {
         5  = { Invoke-Step5_CreateDataverseEnvironment -State $state }
         6  = { Invoke-Step6_WaitForDataverse -State $state }
         7  = { Invoke-Step7_ImportSolutions -State $state }
-        8  = { Invoke-Step8_ProvisionSPEContainers -State $state }
-        9  = { Invoke-Step9_RegisterTenant -State $state }
-        10 = { Invoke-Step10_RunSmokeTests -State $state }
+        8  = { Invoke-Step8_SetDataverseEnvVars -State $state }
+        9  = { Invoke-Step9_GenerateEnvironmentConfig -State $state }
+        10 = { Invoke-Step10_ProvisionSPEContainers -State $state }
+        11 = { Invoke-Step11_RegisterTenant -State $state }
+        12 = { Invoke-Step12_RunSmokeTests -State $state }
+        13 = { Invoke-Step13_ValidateEnvironment -State $state }
     }
 
     for ($step = $startStep; $step -le $TotalSteps; $step++) {
@@ -1215,6 +1536,7 @@ try {
     Write-Host "  Key Vault:       $KeyVaultName" -ForegroundColor White
     Write-Host "  Dataverse:       $DataverseEnvUrl" -ForegroundColor White
     Write-Host "  BFF API:         $BffApiBaseUrl" -ForegroundColor White
+    Write-Host "  Env Config:      $(if ($state.StepOutputs.EnvironmentConfigPath) { $state.StepOutputs.EnvironmentConfigPath } else { 'N/A' })" -ForegroundColor White
     Write-Host "  Duration:        $([math]::Round($elapsed.TotalMinutes, 1)) minutes" -ForegroundColor White
     Write-Host "  Log:             $LogFile" -ForegroundColor Gray
     Write-Host "  State:           $StateFile" -ForegroundColor Gray

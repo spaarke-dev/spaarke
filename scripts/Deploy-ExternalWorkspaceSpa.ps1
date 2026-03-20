@@ -1,7 +1,16 @@
 # Deploy External Workspace SPA as a Dataverse Web Resource
 # Follows the same pattern as Deploy-CorporateWorkspace.ps1
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
 $ErrorActionPreference = 'Stop'
-$orgUrl = 'https://spaarkedev1.crm.dynamics.com'
+$orgUrl = $DataverseUrl
 $webResourceName = 'sprk_externalworkspace'
 $webResourceDisplayName = 'Spaarke External Workspace SPA'
 

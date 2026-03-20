@@ -22,18 +22,27 @@ jest.mock('../../services/authInit', () => ({
   getAuthHeader: mockGetAuthHeader,
 }));
 
+jest.mock('@spaarke/auth', () => ({
+  resolveRuntimeConfig: jest.fn().mockResolvedValue({
+    bffBaseUrl: 'https://test-bff-api.example.com',
+    bffOAuthScope: 'api://test-app-id/user_impersonation',
+    msalClientId: 'test-client-id',
+  }),
+}));
+
 // Mock global fetch
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
 global.fetch = mockFetch as typeof global.fetch;
 
 import { search } from '../../services/RecordSearchApiService';
-import { BFF_API_BASE_URL } from '../../services/apiBase';
+import { initializeRuntimeConfig } from '../../services/apiBase';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const EXPECTED_ENDPOINT = `${BFF_API_BASE_URL}/api/ai/search/records`;
+const TEST_BFF_URL = 'https://test-bff-api.example.com';
+const EXPECTED_ENDPOINT = `${TEST_BFF_URL}/api/ai/search/records`;
 
 const sampleRequest: RecordSearchRequest = {
   query: 'Johnson merger acquisition',
@@ -108,6 +117,10 @@ function createNetworkErrorResponse(status: number, statusText: string): Respons
 // ---------------------------------------------------------------------------
 
 describe('RecordSearchApiService', () => {
+  beforeAll(async () => {
+    await initializeRuntimeConfig();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetAuthHeader.mockResolvedValue('Bearer test-token');
@@ -534,8 +547,8 @@ describe('RecordSearchApiService', () => {
 
       it('should use different endpoints from SemanticSearchApiService', () => {
         // Verify the record search endpoint is distinct
-        expect(EXPECTED_ENDPOINT).toBe('https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/search/records');
-        expect(EXPECTED_ENDPOINT).not.toBe('https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/search');
+        expect(EXPECTED_ENDPOINT).toBe(`${TEST_BFF_URL}/api/ai/search/records`);
+        expect(EXPECTED_ENDPOINT).not.toBe(`${TEST_BFF_URL}/api/ai/search`);
       });
     });
   });

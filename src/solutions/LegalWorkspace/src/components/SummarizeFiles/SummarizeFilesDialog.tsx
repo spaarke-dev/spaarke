@@ -59,7 +59,7 @@ import type { ICreateProjectFormState } from '../CreateProject/projectFormTypes'
 import { EMPTY_PROJECT_FORM } from '../CreateProject/projectFormTypes';
 import { ProjectService } from '../CreateProject/projectService';
 import { navigateToEntity } from '../../utils/navigation';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import type { IWebApi } from '../../types/xrm';
 

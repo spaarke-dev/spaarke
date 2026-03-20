@@ -37,6 +37,9 @@
  */
 export type KnownEnvironmentVariable =
   | 'sprk_BffApiBaseUrl'
+  | 'sprk_BffApiAppId'
+  | 'sprk_MsalClientId'
+  | 'sprk_TenantId'
   | 'sprk_AzureOpenAiEndpoint'
   | 'sprk_ApplicationInsightsKey'
   | 'sprk_SharePointEmbeddedContainerId'
@@ -66,6 +69,9 @@ const CACHE_DURATION_MS = 5 * 60 * 1000;
  */
 const DEFAULT_VALUES: Record<KnownEnvironmentVariable, string> = {
   sprk_BffApiBaseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net/api',
+  sprk_BffApiAppId: '',
+  sprk_MsalClientId: '',
+  sprk_TenantId: '',
   sprk_AzureOpenAiEndpoint: 'https://spaarke-openai-dev.openai.azure.com/',
   sprk_ApplicationInsightsKey: '',
   sprk_SharePointEmbeddedContainerId: '',
@@ -225,6 +231,40 @@ export async function getAppInsightsKey(webApi: ComponentFramework.WebApi): Prom
   return getEnvironmentVariableOrDefault(webApi, 'sprk_ApplicationInsightsKey');
 }
 
+/**
+ * Get the MSAL Client ID from environment variables.
+ * Returns empty string if sprk_MsalClientId is not defined in Dataverse.
+ *
+ * @param webApi - The PCF WebAPI instance
+ * @returns The MSAL Client (Application) ID
+ */
+export async function getMsalClientId(webApi: ComponentFramework.WebApi): Promise<string> {
+  return getEnvironmentVariableOrDefault(webApi, 'sprk_MsalClientId');
+}
+
+/**
+ * Get the BFF API Application ID from environment variables.
+ * Used to construct the BFF API scope: api://<appId>/user_impersonation
+ * Returns empty string if sprk_BffApiAppId is not defined in Dataverse.
+ *
+ * @param webApi - The PCF WebAPI instance
+ * @returns The BFF API Application ID
+ */
+export async function getBffApiAppId(webApi: ComponentFramework.WebApi): Promise<string> {
+  return getEnvironmentVariableOrDefault(webApi, 'sprk_BffApiAppId');
+}
+
+/**
+ * Get the Azure AD Tenant ID from environment variables.
+ * Returns empty string if sprk_TenantId is not defined in Dataverse.
+ *
+ * @param webApi - The PCF WebAPI instance
+ * @returns The Azure AD Tenant (Directory) ID
+ */
+export async function getTenantId(webApi: ComponentFramework.WebApi): Promise<string> {
+  return getEnvironmentVariableOrDefault(webApi, 'sprk_TenantId');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Bulk Loading
 // ─────────────────────────────────────────────────────────────────────────────
@@ -359,6 +399,9 @@ export default {
   getApiBaseUrl,
   getAzureOpenAiEndpoint,
   getAppInsightsKey,
+  getMsalClientId,
+  getBffApiAppId,
+  getTenantId,
   loadEnvironmentVariables,
   loadSpaarkeConfiguration,
   clearEnvironmentVariableCache,

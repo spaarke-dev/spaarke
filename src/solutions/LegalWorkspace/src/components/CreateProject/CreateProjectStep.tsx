@@ -50,7 +50,7 @@ import { SecureProjectSection } from './SecureProjectSection';
 import type { ILookupItem } from '../../types/entities';
 import type { IWebApi } from '../../types/xrm';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import { useAiPrefill, type IResolvedPrefillFields } from '../../../../../client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill';
 

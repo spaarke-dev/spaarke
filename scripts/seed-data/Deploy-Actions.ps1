@@ -6,7 +6,7 @@
 #   .\Deploy-Actions.ps1 -DryRun  # Preview without inserting
 
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [switch]$DryRun = $false,
     [switch]$Force = $false
 )

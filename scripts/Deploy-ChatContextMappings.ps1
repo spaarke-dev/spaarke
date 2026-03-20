@@ -14,7 +14,7 @@
     .\scripts\Deploy-ChatContextMappings.ps1 -EnvironmentUrl "https://myorg.crm.dynamics.com"
 #>
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com"
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL
 )
 
 $ErrorActionPreference = "Stop"

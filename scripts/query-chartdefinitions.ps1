@@ -1,6 +1,6 @@
 # Query sprk_chartdefinition records from Dataverse
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [switch]$ShowSchema
 )
 

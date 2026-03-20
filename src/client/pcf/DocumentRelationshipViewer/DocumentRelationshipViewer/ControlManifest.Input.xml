@@ -6,7 +6,8 @@
            control-type="virtual">
 
     <external-service-usage enabled="true">
-      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <!-- Domain resolved at runtime from Dataverse environment variable sprk_BffApiBaseUrl -->
+      <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
 
@@ -14,20 +15,20 @@
     <property name="documentId" display-name-key="Document ID" description-key="The GUID of the source document"
               of-type="SingleLine.Text" usage="bound" required="true" />
 
-    <!-- Input: Tenant ID for multi-tenant routing -->
-    <property name="tenantId" display-name-key="Tenant ID" description-key="Tenant identifier for API routing"
+    <!-- Input: Tenant ID - resolved from Dataverse env var sprk_TenantId at runtime if not set -->
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Tenant identifier (resolved from sprk_TenantId env var if empty)"
               of-type="SingleLine.Text" usage="input" required="false" />
 
-    <!-- Input: Client Application ID (for MSAL authentication via @spaarke/auth) -->
-    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD Client Application ID for MSAL"
+    <!-- Input: Client Application ID - resolved from Dataverse env var sprk_MsalClientId at runtime -->
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD Client App ID (resolved from sprk_MsalClientId env var)"
               of-type="SingleLine.Text" usage="input" required="false" />
 
-    <!-- Input: BFF Application ID (for scope construction via @spaarke/auth) -->
-    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF Application ID for OAuth scope"
+    <!-- Input: BFF Application ID - resolved from Dataverse env var sprk_BffApiAppId at runtime -->
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF App ID for OAuth scope (resolved from sprk_BffApiAppId env var)"
               of-type="SingleLine.Text" usage="input" required="false" />
 
-    <!-- Input: API Base URL -->
-    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL"
+    <!-- Input: API Base URL - resolved from Dataverse env var sprk_BffApiBaseUrl at runtime if not set -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL (resolved from sprk_BffApiBaseUrl env var if empty)"
               of-type="SingleLine.Text" usage="input" required="false" />
 
     <!-- Output: Selected document ID when user clicks a node -->

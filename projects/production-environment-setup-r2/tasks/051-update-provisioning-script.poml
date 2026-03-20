@@ -1,0 +1,41 @@
+<task id="ENV-051" project="Production Environment Setup R2">
+  <metadata>
+    <title>Update Provision-Customer.ps1 — add Dataverse Environment Variable creation step</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>6</phase>
+    <tags>infrastructure, scripts, provisioning</tags>
+    <parallel-group>6</parallel-group>
+    <dependencies>ENV-004, ENV-050</dependencies>
+  </metadata>
+
+  <prompt>Add a step to Provision-Customer.ps1 that creates/sets Dataverse Environment Variables (sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId, sprk_AzureOpenAiEndpoint, sprk_ShareLinkBaseUrl, sprk_SharePointEmbeddedContainerId) after solution import. Also output environment-config.json as canonical config reference.</prompt>
+
+  <role>PowerShell developer with Dataverse provisioning experience</role>
+
+  <goal>Provision-Customer.ps1 automatically sets all 7 Dataverse Environment Variables after solution import. Outputs environment-config.json with all resolved values.</goal>
+
+  <knowledge>
+    <files>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>projects/production-environment-setup-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read script">Read Provision-Customer.ps1 to find where solution import happens (Step 7).</step>
+    <step order="2" name="Add env var step">After solution import, add pac env var set commands for all 7 variables.</step>
+    <step order="3" name="Add config output">Generate environment-config.json with all canonical values.</step>
+    <step order="4" name="Add validation call">Call Validate-DeployedEnvironment.ps1 as final validation step.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/Provision-Customer.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script sets all 7 Dataverse Environment Variables after solution import</criterion>
+    <criterion testable="true">Script outputs environment-config.json</criterion>
+    <criterion testable="true">Script calls validation as final step</criterion>
+  </acceptance-criteria>
+</task>

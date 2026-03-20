@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-012" project="Production Environment Setup R2">
+  <metadata>
+    <title>Standardize window global names and BFF scope format</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>shared-lib, typescript, config</tags>
+    <parallel-group>2</parallel-group>
+    <dependencies>ENV-010</dependencies>
+    <blocks>Phase 3 (code pages), Phase 4 (PCF controls)</blocks>
+  </metadata>
+
+  <prompt>
+    Standardize window global names across all components: use __SPAARKE_BFF_BASE_URL__ everywhere. Known inconsistencies from prior CORS hotfix:
+    - SpeAdminApp bffConfig.ts uses __SPAARKE_BFF_URL__ (missing _BASE_)
+    - @spaarke/auth config.ts resolveConfig() uses __SPAARKE_BFF_URL__ (missing _BASE_)
+    - LegalWorkspace, DocumentUploadWizard, AnalysisWorkspace bffConfig.ts use __SPAARKE_BFF_BASE_URL__ (correct)
+    Standardize BFF scope format to user_impersonation everywhere (DocumentRelationshipViewer PCF uses SDAP.Access — inconsistent).
+    Also remove the hardcoded BFF_API_SCOPE constant from LegalWorkspace bffConfig.ts (api://1e40baad-.../user_impersonation) — this will be resolved at runtime via resolveRuntimeConfig().
+  </prompt>
+
+  <role>TypeScript developer with cross-module consistency experience</role>
+
+  <goal>
+    All window globals use consistent naming. All BFF OAuth scopes use the same format. No variant names remain in source code.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Window global must be __SPAARKE_BFF_BASE_URL__ (not __SPAARKE_BFF_URL__)</constraint>
+    <constraint source="project">BFF scope must be api://{APP_ID}/user_impersonation (not SDAP.Access)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts</file>
+      <file>src/solutions/LegalWorkspace/src/config/bffConfig.ts</file>
+      <file>src/solutions/SpeAdminApp/src/config/bffConfig.ts</file>
+      <file>src/solutions/DocumentUploadWizard/src/config/bffConfig.ts</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Find all variants">Search codebase for __SPAARKE_BFF_ and SDAP.Access to find all variant usages.</step>
+    <step order="2" name="Standardize globals">Replace all __SPAARKE_BFF_URL__ with __SPAARKE_BFF_BASE_URL__.</step>
+    <step order="3" name="Standardize scopes">Replace all SDAP.Access references with user_impersonation format.</step>
+    <step order="4" name="Verify builds">Build affected modules.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages</tool>
+    <tool name="grep">Search for variant names</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Files with window global or scope references (multiple)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep for __SPAARKE_BFF_URL__[^_] returns zero hits (variant eliminated from @spaarke/auth and SpeAdminApp)</criterion>
+    <criterion testable="true">grep for SDAP.Access returns zero hits</criterion>
+    <criterion testable="true">grep for "api://1e40baad" in bffConfig.ts files returns zero hits (hardcoded scope removed)</criterion>
+    <criterion testable="true">All affected modules build successfully</criterion>
+  </acceptance-criteria>
+</task>

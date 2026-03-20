@@ -1,10 +1,19 @@
 # Deploy sprk_subgrid_commands.js Web Resource to Dataverse
 
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
 Write-Host "====================================="
 Write-Host "Subgrid Commands Deployment"
 Write-Host "====================================="
 
-$orgUrl = "https://spaarkedev1.crm.dynamics.com"
+$orgUrl = $DataverseUrl
 $webResourceName = "sprk_subgrid_commands"
 $jsFilePath = "C:\code_files\spaarke\src\client\pcf\UniversalQuickCreate\solution\src\WebResources\sprk_subgrid_commands.js"
 

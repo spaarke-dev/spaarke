@@ -250,7 +250,7 @@ describe('useRelatedDocumentCount', () => {
         .mockResolvedValueOnce(mockJsonResponse(countOnlyResponse(8)));
 
       const { result, waitForNextUpdate, rerender } = renderHook(
-        ({ docId }) => useRelatedDocumentCount(docId, TENANT_ID, API_BASE),
+        ({ docId }: { docId: string }) => useRelatedDocumentCount(docId, TENANT_ID, API_BASE),
         { initialProps: { docId: 'doc-1' } }
       );
 
@@ -277,7 +277,7 @@ describe('useRelatedDocumentCount', () => {
       fetchMock.mockReturnValueOnce(firstPromise).mockResolvedValueOnce(mockJsonResponse(countOnlyResponse(99)));
 
       const { result, waitForNextUpdate, rerender } = renderHook(
-        ({ docId }) => useRelatedDocumentCount(docId, TENANT_ID, API_BASE),
+        ({ docId }: { docId: string }) => useRelatedDocumentCount(docId, TENANT_ID, API_BASE),
         { initialProps: { docId: 'doc-slow' } }
       );
 

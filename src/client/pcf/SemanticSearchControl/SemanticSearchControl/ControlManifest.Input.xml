@@ -6,7 +6,7 @@
            control-type="virtual">
 
     <external-service-usage enabled="true">
-      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
 
@@ -16,6 +16,14 @@
 
     <!-- Input: Tenant ID for authentication -->
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Input: Client Application ID for MSAL authentication -->
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Input: BFF Application ID for scope construction -->
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction"
               of-type="SingleLine.Text" usage="input" required="false" />
 
     <!-- Input: Search scope mode (all, entity, custom) -->

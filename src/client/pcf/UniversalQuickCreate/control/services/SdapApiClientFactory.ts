@@ -12,28 +12,13 @@ import { MsalAuthProvider } from './auth/MsalAuthProvider';
 import { logger } from '../utils/logger';
 
 /**
- * Factory for creating SdapApiClient instances
+ * Factory for creating SdapApiClient instances.
+ *
+ * OAuth scopes are resolved at runtime from MsalAuthProvider.getBffApiScopes()
+ * rather than hardcoded. The BFF API App ID URI comes from the Dataverse
+ * environment variable sprk_BffApiAppId.
  */
 export class SdapApiClientFactory {
-  /**
-   * OAuth scopes for SDAP BFF API (SharePoint Embedded)
-   *
-   * SPE BFF API App Registration:
-   * - Client ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
-   * - Application ID URI: api://1e40baad-e065-4aea-a8d4-4b7ab273458c
-   *
-   * IMPORTANT: Azure AD does not allow requesting scopes from multiple resources in one token.
-   *
-   * Token Flow:
-   * 1. PCF requests Token A with scope: api://[bff-api]/user_impersonation
-   * 2. PCF sends Token A to BFF API in Authorization header
-   * 3. BFF API uses OBO flow to exchange Token A for Token B (Graph API token)
-   * 4. Token B contains: FileStorageContainer.Selected, Files.Read.All (requested by BFF, not PCF)
-   *
-   * The Graph API scopes (FileStorageContainer.Selected, Files.Read.All) are requested by the
-   * BFF API during the OBO exchange - NOT by the PCF client. See GraphClientFactory.cs.
-   */
-  private static readonly SPE_BFF_API_SCOPES = ['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'];
 
   /**
    * Create SDAP API Client with MSAL authentication
@@ -66,7 +51,7 @@ export class SdapApiClientFactory {
           logger.info('SdapApiClientFactory', 'MSAL initialization complete');
         }
 
-        const token = await authProvider.getToken(SdapApiClientFactory.SPE_BFF_API_SCOPES);
+        const token = await authProvider.getToken(authProvider.getBffApiScopes());
 
         logger.debug('SdapApiClientFactory', 'Access token retrieved successfully');
 

@@ -9,8 +9,9 @@
  *   )
  *
  * Authentication:
- *   Uses @spaarke/auth initAuth() for BFF token acquisition.
- *   Supports Xrm frame-walk and MSAL popup fallback.
+ *   Resolves BFF URL, MSAL client ID, and OAuth scope from Dataverse
+ *   Environment Variables at runtime via resolveRuntimeConfig(). Then
+ *   initializes @spaarke/auth with those values (no build-time config).
  *
  * Theme Detection:
  *   Reads data-theme attribute set by the inline script in index.html.
@@ -28,7 +29,7 @@ import {
     webLightTheme,
     webDarkTheme,
 } from "@fluentui/react-components";
-import { initAuth } from "@spaarke/auth";
+import { resolveRuntimeConfig, initAuth } from "@spaarke/auth";
 import { App } from "./App";
 
 // ---------------------------------------------------------------------------
@@ -56,16 +57,31 @@ function resolveTheme() {
 }
 
 // ---------------------------------------------------------------------------
-// Initialize auth and render
+// Resolve runtime config, initialize auth, and render
 // ---------------------------------------------------------------------------
 
 async function bootstrap(): Promise<void> {
+    // 1. Resolve BFF URL, MSAL client ID, and OAuth scope from Dataverse
+    //    Environment Variables (pre-auth — uses session cookie, not MSAL).
+    const runtimeConfig = await resolveRuntimeConfig();
+
+    // 2. Set window globals so downstream modules (e.g., DocumentUploadWizardDialog)
+    //    can read bffBaseUrl synchronously without re-querying Dataverse.
+    window.__SPAARKE_BFF_BASE_URL__ = runtimeConfig.bffBaseUrl;
+    window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
+
+    // 3. Initialize auth with runtime-resolved values
     try {
-        await initAuth();
+        await initAuth({
+            clientId: runtimeConfig.msalClientId,
+            bffApiScope: runtimeConfig.bffOAuthScope,
+            bffBaseUrl: runtimeConfig.bffBaseUrl,
+        });
     } catch (err) {
         console.warn("[DocumentUploadWizard] Auth init failed, proceeding without pre-warmed token:", err);
     }
 
+    // 4. Render
     const container = document.getElementById("root");
     if (!container) throw new Error("[DocumentUploadWizard] Root container #root not found in DOM.");
 

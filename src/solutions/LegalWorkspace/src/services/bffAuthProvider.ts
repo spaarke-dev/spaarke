@@ -15,7 +15,7 @@
  */
 
 import { PublicClientApplication } from '@azure/msal-browser';
-import { BFF_API_SCOPE } from '../config/bffConfig';
+import { getBffOAuthScope } from '../config/runtimeConfig';
 import { msalConfig } from '../config/msalConfig';
 
 // ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ async function acquireTokenViaMsal(): Promise<string> {
   const msal = await ensureMsalInitialized();
   if (!msal) return '';
 
-  const scopes = [BFF_API_SCOPE];
+  const scopes = [getBffOAuthScope()];
 
   try {
     // Try acquireTokenSilent first (uses cached token / refresh token)
@@ -263,5 +263,5 @@ export async function getTenantId(): Promise<string> {
   return '';
 }
 
-// Re-export scope for convenience
-export { BFF_API_SCOPE };
+// Re-export scope accessor for convenience
+export { getBffOAuthScope };

@@ -1,0 +1,55 @@
+<task id="ENV-042" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix sprk_DocumentOperations.js — replace hardcoded BFF app ID with env var query</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>5</phase>
+    <tags>webresource, javascript, config</tags>
+    <parallel-group>5</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded BFF app ID on line 53 of sprk_DocumentOperations.js (hardcoded "1e40baad-...") with a Dataverse Environment Variable query for sprk_BffApiAppId. Note this file exists in two locations: src/solutions/webresources/ and infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/ — both must be updated.
+  </prompt>
+
+  <role>JavaScript developer with Dataverse web resource experience</role>
+
+  <goal>sprk_DocumentOperations.js in both source locations resolves BFF app ID from Dataverse Environment Variables. No hardcoded GUIDs remain. Both copies are consistent.</goal>
+
+  <constraints>
+    <constraint source="ADR-006">No business logic in ribbon scripts; no remote calls from ribbon scripts</constraint>
+    <constraint source="project">Legacy JS webresources cannot import npm packages — use inline fetch</constraint>
+    <constraint source="project">Must work without @spaarke/auth (legacy JS context)</constraint>
+    <constraint source="project">Both copies of the file (src/solutions/ and infrastructure/dataverse/ribbon/) must be updated identically</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/webresources/sprk_DocumentOperations.js</file>
+      <file>infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current code">Read both copies of sprk_DocumentOperations.js. Identify all hardcoded values (line 53 BFF app ID, any URL hardcoding). Confirm both copies are in sync.</step>
+    <step order="2" name="Replace with env var query">Replace hardcoded values with Xrm.WebApi.retrieveMultipleRecords query for environmentvariabledefinition + environmentvariablevalue. Use same pattern as task 040.</step>
+    <step order="3" name="Add caching">Cache resolved values (sessionStorage or module-level variable) to avoid repeated queries.</step>
+    <step order="4" name="Update both copies">Apply identical changes to both file locations.</step>
+    <step order="5" name="Verify no remaining hardcoded values">Search both files for 1e40baad and spaarkedev1 to confirm removal.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/webresources/sprk_DocumentOperations.js</output>
+    <output type="code">infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No hardcoded "1e40baad" BFF app ID in either copy of the file</criterion>
+    <criterion testable="true">No hardcoded "spaarkedev1" or dev BFF URL in either copy</criterion>
+    <criterion testable="true">BFF app ID resolved from Dataverse Environment Variables (sprk_BffApiAppId)</criterion>
+    <criterion testable="true">Both copies (src/solutions/ and infrastructure/dataverse/ribbon/) are identical</criterion>
+    <criterion testable="true">Result is cached to avoid repeated queries</criterion>
+  </acceptance-criteria>
+</task>

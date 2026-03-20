@@ -1,4 +1,13 @@
-$token = az account get-access-token --resource "https://spaarkedev1.crm.dynamics.com" --query "accessToken" -o tsv
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$token = az account get-access-token --resource $DataverseUrl --query "accessToken" -o tsv
 
 $headers = @{
     'Authorization' = "Bearer $token"
@@ -9,7 +18,7 @@ $headers = @{
 
 $documentId = "46ee229e-14ec-f811-8486-7c1e520aa4df"
 $currentUserId = "1d02f31c-1872-f011-b4cb-7c1e52671ad0"  # Ralph Schroeder
-$baseUrl = "https://spaarkedev1.crm.dynamics.com/api/data/v9.2"
+$baseUrl = "$DataverseUrl/api/data/v9.2"
 
 Write-Host "Checking Document Access for AI Analysis" -ForegroundColor Cyan
 Write-Host ""

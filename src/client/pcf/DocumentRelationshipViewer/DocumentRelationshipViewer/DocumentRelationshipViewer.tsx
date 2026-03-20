@@ -22,6 +22,7 @@ import { DocumentGraph } from './components/DocumentGraph';
 import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
 import type { DocumentNode } from './types/graph';
 import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from './types/api';
+import { getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 // Control version - must match ControlManifest.Input.xml
 const CONTROL_VERSION = '1.0.32';
@@ -189,8 +190,42 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
   ).page;
   const pageEntityId = pageContext?.entityId ?? null;
   const documentId = pageEntityId ?? '';
-  const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? 'https://spe-api-dev-67e2xz.azurewebsites.net';
-  const tenantId = context.parameters.tenantId?.raw ?? '';
+
+  // Resolve apiBaseUrl and tenantId from Dataverse environment variables at runtime.
+  // Falls back to manifest property values if set, but no hardcoded dev defaults.
+  const [resolvedApiBaseUrl, setResolvedApiBaseUrl] = React.useState<string>(
+    context.parameters.apiBaseUrl?.raw ?? ''
+  );
+  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>(
+    context.parameters.tenantId?.raw ?? ''
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function resolveConfig(): Promise<void> {
+      try {
+        const webApi = context.webAPI;
+
+        // Resolve from Dataverse env vars if not already set via manifest property
+        if (!resolvedApiBaseUrl) {
+          const url = await getApiBaseUrl(webApi);
+          if (!cancelled) setResolvedApiBaseUrl(url);
+        }
+        if (!resolvedTenantId) {
+          const tid = await getTenantId(webApi);
+          if (!cancelled) setResolvedTenantId(tid);
+        }
+      } catch (err) {
+        console.error('[DocumentRelationshipViewer] Failed to resolve runtime config:', err);
+      }
+    }
+
+    void resolveConfig();
+
+    return () => { cancelled = true; };
+    // Only run on mount -- env vars don't change during session
+  }, []);
 
   // Selected node state
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null);
@@ -201,14 +236,14 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
   // Fetch visualization data from API
   // Authentication is handled transparently by authenticatedFetch() from @spaarke/auth
   const { nodes, edges, metadata, isLoading, error } = useVisualizationApi({
-    apiBaseUrl,
+    apiBaseUrl: resolvedApiBaseUrl,
     documentId,
-    tenantId,
+    tenantId: resolvedTenantId,
     threshold: 0.65,
     limit: 25,
     depth: 1,
     relationshipTypes: selectedRelationshipTypes.length > 0 ? selectedRelationshipTypes : undefined,
-    enabled: !!documentId && documentId.trim() !== '' && !!tenantId,
+    enabled: !!documentId && documentId.trim() !== '' && !!resolvedTenantId && !!resolvedApiBaseUrl,
   });
 
   // Get container dimensions for layout
@@ -297,7 +332,7 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
 
   // Check if we should show the placeholder (missing document or tenant)
   const showPlaceholder = !documentId || documentId.trim() === '';
-  const showTenantMissing = documentId && !tenantId;
+  const showTenantMissing = documentId && !resolvedTenantId;
   // Check if we have measured dimensions
   const hasDimensions = dimensions !== null && dimensions.width > 0 && dimensions.height > 0;
   // Format error message for display

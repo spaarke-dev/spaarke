@@ -15,19 +15,24 @@
  */
 
 import type { AnalysisRecord, DocumentMetadata, AnalysisError, ProblemDetails, ExportFormat } from '../types';
-import { getBffBaseUrl } from '../config/bffConfig';
+import { getRuntimeConfig } from './authInit';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 /**
- * BFF API base URL — resolved to the absolute BFF host.
- * Used for document metadata, save, and export operations.
- * MUST NOT use a relative path like "/api" because the page origin is the
- * Dataverse org (e.g., spaarkedev1.crm.dynamics.com), not the BFF API host.
+ * Get the BFF API base URL from runtime config.
+ *
+ * Resolved lazily from Dataverse Environment Variables via resolveRuntimeConfig()
+ * (called during auth init). MUST NOT use a relative path like "/api" because
+ * the page origin is the Dataverse org, not the BFF API host.
+ *
+ * @throws Error if called before initializeAuth() completes
  */
-const API_BASE_URL = getBffBaseUrl();
+function getApiBaseUrl(): string {
+  return getRuntimeConfig().bffBaseUrl;
+}
 
 const LOG_PREFIX = '[AnalysisWorkspace:AnalysisApi]';
 
@@ -213,7 +218,7 @@ export async function fetchDocumentMetadata(documentId: string, token: string): 
 
   const controller = createTimeoutController();
 
-  const response = await fetch(`${API_BASE_URL}/v1/documents/${documentId}`, {
+  const response = await fetch(`${getApiBaseUrl()}/v1/documents/${documentId}`, {
     method: 'GET',
     headers: buildHeaders(token),
     signal: controller.signal,
@@ -249,7 +254,7 @@ export async function getDocumentViewUrl(documentId: string, token: string): Pro
 
   const controller = createTimeoutController();
 
-  const response = await fetch(`${API_BASE_URL}/documents/${documentId}/preview-url`, {
+  const response = await fetch(`${getApiBaseUrl()}/documents/${documentId}/preview-url`, {
     method: 'GET',
     headers: buildHeaders(token),
     signal: controller.signal,
@@ -375,7 +380,7 @@ export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<vo
   if (actionId) body.actionId = actionId;
   if (playbookId) body.playbookId = playbookId;
 
-  const response = await fetch(`${API_BASE_URL}/ai/analysis/execute`, {
+  const response = await fetch(`${getApiBaseUrl()}/ai/analysis/execute`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -485,7 +490,7 @@ export async function exportAnalysis(analysisId: string, format: ExportFormat, t
 
   const controller = createTimeoutController(60_000); // 60s timeout for export
 
-  const response = await fetch(`${API_BASE_URL}/ai/analysis/${analysisId}/export`, {
+  const response = await fetch(`${getApiBaseUrl()}/ai/analysis/${analysisId}/export`, {
     method: 'POST',
     headers: buildHeaders(token),
     body: JSON.stringify({ format }),

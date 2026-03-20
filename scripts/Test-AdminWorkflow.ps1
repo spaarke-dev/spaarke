@@ -29,7 +29,7 @@
     Task: 043 - Admin workflow end-to-end test
 #>
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [string]$BffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net"
 )
 

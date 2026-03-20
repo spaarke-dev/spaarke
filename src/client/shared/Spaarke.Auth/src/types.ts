@@ -57,5 +57,6 @@ declare global {
     __SPAARKE_BFF_TOKEN__?: string;
     __SPAARKE_MSAL_CLIENT_ID__?: string;
     __SPAARKE_BFF_URL__?: string;
+    __SPAARKE_BFF_API_SCOPE__?: string;
   }
 }

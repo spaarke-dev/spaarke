@@ -17,12 +17,16 @@
  *   playbookId  - AI playbook ID for guided interactions (optional)
  *   sessionId   - Existing chat session to resume (optional)
  *   theme       - Theme override: light | dark | highcontrast (optional)
- *   apiBaseUrl  - BFF API base URL override (optional; defaults to dev endpoint)
  *
  * Authentication:
  *   Token acquisition is handled independently by App.tsx via authService.ts.
  *   The authService uses Xrm.Utility.getGlobalContext() to acquire Bearer tokens
  *   for the BFF API. No tokens are passed via URL parameters or BroadcastChannel.
+ *
+ * Runtime configuration:
+ *   BFF API base URL, MSAL client ID, and OAuth scope are resolved at runtime
+ *   from Dataverse Environment Variables via resolveRuntimeConfig() from
+ *   @spaarke/auth. No build-time .env.production values are used for these.
  *
  * Theme detection follows 4-level priority (replaces PH-010-B light-theme-only):
  *   1. User preference (localStorage 'spaarke-theme')
@@ -37,6 +41,7 @@
 
 import { createRoot } from 'react-dom/client';
 import { FluentProvider } from '@fluentui/react-components';
+import { resolveRuntimeConfig } from '@spaarke/auth';
 import { App } from './App';
 import { detectTheme, setupThemeListener } from './ThemeProvider';
 
@@ -55,7 +60,7 @@ const sessionId = appParams.get('sessionId') ?? '';
 
 // ---- Analysis launch context params (task 002) ----
 // Set by AnalysisWorkspace via openSprkChatPane() with a SprkChatLaunchContext.
-// Passed through to App → detectContext so the BFF can resolve the correct
+// Passed through to App -> detectContext so the BFF can resolve the correct
 // playbook and knowledge sources for the analysis context.
 const analysisType = appParams.get('analysisType') ?? '';
 const matterType = appParams.get('matterType') ?? '';
@@ -66,50 +71,12 @@ const sourceContainerId = appParams.get('sourceContainerId') ?? '';
 const mode = (appParams.get('mode') ?? '') as 'analysis' | 'general' | '';
 
 // ---------------------------------------------------------------------------
-// API configuration
-// ---------------------------------------------------------------------------
-
-// Resolve BFF API base URL: URL param > Xrm global context > fallback
-function resolveApiBaseUrl(): string {
-  // Check URL param first
-  const urlApi = appParams.get('apiBaseUrl');
-  if (urlApi) return urlApi;
-
-  // Try Xrm global context for Dataverse environment URL
-  try {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
-    if (xrm?.Utility?.getGlobalContext) {
-      const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
-      if (clientUrl) {
-        // The BFF API URL is not the Dataverse URL itself but we
-        // return the known dev endpoint; in production this would be
-        // read from a Dataverse environment variable or configuration.
-      }
-    }
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-  } catch {
-    /* cross-origin or unavailable */
-  }
-
-  // Default to the known dev BFF API endpoint
-  return 'https://spe-api-dev-67e2xz.azurewebsites.net';
-}
-
-const apiBaseUrl = resolveApiBaseUrl();
-
-// NOTE: accessToken is no longer resolved here. Authentication is handled
-// independently by App.tsx via services/authService.ts, which uses
-// Xrm.Utility.getGlobalContext() at runtime. This avoids transmitting
-// tokens through the render pipeline and supports automatic refresh.
-
-// ---------------------------------------------------------------------------
-// Theme detection (4-level priority — replaces PH-010-B)
+// Theme detection (4-level priority -- replaces PH-010-B)
 // ---------------------------------------------------------------------------
 
 let theme = detectTheme(appParams);
 
-// Set body background to match detected theme — prevents white flash in dark mode.
+// Set body background to match detected theme -- prevents white flash in dark mode.
 // Uses the theme object's actual colorNeutralBackground1 value (a resolved hex/rgb string),
 // NOT tokens.* (which are CSS variable references that only work inside FluentProvider).
 const bgColor = (theme as Record<string, string>).colorNeutralBackground1;
@@ -118,7 +85,7 @@ if (bgColor) {
 }
 
 // ---------------------------------------------------------------------------
-// Render
+// Bootstrap: resolve runtime config, then render
 // ---------------------------------------------------------------------------
 
 const container = document.getElementById('root');
@@ -126,39 +93,74 @@ if (!container) throw new Error('[SprkChatPane] Root container #root not found i
 
 const root = createRoot(container);
 
-function renderApp(): void {
-  root.render(
-    <FluentProvider theme={theme} style={{ height: '100%' }}>
-      <App
-        entityType={entityType}
-        entityId={entityId}
-        playbookId={playbookId}
-        sessionId={sessionId}
-        apiBaseUrl={apiBaseUrl}
-        analysisType={analysisType}
-        matterType={matterType}
-        practiceArea={practiceArea}
-        analysisId={analysisId}
-        sourceFileId={sourceFileId}
-        sourceContainerId={sourceContainerId}
-        mode={mode}
-      />
-    </FluentProvider>
-  );
+/**
+ * Async bootstrap: resolve BFF URL + MSAL client ID from Dataverse
+ * Environment Variables at runtime, set window globals for @spaarke/auth
+ * resolveConfig(), then render the application.
+ */
+async function bootstrap(): Promise<void> {
+  // 1. Resolve runtime config from Dataverse Environment Variables
+  const runtimeConfig = await resolveRuntimeConfig();
+
+  // 2. Set window globals so @spaarke/auth resolveConfig() picks them up
+  //    when initAuth() is called inside App.tsx
+  window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
+  window.__SPAARKE_BFF_BASE_URL__ = runtimeConfig.bffBaseUrl;
+  window.__SPAARKE_BFF_API_SCOPE__ = runtimeConfig.bffOAuthScope;
+
+  const apiBaseUrl = runtimeConfig.bffBaseUrl;
+
+  // 3. Render the app with resolved config
+  function renderApp(): void {
+    root.render(
+      <FluentProvider theme={theme} style={{ height: '100%' }}>
+        <App
+          entityType={entityType}
+          entityId={entityId}
+          playbookId={playbookId}
+          sessionId={sessionId}
+          apiBaseUrl={apiBaseUrl}
+          analysisType={analysisType}
+          matterType={matterType}
+          practiceArea={practiceArea}
+          analysisId={analysisId}
+          sourceFileId={sourceFileId}
+          sourceContainerId={sourceContainerId}
+          mode={mode}
+        />
+      </FluentProvider>
+    );
+  }
+
+  // Initial render
+  renderApp();
+
+  // Theme change listener -- re-render on system/user preference change
+  setupThemeListener(() => {
+    theme = detectTheme(appParams);
+    const updatedBg = (theme as Record<string, string>).colorNeutralBackground1;
+    if (updatedBg) {
+      document.body.style.backgroundColor = updatedBg;
+    }
+    renderApp();
+  });
 }
 
-// Initial render
-renderApp();
-
-// ---------------------------------------------------------------------------
-// Theme change listener — re-render on system/user preference change
-// ---------------------------------------------------------------------------
-
-setupThemeListener(() => {
-  theme = detectTheme(appParams);
-  const updatedBg = (theme as Record<string, string>).colorNeutralBackground1;
-  if (updatedBg) {
-    document.body.style.backgroundColor = updatedBg;
-  }
-  renderApp();
+bootstrap().catch((err) => {
+  console.error('[SprkChatPane] Failed to resolve runtime configuration:', err);
+  // Render a minimal error state so the user sees something
+  root.render(
+    <FluentProvider theme={theme} style={{ height: '100%' }}>
+      <div style={{ padding: '24px', textAlign: 'center', color: '#d13438' }}>
+        <h3>Configuration Error</h3>
+        <p>
+          Failed to load runtime configuration from Dataverse.
+          Ensure the SpaarkeCore solution is imported and environment variables are configured.
+        </p>
+        <p style={{ fontSize: '12px', color: '#666' }}>
+          {err instanceof Error ? err.message : String(err)}
+        </p>
+      </div>
+    </FluentProvider>
+  );
 });

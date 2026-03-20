@@ -313,8 +313,9 @@ describe('DEFAULT_GRID_CONFIG', () => {
     expect(DEFAULT_GRID_CONFIG.enableCheckboxSelection).toBe(true);
   });
 
-  it('has SDAP config with base URL and timeout', () => {
-    expect(DEFAULT_GRID_CONFIG.sdapConfig.baseUrl).toBe('https://spe-api-dev-67e2xz.azurewebsites.net');
+  it('has SDAP config with empty baseUrl (resolved at runtime) and timeout', () => {
+    // baseUrl is resolved at runtime from Dataverse env var sprk_BffApiBaseUrl
+    expect(DEFAULT_GRID_CONFIG.sdapConfig.baseUrl).toBe('');
     expect(DEFAULT_GRID_CONFIG.sdapConfig.timeout).toBe(300000);
   });
 

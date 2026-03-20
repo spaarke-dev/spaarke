@@ -16,10 +16,16 @@
 #>
 
 param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL,
     [switch]$WhatIf
 )
 
-$token = az account get-access-token --resource "https://spaarkedev1.crm.dynamics.com" --query "accessToken" -o tsv
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$token = az account get-access-token --resource $DataverseUrl --query "accessToken" -o tsv
 if (-not $token) {
     Write-Error "Failed to get access token. Please run 'az login' first."
     exit 1
@@ -33,7 +39,7 @@ $headers = @{
     'OData-Version' = '4.0'
 }
 
-$baseUrl = "https://spaarkedev1.crm.dynamics.com/api/data/v9.2"
+$baseUrl = "$DataverseUrl/api/data/v9.2"
 
 function Create-DataverseRecord {
     param(

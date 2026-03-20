@@ -1,6 +1,15 @@
 # Deploy simplified SVG theme icons that match Dataverse's expected format
 
-$orgUrl = "https://spaarkedev1.crm.dynamics.com"
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$orgUrl = $DataverseUrl
 $accessToken = (& az account get-access-token --resource "$orgUrl/" --query accessToken -o tsv 2>$null)
 if ([string]::IsNullOrEmpty($accessToken)) {
     Write-Host "Error: Failed to get access token" -ForegroundColor Red

@@ -9,6 +9,10 @@
  * Reuses the same Azure AD app registration as AnalysisWorkspace and
  * LegalWorkspace (CLIENT_ID = "DSM-SPE Dev 2").
  *
+ * The MSAL client ID is resolved at runtime from Dataverse Environment Variables
+ * via resolveRuntimeConfig() in index.tsx, which sets window.__SPAARKE_MSAL_CLIENT_ID__
+ * before this module is loaded.
+ *
  * Pattern from: src/client/code-pages/AnalysisWorkspace/src/config/msalConfig.ts
  *
  * @see ADR-008 - Endpoint filters for auth
@@ -18,11 +22,8 @@
 import type { Configuration } from '@azure/msal-browser';
 import { LogLevel } from '@azure/msal-browser';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const CLIENT_ID: string = (window as any).__SPAARKE_MSAL_CLIENT_ID__
-  || (import.meta.env.VITE_MSAL_CLIENT_ID as string | undefined)
-  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Set VITE_MSAL_CLIENT_ID in .env.development or .env.production.'); })();
-/* eslint-enable @typescript-eslint/no-explicit-any */
+const CLIENT_ID: string = window.__SPAARKE_MSAL_CLIENT_ID__
+  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Ensure resolveRuntimeConfig() has been called before loading msalConfig.'); })();
 
 const REDIRECT_URI = window.location.origin;
 
@@ -58,9 +59,3 @@ export const msalConfig: Configuration = {
     },
   },
 };
-
-/**
- * OAuth scope for the BFF API. Used when acquiring tokens via MSAL.
- * This is the BFF API app registration's user_impersonation scope.
- */
-export const BFF_API_SCOPE = 'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation';

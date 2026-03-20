@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-010" project="Production Environment Setup R2">
+  <metadata>
+    <title>Add resolveRuntimeConfig() to @spaarke/auth shared library</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>shared-lib, auth, typescript, config</tags>
+    <parallel-group>2</parallel-group>
+    <dependencies>Phase 1 complete</dependencies>
+    <blocks>Phase 3 (all code pages), Phase 5 (legacy JS, add-ins)</blocks>
+  </metadata>
+
+  <prompt>
+    Add a resolveRuntimeConfig() function to @spaarke/auth that queries Dataverse Environment Variables (sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId) via REST API at runtime. This replaces build-time .env.production resolution for code pages. Also investigate Xrm.Utility.getGlobalContext() for MSAL client ID pre-auth bootstrap.
+    CONTEXT: Several code pages (LegalWorkspace, DocumentUploadWizard, SpeAdminApp) currently have bffConfig.ts files from a prior CORS hotfix that resolve BFF URL via window globals (__SPAARKE_BFF_BASE_URL__ or __SPAARKE_BFF_URL__). resolveRuntimeConfig() supersedes this pattern entirely — downstream tasks will delete those bffConfig.ts files and use resolveRuntimeConfig() instead. The existing resolveConfig() in config.ts also has an inconsistent window global key (__SPAARKE_BFF_URL__ missing _BASE_) — ensure resolveRuntimeConfig() uses the canonical __SPAARKE_BFF_BASE_URL__ name.
+  </prompt>
+
+  <role>Senior TypeScript developer with MSAL and Dataverse REST API experience</role>
+
+  <goal>
+    @spaarke/auth exports resolveRuntimeConfig() that returns { bffBaseUrl, bffOAuthScope, msalClientId } resolved from Dataverse Environment Variables at runtime, with 5-minute caching. MSAL client ID can be obtained from Xrm context before auth initialization.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components must not hardcode Dataverse entity names</constraint>
+    <constraint source="ADR-022">Must work in both React 16 (PCF) and React 18 (Code Page) contexts</constraint>
+    <constraint source="project">Remove DEFAULT_CLIENT_ID and DEFAULT_BFF_SCOPE hardcoded constants</constraint>
+    <constraint source="project">Fail loudly if environment variables not found (no silent fallback to dev)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts</file>
+      <file>src/client/pcf/shared/utils/environmentVariables.ts</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Code pages run as Dataverse web resources in iframes. They can't use the PCF webApi SDK, but they can make REST API calls to Dataverse once authenticated. The chicken-and-egg: MSAL client ID is needed before auth, but env vars need auth to query. Solution: get MSAL client ID from Xrm.Utility.getGlobalContext() (available pre-auth in all web resources), then authenticate, then query remaining env vars.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Read existing auth config">Read Spaarke.Auth/src/config.ts and understand the current resolveConfig() chain (user config → window globals → defaults).</step>
+    <step order="2" name="Research Xrm context">Investigate what's available from Xrm.Utility.getGlobalContext() before auth — specifically getClientUrl(), and whether client ID or tenant ID are exposed.</step>
+    <step order="3" name="Implement resolveRuntimeConfig">
+      Create resolveRuntimeConfig() that:
+      1. Gets org URL from Xrm.Utility.getGlobalContext().getClientUrl()
+      2. Gets MSAL client ID from window global or Xrm context
+      3. Authenticates with MSAL
+      4. Queries Dataverse REST API for environment variables (sprk_BffApiBaseUrl, sprk_BffApiAppId)
+      5. Caches results for 5 minutes
+      6. Returns { bffBaseUrl, bffOAuthScope, msalClientId }
+    </step>
+    <step order="4" name="Remove dev defaults">Remove DEFAULT_CLIENT_ID and DEFAULT_BFF_SCOPE from config.ts. Make resolveConfig() throw if no config source provides these values.</step>
+    <step order="5" name="Export and build">Export resolveRuntimeConfig from package barrel. Run npm run build to verify.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Auth/src/config.ts</output>
+    <output type="code">src/client/shared/Spaarke.Auth/src/resolveRuntimeConfig.ts (new)</output>
+    <output type="code">src/client/shared/Spaarke.Auth/src/index.ts (export)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">resolveRuntimeConfig() is exported from @spaarke/auth</criterion>
+    <criterion testable="true">Function queries Dataverse Environment Variables via REST API</criterion>
+    <criterion testable="true">Results are cached for 5 minutes</criterion>
+    <criterion testable="true">DEFAULT_CLIENT_ID and DEFAULT_BFF_SCOPE constants are removed</criterion>
+    <criterion testable="true">npm run build succeeds</criterion>
+    <criterion testable="true">Missing environment variables throw clear error messages</criterion>
+  </acceptance-criteria>
+</task>

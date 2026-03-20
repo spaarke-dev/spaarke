@@ -58,7 +58,7 @@ import {
   fetchAiDraftSummary,
 } from './matterService';
 import type { ILookupItem } from '../../types/entities';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import { useAiPrefill, type IResolvedPrefillFields } from '../../../../../client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill';
 

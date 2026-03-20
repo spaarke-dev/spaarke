@@ -43,6 +43,14 @@ jest.mock('../../services/authInit', () => ({
   isAuthenticated: jest.fn().mockReturnValue(true),
 }));
 
+jest.mock('@spaarke/auth', () => ({
+  resolveRuntimeConfig: jest.fn().mockResolvedValue({
+    bffBaseUrl: 'https://test-bff-api.example.com',
+    bffOAuthScope: 'api://test-app-id/user_impersonation',
+    msalClientId: 'test-client-id',
+  }),
+}));
+
 // Mock global fetch at the lowest level so the full service pipeline is tested
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
 global.fetch = mockFetch as typeof global.fetch;
@@ -50,7 +58,9 @@ global.fetch = mockFetch as typeof global.fetch;
 // Import hooks AFTER mocks are established
 import { useSemanticSearch } from '../../hooks/useSemanticSearch';
 import { useRecordSearch } from '../../hooks/useRecordSearch';
-import { BFF_API_BASE_URL } from '../../services/apiBase';
+import { initializeRuntimeConfig } from '../../services/apiBase';
+
+const TEST_BFF_URL = 'https://test-bff-api.example.com';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -156,6 +166,10 @@ function createErrorFetchResponse(status: number, body: unknown, statusText = 'E
 // ---------------------------------------------------------------------------
 
 describe('SearchFlowIntegration', () => {
+  beforeAll(async () => {
+    await initializeRuntimeConfig();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -177,7 +191,7 @@ describe('SearchFlowIntegration', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe(`${BFF_API_BASE_URL}/api/ai/search`);
+      expect(url).toBe(`${TEST_BFF_URL}/api/ai/search`);
       expect(init?.method).toBe('POST');
 
       const body = JSON.parse(init?.body as string);
@@ -284,7 +298,7 @@ describe('SearchFlowIntegration', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const [url, init] = mockFetch.mock.calls[0];
-      expect(url).toBe(`${BFF_API_BASE_URL}/api/ai/search/records`);
+      expect(url).toBe(`${TEST_BFF_URL}/api/ai/search/records`);
       expect(init?.method).toBe('POST');
 
       const body = JSON.parse(init?.body as string);

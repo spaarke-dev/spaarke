@@ -1,0 +1,56 @@
+<task id="ENV-036" project="Production Environment Setup R2">
+  <metadata>
+    <title>Migrate AssociationResolver PCF to runtime config resolution</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>pcf, typescript, auth, config</tags>
+    <parallel-group>4</parallel-group>
+    <dependencies>ENV-011</dependencies>
+  </metadata>
+
+  <prompt>
+    Migrate AssociationResolver PCF control to use @spaarke/auth shared auth pattern and environmentVariables.ts for runtime config resolution. Replace the hardcoded msalConfig.ts (if present) with the shared pattern established in ENV-011. Remove any hardcoded CLIENT_ID or BFF URL from PCF source. The control should read MSAL Client ID and BFF URL from Dataverse context at runtime via the shared environmentVariables utility.
+  </prompt>
+
+  <role>PCF developer with Power Platform and React experience</role>
+
+  <goal>
+    AssociationResolver PCF control has no hardcoded CLIENT_ID or BFF URL. Authentication and API config are resolved at runtime from Dataverse environment variables using the shared @spaarke/auth pattern. The control builds successfully.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Field-bound PCF controls — must use React 16 APIs (platform-provided)</constraint>
+    <constraint source="ADR-022">PCF: React 16 APIs only; ReactControl or StandardControl pattern; no createRoot()</constraint>
+    <constraint source="project">Do not bundle React in PCF — use platform-provided React 16/17</constraint>
+    <constraint source="project">Use shared environmentVariables.ts pattern from ENV-011</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/shared/utils/environmentVariables.ts</file>
+      <file>src/client/shared/Spaarke.Auth/src/config.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current auth files">Read AssociationResolver auth files (msalConfig.ts, authService.ts, or similar). Identify where CLIENT_ID and BFF URL are currently defined.</step>
+    <step order="2" name="Replace with shared pattern">Replace hardcoded msalConfig.ts content with imports from @spaarke/auth. Use environmentVariables.ts to read CLIENT_ID and BFF URL from PCF context properties at runtime.</step>
+    <step order="3" name="Remove old msalConfig.ts">Delete or clear the old msalConfig.ts that contained hardcoded values. Ensure nothing still imports from it.</step>
+    <step order="4" name="Update index.ts if needed">Ensure the PCF index.ts passes the required context properties through to the auth utilities.</step>
+    <step order="5" name="Build">Run npm run build from the AssociationResolver directory. Confirm no TypeScript errors.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No hardcoded CLIENT_ID in AssociationResolver source</criterion>
+    <criterion testable="true">No hardcoded BFF URL in AssociationResolver source</criterion>
+    <criterion testable="true">Control uses @spaarke/auth and environmentVariables.ts for auth config</criterion>
+    <criterion testable="true">npm run build succeeds with no TypeScript errors</criterion>
+  </acceptance-criteria>
+</task>

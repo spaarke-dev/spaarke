@@ -2,7 +2,7 @@
  * Unit tests for apiBase.ts — shared API base utilities.
  *
  * Tests:
- * - BFF_API_BASE_URL constant
+ * - getBffBaseUrl() — returns cached BFF base URL after initialization
  * - buildAuthHeaders() — constructs Authorization + Content-Type headers
  * - handleApiResponse<T>() — parses JSON on 2xx, throws ApiError on failure
  *
@@ -21,7 +21,15 @@ jest.mock('../../services/authInit', () => ({
   getAuthHeader: mockGetAuthHeader,
 }));
 
-import { BFF_API_BASE_URL, buildAuthHeaders, handleApiResponse } from '../../services/apiBase';
+jest.mock('@spaarke/auth', () => ({
+  resolveRuntimeConfig: jest.fn().mockResolvedValue({
+    bffBaseUrl: 'https://test-bff-api.example.com',
+    bffOAuthScope: 'api://test-app-id/user_impersonation',
+    msalClientId: 'test-client-id',
+  }),
+}));
+
+import { getBffBaseUrl, initializeRuntimeConfig, buildAuthHeaders, handleApiResponse } from '../../services/apiBase';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,24 +66,29 @@ describe('apiBase', () => {
   });
 
   // -----------------------------------------------------------------------
-  // BFF_API_BASE_URL
+  // getBffBaseUrl()
   // -----------------------------------------------------------------------
 
-  describe('BFF_API_BASE_URL', () => {
-    it('should be the dev BFF API base URL', () => {
-      expect(BFF_API_BASE_URL).toBe('https://spe-api-dev-67e2xz.azurewebsites.net');
+  describe('getBffBaseUrl()', () => {
+    it('should return the resolved BFF base URL after initialization', async () => {
+      await initializeRuntimeConfig();
+      const url = getBffBaseUrl();
+      expect(url).toBe('https://test-bff-api.example.com');
     });
 
-    it('should be a string', () => {
-      expect(typeof BFF_API_BASE_URL).toBe('string');
+    it('should return a string', async () => {
+      await initializeRuntimeConfig();
+      expect(typeof getBffBaseUrl()).toBe('string');
     });
 
-    it('should start with https://', () => {
-      expect(BFF_API_BASE_URL).toMatch(/^https:\/\//);
+    it('should start with https://', async () => {
+      await initializeRuntimeConfig();
+      expect(getBffBaseUrl()).toMatch(/^https:\/\//);
     });
 
-    it('should not have a trailing slash', () => {
-      expect(BFF_API_BASE_URL).not.toMatch(/\/$/);
+    it('should not have a trailing slash', async () => {
+      await initializeRuntimeConfig();
+      expect(getBffBaseUrl()).not.toMatch(/\/$/);
     });
   });
 

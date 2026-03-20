@@ -6,7 +6,12 @@ import {
   InteractionRequiredAuthError,
   PopupRequest,
 } from '@azure/msal-browser';
-import { msalConfig, validateMsalConfig } from './msalConfig';
+import {
+  RuntimeMsalConfig,
+  createMsalConfig,
+  createLoginRequest,
+  validateRuntimeMsalConfig,
+} from './msalConfig';
 import { IAuthProvider, TokenCacheEntry } from '../../types/auth';
 
 /**
@@ -101,6 +106,18 @@ export class MsalAuthProvider implements IAuthProvider {
    */
   private refreshPromises = new Map<string, Promise<void>>();
 
+  /**
+   * Runtime configuration resolved from Dataverse environment variables.
+   * Set via configure() before initialize().
+   */
+  private runtimeConfig: RuntimeMsalConfig | null = null;
+
+  /**
+   * BFF API OAuth scopes derived from runtime config.
+   * Populated by configure().
+   */
+  private bffApiScopes: string[] = [];
+
   // ============================================================================
   // Constructor (Private - Singleton Pattern)
   // ============================================================================
@@ -132,6 +149,34 @@ export class MsalAuthProvider implements IAuthProvider {
     return MsalAuthProvider.instance;
   }
 
+  /**
+   * Configure the auth provider with runtime-resolved values.
+   *
+   * Must be called before initialize(). Values come from Dataverse
+   * environment variables via environmentVariables.ts.
+   *
+   * @param config - Runtime MSAL configuration
+   */
+  public configure(config: RuntimeMsalConfig): void {
+    this.runtimeConfig = config;
+    const loginRequest = createLoginRequest(config);
+    this.bffApiScopes = loginRequest.scopes;
+    console.info('[MsalAuthProvider] Configured with runtime values');
+  }
+
+  /**
+   * Get the BFF API OAuth scopes derived from runtime config.
+   *
+   * @returns Array of OAuth scope strings
+   * @throws Error if not configured
+   */
+  public getBffApiScopes(): string[] {
+    if (this.bffApiScopes.length === 0) {
+      throw new Error('[MsalAuthProvider] Not configured. Call configure() first.');
+    }
+    return this.bffApiScopes;
+  }
+
   // ============================================================================
   // IAuthProvider Interface Implementation
   // ============================================================================
@@ -140,10 +185,12 @@ export class MsalAuthProvider implements IAuthProvider {
    * Initialize MSAL PublicClientApplication
    *
    * Call this once during PCF control initialization (index.ts init() method).
+   * Must call configure() first to provide runtime config values.
    *
    * Steps:
-   * 1. Validate MSAL configuration (fail fast if misconfigured)
-   * 2. Create PublicClientApplication instance
+   * 0. Ensure runtime config has been provided via configure()
+   * 1. Validate runtime configuration (fail fast if misconfigured)
+   * 2. Create PublicClientApplication instance from runtime config
    * 3. Handle redirect response (if returning from Azure AD login)
    * 4. Set active account (if user already logged in)
    *
@@ -161,13 +208,22 @@ export class MsalAuthProvider implements IAuthProvider {
     console.info('[MsalAuthProvider] Initializing MSAL...');
 
     try {
-      // Step 1: Validate configuration (throws if invalid)
-      validateMsalConfig();
-      console.info('[MsalAuthProvider] Configuration validated ✅');
+      // Step 0: Ensure runtime config has been provided
+      if (!this.runtimeConfig) {
+        throw new Error(
+          '[MsalAuthProvider] Runtime config not set. Call configure() with values from ' +
+            'Dataverse environment variables before calling initialize().'
+        );
+      }
 
-      // Step 2: Create PublicClientApplication instance
-      this.msalInstance = new PublicClientApplication(msalConfig);
-      console.info('[MsalAuthProvider] PublicClientApplication created ✅');
+      // Step 1: Validate runtime configuration (throws if invalid)
+      validateRuntimeMsalConfig(this.runtimeConfig);
+      console.info('[MsalAuthProvider] Configuration validated');
+
+      // Step 2: Create PublicClientApplication instance from runtime config
+      const msalConfiguration = createMsalConfig(this.runtimeConfig);
+      this.msalInstance = new PublicClientApplication(msalConfiguration);
+      console.info('[MsalAuthProvider] PublicClientApplication created');
 
       // Step 2.5: Initialize MSAL instance (REQUIRED in MSAL.js v3+)
       // Must be called before any other MSAL methods

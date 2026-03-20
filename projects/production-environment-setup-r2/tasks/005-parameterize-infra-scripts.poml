@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-005" project="Production Environment Setup R2">
+  <metadata>
+    <title>Parameterize infrastructure scripts with hardcoded org URLs</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>infrastructure, scripts, config</tags>
+    <parallel-group>1B</parallel-group>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Parameterize update-theme-icons.ps1, Deploy-EventsSitemap.ps1, and other infrastructure scripts that hardcode "spaarkedev1". Add -DataverseUrl parameter with $env:DATAVERSE_URL fallback. Follow the same pattern as Provision-Customer.ps1.
+  </prompt>
+
+  <role>PowerShell developer familiar with Azure and Dataverse deployment scripts</role>
+
+  <goal>
+    Infrastructure scripts accept DataverseUrl as a parameter with environment variable fallback. Zero hardcoded "spaarkedev1" in infrastructure/ directory.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Follow existing parameterization pattern from Provision-Customer.ps1</constraint>
+    <constraint source="project">Must maintain backward compatibility — existing calls without parameters should still work via env var fallback</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/README.md</file>
+      <file>projects/production-environment-setup-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Find affected scripts">Search infrastructure/ for "spaarkedev1". List all files.</step>
+    <step order="2" name="Parameterize each script">For each script: add -DataverseUrl parameter with default $env:DATAVERSE_URL. Replace hardcoded URL.</step>
+    <step order="3" name="Verify scripts parse">Run PowerShell syntax check on modified scripts.</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">PowerShell scripting</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/scripts/update-theme-icons.ps1</output>
+    <output type="code">infrastructure/dataverse/solutions/EventsSitemap/Deploy-EventsSitemap.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero hardcoded "spaarkedev1" in infrastructure/ directory (excluding Bicep dev.bicepparam which is correct)</criterion>
+    <criterion testable="true">All modified scripts accept -DataverseUrl parameter</criterion>
+    <criterion testable="true">All modified scripts fall back to $env:DATAVERSE_URL</criterion>
+  </acceptance-criteria>
+</task>

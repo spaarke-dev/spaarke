@@ -9,10 +9,16 @@
  *
  * When embedded on a form (no data params), resolves documentId from Xrm form
  * context and tenantId from @spaarke/auth after MSAL initialization.
+ *
+ * Runtime configuration:
+ *   BFF API URL, MSAL Client ID, and OAuth scope are resolved at runtime from
+ *   Dataverse Environment Variables via resolveRuntimeConfig() from @spaarke/auth.
+ *   No build-time .env.production values are used for these settings.
  */
 
 import { createRoot } from 'react-dom/client';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { resolveRuntimeConfig } from '@spaarke/auth';
 import { App } from './App';
 import { initializeAuth, getAuthProvider } from './services/authInit';
 
@@ -51,11 +57,27 @@ if (!container) throw new Error('[DocumentRelationshipViewer] Root container #ro
 
 const root = createRoot(container);
 
-// Initialize auth first so we can resolve tenantId if not in URL params
+/**
+ * Bootstrap sequence:
+ *   1. Resolve runtime config from Dataverse Environment Variables (BFF URL, MSAL Client ID, OAuth scope)
+ *   2. Initialize MSAL auth with resolved config
+ *   3. Resolve tenantId from auth if not in URL params
+ *   4. Render App with resolved apiBaseUrl
+ */
 async function bootstrap(): Promise<void> {
+  // 1. Resolve runtime config (BFF URL, MSAL client ID, OAuth scope) from Dataverse
+  const runtimeConfig = await resolveRuntimeConfig();
+
+  // 2. Initialize auth with runtime-resolved config
+  await initializeAuth({
+    clientId: runtimeConfig.msalClientId,
+    bffApiScope: runtimeConfig.bffOAuthScope,
+    bffBaseUrl: runtimeConfig.bffBaseUrl,
+  });
+
+  // 3. Resolve tenantId from auth if not in URL params
   if (!params.get('tenantId')) {
     try {
-      await initializeAuth();
       const tenantId = await getAuthProvider().getTenantId();
       if (tenantId) params.set('tenantId', tenantId);
     } catch (err) {
@@ -63,9 +85,10 @@ async function bootstrap(): Promise<void> {
     }
   }
 
+  // 4. Render with runtime-resolved BFF URL
   root.render(
     <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
-      <App params={params} isDark={isDark} />
+      <App params={params} isDark={isDark} apiBaseUrl={runtimeConfig.bffBaseUrl} />
     </FluentProvider>
   );
 }

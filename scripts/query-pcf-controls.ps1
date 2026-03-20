@@ -1,6 +1,6 @@
 # Query PCF controls registered in Dataverse
 param(
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [string]$Filter = "Spaarke"
 )
 

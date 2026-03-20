@@ -17,7 +17,7 @@
     <!-- Parent Display Name (INPUT for Custom Page) -->
     <property name="parentDisplayName" display-name-key="Parent Display Name" description-key="Display name of parent record for UI header (e.g., Matter #12345)" of-type="SingleLine.Text" usage="input" required="false" />
     <!-- Configuration: SDAP API Base URL -->
-    <property name="sdapApiBaseUrl" display-name-key="SDAP API Base URL" description-key="Base URL for SDAP BFF API (include /api suffix)" of-type="SingleLine.Text" usage="input" required="false" default-value="spe-api-dev-67e2xz.azurewebsites.net/api" />
+    <property name="sdapApiBaseUrl" display-name-key="SDAP API Base URL" description-key="Base URL for SDAP BFF API. Resolved at runtime from sprk_BffApiBaseUrl environment variable if not provided." of-type="SingleLine.Text" usage="input" required="false" />
     <!-- OUTPUT: Should Close Dialog (signals Custom Page to call Exit()) -->
     <property name="shouldClose" display-name-key="Should Close Dialog" description-key="Set to true when upload completes successfully - Custom Page monitors this and calls Exit()" of-type="TwoOptions" usage="output" required="false" />
     <resources>

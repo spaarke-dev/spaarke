@@ -37,8 +37,7 @@ import { LogLevel } from '@azure/msal-browser';
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const CLIENT_ID: string = (window as any).__SPAARKE_MSAL_CLIENT_ID__
-  || (import.meta.env.VITE_MSAL_CLIENT_ID as string | undefined)
-  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Set VITE_MSAL_CLIENT_ID in .env.development or .env.production.'); })();
+  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Set window.__SPAARKE_MSAL_CLIENT_ID__ or use resolveRuntimeConfig() from @spaarke/auth.'); })();
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
@@ -90,8 +89,6 @@ export const msalConfig: Configuration = {
 // BFF API OAuth Scope
 // ---------------------------------------------------------------------------
 
-/**
- * OAuth scope for the BFF API. Used when acquiring tokens via MSAL.
- * This is the BFF API app registration's user_impersonation scope.
- */
-export const BFF_API_SCOPE = 'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation';
+// BFF_API_SCOPE has been removed. The OAuth scope is now resolved at runtime
+// from Dataverse Environment Variables via resolveRuntimeConfig() in @spaarke/auth.
+// See authInit.ts for the runtime resolution flow.

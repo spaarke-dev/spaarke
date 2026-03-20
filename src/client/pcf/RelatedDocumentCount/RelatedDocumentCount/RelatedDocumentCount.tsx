@@ -1,9 +1,12 @@
 /**
  * RelatedDocumentCount - Main component for the PCF control.
  *
- * Fetches the count of semantically related documents via useRelatedDocumentCount
+ * Fetches the count of semantically related documents via useRelatedDocumentGraphData
  * and renders the RelationshipCountCard shared component. Clicking "View" opens
  * the FindSimilarDialog with the DocumentRelationshipViewer code page.
+ *
+ * All configuration (auth, BFF URL, tenant ID) is resolved at runtime from
+ * Dataverse environment variables — no hardcoded CLIENT_ID or BFF URLs.
  *
  * @see ADR-012 - Deep import from shared component library
  * @see ADR-021 - Fluent UI v9 design tokens
@@ -15,6 +18,7 @@ import { RelationshipCountCard } from '@spaarke/ui-components/dist/components/Re
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
 import { MiniGraph } from '@spaarke/ui-components/dist/components/MiniGraph';
 import { initializeAuth } from './authInit';
+import type { ResolvedAuthConfig } from './authInit';
 import { useRelatedDocumentGraphData } from './hooks/useRelatedDocumentGraphData';
 import { IRelatedDocumentCountProps } from './types';
 
@@ -70,32 +74,45 @@ function getClientUrl(): string {
  *
  * Displays the count of semantically related documents using RelationshipCountCard.
  * On click, opens the FindSimilarDialog iframe with the full relationship viewer.
+ *
+ * Auth config and API URL are resolved from Dataverse environment variables at runtime.
  */
 export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
+  context,
   documentId,
-  tenantId,
-  apiBaseUrl,
   isDarkMode,
 }) => {
   // Auth initialization state — must complete before API calls
   const [isAuthReady, setIsAuthReady] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
 
+  // Runtime-resolved config from Dataverse environment variables
+  const [resolvedConfig, setResolvedConfig] = React.useState<ResolvedAuthConfig | null>(null);
+
   React.useEffect(() => {
     let cancelled = false;
-    const effectiveApiBaseUrl = apiBaseUrl || 'https://spe-api-dev-67e2xz.azurewebsites.net';
-    initializeAuth(effectiveApiBaseUrl)
-      .then(() => {
-        if (!cancelled) setIsAuthReady(true);
+    // initializeAuth resolves all config (Client ID, Tenant ID, BFF URL, etc.)
+    // from Dataverse environment variables via webApi — no hardcoded fallbacks.
+    initializeAuth(context.webAPI)
+      .then((config) => {
+        if (!cancelled) {
+          setResolvedConfig(config);
+          setIsAuthReady(true);
+        }
+        return undefined;
       })
-      .catch(err => {
+      .catch((err: unknown) => {
         console.error('[RelatedDocumentCount] Auth init failed:', err);
         if (!cancelled) setAuthError('Authentication failed. Please refresh.');
       });
     return () => {
       cancelled = true;
     };
-  }, [apiBaseUrl]);
+  }, [context.webAPI]);
+
+  // Use runtime-resolved values from env vars (no hardcoded fallbacks)
+  const effectiveApiBaseUrl = resolvedConfig?.bffApiUrl;
+  const effectiveTenantId = resolvedConfig?.tenantId;
 
   // Single API call: returns count (from metadata) + graph preview data
   const {
@@ -106,15 +123,15 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({
     error,
     lastUpdated,
     refetch,
-  } = useRelatedDocumentGraphData(documentId, tenantId, apiBaseUrl, isAuthReady);
+  } = useRelatedDocumentGraphData(documentId, effectiveTenantId, effectiveApiBaseUrl, isAuthReady);
 
   // Dialog open/close state
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
 
   // Build viewer URL for the dialog
   const viewerUrl = React.useMemo(
-    () => buildViewerUrl(documentId, tenantId, isDarkMode),
-    [documentId, tenantId, isDarkMode]
+    () => buildViewerUrl(documentId, effectiveTenantId, isDarkMode),
+    [documentId, effectiveTenantId, isDarkMode]
   );
 
   // Open the FindSimilarDialog when user clicks "View" on the count card

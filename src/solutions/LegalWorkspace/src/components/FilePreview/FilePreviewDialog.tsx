@@ -44,7 +44,7 @@ import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 import { searchUsersAsLookup } from '../CreateMatter/matterService';
 import { getXrm } from '../../services/xrmProvider';
 import { authenticatedFetch } from '../../services/authInit';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 
 // ---------------------------------------------------------------------------
 // Props

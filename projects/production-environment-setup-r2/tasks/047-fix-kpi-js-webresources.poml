@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="ENV-047" project="Production Environment Setup R2">
+  <metadata>
+    <title>Fix KPI JS webresources — replace org-to-BFF URL map with env var query</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>5</phase>
+    <tags>webresource, javascript, config</tags>
+    <parallel-group>5</parallel-group>
+    <dependencies>ENV-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded org-to-BFF URL mapping in 3 KPI-related JS webresources with a Dataverse Environment Variable query for sprk_BffApiBaseUrl. These files use the same inline if-else pattern as sprk_subgrid_parent_rollup.js (task ENV-040):
+    - src/solutions/webresources/sprk_matter_kpi_refresh.js
+    - src/solutions/webresources/sprk_kpi_subgrid_refresh.js
+    - src/solutions/webresources/sprk_kpiassessment_quickcreate.js
+    Each file has inline if-else chains matching getClientUrl() hostname to hardcoded BFF URLs for dev, UAT, and prod environments. New customer orgs would fall through with no URL.
+  </prompt>
+
+  <role>JavaScript developer with Dataverse web resource experience</role>
+
+  <goal>All 3 KPI JS webresources resolve BFF URL from Dataverse Environment Variables at runtime. No hardcoded org-to-URL mapping remains in any of the 3 files.</goal>
+
+  <constraints>
+    <constraint source="ADR-006">No business logic in ribbon scripts; no remote calls from ribbon scripts</constraint>
+    <constraint source="project">Legacy JS webresources cannot import npm packages — use inline fetch</constraint>
+    <constraint source="project">Must work without @spaarke/auth (legacy JS context)</constraint>
+    <constraint source="project">Follow same pattern as ENV-040 (sprk_subgrid_parent_rollup.js) for consistency</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/webresources/sprk_matter_kpi_refresh.js</file>
+      <file>src/solutions/webresources/sprk_kpi_subgrid_refresh.js</file>
+      <file>src/solutions/webresources/sprk_kpiassessment_quickcreate.js</file>
+      <file>src/solutions/webresources/sprk_subgrid_parent_rollup.js</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current code">Read all 3 KPI JS files. Identify the inline if-else org-to-URL mapping in each.</step>
+    <step order="2" name="Create shared helper">If not already created by ENV-040, create a shared getBffBaseUrl() helper function that queries Dataverse env vars via Xrm.WebApi.retrieveMultipleRecords. If ENV-040 already created this, reuse it.</step>
+    <step order="3" name="Replace in all 3 files">Replace the inline if-else chains in each file with the env var query pattern. Cache the resolved URL (sessionStorage or module-level variable).</step>
+    <step order="4" name="Remove hardcoded BFF app ID">Also replace hardcoded 1e40baad if present in any of the 3 files.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Search for hardcoded org names and URLs</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/webresources/sprk_matter_kpi_refresh.js</output>
+    <output type="code">src/solutions/webresources/sprk_kpi_subgrid_refresh.js</output>
+    <output type="code">src/solutions/webresources/sprk_kpiassessment_quickcreate.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No hardcoded "spaarkedev1", "spaarkeuat", "spaarkeprod", or org-to-URL mapping in any of the 3 files</criterion>
+    <criterion testable="true">BFF URL resolved from Dataverse Environment Variables in all 3 files</criterion>
+    <criterion testable="true">Result is cached to avoid repeated queries</criterion>
+    <criterion testable="true">Pattern is consistent with ENV-040 (sprk_subgrid_parent_rollup.js)</criterion>
+  </acceptance-criteria>
+</task>

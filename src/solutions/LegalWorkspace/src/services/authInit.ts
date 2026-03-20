@@ -3,7 +3,7 @@
  * Thin wrapper around @spaarke/auth for the Legal Operations Workspace.
  *
  * Initializes the shared auth provider with workspace-appropriate defaults
- * (BFF base URL from bffConfig, proactive refresh enabled) and re-exports
+ * (BFF base URL from runtimeConfig, proactive refresh enabled) and re-exports
  * the two functions consumed across the workspace: authenticatedFetch and
  * getTenantId.
  *
@@ -12,7 +12,7 @@
  */
 
 import { initAuth, authenticatedFetch as sharedAuthFetch, getAuthProvider } from '@spaarke/auth';
-import { getBffBaseUrl } from '../config/bffConfig';
+import { getBffBaseUrl } from '../config/runtimeConfig';
 
 // ---------------------------------------------------------------------------
 // Initialization

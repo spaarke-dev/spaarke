@@ -58,7 +58,8 @@ import { SummaryStep } from "./components/SummaryStep";
 import type { UploadedDocumentInfo } from "./components/SummaryStep";
 import { NextStepsStep } from "./components/NextStepsStep";
 import type { IDocumentEmailStepProps } from "./components/DocumentEmailStep";
-import { getBffBaseUrl } from "./config/bffConfig";
+// BFF base URL is resolved at runtime via resolveRuntimeConfig() in main.tsx
+// and set on window.__SPAARKE_BFF_BASE_URL__ before React renders.
 import { createBffTokenProvider } from "./services/codePageTokenProvider";
 import { createCodePageDataverseClient } from "./services/codePageDataverseClient";
 import {
@@ -184,10 +185,15 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// BFF config (resolved once, reused across renders)
+// BFF config (resolved once from window global, reused across renders)
 // ---------------------------------------------------------------------------
 
-const bffBaseUrl = getBffBaseUrl();
+const bffBaseUrl = window.__SPAARKE_BFF_BASE_URL__ ?? (() => {
+    throw new Error(
+        '[DocumentUploadWizard] window.__SPAARKE_BFF_BASE_URL__ is not set. ' +
+        'resolveRuntimeConfig() must be called in main.tsx before rendering.'
+    );
+})();
 const bffTokenProvider = createBffTokenProvider();
 
 // ---------------------------------------------------------------------------

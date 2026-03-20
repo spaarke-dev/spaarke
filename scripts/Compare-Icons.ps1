@@ -1,6 +1,15 @@
 # Compare working vs non-working SVG icons
 
-$orgUrl = "https://spaarkedev1.crm.dynamics.com"
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$orgUrl = $DataverseUrl
 $accessToken = (& az account get-access-token --resource "$orgUrl/" --query accessToken -o tsv 2>$null)
 $headers = @{ "Authorization" = "Bearer $accessToken" }
 $apiUrl = "$orgUrl/api/data/v9.2"

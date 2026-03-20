@@ -21,7 +21,7 @@ import type { IWebApi, WebApiEntity } from '../../types/xrm';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../CreateMatter/wizardTypes';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
 import {
   applyResolverFields,

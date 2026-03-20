@@ -96,17 +96,20 @@ Sprk.Communication.Send.SendMode = {
  * Reuses the same app registration as Spaarke.Email / Document modules.
  * Required for acquiring bearer tokens for cross-origin BFF API calls
  * and for user-mode OBO token flow.
+ *
+ * All values are resolved at runtime from Dataverse Environment Variables
+ * via _resolveConfig(). No hardcoded GUIDs or URLs.
+ *
+ * Environment Variables:
+ * - sprk_MsalClientId → clientId
+ * - sprk_BffApiAppId  → bffAppId
+ * - sprk_TenantId     → tenantId
+ * - redirectUri       → Xrm.Utility.getGlobalContext().getClientUrl()
+ *
+ * @private
  */
-Sprk.Communication.Send._MSAL_CONFIG = {
-    // Client Application ID (SPE-File-Viewer-PCF app registration)
-    clientId: "b36e9b91-ee7d-46e6-9f6a-376871cc9d54",
-    // BFF Application ID (SDAP-BFF-SPE-API for scope construction)
-    bffAppId: "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-    // Azure AD Tenant ID
-    tenantId: "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-    // Redirect URI - must match Azure AD app registration
-    redirectUri: "https://spaarkedev1.crm.dynamics.com"
-};
+Sprk.Communication.Send._MSAL_CONFIG = null;
+Sprk.Communication.Send._configResolvePromise = null;
 
 /**
  * Cached MSAL instance and account.
@@ -124,82 +127,120 @@ Sprk.Communication.Send._cachedSendAccounts = null;
 Sprk.Communication.Send._sendAccountsLoading = false;
 
 // -----------------------------------------------------------------------
-// Configuration
+// Configuration — Runtime Resolution from Dataverse Environment Variables
 // -----------------------------------------------------------------------
 
 /**
- * Get the BFF API base URL.
+ * Resolve MSAL and BFF configuration from Dataverse Environment Variables.
  *
- * Resolution order:
- * 1. Dataverse environment variable (sprk_BffApiBaseUrl) if available
- * 2. Fallback to the default BFF URL
+ * Queries the following environment variables in a single batch:
+ * - sprk_BffApiBaseUrl → BFF API base URL
+ * - sprk_BffApiAppId  → BFF Application ID (for OAuth scope)
+ * - sprk_MsalClientId → MSAL Client Application ID
+ * - sprk_TenantId     → Azure AD Tenant ID
+ *
+ * redirectUri is derived from Xrm.Utility.getGlobalContext().getClientUrl().
+ *
+ * Results are cached in module-level variables. Throws if any required
+ * environment variable is missing (fail loudly — no hardcoded fallbacks).
+ *
+ * @returns {Promise<Object>} Resolves to the populated _MSAL_CONFIG object
+ * @private
+ */
+Sprk.Communication.Send._resolveConfig = function () {
+    // Return cached promise if already resolving/resolved
+    if (Sprk.Communication.Send._configResolvePromise) {
+        return Sprk.Communication.Send._configResolvePromise;
+    }
+
+    Sprk.Communication.Send._configResolvePromise = Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=" +
+            "schemaname eq 'sprk_BffApiBaseUrl' or " +
+            "schemaname eq 'sprk_BffApiAppId' or " +
+            "schemaname eq 'sprk_MsalClientId' or " +
+            "schemaname eq 'sprk_TenantId'" +
+        "&$select=schemaname,environmentvariabledefinitionid" +
+        "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
+    ).then(function (result) {
+        var resolved = {};
+        if (result.entities) {
+            result.entities.forEach(function (def) {
+                var vals = def.environmentvariabledefinition_environmentvariablevalue;
+                if (vals && vals.length > 0 && vals[0].value) {
+                    resolved[def.schemaname] = vals[0].value;
+                }
+            });
+        }
+
+        // Validate all required values are present
+        var required = ["sprk_BffApiBaseUrl", "sprk_BffApiAppId", "sprk_MsalClientId", "sprk_TenantId"];
+        var missing = required.filter(function (key) { return !resolved[key]; });
+        if (missing.length > 0) {
+            throw new Error(
+                "[Communication Send] Missing required Dataverse Environment Variables: " +
+                missing.join(", ") +
+                ". Ensure these are configured in the Dataverse solution."
+            );
+        }
+
+        // Derive redirectUri from Xrm context (current org URL)
+        var redirectUri;
+        try {
+            redirectUri = Xrm.Utility.getGlobalContext().getClientUrl();
+        } catch (e) {
+            throw new Error(
+                "[Communication Send] Cannot determine redirectUri: " + e.message
+            );
+        }
+
+        // Cache BFF base URL (remove trailing slash)
+        Sprk.Communication.Send._cachedBffBaseUrl = resolved["sprk_BffApiBaseUrl"].replace(/\/+$/, "");
+
+        // Build and cache MSAL config
+        Sprk.Communication.Send._MSAL_CONFIG = {
+            clientId: resolved["sprk_MsalClientId"],
+            bffAppId: resolved["sprk_BffApiAppId"],
+            tenantId: resolved["sprk_TenantId"],
+            redirectUri: redirectUri
+        };
+
+        console.log("[Communication Send] Config resolved from environment variables:", {
+            bffBaseUrl: Sprk.Communication.Send._cachedBffBaseUrl,
+            clientId: Sprk.Communication.Send._MSAL_CONFIG.clientId,
+            bffAppId: Sprk.Communication.Send._MSAL_CONFIG.bffAppId,
+            tenantId: Sprk.Communication.Send._MSAL_CONFIG.tenantId,
+            redirectUri: Sprk.Communication.Send._MSAL_CONFIG.redirectUri
+        });
+
+        return Sprk.Communication.Send._MSAL_CONFIG;
+    }).catch(function (error) {
+        // Reset promise so retry is possible on next call
+        Sprk.Communication.Send._configResolvePromise = null;
+        console.error("[Communication Send] Config resolution failed:", error);
+        throw error;
+    });
+
+    return Sprk.Communication.Send._configResolvePromise;
+};
+
+/**
+ * Get the BFF API base URL (synchronous, from cache).
+ *
+ * Returns the cached BFF base URL resolved by _resolveConfig() from
+ * the sprk_BffApiBaseUrl Dataverse environment variable.
+ * Throws if config has not been resolved yet.
  *
  * @returns {string} The BFF API base URL (no trailing slash)
  */
 Sprk.Communication.Send._getBffBaseUrl = function () {
-    // Check for cached value
     if (Sprk.Communication.Send._cachedBffBaseUrl) {
         return Sprk.Communication.Send._cachedBffBaseUrl;
     }
-
-    // Default BFF URL - configurable via Dataverse environment variable
-    var defaultUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-
-    try {
-        // Attempt to read from Dataverse environment variable
-        // This is set via Power Platform admin center or solution import
-        var globalContext = Xrm.Utility.getGlobalContext();
-        var clientUrl = globalContext.getClientUrl();
-
-        // Use the Dataverse WebApi to read environment variable
-        // This is async but we cache the result for subsequent calls
-        Sprk.Communication.Send._loadBffBaseUrlAsync(defaultUrl);
-
-        // Return default on first call; cached value used on subsequent calls
-        return Sprk.Communication.Send._cachedBffBaseUrl || defaultUrl;
-    } catch (e) {
-        console.warn("[Communication Send] Could not determine BFF base URL, using default:", e);
-        return defaultUrl;
-    }
-};
-
-/**
- * Asynchronously load BFF base URL from Dataverse environment variable.
- * Caches the result for subsequent calls.
- * @param {string} defaultUrl - Fallback URL if environment variable not found
- * @private
- */
-Sprk.Communication.Send._loadBffBaseUrlAsync = function (defaultUrl) {
-    if (Sprk.Communication.Send._bffUrlLoading) {
-        return;
-    }
-    Sprk.Communication.Send._bffUrlLoading = true;
-
-    try {
-        Xrm.WebApi.retrieveMultipleRecords(
-            "environmentvariabledefinition",
-            "?$filter=schemaname eq 'sprk_BffApiBaseUrl'&$select=environmentvariabledefinitionid" +
-            "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
-        ).then(function (result) {
-            if (result.entities && result.entities.length > 0) {
-                var definition = result.entities[0];
-                var values = definition.environmentvariabledefinition_environmentvariablevalue;
-                if (values && values.length > 0 && values[0].value) {
-                    // Remove trailing slash if present
-                    Sprk.Communication.Send._cachedBffBaseUrl = values[0].value.replace(/\/+$/, "");
-                    console.log("[Communication Send] BFF URL from environment variable:", Sprk.Communication.Send._cachedBffBaseUrl);
-                    return;
-                }
-            }
-            Sprk.Communication.Send._cachedBffBaseUrl = defaultUrl;
-            console.log("[Communication Send] Using default BFF URL:", defaultUrl);
-        }).catch(function () {
-            Sprk.Communication.Send._cachedBffBaseUrl = defaultUrl;
-            console.log("[Communication Send] Environment variable lookup failed, using default BFF URL");
-        });
-    } catch (e) {
-        Sprk.Communication.Send._cachedBffBaseUrl = defaultUrl;
-    }
+    throw new Error(
+        "[Communication Send] BFF base URL not available. " +
+        "Ensure _resolveConfig() has completed before calling _getBffBaseUrl()."
+    );
 };
 
 // -----------------------------------------------------------------------
@@ -491,55 +532,58 @@ Sprk.Communication.Send._collectAssociations = function (formContext) {
  * @private
  */
 Sprk.Communication.Send._sendRequest = function (formContext, request) {
-    var bffBaseUrl = Sprk.Communication.Send._getBffBaseUrl();
-    var url = bffBaseUrl + "/api/communications/send";
+    // Resolve config (BFF URL + MSAL config) from env vars, then authenticate and send
+    Sprk.Communication.Send._resolveConfig().then(function () {
+        var bffBaseUrl = Sprk.Communication.Send._getBffBaseUrl();
+        var url = bffBaseUrl + "/api/communications/send";
 
-    // Get the bearer token via MSAL for BFF authentication.
-    // Required for both send modes:
-    // - SharedMailbox: BFF validates caller identity
-    // - User: BFF uses token for OBO exchange to send as the user
-    Sprk.Communication.Send._getAuthToken().then(function (token) {
-        if (!token) {
-            // Token acquisition failed — warn user
-            // This is particularly important for user-mode sends where OBO requires a valid token
-            console.warn("[Communication Send] No auth token acquired; request may fail for user-mode sends");
-        }
+        // Get the bearer token via MSAL for BFF authentication.
+        // Required for both send modes:
+        // - SharedMailbox: BFF validates caller identity
+        // - User: BFF uses token for OBO exchange to send as the user
+        return Sprk.Communication.Send._getAuthToken().then(function (token) {
+            if (!token) {
+                // Token acquisition failed — warn user
+                // This is particularly important for user-mode sends where OBO requires a valid token
+                console.warn("[Communication Send] No auth token acquired; request may fail for user-mode sends");
+            }
 
-        var headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        };
+            var headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            };
 
-        if (token) {
-            headers["Authorization"] = "Bearer " + token;
-        }
+            if (token) {
+                headers["Authorization"] = "Bearer " + token;
+            }
 
-        return fetch(url, {
-            method: "POST",
-            headers: headers,
-            body: JSON.stringify(request)
+            return fetch(url, {
+                method: "POST",
+                headers: headers,
+                body: JSON.stringify(request)
+            });
+        }).then(function (response) {
+            if (response.ok) {
+                return response.json().then(function (data) {
+                    Sprk.Communication.Send._handleSuccess(formContext, data);
+                });
+            } else {
+                return response.json().then(function (problemDetails) {
+                    Sprk.Communication.Send._handleError(formContext, problemDetails, response.status);
+                }).catch(function () {
+                    // Response body was not valid JSON
+                    Sprk.Communication.Send._handleError(formContext, {
+                        title: "Send Failed",
+                        detail: "The server returned status " + response.status + " with an unexpected response format.",
+                        status: response.status,
+                        errorCode: "UNKNOWN_ERROR"
+                    }, response.status);
+                });
+            }
         });
-    }).then(function (response) {
-        if (response.ok) {
-            return response.json().then(function (data) {
-                Sprk.Communication.Send._handleSuccess(formContext, data);
-            });
-        } else {
-            return response.json().then(function (problemDetails) {
-                Sprk.Communication.Send._handleError(formContext, problemDetails, response.status);
-            }).catch(function () {
-                // Response body was not valid JSON
-                Sprk.Communication.Send._handleError(formContext, {
-                    title: "Send Failed",
-                    detail: "The server returned status " + response.status + " with an unexpected response format.",
-                    status: response.status,
-                    errorCode: "UNKNOWN_ERROR"
-                }, response.status);
-            });
-        }
     }).catch(function (error) {
-        // Network error or fetch failure
-        console.error("[Communication Send] Fetch failed:", error);
+        // Config resolution, auth, or network error
+        console.error("[Communication Send] Send failed:", error);
         Sprk.Communication.Send._clearNotifications(formContext);
         formContext.ui.setFormNotification(
             "Network error: Unable to reach the communication service. Please check your connection and try again.",
@@ -603,10 +647,12 @@ Sprk.Communication.Send._initMsal = function () {
         return Sprk.Communication.Send._msalInitPromise;
     }
 
-    var cfg = Sprk.Communication.Send._MSAL_CONFIG;
-
-    Sprk.Communication.Send._msalInitPromise = Sprk.Communication.Send._loadMsalLibrary()
-        .then(function () {
+    // Resolve config from Dataverse env vars and load MSAL library in parallel
+    Sprk.Communication.Send._msalInitPromise = Promise.all([
+        Sprk.Communication.Send._resolveConfig(),
+        Sprk.Communication.Send._loadMsalLibrary()
+    ]).then(function (results) {
+            var cfg = results[0];
             var authorityMetadataJson = JSON.stringify({
                 "authorization_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/authorize",
                 "token_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/token",
@@ -685,10 +731,10 @@ Sprk.Communication.Send._initMsal = function () {
  * @private
  */
 Sprk.Communication.Send._getAuthToken = function () {
-    var cfg = Sprk.Communication.Send._MSAL_CONFIG;
-    var scope = "api://" + cfg.bffAppId + "/SDAP.Access";
-
     return Sprk.Communication.Send._initMsal().then(function (msalInstance) {
+        // Config is guaranteed resolved by _initMsal (which calls _resolveConfig)
+        var cfg = Sprk.Communication.Send._MSAL_CONFIG;
+        var scope = "api://" + cfg.bffAppId + "/user_impersonation";
         // Strategy 1: Silent token acquisition from cache
         if (Sprk.Communication.Send._currentAccount) {
             console.log("[Communication Send] Attempting acquireTokenSilent...");

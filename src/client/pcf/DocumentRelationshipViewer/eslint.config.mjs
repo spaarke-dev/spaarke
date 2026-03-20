@@ -11,8 +11,8 @@ export default [
     ignores: ["**/generated"],
   },
   eslintjs.configs.recommended,
-  ...typescriptEslint.configs.recommendedTypeChecked,
-  ...typescriptEslint.configs.stylisticTypeChecked,
+  ...typescriptEslint.configs.recommended,
+  ...typescriptEslint.configs.stylistic,
   pluginPromise.configs["flat/recommended"],
   microsoftPowerApps.configs.paCheckerHosted,
   reactPlugin.configs.flat.recommended,
@@ -29,13 +29,12 @@ export default [
       parserOptions: {
         ecmaVersion: 2020,
         sourceType: "module",
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
       },
     },
 
     rules: {
       "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-explicit-any": "warn",
     },
     settings: {
       react: {

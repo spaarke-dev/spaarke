@@ -38,7 +38,8 @@
  */
 
 import { PublicClientApplication } from '@azure/msal-browser';
-import { msalConfig, BFF_API_SCOPE } from '../config/msalConfig';
+import { msalConfig } from '../config/msalConfig';
+import { getRuntimeConfig } from './authInit';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -315,7 +316,7 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
   const msal = await ensureMsalInitialized();
   if (!msal) return null;
 
-  const scopes = [BFF_API_SCOPE];
+  const scopes = [getRuntimeConfig().bffOAuthScope];
 
   try {
     // Try acquireTokenSilent first (uses cached token / refresh token)

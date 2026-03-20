@@ -10,7 +10,7 @@
 param(
     [string]$SourceDir = "",
     [string]$Pattern = "KNW-*.md",
-    [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
+    [string]$EnvironmentUrl = $env:DATAVERSE_URL,
     [switch]$SkipDataverse,
     [switch]$DryRun
 )

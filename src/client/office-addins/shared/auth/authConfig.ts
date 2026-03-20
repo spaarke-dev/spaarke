@@ -34,21 +34,39 @@ export interface NaaAuthConfig {
 }
 
 /**
+ * Validate that a required environment variable was injected at build time.
+ * Fails loudly if missing — no silent dev fallbacks in production builds.
+ */
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `[Office Add-in] Missing required environment variable: ${name}. ` +
+        `Ensure it is set in .env or CI/CD pipeline and injected via webpack DefinePlugin.`
+    );
+  }
+  return value;
+}
+
+/**
  * Default configuration loaded from environment variables.
  * These are injected at build time via webpack DefinePlugin.
+ *
+ * All values are REQUIRED — no dev-specific fallbacks.
+ * Set values in .env (local dev) or CI/CD environment variables (production).
  */
 export const DEFAULT_AUTH_CONFIG: NaaAuthConfig = {
-  // Client ID from Azure AD app registration (Task 001)
-  clientId: process.env.ADDIN_CLIENT_ID || 'c1258e2d-1688-49d2-ac99-a7485ebd9995',
+  // Client ID from Azure AD app registration
+  clientId: requireEnv('ADDIN_CLIENT_ID'),
 
   // Tenant ID for single-tenant app
-  tenantId: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
+  tenantId: requireEnv('TENANT_ID'),
 
   // BFF API client ID for user_impersonation scope
-  bffApiClientId: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
+  bffApiClientId: requireEnv('BFF_API_CLIENT_ID'),
 
   // BFF API base URL
-  bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net',
+  bffApiBaseUrl: requireEnv('BFF_API_BASE_URL'),
 
   // NAA broker redirect URI (required for Nested App Authentication)
   redirectUri: 'brk-multihub://localhost',

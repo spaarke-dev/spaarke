@@ -1,11 +1,20 @@
 # Deploy sprk_ThemeMenu.js Web Resource to Dataverse
 
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "Theme Menu JS Web Resource Deployment" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host ""
 
-$orgUrl = "https://spaarkedev1.crm.dynamics.com"
+$orgUrl = $DataverseUrl
 $webResourceName = "sprk_ThemeMenu.js"
 $jsFilePath = "C:\code_files\spaarke\src\client\webresources\js\sprk_ThemeMenu.js"
 

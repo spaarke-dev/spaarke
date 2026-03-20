@@ -1,0 +1,51 @@
+<task id="ENV-050" project="Production Environment Setup R2">
+  <metadata>
+    <title>Create Validate-DeployedEnvironment.ps1 validation script</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>6</phase>
+    <tags>infrastructure, scripts, validation</tags>
+    <parallel-group>6</parallel-group>
+    <dependencies>All Phase 1-5 tasks</dependencies>
+  </metadata>
+
+  <prompt>
+    Create Validate-DeployedEnvironment.ps1 that verifies all environment-specific configuration is correctly set in a deployed environment. Check: Dataverse Environment Variables exist, BFF API health, CORS origins match, MSAL client ID resolves, Key Vault accessible, no dev values leaked. See spec.md "Deployment Validation Script" section for full checklist.
+  </prompt>
+
+  <role>PowerShell developer with Azure and Dataverse admin experience</role>
+
+  <goal>A comprehensive validation script that catches all configuration issues in a deployed environment. Returns clear pass/fail with actionable error messages for each check.</goal>
+
+  <constraints>
+    <constraint source="project">Must check all 7 Dataverse Environment Variables</constraint>
+    <constraint source="project">Must detect dev value leakage (spaarkedev1, spe-api-dev, etc.)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/production-environment-setup-r2/spec.md</file>
+      <file>scripts/README.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read validation checklist">Read spec.md "Deployment Validation Script" section for the full checklist (Infrastructure, Dataverse, SPE, Auth, Secret Lifecycle, No Dev Leakage).</step>
+    <step order="2" name="Create script">Create Validate-DeployedEnvironment.ps1 with parameters for DataverseUrl, BffApiUrl. Implement each check category.</step>
+    <step order="3" name="Add to script registry">Update scripts/README.md with new script entry.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/Validate-DeployedEnvironment.ps1 (new)</output>
+    <output type="code">scripts/README.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script checks all 7 Dataverse Environment Variables exist and are non-empty</criterion>
+    <criterion testable="true">Script checks BFF API /healthz responds 200</criterion>
+    <criterion testable="true">Script checks CORS origins match Dataverse org URL</criterion>
+    <criterion testable="true">Script detects dev value leakage (spaarkedev1, spe-api-dev)</criterion>
+    <criterion testable="true">Script returns clear pass/fail per check with guidance</criterion>
+  </acceptance-criteria>
+</task>

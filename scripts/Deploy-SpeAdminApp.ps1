@@ -17,16 +17,20 @@
 #   .\scripts\Deploy-SpeAdminApp.ps1 -Environment prod
 param(
     [ValidateSet('dev', 'prod')]
-    [string]$Environment = 'dev'
+    [string]$Environment = 'dev',
+    [string]$DataverseUrl = $env:DATAVERSE_URL
 )
 
 $ErrorActionPreference = 'Stop'
 
 # ── Environment config ────────────────────────────────────────────────────────
-if ($Environment -eq 'prod') {
+if ($DataverseUrl) {
+    $orgUrl = $DataverseUrl
+} elseif ($Environment -eq 'prod') {
     $orgUrl = 'https://spaarke-demo.crm.dynamics.com'
 } else {
-    $orgUrl = 'https://spaarkedev1.crm.dynamics.com'
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
 }
 
 Write-Host '====================================='

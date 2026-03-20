@@ -1,4 +1,13 @@
-$token = az account get-access-token --resource "https://spaarkedev1.crm.dynamics.com" --query "accessToken" -o tsv
+param(
+    [string]$DataverseUrl = $env:DATAVERSE_URL
+)
+
+if (-not $DataverseUrl) {
+    Write-Error "DataverseUrl is required. Set DATAVERSE_URL env var or pass -DataverseUrl parameter."
+    exit 1
+}
+
+$token = az account get-access-token --resource $DataverseUrl --query "accessToken" -o tsv
 
 $headers = @{
     'Authorization' = "Bearer $token"
@@ -7,7 +16,7 @@ $headers = @{
     'OData-Version' = '4.0'
 }
 
-$baseUrl = "https://spaarkedev1.crm.dynamics.com/api/data/v9.2"
+$baseUrl = "$DataverseUrl/api/data/v9.2"
 
 Write-Host "Listing all Application Users in Dataverse" -ForegroundColor Cyan
 Write-Host ""

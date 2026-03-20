@@ -15,11 +15,8 @@
 import type { Configuration } from '@azure/msal-browser';
 import { LogLevel } from '@azure/msal-browser';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const CLIENT_ID: string = (window as any).__SPAARKE_MSAL_CLIENT_ID__
-  || (import.meta.env.VITE_MSAL_CLIENT_ID as string | undefined)
-  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Set VITE_MSAL_CLIENT_ID in .env.development or .env.production.'); })();
-/* eslint-enable @typescript-eslint/no-explicit-any */
+const CLIENT_ID: string = window.__SPAARKE_MSAL_CLIENT_ID__
+  || (() => { throw new Error('[Spaarke] MSAL client ID not configured. Window global __SPAARKE_MSAL_CLIENT_ID__ must be set by resolveRuntimeConfig() before this module loads.'); })();
 
 const REDIRECT_URI = window.location.origin;
 

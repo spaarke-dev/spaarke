@@ -7,7 +7,6 @@
  * URL params:
  *   documentId  - GUID of the source document (required)
  *   tenantId    - Azure AD tenant ID (required)
- *   apiBaseUrl  - BFF API base URL (optional, defaults to dev)
  *
  * Features:
  *   - Graph view: @xyflow/react v12 force-directed visualization
@@ -85,13 +84,13 @@ const GraphViewIcon: React.FC = () => (
   </svg>
 );
 
-const DEFAULT_API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
-
 type ViewMode = 'graph' | 'grid' | 'network' | 'timeline';
 
 interface AppProps {
   params: URLSearchParams;
   isDark?: boolean;
+  /** BFF API base URL resolved at runtime from Dataverse Environment Variables. */
+  apiBaseUrl: string;
 }
 
 const useStyles = makeStyles({
@@ -185,13 +184,12 @@ const useStyles = makeStyles({
   },
 });
 
-export const App: React.FC<AppProps> = ({ params, isDark = false }) => {
+export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) => {
   const styles = useStyles();
 
   // Parse URL params
   const documentId = params.get('documentId') ?? '';
   const tenantId = params.get('tenantId') ?? '';
-  const apiBaseUrl = params.get('apiBaseUrl') ?? DEFAULT_API_BASE_URL;
 
   // Auth state
   const [accessToken, setAccessToken] = useState<string | undefined>(undefined);

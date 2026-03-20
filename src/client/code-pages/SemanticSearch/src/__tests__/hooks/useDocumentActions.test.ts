@@ -24,7 +24,7 @@ import { renderHook, act } from '@testing-library/react';
 const mockBuildAuthHeaders = jest.fn<Promise<Record<string, string>>, []>();
 
 jest.mock('../../services/apiBase', () => ({
-  BFF_API_BASE_URL: 'https://test-api.example.com',
+  getBffBaseUrl: () => 'https://test-api.example.com',
   buildAuthHeaders: () => mockBuildAuthHeaders(),
 }));
 

@@ -4,7 +4,28 @@ import {
   IDocumentRelationshipViewerProps,
 } from './DocumentRelationshipViewer';
 import { initializeAuth } from './authInit';
+import {
+  getApiBaseUrl,
+  getMsalClientId,
+  getTenantId,
+  getBffApiAppId,
+} from '../../shared/utils/environmentVariables';
 import * as React from 'react';
+
+/**
+ * Resolve the Dataverse org URL from Xrm global context.
+ * Returns empty string if Xrm is not available (e.g., in test harness).
+ */
+function getDataverseUrl(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window as any).Xrm;
+    const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() as string | undefined;
+    return url || '';
+  } catch {
+    return '';
+  }
+}
 
 /**
  * DocumentRelationshipViewer PCF Control
@@ -13,7 +34,11 @@ import * as React from 'react';
  * based on vector similarity from Azure AI Search.
  *
  * Authentication is handled by @spaarke/auth (initialized via authInit.ts).
- * API calls use authenticatedFetch() for transparent token management.
+ * All configuration is resolved at runtime from Dataverse environment variables:
+ *   - sprk_MsalClientId -> MSAL Client Application ID
+ *   - sprk_TenantId -> Azure AD Tenant ID
+ *   - sprk_BffApiAppId -> BFF Application ID (for scope construction)
+ *   - sprk_BffApiBaseUrl -> BFF API base URL
  *
  * Follows:
  * - ADR-006: PCF for all custom UI
@@ -27,7 +52,8 @@ export class DocumentRelationshipViewer implements ComponentFramework.ReactContr
 
   /**
    * Initialize the control instance.
-   * Sets up @spaarke/auth with configuration from PCF manifest parameters.
+   * Resolves auth config from Dataverse environment variables at runtime,
+   * then initializes @spaarke/auth.
    */
   public init(
     context: ComponentFramework.Context<IInputs>,
@@ -36,26 +62,44 @@ export class DocumentRelationshipViewer implements ComponentFramework.ReactContr
   ): void {
     this.notifyOutputChanged = notifyOutputChanged;
 
-    // Extract auth configuration from manifest parameters
-    // These default to the dev environment values from the original msalConfig.ts
-    const tenantId = context.parameters.tenantId?.raw ?? 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
-    const clientAppId =
-      (context.parameters as unknown as Record<string, { raw?: string }>).clientAppId?.raw ??
-      '170c98e1-d486-4355-bcbe-170454e0207c';
-    const bffAppId =
-      (context.parameters as unknown as Record<string, { raw?: string }>).bffAppId?.raw ?? '1e40baad-e065-4aea-a8d4-4b7ab273458c';
-    const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? 'https://spe-api-dev-67e2xz.azurewebsites.net';
-
-    // Initialize @spaarke/auth asynchronously (don't block init)
-    void initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrl)
+    // Resolve all auth configuration from Dataverse environment variables at runtime
+    void this.initializeAuthFromEnvVars(context)
       .then(() => {
         this.authInitialized = true;
-        console.info('[DocumentRelationshipViewer] @spaarke/auth initialized');
+        console.info('[DocumentRelationshipViewer] @spaarke/auth initialized from environment variables');
         return undefined;
       })
-      .catch(error => {
+      .catch((error: unknown) => {
         console.error('[DocumentRelationshipViewer] @spaarke/auth initialization failed:', error);
       });
+  }
+
+  /**
+   * Resolve auth configuration from Dataverse environment variables and initialize @spaarke/auth.
+   */
+  private async initializeAuthFromEnvVars(
+    context: ComponentFramework.Context<IInputs>
+  ): Promise<void> {
+    const webApi = context.webAPI;
+
+    // Resolve all config from Dataverse environment variables (fail loudly if missing)
+    const [tenantId, clientAppId, bffAppId, bffApiUrl] = await Promise.all([
+      getTenantId(webApi),
+      getMsalClientId(webApi),
+      getBffApiAppId(webApi),
+      getApiBaseUrl(webApi),
+    ]);
+
+    // Resolve Dataverse org URL from Xrm context for redirect URI
+    const dataverseUrl = getDataverseUrl();
+    if (!dataverseUrl) {
+      throw new Error(
+        '[DocumentRelationshipViewer] Cannot resolve Dataverse URL from Xrm.Utility.getGlobalContext().getClientUrl(). ' +
+        'Ensure the control is running inside a Dataverse model-driven app.'
+      );
+    }
+
+    await initializeAuth(tenantId, clientAppId, bffAppId, bffApiUrl, dataverseUrl);
   }
 
   /**
