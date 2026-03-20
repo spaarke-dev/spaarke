@@ -33,6 +33,14 @@
       #root > div {
         height: 100%;
       }
+      /* Hide scrollbars globally while preserving scroll behavior */
+      * {
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none; /* IE/Edge */
+      }
+      *::-webkit-scrollbar {
+        display: none; /* Chrome/Safari */
+      }
     </style>
   </head>
   <body>
