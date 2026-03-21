@@ -131,7 +131,7 @@ export function useRelatedDocumentGraphData(
         return;
       }
       const baseUrl = apiBaseUrl.replace(/\/$/, '');
-      const url = `${baseUrl}/api/ai/visualization/related/${documentId}?${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
+      const url = `${baseUrl}/ai/visualization/related/${documentId}?${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
 
       console.log('[useRelatedDocumentGraphData] Fetching count + graph:', {
         documentId,

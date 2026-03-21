@@ -55,7 +55,7 @@ import {
 } from './components/ControlPanel';
 // NodeActionBar removed — node click now opens FilePreviewDialog
 import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
-import { initializeAuth, getToken } from './services/authInit';
+import { getToken } from './services/authInit';
 import { exportToCsv } from './services/CsvExportService';
 import { authenticatedFetch } from './services/authInit';
 import { FilePreviewDialog } from './components/FilePreviewDialog';
@@ -218,12 +218,14 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
   const CACHE_MAX_SIZE = 50;
 
-  // Auth initialization — uses @spaarke/auth (multi-tenant, no hardcoded values)
+  // Auth token acquisition — auth is already initialized by bootstrap() in index.tsx.
+  // We do NOT call initializeAuth() here — doing so with no params would dispose the
+  // correctly configured provider set up by bootstrap() and re-create one using only
+  // the window.__SPAARKE_MSAL_CLIENT_ID__ fallback.
   useEffect(() => {
     let cancelled = false;
 
-    initializeAuth()
-      .then(() => getToken())
+    getToken()
       .then(token => {
         if (!cancelled) setAccessToken(token);
       })

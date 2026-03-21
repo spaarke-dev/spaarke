@@ -79,3 +79,11 @@ export function getBffOAuthScope(): string {
 export function getMsalClientId(): string {
   return getConfig().msalClientId;
 }
+
+/**
+ * Azure AD tenant ID resolved from Xrm organizationSettings at bootstrap.
+ * Used for constructing URLs that require tenantId (e.g. DocumentRelationshipViewer).
+ */
+export function getTenantId(): string {
+  return getConfig().tenantId;
+}

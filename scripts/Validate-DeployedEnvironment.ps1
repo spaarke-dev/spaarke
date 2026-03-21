@@ -1,14 +1,14 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Validates that all environment-specific configuration is correctly set in a deployed Spaarke environment.
 
 .DESCRIPTION
     Comprehensive validation script that verifies:
-      1. Dataverse Environment Variables — all 7 required variables exist and have non-empty values
-      2. BFF API Health — /healthz and /ping return 200
-      3. CORS Origin — BFF API CORS configuration includes the Dataverse org URL
-      4. Dev Value Leakage — no dev-only identifiers remain in env var values
+      1. Dataverse Environment Variables  -  all 7 required variables exist and have non-empty values
+      2. BFF API Health  -  /healthz and /ping return 200
+      3. CORS Origin  -  BFF API CORS configuration includes the Dataverse org URL
+      4. Dev Value Leakage  -  no dev-only identifiers remain in env var values
 
     This is the capstone validation tool for the production environment setup project.
     Run this after deploying to any non-dev environment to catch configuration issues.
@@ -33,7 +33,7 @@
 
 .NOTES
     Project: production-environment-setup-r2
-    Task: ENV-050 — Create Validate-DeployedEnvironment.ps1 validation script
+    Task: ENV-050  -  Create Validate-DeployedEnvironment.ps1 validation script
 #>
 
 [CmdletBinding()]
@@ -52,7 +52,7 @@ $script:Results = [System.Collections.ArrayList]::new()
 # Configuration
 # ─────────────────────────────────────────────────────────────────────
 
-# Normalize DataverseUrl — strip trailing slash
+# Normalize DataverseUrl  -  strip trailing slash
 $DataverseUrl = $DataverseUrl.TrimEnd('/')
 
 # The 7 required Dataverse Environment Variables
@@ -136,7 +136,7 @@ function Test-DataverseEnvironmentVariables {
             # Query the environment variable definition and its current value
             # Uses Dataverse Web API via az rest with the PAC auth context
             $filter = "schemaname eq '$varName'"
-            $apiUrl = "$DataverseUrl/api/data/v9.2/environmentvariabledefinitions?`$filter=$filter&`$expand=environmentvariablevalues(`$select=value)&`$select=schemaname,displayname,defaultvalue"
+            $apiUrl = "$DataverseUrl/api/data/v9.2/environmentvariabledefinitions?`$filter=$filter&`$expand=environmentvariabledefinition_environmentvariablevalue(`$select=value)&`$select=schemaname,displayname,defaultvalue"
 
             $response = az rest --method GET --url $apiUrl --resource "$DataverseUrl" 2>&1
             if ($LASTEXITCODE -ne 0) {
@@ -156,8 +156,8 @@ function Test-DataverseEnvironmentVariables {
 
             # Get the current value: prefer value record, fall back to default
             $currentValue = $null
-            if ($definition.environmentvariablevalues -and $definition.environmentvariablevalues.Count -gt 0) {
-                $currentValue = $definition.environmentvariablevalues[0].value
+            if ($definition.environmentvariabledefinition_environmentvariablevalue -and $definition.environmentvariabledefinition_environmentvariablevalue.Count -gt 0) {
+                $currentValue = $definition.environmentvariabledefinition_environmentvariablevalue[0].value
             }
             if ([string]::IsNullOrWhiteSpace($currentValue)) {
                 $currentValue = $definition.defaultvalue
@@ -210,7 +210,7 @@ function Test-BffApiHealth {
         $response = Invoke-WebRequest -Uri "$apiUrl/healthz" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
         if ($response.StatusCode -eq 200) {
             Add-TestResult -Group 'BFF API' -Test 'GET /healthz returns 200' -Status 'Pass' `
-                -Message "HTTP 200 — Healthy"
+                -Message "HTTP 200  -  Healthy"
         }
         else {
             Add-TestResult -Group 'BFF API' -Test 'GET /healthz returns 200' -Status 'Fail' `
@@ -231,7 +231,7 @@ function Test-BffApiHealth {
         $response = Invoke-WebRequest -Uri "$apiUrl/ping" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
         if ($response.StatusCode -eq 200) {
             Add-TestResult -Group 'BFF API' -Test 'GET /ping returns 200' -Status 'Pass' `
-                -Message "HTTP 200 — Pong"
+                -Message "HTTP 200  -  Pong"
         }
         else {
             Add-TestResult -Group 'BFF API' -Test 'GET /ping returns 200' -Status 'Fail' `
@@ -263,7 +263,7 @@ function Test-CorsOrigin {
         }
         else {
             Add-TestResult -Group 'CORS' -Test 'CORS includes Dataverse origin' -Status 'Fail' `
-                -Message "Cannot test CORS — BFF API URL not available."
+                -Message "Cannot test CORS  -  BFF API URL not available."
             return
         }
     }
@@ -307,7 +307,7 @@ function Test-CorsOrigin {
         }
 
         Add-TestResult -Group 'CORS' -Test 'CORS includes Dataverse origin' -Status 'Warn' `
-            -Message "Could not confirm CORS configuration via preflight. Verify manually in Azure Portal > App Service > CORS. Error: $($_.Exception.Message)"
+            -Message ("Could not confirm CORS configuration via preflight. Verify manually in Azure Portal / App Service / CORS. Error: " + $_.Exception.Message)
     }
 }
 
@@ -431,17 +431,17 @@ if ($failCount -gt 0) {
 
 # Final verdict
 if ($failCount -gt 0) {
-    Write-Host "  VERDICT: FAILED — $failCount check(s) failed. Fix the issues above and re-run." -ForegroundColor Red
+    Write-Host "  VERDICT: FAILED  -  $failCount check(s) failed. Fix the issues above and re-run." -ForegroundColor Red
     Write-Host ""
     exit 1
 }
 elseif ($warnCount -gt 0) {
-    Write-Host "  VERDICT: PASSED WITH WARNINGS — $warnCount warning(s). Review manually." -ForegroundColor Yellow
+    Write-Host "  VERDICT: PASSED WITH WARNINGS  -  $warnCount warning(s). Review manually." -ForegroundColor Yellow
     Write-Host ""
     exit 0
 }
 else {
-    Write-Host "  VERDICT: PASSED — All checks successful. Environment is correctly configured." -ForegroundColor Green
+    Write-Host "  VERDICT: PASSED  -  All checks successful. Environment is correctly configured." -ForegroundColor Green
     Write-Host ""
     exit 0
 }

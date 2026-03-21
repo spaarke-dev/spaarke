@@ -35,6 +35,8 @@ export interface IRuntimeConfig {
   bffOAuthScope: string;
   /** Azure AD client ID for MSAL authentication. */
   msalClientId: string;
+  /** Azure AD tenant ID (from Xrm organizationSettings). Empty string if not available. */
+  tenantId: string;
 }
 
 /** Environment variable schema names queried from Dataverse. */
@@ -65,12 +67,54 @@ export function clearRuntimeConfigCache(): void {
 }
 
 // ---------------------------------------------------------------------------
+// localStorage persistence (for full-screen / new-window scenarios)
+// ---------------------------------------------------------------------------
+
+const LS_KEY = '__spaarke_rtc__';
+/** TTL for localStorage cache: 60 minutes */
+const LS_TTL_MS = 60 * 60 * 1000;
+
+interface IPersistedConfig extends IRuntimeConfig {
+  _ts: number;
+}
+
+function saveToLocalStorage(config: IRuntimeConfig): void {
+  try {
+    const entry: IPersistedConfig = { ...config, _ts: Date.now() };
+    localStorage.setItem(LS_KEY, JSON.stringify(entry));
+  } catch {
+    /* localStorage may not be available (private browsing, storage full, etc.) */
+  }
+}
+
+function loadFromLocalStorage(): IRuntimeConfig | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as Partial<IPersistedConfig>;
+    if (!entry._ts || Date.now() - entry._ts > LS_TTL_MS) return null;
+    if (!entry.bffBaseUrl || !entry.bffOAuthScope || !entry.msalClientId) return null;
+    return {
+      bffBaseUrl: entry.bffBaseUrl,
+      bffOAuthScope: entry.bffOAuthScope,
+      msalClientId: entry.msalClientId,
+      tenantId: entry.tenantId ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Xrm context resolution
 // ---------------------------------------------------------------------------
 
 /** Minimal Xrm type for getGlobalContext — available in all Dataverse web resources. */
 interface XrmGlobalContext {
   getClientUrl: () => string;
+  organizationSettings?: {
+    tenantId?: string;
+  };
 }
 
 /**
@@ -238,6 +282,18 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   // 1. Resolve Xrm context for org URL
   const xrmContext = resolveXrmContext();
   if (!xrmContext) {
+    // Fallback: use localStorage cache (covers full-screen / new-window scenarios
+    // where Xrm is not available but the user previously accessed from within Dataverse)
+    const lsCached = loadFromLocalStorage();
+    if (lsCached) {
+      console.warn(
+        '[Spaarke.RuntimeConfig] Xrm not available — using localStorage cache. ' +
+        `bffBaseUrl=${lsCached.bffBaseUrl}`
+      );
+      cachedConfig = lsCached;
+      cacheTimestamp = Date.now();
+      return lsCached;
+    }
     throw new Error(
       '[Spaarke.RuntimeConfig] Xrm.Utility.getGlobalContext() not available. ' +
       'resolveRuntimeConfig() must be called from within a Dataverse web resource.'
@@ -251,6 +307,9 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
       'Cannot determine Dataverse organization URL.'
     );
   }
+
+  // Capture tenantId from Xrm organizationSettings while we have Xrm access
+  const xrmTenantId = xrmContext.organizationSettings?.tenantId ?? '';
 
   // 2. Query all three environment variables in a single batch
   const envVars = await queryEnvironmentVariables(clientUrl, [
@@ -295,15 +354,18 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
     bffBaseUrl: normalizeUrl(bffBaseUrl),
     bffOAuthScope: `api://${bffAppId}/user_impersonation`,
     msalClientId,
+    tenantId: xrmTenantId,
   };
 
-  // 5. Cache
+  // 5. Cache in memory + localStorage (localStorage enables full-screen fallback)
   cachedConfig = config;
   cacheTimestamp = Date.now();
+  saveToLocalStorage(config);
 
   console.log(
     `[Spaarke.RuntimeConfig] Resolved: bffBaseUrl=${config.bffBaseUrl}, ` +
-    `scope=api://${bffAppId.substring(0, 8)}..., clientId=${msalClientId.substring(0, 8)}...`
+    `scope=api://${bffAppId.substring(0, 8)}..., clientId=${msalClientId.substring(0, 8)}..., ` +
+    `tenantId=${xrmTenantId ? xrmTenantId.substring(0, 8) + '...' : '(empty)'}`
   );
 
   return config;

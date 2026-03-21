@@ -68,6 +68,12 @@ async function bootstrap(): Promise<void> {
   // 1. Resolve runtime config (BFF URL, MSAL client ID, OAuth scope) from Dataverse
   const runtimeConfig = await resolveRuntimeConfig();
 
+  // Set window globals so that @spaarke/auth resolveConfig() fallback finds the
+  // correct client ID. This is required because App.tsx calls initializeAuth()
+  // without explicit params — the window global ensures it gets the right clientId.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
+
   // 2. Initialize auth with runtime-resolved config
   await initializeAuth({
     clientId: runtimeConfig.msalClientId,

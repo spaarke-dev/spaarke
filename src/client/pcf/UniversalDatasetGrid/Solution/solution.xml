@@ -11,7 +11,7 @@
     <Descriptions>
       <Description description="Enhanced dataset grid with calendar filtering, hyperlink columns, checkbox selection, and optimistic updates" languagecode="1033" />
     </Descriptions>
-    <Version>2.2.1</Version>
+    <Version>2.2.2</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
