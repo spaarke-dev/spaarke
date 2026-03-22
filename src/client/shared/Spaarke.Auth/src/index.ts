@@ -22,3 +22,6 @@ export { authenticatedFetch } from './authenticatedFetch';
 
 // Public init API
 export { initAuth, getAuthProvider } from './initAuth';
+
+// Synchronous tenant ID resolution (for click handlers — cannot await async getTenantId)
+export { resolveTenantIdSync } from './resolveTenantIdSync';
