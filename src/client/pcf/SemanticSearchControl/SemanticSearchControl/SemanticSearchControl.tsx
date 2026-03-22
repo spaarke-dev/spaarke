@@ -738,7 +738,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.12 • Built 2026-03-15</Text>
+        <Text size={100}>v1.1.15 • Built 2026-03-22</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}

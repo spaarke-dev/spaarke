@@ -14,7 +14,7 @@
  * @see ADR-008  - Independent auth per Code Page (no tokens in URL params)
  */
 
-import { getAuthProvider } from "@spaarke/auth";
+import { resolveTenantIdSync } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -59,45 +59,6 @@ export function getClientUrl(): string | null {
         }
     }
     return null;
-}
-
-/**
- * Resolve the Azure AD tenant ID from the MSAL auth provider.
- * Falls back to extracting from Xrm authority URL.
- */
-export function getTenantId(): string {
-    // Try @spaarke/auth provider (MSAL)
-    try {
-        const provider = getAuthProvider();
-        const authority: string = provider?.getConfig?.()?.authority ?? "";
-        if (authority) {
-            const parts = authority.split("/");
-            const tenantId = parts[parts.length - 1] ?? "";
-            if (tenantId && tenantId !== "common" && tenantId !== "organizations") {
-                return tenantId;
-            }
-        }
-    } catch {
-        // Auth provider not available — try Xrm fallback
-    }
-
-    // Fallback: extract from Xrm organizationSettings
-    const frames: Window[] = [window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-
-    for (const frame of frames) {
-        try {
-            const xrm = (frame as any).Xrm;
-            const ctx = xrm?.Utility?.getGlobalContext?.();
-            // organizationSettings.tenantId is available in UCI
-            const tenantId = ctx?.organizationSettings?.tenantId;
-            if (tenantId) return tenantId;
-        } catch {
-            // Cross-origin frame — skip
-        }
-    }
-
-    return "";
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -163,8 +124,6 @@ export function openAnalysisBuilder(
 /**
  * Open the Document Relationship Viewer (Find Similar) in a new browser tab.
  *
- * Resolves tenantId from the MSAL auth provider or Xrm organization settings.
- *
  * @param documentId  - Dataverse sprk_document record GUID
  * @param containerId - SPE container ID for file operations
  */
@@ -172,7 +131,7 @@ export function openFindSimilar(
     documentId: string,
     containerId: string,
 ): void {
-    const tenantId = getTenantId();
+    const tenantId = resolveTenantIdSync();
 
     const params = new URLSearchParams();
     if (documentId) params.set("documentId", documentId);
