@@ -81,9 +81,36 @@ export function getMsalClientId(): string {
 }
 
 /**
- * Azure AD tenant ID resolved from Xrm organizationSettings at bootstrap.
- * Used for constructing URLs that require tenantId (e.g. DocumentRelationshipViewer).
+ * Azure AD tenant ID resolved from Xrm organizationSettings.
+ *
+ * Primary: uses the value captured at bootstrap by resolveRuntimeConfig().
+ * Fallback: if bootstrap ran before Xrm had organizationSettings populated
+ * (intermittent timing issue), walks the frame hierarchy to obtain the value
+ * on demand and caches it for subsequent calls.
  */
 export function getTenantId(): string {
-  return getConfig().tenantId;
+  const stored = getConfig().tenantId;
+  if (stored) return stored;
+
+  // Bootstrap captured an empty tenantId — Xrm.organizationSettings may not have
+  // been ready yet. Try to read it synchronously now (safe to call from click handlers).
+  if (typeof window !== 'undefined') {
+    const frames: Window[] = [window];
+    try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+    try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!); } catch { /* cross-origin */ }
+
+    for (const frame of frames) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tenantId = (frame as any).Xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId as string | undefined;
+        if (tenantId) {
+          // Cache it so subsequent calls don't need to walk frames again.
+          if (_config) _config = { ..._config, tenantId };
+          return tenantId;
+        }
+      } catch { /* cross-origin */ }
+    }
+  }
+
+  return '';
 }
