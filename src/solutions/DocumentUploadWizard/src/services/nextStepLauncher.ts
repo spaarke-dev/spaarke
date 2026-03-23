@@ -20,8 +20,8 @@ import { resolveTenantIdSync } from "@spaarke/auth";
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Web resource name for the Analysis Builder Code Page. */
-const ANALYSIS_BUILDER_WEB_RESOURCE = "sprk_analysisbuilder";
+/** Web resource name for the Playbook Library Code Page (merged from AnalysisBuilder). */
+const ANALYSIS_BUILDER_WEB_RESOURCE = "sprk_playbooklibrary";
 
 /** Web resource name for the Document Relationship Viewer (Find Similar). */
 const FIND_SIMILAR_WEB_RESOURCE = "sprk_documentrelationshipviewer";

@@ -53,7 +53,8 @@ import {
   FOLLOW_ON_CANONICAL_ORDER,
 } from './FollowOnSteps';
 
-import { AssignResourcesStep } from './steps/AssignResourcesStep';
+import { AssignWorkFollowOnStep, WORK_ASSIGNMENT_PRIORITY } from './steps/AssignWorkFollowOnStep';
+import type { WorkAssignmentPriorityValue } from './steps/AssignWorkFollowOnStep';
 import { DraftSummaryStep } from './steps/DraftSummaryStep';
 import { SendEmailStep } from './steps/SendEmailStep';
 
@@ -144,14 +145,25 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   // -- Follow-on step selections --
   const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
 
-  // -- Assign Resources state --
+  // -- Assign Work state (replaces Assign Resources) --
+  const [assignWorkName, setAssignWorkName] = React.useState('');
+  const [assignWorkDescription, setAssignWorkDescription] = React.useState('');
+  const [assignWorkMatterTypeId, setAssignWorkMatterTypeId] = React.useState('');
+  const [assignWorkMatterTypeName, setAssignWorkMatterTypeName] = React.useState('');
+  const [assignWorkPracticeAreaId, setAssignWorkPracticeAreaId] = React.useState('');
+  const [assignWorkPracticeAreaName, setAssignWorkPracticeAreaName] = React.useState('');
+  const [assignWorkPriority, setAssignWorkPriority] = React.useState<WorkAssignmentPriorityValue>(
+    WORK_ASSIGNMENT_PRIORITY.Normal
+  );
+  const [assignWorkResponseDueDate, setAssignWorkResponseDueDate] = React.useState('');
   const [assignedAttorneyId, setAssignedAttorneyId] = React.useState('');
   const [assignedAttorneyName, setAssignedAttorneyName] = React.useState('');
   const [assignedParalegalId, setAssignedParalegalId] = React.useState('');
   const [assignedParalegalName, setAssignedParalegalName] = React.useState('');
   const [assignedOutsideCounselId, setAssignedOutsideCounselId] = React.useState('');
   const [assignedOutsideCounselName, setAssignedOutsideCounselName] = React.useState('');
-  const [notifyResources, setNotifyResources] = React.useState(false);
+  // Track whether Assign Work defaults have been applied (auto-fill from parent)
+  const [assignWorkDefaultsApplied, setAssignWorkDefaultsApplied] = React.useState(false);
 
   // -- Draft Summary state --
   const [summaryText, setSummaryText] = React.useState('');
@@ -178,13 +190,21 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       fileDispatch({ type: 'RESET' });
       setAssociation(null);
       setSelectedActions([]);
+      setAssignWorkName('');
+      setAssignWorkDescription('');
+      setAssignWorkMatterTypeId('');
+      setAssignWorkMatterTypeName('');
+      setAssignWorkPracticeAreaId('');
+      setAssignWorkPracticeAreaName('');
+      setAssignWorkPriority(WORK_ASSIGNMENT_PRIORITY.Normal);
+      setAssignWorkResponseDueDate('');
       setAssignedAttorneyId('');
       setAssignedAttorneyName('');
       setAssignedParalegalId('');
       setAssignedParalegalName('');
       setAssignedOutsideCounselId('');
       setAssignedOutsideCounselName('');
-      setNotifyResources(false);
+      setAssignWorkDefaultsApplied(false);
       setSummaryText('');
       setRecipients([]);
       setCcRecipients([]);
@@ -197,8 +217,6 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   // -- Refs for stale closure prevention in dynamic step renderContent --
   const associationRef = React.useRef(association);
   associationRef.current = association;
-  const notifyResourcesRef = React.useRef(notifyResources);
-  notifyResourcesRef.current = notifyResources;
   const summaryTextRef = React.useRef(summaryText);
   summaryTextRef.current = summaryText;
   const recipientsRef = React.useRef(recipients);
@@ -218,7 +236,23 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const speContainerIdRef = React.useRef(speContainerId);
   speContainerIdRef.current = speContainerId;
 
-  // Assign resources refs
+  // Assign Work refs
+  const assignWorkNameRef = React.useRef(assignWorkName);
+  assignWorkNameRef.current = assignWorkName;
+  const assignWorkDescriptionRef = React.useRef(assignWorkDescription);
+  assignWorkDescriptionRef.current = assignWorkDescription;
+  const assignWorkMatterTypeIdRef = React.useRef(assignWorkMatterTypeId);
+  assignWorkMatterTypeIdRef.current = assignWorkMatterTypeId;
+  const assignWorkMatterTypeNameRef = React.useRef(assignWorkMatterTypeName);
+  assignWorkMatterTypeNameRef.current = assignWorkMatterTypeName;
+  const assignWorkPracticeAreaIdRef = React.useRef(assignWorkPracticeAreaId);
+  assignWorkPracticeAreaIdRef.current = assignWorkPracticeAreaId;
+  const assignWorkPracticeAreaNameRef = React.useRef(assignWorkPracticeAreaName);
+  assignWorkPracticeAreaNameRef.current = assignWorkPracticeAreaName;
+  const assignWorkPriorityRef = React.useRef(assignWorkPriority);
+  assignWorkPriorityRef.current = assignWorkPriority;
+  const assignWorkResponseDueDateRef = React.useRef(assignWorkResponseDueDate);
+  assignWorkResponseDueDateRef.current = assignWorkResponseDueDate;
   const assignedAttorneyIdRef = React.useRef(assignedAttorneyId);
   assignedAttorneyIdRef.current = assignedAttorneyId;
   const assignedAttorneyNameRef = React.useRef(assignedAttorneyName);
@@ -236,8 +270,18 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const searchContacts = config.searchContacts ?? EMPTY_SEARCH;
   const searchOrganizations = config.searchOrganizations ?? EMPTY_SEARCH;
   const searchUsers = config.searchUsers ?? EMPTY_SEARCH;
+  const searchMatterTypes = config.searchMatterTypes ?? EMPTY_SEARCH;
+  const searchPracticeAreas = config.searchPracticeAreas ?? EMPTY_SEARCH;
 
-  // -- Assign Resources change handlers --
+  // -- Assign Work change handlers --
+  const handleMatterTypeChange = React.useCallback((item: ILookupItem | null) => {
+    setAssignWorkMatterTypeId(item?.id ?? '');
+    setAssignWorkMatterTypeName(item?.name ?? '');
+  }, []);
+  const handlePracticeAreaChange = React.useCallback((item: ILookupItem | null) => {
+    setAssignWorkPracticeAreaId(item?.id ?? '');
+    setAssignWorkPracticeAreaName(item?.name ?? '');
+  }, []);
   const handleAttorneyChange = React.useCallback((item: ILookupItem | null) => {
     setAssignedAttorneyId(item?.id ?? '');
     setAssignedAttorneyName(item?.name ?? '');
@@ -263,6 +307,20 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
         const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
         const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
 
+        // When Assign Work is first selected, apply defaults from parent entity form
+        if (stepId === 'followon-assign-counsel' && !assignWorkDefaultsApplied && config.getAssignWorkDefaults) {
+          const defaults = config.getAssignWorkDefaults();
+          if (defaults.assignWorkMatterTypeId) {
+            setAssignWorkMatterTypeId(defaults.assignWorkMatterTypeId);
+            setAssignWorkMatterTypeName(defaults.assignWorkMatterTypeName ?? '');
+          }
+          if (defaults.assignWorkPracticeAreaId) {
+            setAssignWorkPracticeAreaId(defaults.assignWorkPracticeAreaId);
+            setAssignWorkPracticeAreaName(defaults.assignWorkPracticeAreaName ?? '');
+          }
+          setAssignWorkDefaultsApplied(true);
+        }
+
         const dynamicConfig: IWizardStepConfig = {
           id: stepId,
           label: stepLabel,
@@ -278,27 +336,38 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
           },
           renderContent: () => {
             if (stepId === 'followon-assign-counsel') {
+              const mtVal: ILookupItem | null = assignWorkMatterTypeIdRef.current
+                ? { id: assignWorkMatterTypeIdRef.current, name: assignWorkMatterTypeNameRef.current }
+                : null;
+              const paVal: ILookupItem | null = assignWorkPracticeAreaIdRef.current
+                ? { id: assignWorkPracticeAreaIdRef.current, name: assignWorkPracticeAreaNameRef.current }
+                : null;
               const attVal: ILookupItem | null = assignedAttorneyIdRef.current
-                ? {
-                    id: assignedAttorneyIdRef.current,
-                    name: assignedAttorneyNameRef.current,
-                  }
+                ? { id: assignedAttorneyIdRef.current, name: assignedAttorneyNameRef.current }
                 : null;
               const paraVal: ILookupItem | null = assignedParalegalIdRef.current
-                ? {
-                    id: assignedParalegalIdRef.current,
-                    name: assignedParalegalNameRef.current,
-                  }
+                ? { id: assignedParalegalIdRef.current, name: assignedParalegalNameRef.current }
                 : null;
               const ocVal: ILookupItem | null = assignedOutsideCounselIdRef.current
-                ? {
-                    id: assignedOutsideCounselIdRef.current,
-                    name: assignedOutsideCounselNameRef.current,
-                  }
+                ? { id: assignedOutsideCounselIdRef.current, name: assignedOutsideCounselNameRef.current }
                 : null;
 
               return (
-                <AssignResourcesStep
+                <AssignWorkFollowOnStep
+                  nameValue={assignWorkNameRef.current}
+                  onNameChange={setAssignWorkName}
+                  descriptionValue={assignWorkDescriptionRef.current}
+                  onDescriptionChange={setAssignWorkDescription}
+                  matterTypeValue={mtVal}
+                  onMatterTypeChange={handleMatterTypeChange}
+                  onSearchMatterTypes={searchMatterTypes}
+                  practiceAreaValue={paVal}
+                  onPracticeAreaChange={handlePracticeAreaChange}
+                  onSearchPracticeAreas={searchPracticeAreas}
+                  priorityValue={assignWorkPriorityRef.current}
+                  onPriorityChange={setAssignWorkPriority}
+                  responseDueDateValue={assignWorkResponseDueDateRef.current}
+                  onResponseDueDateChange={setAssignWorkResponseDueDate}
                   attorneyValue={attVal}
                   onAttorneyChange={handleAttorneyChange}
                   onSearchAttorneys={searchContacts}
@@ -308,11 +377,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
                   outsideCounselValue={ocVal}
                   onOutsideCounselChange={handleOutsideCounselChange}
                   onSearchOutsideCounsel={searchOrganizations}
-                  notifyResources={notifyResourcesRef.current}
-                  onNotifyChange={setNotifyResources}
                 />
               );
-            }
+            } // end followon-assign-counsel
             if (stepId === 'followon-draft-summary') {
               return (
                 <DraftSummaryStep
@@ -360,9 +427,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     searchContacts,
     searchOrganizations,
     searchUsers,
+    searchMatterTypes,
+    searchPracticeAreas,
+    handleMatterTypeChange,
+    handlePracticeAreaChange,
     handleAttorneyChange,
     handleParalegalChange,
     handleOutsideCounselChange,
+    assignWorkDefaultsApplied,
     config,
   ]);
 
@@ -403,13 +475,22 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       selectedActions: selectedActionsRef.current,
       association: associationRef.current,
       followOn: {
+        // Assign Work fields
+        assignWorkName: assignWorkNameRef.current,
+        assignWorkDescription: assignWorkDescriptionRef.current,
+        assignWorkMatterTypeId: assignWorkMatterTypeIdRef.current,
+        assignWorkMatterTypeName: assignWorkMatterTypeNameRef.current,
+        assignWorkPracticeAreaId: assignWorkPracticeAreaIdRef.current,
+        assignWorkPracticeAreaName: assignWorkPracticeAreaNameRef.current,
+        assignWorkPriority: assignWorkPriorityRef.current,
+        assignWorkResponseDueDate: assignWorkResponseDueDateRef.current,
         assignedAttorneyId: assignedAttorneyIdRef.current,
         assignedAttorneyName: assignedAttorneyNameRef.current,
         assignedParalegalId: assignedParalegalIdRef.current,
         assignedParalegalName: assignedParalegalNameRef.current,
         assignedOutsideCounselId: assignedOutsideCounselIdRef.current,
         assignedOutsideCounselName: assignedOutsideCounselNameRef.current,
-        notifyResources: notifyResourcesRef.current,
+        // Draft Summary / Send Email fields
         summaryText: summaryTextRef.current,
         recipients: recipientsRef.current,
         ccRecipients: ccRecipientsRef.current,

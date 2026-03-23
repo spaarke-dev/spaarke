@@ -168,6 +168,34 @@ async function searchUsersAsLookup(dataService: IDataService, query: string): Pr
   }));
 }
 
+async function searchMatterTypesAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
+  if (!query || query.trim().length < 1) return [];
+  const safeFilter = query.trim().replace(/'/g, "''");
+  const options =
+    `?$select=sprk_mattertype_refid,sprk_mattertypename` +
+    `&$filter=contains(sprk_mattertypename,'${safeFilter}')` +
+    `&$orderby=sprk_mattertypename asc&$top=10`;
+  const result = await dataService.retrieveMultipleRecords('sprk_mattertype_ref', options);
+  return result.entities.map((e) => ({
+    id: e['sprk_mattertype_refid'] as string,
+    name: e['sprk_mattertypename'] as string,
+  }));
+}
+
+async function searchPracticeAreasAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
+  if (!query || query.trim().length < 1) return [];
+  const safeFilter = query.trim().replace(/'/g, "''");
+  const options =
+    `?$select=sprk_practicearea_refid,sprk_practiceareaname` +
+    `&$filter=contains(sprk_practiceareaname,'${safeFilter}')` +
+    `&$orderby=sprk_practiceareaname asc&$top=10`;
+  const result = await dataService.retrieveMultipleRecords('sprk_practicearea_ref', options);
+  return result.entities.map((e) => ({
+    id: e['sprk_practicearea_refid'] as string,
+    name: e['sprk_practiceareaname'] as string,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -261,6 +289,14 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
     (query: string) => searchUsersAsLookup(dataService, query),
     [dataService]
   );
+  const handleSearchMatterTypes = React.useCallback(
+    (query: string) => searchMatterTypesAsLookup(dataService, query),
+    [dataService]
+  );
+  const handleSearchPracticeAreas = React.useCallback(
+    (query: string) => searchPracticeAreasAsLookup(dataService, query),
+    [dataService]
+  );
 
   // ── WebApi adapter for CreateRecordWizard ─────────────────────────────
   const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
@@ -312,6 +348,14 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       searchContacts: handleSearchContacts,
       searchOrganizations: handleSearchOrganizations,
       searchUsers: handleSearchUsers,
+      searchMatterTypes: handleSearchMatterTypes,
+      searchPracticeAreas: handleSearchPracticeAreas,
+
+      getAssignWorkDefaults: () => ({
+        // Projects don't have a matterTypeId; seed practice area from the project form
+        assignWorkPracticeAreaId: formValuesRef.current.practiceAreaId,
+        assignWorkPracticeAreaName: formValuesRef.current.practiceAreaName,
+      }),
 
       resolveSpeContainerId,
 
@@ -338,17 +382,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
         const warnings: string[] = [];
         const currentFormValues = formValuesRef.current;
-
-        // Merge follow-on resource assignments back into form values
-        const mergedFormValues: ICreateProjectFormState = {
-          ...currentFormValues,
-          assignedAttorneyId: context.followOn.assignedAttorneyId || currentFormValues.assignedAttorneyId,
-          assignedAttorneyName: context.followOn.assignedAttorneyName || currentFormValues.assignedAttorneyName,
-          assignedParalegalId: context.followOn.assignedParalegalId || currentFormValues.assignedParalegalId,
-          assignedParalegalName: context.followOn.assignedParalegalName || currentFormValues.assignedParalegalName,
-          assignedOutsideCounselId: context.followOn.assignedOutsideCounselId || currentFormValues.assignedOutsideCounselId,
-          assignedOutsideCounselName: context.followOn.assignedOutsideCounselName || currentFormValues.assignedOutsideCounselName,
-        };
+        const mergedFormValues: ICreateProjectFormState = { ...currentFormValues };
 
         // 1. Create sprk_project record
         const projectService = new ProjectService(dataService);
@@ -360,7 +394,56 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const projectId = result.projectId!;
         const projectName = result.projectName!;
 
-        // 1b. Wire association from AssociateToStep (if the user made a selection)
+        // 1b. Create Work Assignment (sprk_workassignment) linked to this project
+        if (context.selectedActions.includes('assign-counsel') && context.followOn.assignWorkName.trim()) {
+          try {
+            const workAssignmentPayload: Record<string, unknown> = {
+              sprk_name: context.followOn.assignWorkName.trim(),
+              sprk_priority: context.followOn.assignWorkPriority,
+            };
+            if (context.followOn.assignWorkDescription.trim()) {
+              workAssignmentPayload['sprk_description'] = context.followOn.assignWorkDescription.trim();
+            }
+            if (context.followOn.assignWorkResponseDueDate) {
+              workAssignmentPayload['sprk_responseduedate'] = context.followOn.assignWorkResponseDueDate;
+            }
+            // N:1 link to parent project via relationship
+            workAssignmentPayload['sprk_workassignment_RegardingProject_sprk_project_n1@odata.bind'] =
+              `/sprk_projects(${projectId})`;
+            // Classification lookups
+            if (context.followOn.assignWorkMatterTypeId) {
+              workAssignmentPayload['sprk_MatterType@odata.bind'] =
+                `/sprk_mattertype_refs(${context.followOn.assignWorkMatterTypeId})`;
+            }
+            if (context.followOn.assignWorkPracticeAreaId) {
+              workAssignmentPayload['sprk_PracticeArea@odata.bind'] =
+                `/sprk_practicearea_refs(${context.followOn.assignWorkPracticeAreaId})`;
+            }
+            // Resource lookups
+            if (context.followOn.assignedAttorneyId) {
+              workAssignmentPayload['sprk_AssignedAttorney@odata.bind'] =
+                `/contacts(${context.followOn.assignedAttorneyId})`;
+            }
+            if (context.followOn.assignedParalegalId) {
+              workAssignmentPayload['sprk_AssignedParalegal@odata.bind'] =
+                `/contacts(${context.followOn.assignedParalegalId})`;
+            }
+            if (context.followOn.assignedOutsideCounselId) {
+              workAssignmentPayload['sprk_AssignedOutsideCounsel@odata.bind'] =
+                `/sprk_organizations(${context.followOn.assignedOutsideCounselId})`;
+            }
+            await dataService.createRecord('sprk_workassignment', workAssignmentPayload);
+            console.info('[CreateProjectWizard] Work assignment created and linked to project:', projectId);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            warnings.push(
+              `Work assignment could not be created (${message}). ` +
+              'You can create it manually from the project record.'
+            );
+          }
+        }
+
+        // 1c. Wire association from AssociateToStep (if the user made a selection)
         const association = context.association;
         if (association?.recordId) {
           try {
@@ -515,7 +598,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         };
       },
     }),
-    [formValid, formValues, dataService, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, onClose, authFetch, bffBaseUrl, navigationService, resolveSpeContainerId, webApiAdapter]
+    [formValid, formValues, dataService, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, handleSearchMatterTypes, handleSearchPracticeAreas, onClose, authFetch, bffBaseUrl, navigationService, resolveSpeContainerId, webApiAdapter]
   );
 
   // ── Render ──────────────────────────────────────────────────────────────

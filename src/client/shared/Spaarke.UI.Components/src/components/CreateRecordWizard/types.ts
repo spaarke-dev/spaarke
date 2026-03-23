@@ -88,17 +88,46 @@ export interface IEntityInfoStep {
 // Follow-on state (passed to onFinish and used by dynamic steps)
 // ---------------------------------------------------------------------------
 
-/** State collected from the optional follow-on steps. */
-export interface IFollowOnState {
-  /** IDs of attorney/paralegal/outside-counsel assignments. */
+/**
+ * State collected from the "Assign Work" follow-on step.
+ * Used to create a sprk_workassignment record linked to the parent entity.
+ */
+export interface IAssignWorkFollowOnState {
+  /** Work assignment name (required to create the record). */
+  assignWorkName: string;
+  /** Work assignment description (optional). */
+  assignWorkDescription: string;
+  /** Matter Type lookup ID (auto-filled from parent matter/project). */
+  assignWorkMatterTypeId: string;
+  /** Matter Type display name. */
+  assignWorkMatterTypeName: string;
+  /** Practice Area lookup ID (auto-filled from parent record). */
+  assignWorkPracticeAreaId: string;
+  /** Practice Area display name. */
+  assignWorkPracticeAreaName: string;
+  /**
+   * Priority option set value.
+   * 100000000=Low, 100000001=Normal (default), 100000002=High, 100000003=Critical
+   */
+  assignWorkPriority: number;
+  /** Response Due Date as ISO date string (e.g. "2026-04-15"), or empty string. */
+  assignWorkResponseDueDate: string;
+  /** Assigned Attorney contact GUID. */
   assignedAttorneyId: string;
+  /** Assigned Attorney display name. */
   assignedAttorneyName: string;
+  /** Assigned Paralegal contact GUID. */
   assignedParalegalId: string;
+  /** Assigned Paralegal display name. */
   assignedParalegalName: string;
+  /** Assigned Outside Counsel organization GUID. */
   assignedOutsideCounselId: string;
+  /** Assigned Outside Counsel display name. */
   assignedOutsideCounselName: string;
-  /** Whether "Notify assigned resources" is checked. */
-  notifyResources: boolean;
+}
+
+/** State collected from the optional follow-on steps. */
+export interface IFollowOnState extends IAssignWorkFollowOnState {
   /** AI-generated or user-edited summary text. */
   summaryText: string;
   /** "Distribute to" recipients for draft summary. */
@@ -208,6 +237,20 @@ export interface ICreateRecordWizardConfig {
   searchOrganizations?: SearchCallback;
   /** Search system users for email "To" field. */
   searchUsers?: SearchCallback;
+  /** Search matter type reference records (for Assign Work step). */
+  searchMatterTypes?: SearchCallback;
+  /** Search practice area reference records (for Assign Work step). */
+  searchPracticeAreas?: SearchCallback;
+
+  /**
+   * Optional callback to get initial (auto-fill) values for the Assign Work step.
+   * Called when the assign-work follow-on card is first selected. Allows entity
+   * wizards to seed Matter Type and Practice Area from the parent record form.
+   *
+   * @returns Partial IAssignWorkFollowOnState to merge as defaults. Only non-empty
+   * fields are applied — the user can still override everything.
+   */
+  getAssignWorkDefaults?: () => Partial<IAssignWorkFollowOnState>;
 }
 
 // ---------------------------------------------------------------------------

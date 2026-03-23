@@ -39,9 +39,9 @@ interface IFollowOnCardDef {
 const CARD_DEFS: IFollowOnCardDef[] = [
   {
     id: 'assign-counsel',
-    label: 'Assign Resources',
-    description: 'Search and assign internal and external resources.',
-    stepLabel: 'Assign Resources',
+    label: 'Assign Work',
+    description: 'Create a work assignment with resources linked to this record.',
+    stepLabel: 'Assign Work',
     icon: <PersonRegular fontSize={28} />,
   },
   {
@@ -73,7 +73,7 @@ export const FOLLOW_ON_STEP_ID_MAP: Record<FollowOnActionId, string> = {
 
 /** Map FollowOnActionId → sidebar step label. */
 export const FOLLOW_ON_STEP_LABEL_MAP: Record<FollowOnActionId, string> = {
-  'assign-counsel': 'Assign Resources',
+  'assign-counsel': 'Assign Work',
   'draft-summary': 'Draft Summary',
   'send-email': 'Send Email',
 };

@@ -53,7 +53,7 @@ $webResources = @(
     # Updated existing
     @{ Name = 'sprk_documentuploadwizard';           DisplayName = 'Upload Documents';               Type = 1; Path = 'src\solutions\DocumentUploadWizard\dist\index.html' }
     @{ Name = 'sprk_corporateworkspace';             DisplayName = 'Corporate Workspace';            Type = 1; Path = 'src\solutions\LegalWorkspace\dist\corporateworkspace.html' }
-    @{ Name = 'sprk_analysisbuilder';                DisplayName = 'Analysis Builder';               Type = 1; Path = 'src\solutions\AnalysisBuilder\dist\analysisbuilder.html' }
+
 )
 
 $publishIds = @()

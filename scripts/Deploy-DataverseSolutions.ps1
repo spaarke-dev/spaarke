@@ -129,8 +129,7 @@ $SolutionImportOrder = [ordered]@{
     "webresources"         = @{ DisplayName = "Spaarke Web Resources";    SolutionName = "SpaarkeWebResources";  Tier = 2 }
 
     # Tier 3: Feature solutions (independent of each other)
-    "AnalysisBuilder"      = @{ DisplayName = "Analysis Builder";         SolutionName = "AnalysisBuilder";      Tier = 3 }
-    "CalendarSidePane"     = @{ DisplayName = "Calendar Side Pane";       SolutionName = "CalendarSidePane";     Tier = 3 }
+"CalendarSidePane"     = @{ DisplayName = "Calendar Side Pane";       SolutionName = "CalendarSidePane";     Tier = 3 }
     "DocumentUploadWizard" = @{ DisplayName = "Document Upload Wizard";   SolutionName = "DocumentUploadWizard"; Tier = 3 }
     "EventCommands"        = @{ DisplayName = "Event Ribbon Commands";    SolutionName = "EventRibbons";         Tier = 3 }
     "EventDetailSidePane"  = @{ DisplayName = "Event Detail Side Pane";   SolutionName = "EventDetailSidePane";  Tier = 3 }

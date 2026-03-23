@@ -402,7 +402,7 @@ async function openAnalysisBuilderDialog(params, formContext) {
         // Pass data via query string parameters (Code Page reads via URLSearchParams)
         const pageInput = {
             pageType: "webresource",
-            webresourceName: "sprk_analysisbuilder",
+            webresourceName: "sprk_playbooklibrary",
             data: buildQueryString(dataPayload)
         };
 
@@ -542,7 +542,7 @@ RIBBON CONFIGURATION:
    - Icon: AnalysisAdd or custom icon
 
 WEB RESOURCE NAMES:
-- Analysis Builder: sprk_analysisbuilder
+- Playbook Library (merged, replaces AnalysisBuilder): sprk_playbooklibrary
 - Analysis Workspace: sprk_analysisworkspace_8bc0b
 
 VERSION HISTORY:

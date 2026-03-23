@@ -18,6 +18,7 @@ export {
 } from './FollowOnSteps';
 
 // Step components (for direct use if needed)
+export { AssignWorkFollowOnStep, WORK_ASSIGNMENT_PRIORITY } from './steps/AssignWorkFollowOnStep';
 export { AssignResourcesStep } from './steps/AssignResourcesStep';
 export { DraftSummaryStep } from './steps/DraftSummaryStep';
 export { SendEmailStep } from './steps/SendEmailStep';
@@ -29,6 +30,7 @@ export type {
   ICreateRecordWizardProps,
   IFinishContext,
   IFollowOnState,
+  IAssignWorkFollowOnState,
   IEntityInfoStep,
   IAssociateToStepConfig,
   FollowOnActionId,
@@ -39,6 +41,7 @@ export type {
 } from './types';
 
 // Step prop types
+export type { IAssignWorkFollowOnStepProps, WorkAssignmentPriorityValue } from './steps/AssignWorkFollowOnStep';
 export type { IAssignResourcesStepProps } from './steps/AssignResourcesStep';
 export type { IDraftSummaryStepProps } from './steps/DraftSummaryStep';
 export type { ISendEmailStepProps } from './steps/SendEmailStep';

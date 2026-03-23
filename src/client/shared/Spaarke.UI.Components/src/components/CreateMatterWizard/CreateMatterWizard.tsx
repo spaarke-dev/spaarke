@@ -43,6 +43,8 @@ import {
   searchContactsAsLookup,
   searchOrganizationsAsLookup,
   searchUsersAsLookup,
+  searchMatterTypes,
+  searchPracticeAreas,
   fetchAiDraftSummary,
 } from './matterService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
@@ -214,6 +216,14 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
     (query: string) => searchUsersAsLookup(dataService, query),
     [dataService]
   );
+  const handleSearchMatterTypes = React.useCallback(
+    (query: string) => searchMatterTypes(dataService, query),
+    [dataService]
+  );
+  const handleSearchPracticeAreas = React.useCallback(
+    (query: string) => searchPracticeAreas(dataService, query),
+    [dataService]
+  );
 
   // -- Wizard config --
   const config: ICreateRecordWizardConfig = React.useMemo(
@@ -260,6 +270,15 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       searchContacts: handleSearchContacts,
       searchOrganizations: handleSearchOrganizations,
       searchUsers: handleSearchUsers,
+      searchMatterTypes: handleSearchMatterTypes,
+      searchPracticeAreas: handleSearchPracticeAreas,
+
+      getAssignWorkDefaults: () => ({
+        assignWorkMatterTypeId: step2FormValuesRef.current.matterTypeId,
+        assignWorkMatterTypeName: step2FormValuesRef.current.matterTypeName,
+        assignWorkPracticeAreaId: step2FormValuesRef.current.practiceAreaId,
+        assignWorkPracticeAreaName: step2FormValuesRef.current.practiceAreaName,
+      }),
 
       resolveSpeContainerId: resolveSpeContainerId
         ? resolveSpeContainerId
@@ -298,12 +317,6 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         const currentFormValues = step2FormValuesRef.current;
         const mergedFormValues = {
           ...currentFormValues,
-          assignedAttorneyId: context.followOn.assignedAttorneyId || currentFormValues.assignedAttorneyId,
-          assignedAttorneyName: context.followOn.assignedAttorneyName || currentFormValues.assignedAttorneyName,
-          assignedParalegalId: context.followOn.assignedParalegalId || currentFormValues.assignedParalegalId,
-          assignedParalegalName: context.followOn.assignedParalegalName || currentFormValues.assignedParalegalName,
-          assignedOutsideCounselId: context.followOn.assignedOutsideCounselId || currentFormValues.assignedOutsideCounselId,
-          assignedOutsideCounselName: context.followOn.assignedOutsideCounselName || currentFormValues.assignedOutsideCounselName,
         };
 
         const followOnActions: IFollowOnActions = {};
@@ -336,6 +349,57 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
         const matterId = result.matterId!;
         const matterName = result.matterName!;
+
+        // -- Create Work Assignment (sprk_workassignment) --
+        // When the user selected "Assign Work" follow-on and entered a name,
+        // create the work assignment record linked to the matter via N:1.
+        if (context.selectedActions.includes('assign-counsel') && context.followOn.assignWorkName.trim()) {
+          try {
+            const workAssignmentPayload: Record<string, unknown> = {
+              sprk_name: context.followOn.assignWorkName.trim(),
+              sprk_priority: context.followOn.assignWorkPriority,
+            };
+            if (context.followOn.assignWorkDescription.trim()) {
+              workAssignmentPayload['sprk_description'] = context.followOn.assignWorkDescription.trim();
+            }
+            if (context.followOn.assignWorkResponseDueDate) {
+              workAssignmentPayload['sprk_responseduedate'] = context.followOn.assignWorkResponseDueDate;
+            }
+            // N:1 link to parent matter via relationship
+            workAssignmentPayload['sprk_workassignment_RegardingMatter_sprk_matter_n1@odata.bind'] =
+              `/sprk_matters(${matterId})`;
+            // Classification lookups
+            if (context.followOn.assignWorkMatterTypeId) {
+              workAssignmentPayload['sprk_MatterType@odata.bind'] =
+                `/sprk_mattertype_refs(${context.followOn.assignWorkMatterTypeId})`;
+            }
+            if (context.followOn.assignWorkPracticeAreaId) {
+              workAssignmentPayload['sprk_PracticeArea@odata.bind'] =
+                `/sprk_practicearea_refs(${context.followOn.assignWorkPracticeAreaId})`;
+            }
+            // Resource lookups
+            if (context.followOn.assignedAttorneyId) {
+              workAssignmentPayload['sprk_AssignedAttorney@odata.bind'] =
+                `/contacts(${context.followOn.assignedAttorneyId})`;
+            }
+            if (context.followOn.assignedParalegalId) {
+              workAssignmentPayload['sprk_AssignedParalegal@odata.bind'] =
+                `/contacts(${context.followOn.assignedParalegalId})`;
+            }
+            if (context.followOn.assignedOutsideCounselId) {
+              workAssignmentPayload['sprk_AssignedOutsideCounsel@odata.bind'] =
+                `/sprk_organizations(${context.followOn.assignedOutsideCounselId})`;
+            }
+            await dataService.createRecord('sprk_workassignment', workAssignmentPayload);
+            console.info('[CreateMatterWizard] Work assignment created and linked to matter:', matterId);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            result.warnings.push(
+              `Work assignment could not be created (${message}). ` +
+              'You can create it manually from the matter record.'
+            );
+          }
+        }
 
         // -- Wire N:N association (sprk_Project_Matter_nn) --
         // If the user selected an association in step 1, create the link now.
@@ -382,7 +446,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         };
       },
     }),
-    [step2Valid, step2FormValues, dataService, authenticatedFetch, bffBaseUrl, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, onClose, navigationService, resolveSpeContainerId]
+    [step2Valid, step2FormValues, dataService, authenticatedFetch, bffBaseUrl, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, handleSearchMatterTypes, handleSearchPracticeAreas, onClose, navigationService, resolveSpeContainerId]
   );
 
   // Adapt IDataService to the IWebApi shape that CreateRecordWizard expects
