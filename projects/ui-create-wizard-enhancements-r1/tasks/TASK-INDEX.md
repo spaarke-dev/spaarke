@@ -67,22 +67,22 @@ NextSteps in same wizards), then 034 last (touches form steps modified by 030/03
 
 | # | Task | Tags | Depends On | Status |
 |---|------|------|------------|--------|
-| 030 | CreateMatter AssociateToStep integration | wizard | 011 | 🔲 |
-| 031 | CreateProject AssociateToStep integration | wizard | 011 | 🔲 |
-| 032 | Assign Work follow-on step | wizard | 010, 030, 031 | 🔲 |
-| 033 | Create Event follow-on step | wizard | 032 | 🔲 |
-| 034 | Dataverse lookup side pane integration | wizard | 010, 030, 031 | 🔲 |
+| 030 | CreateMatter AssociateToStep integration | wizard | 011 | ✅ |
+| 031 | CreateProject AssociateToStep integration | wizard | 011 | ✅ |
+| 032 | Assign Work follow-on step | wizard | 010, 030, 031 | ✅ |
+| 033 | Create Event follow-on step | wizard | 032 | ✅ |
+| 034 | Dataverse lookup side pane integration | wizard | 010, 030, 031 | ✅ |
 | 035 | Phase 4 deploy + verify | deploy | 030-034 | 🔲 |
 
 ## Phase 5: Consolidation & Document Flow (~19 hours)
 
 | # | Task | Tags | Depends On | Status |
 |---|------|------|------------|--------|
-| 040 | Merge PlaybookLibrary + AnalysisBuilder | code-pages, ai | — | 🔲 |
-| 041 | Summarize → Analysis document creation | shared-library, ai | 040 | 🔲 |
-| 042 | Document selector in PlaybookLibrary | code-pages, ai | 040, 041 | 🔲 |
-| 043 | LegalWorkspace WorkspaceShell refactor | workspace | 012 | 🔲 |
-| 044 | Update launch points + retire AnalysisBuilder | webresource, cleanup | 040 | 🔲 |
+| 040 | Merge PlaybookLibrary + AnalysisBuilder | code-pages, ai | — | ✅ |
+| 041 | Summarize → Analysis document creation | shared-library, ai | 040 | ✅ |
+| 042 | Document selector in PlaybookLibrary | code-pages, ai | 040, 041 | ✅ |
+| 043 | LegalWorkspace WorkspaceShell refactor | workspace | 012 | ✅ |
+| 044 | Update launch points + retire AnalysisBuilder | webresource, cleanup | 040 | ✅ |
 | 045 | Phase 5 deploy + verify | deploy | 040-044 | 🔲 |
 
 ## Phase 6: Integration & Wrap-up (~8 hours)
