@@ -686,6 +686,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       finishingLabel="Processing&hellip;"
       finishLabel="Done"
       embedded={embedded}
+      hideTitle={embedded}
     />
   );
 };

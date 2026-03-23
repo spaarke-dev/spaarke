@@ -559,6 +559,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       finishLabel="Create"
       finishingLabel={finishingLabel}
       embedded={embedded}
+      hideTitle={embedded}
     />
   );
 };

@@ -412,6 +412,14 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
         )}
       </div>
 
+      {/* ── Secure Project toggle ── */}
+      {!isLoading && (
+        <SecureProjectSection
+          isSecure={formState.isSecure}
+          onSecureChange={handleSecureChange}
+        />
+      )}
+
       {/* 2-column form grid */}
       {isLoading ? (
         <div className={styles.formGrid}>
@@ -493,14 +501,6 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
             />
           </Field>
         </div>
-      )}
-
-      {/* ── Secure Project toggle ── */}
-      {!isLoading && (
-        <SecureProjectSection
-          isSecure={formState.isSecure}
-          onSecureChange={handleSecureChange}
-        />
       )}
     </div>
   );
