@@ -175,7 +175,7 @@ export const speApiClient = {
      * List all Dataverse Business Units available for scoping.
      */
     list(): Promise<BusinessUnit[]> {
-      return get<BusinessUnit[]>("/api/spe/businessunits");
+      return get<BusinessUnit[]>("/spe/businessunits");
     },
   },
 
@@ -189,7 +189,7 @@ export const speApiClient = {
      * List all SPE environment configurations.
      */
     list(): Promise<SpeEnvironment[]> {
-      return get<SpeEnvironment[]>("/api/spe/environments");
+      return get<SpeEnvironment[]>("/spe/environments");
     },
 
     /**
@@ -197,7 +197,7 @@ export const speApiClient = {
      * Create a new SPE environment configuration.
      */
     create(body: SpeEnvironmentUpsert): Promise<SpeEnvironment> {
-      return post<SpeEnvironmentUpsert, SpeEnvironment>("/api/spe/environments", body);
+      return post<SpeEnvironmentUpsert, SpeEnvironment>("/spe/environments", body);
     },
 
     /**
@@ -205,7 +205,7 @@ export const speApiClient = {
      * Update an existing SPE environment configuration.
      */
     update(id: string, body: SpeEnvironmentUpsert): Promise<SpeEnvironment> {
-      return put<SpeEnvironmentUpsert, SpeEnvironment>("/api/spe/environments/" + id, body);
+      return put<SpeEnvironmentUpsert, SpeEnvironment>("/spe/environments/" + id, body);
     },
 
     /**
@@ -213,7 +213,7 @@ export const speApiClient = {
      * Delete an SPE environment configuration.
      */
     delete(id: string): Promise<void> {
-      return del("/api/spe/environments/" + id);
+      return del("/spe/environments/" + id);
     },
   },
 
@@ -231,7 +231,7 @@ export const speApiClient = {
         businessUnitId: options?.businessUnitId,
         environmentId: options?.environmentId,
       });
-      return get<SpeContainerTypeConfig[]>("/api/spe/configs" + query);
+      return get<SpeContainerTypeConfig[]>("/spe/configs" + query);
     },
 
     /**
@@ -239,7 +239,7 @@ export const speApiClient = {
      * Get full detail for a single container type config.
      */
     get(id: string): Promise<SpeContainerTypeConfig> {
-      return get<SpeContainerTypeConfig>("/api/spe/configs/" + id);
+      return get<SpeContainerTypeConfig>("/spe/configs/" + id);
     },
 
     /**
@@ -247,7 +247,7 @@ export const speApiClient = {
      * Create a new container type config.
      */
     create(body: SpeContainerTypeConfigUpsert): Promise<SpeContainerTypeConfig> {
-      return post<SpeContainerTypeConfigUpsert, SpeContainerTypeConfig>("/api/spe/configs", body);
+      return post<SpeContainerTypeConfigUpsert, SpeContainerTypeConfig>("/spe/configs", body);
     },
 
     /**
@@ -255,7 +255,7 @@ export const speApiClient = {
      * Update an existing container type config.
      */
     update(id: string, body: SpeContainerTypeConfigUpsert): Promise<SpeContainerTypeConfig> {
-      return put<SpeContainerTypeConfigUpsert, SpeContainerTypeConfig>("/api/spe/configs/" + id, body);
+      return put<SpeContainerTypeConfigUpsert, SpeContainerTypeConfig>("/spe/configs/" + id, body);
     },
 
     /**
@@ -263,7 +263,7 @@ export const speApiClient = {
      * Delete a container type config.
      */
     delete(id: string): Promise<void> {
-      return del("/api/spe/configs/" + id);
+      return del("/spe/configs/" + id);
     },
   },
 
@@ -277,7 +277,7 @@ export const speApiClient = {
      * List all container types for the given config.
      */
     list(configId: string): Promise<ContainerType[]> {
-      return get<{ items: ContainerType[]; count: number }>("/api/spe/containertypes" + qs({ configId }))
+      return get<{ items: ContainerType[]; count: number }>("/spe/containertypes" + qs({ configId }))
         .then(r => r.items);
     },
 
@@ -286,7 +286,7 @@ export const speApiClient = {
      * Get details for a single container type.
      */
     get(typeId: string, configId: string): Promise<ContainerType> {
-      return get<ContainerType>("/api/spe/containertypes/" + typeId + qs({ configId }));
+      return get<ContainerType>("/spe/containertypes/" + typeId + qs({ configId }));
     },
 
     /**
@@ -297,7 +297,7 @@ export const speApiClient = {
       configId: string,
       body: { displayName: string; billingClassification: string },
     ): Promise<ContainerType> {
-      return post<typeof body, ContainerType>("/api/spe/containertypes" + qs({ configId }), body);
+      return post<typeof body, ContainerType>("/spe/containertypes" + qs({ configId }), body);
     },
 
     /**
@@ -310,7 +310,7 @@ export const speApiClient = {
       body: Record<string, unknown>,
     ): Promise<ContainerType> {
       return put<Record<string, unknown>, ContainerType>(
-        "/api/spe/containertypes/" + typeId + "/settings" + qs({ configId }),
+        "/spe/containertypes/" + typeId + "/settings" + qs({ configId }),
         body,
       );
     },
@@ -325,7 +325,7 @@ export const speApiClient = {
       body: { delegatedPermissions: string[]; applicationPermissions: string[] },
     ): Promise<void> {
       return post<typeof body, void>(
-        "/api/spe/containertypes/" + typeId + "/register" + qs({ configId }),
+        "/spe/containertypes/" + typeId + "/register" + qs({ configId }),
         body,
       );
     },
@@ -336,7 +336,7 @@ export const speApiClient = {
      */
     listPermissions(typeId: string, configId: string): Promise<ContainerTypePermission[]> {
       return get<{ items: ContainerTypePermission[]; count: number }>(
-        "/api/spe/containertypes/" + typeId + "/permissions" + qs({ configId }),
+        "/spe/containertypes/" + typeId + "/permissions" + qs({ configId }),
       ).then(r => r.items);
     },
 
@@ -346,7 +346,7 @@ export const speApiClient = {
      */
     listConsumers(typeId: string, configId: string): Promise<ConsumingTenantListResponse> {
       return get<ConsumingTenantListResponse>(
-        "/api/spe/containertypes/" + typeId + "/consumers" + qs({ configId }),
+        "/spe/containertypes/" + typeId + "/consumers" + qs({ configId }),
       );
     },
 
@@ -360,7 +360,7 @@ export const speApiClient = {
       body: RegisterConsumingTenantRequest,
     ): Promise<ConsumingTenant> {
       return post<RegisterConsumingTenantRequest, ConsumingTenant>(
-        "/api/spe/containertypes/" + typeId + "/consumers" + qs({ configId }),
+        "/spe/containertypes/" + typeId + "/consumers" + qs({ configId }),
         body,
       );
     },
@@ -376,7 +376,7 @@ export const speApiClient = {
       body: UpdateConsumingTenantRequest,
     ): Promise<ConsumingTenant> {
       return put<UpdateConsumingTenantRequest, ConsumingTenant>(
-        "/api/spe/containertypes/" + typeId + "/consumers/" + encodeURIComponent(appId) + qs({ configId }),
+        "/spe/containertypes/" + typeId + "/consumers/" + encodeURIComponent(appId) + qs({ configId }),
         body,
       );
     },
@@ -387,7 +387,7 @@ export const speApiClient = {
      */
     removeConsumer(typeId: string, appId: string, configId: string): Promise<void> {
       return del(
-        "/api/spe/containertypes/" + typeId + "/consumers/" + encodeURIComponent(appId) + qs({ configId }),
+        "/spe/containertypes/" + typeId + "/consumers/" + encodeURIComponent(appId) + qs({ configId }),
       );
     },
   },
@@ -402,7 +402,7 @@ export const speApiClient = {
      * List all containers for the given config.
      */
     list(configId: string): Promise<Container[]> {
-      return get<{ items: Container[]; count: number }>("/api/spe/containers" + qs({ configId }))
+      return get<{ items: Container[]; count: number }>("/spe/containers" + qs({ configId }))
         .then(r => r.items);
     },
 
@@ -411,7 +411,7 @@ export const speApiClient = {
      * Get a single container with full detail.
      */
     get(containerId: string, configId: string): Promise<Container> {
-      return get<Container>("/api/spe/containers/" + containerId + qs({ configId }));
+      return get<Container>("/spe/containers/" + containerId + qs({ configId }));
     },
 
     /**
@@ -422,7 +422,7 @@ export const speApiClient = {
       configId: string,
       body: { displayName: string; description?: string },
     ): Promise<Container> {
-      return post<typeof body, Container>("/api/spe/containers" + qs({ configId }), body);
+      return post<typeof body, Container>("/spe/containers" + qs({ configId }), body);
     },
 
     /**
@@ -435,7 +435,7 @@ export const speApiClient = {
       body: { displayName?: string; description?: string },
     ): Promise<Container> {
       return patch<typeof body, Container>(
-        "/api/spe/containers/" + containerId + qs({ configId }),
+        "/spe/containers/" + containerId + qs({ configId }),
         body,
       );
     },
@@ -446,7 +446,7 @@ export const speApiClient = {
      */
     activate(containerId: string, configId: string): Promise<Container> {
       return postAction<Container>(
-        "/api/spe/containers/" + containerId + "/activate" + qs({ configId }),
+        "/spe/containers/" + containerId + "/activate" + qs({ configId }),
       );
     },
 
@@ -456,7 +456,7 @@ export const speApiClient = {
      */
     lock(containerId: string, configId: string): Promise<Container> {
       return postAction<Container>(
-        "/api/spe/containers/" + containerId + "/lock" + qs({ configId }),
+        "/spe/containers/" + containerId + "/lock" + qs({ configId }),
       );
     },
 
@@ -466,7 +466,7 @@ export const speApiClient = {
      */
     unlock(containerId: string, configId: string): Promise<Container> {
       return postAction<Container>(
-        "/api/spe/containers/" + containerId + "/unlock" + qs({ configId }),
+        "/spe/containers/" + containerId + "/unlock" + qs({ configId }),
       );
     },
 
@@ -479,7 +479,7 @@ export const speApiClient = {
       configId: string,
     ): Promise<Record<string, ContainerCustomProperty>> {
       return get<Record<string, ContainerCustomProperty>>(
-        "/api/spe/containers/" + containerId + "/customproperties" + qs({ configId }),
+        "/spe/containers/" + containerId + "/customproperties" + qs({ configId }),
       );
     },
 
@@ -493,7 +493,7 @@ export const speApiClient = {
       body: Record<string, ContainerCustomProperty>,
     ): Promise<Record<string, ContainerCustomProperty>> {
       return put<typeof body, Record<string, ContainerCustomProperty>>(
-        "/api/spe/containers/" + containerId + "/customproperties" + qs({ configId }),
+        "/spe/containers/" + containerId + "/customproperties" + qs({ configId }),
         body,
       );
     },
@@ -510,7 +510,7 @@ export const speApiClient = {
      */
     list(containerId: string, configId: string): Promise<ContainerPermission[]> {
       return get<ContainerPermission[]>(
-        "/api/spe/containers/" + containerId + "/permissions" + qs({ configId }),
+        "/spe/containers/" + containerId + "/permissions" + qs({ configId }),
       );
     },
 
@@ -524,7 +524,7 @@ export const speApiClient = {
       body: ContainerPermissionUpsert,
     ): Promise<ContainerPermission> {
       return post<ContainerPermissionUpsert, ContainerPermission>(
-        "/api/spe/containers/" + containerId + "/permissions" + qs({ configId }),
+        "/spe/containers/" + containerId + "/permissions" + qs({ configId }),
         body,
       );
     },
@@ -540,7 +540,7 @@ export const speApiClient = {
       body: Pick<ContainerPermissionUpsert, "role">,
     ): Promise<ContainerPermission> {
       return patch<typeof body, ContainerPermission>(
-        "/api/spe/containers/" + containerId + "/permissions/" + permId + qs({ configId }),
+        "/spe/containers/" + containerId + "/permissions/" + permId + qs({ configId }),
         body,
       );
     },
@@ -551,7 +551,7 @@ export const speApiClient = {
      */
     remove(containerId: string, permId: string, configId: string): Promise<void> {
       return del(
-        "/api/spe/containers/" + containerId + "/permissions/" + permId + qs({ configId }),
+        "/spe/containers/" + containerId + "/permissions/" + permId + qs({ configId }),
       );
     },
   },
@@ -567,7 +567,7 @@ export const speApiClient = {
      */
     list(containerId: string, configId: string): Promise<ColumnDefinition[]> {
       return get<{ items: ColumnDefinition[]; count: number }>(
-        "/api/spe/containers/" + containerId + "/columns" + qs({ configId }),
+        "/spe/containers/" + containerId + "/columns" + qs({ configId }),
       ).then(r => r.items);
     },
 
@@ -581,7 +581,7 @@ export const speApiClient = {
       body: ColumnDefinitionUpsert,
     ): Promise<ColumnDefinition> {
       return post<ColumnDefinitionUpsert, ColumnDefinition>(
-        "/api/spe/containers/" + containerId + "/columns" + qs({ configId }),
+        "/spe/containers/" + containerId + "/columns" + qs({ configId }),
         body,
       );
     },
@@ -597,7 +597,7 @@ export const speApiClient = {
       body: Partial<ColumnDefinitionUpsert>,
     ): Promise<ColumnDefinition> {
       return patch<typeof body, ColumnDefinition>(
-        "/api/spe/containers/" + containerId + "/columns/" + colId + qs({ configId }),
+        "/spe/containers/" + containerId + "/columns/" + colId + qs({ configId }),
         body,
       );
     },
@@ -607,7 +607,7 @@ export const speApiClient = {
      * Delete a column definition from a container.
      */
     delete(containerId: string, colId: string, configId: string): Promise<void> {
-      return del("/api/spe/containers/" + containerId + "/columns/" + colId + qs({ configId }));
+      return del("/spe/containers/" + containerId + "/columns/" + colId + qs({ configId }));
     },
   },
 
@@ -627,7 +627,7 @@ export const speApiClient = {
       options?: { folderId?: string; top?: number; skip?: number },
     ): Promise<DriveItem[]> {
       return get<DriveItem[]>(
-        "/api/spe/containers/" + containerId + "/items" + qs({
+        "/spe/containers/" + containerId + "/items" + qs({
           configId,
           folderId: options?.folderId,
           top: options?.top,
@@ -642,7 +642,7 @@ export const speApiClient = {
      */
     get(containerId: string, itemId: string, configId: string): Promise<DriveItem> {
       return get<DriveItem>(
-        "/api/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
       );
     },
 
@@ -658,7 +658,7 @@ export const speApiClient = {
       options?: { folderId?: string },
     ): Promise<DriveItem> {
       return postFormData<DriveItem>(
-        "/api/spe/containers/" + containerId + "/items/upload" + qs({
+        "/spe/containers/" + containerId + "/items/upload" + qs({
           configId,
           folderId: options?.folderId,
         }),
@@ -672,7 +672,7 @@ export const speApiClient = {
      */
     download(containerId: string, itemId: string, configId: string): Promise<Response> {
       return authenticatedFetch(
-        "/api/spe/containers/" + containerId + "/items/" + itemId + "/content" + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + "/content" + qs({ configId }),
         { method: "GET" },
       );
     },
@@ -683,7 +683,7 @@ export const speApiClient = {
      */
     getPreviewUrl(containerId: string, itemId: string, configId: string): Promise<{ previewUrl: string }> {
       return get<{ previewUrl: string }>(
-        "/api/spe/containers/" + containerId + "/items/" + itemId + "/preview" + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + "/preview" + qs({ configId }),
       );
     },
 
@@ -692,7 +692,7 @@ export const speApiClient = {
      * Delete a drive item (file or folder).
      */
     delete(containerId: string, itemId: string, configId: string): Promise<void> {
-      return del("/api/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }));
+      return del("/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }));
     },
 
     /**
@@ -706,7 +706,7 @@ export const speApiClient = {
       options?: { parentId?: string },
     ): Promise<DriveItem> {
       return post<typeof body, DriveItem>(
-        "/api/spe/containers/" + containerId + "/folders" + qs({
+        "/spe/containers/" + containerId + "/folders" + qs({
           configId,
           parentId: options?.parentId,
         }),
@@ -726,7 +726,7 @@ export const speApiClient = {
      */
     listVersions(containerId: string, itemId: string, configId: string): Promise<DriveItemVersion[]> {
       return get<DriveItemVersion[]>(
-        "/api/spe/containers/" + containerId + "/items/" + itemId + "/versions" + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + "/versions" + qs({ configId }),
       );
     },
 
@@ -736,7 +736,7 @@ export const speApiClient = {
      */
     getThumbnails(containerId: string, itemId: string, configId: string): Promise<Thumbnail[]> {
       return get<Thumbnail[]>(
-        "/api/spe/containers/" + containerId + "/items/" + itemId + "/thumbnails" + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + "/thumbnails" + qs({ configId }),
       );
     },
 
@@ -751,7 +751,7 @@ export const speApiClient = {
       body: { type: SharingLinkType; scope: SharingLinkScope; expirationDateTime?: string },
     ): Promise<SharingLink> {
       return post<typeof body, SharingLink>(
-        "/api/spe/containers/" + containerId + "/items/" + itemId + "/sharing" + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + "/sharing" + qs({ configId }),
         body,
       );
     },
@@ -768,7 +768,7 @@ export const speApiClient = {
      */
     containers(configId: string, body: SearchRequest): Promise<ContainerSearchResult[]> {
       return post<SearchRequest, ContainerSearchResult[]>(
-        "/api/spe/search/containers" + qs({ configId }),
+        "/spe/search/containers" + qs({ configId }),
         body,
       );
     },
@@ -779,7 +779,7 @@ export const speApiClient = {
      */
     items(configId: string, body: SearchRequest): Promise<DriveItemSearchResult[]> {
       return post<SearchRequest, DriveItemSearchResult[]>(
-        "/api/spe/search/items" + qs({ configId }),
+        "/spe/search/items" + qs({ configId }),
         body,
       );
     },
@@ -796,7 +796,7 @@ export const speApiClient = {
      * Returns DeletedContainer items (id, displayName, deletedDateTime, containerTypeId).
      */
     list(configId: string): Promise<DeletedContainer[]> {
-      return get<{ items: DeletedContainer[]; count: number }>("/api/spe/recyclebin" + qs({ configId }))
+      return get<{ items: DeletedContainer[]; count: number }>("/spe/recyclebin" + qs({ configId }))
         .then(r => r.items);
     },
 
@@ -806,7 +806,7 @@ export const speApiClient = {
      */
     restore(containerId: string, configId: string): Promise<void> {
       return postAction<void>(
-        "/api/spe/recyclebin/" + containerId + "/restore" + qs({ configId }),
+        "/spe/recyclebin/" + containerId + "/restore" + qs({ configId }),
       );
     },
 
@@ -815,7 +815,7 @@ export const speApiClient = {
      * Permanently delete a container from the recycle bin. This is irreversible.
      */
     permanentDelete(containerId: string, configId: string): Promise<void> {
-      return del("/api/spe/recyclebin/" + containerId + qs({ configId }));
+      return del("/spe/recyclebin/" + containerId + qs({ configId }));
     },
   },
 
@@ -829,7 +829,7 @@ export const speApiClient = {
      * List security alerts for the tenant.
      */
     listAlerts(configId: string): Promise<SecurityAlert[]> {
-      return get<SecurityAlert[]>("/api/spe/security/alerts" + qs({ configId }));
+      return get<SecurityAlert[]>("/spe/security/alerts" + qs({ configId }));
     },
 
     /**
@@ -837,7 +837,7 @@ export const speApiClient = {
      * Get the current secure score for the tenant.
      */
     getScore(configId: string): Promise<SecureScore> {
-      return get<SecureScore>("/api/spe/security/score" + qs({ configId }));
+      return get<SecureScore>("/spe/security/score" + qs({ configId }));
     },
   },
 
@@ -852,7 +852,7 @@ export const speApiClient = {
      * Data is served from the BackgroundService cache (SpeDashboardSyncService).
      */
     getMetrics(configId: string): Promise<DashboardMetrics> {
-      return get<DashboardMetrics>("/api/spe/dashboard/metrics" + qs({ configId }));
+      return get<DashboardMetrics>("/spe/dashboard/metrics" + qs({ configId }));
     },
 
     /**
@@ -861,7 +861,7 @@ export const speApiClient = {
      * Returns the newly refreshed metrics.
      */
     refresh(configId: string): Promise<DashboardMetrics> {
-      return postAction<DashboardMetrics>("/api/spe/dashboard/refresh" + qs({ configId }));
+      return postAction<DashboardMetrics>("/spe/dashboard/refresh" + qs({ configId }));
     },
   },
 
@@ -883,7 +883,7 @@ export const speApiClient = {
       skip?: number;
     }): Promise<AuditLogEntry[]> {
       return get<AuditLogEntry[]>(
-        "/api/spe/audit" + qs({
+        "/spe/audit" + qs({
           configId: options.configId,
           from: options.from,
           to: options.to,
@@ -906,7 +906,7 @@ export const speApiClient = {
      * Returns immediately with operation ID — poll status to track progress.
      */
     enqueuDelete(request: BulkDeleteRequest): Promise<BulkOperationAccepted> {
-      return post<BulkDeleteRequest, BulkOperationAccepted>("/api/spe/bulk/delete", request);
+      return post<BulkDeleteRequest, BulkOperationAccepted>("/spe/bulk/delete", request);
     },
 
     /**
@@ -915,7 +915,7 @@ export const speApiClient = {
      * Returns immediately with operation ID — poll status to track progress.
      */
     enqueuePermissions(request: BulkPermissionsRequest): Promise<BulkOperationAccepted> {
-      return post<BulkPermissionsRequest, BulkOperationAccepted>("/api/spe/bulk/permissions", request);
+      return post<BulkPermissionsRequest, BulkOperationAccepted>("/spe/bulk/permissions", request);
     },
 
     /**
@@ -924,7 +924,7 @@ export const speApiClient = {
      * Continue polling until isFinished is true.
      */
     getStatus(operationId: string): Promise<BulkOperationStatus> {
-      return get<BulkOperationStatus>(`/api/spe/bulk/${encodeURIComponent(operationId)}/status`);
+      return get<BulkOperationStatus>(`/spe/bulk/${encodeURIComponent(operationId)}/status`);
     },
   },
 };
