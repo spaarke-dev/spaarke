@@ -41,6 +41,7 @@ import type {
 } from '../Playbook/types';
 import type { IDataService } from '../../types/serviceInterfaces';
 import { IntentWizardFlow, INTENT_PLAYBOOK_MAP } from './IntentWizardFlow';
+import { DocumentSelector } from './DocumentSelector';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -49,8 +50,20 @@ import { IntentWizardFlow, INTENT_PLAYBOOK_MAP } from './IntentWizardFlow';
 export interface IPlaybookLibraryShellProps {
   /** Entity type of the source record (e.g., "sprk_document"). */
   entityType: string;
-  /** GUID of the source entity record. */
+  /** GUID of the source entity record (the active document when documentIds is also provided). */
   entityId: string;
+  /**
+   * Optional list of document IDs available for selection.
+   *
+   * When two or more IDs are provided a DocumentSelector bar is rendered at the
+   * top of the shell, allowing the user to switch the active document before
+   * running an analysis.  The first ID in the array is selected by default
+   * (unless `entityId` already matches one of them).
+   *
+   * When only one ID is provided (or this prop is omitted) the selector is
+   * hidden and `entityId` is used directly.
+   */
+  documentIds?: string[];
   /** Optional allowlist — only show playbooks whose IDs are in this array. */
   allowedPlaybookIds?: string[];
   /** Display mode: 'browse' shows full 2-tab UI, 'intent' pre-selects a playbook. */
@@ -156,6 +169,7 @@ type BuilderTab = 'playbook' | 'custom';
 export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
   entityType,
   entityId,
+  documentIds,
   allowedPlaybookIds,
   mode = 'browse',
   embedded = false,
@@ -170,6 +184,37 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
   title = 'New Analysis',
 }) => {
   const styles = useStyles();
+
+  // ---------------------------------------------------------------------------
+  // Document selector state
+  //
+  // When documentIds contains 2+ entries a DocumentSelector bar is shown.
+  // The activeDocumentId drives analysis execution instead of the raw entityId.
+  // ---------------------------------------------------------------------------
+
+  /** True when the caller supplied 2+ document IDs. */
+  const hasMultipleDocuments = (documentIds?.length ?? 0) >= 2;
+
+  /**
+   * Derive the initial active document ID:
+   *  1. If entityId matches one of the provided documentIds, start with it.
+   *  2. Otherwise fall back to the first ID in the list.
+   *  3. If documentIds is absent/empty, use entityId as-is.
+   */
+  const initialDocumentId = React.useMemo((): string => {
+    if (!documentIds || documentIds.length === 0) return entityId;
+    if (documentIds.includes(entityId)) return entityId;
+    return documentIds[0];
+  }, [documentIds, entityId]);
+
+  const [activeDocumentId, setActiveDocumentId] = React.useState<string>(initialDocumentId);
+
+  /**
+   * The document ID to use for analysis execution.
+   * When documentIds is provided, this is the user-selected document;
+   * otherwise it falls through to the plain entityId prop.
+   */
+  const effectiveDocumentId = hasMultipleDocuments ? activeDocumentId : entityId;
 
   // --- Data state ---
   const [isLoading, setIsLoading] = React.useState(true);
@@ -294,7 +339,7 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
 
   // --- Can execute? ---
   const canExecute = React.useMemo(() => {
-    if (!entityId) return false;
+    if (!effectiveDocumentId) return false;
     // Intent mode: always ready once playbook + scopes are resolved
     if (isIntentMode) return true;
     if (activeTab === 'playbook') {
@@ -302,7 +347,7 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
     }
     // Custom scope: need at least an action
     return selectedActionIds.length > 0;
-  }, [activeTab, selectedPlaybook, playbookScopes, selectedActionIds, entityId, isIntentMode]);
+  }, [activeTab, selectedPlaybook, playbookScopes, selectedActionIds, effectiveDocumentId, isIntentMode]);
 
   // --- Run Analysis handler ---
   const handleExecute = React.useCallback(async () => {
@@ -315,7 +360,7 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
 
       if (activeTab === 'playbook' && selectedPlaybook && playbookScopes) {
         config = {
-          documentId: entityId,
+          documentId: effectiveDocumentId,
           playbookId: selectedPlaybook.id,
           actionId: playbookScopes.actionIds[0] ?? '',
           skillIds: playbookScopes.skillIds,
@@ -324,7 +369,7 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
         };
       } else {
         config = {
-          documentId: entityId,
+          documentId: effectiveDocumentId,
           actionId: selectedActionIds[0] ?? '',
           skillIds: selectedSkillIds,
           knowledgeIds: selectedKnowledgeIds,
@@ -357,7 +402,7 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
     selectedSkillIds,
     selectedKnowledgeIds,
     selectedToolIds,
-    entityId,
+    effectiveDocumentId,
     authenticatedFetch,
     bffBaseUrl,
     onComplete,
@@ -417,6 +462,16 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
             </Text>
           )}
         </div>
+      )}
+
+      {/* Document selector — only rendered when 2+ documents are provided */}
+      {hasMultipleDocuments && documentIds && (
+        <DocumentSelector
+          documentIds={documentIds}
+          selectedDocumentId={activeDocumentId}
+          onSelect={setActiveDocumentId}
+          dataService={dataService}
+        />
       )}
 
       {/* Intent mode: streamlined wizard flow (no tabs) */}

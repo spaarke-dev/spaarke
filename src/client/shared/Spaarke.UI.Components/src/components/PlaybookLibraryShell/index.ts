@@ -9,3 +9,6 @@ export type { IPlaybookLibraryShellProps } from './PlaybookLibraryShell';
 
 export { IntentWizardFlow, INTENT_PLAYBOOK_MAP } from './IntentWizardFlow';
 export type { IIntentWizardFlowProps } from './IntentWizardFlow';
+
+export { DocumentSelector } from './DocumentSelector';
+export type { IDocumentSelectorProps, IDocumentItem } from './DocumentSelector';

@@ -134,16 +134,32 @@ function App() {
   // Resolve merged parameters — union of PlaybookLibrary + AnalysisBuilder
   // -------------------------------------------------------------------------
 
+  // documentIds — comma-separated list of document GUIDs (new multi-doc path).
+  // When present and contains 2+ IDs the shell renders a document selector.
+  const resolvedDocumentIds = React.useMemo((): string[] | undefined => {
+    const raw = params.documentIds as string | undefined;
+    if (!raw) return undefined;
+    const ids = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return ids.length >= 1 ? ids : undefined;
+  }, [params.documentIds]);
+
   // entityType / entityId — direct params take precedence.
   // When only documentId is provided (AnalysisBuilder compat), treat the
   // document as the entity so PlaybookLibraryShell has a valid entityId.
+  //
+  // When documentIds is provided, entityId defaults to the first ID in the
+  // list (the shell will manage the active selection internally).
   const resolvedEntityType =
     params.entityType ||
-    (params.documentId ? "sprk_document" : "");
+    (params.documentId || resolvedDocumentIds ? "sprk_document" : "");
 
   const resolvedEntityId =
     params.entityId ||
     params.documentId ||
+    resolvedDocumentIds?.[0] ||
     "";
 
   // documentName maps to entityDisplayName in the shell
@@ -222,6 +238,7 @@ function App() {
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         mode={shellMode}
+        {...(resolvedDocumentIds ? { documentIds: resolvedDocumentIds } : {})}
         {...(intent ? { intent } : {})}
       />
     </FluentProvider>
