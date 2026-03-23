@@ -1,0 +1,73 @@
+<task id="WCWE-023" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Standardize MSAL auth across all wizard Code Pages</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, code-pages, auth</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-02: Standardize MSAL authentication across all wizard Code Pages using @spaarke/auth. Every
+    Code Page main.tsx must use authenticatedFetch with MSAL silent flow. Use the DocumentUploadWizard
+    as the canonical reference implementation. Remove any fetch.bind(window) patterns.
+  </prompt>
+
+  <role>Senior frontend developer with MSAL authentication and Code Page architecture expertise</role>
+
+  <goal>
+    Every wizard Code Page uses @spaarke/auth for MSAL silent token acquisition. All BFF calls
+    use authenticatedFetch. No fetch.bind(window) patterns remain. DocumentUploadWizard pattern
+    is replicated consistently.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">Code Pages must use MSAL as the single canonical auth path for BFF calls.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/solutions/DocumentUploadWizard/src/main.tsx</file>
+      <file>src/solutions/CreateMatterWizard/src/main.tsx</file>
+      <file>src/solutions/CreateProjectWizard/src/main.tsx</file>
+      <file>src/solutions/SummarizeFilesWizard/src/main.tsx</file>
+      <file>src/solutions/PlaybookLibrary/src/main.tsx</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Multiple wizard Code Pages currently use inconsistent authentication patterns. Some use
+      fetch.bind(window), others lack BFF authentication entirely. All must be standardized
+      to use @spaarke/auth with MSAL silent flow for consistent, reliable BFF API access.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="audit-auth">Audit all wizard Code Page main.tsx files for current auth patterns.</step>
+    <step order="2" name="document-reference">Document the canonical pattern from DocumentUploadWizard.</step>
+    <step order="3" name="update-creatematter">Update CreateMatterWizard main.tsx with MSAL auth.</step>
+    <step order="4" name="update-createproject">Update CreateProjectWizard main.tsx with MSAL auth.</step>
+    <step order="5" name="update-summarize">Update SummarizeFilesWizard main.tsx with MSAL auth.</step>
+    <step order="6" name="update-playbook">Update PlaybookLibrary main.tsx with MSAL auth.</step>
+    <step order="7" name="remove-fetchbind">Search and remove all fetch.bind(window) patterns.</step>
+    <step order="8" name="verify-builds">Run npm run build for each updated Code Page.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/CreateMatterWizard/src/main.tsx</output>
+    <output type="code">src/solutions/CreateProjectWizard/src/main.tsx</output>
+    <output type="code">src/solutions/SummarizeFilesWizard/src/main.tsx</output>
+    <output type="code">src/solutions/PlaybookLibrary/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All wizard Code Pages import and use @spaarke/auth for token acquisition.</criterion>
+    <criterion testable="true">All BFF calls use authenticatedFetch with MSAL silent flow.</criterion>
+    <criterion testable="true">Zero instances of fetch.bind(window) in any Code Page.</criterion>
+    <criterion testable="true">All updated Code Pages compile without errors.</criterion>
+  </acceptance-criteria>
+</task>

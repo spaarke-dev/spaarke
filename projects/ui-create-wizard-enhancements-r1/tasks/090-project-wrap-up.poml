@@ -1,0 +1,67 @@
+<task id="WCWE-090" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Final project wrap-up — README, lessons learned, cleanup</title>
+    <phase>6</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>documentation, cleanup</tags>
+    <dependencies>WCWE-051</dependencies>
+  </metadata>
+
+  <prompt>
+    Final project wrap-up. Update the project README.md status to "Complete". Create a
+    lessons-learned.md capturing key decisions, surprises, and patterns discovered. Archive
+    ephemeral project artifacts (notes/). Run /repo-cleanup to validate repository structure.
+  </prompt>
+
+  <role>Project lead with documentation and repository hygiene expertise</role>
+
+  <goal>
+    Project is formally closed. README reflects completion status. Lessons learned are captured.
+    Repository is clean and passes /repo-cleanup validation.
+  </goal>
+
+  <constraints>
+    <constraint source="process">Follow Development Lifecycle Phase 8 (Project Wrap-up) checklist.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ui-create-wizard-enhancements-r1/README.md</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+      <file>projects/ui-create-wizard-enhancements-r1/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      All implementation and testing tasks are complete. This final task formally closes the
+      project, captures institutional knowledge, and ensures the repository is clean for
+      future work.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-051" status="not-started">All testing must pass before wrap-up.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="update-readme">Update README.md status to "Complete" with completion date.</step>
+    <step order="2" name="update-taskindex">Verify all tasks in TASK-INDEX.md show completed status.</step>
+    <step order="3" name="lessons-learned">Create lessons-learned.md with key decisions and patterns.</step>
+    <step order="4" name="archive-notes">Review and archive ephemeral files in notes/ directory.</step>
+    <step order="5" name="repo-cleanup">Run /repo-cleanup to validate repository structure.</step>
+    <step order="6" name="final-commit">Create final commit marking project complete.</step>
+  </steps>
+
+  <outputs>
+    <output type="documentation">projects/ui-create-wizard-enhancements-r1/README.md (updated)</output>
+    <output type="documentation">projects/ui-create-wizard-enhancements-r1/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md status is "Complete" with date.</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md show completed status.</criterion>
+    <criterion testable="true">lessons-learned.md exists with meaningful content.</criterion>
+    <criterion testable="true">/repo-cleanup passes without errors.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,71 @@
+<task id="WCWE-035" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Phase 4 deployment — deploy and verify wizard flows in Dataverse</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, verification</tags>
+    <dependencies>WCWE-030, WCWE-031, WCWE-032, WCWE-033, WCWE-034</dependencies>
+  </metadata>
+
+  <prompt>
+    Phase 4 deployment: Rebuild all modified wizard shared library components, rebuild and deploy
+    all Code Pages that consume them, and verify the enhanced wizard flows work correctly in the
+    Dataverse dev environment.
+  </prompt>
+
+  <role>DevOps engineer with Dataverse web resource deployment and verification expertise</role>
+
+  <goal>
+    All Phase 4 wizard enhancements are deployed and verified. AssociateToStep works in both
+    CreateMatter and CreateProject. Assign Work and Create Event follow-ons create records.
+    Lookup side panes open correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Code Pages deploy as Dataverse web resources via code-page-deploy skill.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 4 adds AssociateToStep to CreateMatter/CreateProject, replaces follow-on steps,
+      and integrates lookup side panes. All changes are in the shared library and consumed by
+      Code Page wrappers that must be rebuilt and redeployed.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-030" status="not-started">CreateMatter AssociateToStep integration.</dependency>
+      <dependency task="WCWE-031" status="not-started">CreateProject AssociateToStep integration.</dependency>
+      <dependency task="WCWE-032" status="not-started">Assign Work follow-on replacement.</dependency>
+      <dependency task="WCWE-033" status="not-started">Create Event follow-on replacement.</dependency>
+      <dependency task="WCWE-034" status="not-started">Lookup side pane integration.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="build-shared">Build shared library: npm run build in Spaarke.UI.Components.</step>
+    <step order="2" name="build-codepages">Build all wizard Code Pages (CreateMatter, CreateProject, etc.).</step>
+    <step order="3" name="deploy-codepages">Deploy Code Pages as Dataverse web resources.</step>
+    <step order="4" name="verify-associateto">Verify AssociateToStep works in CreateMatter and CreateProject.</step>
+    <step order="5" name="verify-followons">Verify Assign Work and Create Event follow-ons create records.</step>
+    <step order="6" name="verify-lookups">Verify lookup side panes open for Matter Type, Practice Area, Project Type.</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">Updated Code Pages deployed as Dataverse web resources</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateMatter wizard shows AssociateToStep and creates N:N link.</criterion>
+    <criterion testable="true">CreateProject wizard shows AssociateToStep and creates associations.</criterion>
+    <criterion testable="true">Assign Work follow-on creates sprk_workassignment record.</criterion>
+    <criterion testable="true">Create Event follow-on creates sprk_event record.</criterion>
+    <criterion testable="true">Lookup side panes open and return selected values.</criterion>
+  </acceptance-criteria>
+</task>

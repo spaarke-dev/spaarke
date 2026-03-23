@@ -1,0 +1,72 @@
+<task id="WCWE-021" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Add scope association method to IAnalysisDataverseService</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, api, dataverse</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-16: Add a scope association method to IAnalysisDataverseService that associates skills
+    (sprk_analysis_skill), knowledge (sprk_analysis_knowledge), and tools (sprk_analysis_tool)
+    N:N relationships for a given analysis record. Each relationship type maps to a Dataverse
+    N:N intersection table.
+  </prompt>
+
+  <role>Senior .NET backend developer with Dataverse SDK and relationship management expertise</role>
+
+  <goal>
+    IAnalysisDataverseService exposes an AssociateScopesAsync method that associates an analysis
+    record with skill, knowledge, and tool scope records via N:N relationships. All three
+    relationship types are handled in a single call.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API service pattern — concrete service class, no controllers.</constraint>
+    <constraint source="ADR-010">Use concrete DI types; respect registration budget.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>src/server/shared/Spaarke.Dataverse/IAnalysisDataverseService.cs</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The analysis creation endpoint (WCWE-020) needs to associate scope records after creating
+      the analysis. The three N:N relationships are: sprk_analysis_skill, sprk_analysis_knowledge,
+      and sprk_analysis_tool. This task builds the Dataverse service method that performs those
+      associations via the Dataverse SDK AssociateRequest.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="review-interface">Review IAnalysisDataverseService for existing methods and patterns.</step>
+    <step order="2" name="define-method">Add AssociateScopesAsync(Guid analysisId, IEnumerable skills, IEnumerable knowledge, IEnumerable tools) to the interface.</step>
+    <step order="3" name="implement-association">Implement using Dataverse SDK AssociateRequest for each N:N relationship.</step>
+    <step order="4" name="handle-empty">Handle empty collections gracefully — skip association if array is empty.</step>
+    <step order="5" name="error-handling">Add error handling for failed associations with meaningful error messages.</step>
+    <step order="6" name="verify-build">Run dotnet build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/IAnalysisDataverseService.cs</output>
+    <output type="code">src/server/shared/Spaarke.Dataverse/AnalysisDataverseService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IAnalysisDataverseService has an AssociateScopesAsync method signature.</criterion>
+    <criterion testable="true">Implementation associates skills via sprk_analysis_skill N:N relationship.</criterion>
+    <criterion testable="true">Implementation associates knowledge via sprk_analysis_knowledge N:N relationship.</criterion>
+    <criterion testable="true">Implementation associates tools via sprk_analysis_tool N:N relationship.</criterion>
+    <criterion testable="true">Empty scope arrays are handled without errors.</criterion>
+    <criterion testable="true">Solution compiles successfully with dotnet build.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,62 @@
+<task id="WCWE-007" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Rename "Send Email to Client" to "Send Notification Email"</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>frontend, shared-library</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Rename the label "Send Email to Client" to "Send Notification Email" in the wizard Next Steps
+    card. The label appears in three locations: (1) the Next Steps card label/option, (2) the step
+    sidebar label, and (3) the step content title. Find all occurrences and update them consistently.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    The label reads "Send Notification Email" in all three locations where "Send Email to Client"
+    previously appeared. No other references to the old label remain in the codebase.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Label strings should be defined in shared components or constants, not duplicated across files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback (E-07) requested that "Send Email to Client" be renamed to "Send Notification
+      Email" to better reflect the feature's purpose — the email notifies relevant parties, not
+      necessarily the client directly.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Find all label occurrences">Grep for "Send Email to Client" (case-insensitive) across all .ts, .tsx, and .js files to find every occurrence.</step>
+    <step order="2" name="Replace in Next Steps card">Update the label in the Next Steps card component.</step>
+    <step order="3" name="Replace in step sidebar">Update the label in the wizard step sidebar navigation.</step>
+    <step order="4" name="Replace in step content title">Update the label in the step content/header area.</step>
+    <step order="5" name="Verify no old label remains">Re-grep for "Send Email to Client" to confirm zero results.</step>
+    <step order="6" name="Build affected project">Build the affected project(s) to confirm no errors.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">File(s) containing the "Send Email to Client" label (to be identified in step 1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Next Steps card displays "Send Notification Email" label.</criterion>
+    <criterion testable="true">Step sidebar displays "Send Notification Email" label.</criterion>
+    <criterion testable="true">Step content title displays "Send Notification Email".</criterion>
+    <criterion testable="true">grep -ri "Send Email to Client" src/ returns zero results.</criterion>
+  </acceptance-criteria>
+</task>

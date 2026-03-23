@@ -1,0 +1,70 @@
+<task id="WCWE-008" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Upgrade Code Page solutions from React 18 to React 19</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, code-pages, react</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Upgrade all Code Page solutions from React 18 to React 19. Fluent UI v9 supports react versions
+    less than 20.0.0, so this is a safe upgrade. PCF controls remain on React 16/17 (platform-
+    provided) and must NOT be modified. Update package.json files, resolve any breaking changes, and
+    verify all Code Pages build and render correctly.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    All Code Page solutions run on React 19 with no runtime errors. PCF controls remain unmodified
+    on React 16/17. All builds pass.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-022">PCF controls use platform-provided React 16/17; Code Pages bundle their own React. Do not change PCF React versions.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 must remain compatible; verify peer dependency ranges support React 19.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      React 19 is stable and Fluent UI v9 declares support for react versions below 20.0.0. Upgrading
+      Code Pages to React 19 provides access to the new React compiler optimizations, improved
+      Suspense, and other enhancements. PCF controls are excluded because they use the Dataverse
+      platform's bundled React 16/17.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Inventory Code Page package.json files">Find all package.json files in src/solutions/ and src/client/code-pages/ that declare react 18 as a dependency.</step>
+    <step order="2" name="Check Fluent UI peer deps">Verify @fluentui/react-components peer dependency range includes React 19.</step>
+    <step order="3" name="Check shared library compatibility">Verify @spaarke/ui-components peer dependency range includes React 19; update if needed.</step>
+    <step order="4" name="Update package.json files">For each Code Page, update react and react-dom to ^19.0.0, and @types/react and @types/react-dom to ^19.0.0.</step>
+    <step order="5" name="Install dependencies">Run npm install in each updated project to resolve the dependency tree.</step>
+    <step order="6" name="Fix breaking changes">Address any React 19 breaking changes (removed APIs, changed signatures) if any are used.</step>
+    <step order="7" name="Build all Code Pages">Build each Code Page solution and verify no compile errors.</step>
+    <step order="8" name="Verify PCF untouched">Confirm no PCF control package.json files were modified.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">All Code Page package.json files in src/solutions/ and src/client/code-pages/</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/package.json (peer dep update if needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Code Page package.json files declare react ^19.0.0 and react-dom ^19.0.0.</criterion>
+    <criterion testable="true">All Code Page solutions build without TypeScript errors.</criterion>
+    <criterion testable="true">No PCF control package.json files were modified (still on React 16/17).</criterion>
+    <criterion testable="true">Fluent UI v9 peer dependency is satisfied by React 19.</criterion>
+    <criterion testable="true">Shared library @spaarke/ui-components peer deps include React 19.</criterion>
+  </acceptance-criteria>
+</task>

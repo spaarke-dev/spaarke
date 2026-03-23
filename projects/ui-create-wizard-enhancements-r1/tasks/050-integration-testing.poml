@@ -1,0 +1,75 @@
+<task id="WCWE-050" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>End-to-end integration testing of all enhanced wizard flows</title>
+    <phase>6</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, e2e-test, verification</tags>
+    <dependencies>WCWE-009, WCWE-015, WCWE-025, WCWE-035, WCWE-045</dependencies>
+  </metadata>
+
+  <prompt>
+    End-to-end integration testing of all enhanced wizard flows. Test all 19 success criteria
+    from the project spec. Verify each wizard flow end-to-end: CreateMatter, CreateProject,
+    Summarize, PlaybookLibrary, LegalWorkspace. Verify MSAL auth, BFF API calls, record creation,
+    N:N associations, follow-on actions, and lookup side panes.
+  </prompt>
+
+  <role>QA engineer with Dataverse application testing and end-to-end verification expertise</role>
+
+  <goal>
+    All 19 success criteria from the project spec pass. Every enhanced wizard flow works
+    end-to-end in the Dataverse dev environment without errors.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">All 19 success criteria must be verified and documented.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ui-create-wizard-enhancements-r1/spec.md</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the comprehensive integration testing task that validates all project deliverables
+      work together. It covers all phases (1-5) and ensures no regressions were introduced.
+      The 19 success criteria from the spec serve as the acceptance test plan.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-009" status="not-started">Phase 1 complete (theme, colors, shared components).</dependency>
+      <dependency task="WCWE-015" status="not-started">Phase 2 complete (React upgrade, hideTitle).</dependency>
+      <dependency task="WCWE-025" status="not-started">Phase 3 complete (BFF API, auth).</dependency>
+      <dependency task="WCWE-035" status="not-started">Phase 4 complete (wizard flows).</dependency>
+      <dependency task="WCWE-045" status="not-started">Phase 5 complete (consolidation, document flow).</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="prepare-checklist">Create testing checklist from all 19 spec success criteria.</step>
+    <step order="2" name="test-theme">Test theme cascade: dark mode only via Spaarke menu, not OS.</step>
+    <step order="3" name="test-colors">Test color compliance: no hard-coded colors, tokens only.</step>
+    <step order="4" name="test-auth">Test MSAL auth: all Code Pages authenticate via @spaarke/auth.</step>
+    <step order="5" name="test-wizards">Test each wizard flow: CreateMatter, CreateProject with AssociateToStep.</step>
+    <step order="6" name="test-followons">Test follow-on steps: Assign Work, Create Event.</step>
+    <step order="7" name="test-analysis">Test analysis flow: BFF create endpoint, scope association.</step>
+    <step order="8" name="test-playbook">Test merged PlaybookLibrary with both intents.</step>
+    <step order="9" name="test-workspace">Test LegalWorkspace with WorkspaceShell.</step>
+    <step order="10" name="document-results">Document test results for each success criterion.</step>
+  </steps>
+
+  <outputs>
+    <output type="documentation">projects/ui-create-wizard-enhancements-r1/notes/integration-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 19 success criteria from spec.md pass.</criterion>
+    <criterion testable="true">Every wizard flow completes end-to-end without JavaScript errors.</criterion>
+    <criterion testable="true">MSAL auth works in all Code Pages.</criterion>
+    <criterion testable="true">BFF API analysis creation works with scope association.</criterion>
+    <criterion testable="true">Test results are documented with pass/fail for each criterion.</criterion>
+  </acceptance-criteria>
+</task>

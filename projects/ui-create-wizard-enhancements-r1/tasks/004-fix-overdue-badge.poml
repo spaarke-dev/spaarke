@@ -1,0 +1,60 @@
+<task id="WCWE-004" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Fix overdue badge 400 error — correct sprk_duedate field name</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>frontend, bug-fix</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Fix the Quick Summary overdue badge which returns a 400 Bad Request due to an incorrect field
+    name (sprk_duedate) in the OData query. The correct field is likely sprk_responseduedatetime on
+    the sprk_workassignment entity. Identify the source of the OData query, correct the field name,
+    and verify the overdue count displays.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    The OData query for overdue items uses the correct Dataverse field name, returns HTTP 200, and the
+    overdue count badge displays the correct number.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">UI code must not hard-code Dataverse entity schemas; use constants or configuration for field names.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback (E-12) reported that the Quick Summary card's overdue badge shows an error. Network
+      inspection reveals a 400 Bad Request caused by referencing sprk_duedate which does not exist on
+      the sprk_workassignment entity. The correct field is sprk_responseduedatetime.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Locate the OData query">Grep for sprk_duedate across the codebase to find the file(s) containing the incorrect field reference.</step>
+    <step order="2" name="Verify correct field name">Confirm the correct field name is sprk_responseduedatetime by checking entity definitions or other working queries on sprk_workassignment.</step>
+    <step order="3" name="Replace field name">Update the OData query to use the correct field name.</step>
+    <step order="4" name="Build and verify">Build the affected project and verify no compile errors.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">File(s) containing the overdue badge OData query (to be identified in step 1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">OData query for overdue items returns HTTP 200 (not 400).</criterion>
+    <criterion testable="true">Overdue count badge displays the correct number on the Quick Summary card.</criterion>
+    <criterion testable="true">grep -r "sprk_duedate" src/ returns zero results (replaced with correct field name).</criterion>
+  </acceptance-criteria>
+</task>

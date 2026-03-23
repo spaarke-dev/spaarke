@@ -1,0 +1,70 @@
+<task id="WCWE-042" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Add document selector to PlaybookLibrary for multiple documents</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, code-pages, ai</tags>
+    <dependencies>WCWE-040, WCWE-041</dependencies>
+  </metadata>
+
+  <prompt>
+    E-15: Add a document selector component to PlaybookLibrary that displays at the top when
+    multiple documents are passed via the documentIds parameter. Implement single-select for MVP
+    so the user can switch between documents for analysis.
+  </prompt>
+
+  <role>Senior frontend developer with Fluent UI v9 component design expertise</role>
+
+  <goal>
+    When PlaybookLibrary receives multiple document IDs, a selector bar appears at the top
+    allowing the user to switch between documents. Single-select for MVP. The active document
+    drives the analysis context.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 components exclusively. Support dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/solutions/PlaybookLibrary/</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      When users come from the Summarize wizard's "Work on Analysis" follow-on, they may have
+      multiple documents. The document selector enables switching between them without leaving
+      the PlaybookLibrary. Single-select MVP keeps scope manageable.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-040" status="not-started">Merged PlaybookLibrary accepting documentIds.</dependency>
+      <dependency task="WCWE-041" status="not-started">Document creation from Summarize wizard.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="design-selector">Design document selector using Fluent UI v9 Dropdown or TabList.</step>
+    <step order="2" name="implement-component">Implement DocumentSelector component with document name display.</step>
+    <step order="3" name="conditional-render">Only render selector when documentIds contains 2+ items.</step>
+    <step order="4" name="wire-selection">Wire selection change to update active document context.</step>
+    <step order="5" name="dark-mode">Verify dark mode rendering with design tokens.</step>
+    <step order="6" name="verify-build">Run npm run build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/PlaybookLibrary/src/components/DocumentSelector.tsx</output>
+    <output type="code">src/solutions/PlaybookLibrary/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Document selector appears when 2+ document IDs are passed.</criterion>
+    <criterion testable="true">Document selector is hidden when 0 or 1 document ID is passed.</criterion>
+    <criterion testable="true">Single-select — only one document active at a time.</criterion>
+    <criterion testable="true">Changing selection updates the analysis context.</criterion>
+    <criterion testable="true">Component renders correctly in both light and dark mode.</criterion>
+  </acceptance-criteria>
+</task>

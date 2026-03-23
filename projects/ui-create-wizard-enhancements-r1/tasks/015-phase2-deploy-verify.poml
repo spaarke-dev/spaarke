@@ -1,0 +1,76 @@
+<task id="WCWE-015" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Phase 2 deployment and verification</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, verification</tags>
+    <dependencies>WCWE-010, WCWE-011, WCWE-012, WCWE-013, WCWE-014</dependencies>
+  </metadata>
+
+  <prompt>
+    Phase 2 deployment and verification. Build the shared library with all Phase 2 changes,
+    rebuild all consuming Code Pages that reference updated components, deploy to the dev
+    environment, and verify that changes are working end-to-end.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and shared component libraries</role>
+
+  <goal>All Phase 2 shared library changes are built, deployed, and verified working in the dev environment.</goal>
+
+  <constraints>
+    <constraint source="ADR-012">Shared library must be built before consuming Code Pages are rebuilt.</constraint>
+    <constraint source="ADR-006">Code Pages are deployed as Dataverse web resources via solution import.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 2 adds three new shared library components (openLookup service method,
+      AssociateToStep, WorkspaceShell) and two fixes (duplicate title bars, Secure Project
+      position). Before Phase 3 can begin wiring these into specific wizards and workspaces,
+      the shared library must be built and verified. Consuming Code Pages must also be
+      rebuilt to pick up the updated library.
+    </background>
+    <dependencies>
+      Depends on all Phase 2 implementation tasks: WCWE-010 (openLookup), WCWE-011
+      (AssociateToStep), WCWE-012 (WorkspaceShell), WCWE-013 (duplicate title bars),
+      WCWE-014 (Secure Project position). All must be complete before deployment.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="build-shared-lib">Build the shared library: cd src/client/shared/Spaarke.UI.Components &amp;&amp; npm run build</step>
+    <step order="2" name="verify-exports">Verify all new exports (AssociateToStep, WorkspaceShell, LookupOptions, LookupResult) are available from the built package.</step>
+    <step order="3" name="rebuild-consumers">Rebuild consuming Code Pages: CreateMatterWizard, CreateProjectWizard, SummarizeFilesWizard, LegalWorkspace.</step>
+    <step order="4" name="run-tests">Run any available unit tests for the shared library and consuming Code Pages.</step>
+    <step order="5" name="deploy-code-pages">Deploy rebuilt Code Pages to dev environment using code-page-deploy skill.</step>
+    <step order="6" name="verify-title-bars">Open SummarizeFiles wizard and Assign Work step in dev — confirm no duplicate title bars.</step>
+    <step order="7" name="verify-secure-project">Open CreateProject wizard in dev — confirm SecureProjectSection is at top of Enter Info step.</step>
+    <step order="8" name="verify-build-artifacts">Confirm shared library build artifacts include WorkspaceShell and AssociateToStep component bundles.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Built shared library (src/client/shared/Spaarke.UI.Components/dist/)</output>
+    <output type="code">Rebuilt Code Page bundles (CreateMatterWizard, CreateProjectWizard, SummarizeFilesWizard, LegalWorkspace)</output>
+    <output type="code">Deployed web resources to dev environment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Shared library builds successfully with all Phase 2 changes</criterion>
+    <criterion testable="true">All consuming Code Pages rebuild without errors</criterion>
+    <criterion testable="true">No duplicate title bars visible in SummarizeFiles or Assign Work dialogs</criterion>
+    <criterion testable="true">SecureProjectSection appears at top of CreateProject Enter Info step</criterion>
+    <criterion testable="true">AssociateToStep and WorkspaceShell exports are available from built library</criterion>
+    <criterion testable="true">All Phase 2 shared library changes are consumed and working in dev</criterion>
+  </acceptance-criteria>
+</task>

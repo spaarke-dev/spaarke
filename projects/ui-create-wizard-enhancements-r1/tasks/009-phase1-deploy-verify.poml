@@ -1,0 +1,86 @@
+<task id="WCWE-009" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Phase 1 deployment and verification</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>deploy, verification</tags>
+    <dependencies>WCWE-001, WCWE-002, WCWE-003, WCWE-004, WCWE-005, WCWE-006, WCWE-007, WCWE-008</dependencies>
+  </metadata>
+
+  <prompt>
+    Build all modified Code Pages and deploy Phase 1 changes to the Dataverse dev environment.
+    Verify that all Phase 1 fixes (theme cascade, hard-coded colors, ThemeProvider consolidation,
+    overdue badge, SprkChat URL, dialog sizing, email label rename, React 19 upgrade) are working
+    correctly in the deployed environment.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    All Phase 1 changes are deployed to the dev Dataverse environment and verified working. Each
+    acceptance criterion from tasks WCWE-001 through WCWE-008 is confirmed in the live environment.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Code Pages deploy as Dataverse web resources via solution import.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 1 contains foundation fixes and bug fixes that must be deployed and verified before
+      Phase 2 (wizard UX enhancements) can begin. This task aggregates the build, deploy, and
+      verification steps for all Phase 1 work.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-001" status="not-started">Theme cascade fix</dependency>
+      <dependency task="WCWE-002" status="not-started">Hard-coded color replacement</dependency>
+      <dependency task="WCWE-003" status="not-started">ThemeProvider consolidation</dependency>
+      <dependency task="WCWE-004" status="not-started">Overdue badge fix</dependency>
+      <dependency task="WCWE-005" status="not-started">SprkChat URL fix</dependency>
+      <dependency task="WCWE-006" status="not-started">Dialog sizing standardization</dependency>
+      <dependency task="WCWE-007" status="not-started">Send email label rename</dependency>
+      <dependency task="WCWE-008" status="not-started">React 19 upgrade</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Build shared library">Build @spaarke/ui-components to produce updated package with theme fixes and token replacements.</step>
+    <step order="2" name="Build all Code Pages">Build LegalWorkspace, EventsPage, CalendarSidePane, SpeAdminApp, EventDetailSidePane, TodoDetailSidePane, and any other modified Code Pages.</step>
+    <step order="3" name="Build modified PCF controls">Build SprkChat and any other PCF controls modified in Phase 1.</step>
+    <step order="4" name="Build webresources">Build sprk_wizard_commands.js if it requires a build step.</step>
+    <step order="5" name="Deploy to Dataverse">Use dataverse-deploy and code-page-deploy skills to deploy all built artifacts to the dev environment.</step>
+    <step order="6" name="Verify theme cascade">Open a Code Page with OS dark mode enabled; confirm it renders in light mode. Set Spaarke theme to dark; confirm dark mode activates.</step>
+    <step order="7" name="Verify no hard-coded colors">Inspect rendered styles in browser dev tools; confirm Fluent tokens are used.</step>
+    <step order="8" name="Verify overdue badge">Navigate to Quick Summary; confirm overdue badge shows correct count without 400 error.</step>
+    <step order="9" name="Verify SprkChat URL">Open SprkChat; confirm context-mappings request returns 200.</step>
+    <step order="10" name="Verify dialog sizing">Open CreateMatter, CreateProject, SummarizeFiles, PlaybookLibrary dialogs; confirm 60%x70% sizing.</step>
+    <step order="11" name="Verify email label">Open wizard with email step; confirm "Send Notification Email" label.</step>
+    <step order="12" name="Verify React 19">Check React version in browser console or bundle; confirm React 19 loaded for Code Pages.</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">All Phase 1 artifacts deployed to Dataverse dev environment</output>
+    <output type="verification">Verification checklist completed for all WCWE-001 through WCWE-008 acceptance criteria</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Code Pages build successfully with zero errors.</criterion>
+    <criterion testable="true">All modified PCF controls build successfully.</criterion>
+    <criterion testable="true">Deployment to Dataverse dev environment completes without errors.</criterion>
+    <criterion testable="true">Theme cascade verified: light default, dark only on explicit selection.</criterion>
+    <criterion testable="true">Overdue badge displays correctly (HTTP 200).</criterion>
+    <criterion testable="true">SprkChat context-mappings returns HTTP 200.</criterion>
+    <criterion testable="true">All wizard dialogs open at 60% width, 70% height.</criterion>
+    <criterion testable="true">"Send Notification Email" label confirmed in wizard.</criterion>
+    <criterion testable="true">React 19 confirmed in Code Page bundles.</criterion>
+  </acceptance-criteria>
+</task>

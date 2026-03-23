@@ -1,0 +1,70 @@
+<task id="WCWE-044" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Update launch points to sprk_playbooklibrary and retire AnalysisBuilder</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>frontend, webresource, cleanup</tags>
+    <dependencies>WCWE-040</dependencies>
+  </metadata>
+
+  <prompt>
+    E-14: Update ALL launch points that currently open AnalysisBuilder to use sprk_playbooklibrary
+    instead. After all references are migrated, delete the src/solutions/AnalysisBuilder/ directory
+    and remove the sprk_analysisbuilder web resource from the Dataverse solution.
+  </prompt>
+
+  <role>Senior frontend developer with Dataverse web resource management and code cleanup expertise</role>
+
+  <goal>
+    Zero references to AnalysisBuilder remain in the codebase. All launch points use
+    sprk_playbooklibrary. The AnalysisBuilder directory and web resource are removed.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">All launch points must be updated before deletion to avoid broken references.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/AnalysisBuilder/</file>
+      <file>src/solutions/PlaybookLibrary/</file>
+      <file>src/client/webresources/js/sprk_wizard_commands.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ActionCard/ActionCardHandlers.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      With the PlaybookLibrary and AnalysisBuilder merge complete (WCWE-040), all launch points
+      must be updated to use the single sprk_playbooklibrary web resource. The AnalysisBuilder
+      Code Page can then be safely retired.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-040" status="not-started">Merged PlaybookLibrary must be complete.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="search-references">Search entire codebase for references to analysisbuilder and AnalysisBuilder.</step>
+    <step order="2" name="update-commands">Update sprk_wizard_commands.js launch points to sprk_playbooklibrary.</step>
+    <step order="3" name="update-handlers">Update ActionCardHandlers.ts launch points to sprk_playbooklibrary.</step>
+    <step order="4" name="update-other">Update any other references (ribbon XML, solution XML, etc.).</step>
+    <step order="5" name="verify-no-refs">Verify zero remaining references to AnalysisBuilder.</step>
+    <step order="6" name="delete-directory">Delete src/solutions/AnalysisBuilder/ directory.</step>
+    <step order="7" name="remove-webresource">Remove sprk_analysisbuilder from Dataverse solution manifest.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_wizard_commands.js</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ActionCard/ActionCardHandlers.ts</output>
+    <output type="deletion">src/solutions/AnalysisBuilder/ (deleted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero references to AnalysisBuilder or sprk_analysisbuilder in the codebase.</criterion>
+    <criterion testable="true">All former AnalysisBuilder launch points now open sprk_playbooklibrary.</criterion>
+    <criterion testable="true">src/solutions/AnalysisBuilder/ directory is deleted.</criterion>
+    <criterion testable="true">sprk_analysisbuilder web resource is removed from solution manifest.</criterion>
+  </acceptance-criteria>
+</task>

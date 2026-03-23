@@ -1,0 +1,61 @@
+<task id="WCWE-005" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Fix double /api/api/ prefix in SprkChat context-mappings URL</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>frontend, bug-fix, pcf</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Fix the double /api/api/ prefix in the SprkChat PCF control's context-mappings URL which causes
+    a 404 Not Found. The request should use a single /api/ prefix so the URL resolves to
+    {bffBaseUrl}/api/ai/chat/context-mappings (or whatever the correct BFF endpoint path is).
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    The SprkChat context-mappings request uses the correct URL with a single /api/ prefix and returns
+    HTTP 200.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">BFF API uses /api/ prefix for all endpoints; clients must not duplicate it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback (E-13) found that the SprkChat control issues a request with a double /api/api/
+      prefix, resulting in a 404. This is likely caused by the base URL already including /api/ and
+      the client code prepending another /api/. A recent fix (commit 104301ac) addressed a similar
+      double-prefix issue in speApiClient; this may be a remaining instance.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Locate the URL construction">Grep for context-mappings and /api/ai/chat in the SprkChat PCF control source to find the URL construction code.</step>
+    <step order="2" name="Identify the double prefix cause">Determine whether the base URL already includes /api/ or whether the path literal duplicates it.</step>
+    <step order="3" name="Fix the URL">Remove the duplicate /api/ prefix so the final URL is correct.</step>
+    <step order="4" name="Search for similar issues">Grep for /api/api/ across the codebase to find any other double-prefix occurrences.</step>
+    <step order="5" name="Build and verify">Build the SprkChat PCF control and confirm no compile errors.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">SprkChat PCF control source file(s) containing the URL (to be identified in step 1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Request to context-mappings endpoint returns HTTP 200 (not 404).</criterion>
+    <criterion testable="true">grep -r "/api/api/" src/ returns zero results.</criterion>
+    <criterion testable="true">SprkChat PCF control builds without errors.</criterion>
+  </acceptance-criteria>
+</task>

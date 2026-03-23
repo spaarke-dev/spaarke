@@ -1,0 +1,91 @@
+<task id="WCWE-012" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Extract WorkspaceShell layout components from LegalWorkspace into shared library</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>frontend, shared-library, workspace</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-09: Extract workspace layout components from LegalWorkspace into
+    @spaarke/ui-components/components/WorkspaceShell/. Components to extract:
+    WorkspaceShell, ActionCardRow, ActionCard, MetricCardRow, MetricCard, SectionPanel,
+    and types.ts. Cards use CSS Grid with aspect-ratio: 1 (square). WorkspaceShell accepts
+    a declarative configuration object that defines sections, cards, and layout.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and shared component libraries</role>
+
+  <goal>WorkspaceShell and child components are extracted into the shared library; cards maintain square aspect ratio at all viewport widths (768px-2560px); cards wrap instead of stretching; LegalWorkspace can consume the shared version.</goal>
+
+  <constraints>
+    <constraint source="ADR-012">All reusable UI components must be extracted into @spaarke/ui-components for cross-project consumption.</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 exclusively. All layout must use semantic tokens. Dark mode required. No hard-coded colors.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/solutions/LegalWorkspace/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The LegalWorkspace currently contains inline workspace layout logic (action cards,
+      metric cards, section panels) that other workspaces (Corporate, Events) need to reuse.
+      Extracting these into a shared WorkspaceShell component with declarative configuration
+      eliminates duplication and ensures consistent responsive behavior across all workspace
+      implementations. The key UX requirement is that cards remain square at every viewport
+      width and wrap gracefully rather than stretching to fill available space.
+    </background>
+    <dependencies>
+      No task dependencies. Source is LegalWorkspace; target is the shared library.
+      After extraction, LegalWorkspace will be updated to consume the shared component
+      (may be a separate task or done inline).
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="audit-source">Read LegalWorkspace source to identify all workspace layout components, their props, and styling patterns.</step>
+    <step order="2" name="create-folder">Create src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ directory.</step>
+    <step order="3" name="define-types">Create types.ts: WorkspaceConfig (sections array), SectionConfig (title, type, cards), ActionCardConfig (icon, label, onClick), MetricCardConfig (label, value, trend), SectionPanelConfig (title, children render prop).</step>
+    <step order="4" name="action-card">Create ActionCard.tsx and ActionCardRow.tsx. ActionCard uses CSS Grid cell with aspect-ratio: 1 for square layout. ActionCardRow uses CSS Grid with auto-fill and minmax for responsive wrapping.</step>
+    <step order="5" name="metric-card">Create MetricCard.tsx and MetricCardRow.tsx with same square-aspect pattern.</step>
+    <step order="6" name="section-panel">Create SectionPanel.tsx: collapsible section with title bar and content area.</step>
+    <step order="7" name="workspace-shell">Create WorkspaceShell.tsx: accepts WorkspaceConfig, renders sections in order using appropriate row components. Supports declarative configuration.</step>
+    <step order="8" name="styles">Create shared styles file(s) using Fluent v9 makeStyles. Use semantic tokens. Ensure dark mode support. Verify aspect-ratio: 1 on card containers.</step>
+    <step order="9" name="responsive-test">Verify card layout at breakpoints: 768px, 1024px, 1440px, 1920px, 2560px. Cards must wrap, not stretch.</step>
+    <step order="10" name="barrel-export">Create index.ts barrel. Add exports to shared library top-level barrel.</step>
+    <step order="11" name="build-verify">Run npm build in the shared library to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/WorkspaceShell.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCardRow.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCardRow.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/SectionPanel.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/WorkspaceShell.styles.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Cards maintain square aspect ratio (aspect-ratio: 1) at all viewport widths from 768px to 2560px</criterion>
+    <criterion testable="true">Cards wrap to next row instead of stretching when viewport narrows</criterion>
+    <criterion testable="true">WorkspaceShell accepts a declarative WorkspaceConfig and renders all section types</criterion>
+    <criterion testable="true">ActionCard renders icon and label; triggers onClick callback</criterion>
+    <criterion testable="true">MetricCard renders label, value, and optional trend indicator</criterion>
+    <criterion testable="true">SectionPanel supports collapse/expand with title</criterion>
+    <criterion testable="true">All components use Fluent v9 semantic tokens — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly for all components</criterion>
+    <criterion testable="true">Shared library builds without errors</criterion>
+  </acceptance-criteria>
+</task>

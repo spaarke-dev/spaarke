@@ -1,0 +1,74 @@
+<task id="WCWE-010" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Add openLookup() method to INavigationService interface</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, shared-library, service-interfaces</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-04: Add an openLookup() method to the INavigationService interface. Implement it in
+    the Xrm adapter (calls Xrm.Utility.lookupObjects), the BFF adapter (no-op or graceful
+    fallback), and the mock adapter (jest.fn() stub). The method should accept entity type,
+    view ID, and return selected record(s).
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and shared component libraries</role>
+
+  <goal>INavigationService exposes openLookup(); all three adapters compile and implement it correctly; mock adapter is testable with jest.</goal>
+
+  <constraints>
+    <constraint source="ADR-012">All shared UI components and service interfaces must live in @spaarke/ui-components.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/adapters/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The create wizard "Associate To" step needs to open a Dataverse lookup side pane so
+      users can search for and select a record (e.g., Matter, Project). The current
+      INavigationService interface has no method for opening a lookup dialog. This task adds
+      that capability at the service-interface layer so the new AssociateToStep component
+      (task 011) can consume it without coupling to Xrm directly.
+    </background>
+    <dependencies>
+      None — this is the first task in Phase 2. Tasks 011 (AssociateToStep) depends on this.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="review-interface">Read serviceInterfaces.ts to understand the existing INavigationService shape and adapter pattern.</step>
+    <step order="2" name="define-types">Define LookupOptions (entityTypes, defaultEntityType, viewIds, allowMultiSelect) and LookupResult (id, name, entityType) types.</step>
+    <step order="3" name="extend-interface">Add openLookup(options: LookupOptions): Promise&lt;LookupResult[]&gt; to INavigationService.</step>
+    <step order="4" name="xrm-adapter">Implement openLookup in the Xrm adapter by calling Xrm.Utility.lookupObjects and mapping the result to LookupResult[].</step>
+    <step order="5" name="bff-adapter">Implement openLookup in the BFF adapter as a no-op that returns an empty array (lookup is client-only).</step>
+    <step order="6" name="mock-adapter">Implement openLookup in the mock adapter as a jest.fn() that returns an empty array by default.</step>
+    <step order="7" name="export-types">Export new types from the shared library barrel file.</step>
+    <step order="8" name="build-verify">Run npm build in the shared library to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts (modified — new LookupOptions, LookupResult, openLookup method)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationAdapter.ts (modified)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffNavigationAdapter.ts (modified)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/adapters/mockNavigationAdapter.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">INavigationService interface includes openLookup(options: LookupOptions): Promise&lt;LookupResult[]&gt;</criterion>
+    <criterion testable="true">Xrm adapter calls Xrm.Utility.lookupObjects with correct parameters and maps response</criterion>
+    <criterion testable="true">BFF adapter returns empty array without throwing</criterion>
+    <criterion testable="true">Mock adapter exposes jest.fn() that can be asserted on in tests</criterion>
+    <criterion testable="true">Shared library builds without errors</criterion>
+  </acceptance-criteria>
+</task>

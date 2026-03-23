@@ -1,0 +1,72 @@
+<task id="WCWE-041" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Create sprk_document records from uploaded files in Summarize wizard follow-on</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, shared-library, ai</tags>
+    <dependencies>WCWE-040</dependencies>
+  </metadata>
+
+  <prompt>
+    E-15: In the Summarize wizard's "Work on Analysis" follow-on step, create sprk_document
+    records from uploaded files using the business unit's sprk_containerid. After creation, pass
+    the document IDs to PlaybookLibrary so the user can immediately begin analysis on those
+    documents.
+  </prompt>
+
+  <role>Senior frontend developer with SPE document management and wizard integration expertise</role>
+
+  <goal>
+    When users select "Work on Analysis" from the Summarize wizard, sprk_document records are
+    created for each uploaded file. The document IDs are passed to the merged PlaybookLibrary
+    Code Page for immediate analysis.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">Document creation uses BFF API, not Xrm.WebApi from Code Page.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/</file>
+      <file>src/solutions/PlaybookLibrary/</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The Summarize wizard uploads files but does not currently create sprk_document records.
+      For AI analysis, documents must exist as Dataverse records with references to the SPE
+      container. The "Work on Analysis" follow-on bridges the gap by creating document records
+      and launching PlaybookLibrary with those document IDs.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-040" status="not-started">Merged PlaybookLibrary must accept documentIds parameter.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="review-summarize">Review SummarizeFilesWizard follow-on step structure.</step>
+    <step order="2" name="get-containerid">Retrieve business unit sprk_containerid for document creation.</step>
+    <step order="3" name="create-documents">Create sprk_document records via BFF API for each uploaded file.</step>
+    <step order="4" name="collect-ids">Collect created document IDs into an array.</step>
+    <step order="5" name="launch-playbook">Launch PlaybookLibrary with documentIds parameter.</step>
+    <step order="6" name="error-handling">Handle partial failures — report which documents failed to create.</step>
+    <step order="7" name="verify-build">Run npm run build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Work on Analysis" follow-on creates sprk_document records for uploaded files.</criterion>
+    <criterion testable="true">Document records use the business unit's sprk_containerid.</criterion>
+    <criterion testable="true">Created document IDs are passed to PlaybookLibrary via documentIds parameter.</criterion>
+    <criterion testable="true">Partial failures are handled gracefully with user feedback.</criterion>
+    <criterion testable="true">Shared library compiles without errors.</criterion>
+  </acceptance-criteria>
+</task>

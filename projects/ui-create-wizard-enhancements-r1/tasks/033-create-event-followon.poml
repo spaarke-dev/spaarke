@@ -1,0 +1,67 @@
+<task id="WCWE-033" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Replace "AI Summary" follow-on with "Create Event" inline form</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-06: Replace the "AI Summary" follow-on step with "Create Event". Implement an inline event
+    creation form in the wizard's Next Steps. Creates a sprk_event record linked to the parent
+    matter or project via the appropriate relationship.
+  </prompt>
+
+  <role>Senior frontend developer with React wizard and Dataverse entity creation expertise</role>
+
+  <goal>
+    "Create Event" follow-on step creates a sprk_event record linked to the parent matter/project.
+    The inline form reuses CreateEventWizard components from the shared library.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Reuse CreateEventWizard components from @spaarke/ui-components.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The "AI Summary" follow-on is being replaced with a more actionable "Create Event" option.
+      The CreateEventWizard components already exist in the shared library and can be adapted
+      for inline use within the wizard's Next Steps section.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="review-event-wizard">Review CreateEventWizard components for inline reuse patterns.</step>
+    <step order="2" name="replace-followon">Replace "AI Summary" follow-on with "Create Event" in Next Steps.</step>
+    <step order="3" name="inline-form">Create inline event form using CreateEventWizard field components.</step>
+    <step order="4" name="wire-relationship">Link created sprk_event to parent matter/project relationship.</step>
+    <step order="5" name="handle-success">Show success confirmation after event creation.</step>
+    <step order="6" name="verify-build">Run npm run build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Create Event" follow-on replaces "AI Summary" in wizard Next Steps.</criterion>
+    <criterion testable="true">Inline event form captures required event fields.</criterion>
+    <criterion testable="true">Created sprk_event is linked to parent matter or project.</criterion>
+    <criterion testable="true">Success confirmation displays after event creation.</criterion>
+    <criterion testable="true">Shared library compiles without errors.</criterion>
+  </acceptance-criteria>
+</task>

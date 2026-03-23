@@ -1,0 +1,84 @@
+<task id="WCWE-003" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Consolidate duplicated ThemeProvider files to shared codePageTheme utilities</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, fluent-ui, code-pages, theme</tags>
+    <dependencies>WCWE-001</dependencies>
+  </metadata>
+
+  <prompt>
+    Consolidate the 6 duplicated ThemeProvider.ts files in Code Page solutions (LegalWorkspace,
+    EventsPage, CalendarSidePane, SpeAdminApp, EventDetailSidePane, TodoDetailSidePane) to use the
+    shared codePageTheme.ts and themeStorage.ts utilities from @spaarke/ui-components. Each Code Page
+    should import and delegate to the shared utilities rather than maintaining its own copy of theme
+    resolution logic.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    All 6 ThemeProvider files replaced with thin wrappers or direct imports of shared theme utilities.
+    Zero duplication of theme resolution logic across Code Pages.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Theme management must be consistent across all UI surfaces via Fluent v9.</constraint>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components shared library; do not duplicate utilities across projects.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/codePageTheme.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+      <file>src/solutions/LegalWorkspace/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/EventsPage/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/CalendarSidePane/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/SpeAdminApp/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/EventDetailSidePane/src/providers/ThemeProvider.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      E-18 consolidation item. Six Code Page solutions each have their own ThemeProvider.ts with
+      duplicated theme resolution logic. After task WCWE-001 fixes the theme cascade in the shared
+      library, these duplicates must be consolidated to use the shared implementation so that bug
+      fixes and enhancements propagate automatically.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-001" status="not-started">Theme cascade fix must land first so shared utilities have correct behavior.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Diff existing ThemeProviders">Compare all 6 ThemeProvider.ts files to identify deviations from the shared codePageTheme.ts pattern.</step>
+    <step order="2" name="Design thin wrapper">Define the minimal ThemeProvider.ts that imports from @spaarke/ui-components and re-exports or wraps the shared hooks/functions.</step>
+    <step order="3" name="Replace LegalWorkspace ThemeProvider">Refactor to use shared utilities; verify build.</step>
+    <step order="4" name="Replace EventsPage ThemeProvider">Refactor to use shared utilities; verify build.</step>
+    <step order="5" name="Replace CalendarSidePane ThemeProvider">Refactor to use shared utilities; verify build.</step>
+    <step order="6" name="Replace SpeAdminApp ThemeProvider">Refactor to use shared utilities; verify build.</step>
+    <step order="7" name="Replace EventDetailSidePane ThemeProvider">Refactor to use shared utilities; verify build.</step>
+    <step order="8" name="Replace TodoDetailSidePane ThemeProvider">Locate TodoDetailSidePane ThemeProvider and refactor to use shared utilities; verify build.</step>
+    <step order="9" name="Verify no duplication remains">Grep for theme resolution patterns (resolveCodePageTheme, getEffectiveDarkMode, prefers-color-scheme) outside the shared library to confirm consolidation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/providers/ThemeProvider.ts</output>
+    <output type="code">src/solutions/EventsPage/src/providers/ThemeProvider.ts</output>
+    <output type="code">src/solutions/CalendarSidePane/src/providers/ThemeProvider.ts</output>
+    <output type="code">src/solutions/SpeAdminApp/src/providers/ThemeProvider.ts</output>
+    <output type="code">src/solutions/EventDetailSidePane/src/providers/ThemeProvider.ts</output>
+    <output type="code">src/solutions/TodoDetailSidePane/src/providers/ThemeProvider.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 ThemeProvider files import from @spaarke/ui-components shared utilities instead of containing inline theme logic.</criterion>
+    <criterion testable="true">All 6 Code Page solutions build without errors.</criterion>
+    <criterion testable="true">No duplicated theme resolution logic exists outside src/client/shared/.</criterion>
+    <criterion testable="true">Theme behavior (light default, explicit dark only) is consistent across all Code Pages.</criterion>
+  </acceptance-criteria>
+</task>

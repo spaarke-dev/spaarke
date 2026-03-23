@@ -1,0 +1,72 @@
+<task id="WCWE-040" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Merge PlaybookLibrary and AnalysisBuilder into single Code Page</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, code-pages, ai</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-14: Merge PlaybookLibrary and AnalysisBuilder into a single Code Page (sprk_playbooklibrary).
+    Accept the union of parameters from both: intent, documentId/documentIds, documentName,
+    apiBaseUrl, entityType/entityId. Auto-detect close behavior based on launch context. The
+    merged page handles both playbook selection and analysis building flows.
+  </prompt>
+
+  <role>Senior frontend developer with Code Page architecture and React application consolidation expertise</role>
+
+  <goal>
+    A single sprk_playbooklibrary Code Page replaces both PlaybookLibrary and AnalysisBuilder.
+    It accepts all parameters from both former pages and routes internally based on intent.
+    Close behavior auto-detects from launch context.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Standalone dialogs must be Code Pages, not custom pages with PCF wrappers.</constraint>
+    <constraint source="ADR-012">Shared components from @spaarke/ui-components for playbook/analysis UI.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-anti-legacy-js.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/PlaybookLibrary/</file>
+      <file>src/solutions/AnalysisBuilder/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      PlaybookLibrary and AnalysisBuilder are separate Code Pages with overlapping functionality.
+      Merging them reduces maintenance burden, simplifies launch points, and provides a unified
+      AI analysis experience. The merged page uses intent-based routing to show the appropriate
+      view.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="audit-params">Audit all parameters from both PlaybookLibrary and AnalysisBuilder.</step>
+    <step order="2" name="define-union">Define union parameter interface: intent, documentId/documentIds, documentName, apiBaseUrl, entityType/entityId.</step>
+    <step order="3" name="merge-routing">Implement intent-based routing in sprk_playbooklibrary main.tsx.</step>
+    <step order="4" name="close-behavior">Auto-detect close behavior: dialog close vs. navigation based on launch context.</step>
+    <step order="5" name="migrate-components">Migrate AnalysisBuilder-specific components into PlaybookLibrary.</step>
+    <step order="6" name="backward-compat">Ensure backward compatibility with existing launch point parameters.</step>
+    <step order="7" name="verify-build">Run npm run build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/PlaybookLibrary/src/main.tsx</output>
+    <output type="code">src/solutions/PlaybookLibrary/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_playbooklibrary accepts all parameters from both former Code Pages.</criterion>
+    <criterion testable="true">Intent-based routing shows playbook view or analysis builder view.</criterion>
+    <criterion testable="true">Close behavior auto-detects from launch context.</criterion>
+    <criterion testable="true">Existing launch points continue to work without modification.</criterion>
+    <criterion testable="true">Code Page compiles and builds without errors.</criterion>
+  </acceptance-criteria>
+</task>

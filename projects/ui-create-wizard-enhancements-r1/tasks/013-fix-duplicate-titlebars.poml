@@ -1,0 +1,69 @@
+<task id="WCWE-013" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Fix duplicate title bars in SummarizeFiles wizard and Assign Work step</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-11: The SummarizeFiles wizard and Assign Work follow-on step render with their own
+    title bar when opened as Dataverse dialogs, creating a duplicate title bar (Dataverse
+    dialog chrome already provides one). Fix by setting hideTitle={true} on WizardShell
+    in both cases.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and shared component libraries</role>
+
+  <goal>No duplicate title bar appears in any wizard dialog opened via Xrm.Navigation.navigateTo.</goal>
+
+  <constraints>
+    <constraint source="ADR-006">Code Pages are standalone dialogs opened via navigateTo. They inherit the Dataverse dialog chrome which includes its own title bar.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignment/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WizardShell/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      When Code Page wizards are opened as Dataverse dialogs via Xrm.Navigation.navigateTo
+      with target: 2, the Dataverse platform renders its own dialog title bar. If the
+      WizardShell component also renders its title bar, users see two title bars stacked.
+      The SummarizeFiles wizard and the Assign Work follow-on step both exhibit this issue.
+      The fix is straightforward: pass hideTitle={true} to WizardShell so only the
+      platform-provided title bar appears.
+    </background>
+    <dependencies>
+      No task dependencies. This is a standalone fix that can run in parallel with other
+      Phase 2 tasks.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="identify-occurrences">Search for WizardShell usage in SummarizeFilesWizard and CreateWorkAssignment components to locate where hideTitle should be set.</step>
+    <step order="2" name="fix-summarize">Add hideTitle={true} to WizardShell in SummarizeFilesWizard component.</step>
+    <step order="3" name="fix-assign-work">Add hideTitle={true} to WizardShell in the Assign Work follow-on step component.</step>
+    <step order="4" name="verify-other-wizards">Audit all other wizard components to confirm no other instances have duplicate title bars.</step>
+    <step order="5" name="build-verify">Run npm build in the shared library to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/ (modified — hideTitle prop)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignment/ (modified — hideTitle prop)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SummarizeFiles wizard shows only the Dataverse dialog title bar — no duplicate</criterion>
+    <criterion testable="true">Assign Work follow-on step shows only the Dataverse dialog title bar — no duplicate</criterion>
+    <criterion testable="true">No other wizard dialogs exhibit duplicate title bars</criterion>
+    <criterion testable="true">Shared library builds without errors</criterion>
+  </acceptance-criteria>
+</task>

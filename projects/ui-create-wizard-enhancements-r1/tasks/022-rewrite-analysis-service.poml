@@ -1,0 +1,70 @@
+<task id="WCWE-022" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Rewrite analysisService.ts to use BFF API via authenticatedFetch</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, shared-library, ai</tags>
+    <dependencies>WCWE-020, WCWE-021</dependencies>
+  </metadata>
+
+  <prompt>
+    E-08: Rewrite the frontend analysisService.ts to call the BFF API via authenticatedFetch
+    instead of Xrm.WebApi. Remove all Xrm.WebApi.execute and Xrm.WebApi.online.execute calls.
+    Use the new POST /api/ai/analysis/create endpoint for analysis creation with scope association.
+  </prompt>
+
+  <role>Senior frontend developer with MSAL authentication and BFF API integration expertise</role>
+
+  <goal>
+    analysisService.ts uses authenticatedFetch for all operations. Zero Xrm.WebApi references
+    remain. Analysis creation calls POST /api/ai/analysis/create with scope arrays.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">AI features call BFF API, not Dataverse directly from browser.</constraint>
+    <constraint source="ADR-012">Service lives in @spaarke/ui-components shared library.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Playbook/analysisService.ts</file>
+      <file>src/solutions/DocumentUploadWizard/src/main.tsx</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Xrm.WebApi does not work reliably from Code Page iframes. The analysis service must use
+      MSAL-authenticated fetch calls to the BFF API. The new BFF endpoint (WCWE-020) accepts
+      the full creation payload including scope associations.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-020" status="not-started">BFF endpoint must exist to call.</dependency>
+      <dependency task="WCWE-021" status="not-started">Scope association method must exist on the server.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="audit-current">Audit current analysisService.ts for all Xrm.WebApi usage.</step>
+    <step order="2" name="add-fetch-param">Add authenticatedFetch and bffBaseUrl as constructor/factory parameters.</step>
+    <step order="3" name="rewrite-create">Rewrite createAnalysis to POST to /api/ai/analysis/create with full payload.</step>
+    <step order="4" name="rewrite-remaining">Rewrite any remaining Xrm.WebApi calls to use BFF endpoints.</step>
+    <step order="5" name="remove-xrm-imports">Remove all Xrm.WebApi imports and type references.</step>
+    <step order="6" name="update-consumers">Update PlaybookLibrary and other consumers to pass authenticatedFetch.</step>
+    <step order="7" name="verify-build">Run npm run build in shared library to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Playbook/analysisService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero references to Xrm.WebApi in analysisService.ts.</criterion>
+    <criterion testable="true">createAnalysis calls POST /api/ai/analysis/create with name, documentId, skills, knowledge, tools.</criterion>
+    <criterion testable="true">All API calls use authenticatedFetch parameter.</criterion>
+    <criterion testable="true">Shared library compiles without errors.</criterion>
+  </acceptance-criteria>
+</task>

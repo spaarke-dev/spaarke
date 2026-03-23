@@ -1,0 +1,64 @@
+<task id="WCWE-024" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Propagate bffBaseUrl via navigateTo data params from all launch points</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>frontend, webresource</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-02: Ensure bffBaseUrl is passed via navigateTo data params from ALL launch points that open
+    wizard Code Pages. Update sprk_wizard_commands.js and ActionCardHandlers.ts to include
+    bffBaseUrl in the data query string for every Xrm.Navigation.navigateTo call.
+  </prompt>
+
+  <role>Senior frontend developer with Dataverse webresource and navigation expertise</role>
+
+  <goal>
+    Every navigateTo call that opens a wizard Code Page includes bffBaseUrl in the data parameter.
+    Code Pages can reliably extract bffBaseUrl from URL search params on startup.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">bffBaseUrl must be available to all Code Pages for MSAL-authenticated BFF calls.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/webresources/js/sprk_wizard_commands.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ActionCard/ActionCardHandlers.ts</file>
+      <file>src/solutions/DocumentUploadWizard/src/main.tsx</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Code Pages run in iframes and need the BFF API base URL to make authenticated calls.
+      The bffBaseUrl must be passed from the Dataverse form context (which has access to
+      environment variables) through the navigateTo data parameter to the Code Page.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="audit-launchpoints">Audit all navigateTo calls in sprk_wizard_commands.js and ActionCardHandlers.ts.</step>
+    <step order="2" name="add-bffbaseurl-commands">Add bffBaseUrl to all navigateTo data params in sprk_wizard_commands.js.</step>
+    <step order="3" name="add-bffbaseurl-handlers">Add bffBaseUrl to all navigateTo data params in ActionCardHandlers.ts.</step>
+    <step order="4" name="verify-consistency">Verify every launch point passes bffBaseUrl consistently.</step>
+    <step order="5" name="test-extraction">Verify Code Pages can extract bffBaseUrl from URLSearchParams.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_wizard_commands.js</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ActionCard/ActionCardHandlers.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All navigateTo calls in sprk_wizard_commands.js include bffBaseUrl in data params.</criterion>
+    <criterion testable="true">All navigateTo calls in ActionCardHandlers.ts include bffBaseUrl in data params.</criterion>
+    <criterion testable="true">bffBaseUrl value is sourced from Dataverse environment variable or configuration.</criterion>
+    <criterion testable="true">Code Pages can read bffBaseUrl via new URLSearchParams(window.location.search).</criterion>
+  </acceptance-criteria>
+</task>

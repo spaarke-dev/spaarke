@@ -1,0 +1,69 @@
+<task id="WCWE-031" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Integrate AssociateToStep as step 1 in CreateProject wizard</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>WCWE-011</dependencies>
+  </metadata>
+
+  <prompt>
+    E-01: Integrate AssociateToStep as step 1 in the CreateProject wizard. Entity types for
+    association are Account and Matter. Wire the appropriate N:N or N:1 associations after
+    project creation.
+  </prompt>
+
+  <role>Senior frontend developer with React wizard architecture and Dataverse relationship expertise</role>
+
+  <goal>
+    CreateProject wizard has AssociateToStep as its first step with Account and Matter as
+    selectable entity types. After project creation, selected associations are established.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Use AssociateToStep from @spaarke/ui-components shared library.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The CreateProject wizard needs an AssociateToStep similar to CreateMatter. Projects can
+      be associated with Accounts (client) or Matters. This enables users to link the new
+      project to existing records during the creation flow.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-011" status="not-started">AssociateToStep shared component must exist.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="review-wizard">Review CreateProjectWizard current step configuration.</step>
+    <step order="2" name="add-associateto">Add AssociateToStep as step 1 with entity types = Account, Matter.</step>
+    <step order="3" name="update-sequence">Update step sequence: Associate To -> Add Files -> Enter Info -> Next Steps.</step>
+    <step order="4" name="wire-account">Wire Account association (N:1 lookup) after project creation.</step>
+    <step order="5" name="wire-matter">Wire Matter association via sprk_Project_Matter_nn after project creation.</step>
+    <step order="6" name="handle-skip">Ensure AssociateToStep is optional — users can skip it.</step>
+    <step order="7" name="verify-build">Run npm run build to verify shared library compiles.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AssociateToStep appears as step 1 in CreateProject wizard.</criterion>
+    <criterion testable="true">Entity type dropdown includes Account and Matter.</criterion>
+    <criterion testable="true">Selecting an Account sets the project's client lookup after creation.</criterion>
+    <criterion testable="true">Selecting a Matter creates sprk_Project_Matter_nn association.</criterion>
+    <criterion testable="true">Skipping AssociateToStep proceeds without error.</criterion>
+  </acceptance-criteria>
+</task>

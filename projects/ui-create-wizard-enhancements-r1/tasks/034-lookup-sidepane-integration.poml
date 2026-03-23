@@ -1,0 +1,73 @@
+<task id="WCWE-034" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Integrate Dataverse lookup side pane for Matter Type, Practice Area, Project Type</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>WCWE-010</dependencies>
+  </metadata>
+
+  <prompt>
+    E-04: Integrate the Dataverse lookup side pane for Matter Type, Practice Area, and Project
+    Type fields in the CreateMatter and CreateProject wizards. Use INavigationService.openLookup()
+    to trigger the standard Dataverse lookup dialog from within the wizard Code Pages.
+  </prompt>
+
+  <role>Senior frontend developer with Dataverse lookup integration and service adapter expertise</role>
+
+  <goal>
+    Matter Type, Practice Area, and Project Type fields in CreateMatter and CreateProject wizards
+    open the standard Dataverse lookup side pane when clicked. Selected values populate the
+    wizard form fields.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Use INavigationService abstraction from @spaarke/ui-components.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/adapters/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Lookup fields (Matter Type, Practice Area, Project Type) currently use simple dropdowns
+      or text inputs. Users expect the standard Dataverse lookup experience with search and
+      filtering. The INavigationService.openLookup() method provides this capability through
+      the Xrm.Utility.lookupObjects API.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-010" status="not-started">openLookup added to INavigationService.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="review-interface">Review INavigationService.openLookup() signature and adapter.</step>
+    <step order="2" name="matter-type-lookup">Replace Matter Type field with lookup-enabled input in CreateMatter.</step>
+    <step order="3" name="practice-area-lookup">Replace Practice Area field with lookup-enabled input in CreateMatter.</step>
+    <step order="4" name="project-type-lookup">Replace Project Type field with lookup-enabled input in CreateProject.</step>
+    <step order="5" name="wire-selection">Wire lookup selection back to wizard form state.</step>
+    <step order="6" name="handle-cancel">Handle lookup cancel/dismiss gracefully.</step>
+    <step order="7" name="verify-build">Run npm run build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Matter Type field opens Dataverse lookup pane via openLookup().</criterion>
+    <criterion testable="true">Practice Area field opens Dataverse lookup pane via openLookup().</criterion>
+    <criterion testable="true">Project Type field opens Dataverse lookup pane via openLookup().</criterion>
+    <criterion testable="true">Selected lookup values populate the corresponding wizard form fields.</criterion>
+    <criterion testable="true">Cancelling the lookup does not clear existing field values.</criterion>
+  </acceptance-criteria>
+</task>

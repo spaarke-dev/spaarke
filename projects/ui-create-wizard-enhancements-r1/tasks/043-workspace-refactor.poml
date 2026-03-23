@@ -1,0 +1,72 @@
+<task id="WCWE-043" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Refactor LegalWorkspace to consume WorkspaceShell from shared library</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, code-pages, workspace</tags>
+    <dependencies>WCWE-012</dependencies>
+  </metadata>
+
+  <prompt>
+    E-09: Refactor LegalWorkspace to consume the WorkspaceShell component from the shared library.
+    Replace the inline layout with WorkspaceShell's declarative configuration. The workspace
+    defines its sections, cards, and toolbar via config objects rather than JSX layout code.
+  </prompt>
+
+  <role>Senior frontend developer with workspace architecture and shared component integration expertise</role>
+
+  <goal>
+    LegalWorkspace uses WorkspaceShell from @spaarke/ui-components. Inline layout JSX is replaced
+    with declarative config. The visual result is identical, but the implementation is standardized
+    and maintainable.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Consume WorkspaceShell from @spaarke/ui-components shared library.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/</file>
+      <file>src/solutions/LegalWorkspace/</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      LegalWorkspace currently has inline layout code that duplicates patterns found in other
+      workspaces. The WorkspaceShell shared component (WCWE-012) provides a declarative API
+      for workspace layout. Migrating LegalWorkspace to WorkspaceShell reduces code and ensures
+      consistent behavior across all workspaces.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-012" status="not-started">WorkspaceShell shared component must exist.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="audit-layout">Audit current LegalWorkspace inline layout structure.</step>
+    <step order="2" name="define-config">Define WorkspaceShell config: sections, cards, toolbar items.</step>
+    <step order="3" name="replace-layout">Replace inline JSX with WorkspaceShell component and config.</step>
+    <step order="4" name="migrate-handlers">Migrate event handlers and data fetching to WorkspaceShell callbacks.</step>
+    <step order="5" name="visual-parity">Verify visual parity with the original layout.</step>
+    <step order="6" name="dark-mode">Verify dark mode works through WorkspaceShell.</step>
+    <step order="7" name="verify-build">Run npm run build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/App.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/workspaceConfig.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LegalWorkspace imports and uses WorkspaceShell from @spaarke/ui-components.</criterion>
+    <criterion testable="true">Layout is defined via declarative config, not inline JSX.</criterion>
+    <criterion testable="true">Visual output is identical to the original layout.</criterion>
+    <criterion testable="true">All workspace sections, cards, and toolbar items render correctly.</criterion>
+    <criterion testable="true">Dark mode renders correctly through WorkspaceShell.</criterion>
+  </acceptance-criteria>
+</task>

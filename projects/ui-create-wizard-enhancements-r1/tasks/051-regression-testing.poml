@@ -1,0 +1,67 @@
+<task id="WCWE-051" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Cross-wizard regression testing and dark mode verification</title>
+    <phase>6</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>testing, e2e-test, verification</tags>
+    <dependencies>WCWE-050</dependencies>
+  </metadata>
+
+  <prompt>
+    Cross-wizard regression testing. Verify no breakage in existing wizards that were not directly
+    modified (FindSimilar, DocumentUpload, etc.). Verify dark mode renders correctly across all
+    wizards and workspaces. Check browser console for JavaScript errors during all flows.
+  </prompt>
+
+  <role>QA engineer with regression testing and cross-browser verification expertise</role>
+
+  <goal>
+    All existing wizards continue to work correctly after the enhancements. Dark mode renders
+    properly everywhere. Zero unexpected JavaScript console errors across all wizard flows.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">Dark mode must work in all UI surfaces using Fluent v9 tokens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ui-create-wizard-enhancements-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Shared library changes (theme, components, services) can have unintended effects on
+      wizards that were not directly modified. This regression pass ensures the shared library
+      updates are backward-compatible and that dark mode works universally.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-050" status="not-started">Integration testing must pass first.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="list-wizards">List all existing wizards not directly modified in this project.</step>
+    <step order="2" name="test-findsimilar">Test FindSimilar wizard end-to-end.</step>
+    <step order="3" name="test-documentupload">Test DocumentUpload wizard end-to-end.</step>
+    <step order="4" name="test-other-wizards">Test any other existing wizard flows.</step>
+    <step order="5" name="test-darkmode-all">Toggle dark mode and verify rendering across all wizards.</step>
+    <step order="6" name="check-console">Check browser console for JavaScript errors during each flow.</step>
+    <step order="7" name="document-results">Document regression test results with any issues found.</step>
+  </steps>
+
+  <outputs>
+    <output type="documentation">projects/ui-create-wizard-enhancements-r1/notes/regression-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FindSimilar wizard works without regression.</criterion>
+    <criterion testable="true">DocumentUpload wizard works without regression.</criterion>
+    <criterion testable="true">Dark mode renders correctly in all wizards and workspaces.</criterion>
+    <criterion testable="true">Zero unexpected JavaScript console errors across all flows.</criterion>
+    <criterion testable="true">Regression results documented with pass/fail status.</criterion>
+  </acceptance-criteria>
+</task>

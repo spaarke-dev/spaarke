@@ -1,0 +1,73 @@
+<task id="WCWE-032" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Replace "Assign Resources" follow-on with "Assign Work" full form</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>WCWE-010</dependencies>
+  </metadata>
+
+  <prompt>
+    E-05: Replace the "Assign Resources" follow-on step with "Assign Work". Implement full work
+    assignment fields: Name, Description, Matter Type, Practice Area, Priority, Response Due Date,
+    Assigned Attorney, Paralegal, Outside Counsel. Creates a sprk_workassignment record linked
+    via N:1 relationship to the parent matter/project. Priority defaults to "Normal"; Matter Type
+    and Practice Area auto-fill from parent record.
+  </prompt>
+
+  <role>Senior frontend developer with Dataverse form and wizard step expertise</role>
+
+  <goal>
+    "Assign Work" follow-on step creates a sprk_workassignment record with all specified fields.
+    Priority defaults to Normal. Matter Type and Practice Area are auto-populated from the parent.
+    Record is linked to parent via N:1 relationship.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Reuse CreateWorkAssignment components from @spaarke/ui-components.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignment/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The existing "Assign Resources" follow-on is a placeholder. Users need a complete work
+      assignment creation form in the wizard's Next Steps. The CreateWorkAssignment components
+      already exist in the shared library and should be reused.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-010" status="not-started">Shared follow-on step infrastructure.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="review-existing">Review existing CreateWorkAssignment components for reuse.</step>
+    <step order="2" name="replace-followon">Replace "Assign Resources" follow-on with "Assign Work" using CreateWorkAssignment.</step>
+    <step order="3" name="add-fields">Ensure all fields: Name, Description, Matter Type, Practice Area, Priority, Response Due Date, Assigned Attorney, Paralegal, Outside Counsel.</step>
+    <step order="4" name="default-priority">Set Priority default to "Normal" (option set value).</step>
+    <step order="5" name="auto-fill">Auto-fill Matter Type and Practice Area from parent record context.</step>
+    <step order="6" name="wire-relationship">Create sprk_workassignment linked via N:1 to parent matter or project.</step>
+    <step order="7" name="verify-build">Run npm run build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Assign Work" follow-on replaces "Assign Resources" in wizard Next Steps.</criterion>
+    <criterion testable="true">All 9 fields (Name, Description, Matter Type, Practice Area, Priority, Response Due Date, Attorney, Paralegal, Outside Counsel) are present.</criterion>
+    <criterion testable="true">Priority defaults to "Normal".</criterion>
+    <criterion testable="true">Matter Type and Practice Area auto-fill from parent record.</criterion>
+    <criterion testable="true">Created sprk_workassignment is linked to parent via N:1 relationship.</criterion>
+  </acceptance-criteria>
+</task>

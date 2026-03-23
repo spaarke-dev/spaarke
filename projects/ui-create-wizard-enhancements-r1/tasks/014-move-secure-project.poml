@@ -1,0 +1,62 @@
+<task id="WCWE-014" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Move SecureProjectSection to top of CreateProject Enter Info step</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-10: Move the SecureProjectSection from below the form grid to above it in the
+    CreateProject wizard's "Enter Info" step. The secure project toggle should be the
+    first thing users see when entering project details, not buried below the form fields.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and shared component libraries</role>
+
+  <goal>The Secure Project toggle appears at the top of the "Enter Info" step in CreateProjectWizard, above all form fields.</goal>
+
+  <constraints>
+    <constraint source="ADR-012">Changes to shared wizard components must be made in @spaarke/ui-components, not in consuming Code Pages.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback indicated that the Secure Project toggle in CreateProject is too easy to
+      miss when placed below the form grid. Users creating confidential projects need to see
+      and set this option immediately. Moving it to the top of the step ensures visibility
+      and aligns with the workflow expectation that security classification happens first.
+    </background>
+    <dependencies>
+      No task dependencies. This is a layout-only change within the existing CreateProject
+      wizard component.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="locate-component">Read CreateProjectWizard "Enter Info" step component to find the SecureProjectSection placement.</step>
+    <step order="2" name="move-section">Move the SecureProjectSection JSX block from below the form grid to above it, before the first form field.</step>
+    <step order="3" name="verify-spacing">Ensure proper spacing between SecureProjectSection and the form grid below it using Fluent v9 tokens.</step>
+    <step order="4" name="build-verify">Run npm build in the shared library to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/ (modified — SecureProjectSection moved)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SecureProjectSection renders above all form fields in the "Enter Info" step</criterion>
+    <criterion testable="true">Visual spacing between SecureProjectSection and form fields is consistent with other wizard steps</criterion>
+    <criterion testable="true">Toggle functionality (secure/unsecure) still works correctly after repositioning</criterion>
+    <criterion testable="true">Shared library builds without errors</criterion>
+  </acceptance-criteria>
+</task>

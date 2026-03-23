@@ -1,0 +1,74 @@
+<task id="WCWE-020" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Create POST /api/ai/analysis/create BFF endpoint</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, api, ai</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    E-16: Create a POST /api/ai/analysis/create BFF endpoint in AnalysisEndpoints.cs. The endpoint
+    accepts analysis name, document ID, and scope selections (skills, knowledge, tools arrays as
+    Guid collections). It creates a sprk_analysis record in Dataverse and then associates the N:N
+    scope records for skills, knowledge, and tools via the scope association service.
+  </prompt>
+
+  <role>Senior .NET backend developer with Dataverse integration expertise</role>
+
+  <goal>
+    A new POST /api/ai/analysis/create endpoint exists in AnalysisEndpoints.cs, accepts a typed
+    request body, creates the analysis record, associates scopes, and returns the new analysis ID.
+    Endpoint uses endpoint filters for authorization per ADR-008.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API pattern — MapPost with typed handler delegate, no controllers.</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization — no global middleware.</constraint>
+    <constraint source="ADR-010">Use concrete DI types; stay within 15-registration budget.</constraint>
+    <constraint source="ADR-013">AI features extend BFF API, not a separate service.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/IAnalysisDataverseService.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The frontend PlaybookLibrary Code Page needs a BFF endpoint to create analysis records with
+      associated scopes. Currently the frontend uses Xrm.WebApi which does not work from Code Page
+      iframes. Moving to a BFF endpoint enables MSAL-authenticated calls from the browser.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="review-existing">Review existing AnalysisEndpoints.cs for patterns and existing routes.</step>
+    <step order="2" name="define-request-model">Create CreateAnalysisRequest record with Name, DocumentId, Skills, Knowledge, Tools properties.</step>
+    <step order="3" name="implement-handler">Implement the POST handler that creates sprk_analysis and returns the new record ID.</step>
+    <step order="4" name="add-scope-association">Call IAnalysisDataverseService to associate N:N scope records after creation.</step>
+    <step order="5" name="add-auth-filter">Apply endpoint authorization filter per ADR-008.</step>
+    <step order="6" name="register-endpoint">Register the new endpoint in the MapGroup chain.</step>
+    <step order="7" name="verify-build">Run dotnet build to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/CreateAnalysisRequest.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/ai/analysis/create endpoint compiles and is registered in the route table.</criterion>
+    <criterion testable="true">Request body accepts analysisName (string), documentId (Guid), skills/knowledge/tools (Guid arrays).</criterion>
+    <criterion testable="true">Endpoint uses an endpoint filter for authorization, not global middleware.</criterion>
+    <criterion testable="true">Handler creates sprk_analysis record and associates N:N scope records.</criterion>
+    <criterion testable="true">Returns 201 Created with the new analysis ID on success.</criterion>
+  </acceptance-criteria>
+</task>

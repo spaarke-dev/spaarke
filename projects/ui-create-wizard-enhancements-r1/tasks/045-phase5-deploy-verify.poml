@@ -1,0 +1,74 @@
+<task id="WCWE-045" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Phase 5 deployment — deploy and verify consolidation and document flow</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, verification</tags>
+    <dependencies>WCWE-040, WCWE-041, WCWE-042, WCWE-043, WCWE-044</dependencies>
+  </metadata>
+
+  <prompt>
+    Phase 5 deployment: Deploy the merged PlaybookLibrary, updated SummarizeFilesWizard,
+    refactored LegalWorkspace, and all updated launch points. Verify consolidation works
+    correctly, document flow from Summarize to Analysis works, and AnalysisBuilder web resource
+    is removed from Dataverse.
+  </prompt>
+
+  <role>DevOps engineer with Dataverse web resource deployment and end-to-end verification expertise</role>
+
+  <goal>
+    All Phase 5 changes are deployed. PlaybookLibrary handles both playbook and analysis flows.
+    Document creation from Summarize wizard works. LegalWorkspace uses WorkspaceShell.
+    AnalysisBuilder web resource is removed.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Deploy Code Pages via code-page-deploy skill. Remove retired web resources.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 5 consolidates PlaybookLibrary + AnalysisBuilder, adds document creation flow,
+      adds document selector, refactors LegalWorkspace, and retires AnalysisBuilder. Deployment
+      must verify both new functionality and cleanup.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-040" status="not-started">PlaybookLibrary + AnalysisBuilder merge.</dependency>
+      <dependency task="WCWE-041" status="not-started">Document creation in Summarize follow-on.</dependency>
+      <dependency task="WCWE-042" status="not-started">Document selector in PlaybookLibrary.</dependency>
+      <dependency task="WCWE-043" status="not-started">LegalWorkspace WorkspaceShell refactor.</dependency>
+      <dependency task="WCWE-044" status="not-started">Launch point updates and AnalysisBuilder retirement.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="build-all">Build shared library, PlaybookLibrary, SummarizeFilesWizard, LegalWorkspace.</step>
+    <step order="2" name="deploy-codepages">Deploy all updated Code Pages as Dataverse web resources.</step>
+    <step order="3" name="remove-analysisbuilder">Remove sprk_analysisbuilder web resource from Dataverse.</step>
+    <step order="4" name="verify-playbook">Verify PlaybookLibrary handles both playbook and analysis intents.</step>
+    <step order="5" name="verify-documents">Verify Summarize -> Work on Analysis creates documents and launches PlaybookLibrary.</step>
+    <step order="6" name="verify-workspace">Verify LegalWorkspace renders correctly with WorkspaceShell.</step>
+    <step order="7" name="verify-cleanup">Verify sprk_analysisbuilder is no longer available in Dataverse.</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">Updated Code Pages deployed to Dataverse</output>
+    <output type="deployment">sprk_analysisbuilder web resource removed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PlaybookLibrary opens for both playbook and analysis launch points.</criterion>
+    <criterion testable="true">Summarize wizard "Work on Analysis" creates documents and launches analysis.</criterion>
+    <criterion testable="true">Document selector appears when multiple documents are present.</criterion>
+    <criterion testable="true">LegalWorkspace renders identically using WorkspaceShell.</criterion>
+    <criterion testable="true">sprk_analysisbuilder web resource is gone from Dataverse.</criterion>
+  </acceptance-criteria>
+</task>

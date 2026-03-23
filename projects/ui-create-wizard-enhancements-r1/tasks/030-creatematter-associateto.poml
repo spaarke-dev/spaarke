@@ -1,0 +1,69 @@
+<task id="WCWE-030" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Integrate AssociateToStep as step 1 in CreateMatter wizard</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>WCWE-011</dependencies>
+  </metadata>
+
+  <prompt>
+    E-01: Integrate AssociateToStep as step 1 in the CreateMatter wizard. Update the step sequence
+    to: Associate To -> Add Files -> Enter Info -> Next Steps. Wire the N:N association via
+    sprk_Project_Matter_nn so that after matter creation, the selected project(s) are linked.
+  </prompt>
+
+  <role>Senior frontend developer with React wizard architecture and Dataverse relationship expertise</role>
+
+  <goal>
+    CreateMatter wizard has AssociateToStep as its first step. Users can optionally select a
+    project to associate with. After matter creation, the N:N sprk_Project_Matter_nn relationship
+    is established. Step sequence is consistent with other wizards.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-012">Use AssociateToStep from @spaarke/ui-components shared library.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/</file>
+      <file>projects/ui-create-wizard-enhancements-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The CreateMatter wizard currently starts with Add Files. Adding AssociateToStep as step 1
+      allows users to link the new matter to an existing project. The sprk_Project_Matter_nn
+      N:N relationship is used for the association.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-011" status="not-started">AssociateToStep shared component must exist.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="review-wizard">Review CreateMatterWizard current step configuration.</step>
+    <step order="2" name="add-associateto">Add AssociateToStep as step 1 with entity type = Project.</step>
+    <step order="3" name="update-sequence">Update step sequence: Associate To -> Add Files -> Enter Info -> Next Steps.</step>
+    <step order="4" name="wire-association">Wire N:N association via sprk_Project_Matter_nn after record creation.</step>
+    <step order="5" name="handle-skip">Ensure AssociateToStep is optional — users can skip it.</step>
+    <step order="6" name="verify-build">Run npm run build to verify shared library compiles.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AssociateToStep appears as step 1 in CreateMatter wizard.</criterion>
+    <criterion testable="true">Step sequence is: Associate To -> Add Files -> Enter Info -> Next Steps.</criterion>
+    <criterion testable="true">Selecting a project creates sprk_Project_Matter_nn association after matter creation.</criterion>
+    <criterion testable="true">Skipping AssociateToStep proceeds to Add Files without error.</criterion>
+    <criterion testable="true">Shared library compiles without errors.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,80 @@
+<task id="WCWE-011" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Create shared AssociateToStep component</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, shared-library, wizard</tags>
+    <dependencies>WCWE-010</dependencies>
+  </metadata>
+
+  <prompt>
+    E-01: Create a shared AssociateToStep component in @spaarke/ui-components/components/AssociateToStep/.
+    The component includes a record type dropdown and a Dataverse lookup side pane triggered
+    via INavigationService.openLookup(). Users can skip association entirely. Reference the
+    existing implementation at src/solutions/DocumentUploadWizard/AssociateToStep.tsx.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and shared component libraries</role>
+
+  <goal>AssociateToStep component renders with record type selection and lookup trigger; skip works; component is reusable across CreateMatter, CreateProject, and future wizards.</goal>
+
+  <constraints>
+    <constraint source="ADR-012">Reuse @spaarke/ui-components for all shared wizard components. Do not duplicate component logic in consuming Code Pages.</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 exclusively. All colors via semantic tokens. Dark mode must work.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/solutions/DocumentUploadWizard/AssociateToStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback requested that CreateMatter and CreateProject wizards include an initial
+      "Associate To" step allowing users to link the new record to an existing parent record
+      (e.g., associate a new Project to an existing Matter). The DocumentUploadWizard already
+      has a similar step. This task extracts the pattern into a reusable shared component so
+      all wizards can consume it without code duplication.
+    </background>
+    <dependencies>
+      Depends on WCWE-010 (openLookup service method). The Xrm adapter must support
+      openLookup before the component can trigger the Dataverse lookup pane.
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="study-reference">Read src/solutions/DocumentUploadWizard/AssociateToStep.tsx to understand the existing pattern.</step>
+    <step order="2" name="create-folder">Create src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/ directory.</step>
+    <step order="3" name="define-types">Create types.ts with AssociateToStepProps (recordTypes, onSelect, onSkip, navigationService) and RecordTypeOption (entityType, displayName, viewId).</step>
+    <step order="4" name="build-component">Create AssociateToStep.tsx: Fluent v9 Dropdown for record type selection, Button to trigger openLookup(), display of selected record, and Skip button.</step>
+    <step order="5" name="styles">Create AssociateToStep.styles.ts using Fluent v9 makeStyles with semantic tokens. Support dark mode.</step>
+    <step order="6" name="index-barrel">Create index.ts barrel export. Add to shared library top-level barrel.</step>
+    <step order="7" name="skip-behavior">Implement skip: when user clicks Skip, call onSkip() callback which advances wizard without association.</step>
+    <step order="8" name="build-verify">Run npm build in the shared library to verify compilation.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.styles.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AssociateToStep renders a record type dropdown populated from props</criterion>
+    <criterion testable="true">Selecting a record type and clicking the lookup button calls INavigationService.openLookup()</criterion>
+    <criterion testable="true">Selected record name and type display in the component after lookup returns</criterion>
+    <criterion testable="true">Skip button calls onSkip callback and does not require a selection</criterion>
+    <criterion testable="true">Component uses Fluent v9 tokens exclusively — no hard-coded colors</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+    <criterion testable="true">Shared library builds without errors</criterion>
+  </acceptance-criteria>
+</task>

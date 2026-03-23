@@ -1,0 +1,74 @@
+<task id="WCWE-025" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Phase 3 deployment — deploy BFF API, Code Pages, verify auth flow</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, verification</tags>
+    <dependencies>WCWE-020, WCWE-021, WCWE-022, WCWE-023, WCWE-024</dependencies>
+  </metadata>
+
+  <prompt>
+    Phase 3 deployment: Deploy the updated BFF API with the new analysis create endpoint, rebuild
+    and deploy all updated Code Pages with MSAL auth standardization, and verify the end-to-end
+    auth flow works from Code Page through BFF to Dataverse.
+  </prompt>
+
+  <role>DevOps engineer with Azure App Service and Dataverse deployment expertise</role>
+
+  <goal>
+    BFF API is deployed with the new analysis endpoint. All Code Pages are rebuilt and deployed
+    with MSAL auth. End-to-end flow from Code Page -> MSAL token -> BFF API -> Dataverse is
+    verified working in the dev environment.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">BFF API deploys via scripts/Deploy-BffApi.ps1.</constraint>
+    <constraint source="spec">Code Pages deploy as Dataverse web resources.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 3 introduces the BFF analysis endpoint and standardizes MSAL auth across all Code
+      Pages. Deployment must be coordinated — API first, then Code Pages — to ensure the
+      endpoint exists before the frontend tries to call it.
+    </background>
+    <dependencies>
+      <dependency task="WCWE-020" status="not-started">BFF analysis endpoint implementation.</dependency>
+      <dependency task="WCWE-021" status="not-started">Scope association service method.</dependency>
+      <dependency task="WCWE-022" status="not-started">Frontend analysisService rewrite.</dependency>
+      <dependency task="WCWE-023" status="not-started">MSAL auth standardization.</dependency>
+      <dependency task="WCWE-024" status="not-started">bffBaseUrl propagation.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="build-api">Build BFF API: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="2" name="deploy-api">Deploy BFF API using scripts/Deploy-BffApi.ps1.</step>
+    <step order="3" name="verify-endpoint">Verify POST /api/ai/analysis/create responds (health check).</step>
+    <step order="4" name="build-codepages">Build all updated Code Pages (npm run build in each).</step>
+    <step order="5" name="deploy-codepages">Deploy Code Pages as Dataverse web resources.</step>
+    <step order="6" name="verify-auth">Open a wizard Code Page and verify MSAL auth flow works end-to-end.</step>
+    <step order="7" name="verify-analysis">Test analysis creation from PlaybookLibrary through BFF to Dataverse.</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">BFF API deployed to spe-api-dev-67e2xz</output>
+    <output type="deployment">Code Pages deployed as Dataverse web resources</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF API is deployed and POST /api/ai/analysis/create returns 200/201.</criterion>
+    <criterion testable="true">All Code Pages load without auth errors in Dataverse.</criterion>
+    <criterion testable="true">MSAL silent token acquisition works from Code Page iframe.</criterion>
+    <criterion testable="true">Analysis creation with scope association works end-to-end.</criterion>
+  </acceptance-criteria>
+</task>

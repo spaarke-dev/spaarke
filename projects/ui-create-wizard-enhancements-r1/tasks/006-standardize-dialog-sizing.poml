@@ -1,0 +1,65 @@
+<task id="WCWE-006" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Standardize wizard dialog sizing to 60% width x 70% height</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>frontend, webresource, code-pages</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Standardize all wizard navigateTo calls to use consistent dialog dimensions: width 60%, height
+    70%. This applies to CreateMatter, CreateProject, SummarizeFiles, PlaybookLibrary, and any other
+    wizard dialog opened via Xrm.Navigation.navigateTo. Find all navigateTo calls that open wizard
+    dialogs and update their width/height options.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    All wizard dialogs open at exactly 60% width and 70% height, providing a consistent user
+    experience across all Create wizards and utility dialogs.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">Standalone dialogs must use Code Page pattern opened via navigateTo webresource.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>src/client/webresources/js/sprk_wizard_commands.js</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback (E-03) noted inconsistent dialog sizes across wizards. Some open too large, some
+      too small. Standardizing to 60%x70% provides enough workspace for wizard content without
+      overwhelming the Dataverse form behind it.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Inventory all navigateTo calls">Grep for navigateTo across the codebase to find all wizard dialog open calls, including sprk_wizard_commands.js and any PCF/Code Page launch points.</step>
+    <step order="2" name="Audit current dimensions">Record the current width/height for each navigateTo call.</step>
+    <step order="3" name="Update sprk_wizard_commands.js">Set all wizard navigateTo calls in the commands file to width: {value: 60, unit: "%"}, height: {value: 70, unit: "%"}.</step>
+    <step order="4" name="Update other launch points">Update any other navigateTo calls found in step 1 to use the standard 60%x70% dimensions.</step>
+    <step order="5" name="Verify consistency">Re-grep for navigateTo and confirm all wizard dialogs use 60%x70%.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_wizard_commands.js</output>
+    <output type="code">Any other files containing wizard navigateTo calls</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateMatter dialog opens at 60% width, 70% height.</criterion>
+    <criterion testable="true">CreateProject dialog opens at 60% width, 70% height.</criterion>
+    <criterion testable="true">SummarizeFiles dialog opens at 60% width, 70% height.</criterion>
+    <criterion testable="true">PlaybookLibrary dialog opens at 60% width, 70% height.</criterion>
+    <criterion testable="true">All navigateTo wizard calls use consistent 60%x70% dimensions.</criterion>
+  </acceptance-criteria>
+</task>

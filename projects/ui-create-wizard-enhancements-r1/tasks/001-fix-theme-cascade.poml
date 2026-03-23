@@ -1,0 +1,72 @@
+<task id="WCWE-001" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Fix theme cascade — remove OS prefers-color-scheme fallback</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>frontend, fluent-ui, shared-library, theme</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Fix resolveCodePageTheme() and getEffectiveDarkMode() in the shared theme utilities to remove the
+    OS prefers-color-scheme media query as the final fallback (level 4). When no explicit Spaarke theme
+    is set, default to light mode. Also remove the prefers-color-scheme media query change listener
+    from setupCodePageThemeListener and setupThemeListener so OS-level dark mode toggles have zero
+    effect on Spaarke UI.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    Code Pages and shared components render in light mode by default. Dark mode activates only when
+    the Spaarke theme menu explicitly selects dark. OS dark mode preference has no effect on any
+    Spaarke UI surface.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">All UI must use Fluent UI v9 design tokens; theme is controlled by the Spaarke theme system, not the OS.</constraint>
+    <constraint source="ADR-012">Theme utilities live in @spaarke/ui-components shared library; changes propagate to all consumers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/codePageTheme.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback (E-17) identified that Code Pages incorrectly inherit OS dark mode via the
+      prefers-color-scheme media query fallback. Users on OS dark mode see dark UI even though they
+      never set Spaarke to dark mode. The theme cascade should be: (1) URL param, (2) localStorage,
+      (3) Dataverse user setting — and if none found, default to light.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Audit theme cascade">Read codePageTheme.ts and themeStorage.ts; map the current 4-level fallback chain and identify all references to prefers-color-scheme.</step>
+    <step order="2" name="Remove OS fallback from resolvers">In resolveCodePageTheme(), remove the level-4 prefers-color-scheme check; return light theme as default. Do the same in getEffectiveDarkMode().</step>
+    <step order="3" name="Remove media query listeners">In setupCodePageThemeListener and setupThemeListener, remove window.matchMedia('(prefers-color-scheme: dark)') event listeners.</step>
+    <step order="4" name="Update type signatures if needed">Ensure ThemeSource or similar enums no longer include an 'os' or 'system' variant if one exists.</step>
+    <step order="5" name="Verify build">Run npm build for Spaarke.UI.Components to confirm no compile errors.</step>
+    <step order="6" name="Search for other OS fallback references">Grep the codebase for prefers-color-scheme to ensure no other files still use it for theme decisions.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/codePageTheme.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code Pages render in light mode by default when no Spaarke theme is explicitly set.</criterion>
+    <criterion testable="true">Dark mode activates only when user selects dark via the Spaarke theme menu.</criterion>
+    <criterion testable="true">OS dark mode toggle has no effect on Spaarke UI rendering.</criterion>
+    <criterion testable="true">grep -r "prefers-color-scheme" src/client/shared/ returns zero results related to theme fallback logic.</criterion>
+    <criterion testable="true">Shared library builds without errors.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,76 @@
+<task id="WCWE-002" project="UI Create Wizard Enhancements R1">
+  <metadata>
+    <title>Replace hard-coded hex/rgb colors with Fluent UI v9 semantic tokens</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>frontend, fluent-ui, shared-library, theme, code-pages</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Replace all hard-coded hex colors (#xxx/#xxxxxx), rgb(), and rgba() values with Fluent UI v9
+    semantic design tokens across all .ts and .tsx files in the codebase. Use the specific mapping
+    from the spec:
+
+    - rgba(0,0,0,0.12) → tokens.colorNeutralStroke1
+    - rgba(0,0,0,0.3) / rgba(0,0,0,0.5) → tokens.colorBackgroundOverlay
+    - #292929 / #ffffff backgrounds → tokens.colorNeutralBackground1
+    - #d13438 / #a4262c reds → tokens.colorPaletteRedForeground1
+    - #fde7e9 error background → tokens.colorPaletteRedBackground1
+    - #666 muted text → tokens.colorNeutralForeground3
+    - #195ABD / #2987E6 blues → tokens.colorBrandForeground1 / tokens.colorBrandForeground2
+    - #444 / #ddd graph strokes → tokens.colorNeutralStroke2
+
+    Exclude: navbar detection constants, test fixtures, and type definition comments.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React, and Dataverse Code Pages</role>
+
+  <goal>
+    Zero hard-coded color values in .ts/.tsx production code. All colors reference Fluent UI v9
+    tokens, enabling automatic dark mode support and theme consistency.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-021">No hard-coded colors; all UI must use Fluent v9 design tokens for dark mode compatibility.</constraint>
+    <constraint source="ADR-012">Shared components in @spaarke/ui-components must be the single source of reusable styled elements.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT feedback (E-18) identified multiple hard-coded colors that break dark mode rendering and
+      violate ADR-021. These colors were introduced incrementally across shared components, Code Pages,
+      and PCF controls. A systematic sweep is needed to replace them all with semantic tokens.
+    </background>
+    <dependencies />
+  </context>
+
+  <steps>
+    <step order="1" name="Inventory hard-coded colors">Grep all .ts/.tsx files for hex color patterns (#[0-9a-fA-F]{3,8}), rgb(, and rgba( to build a complete inventory.</step>
+    <step order="2" name="Classify each occurrence">For each match, determine: (a) which Fluent token maps to it per the spec, (b) whether it is an exclusion (navbar constant, test fixture, type comment).</step>
+    <step order="3" name="Replace in shared library">Update files in src/client/shared/Spaarke.UI.Components/ — add tokens import where missing, replace values.</step>
+    <step order="4" name="Replace in Code Pages">Update files in src/solutions/ and src/client/code-pages/ with token replacements.</step>
+    <step order="5" name="Replace in PCF controls">Update files in src/client/pcf/ with token replacements.</step>
+    <step order="6" name="Verify builds">Build shared library, at least one Code Page, and at least one PCF control to confirm no compile errors.</step>
+    <step order="7" name="Final grep verification">Re-run the grep from step 1 and confirm only excluded items remain.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Multiple .ts/.tsx files across src/client/shared/, src/solutions/, src/client/code-pages/, src/client/pcf/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep -rE "#[0-9a-fA-F]{3,8}|rgba?\(" --include="*.ts" --include="*.tsx" src/ returns zero results in production code (excluding navbar detection constants, test fixtures, type def comments).</criterion>
+    <criterion testable="true">All modified projects build without TypeScript errors.</criterion>
+    <criterion testable="true">Each replacement uses the correct semantic token from the spec mapping.</criterion>
+    <criterion testable="true">tokens import from @fluentui/react-components is present in every file that uses tokens.</criterion>
+  </acceptance-criteria>
+</task>
