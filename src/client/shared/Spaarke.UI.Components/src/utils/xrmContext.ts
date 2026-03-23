@@ -246,6 +246,9 @@ export function isPcfContext(): boolean {
  * Detect the current theme from the host environment.
  * Uses Xrm.Utility.getGlobalContext().userSettings when available.
  *
+ * OS `prefers-color-scheme` is intentionally NOT consulted — ADR-021 requires
+ * the Spaarke theme system (not the OS) to control all UI surfaces.
+ *
  * @returns Object with isDarkTheme boolean and source of detection
  *
  * @example
@@ -258,7 +261,7 @@ export function isPcfContext(): boolean {
  */
 export function detectThemeFromHost(): {
   isDarkTheme: boolean;
-  source: 'xrm' | 'media-query' | 'default';
+  source: 'xrm' | 'default';
 } {
   // Try Xrm global context first
   try {
@@ -276,20 +279,7 @@ export function detectThemeFromHost(): {
     // Xrm context not available or error accessing
   }
 
-  // Fall back to prefers-color-scheme media query
-  try {
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      return {
-        isDarkTheme: darkModeQuery.matches,
-        source: 'media-query',
-      };
-    }
-  } catch {
-    // matchMedia not available
-  }
-
-  // Default to light theme
+  // Default: light theme (OS prefers-color-scheme is intentionally NOT consulted)
   return {
     isDarkTheme: false,
     source: 'default',

@@ -208,30 +208,8 @@ describe('xrmContext', () => {
       expect(result.source).toBe('xrm');
     });
 
-    it('should fall back to media query when Xrm is not available', () => {
-      // Mock matchMedia
-      const mockMatchMedia = jest.fn().mockReturnValue({
-        matches: true,
-        media: '(prefers-color-scheme: dark)',
-      });
-      Object.defineProperty(window, 'matchMedia', {
-        value: mockMatchMedia,
-        writable: true,
-      });
-
-      const result = detectThemeFromHost();
-
-      expect(result.source).toBe('media-query');
-      expect(mockMatchMedia).toHaveBeenCalledWith('(prefers-color-scheme: dark)');
-    });
-
-    it('should return default light theme when no detection method works', () => {
-      // Ensure matchMedia is not available
-      Object.defineProperty(window, 'matchMedia', {
-        value: undefined,
-        writable: true,
-      });
-
+    it('should return default light theme when Xrm is not available', () => {
+      // Xrm not available — should NOT fall back to OS prefers-color-scheme (ADR-021)
       const result = detectThemeFromHost();
 
       expect(result.isDarkTheme).toBe(false);

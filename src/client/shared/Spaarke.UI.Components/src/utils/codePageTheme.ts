@@ -3,12 +3,15 @@
  *
  * Theme resolution for standalone Code Page wrappers (HTML pages loaded via
  * Xrm.Navigation.navigateTo). Unlike PCF controls, Code Pages do NOT have a
- * ComponentFramework context, so theme detection relies on a 4-level cascade:
+ * ComponentFramework context, so theme detection relies on a 3-level cascade:
  *
  * 1. localStorage (`spaarke-theme` key) - user's explicit preference
  * 2. URL `flags` param with `themeOption=dark|light`
  * 3. Navbar DOM color detection (Dataverse model-driven app context)
- * 4. System preference (`prefers-color-scheme` media query)
+ *
+ * When no preference is found, light theme is used as the default.
+ * OS-level `prefers-color-scheme` is intentionally NOT consulted — ADR-021
+ * requires the Spaarke theme system (not the OS) to control all UI surfaces.
  *
  * @see ADR-021 - Fluent UI v9 Design System (dark mode required)
  * @see ADR-012 - Shared component library
@@ -134,13 +137,16 @@ export function detectDarkModeFromNavbar(): boolean | null {
 // ============================================================================
 
 /**
- * Resolve the Fluent UI v9 theme for a Code Page using the 4-level cascade.
+ * Resolve the Fluent UI v9 theme for a Code Page using the 3-level cascade.
  *
  * Priority:
  * 1. **localStorage** (`spaarke-theme` key) - user's explicit dark/light choice
  * 2. **URL flags** (`flags` param with `themeOption=dark|light`)
  * 3. **Navbar DOM** - reads Dataverse navbar background-color luminance
- * 4. **System preference** - `prefers-color-scheme` media query
+ *
+ * Falls back to **light theme** when no preference is found.
+ * OS `prefers-color-scheme` is NOT consulted — ADR-021 requires the Spaarke
+ * theme system to control all UI surfaces, not the operating system.
  *
  * This function does NOT require a PCF `ComponentFramework.Context` and is
  * designed exclusively for Code Page wrappers.
@@ -173,10 +179,8 @@ export function resolveCodePageTheme(): Theme {
     const navbarDark = detectDarkModeFromNavbar();
     if (navbarDark !== null) return navbarDark ? webDarkTheme : webLightTheme;
 
-    // 4. System preference
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches
-      ? webDarkTheme
-      : webLightTheme;
+    // Default: light theme (OS prefers-color-scheme is intentionally NOT consulted)
+    return webLightTheme;
   } catch {
     // Fallback to light theme on any error
     return webLightTheme;
@@ -200,7 +204,9 @@ export type CodePageThemeChangeHandler = (theme: Theme) => void;
  * Listens for:
  * - **localStorage changes** from other tabs (`storage` event on `spaarke-theme` key)
  * - **Same-tab theme changes** (`spaarke-theme-change` custom event from theme menu)
- * - **System preference changes** (`prefers-color-scheme` media query, only when preference is 'auto')
+ *
+ * OS `prefers-color-scheme` changes are intentionally NOT listened to — ADR-021
+ * requires the Spaarke theme system (not the OS) to control all UI surfaces.
  *
  * @param onChange - Callback invoked with the newly resolved theme
  * @returns Cleanup function to remove all listeners
@@ -238,22 +244,11 @@ export function setupCodePageThemeListener(onChange: CodePageThemeChangeHandler)
     resolveAndNotify();
   };
 
-  // Listen for system preference changes (only relevant when user preference is 'auto')
-  const handleSystemChange = () => {
-    if (getUserThemePreference() === 'auto') {
-      resolveAndNotify();
-    }
-  };
-
   window.addEventListener('storage', handleStorageChange);
   window.addEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-
-  const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
-  mediaQuery?.addEventListener('change', handleSystemChange);
 
   return () => {
     window.removeEventListener('storage', handleStorageChange);
     window.removeEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-    mediaQuery?.removeEventListener('change', handleSystemChange);
   };
 }

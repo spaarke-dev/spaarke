@@ -60,7 +60,10 @@ export function setUserThemePreference(theme: ThemePreference): void {
  * 1. localStorage (user's explicit preference)
  * 2. Power Platform context (fluentDesignLanguage.isDarkTheme)
  * 3. DOM navbar detection (Custom Pages fallback)
- * 4. System preference (OS/browser)
+ *
+ * Defaults to false (light mode) when no preference is found.
+ * OS `prefers-color-scheme` is intentionally NOT consulted — ADR-021 requires
+ * the Spaarke theme system (not the OS) to control all UI surfaces.
  *
  * @param context - PCF context (optional)
  * @returns true if dark mode should be active
@@ -85,8 +88,8 @@ export function getEffectiveDarkMode(context?: any): boolean {
     if (bg === 'rgb(240, 240, 240)') return false; // Light mode navbar
   }
 
-  // Final fallback to system preference
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+  // Default: light mode (OS prefers-color-scheme is intentionally NOT consulted)
+  return false;
 }
 
 /**
@@ -112,7 +115,9 @@ export interface ThemeChangeHandler {
  * Listens for:
  * - localStorage changes from other tabs
  * - Custom events from same-tab theme menu
- * - System preference changes (for auto mode)
+ *
+ * OS `prefers-color-scheme` changes are intentionally NOT listened to — ADR-021
+ * requires the Spaarke theme system (not the OS) to control all UI surfaces.
  *
  * @param onChange - Callback when theme changes
  * @param context - PCF context (optional, for re-evaluating effective theme)
@@ -129,23 +134,13 @@ export function setupThemeListener(onChange: ThemeChangeHandler, context?: any):
     onChange(getEffectiveDarkMode(context));
   };
 
-  const handleSystemChange = (event: MediaQueryListEvent) => {
-    if (getUserThemePreference() === 'auto') {
-      onChange(event.matches);
-    }
-  };
-
   // Add listeners
   window.addEventListener('storage', handleStorageChange);
   window.addEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-
-  const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
-  mediaQuery?.addEventListener('change', handleSystemChange);
 
   // Return cleanup function
   return () => {
     window.removeEventListener('storage', handleStorageChange);
     window.removeEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-    mediaQuery?.removeEventListener('change', handleSystemChange);
   };
 }
