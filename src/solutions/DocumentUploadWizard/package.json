@@ -15,13 +15,13 @@
     "@fluentui/react-icons": "^2.0.0",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@azure/msal-browser": "^4.30.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@types/xrm": "^9.0.0",
     "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.4.0",
