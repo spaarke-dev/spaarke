@@ -1,10 +1,10 @@
 /**
  * SendEmailStep.tsx
- * Follow-on step for "Send Email to Client" in the Create New Matter wizard.
+ * Follow-on step for "Send Notification Email" in the Create New Matter wizard.
  *
  * Layout:
  *   ┌──────────────────────────────────────────────────────────────────────┐
- *   │  Send Email to Client                                                 │
+ *   │  Send Notification Email                                              │
  *   │  Compose an introductory email. It will be created as a Dataverse   │
  *   │  email activity linked to this matter.                               │
  *   │                                                                       │
@@ -189,7 +189,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
       {/* Header */}
       <div className={styles.headerText}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-          Send Email to Client
+          Send Notification Email
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
           Compose an introductory email. It will be created as an email activity

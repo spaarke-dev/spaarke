@@ -8,17 +8,17 @@ var Spaarke = Spaarke || {};
 Spaarke.Commands = Spaarke.Commands || {};
 Spaarke.Commands.Wizards = (function () {
 
-  // Common dialog options
+  // Common dialog options — standardized to 60% x 70% per UAT feedback E-03
   var DIALOG_OPTIONS = {
     target: 2,
-    width: { value: 85, unit: "%" },
-    height: { value: 85, unit: "%" }
+    width: { value: 60, unit: "%" },
+    height: { value: 70, unit: "%" }
   };
 
   var SMALL_DIALOG_OPTIONS = {
     target: 2,
-    width: { value: 70, unit: "%" },
-    height: { value: 80, unit: "%" }
+    width: { value: 60, unit: "%" },
+    height: { value: 70, unit: "%" }
   };
 
   /**

@@ -18,7 +18,7 @@ import type { ILookupItem } from '../../../types/LookupTypes';
 // ---------------------------------------------------------------------------
 
 export interface ISendEmailStepProps {
-  /** Optional step title override (default: "Send Email to Client"). */
+  /** Optional step title override (default: "Send Notification Email"). */
   title?: string;
   /** Controlled "To" value (email address string). */
   emailTo: string;
@@ -88,7 +88,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
-  title = 'Send Email to Client',
+  title = 'Send Notification Email',
   emailTo: _emailTo,
   onEmailToChange,
   emailCc,

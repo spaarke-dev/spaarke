@@ -73,7 +73,7 @@ async function openPlaybookIntent(intent: string, onDialogClose?: () => void): P
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (window as any).Xrm?.Navigation?.navigateTo(
       { pageType: "webresource", webresourceName: "sprk_playbooklibrary", data },
-      { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Playbook Library" }
+      { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Playbook Library" }
     );
     onDialogClose?.();
   } catch {

@@ -90,9 +90,9 @@ const CARD_DEFS: IFollowOnCardDef[] = [
   },
   {
     id: 'send-email',
-    label: 'Send Email to Client',
+    label: 'Send Notification Email',
     description: 'Compose and queue an introductory email to the client.',
-    stepLabel: 'Send Email',
+    stepLabel: 'Send Notification Email',
     icon: <MailRegular fontSize={28} />,
   },
 ];

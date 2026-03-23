@@ -1,6 +1,6 @@
 /**
  * SendEmailStep.tsx
- * Follow-on step for "Send Email to Client" in the Create New Matter wizard.
+ * Follow-on step for "Send Notification Email" in the Create New Matter wizard.
  *
  * "To" field uses LookupField searching the systemuser table.
  * Subject is pre-filled: "New Matter: {matterName}"
@@ -175,7 +175,7 @@ export const SendEmailStep: React.FC<ISendEmailStepProps> = ({
       {/* Header */}
       <div className={styles.headerText}>
         <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-          Send Email to Client
+          Send Notification Email
         </Text>
         <Text size={200} className={styles.stepSubtitle}>
           Compose an introductory email. It will be created as an email activity
