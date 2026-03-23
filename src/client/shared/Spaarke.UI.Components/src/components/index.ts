@@ -96,3 +96,6 @@ export * from './PlaybookLibraryShell';
 
 // WorkspaceShell - Declarative workspace layout (shell, section panels, action cards, metric cards)
 export * from './WorkspaceShell';
+
+// AssociateToStep - Wizard step for optionally associating a new record with an existing parent
+export * from './AssociateToStep';
