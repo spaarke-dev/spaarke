@@ -2,7 +2,7 @@
   <metadata>
     <title>Propagate bffBaseUrl via navigateTo data params from all launch points</title>
     <phase>3</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <tags>frontend, webresource</tags>
     <dependencies>none</dependencies>

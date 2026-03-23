@@ -57,7 +57,7 @@ No file overlap between tracks.
 | 021 | IAnalysisDataverseService scope association | bff-api, dataverse | — | 🔲 |
 | 022 | Rewrite analysisService.ts for BFF API | shared-library, ai | 020, 021 | 🔲 |
 | 023 | MSAL auth standardization across Code Pages | code-pages, auth | — | 🔲 |
-| 024 | bffBaseUrl propagation from launch points | webresource | — | 🔲 |
+| 024 | bffBaseUrl propagation from launch points | webresource | — | ✅ |
 | 025 | Phase 3 deploy + verify | deploy | 020-024 | 🔲 |
 
 ## Phase 4: Wizard Flow Enhancements (~18 hours)
