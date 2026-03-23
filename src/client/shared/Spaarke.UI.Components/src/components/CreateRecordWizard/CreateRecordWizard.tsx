@@ -16,15 +16,21 @@
  *   - config.onFinish: record creation + success screen
  *   - Search callbacks (contacts, organizations, users)
  *
- * Steps:
- *   [0] Associate To — optional; only when config.associateToStep is provided
- *   [1] Add file(s)  — always skip-able (canAdvance: true)
- *   [2] Entity info  — from config.infoStep
- *   [3] Next Steps   — follow-on action card selection
- *   [4+] Dynamic     — Assign Resources, Draft Summary, Send Email
+ * Steps (with optional associateToStep):
+ *   [0] Associate To -- optional; only present when config.associateToStep is set
+ *   [1] Add file(s)  -- always skip-able (canAdvance: true)
+ *   [2] Entity info  -- from config.infoStep
+ *   [3] Next Steps   -- follow-on action card selection
+ *   [4+] Dynamic     -- Assign Resources, Draft Summary, Send Email
  *
- * @see WizardShell — underlying generic dialog shell
- * @see ADR-012 — Shared Component Library
+ * Steps (without associateToStep):
+ *   [0] Add file(s)  -- always skip-able (canAdvance: true)
+ *   [1] Entity info  -- from config.infoStep
+ *   [2] Next Steps   -- follow-on action card selection
+ *   [3+] Dynamic     -- Assign Resources, Draft Summary, Send Email
+ *
+ * @see WizardShell -- underlying generic dialog shell
+ * @see ADR-012 -- Shared Component Library
  */
 import * as React from 'react';
 import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
@@ -37,7 +43,8 @@ import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 
-import type { ICreateRecordWizardProps, FollowOnActionId, IRecipientItem } from './types';
+import type { ICreateRecordWizardProps, FollowOnActionId, IRecipientItem, AssociationResult } from './types';
+import { AssociateToStep } from '../AssociateToStep/AssociateToStep';
 
 import {
   NextStepsStep,
@@ -49,9 +56,6 @@ import {
 import { AssignResourcesStep } from './steps/AssignResourcesStep';
 import { DraftSummaryStep } from './steps/DraftSummaryStep';
 import { SendEmailStep } from './steps/SendEmailStep';
-
-import { AssociateToStep } from '../AssociateToStep/AssociateToStep';
-import type { AssociationResult } from '../AssociateToStep/types';
 
 // ---------------------------------------------------------------------------
 // File reducer
@@ -115,7 +119,7 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Empty search callback (for when entity doesn't provide search)
+// Empty search callback (for when entity does not provide search)
 // ---------------------------------------------------------------------------
 
 const EMPTY_SEARCH = () => Promise.resolve([] as ILookupItem[]);
@@ -128,21 +132,19 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
-  // ── Associate To state ──────────────────────────────────────────────────
-  const [associationResult, setAssociationResult] = React.useState<AssociationResult | null>(null);
-  const associationResultRef = React.useRef<AssociationResult | null>(null);
-  associationResultRef.current = associationResult;
-
-  // ── File state ──────────────────────────────────────────────────────────
+  // -- File state --
   const [fileState, fileDispatch] = React.useReducer(fileReducer, {
     uploadedFiles: [],
     validationErrors: [],
   });
 
-  // ── Follow-on step selections ───────────────────────────────────────────
+  // -- Association state (AssociateToStep -- optional step 1) --
+  const [association, setAssociation] = React.useState<AssociationResult | null>(null);
+
+  // -- Follow-on step selections --
   const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
 
-  // ── Assign Resources state ──────────────────────────────────────────────
+  // -- Assign Resources state --
   const [assignedAttorneyId, setAssignedAttorneyId] = React.useState('');
   const [assignedAttorneyName, setAssignedAttorneyName] = React.useState('');
   const [assignedParalegalId, setAssignedParalegalId] = React.useState('');
@@ -151,17 +153,17 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const [assignedOutsideCounselName, setAssignedOutsideCounselName] = React.useState('');
   const [notifyResources, setNotifyResources] = React.useState(false);
 
-  // ── Draft Summary state ─────────────────────────────────────────────────
+  // -- Draft Summary state --
   const [summaryText, setSummaryText] = React.useState('');
   const [recipients, setRecipients] = React.useState<IRecipientItem[]>([]);
   const [ccRecipients, setCcRecipients] = React.useState<IRecipientItem[]>([]);
 
-  // ── Send Email state ────────────────────────────────────────────────────
+  // -- Send Email state --
   const [emailTo, setEmailTo] = React.useState('');
   const [emailSubject, setEmailSubject] = React.useState('');
   const [emailBody, setEmailBody] = React.useState('');
 
-  // ── SPE container ID ────────────────────────────────────────────────────
+  // -- SPE container ID --
   const [speContainerId, setSpeContainerId] = React.useState('');
 
   React.useEffect(() => {
@@ -170,11 +172,11 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     }
   }, [open, config]);
 
-  // ── Reset all state on open ─────────────────────────────────────────────
+  // -- Reset all state on open --
   React.useEffect(() => {
     if (open) {
-      setAssociationResult(null);
       fileDispatch({ type: 'RESET' });
+      setAssociation(null);
       setSelectedActions([]);
       setAssignedAttorneyId('');
       setAssignedAttorneyName('');
@@ -192,7 +194,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     }
   }, [open]);
 
-  // ── Refs for stale closure prevention in dynamic step renderContent ─────
+  // -- Refs for stale closure prevention in dynamic step renderContent --
+  const associationRef = React.useRef(association);
+  associationRef.current = association;
   const notifyResourcesRef = React.useRef(notifyResources);
   notifyResourcesRef.current = notifyResources;
   const summaryTextRef = React.useRef(summaryText);
@@ -228,12 +232,12 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const assignedOutsideCounselNameRef = React.useRef(assignedOutsideCounselName);
   assignedOutsideCounselNameRef.current = assignedOutsideCounselName;
 
-  // ── Search callbacks (from config, with fallbacks) ──────────────────────
+  // -- Search callbacks (from config, with fallbacks) --
   const searchContacts = config.searchContacts ?? EMPTY_SEARCH;
   const searchOrganizations = config.searchOrganizations ?? EMPTY_SEARCH;
   const searchUsers = config.searchUsers ?? EMPTY_SEARCH;
 
-  // ── Assign Resources change handlers ────────────────────────────────────
+  // -- Assign Resources change handlers --
   const handleAttorneyChange = React.useCallback((item: ILookupItem | null) => {
     setAssignedAttorneyId(item?.id ?? '');
     setAssignedAttorneyName(item?.name ?? '');
@@ -247,7 +251,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     setAssignedOutsideCounselName(item?.name ?? '');
   }, []);
 
-  // ── Sync dynamic steps with selected action cards ───────────────────────
+  // -- Sync dynamic steps with selected action cards --
   const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
 
   React.useEffect(() => {
@@ -362,7 +366,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     config,
   ]);
 
-  // ── Email pre-fill when send-email is selected ──────────────────────────
+  // -- Email pre-fill when send-email is selected --
   React.useEffect(() => {
     if (selectedActions.includes('send-email') && !emailSubject) {
       const entityName = config.getEntityName?.() ?? '';
@@ -379,7 +383,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     }
   }, [selectedActions, emailSubject, config]);
 
-  // ── File handler callbacks ──────────────────────────────────────────────
+  // -- File handler callbacks --
   const handleFilesAccepted = React.useCallback(
     (files: IUploadedFile[]) => fileDispatch({ type: 'ADD_FILES', files }),
     []
@@ -391,13 +395,13 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const handleRemoveFile = React.useCallback((fileId: string) => fileDispatch({ type: 'REMOVE_FILE', fileId }), []);
   const handleClearErrors = React.useCallback(() => fileDispatch({ type: 'CLEAR_VALIDATION_ERRORS' }), []);
 
-  // ── Finish handler ──────────────────────────────────────────────────────
+  // -- Finish handler --
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     return config.onFinish({
       uploadedFiles: fileStateRef.current.uploadedFiles,
       speContainerId: speContainerIdRef.current,
       selectedActions: selectedActionsRef.current,
-      association: associationResultRef.current,
+      association: associationRef.current,
       followOn: {
         assignedAttorneyId: assignedAttorneyIdRef.current,
         assignedAttorneyName: assignedAttorneyNameRef.current,
@@ -416,13 +420,11 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     });
   }, [config]);
 
-  // ── Step configurations ─────────────────────────────────────────────────
+  // -- Step configurations --
   const filesStepSubtitle = config.filesStepSubtitle ?? 'Upload documents for AI analysis, or click Next to skip.';
 
   const stepConfigs: IWizardStepConfig[] = React.useMemo(
     () => {
-      const associateToConfig = config.associateToStep;
-
       const addFilesStep: IWizardStepConfig = {
         id: 'add-files',
         label: 'Add file(s)',
@@ -460,14 +462,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
         ),
       };
 
-      const infoStep: IWizardStepConfig = {
+      const infoStepConfig: IWizardStepConfig = {
         id: config.infoStep.id,
         label: config.infoStep.label,
         canAdvance: config.infoStep.canAdvance,
         renderContent: () => config.infoStep.renderContent(fileStateRef.current.uploadedFiles),
       };
 
-      const nextStepsStep: IWizardStepConfig = {
+      const nextStepsConfig: IWizardStepConfig = {
         id: 'next-steps',
         label: 'Next Steps',
         canAdvance: () => true,
@@ -481,44 +483,35 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
         ),
       };
 
-      const coreSteps: IWizardStepConfig[] = [addFilesStep, infoStep, nextStepsStep];
-
-      if (!associateToConfig) {
-        return coreSteps;
+      if (config.associateToStep) {
+        const { entityTypes, navigationService } = config.associateToStep;
+        const associateStepConfig: IWizardStepConfig = {
+          id: 'associate-to',
+          label: 'Associate To',
+          canAdvance: () => true, // optional -- always advanceable
+          isSkippable: true,
+          renderContent: (handle) => (
+            <AssociateToStep
+              entityTypes={entityTypes}
+              navigationService={navigationService}
+              value={associationRef.current}
+              onChange={setAssociation}
+              onSkip={() => {
+                setAssociation(null);
+                handle.nextStep();
+              }}
+            />
+          ),
+        };
+        return [associateStepConfig, addFilesStep, infoStepConfig, nextStepsConfig];
       }
 
-      // Prepend the optional Associate To step when configured.
-      // The step is always skip-able — Next button is always enabled so
-      // the user can proceed with or without selecting a record.
-      const associateStep: IWizardStepConfig = {
-        id: 'associate-to',
-        label: 'Associate To',
-        canAdvance: () => true, // optional — always advance-able
-        isSkippable: true,
-        renderContent: (handle) => (
-          <AssociateToStep
-            entityTypes={associateToConfig.entityTypes}
-            navigationService={associateToConfig.navigationService}
-            value={associationResultRef.current}
-            onChange={setAssociationResult}
-            onSkip={() => {
-              setAssociationResult(null);
-              // Advance the wizard via the shell handle's requestUpdate
-              // then rely on the Next button for advancement.
-              // The WizardShell Skip button (isSkippable) handles navigation.
-              handle.requestUpdate();
-            }}
-          />
-        ),
-      };
-
-      return [associateStep, ...coreSteps];
+      return [addFilesStep, infoStepConfig, nextStepsConfig];
     },
     [
       fileState.uploadedFiles,
       fileState.validationErrors,
       selectedActions,
-      associationResult,
       config,
       styles,
       filesStepSubtitle,
@@ -529,7 +522,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     ]
   );
 
-  // ── Render ──────────────────────────────────────────────────────────────
+  // -- Render --
   return (
     <WizardShell
       ref={shellRef}

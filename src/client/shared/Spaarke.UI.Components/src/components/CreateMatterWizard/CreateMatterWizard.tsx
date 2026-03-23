@@ -3,10 +3,20 @@
  * Main exported component for the "Create New Matter" wizard.
  *
  * This is a thin wrapper around CreateRecordWizard that provides:
+ *   - AssociateToStep as step 1 (optional, links matter to a Project or Account via N:N)
  *   - Entity-specific form step (CreateRecordStep)
- *   - Finish handler (MatterService.createMatter + success screen)
+ *   - Finish handler (MatterService.createMatter + success screen + N:N association)
  *   - Search callbacks (contacts, organizations, users)
  *   - Email template builders
+ *
+ * Step sequence:
+ *   1. Associate To  — optional; links to Project (sprk_project) or Account (account)
+ *   2. Add file(s)   — upload documents for AI pre-fill
+ *   3. Enter Info    — matter form fields
+ *   4. Next Steps    — follow-on action selection
+ *
+ * After matter creation, if a Project association was selected, the N:N
+ * sprk_Project_Matter_nn relationship is established via IDataService.
  *
  * All generic wizard mechanics (file upload, follow-on steps, state
  * management) are handled by the shared CreateRecordWizard component.
@@ -37,6 +47,74 @@ import {
 } from './matterService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { AssociationResult } from '../AssociateToStep/types';
+
+// ---------------------------------------------------------------------------
+// Association helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a Dataverse association between the newly created matter and the
+ * record selected in AssociateToStep.
+ *
+ * - sprk_project: uses the N:N relationship sprk_Project_Matter_nn
+ * - account: uses a direct $ref association on the matter's account lookup
+ *
+ * Returns a success/failure result; never throws.
+ */
+async function associateToRecord(
+  dataService: IDataService,
+  matterId: string,
+  association: AssociationResult
+): Promise<{ success: boolean }> {
+  try {
+    const { entityType, recordId } = association;
+
+    if (entityType === 'sprk_project') {
+      // N:N association via the relationship collection navigation property.
+      // Dataverse REST API: POST /sprk_projects({projectId})/sprk_Project_Matter_nn/$ref
+      // Body: { "@odata.id": "[base]/sprk_matters({matterId})" }
+      const apiBase = '/api/data/v9.0';
+      const url = `${apiBase}/sprk_projects(${recordId})/sprk_Project_Matter_nn/$ref`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json; odata.metadata=minimal' },
+        body: JSON.stringify({ '@odata.id': `${apiBase}/sprk_matters(${matterId})` }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.statusText);
+        console.warn('[CreateMatterWizard] N:N association response not OK:', resp.status, text);
+        return { success: false };
+      }
+      console.info(
+        '[CreateMatterWizard] N:N association created:',
+        `sprk_project(${recordId}) <-> sprk_matter(${matterId})`
+      );
+      return { success: true };
+    }
+
+    if (entityType === 'account') {
+      // For account: update the matter record's account lookup via @odata.bind.
+      // This is a N:1 association on the matter side.
+      await dataService.updateRecord('sprk_matter', matterId, {
+        'sprk_Account@odata.bind': `/accounts(${recordId})`,
+      });
+      console.info(
+        '[CreateMatterWizard] Account association set:',
+        `account(${recordId}) -> sprk_matter(${matterId})`
+      );
+      return { success: true };
+    }
+
+    // Unsupported entity type -- skip silently
+    console.warn('[CreateMatterWizard] Unsupported association entity type:', entityType);
+    return { success: true };
+  } catch (err) {
+    console.warn('[CreateMatterWizard] Association failed:', err instanceof Error ? err.message : err);
+    return { success: false };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -146,6 +224,21 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         'Upload documents for AI analysis. The AI will extract key information to pre-fill the matter form.',
       finishingLabel: 'Creating matter\u2026',
 
+      // Associate To step — optional step 1.
+      // Requires navigationService (for the Dataverse lookup dialog).
+      // Allows linking the new matter to a Project or Account before creation.
+      ...(navigationService
+        ? {
+            associateToStep: {
+              entityTypes: [
+                { label: 'Project', entityType: 'sprk_project' },
+                { label: 'Account', entityType: 'account' },
+              ],
+              navigationService,
+            },
+          }
+        : {}),
+
       infoStep: {
         id: 'create-record',
         label: 'Enter Info',
@@ -243,6 +336,24 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
         const matterId = result.matterId!;
         const matterName = result.matterName!;
+
+        // -- Wire N:N association (sprk_Project_Matter_nn) --
+        // If the user selected an association in step 1, create the link now.
+        // This is a non-blocking operation -- failure produces a warning, not an error.
+        if (context.association?.recordId) {
+          const assocResult = await associateToRecord(
+            dataService,
+            matterId,
+            context.association
+          );
+          if (!assocResult.success) {
+            result.warnings.push(
+              `Matter created, but could not link to "${context.association.recordName}". ` +
+              'You can associate them manually from the matter record.'
+            );
+          }
+        }
+
         const hasWarnings = result.warnings.length > 0;
 
         const viewMatter = () => {

@@ -223,6 +223,10 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
         forceRender();
       },
 
+      nextStep() {
+        dispatch({ type: 'NEXT_STEP' });
+      },
+
       get state() {
         return shellState;
       },
@@ -345,6 +349,9 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       },
       requestUpdate() {
         forceRender();
+      },
+      nextStep() {
+        dispatch({ type: 'NEXT_STEP' });
       },
       get state() {
         return shellState;

@@ -171,6 +171,12 @@ export interface IWizardShellHandle {
    * `canAdvance()` but doesn't otherwise trigger a shell re-render.
    */
   requestUpdate(): void;
+  /**
+   * Advance to the next step programmatically.
+   * Equivalent to the user clicking Next / Skip in the footer.
+   * No-op if the wizard is already on the last step or is finishing.
+   */
+  nextStep(): void;
   /** Read-only snapshot of the current shell state. */
   readonly state: IWizardShellState;
 }

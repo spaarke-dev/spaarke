@@ -30,9 +30,12 @@ export type {
   IFinishContext,
   IFollowOnState,
   IEntityInfoStep,
+  IAssociateToStepConfig,
   FollowOnActionId,
   IRecipientItem,
   SearchCallback,
+  AssociationResult,
+  EntityTypeOption,
 } from './types';
 
 // Step prop types
