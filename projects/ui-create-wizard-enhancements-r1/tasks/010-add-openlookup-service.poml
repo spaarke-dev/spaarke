@@ -2,7 +2,7 @@
   <metadata>
     <title>Add openLookup() method to INavigationService interface</title>
     <phase>2</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <tags>frontend, shared-library, service-interfaces</tags>
     <dependencies>none</dependencies>

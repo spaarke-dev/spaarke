@@ -2,7 +2,7 @@
   <metadata>
     <title>Standardize MSAL auth across all wizard Code Pages</title>
     <phase>3</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <tags>frontend, code-pages, auth</tags>
     <dependencies>none</dependencies>

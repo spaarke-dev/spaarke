@@ -24,13 +24,41 @@ import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { PlaybookLibraryShell } from "@spaarke/ui-components/components/PlaybookLibraryShell";
+import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
   const params = React.useMemo(() => parseDataParams(), []);
+  const [isAuthReady, setIsAuthReady] = React.useState(false);
+  const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function initialize(): Promise<void> {
+      try {
+        const config = await resolveRuntimeConfig();
+        await initAuth({
+          clientId: config.msalClientId,
+          bffBaseUrl: config.bffBaseUrl,
+          bffApiScope: config.bffOAuthScope,
+          tenantId: config.tenantId || undefined,
+          proactiveRefresh: true,
+        });
+        if (!cancelled) {
+          setResolvedBffBaseUrl(config.bffBaseUrl);
+          setIsAuthReady(true);
+        }
+      } catch (err) {
+        console.error("[PlaybookLibrary] Failed to initialize auth:", err);
+        if (!cancelled) setIsAuthReady(true);
+      }
+    }
+    void initialize();
+    return () => { cancelled = true; };
   }, []);
 
   const dataService = React.useMemo(() => createXrmDataService(), []);
@@ -45,6 +73,16 @@ function App() {
   const intent = params.intent;
   const mode = intent ? "intent" as const : undefined;
 
+  if (!isAuthReady) {
+    return (
+      <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+          <span>Initializing...</span>
+        </div>
+      </FluentProvider>
+    );
+  }
+
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <PlaybookLibraryShell
@@ -54,6 +92,8 @@ function App() {
         entityId={params.entityId || ""}
         embedded={true}
         onClose={handleClose}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={resolvedBffBaseUrl}
         {...(mode ? { mode, intent } : {})}
       />
     </FluentProvider>

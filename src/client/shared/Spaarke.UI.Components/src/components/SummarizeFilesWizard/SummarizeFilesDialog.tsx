@@ -468,7 +468,10 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     // ── Send Email via BFF ────────────────────────────────────────────
     if (currentSelectedActions.includes('send-email') && currentEmailTo.trim()) {
       try {
-        const fetchFn = authenticatedFetch ?? window.fetch.bind(window);
+        if (!authenticatedFetch) {
+          throw new Error('[SummarizeFilesDialog] authenticatedFetch is required — unauthenticated BFF calls are not permitted.');
+        }
+        const fetchFn = authenticatedFetch;
         const baseUrl = bffBaseUrl ?? '';
         const response = await fetchFn(
           `${baseUrl}/api/communications/send`,

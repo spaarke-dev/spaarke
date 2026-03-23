@@ -93,3 +93,6 @@ export * from './SlashCommandMenu';
 
 // PlaybookLibraryShell - Shared playbook browsing + execution shell (extracted from AnalysisBuilder)
 export * from './PlaybookLibraryShell';
+
+// WorkspaceShell - Declarative workspace layout (shell, section panels, action cards, metric cards)
+export * from './WorkspaceShell';
