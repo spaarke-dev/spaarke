@@ -406,6 +406,102 @@ public class DataverseWebApiService : IDataverseService
         return outputId;
     }
 
+    /// <summary>
+    /// Associates skill, knowledge, and tool scope records with an analysis via N:N relationships.
+    /// Empty collections are silently skipped. Already-existing associations (HTTP 400) are tolerated.
+    /// Uses OData $ref POST: POST /sprk_analysises({id})/{relationship}/$ref
+    /// Failures for individual items are aggregated and thrown as a single exception.
+    /// Relationships: sprk_analysis_skill, sprk_analysis_knowledge, sprk_analysis_tool.
+    /// </summary>
+    public async Task AssociateScopesAsync(
+        Guid analysisId,
+        IEnumerable<Guid> skillIds,
+        IEnumerable<Guid> knowledgeIds,
+        IEnumerable<Guid> toolIds,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<string>();
+
+        // Helper: POST /sprk_analysises({analysisId})/{relationship}/$ref
+        async Task AssociateOneAsync(string relationship, string relatedEntitySet, Guid relatedId)
+        {
+            var refUrl = $"sprk_analysises({analysisId})/{relationship}/$ref";
+            var refBody = new Dictionary<string, string>
+            {
+                ["@odata.id"] = $"{relatedEntitySet}({relatedId})"
+            };
+
+            var response = await SendPostAsJsonAsync(refUrl, refBody, cancellationToken);
+
+            // HTTP 400 typically means the association already exists — tolerate and continue
+            if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                _logger.LogWarning(
+                    "[DATAVERSE-API] Association may already exist: {Relationship} analysis {AnalysisId} -> {RelatedId}",
+                    relationship, analysisId, relatedId);
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+            _logger.LogDebug(
+                "[DATAVERSE-API] Associated {Relationship}: analysis {AnalysisId} -> {RelatedId}",
+                relationship, analysisId, relatedId);
+        }
+
+        var skillList = skillIds.ToList();
+        var knowledgeList = knowledgeIds.ToList();
+        var toolList = toolIds.ToList();
+
+        // Skills (N:N: sprk_analysis_skill → sprk_analysisskills entity set)
+        foreach (var skillId in skillList)
+        {
+            try
+            {
+                await AssociateOneAsync("sprk_analysis_skill", "sprk_analysisskills", skillId);
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"skill {skillId}: {ex.Message}");
+            }
+        }
+
+        // Knowledge (N:N: sprk_analysis_knowledge → sprk_analysisknowledges entity set)
+        foreach (var knowledgeId in knowledgeList)
+        {
+            try
+            {
+                await AssociateOneAsync("sprk_analysis_knowledge", "sprk_analysisknowledges", knowledgeId);
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"knowledge {knowledgeId}: {ex.Message}");
+            }
+        }
+
+        // Tools (N:N: sprk_analysis_tool → sprk_analysistools entity set)
+        foreach (var toolId in toolList)
+        {
+            try
+            {
+                await AssociateOneAsync("sprk_analysis_tool", "sprk_analysistools", toolId);
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"tool {toolId}: {ex.Message}");
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to associate {errors.Count} scope item(s) for analysis {analysisId}:\n{string.Join('\n', errors)}");
+        }
+
+        _logger.LogInformation(
+            "[DATAVERSE-API] Associated scopes for analysis {AnalysisId}: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
+            analysisId, skillList.Count, knowledgeList.Count, toolList.Count);
+    }
+
     public async Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default)
     {
 

@@ -238,6 +238,54 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return outputId;
     }
 
+    public async Task AssociateScopesAsync(
+        Guid analysisId,
+        IEnumerable<Guid> skillIds,
+        IEnumerable<Guid> knowledgeIds,
+        IEnumerable<Guid> toolIds,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<string>();
+
+        async Task AssociateOneAsync(string relatedEntityType, Guid relatedId, string relationship)
+        {
+            await _serviceClient.AssociateAsync(
+                "sprk_analysis",
+                analysisId,
+                new Microsoft.Xrm.Sdk.Relationship(relationship),
+                new EntityReferenceCollection { new EntityReference(relatedEntityType, relatedId) },
+                cancellationToken);
+        }
+
+        foreach (var skillId in skillIds)
+        {
+            try { await AssociateOneAsync("sprk_analysisskill", skillId, "sprk_analysis_skill"); }
+            catch (Exception ex) { errors.Add($"skill {skillId}: {ex.Message}"); }
+        }
+
+        foreach (var knowledgeId in knowledgeIds)
+        {
+            try { await AssociateOneAsync("sprk_analysisknowledge", knowledgeId, "sprk_analysis_knowledge"); }
+            catch (Exception ex) { errors.Add($"knowledge {knowledgeId}: {ex.Message}"); }
+        }
+
+        foreach (var toolId in toolIds)
+        {
+            try { await AssociateOneAsync("sprk_analysistool", toolId, "sprk_analysis_tool"); }
+            catch (Exception ex) { errors.Add($"tool {toolId}: {ex.Message}"); }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to associate {errors.Count} scope item(s) for analysis {analysisId}:\n{string.Join('\n', errors)}");
+        }
+
+        _logger.LogInformation(
+            "[DATAVERSE] Associated scopes for analysis {AnalysisId}: skills/knowledge/tools",
+            analysisId);
+    }
+
     public async Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default)
     {
         var document = new Entity("sprk_document", Guid.Parse(documentId));
