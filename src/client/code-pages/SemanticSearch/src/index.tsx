@@ -55,7 +55,12 @@ let theme = detectTheme(themeParams);
 let isDark = isDarkTheme(themeParams);
 
 // Set body background to match detected theme — prevents white flash in dark mode
-document.body.style.backgroundColor = isDark ? '#292929' : '#ffffff';
+// Uses the theme object's actual colorNeutralBackground1 value (a resolved hex/rgb string),
+// NOT tokens.* (which are CSS variable references that only work inside FluentProvider).
+const _bodyBg = (theme as Record<string, string>).colorNeutralBackground1;
+if (_bodyBg) {
+  document.body.style.backgroundColor = _bodyBg;
+}
 
 // ---------------------------------------------------------------------------
 // Initialize MSAL then Render
@@ -100,6 +105,9 @@ initializeAuth()
 setupThemeListener(() => {
   theme = detectTheme(themeParams);
   isDark = isDarkTheme(themeParams);
-  document.body.style.backgroundColor = isDark ? '#292929' : '#ffffff';
+  const _updatedBg = (theme as Record<string, string>).colorNeutralBackground1;
+  if (_updatedBg) {
+    document.body.style.backgroundColor = _updatedBg;
+  }
   renderApp();
 });

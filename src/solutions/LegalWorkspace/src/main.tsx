@@ -81,7 +81,7 @@ bootstrap().catch((err) => {
       <div style="padding: 40px; text-align: center; font-family: 'Segoe UI', sans-serif;">
         <h2>Configuration Error</h2>
         <p>Unable to load workspace configuration from Dataverse environment variables.</p>
-        <p style="color: #999; font-size: 12px;">${err instanceof Error ? err.message : String(err)}</p>
+        <p style="color: var(--colorNeutralForeground3); font-size: 12px;">${err instanceof Error ? err.message : String(err)}</p>
       </div>
     `;
   }

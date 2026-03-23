@@ -58,7 +58,7 @@ const useStyles = makeStyles({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: tokens.colorBackgroundOverlay,
     zIndex: 10000, // High z-index for Dataverse forms
     display: 'flex',
     alignItems: 'center',

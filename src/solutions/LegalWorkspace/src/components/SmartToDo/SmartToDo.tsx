@@ -82,7 +82,7 @@ const TodoAISummaryFallback: React.FC = () => (
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: "rgba(0,0,0,0.12)",
+      backgroundColor: tokens.colorNeutralStroke1,
       zIndex: 1000,
     }}
     aria-live="polite"

@@ -28,9 +28,9 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
 
     // Simple visual confirmation
     container.innerHTML = `
-            <div style="padding: 20px; background: #e8f5e9; border: 2px solid #4caf50; border-radius: 4px;">
-                <h2 style="color: #2e7d32; margin: 0 0 10px 0;">✅ Universal Dataset Grid - Control Working!</h2>
-                <p style="margin: 0; color: #1b5e20;">
+            <div style="padding: 20px; background: var(--colorPaletteGreenBackground1); border: 2px solid var(--colorPaletteGreenForeground1); border-radius: 4px;">
+                <h2 style="color: var(--colorPaletteGreenForeground1); margin: 0 0 10px 0;">✅ Universal Dataset Grid - Control Working!</h2>
+                <p style="margin: 0; color: var(--colorNeutralForeground1);">
                     <strong>Status:</strong> Control loaded successfully and is executing.<br>
                     <strong>Next:</strong> Ready to add React + Fluent UI v9.
                 </p>

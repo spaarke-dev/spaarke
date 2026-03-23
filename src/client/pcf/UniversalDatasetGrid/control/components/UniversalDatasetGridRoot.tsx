@@ -6,6 +6,7 @@
  */
 
 import * as React from 'react';
+import { tokens } from '@fluentui/react-components';
 import { IInputs } from '../generated/ManifestTypes';
 import {
   GridConfiguration,
@@ -534,7 +535,7 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
           bottom: '2px',
           right: '5px',
           fontSize: '8px',
-          color: '#666',
+          color: tokens.colorNeutralForeground3,
           userSelect: 'none',
           pointerEvents: 'none',
           zIndex: 1000,

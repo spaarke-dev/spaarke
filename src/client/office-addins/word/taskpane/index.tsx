@@ -30,16 +30,16 @@ function renderError(error: Error | string, stage: string) {
 
   container.innerHTML = `
     <div style="padding: 20px; font-family: 'Segoe UI', sans-serif; height: 100%; box-sizing: border-box;">
-      <h2 style="color: #d13438; margin: 0 0 16px 0; font-size: 18px;">Initialization Error</h2>
-      <p style="color: #323130; margin: 0 0 12px 0; font-size: 14px;">
+      <h2 style="color: var(--colorPaletteRedForeground1); margin: 0 0 16px 0; font-size: 18px;">Initialization Error</h2>
+      <p style="color: var(--colorNeutralForeground1); margin: 0 0 12px 0; font-size: 14px;">
         The add-in failed to initialize at stage: <strong>${stage}</strong>
       </p>
-      <div style="background: #fdf3f4; border: 1px solid #d13438; border-radius: 4px; padding: 12px; margin-bottom: 16px;">
-        <code style="color: #d13438; font-size: 12px; word-break: break-word;">${errorMessage}</code>
+      <div style="background: var(--colorPaletteRedBackground1); border: 1px solid var(--colorPaletteRedForeground1); border-radius: 4px; padding: 12px; margin-bottom: 16px;">
+        <code style="color: var(--colorPaletteRedForeground1); font-size: 12px; word-break: break-word;">${errorMessage}</code>
       </div>
       <details style="margin-top: 16px;">
-        <summary style="cursor: pointer; color: #0078d4; font-size: 14px;">Debug Info</summary>
-        <pre style="background: #f3f2f1; padding: 12px; border-radius: 4px; font-size: 11px; overflow: auto; margin-top: 8px;">
+        <summary style="cursor: pointer; color: var(--colorBrandForeground1); font-size: 14px;">Debug Info</summary>
+        <pre style="background: var(--colorNeutralBackground3); padding: 12px; border-radius: 4px; font-size: 11px; overflow: auto; margin-top: 8px;">
 Version: ${APP_VERSION}
 Build: ${BUILD_DATE}
 Client ID: ${CONFIG.clientId ? CONFIG.clientId.substring(0, 8) + '...' : 'NOT SET'}
@@ -48,7 +48,7 @@ BFF API: ${CONFIG.bffApiBaseUrl}
 Stage: ${stage}
         </pre>
       </details>
-      <button onclick="location.reload()" style="margin-top: 16px; padding: 8px 16px; background: #0078d4; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+      <button onclick="location.reload()" style="margin-top: 16px; padding: 8px 16px; background: var(--colorBrandBackground); color: var(--colorNeutralForegroundOnBrand); border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
         Retry
       </button>
     </div>

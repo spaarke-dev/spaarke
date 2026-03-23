@@ -1,12 +1,12 @@
 import * as React from 'react';
-import { Field, makeStyles } from '@fluentui/react-components';
+import { Field, makeStyles, tokens } from '@fluentui/react-components';
 import { logger } from '../utils/logger';
 
 const useStyles = makeStyles({
   fileInfo: {
     marginTop: '8px',
     fontSize: '12px',
-    color: '#666',
+    color: tokens.colorNeutralForeground3,
   },
 });
 
@@ -58,7 +58,7 @@ export const FilePickerField: React.FC<FilePickerFieldProps> = ({ value, onChang
         onChange={handleFileChange}
         style={{
           padding: '8px',
-          border: '1px solid #d1d1d1',
+          border: `1px solid ${tokens.colorNeutralStroke1}`,
           borderRadius: '4px',
           width: '100%',
           fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",

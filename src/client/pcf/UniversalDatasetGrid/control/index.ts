@@ -243,9 +243,9 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     // Create error div
     const errorDiv = document.createElement('div');
     errorDiv.style.padding = '20px';
-    errorDiv.style.color = '#a4262c'; // Office UI Fabric error red
-    errorDiv.style.backgroundColor = '#fde7e9'; // Light red background
-    errorDiv.style.border = '1px solid #a4262c';
+    errorDiv.style.color = 'var(--colorPaletteRedForeground1)';
+    errorDiv.style.backgroundColor = 'var(--colorPaletteRedBackground1)';
+    errorDiv.style.border = '1px solid var(--colorPaletteRedForeground1)';
     errorDiv.style.borderRadius = '4px';
     errorDiv.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
     errorDiv.style.fontSize = '14px';
@@ -255,8 +255,8 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     errorDiv.innerHTML = `
             <div style="display: flex; align-items: center; gap: 10px;">
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="10" cy="10" r="9" fill="#a4262c"/>
-                    <path d="M10 6v4M10 14h.01" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="10" cy="10" r="9" fill="var(--colorPaletteRedForeground1)"/>
+                    <path d="M10 6v4M10 14h.01" stroke="var(--colorNeutralForegroundOnBrand)" stroke-width="2" stroke-linecap="round"/>
                 </svg>
                 <div>
                     <strong>Error</strong><br/>

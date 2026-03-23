@@ -151,13 +151,13 @@ bootstrap().catch((err) => {
   // Render a minimal error state so the user sees something
   root.render(
     <FluentProvider theme={theme} style={{ height: '100%' }}>
-      <div style={{ padding: '24px', textAlign: 'center', color: '#d13438' }}>
+      <div style={{ padding: '24px', textAlign: 'center', color: 'var(--colorPaletteRedForeground1)' }}>
         <h3>Configuration Error</h3>
         <p>
           Failed to load runtime configuration from Dataverse.
           Ensure the SpaarkeCore solution is imported and environment variables are configured.
         </p>
-        <p style={{ fontSize: '12px', color: '#666' }}>
+        <p style={{ fontSize: '12px', color: 'var(--colorNeutralForeground3)' }}>
           {err instanceof Error ? err.message : String(err)}
         </p>
       </div>

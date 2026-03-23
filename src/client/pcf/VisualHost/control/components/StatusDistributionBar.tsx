@@ -78,7 +78,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForegroundOnBrand,
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightMedium,
-    textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+    textShadow: `0 1px 2px ${tokens.colorNeutralShadowAmbient}`,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',

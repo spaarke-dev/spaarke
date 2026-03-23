@@ -126,12 +126,12 @@ function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): 'dange
  */
 function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CSSProperties {
   if (isOverdue || daysUntilDue < 3) {
-    return { backgroundColor: 'var(--colorStatusDangerBackground2, #fde7e9)' };
+    return { backgroundColor: 'var(--colorStatusDangerBackground2)' };
   }
   if (daysUntilDue <= 5) {
-    return { backgroundColor: 'var(--colorStatusWarningBackground2, #fff4ce)' };
+    return { backgroundColor: 'var(--colorStatusWarningBackground2)' };
   }
-  return { backgroundColor: 'var(--colorStatusSuccessBackground2, #dff6dd)' };
+  return { backgroundColor: 'var(--colorStatusSuccessBackground2)' };
 }
 
 function getDueBadgeText(daysUntilDue: number, isOverdue: boolean): string {

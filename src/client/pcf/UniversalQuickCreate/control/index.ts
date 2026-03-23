@@ -724,7 +724,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
   private showError(message: string): void {
     const errorDiv = document.createElement('div');
     errorDiv.style.cssText =
-      'padding: 20px; color: #a4262c; background: #fde7e9; border: 1px solid #a4262c; border-radius: 4px; margin: 10px;';
+      'padding: 20px; color: var(--colorPaletteRedForeground1); background: var(--colorPaletteRedBackground1); border: 1px solid var(--colorPaletteRedForeground1); border-radius: 4px; margin: 10px;';
     errorDiv.innerHTML = `<strong>Error:</strong> ${message}`;
     this.container.appendChild(errorDiv);
   }
@@ -735,7 +735,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
   private showInfo(message: string): void {
     const infoDiv = document.createElement('div');
     infoDiv.style.cssText =
-      'padding: 20px; color: #323130; background: #f3f2f1; border: 1px solid #8a8886; border-radius: 4px; margin: 10px;';
+      'padding: 20px; color: var(--colorNeutralForeground1); background: var(--colorNeutralBackground3); border: 1px solid var(--colorNeutralStroke1); border-radius: 4px; margin: 10px;';
     infoDiv.innerHTML = `<strong>Info:</strong> ${message}`;
     this.container.appendChild(infoDiv);
   }

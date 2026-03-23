@@ -313,7 +313,7 @@ export class EmailProcessingMonitor implements ComponentFramework.StandardContro
    */
   private renderError(errorMessage: string): void {
     this.container.innerHTML = `
-            <div style="padding: 20px; border: 2px solid #d32f2f; background-color: #ffebee; color: #c62828; border-radius: 4px;">
+            <div style="padding: 20px; border: 2px solid var(--colorPaletteRedForeground1); background-color: var(--colorPaletteRedBackground1); color: var(--colorPaletteRedForeground1); border-radius: 4px;">
                 <strong>Email Processing Monitor Error</strong>
                 <p>${this.escapeHtml(errorMessage)}</p>
                 <p><small>Version: ${this.VERSION}</small></p>
