@@ -192,7 +192,25 @@ describe('resolveContextMapping', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 3. Expired cache calls API again
+  // 3. Double /api/ prefix regression — UAT E-13
+  // -----------------------------------------------------------------------
+
+  it('resolveContextMapping_ApiBaseUrlWithApiSuffix_NormalizesUrlToSingleApiPrefix', async () => {
+    // Arrange: apiBaseUrl already ends with /api (as stored by SprkChat PCF control)
+    const apiBaseWithApiSuffix = 'https://spe-api-dev.azurewebsites.net/api';
+
+    // Act
+    await resolveContextMapping(TEST_ENTITY_TYPE, TEST_PAGE_TYPE, apiBaseWithApiSuffix, TEST_TOKEN);
+
+    // Assert: fetch URL uses single /api prefix (not /api/api/)
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const fetchUrl = mockFetch.mock.calls[0][0] as string;
+    expect(fetchUrl).not.toContain('/api/api/');
+    expect(fetchUrl).toContain('https://spe-api-dev.azurewebsites.net/api/ai/chat/context-mappings');
+  });
+
+  // -----------------------------------------------------------------------
+  // 4. Expired cache calls API again
   // -----------------------------------------------------------------------
 
   it('resolveContextMapping_ExpiredCache_CallsApiAndRefreshesCache', async () => {
