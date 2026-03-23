@@ -24,7 +24,7 @@ export type { ISummaryResultsStepProps } from './SummaryResultsStep';
 export type { ISummaryNextStepsStepProps, SummaryActionId } from './SummaryNextStepsStep';
 export type { ISummarizeSendEmailStepProps } from './SummarizeSendEmailStep';
 export type { ISummarizeCreateProjectStepProps } from './SummarizeCreateProjectStep';
-export type { ISummarizeAnalysisStepProps } from './SummarizeAnalysisStep';
+export type { ISummarizeAnalysisStepProps, ICreateDocumentResult } from './SummarizeAnalysisStep';
 export type { StreamSummarizeCallbacks } from './summarizeService';
 export type {
   ISummarizeResult,
