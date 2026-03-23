@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.33" display-name-key="Document Relationship Viewer" description-key="Validate bound documentId is GUID — fallback to entity record ID (v1.0.33)" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.34" display-name-key="Document Relationship Viewer" description-key="Validate bound documentId is GUID — fallback to entity record ID (v1.0.34)" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>

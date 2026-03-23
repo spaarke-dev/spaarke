@@ -7,22 +7,60 @@ import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmD
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { CreateProjectWizard } from "@spaarke/ui-components/components/CreateProjectWizard";
+import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
   const params = React.useMemo(() => parseDataParams(), []);
+  const [isAuthReady, setIsAuthReady] = React.useState(false);
+  const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
   }, []);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    async function initialize(): Promise<void> {
+      try {
+        const config = await resolveRuntimeConfig();
+        await initAuth({
+          clientId: config.msalClientId,
+          bffBaseUrl: config.bffBaseUrl,
+          bffApiScope: config.bffOAuthScope,
+          tenantId: config.tenantId || undefined,
+          proactiveRefresh: true,
+        });
+        if (!cancelled) {
+          setResolvedBffBaseUrl(config.bffBaseUrl);
+          setIsAuthReady(true);
+        }
+      } catch (err) {
+        console.error("[CreateProjectWizard] Failed to initialize auth:", err);
+        if (!cancelled) setIsAuthReady(true);
+      }
+    }
+    void initialize();
+    return () => { cancelled = true; };
+  }, []);
+
   const dataService = React.useMemo(() => createXrmDataService(), []);
-  const uploadService = React.useMemo(() => createXrmUploadService(params.bffBaseUrl || ""), [params.bffBaseUrl]);
+  const uploadService = React.useMemo(() => createXrmUploadService(resolvedBffBaseUrl), [resolvedBffBaseUrl]);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
+
+  if (!isAuthReady) {
+    return (
+      <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+          <span>Initializing...</span>
+        </div>
+      </FluentProvider>
+    );
+  }
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -33,8 +71,8 @@ function App() {
         navigationService={navigationService}
         embedded={true}
         onClose={handleClose}
-        authenticatedFetch={fetch.bind(window)}
-        bffBaseUrl={params.bffBaseUrl || ""}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={resolvedBffBaseUrl}
       />
     </FluentProvider>
   );
@@ -47,4 +85,6 @@ if (rootElement) {
       <App />
     </React.StrictMode>
   );
+} else {
+  console.error("[CreateProjectWizard] Root element not found");
 }

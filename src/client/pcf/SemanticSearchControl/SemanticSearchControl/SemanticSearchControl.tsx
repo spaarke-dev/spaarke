@@ -18,6 +18,8 @@ import { SearchInput, FilterPanel, ResultsList, LoadingState, EmptyState, ErrorS
 import { useSemanticSearch, useFilters } from './hooks';
 import { SemanticSearchApiService, NavigationService } from './services';
 import { authenticatedFetch } from '@spaarke/auth';
+import { initializeAuth } from './authInit';
+import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
 import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
@@ -134,16 +136,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   notifyOutputChanged,
   onDocumentSelect,
   isDarkMode = false,
-  authInitialized: authInitializedProp = false,
-  resolvedApiBaseUrl = '',
 }) => {
   const styles = useStyles();
+
+  // Auth state — initialized in useEffect below so React re-renders when auth completes.
+  // Matches RelatedDocumentCount pattern: auth inside component, not PCF class.
+  const [isAuthInitialized, setIsAuthInitialized] = useState(false);
+  const [resolvedApiBaseUrl, setResolvedApiBaseUrl] = useState('');
 
   // Get control properties from context
   const showFilters = context.parameters.showFilters?.raw ?? true;
   const compactMode = context.parameters.compactMode?.raw ?? false;
   const placeholder = context.parameters.placeholder?.raw ?? 'Search documents...';
-  // BFF API base URL resolved at runtime from Dataverse environment variables (via index.ts)
+  // BFF API base URL — resolved by auth useEffect below, stored in state
   const apiBaseUrl = resolvedApiBaseUrl;
 
   // Auto-detect entity context from page (when on a record form)
@@ -243,9 +248,57 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
   const navigationService = useMemo(() => new NavigationService(), []);
 
-  // Auth state is driven by the authInitialized prop from index.ts
-  // (resolved from Dataverse environment variables at runtime)
-  const isAuthInitialized = authInitializedProp;
+  // Auth initialization — runs once on mount inside the React component.
+  // This mirrors RelatedDocumentCount's pattern: auth in useEffect with useState
+  // so the component re-renders itself when auth completes, without depending on
+  // notifyOutputChanged() triggering updateView() (which is not reliable for ReactControl).
+  useEffect(() => {
+    let cancelled = false;
+
+    // Capture values at mount time — these don't change during the control's lifetime
+    const webApi = context.webAPI;
+    const manifestApiBaseUrl = context.parameters.apiBaseUrl?.raw ?? '';
+    const manifestTenantId = context.parameters.tenantId?.raw ?? '';
+    const manifestClientAppId = context.parameters.clientAppId?.raw ?? '';
+    const manifestBffAppId = context.parameters.bffAppId?.raw ?? '';
+
+    let dataverseUrl: string;
+    try {
+      if (typeof Xrm !== 'undefined' && Xrm.Utility?.getGlobalContext) {
+        dataverseUrl = Xrm.Utility.getGlobalContext().getClientUrl();
+      } else {
+        dataverseUrl = window.location.origin;
+      }
+    } catch {
+      dataverseUrl = window.location.origin;
+    }
+
+    const doAuth = async () => {
+      const apiBaseUrlResolved = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
+      const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
+      const clientAppId =
+        manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
+      const bffAppId =
+        manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+
+      await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrlResolved, dataverseUrl);
+
+      if (!cancelled) {
+        setResolvedApiBaseUrl(apiBaseUrlResolved);
+        setIsAuthInitialized(true);
+      }
+    };
+
+    doAuth().catch(err => {
+      if (!cancelled) {
+        console.error('[SemanticSearchControl] Auth initialization failed:', err);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []); // Run once on mount — context.webAPI and parameters are stable for the control's lifetime
 
   // Filter state management — declared BEFORE auth effects so useEffect can reference filters
   const { filters, setFilters, clearFilters, hasActiveFilters } = useFilters();
@@ -738,7 +791,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.15 • Built 2026-03-22</Text>
+        <Text size={100}>v1.1.23 • Built 2026-03-23</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}

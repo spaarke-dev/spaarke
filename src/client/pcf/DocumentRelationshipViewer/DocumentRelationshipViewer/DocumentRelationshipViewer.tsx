@@ -22,10 +22,11 @@ import { DocumentGraph } from './components/DocumentGraph';
 import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
 import type { DocumentNode } from './types/graph';
 import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from './types/api';
-import { getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
+import { getApiBaseUrl, getTenantId, getMsalClientId, getBffApiAppId } from '../../shared/utils/environmentVariables';
+import { initializeAuth } from './authInit';
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = '1.0.32';
+const CONTROL_VERSION = '1.0.34';
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -191,8 +192,11 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
   const pageEntityId = pageContext?.entityId ?? null;
   const documentId = pageEntityId ?? '';
 
-  // Resolve apiBaseUrl and tenantId from Dataverse environment variables at runtime.
-  // Falls back to manifest property values if set, but no hardcoded dev defaults.
+  // Resolve config and initialize auth from Dataverse environment variables at runtime.
+  // Auth MUST live here (not in index.ts) because ReactControl's notifyOutputChanged()
+  // does not reliably trigger updateView() for read-only controls — only React state
+  // changes guarantee a re-render. See pattern: .claude/patterns/pcf/control-initialization.md
+  const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
   const [resolvedApiBaseUrl, setResolvedApiBaseUrl] = React.useState<string>(
     context.parameters.apiBaseUrl?.raw ?? ''
   );
@@ -203,28 +207,44 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
   React.useEffect(() => {
     let cancelled = false;
 
-    async function resolveConfig(): Promise<void> {
+    async function resolveConfigAndAuth(): Promise<void> {
       try {
         const webApi = context.webAPI;
 
-        // Resolve from Dataverse env vars if not already set via manifest property
-        if (!resolvedApiBaseUrl) {
-          const url = await getApiBaseUrl(webApi);
-          if (!cancelled) setResolvedApiBaseUrl(url);
+        // Resolve API base URL — prefer manifest param, fall back to env var
+        const apiBaseUrl = (context.parameters.apiBaseUrl?.raw ?? '') || (await getApiBaseUrl(webApi));
+        // Resolve Tenant ID — prefer manifest param, fall back to env var
+        const tenantId = (context.parameters.tenantId?.raw ?? '') || (await getTenantId(webApi));
+        // Auth config — always from env vars
+        const clientAppId = await getMsalClientId(webApi);
+        const bffAppId = await getBffApiAppId(webApi);
+
+        // Resolve Dataverse org URL for MSAL redirect URI
+        let dataverseUrl: string;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const xrm = (window as any).Xrm;
+          dataverseUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
+        } catch {
+          dataverseUrl = window.location.origin;
         }
-        if (!resolvedTenantId) {
-          const tid = await getTenantId(webApi);
-          if (!cancelled) setResolvedTenantId(tid);
+
+        await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrl, dataverseUrl);
+
+        if (!cancelled) {
+          setResolvedApiBaseUrl(apiBaseUrl);
+          setResolvedTenantId(tenantId);
+          setIsAuthInitialized(true); // triggers React re-render — component proceeds with API calls
         }
       } catch (err) {
-        console.error('[DocumentRelationshipViewer] Failed to resolve runtime config:', err);
+        console.error('[DocumentRelationshipViewer] Failed to resolve config and initialize auth:', err);
       }
     }
 
-    void resolveConfig();
+    void resolveConfigAndAuth();
 
     return () => { cancelled = true; };
-    // Only run on mount -- env vars don't change during session
+    // Run once on mount — context.webAPI and parameters are stable for control lifetime
   }, []);
 
   // Selected node state
@@ -243,7 +263,7 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     limit: 25,
     depth: 1,
     relationshipTypes: selectedRelationshipTypes.length > 0 ? selectedRelationshipTypes : undefined,
-    enabled: !!documentId && documentId.trim() !== '' && !!resolvedTenantId && !!resolvedApiBaseUrl,
+    enabled: isAuthInitialized && !!documentId && documentId.trim() !== '' && !!resolvedTenantId && !!resolvedApiBaseUrl,
   });
 
   // Get container dimensions for layout

@@ -6,9 +6,15 @@
  * cannot be awaited.
  *
  * Resolution order:
- *   1. MSAL auth provider config authority URL (most reliable — set at initAuth time)
- *   2. Xrm.organizationSettings.tenantId via frame hierarchy walk (fallback)
- *   3. Empty string
+ *   1. MSAL auth provider config authority URL (tenant-specific authority only)
+ *   2. MSAL accounts[0].tenantId — from the JWT, populated after silent auth
+ *   3. Xrm.organizationSettings.tenantId via frame hierarchy walk (fallback)
+ *   4. Empty string
+ *
+ * Why step 2 matters: when initAuth() is called without an explicit tenantId,
+ * MSAL defaults to the 'organizations' authority. Step 1 filters this out.
+ * But after MSAL completes a silent token acquisition, accounts[0].tenantId
+ * contains the real tenant GUID extracted from the JWT — step 2 captures this.
  *
  * This consolidates the pattern that previously existed independently in:
  *   - DocumentUploadWizard/src/services/nextStepLauncher.ts
@@ -44,7 +50,18 @@ export function resolveTenantIdSync(): string {
     // Auth provider not yet initialized — try Xrm fallback.
   }
 
-  // 2. Xrm.organizationSettings.tenantId via frame hierarchy walk.
+  // 2. MSAL accounts — populated after initAuth() completes silent token acquisition.
+  //    getAllAccounts() is synchronous; tenantId is extracted from the JWT.
+  //    This covers the common case where initAuth() uses the 'organizations' authority
+  //    (no tenant-specific URL to parse from step 1) but MSAL has already authenticated.
+  try {
+    const tenantId = getAuthProvider().getCachedTenantId();
+    if (tenantId) return tenantId;
+  } catch {
+    // Auth provider not yet initialized — continue to Xrm fallback.
+  }
+
+  // 3. Xrm.organizationSettings.tenantId via frame hierarchy walk.
   if (typeof window !== 'undefined') {
     const frames: Window[] = [window];
     try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
