@@ -2,7 +2,7 @@
   <metadata>
     <title>Create sprk_document records from uploaded files in Summarize wizard follow-on</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <tags>frontend, shared-library, ai</tags>
     <dependencies>WCWE-040</dependencies>

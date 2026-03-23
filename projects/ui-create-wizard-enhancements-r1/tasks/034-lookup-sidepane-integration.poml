@@ -2,7 +2,7 @@
   <metadata>
     <title>Integrate Dataverse lookup side pane for Matter Type, Practice Area, Project Type</title>
     <phase>4</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <tags>frontend, shared-library, wizard</tags>
     <dependencies>WCWE-010, WCWE-030, WCWE-031</dependencies>
