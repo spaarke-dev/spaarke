@@ -22,14 +22,14 @@ Bug fixes and React 19 run in parallel where file sets don't overlap.
 
 | # | Task | Tags | Depends On | Status |
 |---|------|------|------------|--------|
-| 001 | Fix theme cascade — remove OS prefers-color-scheme | theme, fluent-ui | — | 🔲 |
-| 002 | Replace hard-coded colors with Fluent v9 tokens | theme, fluent-ui | 001 | 🔲 |
-| 003 | Consolidate 6 duplicated ThemeProvider files | theme, code-pages | 002 | 🔲 |
-| 004 | Fix overdue badge 400 error (field name) | bug-fix | — | 🔲 |
-| 005 | Fix SprkChat double /api/api/ prefix | bug-fix, pcf | — | 🔲 |
-| 006 | Standardize dialog sizing to 60%×70% | webresource | — | 🔲 |
-| 007 | Rename "Send Email to Client" → "Send Notification Email" | shared-library | — | 🔲 |
-| 008 | React 19 upgrade for all Code Pages | code-pages, react | 003 | 🔲 |
+| 001 | Fix theme cascade — remove OS prefers-color-scheme | theme, fluent-ui | — | ✅ |
+| 002 | Replace hard-coded colors with Fluent v9 tokens | theme, fluent-ui | 001 | ✅ |
+| 003 | Consolidate 6 duplicated ThemeProvider files | theme, code-pages | 002 | ✅ |
+| 004 | Fix overdue badge 400 error (field name) | bug-fix | — | ✅ |
+| 005 | Fix SprkChat double /api/api/ prefix | bug-fix, pcf | — | ✅ |
+| 006 | Standardize dialog sizing to 60%×70% | webresource | — | ✅ |
+| 007 | Rename "Send Email to Client" → "Send Notification Email" | shared-library | — | ✅ |
+| 008 | React 19 upgrade for all Code Pages | code-pages, react | 003 | ✅ |
 | 009 | Phase 1 deploy + verify | deploy | 001-008 | 🔲 |
 
 ## Phases 2+3: Shared Library + BFF API & Auth (parallel tracks, ~35 hours)
@@ -42,19 +42,19 @@ No file overlap between tracks.
 
 | # | Task | Tags | Depends On | Status |
 |---|------|------|------------|--------|
-| 010 | Add openLookup() to INavigationService + adapters | shared-library | — | 🔲 |
+| 010 | Add openLookup() to INavigationService + adapters | shared-library | — | ✅ |
 | 011 | Create AssociateToStep shared component | shared-library, wizard | 010 | 🔲 |
-| 012 | Extract WorkspaceShell from LegalWorkspace | shared-library, workspace | — | 🔲 |
-| 013 | Fix duplicate title bars (hideTitle) | shared-library, wizard | — | 🔲 |
-| 014 | Move SecureProjectSection to top | shared-library, wizard | — | 🔲 |
+| 012 | Extract WorkspaceShell from LegalWorkspace | shared-library, workspace | — | ✅ |
+| 013 | Fix duplicate title bars (hideTitle) | shared-library, wizard | — | ✅ |
+| 014 | Move SecureProjectSection to top | shared-library, wizard | — | ✅ |
 | 015 | Phase 2 deploy + verify | deploy | 010-014 | 🔲 |
 
 ### Track B — BFF API & Auth (Phase 3)
 
 | # | Task | Tags | Depends On | Status |
 |---|------|------|------------|--------|
-| 020 | POST /api/ai/analysis/create BFF endpoint | bff-api, ai | — | 🔲 |
-| 021 | IAnalysisDataverseService scope association | bff-api, dataverse | — | 🔲 |
+| 020 | POST /api/ai/analysis/create BFF endpoint | bff-api, ai | — | ✅ |
+| 021 | IAnalysisDataverseService scope association | bff-api, dataverse | — | ✅ |
 | 022 | Rewrite analysisService.ts for BFF API | shared-library, ai | 020, 021 | 🔲 |
 | 023 | MSAL auth standardization across Code Pages | code-pages, auth | — | ✅ |
 | 024 | bffBaseUrl propagation from launch points | webresource | — | ✅ |

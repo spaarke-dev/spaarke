@@ -6,7 +6,10 @@
  * the analysis is created using the uploaded files and opens in a new tab.
  *
  * Note: For MVP, analysis requires files to be saved as sprk_document records.
- * This step creates the analysis record and associates scopes, then opens it.
+ * This step creates the analysis record and associates scopes via the BFF API,
+ * then opens the resulting analysis record.
+ *
+ * @see ADR-013 — AI features call BFF API, not Dataverse directly from browser.
  */
 import * as React from 'react';
 import {
@@ -23,7 +26,7 @@ import {
   loadPlaybookScopes,
   createAndAssociate,
 } from '@spaarke/ui-components/components/Playbook';
-import type { IPlaybook } from '@spaarke/ui-components/components/Playbook';
+import type { IPlaybook, AuthenticatedFetchFn } from '@spaarke/ui-components/components/Playbook';
 import { navigateToEntity } from '../../utils/navigation';
 import type { IWebApi } from '../../types/xrm';
 
@@ -32,8 +35,12 @@ import type { IWebApi } from '../../types/xrm';
 // ---------------------------------------------------------------------------
 
 export interface ISummarizeAnalysisStepProps {
-  /** Xrm.WebApi reference for Dataverse operations. */
+  /** Xrm.WebApi reference for Dataverse read operations (playbook loading). */
   webApi: IWebApi;
+  /** Authenticated fetch function for BFF API calls (required for analysis creation). */
+  authenticatedFetch: AuthenticatedFetchFn;
+  /** Base URL of the BFF API (e.g. "https://spe-api-dev.azurewebsites.net"). */
+  bffBaseUrl: string;
   /** Document ID (sprk_document GUID) — needed for analysis creation. */
   documentId?: string;
   /** Document name for the analysis record title. */
@@ -77,6 +84,8 @@ const useStyles = makeStyles({
 
 export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
   webApi,
+  authenticatedFetch,
+  bffBaseUrl,
   documentId,
   documentName,
 }) => {
@@ -141,8 +150,8 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
           return;
         }
 
-        // Create analysis record with associated scopes
-        const analysisId = await createAndAssociate(webApi, {
+        // Create analysis record with associated scopes via BFF API
+        const analysisId = await createAndAssociate(authenticatedFetch, bffBaseUrl, {
           documentId,
           documentName: documentName || 'Document Summary',
           playbookId: playbook.id,
@@ -168,7 +177,7 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
         setLaunchStatus('error');
       }
     },
-    [webApi, documentId, documentName]
+    [webApi, authenticatedFetch, bffBaseUrl, documentId, documentName]
   );
 
   return (

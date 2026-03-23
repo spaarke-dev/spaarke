@@ -23,7 +23,7 @@ import {
   loadPlaybookScopes,
   createAndAssociate,
 } from '../Playbook';
-import type { IPlaybook } from '../Playbook';
+import type { IPlaybook, AuthenticatedFetchFn } from '../Playbook';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { INavigationService } from '../../types/serviceInterfaces';
 
@@ -40,6 +40,10 @@ export interface ISummarizeAnalysisStepProps {
   documentId?: string;
   /** Document name for the analysis record title. */
   documentName?: string;
+  /** Authenticated fetch function for BFF API calls (required for analysis creation). */
+  authenticatedFetch?: AuthenticatedFetchFn;
+  /** Base URL of the BFF API (e.g. "https://spe-api-dev.azurewebsites.net"). */
+  bffBaseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +86,8 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
   navigationService,
   documentId,
   documentName,
+  authenticatedFetch,
+  bffBaseUrl,
 }) => {
   const styles = useStyles();
 
@@ -144,8 +150,16 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
           return;
         }
 
-        // Create analysis record with associated scopes
-        const analysisId = await createAndAssociate(dataService, {
+        if (!authenticatedFetch || !bffBaseUrl) {
+          setErrorMessage(
+            'Authentication is not available. Please reload the page and try again.'
+          );
+          setLaunchStatus('error');
+          return;
+        }
+
+        // Create analysis record with associated scopes via BFF API
+        const analysisId = await createAndAssociate(authenticatedFetch, bffBaseUrl, {
           documentId,
           documentName: documentName || 'Document Summary',
           playbookId: playbook.id,
@@ -169,7 +183,7 @@ export const SummarizeAnalysisStep: React.FC<ISummarizeAnalysisStepProps> = ({
         setLaunchStatus('error');
       }
     },
-    [dataService, navigationService, documentId, documentName]
+    [dataService, navigationService, documentId, documentName, authenticatedFetch, bffBaseUrl]
   );
 
   return (

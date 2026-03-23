@@ -29,6 +29,7 @@ import { ScopeConfigurator } from '../Playbook/ScopeConfigurator';
 import { loadAllData, loadPlaybookScopes } from '../Playbook/playbookService';
 import type { IPlaybookData } from '../Playbook/playbookService';
 import { createAndAssociate } from '../Playbook/analysisService';
+import type { AuthenticatedFetchFn } from '../Playbook/analysisService';
 import type {
   IPlaybook,
   IAction,
@@ -65,7 +66,7 @@ export interface IPlaybookLibraryShellProps {
   /** Data access abstraction (Xrm.WebApi adapter, test mock, etc.). */
   dataService: IDataService;
   /** Authenticated fetch function for BFF API calls. */
-  authenticatedFetch?: typeof fetch;
+  authenticatedFetch?: AuthenticatedFetchFn;
   /** Base URL of the BFF API (e.g., "https://spe-api-dev.azurewebsites.net"). */
   bffBaseUrl?: string;
   /** Display name of the source entity (shown in the header subtitle). */
@@ -194,9 +195,7 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
   const [isExecuting, setIsExecuting] = React.useState(false);
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
 
-  // --- Build a webApi-compatible adapter from IDataService ---
-  // The existing playbookService/analysisService functions accept a raw webApi
-  // object. We wrap IDataService to match that contract.
+  // --- Build a webApi-compatible adapter from IDataService (for playbookService reads) ---
   const webApiAdapter = React.useMemo(() => ({
     retrieveMultipleRecords: (entityName: string, options?: string) =>
       dataService.retrieveMultipleRecords(entityName, options),
@@ -206,12 +205,6 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
       const id = await dataService.createRecord(entityName, data);
       return { id };
     },
-    // For N:N associations, analysisService uses webApi.online.execute.
-    // This is not available through IDataService — consumers that need N:N
-    // associations should provide the Xrm-backed adapter. For basic flows
-    // the createRecord path covers the critical path.
-    online: undefined as any,
-    execute: undefined as any,
   }), [dataService]);
 
   // --- Load data on mount ---
@@ -339,7 +332,11 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
         };
       }
 
-      const analysisId = await createAndAssociate(webApiAdapter, config);
+      if (!authenticatedFetch || !bffBaseUrl) {
+        throw new Error('authenticatedFetch and bffBaseUrl are required to create an analysis.');
+      }
+
+      const analysisId = await createAndAssociate(authenticatedFetch, bffBaseUrl, config);
 
       if (onComplete) {
         onComplete({ analysisId });
@@ -361,7 +358,8 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
     selectedKnowledgeIds,
     selectedToolIds,
     entityId,
-    webApiAdapter,
+    authenticatedFetch,
+    bffBaseUrl,
     onComplete,
   ]);
 

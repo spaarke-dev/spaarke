@@ -381,6 +381,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
               return (
                 <SummarizeAnalysisStep
                   webApi={webApi!}
+                  authenticatedFetch={authenticatedFetch}
+                  bffBaseUrl={getBffBaseUrl()}
                 />
               );
             }

@@ -66,7 +66,7 @@ import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
 import { getClientUrl } from "../services/nextStepLauncher";
-import { getAuthProvider } from "@spaarke/auth";
+import { getAuthProvider, authenticatedFetch as spaarkeAuthenticatedFetch } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -413,6 +413,8 @@ interface IWorkOnAnalysisStepContentProps {
     successfulFiles: OrchestratorFileResult[];
     /** SPE container ID for file operations. */
     containerId: string;
+    /** BFF API base URL. */
+    bffBaseUrl: string;
     /** Called when analysis is created (signals canAdvance=true). */
     onAnalysisCreated: () => void;
 }
@@ -420,6 +422,7 @@ interface IWorkOnAnalysisStepContentProps {
 const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
     successfulFiles,
     containerId,
+    bffBaseUrl,
     onAnalysisCreated,
 }) => {
     const styles = useStyles();
@@ -482,7 +485,7 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
         setIsCreating(true);
         setError(null);
         try {
-            const analysisId = await createAndAssociate(webApi, {
+            const analysisId = await createAndAssociate(spaarkeAuthenticatedFetch, bffBaseUrl, {
                 documentId: selectedDocumentId,
                 documentName: successfulFiles.find(
                     (f) => f.createResult?.documentId === selectedDocumentId
@@ -506,7 +509,7 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
         } finally {
             setIsCreating(false);
         }
-    }, [selectedPlaybook, playbookScopes, selectedDocumentId, successfulFiles, webApi]);
+    }, [selectedPlaybook, playbookScopes, selectedDocumentId, successfulFiles, bffBaseUrl]);
 
     const canCreate = selectedPlaybook !== null && playbookScopes !== null && selectedDocumentId !== null;
 
@@ -799,6 +802,7 @@ function buildDynamicStepConfig(
                 <WorkOnAnalysisStepContent
                     successfulFiles={options.successfulFiles ?? []}
                     containerId={options.containerId}
+                    bffBaseUrl={options.bffBaseUrl}
                     onAnalysisCreated={() => {
                         options.analysisCreatedRef.current = true;
                         options.wizardShellRef.current?.requestUpdate();

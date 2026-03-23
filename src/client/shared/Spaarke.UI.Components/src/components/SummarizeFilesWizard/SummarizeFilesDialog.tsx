@@ -398,6 +398,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
                 <SummarizeAnalysisStep
                   dataService={dataService!}
                   navigationService={navigationService}
+                  authenticatedFetch={authenticatedFetch}
+                  bffBaseUrl={bffBaseUrl}
                 />
               );
             }

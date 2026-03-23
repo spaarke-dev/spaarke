@@ -39,6 +39,7 @@ export {
 export type { IPlaybookData } from './playbookService';
 
 export { createAnalysis, associateScopes, createAndAssociate } from './analysisService';
+export type { AuthenticatedFetchFn } from './analysisService';
 
 // Components
 export { PlaybookCardGrid } from './PlaybookCardGrid';
