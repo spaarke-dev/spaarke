@@ -8,6 +8,7 @@
  * ```typescript
  * const navService = createMockNavigationService();
  * navService.openDialog.mockResolvedValue({ confirmed: false });
+ * navService.openLookup.mockResolvedValue([{ id: "guid-1", name: "Matter A", entityType: "sprk_matter" }]);
  * ```
  */
 import type { INavigationService } from "../types/serviceInterfaces";
@@ -19,6 +20,7 @@ import type { INavigationService } from "../types/serviceInterfaces";
  * - `openRecord` → `undefined`
  * - `openDialog` → `{ confirmed: true }`
  * - `closeDialog` → synchronous no-op
+ * - `openLookup` → `[]` (empty selection — no records chosen)
  *
  * @returns A fully-mocked INavigationService instance
  */
@@ -27,5 +29,6 @@ export function createMockNavigationService(): jest.Mocked<INavigationService> {
     openRecord: jest.fn().mockResolvedValue(undefined),
     openDialog: jest.fn().mockResolvedValue({ confirmed: true }),
     closeDialog: jest.fn(),
+    openLookup: jest.fn().mockResolvedValue([]),
   };
 }

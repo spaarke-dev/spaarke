@@ -210,6 +210,54 @@ export interface IUploadService {
 // ---------------------------------------------------------------------------
 
 /**
+ * Options passed to {@link INavigationService.openLookup} to configure the
+ * Dataverse lookup dialog.
+ */
+export interface LookupOptions {
+  /**
+   * Logical name of the primary entity to search (e.g., "sprk_matter").
+   * Must be provided; used when `entityTypes` is not supplied.
+   */
+  entityType: string;
+
+  /**
+   * Whether the user may select more than one record.
+   * Defaults to `false` (single-select).
+   */
+  allowMultiSelect?: boolean;
+
+  /**
+   * The entity type that is pre-selected in the entity-type picker when the
+   * lookup dialog supports multiple entity types. Defaults to `entityType`.
+   */
+  defaultEntityType?: string;
+
+  /**
+   * List of entity logical names available in the entity-type picker.
+   * When omitted the dialog restricts to `entityType` only.
+   */
+  entityTypes?: string[];
+
+  /**
+   * GUID of the default view to display in the lookup dialog.
+   * When omitted the entity's default lookup view is used.
+   */
+  defaultViewId?: string;
+}
+
+/**
+ * A single record returned by {@link INavigationService.openLookup}.
+ */
+export interface LookupResult {
+  /** GUID of the selected record. */
+  id: string;
+  /** Display name of the selected record. */
+  name: string;
+  /** Logical name of the entity (e.g., "sprk_matter"). */
+  entityType: string;
+}
+
+/**
  * Options for opening a dialog (webresource-based Code Page).
  */
 export interface DialogOptions {
@@ -277,6 +325,7 @@ export interface DialogResult {
  *   openRecord: jest.fn().mockResolvedValue(undefined),
  *   openDialog: jest.fn().mockResolvedValue({ confirmed: true, data: { id: "123" } }),
  *   closeDialog: jest.fn(),
+ *   openLookup: jest.fn().mockResolvedValue([]),
  * };
  * ```
  */
@@ -309,4 +358,16 @@ export interface INavigationService {
    * @param result - Optional data to pass back to the dialog opener
    */
   closeDialog(result?: unknown): void;
+
+  /**
+   * Opens a Dataverse lookup dialog and returns the selected record(s).
+   *
+   * In a Dataverse-hosted context this delegates to `Xrm.Utility.lookupObjects`.
+   * In an SPA/BFF context the lookup dialog is not available — the adapter returns
+   * an empty array as a graceful no-op.
+   *
+   * @param options - Entity type, multi-select flag, and optional view/entity filters
+   * @returns Promise resolving to the array of selected records (empty if cancelled)
+   */
+  openLookup(options: LookupOptions): Promise<LookupResult[]>;
 }

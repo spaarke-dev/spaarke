@@ -35,6 +35,8 @@ import type {
   DialogOptions,
   DialogResult,
   INavigationService,
+  LookupOptions,
+  LookupResult,
 } from '../../types/serviceInterfaces';
 
 /**
@@ -201,6 +203,14 @@ export function createBffNavigationService(
         }
         window.close();
       }
+    },
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async openLookup(_options: LookupOptions): Promise<LookupResult[]> {
+      // Xrm.Utility.lookupObjects is not available in a Power Pages SPA context.
+      // Return an empty array as a graceful no-op so that components that call
+      // openLookup do not crash when running outside Dataverse.
+      return [];
     },
   };
 }

@@ -35,6 +35,8 @@ import type {
   DialogOptions,
   DialogResult,
   INavigationService,
+  LookupOptions,
+  LookupResult,
 } from '../../types/serviceInterfaces';
 import { getXrm } from '../xrmContext';
 
@@ -173,6 +175,51 @@ export function createXrmNavigationService(): INavigationService {
 
       if (typeof window !== 'undefined') {
         window.close();
+      }
+    },
+
+    async openLookup(options: LookupOptions): Promise<LookupResult[]> {
+      const xrm = getXrm();
+      if (!xrm?.Utility) {
+        throw new Error(
+          'Xrm.Utility is not available. Ensure this adapter is used within a Dataverse-hosted context (PCF control or Code Page).'
+        );
+      }
+
+      // Build the lookupObjects options
+      // Xrm.Utility.lookupObjects accepts: entityTypes, allowMultiSelect, defaultEntityType, defaultViewId
+      const lookupObjectsOptions: Record<string, unknown> = {
+        entityTypes: options.entityTypes ?? [options.entityType],
+        allowMultiSelect: options.allowMultiSelect ?? false,
+      };
+
+      if (options.defaultEntityType !== undefined) {
+        lookupObjectsOptions['defaultEntityType'] = options.defaultEntityType;
+      }
+      if (options.defaultViewId !== undefined) {
+        lookupObjectsOptions['defaultViewId'] = options.defaultViewId;
+      }
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrmUtility = xrm.Utility as any;
+        // Xrm.Utility.lookupObjects returns Promise<LookupValue[]>
+        // where LookupValue has: id, name, entityType
+        const results: Array<{ id: string; name: string; entityType: string }> =
+          await xrmUtility.lookupObjects(lookupObjectsOptions);
+
+        if (!Array.isArray(results)) {
+          return [];
+        }
+
+        return results.map((r) => ({
+          id: r.id,
+          name: r.name,
+          entityType: r.entityType,
+        }));
+      } catch {
+        // User cancelled the lookup dialog — return empty array
+        return [];
       }
     },
   };
