@@ -45,9 +45,9 @@ import {
   searchUsersAsLookup,
   searchMatterTypes,
   searchPracticeAreas,
-  fetchAiDraftSummary,
 } from './matterService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
+import { EventService } from '../CreateEventWizard/eventService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { AssociationResult } from '../AssociateToStep/types';
 
@@ -305,14 +305,9 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         practiceAreaName: step2FormValuesRef.current.practiceAreaName,
       }),
 
-      fetchAiSummary: () =>
-        fetchAiDraftSummary(
-          step2FormValuesRef.current.matterName,
-          step2FormValuesRef.current.matterTypeName,
-          step2FormValuesRef.current.practiceAreaName,
-          authenticatedFetch,
-          bffBaseUrl
-        ),
+      // Provide the data service for the "Create Event" follow-on step
+      // (used by CreateEventStep for event type lookups).
+      eventDataService: dataService,
 
       onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
         const currentFormValues = step2FormValuesRef.current;
@@ -321,13 +316,6 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         };
 
         const followOnActions: IFollowOnActions = {};
-        if (context.selectedActions.includes('draft-summary')) {
-          const allEmails = [
-            ...context.followOn.recipients.map((r) => r.email).filter(Boolean),
-            ...context.followOn.ccRecipients.map((r) => r.email).filter(Boolean),
-          ];
-          followOnActions.draftSummary = { recipientEmails: allEmails };
-        }
         if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim()) {
           followOnActions.sendEmail = {
             to: context.followOn.emailTo.trim(),
@@ -397,6 +385,40 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
             const message = err instanceof Error ? err.message : 'Unknown error';
             result.warnings.push(
               `Work assignment could not be created (${message}). ` +
+              'You can create it manually from the matter record.'
+            );
+          }
+        }
+
+        // -- Create Event (sprk_event) --
+        // When the user selected "Create Event" follow-on and entered an event name,
+        // create the event record linked to the matter via N:1.
+        if (context.selectedActions.includes('create-event') && context.followOn.createEventName.trim()) {
+          try {
+            const eventService = new EventService(dataService);
+            const eventFormValues = {
+              eventName: context.followOn.createEventName.trim(),
+              eventTypeId: context.followOn.createEventTypeId,
+              eventTypeName: context.followOn.createEventTypeName,
+              dueDate: context.followOn.createEventDueDate,
+              priority: context.followOn.createEventPriority,
+              description: context.followOn.createEventDescription,
+              regardingRecordId: matterId,
+              regardingRecordName: matterName,
+            };
+            const eventResult = await eventService.createEvent(eventFormValues, 'sprk_matter');
+            if (eventResult.success) {
+              console.info('[CreateMatterWizard] Event created and linked to matter:', matterId);
+            } else {
+              result.warnings.push(
+                `Event could not be created (${eventResult.errorMessage ?? 'unknown error'}). ` +
+                'You can create it manually from the matter record.'
+              );
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            result.warnings.push(
+              `Event could not be created (${message}). ` +
               'You can create it manually from the matter record.'
             );
           }

@@ -124,8 +124,19 @@ export class EventService {
 
   /**
    * Create a sprk_event record in Dataverse.
+   *
+   * @param formValues - Event form state. When `regardingRecordId` is set and
+   *   `regardingEntityName` is provided, the event is linked to the parent
+   *   matter or project via the appropriate nav-prop discovered at runtime.
+   * @param regardingEntityName - Optional logical name of the parent entity
+   *   (e.g. 'sprk_matter', 'sprk_project'). When supplied together with
+   *   `formValues.regardingRecordId`, the event is associated via the
+   *   N:1 relationship nav-prop resolved through metadata discovery.
    */
-  async createEvent(formValues: ICreateEventFormState): Promise<ICreateEventResult> {
+  async createEvent(
+    formValues: ICreateEventFormState,
+    regardingEntityName?: string,
+  ): Promise<ICreateEventResult> {
     const navProps = await _discoverNavProps('sprk_event');
 
     const entity: Record<string, unknown> = {
@@ -145,6 +156,30 @@ export class EventService {
       const navProp = _findNavProp(navProps, 'sprk_eventtype_ref');
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/sprk_eventtype_refs(${formValues.eventTypeId})`;
+      }
+    }
+
+    // Regarding record (parent matter / project) — link via nav-prop
+    if (formValues.regardingRecordId && regardingEntityName) {
+      const pluralMap: Record<string, string> = {
+        sprk_matter: 'sprk_matters',
+        sprk_project: 'sprk_projects',
+      };
+      const entitySetName = pluralMap[regardingEntityName] ?? `${regardingEntityName}s`;
+      const navProp = _findNavProp(navProps, regardingEntityName);
+      if (navProp) {
+        entity[`${navProp}@odata.bind`] = `/${entitySetName}(${formValues.regardingRecordId})`;
+      } else {
+        // Fallback: use well-known column names if metadata discovery missed the relationship
+        const fallbackMap: Record<string, string> = {
+          sprk_matter: 'sprk_regardingmatterid',
+          sprk_project: 'sprk_regardingprojectid',
+        };
+        const fallback = fallbackMap[regardingEntityName];
+        if (fallback) {
+          entity[`${fallback}_${regardingEntityName}@odata.bind`] =
+            `/${entitySetName}(${formValues.regardingRecordId})`;
+        }
       }
     }
 

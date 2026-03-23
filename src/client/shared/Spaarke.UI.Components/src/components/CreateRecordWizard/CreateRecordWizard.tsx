@@ -43,7 +43,7 @@ import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 
-import type { ICreateRecordWizardProps, FollowOnActionId, IRecipientItem, AssociationResult } from './types';
+import type { ICreateRecordWizardProps, FollowOnActionId, AssociationResult } from './types';
 import { AssociateToStep } from '../AssociateToStep/AssociateToStep';
 
 import {
@@ -55,7 +55,7 @@ import {
 
 import { AssignWorkFollowOnStep, WORK_ASSIGNMENT_PRIORITY } from './steps/AssignWorkFollowOnStep';
 import type { WorkAssignmentPriorityValue } from './steps/AssignWorkFollowOnStep';
-import { DraftSummaryStep } from './steps/DraftSummaryStep';
+import { CreateEventFollowOnStep } from './steps/CreateEventFollowOnStep';
 import { SendEmailStep } from './steps/SendEmailStep';
 
 // ---------------------------------------------------------------------------
@@ -165,10 +165,13 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   // Track whether Assign Work defaults have been applied (auto-fill from parent)
   const [assignWorkDefaultsApplied, setAssignWorkDefaultsApplied] = React.useState(false);
 
-  // -- Draft Summary state --
-  const [summaryText, setSummaryText] = React.useState('');
-  const [recipients, setRecipients] = React.useState<IRecipientItem[]>([]);
-  const [ccRecipients, setCcRecipients] = React.useState<IRecipientItem[]>([]);
+  // -- Create Event follow-on form state --
+  const [createEventName, setCreateEventName] = React.useState('');
+  const [createEventTypeId, setCreateEventTypeId] = React.useState('');
+  const [createEventTypeName, setCreateEventTypeName] = React.useState('');
+  const [createEventDueDate, setCreateEventDueDate] = React.useState('');
+  const [createEventPriority, setCreateEventPriority] = React.useState(100000001); // Normal
+  const [createEventDescription, setCreateEventDescription] = React.useState('');
 
   // -- Send Email state --
   const [emailTo, setEmailTo] = React.useState('');
@@ -205,9 +208,12 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       setAssignedOutsideCounselId('');
       setAssignedOutsideCounselName('');
       setAssignWorkDefaultsApplied(false);
-      setSummaryText('');
-      setRecipients([]);
-      setCcRecipients([]);
+      setCreateEventName('');
+      setCreateEventTypeId('');
+      setCreateEventTypeName('');
+      setCreateEventDueDate('');
+      setCreateEventPriority(100000001);
+      setCreateEventDescription('');
       setEmailTo('');
       setEmailSubject('');
       setEmailBody('');
@@ -217,12 +223,18 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   // -- Refs for stale closure prevention in dynamic step renderContent --
   const associationRef = React.useRef(association);
   associationRef.current = association;
-  const summaryTextRef = React.useRef(summaryText);
-  summaryTextRef.current = summaryText;
-  const recipientsRef = React.useRef(recipients);
-  recipientsRef.current = recipients;
-  const ccRecipientsRef = React.useRef(ccRecipients);
-  ccRecipientsRef.current = ccRecipients;
+  const createEventNameRef = React.useRef(createEventName);
+  createEventNameRef.current = createEventName;
+  const createEventTypeIdRef = React.useRef(createEventTypeId);
+  createEventTypeIdRef.current = createEventTypeId;
+  const createEventTypeNameRef = React.useRef(createEventTypeName);
+  createEventTypeNameRef.current = createEventTypeName;
+  const createEventDueDateRef = React.useRef(createEventDueDate);
+  createEventDueDateRef.current = createEventDueDate;
+  const createEventPriorityRef = React.useRef(createEventPriority);
+  createEventPriorityRef.current = createEventPriority;
+  const createEventDescriptionRef = React.useRef(createEventDescription);
+  createEventDescriptionRef.current = createEventDescription;
   const emailToRef = React.useRef(emailTo);
   emailToRef.current = emailTo;
   const emailSubjectRef = React.useRef(emailSubject);
@@ -380,17 +392,38 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
                 />
               );
             } // end followon-assign-counsel
-            if (stepId === 'followon-draft-summary') {
+            if (stepId === 'followon-create-event') {
+              if (!config.eventDataService) {
+                // eventDataService not configured — show informational text
+                return (
+                  <Text size={300} style={{ color: 'inherit' }}>
+                    Event creation is not configured for this wizard.
+                  </Text>
+                );
+              }
+              const currentFormValues = {
+                eventName: createEventNameRef.current,
+                eventTypeId: createEventTypeIdRef.current,
+                eventTypeName: createEventTypeNameRef.current,
+                dueDate: createEventDueDateRef.current,
+                priority: createEventPriorityRef.current,
+                description: createEventDescriptionRef.current,
+                regardingRecordId: '',
+                regardingRecordName: '',
+              };
               return (
-                <DraftSummaryStep
-                  summaryText={summaryTextRef.current}
-                  onSummaryChange={setSummaryText}
-                  recipients={recipientsRef.current}
-                  onRecipientsChange={setRecipients}
-                  ccRecipients={ccRecipientsRef.current}
-                  onCcRecipientsChange={setCcRecipients}
-                  onSearchContacts={searchContacts}
-                  fetchAiSummary={config.fetchAiSummary}
+                <CreateEventFollowOnStep
+                  dataService={config.eventDataService}
+                  formValues={currentFormValues}
+                  onFormValues={(vals) => {
+                    setCreateEventName(vals.eventName);
+                    setCreateEventTypeId(vals.eventTypeId);
+                    setCreateEventTypeName(vals.eventTypeName);
+                    setCreateEventDueDate(vals.dueDate);
+                    setCreateEventPriority(vals.priority);
+                    setCreateEventDescription(vals.description);
+                  }}
+                  onValidChange={() => {/* canAdvance is always true for follow-on */}}
                 />
               );
             }
@@ -490,10 +523,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
         assignedParalegalName: assignedParalegalNameRef.current,
         assignedOutsideCounselId: assignedOutsideCounselIdRef.current,
         assignedOutsideCounselName: assignedOutsideCounselNameRef.current,
-        // Draft Summary / Send Email fields
-        summaryText: summaryTextRef.current,
-        recipients: recipientsRef.current,
-        ccRecipients: ccRecipientsRef.current,
+        // Create Event fields (form values — actual creation in onFinish)
+        createEventName: createEventNameRef.current,
+        createEventTypeId: createEventTypeIdRef.current,
+        createEventTypeName: createEventTypeNameRef.current,
+        createEventDueDate: createEventDueDateRef.current,
+        createEventPriority: createEventPriorityRef.current,
+        createEventDescription: createEventDescriptionRef.current,
+        // Send Email fields
         emailTo: emailToRef.current,
         emailSubject: emailSubjectRef.current,
         emailBody: emailBodyRef.current,

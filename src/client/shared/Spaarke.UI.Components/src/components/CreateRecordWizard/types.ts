@@ -14,7 +14,7 @@ import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 import type { AssociationResult, EntityTypeOption } from '../AssociateToStep/types';
-import type { INavigationService } from '../../types/serviceInterfaces';
+import type { INavigationService, IDataService } from '../../types/serviceInterfaces';
 
 // Re-export for convenience
 export type { AssociationResult, EntityTypeOption };
@@ -50,7 +50,7 @@ export interface IAssociateToStepConfig {
 // ---------------------------------------------------------------------------
 
 /** Identifiers for the optional follow-on action cards shown in "Next Steps". */
-export type FollowOnActionId = 'assign-counsel' | 'draft-summary' | 'send-email';
+export type FollowOnActionId = 'assign-counsel' | 'create-event' | 'send-email';
 
 // ---------------------------------------------------------------------------
 // Recipient item (used by Draft Summary and Send Email)
@@ -126,14 +126,35 @@ export interface IAssignWorkFollowOnState {
   assignedOutsideCounselName: string;
 }
 
+// ---------------------------------------------------------------------------
+// Create Event follow-on state
+// ---------------------------------------------------------------------------
+
+/**
+ * State collected from the "Create Event" follow-on step.
+ * These field values are passed to onFinish so the entity wizard can create
+ * the sprk_event record after the parent matter/project has been created.
+ */
+export interface ICreateEventFollowOnState {
+  /** Event name (required). Maps to sprk_eventname. */
+  createEventName: string;
+  /** Event type lookup GUID (optional). */
+  createEventTypeId: string;
+  /** Event type display name. */
+  createEventTypeName: string;
+  /** Due date as ISO date string (optional). Maps to sprk_duedate. */
+  createEventDueDate: string;
+  /**
+   * Priority option set value.
+   * 100000000=Low, 100000001=Normal (default), 100000002=High, 100000003=Urgent
+   */
+  createEventPriority: number;
+  /** Description free text (optional). Maps to sprk_description. */
+  createEventDescription: string;
+}
+
 /** State collected from the optional follow-on steps. */
-export interface IFollowOnState extends IAssignWorkFollowOnState {
-  /** AI-generated or user-edited summary text. */
-  summaryText: string;
-  /** "Distribute to" recipients for draft summary. */
-  recipients: IRecipientItem[];
-  /** CC recipients for draft summary. */
-  ccRecipients: IRecipientItem[];
+export interface IFollowOnState extends IAssignWorkFollowOnState, ICreateEventFollowOnState {
   /** Email "To" address (resolved from user lookup). */
   emailTo: string;
   /** Email subject line. */
@@ -218,11 +239,15 @@ export interface ICreateRecordWizardConfig {
    * Returns a key-value object of form field names and values.
    */
   getFormFields?: () => Record<string, string>;
+  // ── Create Event follow-on configuration ─────────────────────────────────
+
   /**
-   * Optional callback to fetch AI draft summary text.
-   * If not provided, the DraftSummary step shows a manual-entry textarea.
+   * Data service passed to the CreateEventFollowOnStep for event type lookups.
+   * Required when the 'create-event' follow-on card is used.
+   * Actual event record creation occurs inside onFinish after the parent
+   * record (matter/project) has been created and its GUID is available.
    */
-  fetchAiSummary?: () => Promise<{ summary: string }>;
+  eventDataService?: IDataService;
   /**
    * Optional callback to resolve the SPE container ID for file uploads.
    * Called when the wizard opens. If not provided, speContainerId will be

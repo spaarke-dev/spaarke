@@ -44,6 +44,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { provisionSecureProject } from './provisioningService';
+import { EventService } from '../CreateEventWizard/eventService';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -360,6 +361,10 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
 
       resolveSpeContainerId,
 
+      // Provide the data service for the "Create Event" follow-on step
+      // (used by CreateEventStep for event type lookups).
+      eventDataService: dataService,
+
       buildEmailSubject: (entityName: string) => `New Project: ${entityName}`,
       buildEmailBody: (fields: Record<string, string>) => {
         const typeStr = fields.projectTypeName ? ` ${fields.projectTypeName.toLowerCase()}` : '';
@@ -439,6 +444,38 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             const message = err instanceof Error ? err.message : 'Unknown error';
             warnings.push(
               `Work assignment could not be created (${message}). ` +
+              'You can create it manually from the project record.'
+            );
+          }
+        }
+
+        // 1b-ii. Create Event (sprk_event) linked to this project
+        if (context.selectedActions.includes('create-event') && context.followOn.createEventName.trim()) {
+          try {
+            const eventService = new EventService(dataService);
+            const eventFormValues = {
+              eventName: context.followOn.createEventName.trim(),
+              eventTypeId: context.followOn.createEventTypeId,
+              eventTypeName: context.followOn.createEventTypeName,
+              dueDate: context.followOn.createEventDueDate,
+              priority: context.followOn.createEventPriority,
+              description: context.followOn.createEventDescription,
+              regardingRecordId: projectId,
+              regardingRecordName: projectName,
+            };
+            const eventResult = await eventService.createEvent(eventFormValues, 'sprk_project');
+            if (eventResult.success) {
+              console.info('[CreateProjectWizard] Event created and linked to project:', projectId);
+            } else {
+              warnings.push(
+                `Event could not be created (${eventResult.errorMessage ?? 'unknown error'}). ` +
+                'You can create it manually from the project record.'
+              );
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            warnings.push(
+              `Event could not be created (${message}). ` +
               'You can create it manually from the project record.'
             );
           }

@@ -6,9 +6,9 @@
  * shared library so that all entity wizards share the same follow-on UX.
  *
  * The three optional follow-on actions are:
- *   1. Assign Resources — attorney/paralegal/outside counsel lookups
- *   2. Draft Summary   — AI-generated summary + recipient distribution
- *   3. Send Email       — compose introductory email to client
+ *   1. Assign Work    — create a work assignment with resources linked to this record
+ *   2. Create Event   — create a sprk_event linked to this matter/project
+ *   3. Send Email     — compose introductory email to client
  *
  * @see CreateRecordWizard — parent component that syncs card selections
  *      with dynamic wizard steps via WizardShell.addDynamicStep.
@@ -17,7 +17,7 @@ import * as React from 'react';
 import { Card, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import {
   PersonRegular,
-  DocumentTextRegular,
+  CalendarRegular,
   MailRegular,
   CheckboxCheckedRegular,
   CheckboxUncheckedRegular,
@@ -45,11 +45,11 @@ const CARD_DEFS: IFollowOnCardDef[] = [
     icon: <PersonRegular fontSize={28} />,
   },
   {
-    id: 'draft-summary',
-    label: 'Draft Summary',
-    description: 'Generate an AI-assisted summary and distribute to recipients.',
-    stepLabel: 'Draft Summary',
-    icon: <DocumentTextRegular fontSize={28} />,
+    id: 'create-event',
+    label: 'Create Event',
+    description: 'Create an event linked to this record.',
+    stepLabel: 'Create Event',
+    icon: <CalendarRegular fontSize={28} />,
   },
   {
     id: 'send-email',
@@ -67,19 +67,19 @@ const CARD_DEFS: IFollowOnCardDef[] = [
 /** Map FollowOnActionId → sidebar step ID. */
 export const FOLLOW_ON_STEP_ID_MAP: Record<FollowOnActionId, string> = {
   'assign-counsel': 'followon-assign-counsel',
-  'draft-summary': 'followon-draft-summary',
+  'create-event': 'followon-create-event',
   'send-email': 'followon-send-email',
 };
 
 /** Map FollowOnActionId → sidebar step label. */
 export const FOLLOW_ON_STEP_LABEL_MAP: Record<FollowOnActionId, string> = {
   'assign-counsel': 'Assign Work',
-  'draft-summary': 'Draft Summary',
+  'create-event': 'Create Event',
   'send-email': 'Send Email',
 };
 
 /** Canonical order for dynamic follow-on steps in the sidebar. */
-export const FOLLOW_ON_CANONICAL_ORDER = ['followon-assign-counsel', 'followon-draft-summary', 'followon-send-email'];
+export const FOLLOW_ON_CANONICAL_ORDER = ['followon-assign-counsel', 'followon-create-event', 'followon-send-email'];
 
 // ---------------------------------------------------------------------------
 // Props
