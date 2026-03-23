@@ -327,10 +327,19 @@ FOR each phase:
   DOCUMENT in TASK-INDEX.md "Parallel Execution Groups" section
 
 WHY THIS MATTERS:
-  - Claude Code can spawn multiple Task subagents in parallel
-  - Independent tasks complete faster when run simultaneously
+  - The project-pipeline executes parallel groups CONCURRENTLY by default
+  - Claude Code spawns one task agent per task in a group simultaneously
+  - Independent tasks complete faster when run in parallel
   - Dependencies prevent race conditions and merge conflicts
   - Explicit grouping prevents accidental parallel execution of conflicting tasks
+  - EVERY task MUST have parallel-group and parallel-safe metadata — no exceptions
+
+DESIGN FOR PARALLELISM:
+  - When decomposing work, PREFER creating independent tasks over sequential chains
+  - Split by file/component ownership (e.g., one task per endpoint, per component)
+  - Avoid tasks that touch the same files — this prevents parallelization
+  - A project with no parallel groups will execute slowly (one task at a time)
+  - Aim for at least 2-3 parallel groups per project phase
 ```
 
 ### Step 3.7: Add Mandatory Project Wrap-up Task (REQUIRED)

@@ -363,9 +363,10 @@ This orchestrates the complete setup (internal pipeline steps a-f):
 - c. ✅ Generates artifacts (README.md, PLAN.md, CLAUDE.md, folder structure)
 - d. ✅ Creates 50-200+ task files with full context
 - e. ✅ Creates feature branch and initial commit
-- f. ✅ Optionally starts task 001
+- f. ✅ Auto-starts task execution with parallel task agents
 
-**→ Human-in-loop confirmations after each major step**
+**→ Runs autonomously by default — no approval gates, parallel task execution via concurrent agents**
+**→ For interactive mode: say "run pipeline interactively"**
 
 ---
 

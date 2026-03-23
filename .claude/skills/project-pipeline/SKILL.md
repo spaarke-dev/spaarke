@@ -1,7 +1,7 @@
 # project-pipeline
 
 ---
-description: Automated pipeline from SPEC.md to ready-to-execute tasks with human-in-loop confirmation
+description: Automated pipeline from SPEC.md to ready-to-execute tasks — runs autonomously by default with parallel task execution
 tags: [project-pipeline, orchestration, automation]
 techStack: [all]
 appliesTo: ["projects/*/", "start project", "initialize project"]
@@ -70,13 +70,16 @@ WHEN TO SWITCH: After Step 3 completes and you're ready for Step 4 (branch creat
 **Tier 2 Orchestrator Skill (RECOMMENDED)** - Streamlined end-to-end project initialization pipeline that chains: SPEC.md validation → Resource discovery → Artifact generation → Task decomposition → Feature branch → Ready to execute Task 001.
 
 **Key Features**:
-- Human-in-loop confirmations after each major step
+- **Autonomous by default** — pipeline runs end-to-end without approval gates
 - Automatic resource discovery (ADRs, skills, knowledge docs)
 - Calls component skills (project-setup, task-create)
 - Creates feature branch for isolation
-- Optional auto-start of task 001
+- **Parallel task execution** — tasks are grouped for concurrent execution via Claude Code task agents
+- Auto-starts task 001 after pipeline completes
 
-**Human-in-Loop**: After each step, present results and ask for confirmation before proceeding. Default to "proceed" (user just says 'y').
+**Execution Mode**: The pipeline runs autonomously — it proceeds through all steps without waiting for user confirmation. Status updates are reported at each milestone but do not block progress. The user can interrupt at any point if needed.
+
+**Interactive Override**: If the user explicitly says "run pipeline interactively" or "with approvals", switch to interactive mode with confirmation gates after each step.
 
 ## When to Use
 
@@ -114,7 +117,8 @@ IF no unmerged branches:
   Proceeding with project initialization...
 ```
 
-**Wait for User**: If stale, user chooses to merge first or continue anyway.
+**Autonomous mode** (default): If stale, LOG warning and continue. User can address after pipeline completes.
+**Interactive mode**: Wait for user to choose merge first or continue.
 
 ---
 
@@ -150,7 +154,8 @@ IF validation fails:
 [Y to proceed / refine to make changes / stop to exit]
 ```
 
-**Wait for User**: `y` (proceed) | `refine {instructions}` | `stop`
+**Autonomous mode** (default): Report validation results and proceed immediately.
+**Interactive mode**: Wait for user confirmation.
 
 ---
 
@@ -231,7 +236,8 @@ Recommendations:
 [Y to proceed with awareness / stop to wait]
 ```
 
-**Note:** This step is informational—it doesn't block the pipeline. The goal is awareness so you can plan for sequential merges or file ownership.
+**Autonomous mode** (default): Log overlaps as warnings and proceed. Overlaps are informational — they don't block the pipeline.
+**Interactive mode**: Present overlaps and wait for user confirmation.
 
 ---
 
@@ -349,7 +355,8 @@ ENHANCE CLAUDE.md with discovered resources:
 [Y to proceed / review to view artifacts / refine {file} to edit / stop to exit]
 ```
 
-**Wait for User**: `y` (proceed) | `review` (open PLAN.md) | `refine {instructions}` | `stop`
+**Autonomous mode** (default): Report discovery/generation results and proceed immediately to task decomposition.
+**Interactive mode**: Wait for user confirmation.
 
 ---
 
@@ -482,7 +489,8 @@ Task-execute skill will automatically:
 [Y to start task 001 / review {task-number} to view task / stop to exit]
 ```
 
-**Wait for User**: `y` (proceed to branch creation) | `review {task-number}` | `stop`
+**Autonomous mode** (default): Report task generation results and proceed immediately to branch creation.
+**Interactive mode**: Wait for user confirmation.
 
 ---
 
@@ -558,55 +566,60 @@ WHY create branch at this point:
 [Y to start task 001 / stop to exit]
 ```
 
-**Wait for User**: `y` (start task 001) | `stop`
+**Autonomous mode** (default): Report branch creation and proceed immediately to task execution.
+**Interactive mode**: Wait for user confirmation.
 
 ---
 
-### Step 5: Execute Task 001 (Optional Auto-Start)
+### Step 5: Execute Tasks (Auto-Start with Parallel Execution)
 
 **Action:**
 ```
-IF user said 'y':
-  → INVOKE task-execute skill with projects/{project-name}/tasks/001-*.poml
-  → task-execute will:
-    1. UPDATE current-task.md:
-       - Task ID: 001
-       - Status: in-progress
-       - Started: {timestamp}
-    2. LOAD context:
-       - Task file (POML)
-       - Knowledge files (from <knowledge> section)
-       - ADRs (via adr-aware based on tags)
-       - Context from PLAN.md and README.md
-    3. EXECUTE task steps, updating current-task.md after each step
+AUTONOMOUS MODE (default):
+  → Automatically start task execution after branch creation
+  → Execute tasks following the parallel group strategy from TASK-INDEX.md
+  → Continue through task groups until all complete or context limit reached
 
-PARALLEL TASK EXECUTION (when dependencies allow):
-  If multiple tasks have no dependencies (or all dependencies satisfied):
-  → CAN execute in parallel using Task tool with multiple subagent invocations
-  → Example: Tasks 020, 021, 022 all have "dependencies: 010" satisfied
-  → Send ONE message with THREE Task tool calls (subagent_type: general-purpose)
-  → Each subagent runs task-execute for one task independently
-  → Monitor completion via TaskOutput tool
+TASK EXECUTION STRATEGY:
+  1. READ TASK-INDEX.md for parallel groups and dependencies
+  2. START with first available task(s)
+  3. FOR each parallel group:
+     → Spawn concurrent task agents (one per task in the group)
+     → Send ONE message with MULTIPLE Agent tool calls
+     → Each agent runs task-execute for its task independently
+     → Wait for ALL agents in the group to complete
+     → Update TASK-INDEX.md statuses (🔲 → ✅)
+     → Proceed to next group whose dependencies are now satisfied
+  4. FOR serial tasks (not in a parallel group):
+     → Execute sequentially via task-execute
+  5. AFTER each group/task completes:
+     → Check TASK-INDEX.md for next available group
+     → Continue until all tasks complete or context > 70%
 
-  REQUIREMENTS for parallel execution:
-  - All tasks must have dependencies satisfied (check TASK-INDEX.md)
-  - Tasks must NOT modify the same files (check <relevant-files>)
-  - Each task uses its own task-execute invocation
+PARALLEL EXECUTION REQUIREMENTS:
+  - All tasks in a group must have dependencies satisfied
+  - Tasks must NOT modify the same files (check <relevant-files> and <parallel-safe>)
+  - Each task agent uses its own task-execute invocation with full context loading
   - Track parallel tasks in current-task.md "Parallel Execution" section
+  - If a parallel task fails, continue other tasks in the group — report failure at group end
 
-IF user said 'stop':
-  → OUTPUT:
-    "✅ Project initialized and ready!
+EXAMPLE parallel execution flow:
+  Group A (tasks 010, 011, 012) — prerequisite: 001 ✅
+  → Spawn 3 agents simultaneously
+  → All complete → Group B available
+  Group B (tasks 020, 021) — prerequisite: 012 ✅
+  → Spawn 2 agents simultaneously
+  → Continue...
 
-     current-task.md is set to:
-       - Task ID: none
-       - Status: none (waiting for first task)
+CONTEXT MANAGEMENT during parallel execution:
+  - Checkpoint after each completed group (not each individual task)
+  - If context > 60%: checkpoint + compact before next group
+  - If context > 70%: checkpoint + STOP + report remaining tasks
 
-     When ready to start:
-     - Say: `work on task 001` or `execute task 001`
-     - task-execute will update current-task.md and load all context
-
-     To check status later: `/project-status {project-name}`"
+INTERACTIVE MODE (when user says "run interactively" or "with approvals"):
+  → Execute one task at a time
+  → Ask before proceeding to next task
+  → User can review results between tasks
 ```
 
 **Note on current-task.md lifecycle:**
@@ -667,30 +680,38 @@ Options:
 
 ## Usage Examples
 
-### Example 1: Standard Flow
+### Example 1: Autonomous Flow (Default)
 ```
 User: "start project ai-document-intelligence-r1"
 
+Agent: ✅ Step 0.5: Master is current — all branch work merged.
+       ✅ Step 1: SPEC.md validated (2,306 words)
+       ✅ Step 1.5: No active PR overlaps detected.
+       ✅ Step 2: Resources discovered (4 ADRs, 2 skills, 3 knowledge docs)
+                  Artifacts generated (README, PLAN, CLAUDE.md)
+       ✅ Step 3: 178 tasks created, 6 parallel groups identified
+       ✅ Step 4: Branch feature/ai-document-intelligence-r1 created, PR #265 opened
+       🚀 Step 5: Starting task execution...
+
+       Executing Group 0: Task 001 (serial — foundation setup)
+       ✅ Task 001 complete.
+
+       Executing Group A: Tasks 010, 011, 012 (parallel — 3 agents)
+       ✅ All 3 tasks complete.
+
+       Executing Group B: Tasks 020, 021 (parallel — 2 agents)
+       [continues autonomously...]
+```
+
+### Example 2: Interactive Flow (Explicit Request)
+```
+User: "start project interactively"
+
 Agent: ✅ SPEC.md validated (2,306 words)
-        📋 Next Step: Generate PLAN.md
-        [Y to proceed]
+       [Y to proceed / refine / stop]
 
 User: "y"
-
-Agent: ✅ PLAN.md generated (487 lines, 5 phases)
-        📋 Next Step: Generate task files
-        [Y to proceed]
-
-User: "y"
-
-Agent: ✅ 178 tasks generated
-        ✨ Project ready!
-        📋 Next Step: Execute Task 001
-        [Y to start]
-
-User: "y"
-
-Agent: [Executes task 001 with full context loaded]
+[... approval gates at each step ...]
 ```
 
 ### Example 2: Review Before Proceeding

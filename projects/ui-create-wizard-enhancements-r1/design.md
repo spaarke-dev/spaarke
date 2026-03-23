@@ -41,6 +41,9 @@ Testing of the newly deployed create wizard Code Pages revealed several UX gaps 
 | **E-13** | Fix double `/api/api/` prefix in SprkChat context-mappings URL — BFF base URL already includes `/api`, code prepends it again resulting in 404 | SprkChat pane BFF client configuration |
 | **E-14** | Consolidate PlaybookLibrary and AnalysisBuilder into a single Code Page (`sprk_playbooklibrary`). Both are thin wrappers around the same `PlaybookLibraryShell` component — merge parameter handling, retire `sprk_analysisbuilder` | PlaybookLibrary/main.tsx, AnalysisBuilder/ (retire) |
 | **E-15** | Summarize → Analysis flow: create `sprk_document` records after summary step (so GUIDs are available), pass document IDs to PlaybookLibrary. Add document selector (single-select MVP) at top of PlaybookLibrary when multiple documents are passed | SummarizeFilesDialog follow-on, PlaybookLibraryShell |
+| **E-16** | Fix N:N scope association failure — `Xrm.WebApi.online.execute` is not available in Code Page iframe context. Move analysis creation + scope association (skills, knowledge, tools) to BFF API with `authenticatedFetch` | analysisService.ts, BFF AnalysisEndpoints |
+| **E-17** | Fix theme cascade — remove OS `prefers-color-scheme` as fallback in `resolveCodePageTheme()` and `getEffectiveDarkMode()`. When Spaarke theme menu not set (localStorage `spaarke-theme` = `auto`), default to light. Pages currently inherit OS dark mode instead of defaulting to light | `codePageTheme.ts`, `themeStorage.ts` (shared library) |
+| **E-18** | Replace all hard-coded colors with Fluent UI v9 semantic tokens (ADR-021). Audit found ~25 instances across solutions, code pages, and PCF controls using hex/rgba values that break in dark mode. Also consolidate 6 duplicated ThemeProvider.ts files into shared library usage | LegalWorkspace, SpeAdminApp, SemanticSearch, SprkChatPane, UniversalDatasetGrid, DocumentRelationshipViewer, UniversalQuickCreate, DrillThroughWorkspace |
 
 ### Out of Scope
 
@@ -276,6 +279,26 @@ import { WorkspaceShell } from "@spaarke/ui-components";
 **Document selector component**: A simple list at the top of `PlaybookLibraryShell` shown when multiple `documentIds` are passed. Each item shows file name, type icon, and file size. Single-select radio buttons for MVP. Can be expanded to multi-select (checkbox) in a future iteration — each selected document would get its own `sprk_analysis` record via the existing 1:N relationship.
 
 **No schema changes required** — uses existing `sprk_documentid` lookup on `sprk_analysis`.
+
+### E-16: Fix N:N Scope Association in Code Page Context
+
+**Problem**: When running an analysis from a Code Page (PlaybookLibrary or AnalysisBuilder), the `associateScopes()` function in `analysisService.ts` attempts to use `Xrm.WebApi.online.execute` to create N:N associations between the analysis and its skills, knowledge, and tools. This API is not available inside a `navigateTo` iframe, causing the error: "Xrm.WebApi.online.execute is not available. Cannot create N:N associations."
+
+**Impact**: Analyses are created but their scope configuration (skills, knowledge, tools) is not linked, meaning the AI pipeline may run without the intended scope constraints.
+
+**Root cause**: Same class of issue as E-02 — Code Pages running in `navigateTo` iframes have limited `Xrm.WebApi` access. The `execute` method (needed for `Associate` requests) is unavailable.
+
+**Fix**: Move analysis creation and scope association to the BFF API:
+1. Add a new BFF endpoint: `POST /api/ai/analysis/create` that accepts the full analysis config (document ID, action ID, playbook ID, skill IDs, knowledge IDs, tool IDs)
+2. BFF creates the `sprk_analysis` record and all N:N associations server-side via the Dataverse SDK (where `Associate` works reliably)
+3. Frontend `analysisService.ts` calls this BFF endpoint via `authenticatedFetch` instead of using `Xrm.WebApi` directly
+4. This aligns with E-02 and E-14 — all Code Page API calls go through the BFF with MSAL auth
+
+**Files**:
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/analysisService.ts` — replace `Xrm.WebApi` calls with BFF API calls
+- `src/solutions/LegalWorkspace/src/components/Playbook/analysisService.ts` — same change
+- `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs` — new create endpoint
+- `src/server/shared/Spaarke.Dataverse/IAnalysisDataverseService.cs` — add scope association method
 
 ---
 
