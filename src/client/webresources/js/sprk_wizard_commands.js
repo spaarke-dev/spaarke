@@ -21,6 +21,63 @@ Spaarke.Commands.Wizards = (function () {
     height: { value: 70, unit: "%" }
   };
 
+  // ---------------------------------------------------------------------------
+  // BFF Base URL resolution (E-02: propagate bffBaseUrl to all Code Pages)
+  // ---------------------------------------------------------------------------
+
+  /** Cached BFF API base URL — resolved once per page load and reused. */
+  var _cachedBffBaseUrl = null;
+
+  /**
+   * Resolve the BFF API base URL from the Dataverse Environment Variable
+   * "sprk_BffApiBaseUrl". Caches the result so subsequent calls are instant.
+   *
+   * @returns {Promise<string>} Resolved BFF base URL.
+   */
+  function getBffBaseUrl() {
+    if (_cachedBffBaseUrl) {
+      return Promise.resolve(_cachedBffBaseUrl);
+    }
+
+    var schemaName = "sprk_BffApiBaseUrl";
+
+    return Xrm.WebApi.retrieveMultipleRecords(
+      "environmentvariabledefinition",
+      "?$filter=schemaname eq '" + schemaName + "'&$select=environmentvariabledefinitionid,defaultvalue"
+    ).then(function (defResult) {
+      if (!defResult.entities || defResult.entities.length === 0) {
+        throw new Error(
+          "[WizardCommands] Environment variable \"" + schemaName + "\" not found in Dataverse."
+        );
+      }
+
+      var definition = defResult.entities[0];
+      var definitionId = definition.environmentvariabledefinitionid;
+      var defaultValue = definition.defaultvalue || null;
+
+      return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariablevalue",
+        "?$filter=_environmentvariabledefinitionid_value eq '" + definitionId + "'&$select=value"
+      ).then(function (valResult) {
+        var finalValue = null;
+        if (valResult.entities && valResult.entities.length > 0) {
+          finalValue = valResult.entities[0].value;
+        } else {
+          finalValue = defaultValue;
+        }
+
+        if (!finalValue) {
+          throw new Error(
+            "[WizardCommands] Environment variable \"" + schemaName + "\" has no value configured."
+          );
+        }
+
+        _cachedBffBaseUrl = finalValue;
+        return finalValue;
+      });
+    });
+  }
+
   /**
    * Helper: extract entity context from PrimaryControl (form context)
    */
@@ -61,60 +118,80 @@ Spaarke.Commands.Wizards = (function () {
     });
   }
 
+  /**
+   * Helper: resolve bffBaseUrl then open wizard dialog.
+   * Includes bffBaseUrl as a query param in the data string.
+   *
+   * @param {object} primaryControl - Xrm form/grid context for post-close refresh.
+   * @param {string} webresourceName - Target Code Page web resource name.
+   * @param {string} baseData - Query string params without bffBaseUrl (e.g. "entityType=sprk_matter&entityId=...").
+   * @param {string} title - Dialog title bar text.
+   * @param {object} [options] - Optional dialog size options (defaults to DIALOG_OPTIONS).
+   */
+  function openWizardWithBff(primaryControl, webresourceName, baseData, title, options) {
+    getBffBaseUrl().then(function (bffBaseUrl) {
+      var data = (baseData ? baseData + "&" : "") + "bffBaseUrl=" + encodeURIComponent(bffBaseUrl);
+      openWizardDialog(primaryControl, webresourceName, data, title, options);
+    }).catch(function (err) {
+      console.error("[WizardCommands] Failed to resolve BFF base URL, opening wizard without it:", err);
+      openWizardDialog(primaryControl, webresourceName, baseData, title, options);
+    });
+  }
+
   return {
     openCreateMatterWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_creatematterwizard", data, "Create New Matter");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_creatematterwizard", baseData, "Create New Matter");
     },
 
     openCreateProjectWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_createprojectwizard", data, "Create New Project");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_createprojectwizard", baseData, "Create New Project");
     },
 
     openCreateEventWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_createeventwizard", data, "Create New Event");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_createeventwizard", baseData, "Create New Event");
     },
 
     openCreateTodoWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_createtodowizard", data, "Create New To Do");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_createtodowizard", baseData, "Create New To Do");
     },
 
     openDocumentUploadWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_documentuploadwizard", data, "Upload Documents");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_documentuploadwizard", baseData, "Upload Documents");
     },
 
     openSummarizeFilesWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_summarizefileswizard", data, "Summarize Files");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_summarizefileswizard", baseData, "Summarize Files");
     },
 
     openFindSimilarDialog: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_findsimilar", data, "Find Similar Documents", SMALL_DIALOG_OPTIONS);
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_findsimilar", baseData, "Find Similar Documents", SMALL_DIALOG_OPTIONS);
     },
 
     openPlaybookLibrary: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
-      openWizardDialog(primaryControl, "sprk_playbooklibrary", data, "Playbook Library");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      openWizardWithBff(primaryControl, "sprk_playbooklibrary", baseData, "Playbook Library");
     },
 
     // Intent-based playbook launcher (used by ribbon buttons that pre-select a playbook)
     openPlaybookWithIntent: function (primaryControl, intent) {
       var ctx = getEntityContext(primaryControl);
-      var data = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId + "&intent=" + intent;
-      openWizardDialog(primaryControl, "sprk_playbooklibrary", data, "Playbook Library");
+      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId + "&intent=" + intent;
+      openWizardWithBff(primaryControl, "sprk_playbooklibrary", baseData, "Playbook Library");
     }
   };
 })();

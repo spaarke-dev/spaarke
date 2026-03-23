@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
@@ -24,6 +25,20 @@ public static class AnalysisEndpoints
         var group = app.MapGroup("/api/ai/analysis")
             .RequireAuthorization()
             .WithTags("AI Analysis");
+
+        // POST /api/ai/analysis/create - Create analysis record and associate N:N scopes
+        group.MapPost("/create", CreateAnalysis)
+            .AddAnalysisExecuteAuthorizationFilter()
+            .RequireRateLimiting("ai-batch")
+            .WithName("CreateAnalysis")
+            .WithSummary("Create analysis record with scope associations")
+            .WithDescription("Creates an sprk_analysis record in Dataverse and associates N:N scope items (skills, knowledge, tools). Returns the new analysis ID.")
+            .Produces<CreateAnalysisResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
 
         // POST /api/ai/analysis/execute - Execute new analysis with SSE streaming
         group.MapPost("/execute", ExecuteAnalysis)
@@ -111,6 +126,84 @@ public static class AnalysisEndpoints
             .ProducesProblem(500);
 
         return app;
+    }
+
+    /// <summary>
+    /// Create a new analysis record and associate N:N scope items.
+    /// POST /api/ai/analysis/create
+    /// </summary>
+    private static async Task<IResult> CreateAnalysis(
+        CreateAnalysisRequest request,
+        IAnalysisDataverseService dataverseService,
+        ILogger<AnalysisOrchestrationService> logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: "Analysis name is required.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
+        if (request.DocumentId == Guid.Empty)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: "A valid documentId is required.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
+        logger.LogInformation(
+            "Creating analysis '{Name}' for document {DocumentId} with {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
+            request.Name, request.DocumentId,
+            request.SkillIds.Length, request.KnowledgeIds.Length, request.ToolIds.Length);
+
+        try
+        {
+            // Step 1: Create the sprk_analysis record
+            var analysisId = await dataverseService.CreateAnalysisAsync(
+                request.DocumentId,
+                request.Name,
+                playbookId: null,
+                cancellationToken);
+
+            // Step 2: Associate N:N scope items (skills, knowledge, tools)
+            if (request.SkillIds.Length > 0 || request.KnowledgeIds.Length > 0 || request.ToolIds.Length > 0)
+            {
+                await dataverseService.AssociateScopesAsync(
+                    analysisId,
+                    request.SkillIds,
+                    request.KnowledgeIds,
+                    request.ToolIds,
+                    cancellationToken);
+            }
+
+            logger.LogInformation("Created analysis {AnalysisId} for document {DocumentId}", analysisId, request.DocumentId);
+
+            return Results.Created($"/api/ai/analysis/{analysisId}", new CreateAnalysisResponse(analysisId));
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("scope item"))
+        {
+            // Scope association partially failed — analysis was created but scopes may be incomplete
+            logger.LogWarning(ex, "Analysis created but scope association failed for document {DocumentId}", request.DocumentId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Scope Association Failed",
+                detail: ex.Message,
+                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to create analysis for document {DocumentId}", request.DocumentId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "Failed to create analysis record.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+        }
     }
 
     /// <summary>

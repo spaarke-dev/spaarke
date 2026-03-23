@@ -48,6 +48,13 @@ export interface IPlaybookHandlerOptions {
    * Callers should use this to refetch workspace data.
    */
   onDialogClose?: () => void;
+
+  /**
+   * BFF API base URL to pass to the Code Page via the navigateTo data parameter.
+   * Required so the Playbook Library Code Page can make MSAL-authenticated BFF calls.
+   * Callers should provide this from getBffBaseUrl() in the LegalWorkspace runtimeConfig.
+   */
+  bffBaseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,9 +74,14 @@ export type PlaybookHandlerMap = Readonly<Record<string, () => void>>;
 /**
  * Opens the Playbook Library Code Page in a modal dialog via Xrm.Navigation.navigateTo.
  */
-async function openPlaybookIntent(intent: string, onDialogClose?: () => void): Promise<void> {
+async function openPlaybookIntent(
+  intent: string,
+  onDialogClose?: () => void,
+  bffBaseUrl?: string
+): Promise<void> {
   try {
-    const data = `intent=${intent}`;
+    const bffParam = bffBaseUrl ? `&bffBaseUrl=${encodeURIComponent(bffBaseUrl)}` : "";
+    const data = `intent=${intent}${bffParam}`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (window as any).Xrm?.Navigation?.navigateTo(
       { pageType: "webresource", webresourceName: "sprk_playbooklibrary", data },
@@ -107,14 +119,14 @@ async function openPlaybookIntent(intent: string, onDialogClose?: () => void): P
 export function createPlaybookHandlers(
   options: IPlaybookHandlerOptions = {}
 ): PlaybookHandlerMap {
-  const { onDialogClose } = options;
+  const { onDialogClose, bffBaseUrl } = options;
 
   const handlers: Record<string, () => void> = {};
 
   for (const [cardId, intent] of Object.entries(CARD_INTENT_MAP)) {
     handlers[cardId] = () => {
       logInfo(`Card "${cardId}" clicked → opening Playbook Library with intent "${intent}"`);
-      void openPlaybookIntent(intent, onDialogClose);
+      void openPlaybookIntent(intent, onDialogClose, bffBaseUrl);
     };
   }
 

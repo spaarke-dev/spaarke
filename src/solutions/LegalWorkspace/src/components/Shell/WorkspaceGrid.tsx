@@ -365,7 +365,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenEventWizard = React.useCallback(async () => {
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_createeventwizard" },
+        { pageType: "webresource", webresourceName: "sprk_createeventwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create New Event" }
       );
       feedRefetchRef.current?.();
@@ -381,7 +381,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenTodoWizard = React.useCallback(async () => {
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_createtodowizard" },
+        { pageType: "webresource", webresourceName: "sprk_createtodowizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create New To Do" }
       );
       todoRefetchRef.current?.();
@@ -450,6 +450,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
           feedRefetchRef.current?.();
           todoRefetchRef.current?.();
         },
+        bffBaseUrl: getBffBaseUrl(),
       }),
     []
   );
@@ -542,7 +543,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "&parentEntityId=" +
       "&parentEntityName=" +
       "&containerId=" + containerId +
-      "&theme=" + theme;
+      "&theme=" + theme +
+      "&bffBaseUrl=" + encodeURIComponent(getBffBaseUrl());
 
     try {
       await xrm.Navigation.navigateTo(
