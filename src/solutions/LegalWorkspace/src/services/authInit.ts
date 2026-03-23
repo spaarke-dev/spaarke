@@ -12,7 +12,7 @@
  */
 
 import { initAuth, authenticatedFetch as sharedAuthFetch, getAuthProvider } from '@spaarke/auth';
-import { getBffBaseUrl } from '../config/runtimeConfig';
+import { getBffBaseUrl, getBffOAuthScope, getMsalClientId } from '../config/runtimeConfig';
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -29,7 +29,9 @@ export function ensureAuthInitialized(): Promise<void> {
     _initPromise = (async () => {
       try {
         await initAuth({
+          clientId: getMsalClientId(),
           bffBaseUrl: getBffBaseUrl(),
+          bffApiScope: getBffOAuthScope(),
           proactiveRefresh: true,
         });
         console.info('[authInit] @spaarke/auth initialized successfully');

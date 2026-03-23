@@ -19,6 +19,7 @@ import {
   createPlaybookHandlers,
 } from "../GetStarted/ActionCardHandlers";
 import type { IWebApi } from "../../types/xrm";
+import { getBffBaseUrl } from "../../config/runtimeConfig";
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded dialog components (bundle-size optimization — Task 033)
@@ -277,6 +278,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         {
           pageType: "webresource",
           webresourceName: "sprk_creatematterwizard",
+          data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
         },
         {
           target: 2,
@@ -307,6 +309,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         {
           pageType: "webresource",
           webresourceName: "sprk_createprojectwizard",
+          data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
         },
         {
           target: 2,
@@ -326,7 +329,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const handleOpenSummarize = React.useCallback(async (documentIds?: string[]) => {
     try {
-      const data = documentIds ? `documentIds=${documentIds.join(",")}` : "";
+      const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
+      const data = documentIds ? `documentIds=${documentIds.join(",")}&${bffParam}` : bffParam;
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
         { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Summarize Files" }
@@ -343,7 +347,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const handleOpenFindSimilar = React.useCallback(async (documentId?: string, containerId?: string) => {
     try {
-      const data = `documentId=${documentId || ""}&containerId=${containerId || ""}`;
+      const data = `documentId=${documentId || ""}&containerId=${containerId || ""}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
         { target: 2, width: { value: 70, unit: "%" }, height: { value: 80, unit: "%" }, title: "Find Similar Documents" }
@@ -393,7 +397,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenWorkAssignmentWizard = React.useCallback(async () => {
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard" },
+        { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create Work Assignment" }
       );
     } catch {

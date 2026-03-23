@@ -1,14 +1,14 @@
 # SDAP Authentication Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (Authentication & Security section)
-> **Last Updated**: February 26, 2026
+> **Last Updated**: March 2026
 > **Applies To**: Authentication code, token handling, Azure AD configuration
 
 ---
 
 ## TL;DR
 
-SDAP uses seven authentication patterns: (1) MSAL.js in PCF for user tokens, (2) OBO for Graph API, (3) ClientSecret for server-to-Dataverse, (4) OBO for AI file access, (5) OBO for Dataverse authorization, (6) App-only for email processing, (7) MSAL ssoSilent for Code Pages embedded on forms. Patterns 1-3 cover the core flows. Pattern 7 enables HTML web resources to call the BFF API when embedded as iframes (where Xrm token APIs are unavailable).
+SDAP uses nine authentication patterns: (1) MSAL.js in PCF for user tokens, (2) OBO for Graph API, (3) ClientSecret for server-to-Dataverse, (4) OBO for AI file access, (5) OBO for Dataverse authorization, (6) App-only for email processing, (7) MSAL ssoSilent for Code Pages embedded on forms, (8) Parent-to-Child token bridge for dialogs opened from authenticated parents, (9) resolveRuntimeConfig + initAuth for standalone wizard code pages. Patterns 1-3 cover the core flows. Pattern 9 is required for all wizard code pages under `src/solutions/` — using `fetch.bind(window)` instead returns 401. **Tenant ID note**: `resolveRuntimeConfig().tenantId` is empty on first page load (Xrm initializes it asynchronously). Always patch from `getAuthProvider().getTenantId()` after auth init — see Pattern 9 "Tenant ID at Bootstrap" section. `resolveTenantIdSync()` now resolves via: (1) MSAL authority URL, (2) MSAL `accounts[0].tenantId` (JWT-sourced, reliable post-auth), (3) Xrm frame walk.
 
 ---
 
@@ -988,6 +988,208 @@ Child (iframe code page)
 
 ---
 
+## Pattern 9: Standalone Wizard Code Page Auth (resolveRuntimeConfig + initAuth)
+
+> **Added**: March 2026
+> **Status**: Production (all six wizard code pages under `src/solutions/`)
+> **Use case**: Wizard code pages (opened as standalone dialogs via `Xrm.Navigation.navigateTo`) that call the BFF API directly — e.g., AI pre-fill, file summarization
+
+### When to Use
+
+When a code page opened as a **standalone Dataverse dialog** needs to call the BFF API. These pages:
+- Are opened via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... })`
+- Do NOT inherit auth context from the calling page
+- Cannot use Pattern 7 (Xrm platform strategies) because they are standalone — no parent form with active Xrm token
+
+### Why `fetch.bind(window)` Returns 401
+
+Wizard code pages are standalone web resources. Without explicit MSAL initialization, there is no bearer token. `fetch.bind(window)` sends requests without an `Authorization` header and the BFF returns `401 Unauthorized`.
+
+### Flow
+
+```
+Wizard Code Page Opens (navigateTo dialog)
+    │
+    1. resolveRuntimeConfig()
+    │   ├─ Reads Dataverse env vars via session cookie (no MSAL needed yet)
+    │   │   • sprk_BffApiBaseUrl  → bffBaseUrl
+    │   │   • sprk_BffApiAppId    → bffOAuthScope (api://{id}/user_impersonation)
+    │   │   • sprk_MsalClientId   → msalClientId
+    │   └─ Returns: { bffBaseUrl, bffOAuthScope, msalClientId, tenantId }
+    │
+    2. initAuth({ clientId, bffBaseUrl, bffApiScope, tenantId })
+    │   └─ Initializes MSAL PublicClientApplication with ssoSilent
+    │
+    3. Render wizard — pass authenticatedFetch from @spaarke/auth
+    │   └─ authenticatedFetch adds Authorization: Bearer {token} to all BFF requests
+    │
+    4. Wizard component calls BFF:
+        POST /api/workspace/matters/pre-fill  → 200 OK (pre-fill fields)
+        POST /workspace/files/summarize       → 200 OK (SSE stream)
+```
+
+### Entry Point Implementation (main.tsx)
+
+```tsx
+import * as React from "react";
+import { createRoot } from "react-dom/client";
+import { FluentProvider, webLightTheme, webDarkTheme } from "@fluentui/react-components";
+import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
+import { MyWizardDialog } from "@spaarke/ui-components";
+
+const params = new URLSearchParams(window.location.search);
+const isDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+const theme = isDark ? webDarkTheme : webLightTheme;
+
+function App() {
+    const [isAuthReady, setIsAuthReady] = React.useState(false);
+    const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>("");
+
+    React.useEffect(() => {
+        let cancelled = false;
+        async function initializeAuth(): Promise<void> {
+            try {
+                const config = await resolveRuntimeConfig();
+                await initAuth({
+                    clientId: config.msalClientId,
+                    bffBaseUrl: config.bffBaseUrl,
+                    bffApiScope: config.bffOAuthScope,
+                    tenantId: config.tenantId || undefined,
+                    proactiveRefresh: true,
+                });
+                if (!cancelled) {
+                    setResolvedBffBaseUrl(config.bffBaseUrl);
+                    setIsAuthReady(true);
+                }
+            } catch (err) {
+                console.error("[MyWizard] Failed to initialize auth:", err);
+                if (!cancelled) setIsAuthReady(true); // render anyway
+            }
+        }
+        void initializeAuth();
+        return () => { cancelled = true; };
+    }, []);
+
+    if (!isAuthReady) {
+        return (
+            <FluentProvider theme={theme} style={{ height: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+                    <span>Initializing...</span>
+                </div>
+            </FluentProvider>
+        );
+    }
+
+    return (
+        <FluentProvider theme={theme} style={{ height: "100%" }}>
+            <MyWizardDialog
+                authenticatedFetch={authenticatedFetch}   // ← from @spaarke/auth
+                bffBaseUrl={resolvedBffBaseUrl}
+            />
+        </FluentProvider>
+    );
+}
+
+createRoot(document.getElementById("root")!).render(<App />);
+```
+
+### vite.config.ts Requirements
+
+The `@spaarke/auth` library is aliased to source. Its bare module imports (e.g., `@azure/msal-browser`) must resolve from the solution's own `node_modules`. Use the `resolveSharedLibDeps()` plugin:
+
+```typescript
+// vite.config.ts — required when aliasing @spaarke/auth to source
+resolve: {
+    alias: {
+        "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
+        "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
+        // ...
+    }
+}
+// Plus: resolveSharedLibDeps() plugin in plugins array
+// Redirects bare imports from shared lib source to solution's node_modules
+```
+
+Also add `@azure/msal-browser` to the solution's `package.json` `dependencies`.
+
+### resolveRuntimeConfig() Details
+
+| Step | Description |
+|------|-------------|
+| 1 | Resolve org URL from `Xrm.Utility.getGlobalContext().getClientUrl()` (walks frame hierarchy) |
+| 2 | Fetch `environmentvariabledefinitions` via Dataverse REST API (session cookie auth) |
+| 3 | Fetch `environmentvariablevalues` for override values |
+| 4 | Merge: override value takes precedence over default value |
+| 5 | Build `IRuntimeConfig` with normalized URLs |
+| 6 | Cache in memory (5 min) + localStorage (60 min) |
+
+**Pre-auth bootstrap**: The Dataverse REST API is accessible without a bearer token in a web resource context — the browser session cookie authenticates the request. This is why `resolveRuntimeConfig()` can run before MSAL is initialized.
+
+### Canonical Implementations
+
+| Wizard | File | Notes |
+|--------|------|-------|
+| SummarizeFilesWizard | `src/solutions/SummarizeFilesWizard/src/main.tsx` | No uploadService |
+| CreateMatterWizard | `src/solutions/CreateMatterWizard/src/main.tsx` | Has uploadService (memoized on resolvedBffBaseUrl) |
+| CreateProjectWizard | `src/solutions/CreateProjectWizard/src/main.tsx` | Has uploadService |
+| CreateEventWizard | `src/solutions/CreateEventWizard/src/main.tsx` | Has uploadService |
+| CreateTodoWizard | `src/solutions/CreateTodoWizard/src/main.tsx` | No uploadService |
+| CreateWorkAssignmentWizard | `src/solutions/CreateWorkAssignmentWizard/src/main.tsx` | No uploadService |
+
+### Common Mistakes
+
+| Mistake | Result | Fix |
+|---------|--------|-----|
+| `authenticatedFetch={fetch.bind(window)}` | 401 on all BFF calls | Use `authenticatedFetch` from `@spaarke/auth` |
+| Missing `@azure/msal-browser` in `package.json` | Build error or silent MSAL failure | Add to `dependencies` |
+| Missing `resolveSharedLibDeps()` plugin in vite.config.ts | Module not found for `@azure/msal-browser` | Add the Vite plugin (copy from `SummarizeFilesWizard/vite.config.ts`) |
+| Services created before `resolvedBffBaseUrl` set | Wrong empty URL passed to uploadService | Use `useMemo` with `[resolvedBffBaseUrl]` dependency |
+| No loading state | Wizard renders before auth ready | Gate with `isAuthReady` state |
+| Relying on `resolveRuntimeConfig().tenantId` for downstream sync calls | Empty string on first load — `Xrm.organizationSettings.tenantId` is uninitialized at bootstrap | After `initAuth()`, call `await getAuthProvider().getTenantId()` and patch the stored config (see LegalWorkspace `main.tsx`) |
+| Calling `resolveTenantIdSync()` before `initAuth()` completes | Returns empty — MSAL accounts not yet populated | Ensure `initAuth()` is `await`-ed before the component that calls `resolveTenantIdSync()` renders |
+
+### Tenant ID at Bootstrap — The Async Race
+
+`resolveRuntimeConfig()` reads `Xrm.organizationSettings.tenantId` from the Xrm global context. On **first page load**, Dataverse initializes this property asynchronously — it is reliably empty until about 1–3 seconds after the web resource starts. This means:
+
+```
+First load: resolveRuntimeConfig().tenantId === ''   ← empty at bootstrap time
+Refresh:    resolveRuntimeConfig().tenantId === 'abc…' ← Xrm initialized by reload
+```
+
+**How to get a reliable tenant ID in bootstrap:**
+
+```typescript
+// 1. Resolve config (may return empty tenantId on first load)
+const config = await resolveRuntimeConfig();
+setRuntimeConfig(config);
+
+// 2. Initialize auth
+await initAuth({ clientId: config.msalClientId, bffApiScope: config.bffOAuthScope, bffBaseUrl: config.bffBaseUrl });
+
+// 3. Patch empty tenantId from MSAL accounts (JWT-sourced — always correct post-auth)
+if (!config.tenantId) {
+  const tenantId = await getAuthProvider().getTenantId(); // reads accounts[0].tenantId
+  if (tenantId) setRuntimeConfig({ ...config, tenantId });
+}
+```
+
+**Why `getAuthProvider().getTenantId()` is reliable**: After `initAuth()` completes, MSAL has performed a silent token acquisition and `msal.getAllAccounts()[0].tenantId` contains the real tenant GUID extracted from the access token JWT. This is authoritative regardless of Xrm initialization state.
+
+See `src/solutions/LegalWorkspace/src/main.tsx` for the canonical implementation.
+
+### resolveTenantIdSync() — Resolution Order (for click handlers)
+
+`resolveTenantIdSync()` is safe to call from synchronous click handlers. It resolves in this order:
+
+1. **MSAL authority URL** — if `initAuth()` was called with a tenant-specific authority (e.g. `https://login.microsoftonline.com/{tenantId}`). Filtered: `organizations`, `common`.
+2. **MSAL accounts[0].tenantId** — populated after `initAuth()` completes silent auth (`getCachedTenantId()` on `SpaarkeAuthProvider`). The JWT-sourced tenant ID — always correct.
+3. **Xrm.organizationSettings.tenantId** — frame-walk fallback. Reliable once Xrm has fully initialized (works well for PCF controls embedded in forms, less reliable for standalone code page bootstraps).
+
+**Rule**: As long as `initAuth()` has been `await`-ed before the user can trigger a click, step 2 guarantees a correct tenant ID.
+
+---
+
 ## Token Scopes Reference
 
 | Token For | Scope | Pattern |
@@ -995,6 +1197,7 @@ Child (iframe code page)
 | BFF API (from PCF) | `api://1e40baad-.../user_impersonation` | MSAL.js (Pattern 1) |
 | BFF API (from Code Page - navigateTo) | `api://1e40baad-.../user_impersonation` | Xrm platform (Pattern 7) |
 | BFF API (from Code Page - embedded) | `api://1e40baad-.../user_impersonation` | MSAL ssoSilent (Pattern 7) |
+| BFF API (from standalone wizard code page) | `api://1e40baad-.../user_impersonation` | resolveRuntimeConfig + initAuth (Pattern 9) |
 | Graph API (from BFF) | `https://graph.microsoft.com/.default` | OBO (Pattern 2) |
 | Graph API for AI Analysis | `https://graph.microsoft.com/.default` | OBO via HttpContext (Pattern 4) |
 | Graph API for Email Processing | `https://graph.microsoft.com/.default` | ClientCredentials (Pattern 6) |

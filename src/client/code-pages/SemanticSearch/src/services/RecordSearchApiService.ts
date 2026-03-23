@@ -20,7 +20,7 @@ import type { RecordSearchRequest, RecordSearchResponse } from '../types';
  * @throws Error on network failure or MSAL token acquisition failure
  */
 export async function search(request: RecordSearchRequest): Promise<RecordSearchResponse> {
-  const endpoint = `${getBffBaseUrl()}/api/ai/search/records`;
+  const endpoint = `${getBffBaseUrl()}/ai/search/records`;
   const headers = await buildAuthHeaders();
 
   const response = await fetch(endpoint, {

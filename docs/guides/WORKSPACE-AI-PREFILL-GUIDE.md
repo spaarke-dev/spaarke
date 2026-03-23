@@ -12,6 +12,44 @@ AI Pre-Fill analyzes uploaded files during entity creation (e.g., Create New Mat
 
 ---
 
+## Client Auth Prerequisites
+
+> **Critical**: Wizard code pages that call the BFF API **must** initialize MSAL authentication before making any requests. Using `fetch.bind(window)` without auth causes `401 Unauthorized` on all BFF endpoints.
+
+Wizard code pages (e.g., `sprk_creatematterwizard`) are **standalone Dataverse dialogs** opened via `Xrm.Navigation.navigateTo`. They do not inherit auth context from the calling page. Auth must be initialized explicitly in `main.tsx` using `@spaarke/auth`:
+
+```typescript
+import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
+
+// 1. resolveRuntimeConfig() reads Dataverse env vars via session cookie (no MSAL needed yet)
+const config = await resolveRuntimeConfig();
+// → config.bffBaseUrl, config.bffOAuthScope, config.msalClientId, config.tenantId
+
+// 2. initAuth() initializes MSAL and performs silent token acquisition
+await initAuth({
+    clientId: config.msalClientId,
+    bffBaseUrl: config.bffBaseUrl,
+    bffApiScope: config.bffOAuthScope,
+    tenantId: config.tenantId || undefined,
+    proactiveRefresh: true,
+});
+
+// 3. Pass authenticatedFetch to wizard components — it adds Authorization: Bearer {token}
+<CreateMatterWizard authenticatedFetch={authenticatedFetch} bffBaseUrl={config.bffBaseUrl} />
+```
+
+**Dataverse Environment Variables required** (set in `SpaarkeCore` solution):
+
+| Variable | Purpose |
+|----------|---------|
+| `sprk_BffApiBaseUrl` | BFF API base URL (e.g., `https://spe-api-dev-67e2xz.azurewebsites.net/api`) |
+| `sprk_BffApiAppId` | BFF app registration ID (used to construct OAuth scope) |
+| `sprk_MsalClientId` | MSAL client ID for the PCF/code page app registration |
+
+**See**: [SDAP Auth Pattern 9](../architecture/sdap-auth-patterns.md#pattern-9-standalone-wizard-code-page-auth-resolveruntimeconfig--initauth) for the full implementation pattern and troubleshooting guide.
+
+---
+
 ## Architecture Overview
 
 ```

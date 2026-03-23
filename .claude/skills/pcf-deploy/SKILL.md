@@ -71,6 +71,29 @@ Every deployment MUST increment the version in ALL 5 files:
 
 **If you forget #1 (ControlManifest.Input.xml), Dataverse silently keeps the old control.**
 
+### Async Init in ReactControl — Auth Must Live in the Component (CRITICAL)
+
+For `ComponentFramework.ReactControl` (virtual controls), `notifyOutputChanged()` does **NOT** reliably trigger `updateView()`. If the control has no two-way bound field, the framework may ignore the call entirely.
+
+**Rule**: Any async initialization (auth, config fetching) that needs to trigger a re-render MUST use `useState` + `useEffect` inside the React component — NOT the PCF class `init()`.
+
+```typescript
+// ✅ CORRECT — auth in React component useEffect
+const [isAuthInitialized, setIsAuthInitialized] = useState(false);
+useEffect(() => {
+  initializeAuth(...).then(() => setIsAuthInitialized(true));
+}, []);
+
+// ❌ WRONG — auth in PCF class, triggers notifyOutputChanged()
+// this._authInitialized = true;
+// this.notifyOutputChanged(); // ← updateView() is NOT called for read-only ReactControl
+```
+
+**Full pattern**: See `.claude/patterns/pcf/control-initialization.md` § "Async Initialization"
+**Canonical implementations**: `SemanticSearchControl.tsx`, `RelatedDocumentCount.tsx`
+
+---
+
 ### Shared Library Dependency (CRITICAL)
 
 **If the PCF imports from `@spaarke/ui-components/dist/...`, you MUST compile the shared library BEFORE the PCF build.** The PCF webpack bundles pre-compiled JS from the shared lib's `dist/` folder — NOT the `.tsx` source files. If `dist/` is stale, the PCF bundle will contain OLD code regardless of how many times you rebuild.

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.32"
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.34"
            display-name-key="Document Relationship Viewer"
-           description-key="Validate bound documentId is GUID — fallback to entity record ID (v1.0.32)"
+           description-key="Validate bound documentId is GUID — fallback to entity record ID (v1.0.34)"
            control-type="virtual">
 
     <external-service-usage enabled="true">

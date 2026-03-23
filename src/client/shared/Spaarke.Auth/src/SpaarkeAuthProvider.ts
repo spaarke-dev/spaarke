@@ -121,6 +121,31 @@ export class SpaarkeAuthProvider {
     return this._config;
   }
 
+  /**
+   * Get the Azure AD tenant ID synchronously from MSAL accounts.
+   *
+   * Safe to call from click handlers. Returns the tenant ID extracted from
+   * the JWT stored in the MSAL account after a successful silent auth.
+   * Returns empty string if no accounts are available (MSAL not yet used).
+   */
+  getCachedTenantId(): string {
+    try {
+      const msal = this._msalSilentStrategy.getMsalInstance();
+      if (msal) {
+        const accounts = msal.getAllAccounts();
+        if (accounts.length > 0) {
+          const tenantId = accounts[0].tenantId;
+          if (tenantId && tenantId !== 'common' && tenantId !== 'organizations') {
+            return tenantId;
+          }
+        }
+      }
+    } catch {
+      // MSAL instance not yet available — caller will fall through to Xrm.
+    }
+    return '';
+  }
+
   /** Resolve Azure AD tenant ID from MSAL account or Xrm context. */
   async getTenantId(): Promise<string> {
     // 1. MSAL account

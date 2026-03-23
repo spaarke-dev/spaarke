@@ -32,7 +32,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { IQuickSummary } from '../types';
 
 /** BFF endpoint path */
-const BRIEFING_ENDPOINT = '/api/workspace/briefing';
+const BRIEFING_ENDPOINT = '/workspace/briefing';
 
 /** Cache TTL: 2 minutes (shorter than portfolio health since summary changes after to-do operations) */
 const CACHE_TTL_MS = 2 * 60 * 1000;

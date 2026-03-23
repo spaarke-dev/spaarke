@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Pcf.RelatedDocumentCount" constructor="RelatedDocumentCount" version="1.20.2" display-name-key="Related Document Count" description-key="PCF control displaying a count of semantically related documents with mini graph preview and drill-through (v1.20.2)" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Pcf.RelatedDocumentCount" constructor="RelatedDocumentCount" version="1.20.4" display-name-key="Related Document Count" description-key="PCF control displaying a count of semantically related documents with mini graph preview and drill-through (v1.20.4)" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
-      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
     <property name="documentId" display-name-key="Document ID" description-key="Placeholder bound field - document ID is read from form context at runtime" of-type="SingleLine.Text" usage="bound" required="false"/>
-    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="cardTitle" display-name-key="Card Title" description-key="Title displayed on the count card" of-type="SingleLine.Text" usage="input" required="false"/>
     <resources>
       <code path="bundle.js" order="1"/>
@@ -16,6 +14,7 @@
     </resources>
     <feature-usage>
       <uses-feature name="Utility" required="true"/>
+      <uses-feature name="WebAPI" required="true"/>
     </feature-usage>
     <built-by name="pac" version="1.51.1"/>
   </control>

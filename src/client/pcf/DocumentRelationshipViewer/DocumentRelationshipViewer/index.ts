@@ -3,29 +3,7 @@ import {
   DocumentRelationshipViewer as DocumentRelationshipViewerComponent,
   IDocumentRelationshipViewerProps,
 } from './DocumentRelationshipViewer';
-import { initializeAuth } from './authInit';
-import {
-  getApiBaseUrl,
-  getMsalClientId,
-  getTenantId,
-  getBffApiAppId,
-} from '../../shared/utils/environmentVariables';
 import * as React from 'react';
-
-/**
- * Resolve the Dataverse org URL from Xrm global context.
- * Returns empty string if Xrm is not available (e.g., in test harness).
- */
-function getDataverseUrl(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
-    const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() as string | undefined;
-    return url || '';
-  } catch {
-    return '';
-  }
-}
 
 /**
  * DocumentRelationshipViewer PCF Control
@@ -48,12 +26,13 @@ function getDataverseUrl(): string {
 export class DocumentRelationshipViewer implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void;
   private selectedDocumentId: string | undefined;
-  private authInitialized = false;
 
   /**
    * Initialize the control instance.
-   * Resolves auth config from Dataverse environment variables at runtime,
-   * then initializes @spaarke/auth.
+   * Auth is initialized by the React component via useEffect + useState.
+   * This pattern ensures re-renders after async auth completion (ReactControl
+   * cannot rely on notifyOutputChanged() to trigger updateView()).
+   * See: .claude/patterns/pcf/control-initialization.md
    */
   public init(
     context: ComponentFramework.Context<IInputs>,
@@ -61,45 +40,6 @@ export class DocumentRelationshipViewer implements ComponentFramework.ReactContr
     state: ComponentFramework.Dictionary
   ): void {
     this.notifyOutputChanged = notifyOutputChanged;
-
-    // Resolve all auth configuration from Dataverse environment variables at runtime
-    void this.initializeAuthFromEnvVars(context)
-      .then(() => {
-        this.authInitialized = true;
-        console.info('[DocumentRelationshipViewer] @spaarke/auth initialized from environment variables');
-        return undefined;
-      })
-      .catch((error: unknown) => {
-        console.error('[DocumentRelationshipViewer] @spaarke/auth initialization failed:', error);
-      });
-  }
-
-  /**
-   * Resolve auth configuration from Dataverse environment variables and initialize @spaarke/auth.
-   */
-  private async initializeAuthFromEnvVars(
-    context: ComponentFramework.Context<IInputs>
-  ): Promise<void> {
-    const webApi = context.webAPI;
-
-    // Resolve all config from Dataverse environment variables (fail loudly if missing)
-    const [tenantId, clientAppId, bffAppId, bffApiUrl] = await Promise.all([
-      getTenantId(webApi),
-      getMsalClientId(webApi),
-      getBffApiAppId(webApi),
-      getApiBaseUrl(webApi),
-    ]);
-
-    // Resolve Dataverse org URL from Xrm context for redirect URI
-    const dataverseUrl = getDataverseUrl();
-    if (!dataverseUrl) {
-      throw new Error(
-        '[DocumentRelationshipViewer] Cannot resolve Dataverse URL from Xrm.Utility.getGlobalContext().getClientUrl(). ' +
-        'Ensure the control is running inside a Dataverse model-driven app.'
-      );
-    }
-
-    await initializeAuth(tenantId, clientAppId, bffAppId, bffApiUrl, dataverseUrl);
   }
 
   /**

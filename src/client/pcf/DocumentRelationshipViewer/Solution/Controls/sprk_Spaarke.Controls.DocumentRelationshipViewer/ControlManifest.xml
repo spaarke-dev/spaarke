@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.32" display-name-key="Document Relationship Viewer" description-key="Validate bound documentId is GUID — fallback to entity record ID (v1.0.32)" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.34" display-name-key="Document Relationship Viewer" description-key="Validate bound documentId is GUID — fallback to entity record ID (v1.0.34)" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
-      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
     <property name="documentId" display-name-key="Document ID" description-key="The GUID of the source document" of-type="SingleLine.Text" usage="bound" required="true"/>
-    <property name="tenantId" display-name-key="Tenant ID" description-key="Tenant identifier for API routing" of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD Client Application ID for MSAL" of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF Application ID for OAuth scope" of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Tenant identifier (resolved from sprk_TenantId env var if empty)" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD Client App ID (resolved from sprk_MsalClientId env var)" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF App ID for OAuth scope (resolved from sprk_BffApiAppId env var)" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL (resolved from sprk_BffApiBaseUrl env var if empty)" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="selectedDocumentId" display-name-key="Selected Document" description-key="The document selected by the user" of-type="SingleLine.Text" usage="output"/>
     <resources>
       <code path="bundle.js" order="1"/>

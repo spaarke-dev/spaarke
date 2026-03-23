@@ -185,18 +185,6 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// BFF config (resolved once from window global, reused across renders)
-// ---------------------------------------------------------------------------
-
-const bffBaseUrl = window.__SPAARKE_BFF_BASE_URL__ ?? (() => {
-    throw new Error(
-        '[DocumentUploadWizard] window.__SPAARKE_BFF_BASE_URL__ is not set. ' +
-        'resolveRuntimeConfig() must be called in main.tsx before rendering.'
-    );
-})();
-const bffTokenProvider = createBffTokenProvider();
-
-// ---------------------------------------------------------------------------
 // DocumentUploadWizardDialog (exported)
 // ---------------------------------------------------------------------------
 
@@ -208,6 +196,20 @@ export function DocumentUploadWizardDialog({
     onClose,
 }: IDocumentUploadWizardDialogProps): JSX.Element {
     const styles = useStyles();
+
+    // ---------------------------------------------------------------------------
+    // BFF config (resolved at render time from window global set by bootstrap())
+    // NOTE: Must be inside the component body — module-level code runs synchronously
+    // at bundle parse time, before the async bootstrap() in main.tsx can set this.
+    // ---------------------------------------------------------------------------
+    const bffBaseUrl = window.__SPAARKE_BFF_BASE_URL__ ?? (() => {
+        throw new Error(
+            '[DocumentUploadWizard] window.__SPAARKE_BFF_BASE_URL__ is not set. ' +
+            'resolveRuntimeConfig() must be called in main.tsx before rendering.'
+        );
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const bffTokenProvider = useMemo(() => createBffTokenProvider(), []);
     const wizardRef = useRef<IWizardShellHandle>(null);
 
     // ── Standalone mode detection ───────────────────────────────────────────

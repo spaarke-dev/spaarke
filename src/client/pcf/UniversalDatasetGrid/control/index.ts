@@ -210,6 +210,13 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
         this.authInitialized = true;
 
         logger.info('Control', '@spaarke/auth initialized successfully');
+
+        // Re-render so auth-dependent components can proceed.
+        // StandardControl owns the container — calling renderReactTree() after async
+        // auth is the correct pattern (unlike ReactControl which uses component useState).
+        if (this._context) {
+          this.renderReactTree(this._context);
+        }
       } catch (error) {
         logger.error('Control', 'Failed to initialize @spaarke/auth:', error);
 

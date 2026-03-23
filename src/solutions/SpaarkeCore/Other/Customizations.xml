@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Entities />
+  <Roles />
+  <Workflows />
+  <FieldSecurityProfiles />
+  <Templates />
+  <EntityMaps />
+  <EntityRelationships />
+  <OrganizationSettings />
+  <optionsets />
+  <CustomControls />
+  <EntityDataProviders />
+  <EnvironmentVariableDefinitions>
+    <EnvironmentVariableDefinition>
+      <SchemaName>sprk_BffApiBaseUrl</SchemaName>
+      <DisplayName>
+        <LocalizedNames>
+          <LocalizedName description="BFF API Base URL" languagecode="1033" />
+        </LocalizedNames>
+      </DisplayName>
+      <Description>
+        <LocalizedNames>
+          <LocalizedName description="Base URL for the Spaarke BFF API (e.g. https://spe-api-prod-xxxx.azurewebsites.net/api). Set by Provision-Customer.ps1 during environment provisioning." languagecode="1033" />
+        </LocalizedNames>
+      </Description>
+      <IntroducedVersion>1.1.0.0</IntroducedVersion>
+      <Type>String</Type>
+      <IsRequired>0</IsRequired>
+      <IsCustomizable>1</IsCustomizable>
+    </EnvironmentVariableDefinition>
+    <EnvironmentVariableDefinition>
+      <SchemaName>sprk_BffApiAppId</SchemaName>
+      <DisplayName>
+        <LocalizedNames>
+          <LocalizedName description="BFF API App ID" languagecode="1033" />
+        </LocalizedNames>
+      </DisplayName>
+      <Description>
+        <LocalizedNames>
+          <LocalizedName description="Azure AD Application (client) ID for the BFF API app registration. Used to construct OAuth scopes (api://{AppId}/user_impersonation). Set by Provision-Customer.ps1." languagecode="1033" />
+        </LocalizedNames>
+      </Description>
+      <IntroducedVersion>1.1.0.0</IntroducedVersion>
+      <Type>String</Type>
+      <IsRequired>0</IsRequired>
+      <IsCustomizable>1</IsCustomizable>
+    </EnvironmentVariableDefinition>
+    <EnvironmentVariableDefinition>
+      <SchemaName>sprk_MsalClientId</SchemaName>
+      <DisplayName>
+        <LocalizedNames>
+          <LocalizedName description="MSAL Client ID" languagecode="1033" />
+        </LocalizedNames>
+      </DisplayName>
+      <Description>
+        <LocalizedNames>
+          <LocalizedName description="Azure AD Application (client) ID for the frontend MSAL authentication app registration. Used by code pages and PCF controls for interactive auth. Set by Provision-Customer.ps1." languagecode="1033" />
+        </LocalizedNames>
+      </Description>
+      <IntroducedVersion>1.1.0.0</IntroducedVersion>
+      <Type>String</Type>
+      <IsRequired>0</IsRequired>
+      <IsCustomizable>1</IsCustomizable>
+    </EnvironmentVariableDefinition>
+    <EnvironmentVariableDefinition>
+      <SchemaName>sprk_TenantId</SchemaName>
+      <DisplayName>
+        <LocalizedNames>
+          <LocalizedName description="Tenant ID" languagecode="1033" />
+        </LocalizedNames>
+      </DisplayName>
+      <Description>
+        <LocalizedNames>
+          <LocalizedName description="Azure AD Tenant ID for the customer organization. Used by MSAL authority configuration and OBO token flows. Set by Provision-Customer.ps1." languagecode="1033" />
+        </LocalizedNames>
+      </Description>
+      <IntroducedVersion>1.1.0.0</IntroducedVersion>
+      <Type>String</Type>
+      <IsRequired>0</IsRequired>
+      <IsCustomizable>1</IsCustomizable>
+    </EnvironmentVariableDefinition>
+    <EnvironmentVariableDefinition>
+      <SchemaName>sprk_AzureOpenAiEndpoint</SchemaName>
+      <DisplayName>
+        <LocalizedNames>
+          <LocalizedName description="Azure OpenAI Endpoint" languagecode="1033" />
+        </LocalizedNames>
+      </DisplayName>
+      <Description>
+        <LocalizedNames>
+          <LocalizedName description="Azure OpenAI service endpoint URL (e.g. https://spaarke-openai-prod.openai.azure.com/). Used by AI pipeline components. Set by Provision-Customer.ps1." languagecode="1033" />
+        </LocalizedNames>
+      </Description>
+      <IntroducedVersion>1.1.0.0</IntroducedVersion>
+      <Type>String</Type>
+      <IsRequired>0</IsRequired>
+      <IsCustomizable>1</IsCustomizable>
+    </EnvironmentVariableDefinition>
+    <EnvironmentVariableDefinition>
+      <SchemaName>sprk_ShareLinkBaseUrl</SchemaName>
+      <DisplayName>
+        <LocalizedNames>
+          <LocalizedName description="Share Link Base URL" languagecode="1033" />
+        </LocalizedNames>
+      </DisplayName>
+      <Description>
+        <LocalizedNames>
+          <LocalizedName description="Base URL for shareable document links (e.g. https://spaarke.app/doc). Used by OfficeService to generate share links. Set by Provision-Customer.ps1." languagecode="1033" />
+        </LocalizedNames>
+      </Description>
+      <IntroducedVersion>1.1.0.0</IntroducedVersion>
+      <Type>String</Type>
+      <IsRequired>0</IsRequired>
+      <IsCustomizable>1</IsCustomizable>
+    </EnvironmentVariableDefinition>
+    <EnvironmentVariableDefinition>
+      <SchemaName>sprk_SharePointEmbeddedContainerId</SchemaName>
+      <DisplayName>
+        <LocalizedNames>
+          <LocalizedName description="SharePoint Embedded Container ID" languagecode="1033" />
+        </LocalizedNames>
+      </DisplayName>
+      <Description>
+        <LocalizedNames>
+          <LocalizedName description="SharePoint Embedded container type ID for file storage operations. Used by PCF controls and code pages for document management. Set by Provision-Customer.ps1." languagecode="1033" />
+        </LocalizedNames>
+      </Description>
+      <IntroducedVersion>1.1.0.0</IntroducedVersion>
+      <Type>String</Type>
+      <IsRequired>0</IsRequired>
+      <IsCustomizable>1</IsCustomizable>
+    </EnvironmentVariableDefinition>
+  </EnvironmentVariableDefinitions>
+  <Languages>
+    <Language>1033</Language>
+  </Languages>
+</ImportExportXml>

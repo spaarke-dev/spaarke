@@ -209,6 +209,22 @@ See `sprk_DocumentOperations.js` function `showChoiceDialog()` for a complete wo
 > **Last Updated**: March 2026
 > **Reference**: `src/solutions/LegalWorkspace/src/components/Wizard/`
 
+### 🚨 Auth Requirement for Wizard Code Pages
+
+Wizard code pages (`src/solutions/*Wizard/`) are opened as **standalone Dataverse dialogs** via `Xrm.Navigation.navigateTo`. They do not inherit the caller's auth context and must initialize MSAL explicitly before making BFF API calls.
+
+**Required pattern** (in the wizard's `main.tsx`):
+```tsx
+import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
+// 1. resolveRuntimeConfig() → reads sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId from Dataverse env vars
+// 2. initAuth() → initializes MSAL for silent token acquisition
+// 3. Pass authenticatedFetch to wizard components — NOT fetch.bind(window)
+```
+
+❌ **NEVER** pass `authenticatedFetch={fetch.bind(window)}` to wizard components — this returns 401 on all BFF calls.
+
+See [sdap-auth-patterns.md Pattern 9](../../../docs/architecture/sdap-auth-patterns.md#pattern-9-standalone-wizard-code-page-auth-resolveruntimeconfig--initauth) for the complete implementation.
+
 ### Overview
 
 `WizardShell` is a reusable, generic multi-step dialog component. It handles the wizard chrome — sidebar stepper, content area, navigation footer (Back / Next / Finish), and the post-finish success screen. Domain-specific content is injected via `IWizardStepConfig` arrays.

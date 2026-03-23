@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "3.15.0"
+$version = "3.15.1"
 $zipPath = "bin\UniversalQuickCreate_v$version.zip"
 
 if (-not (Test-Path "bin")) { New-Item -ItemType Directory -Path "bin" | Out-Null }

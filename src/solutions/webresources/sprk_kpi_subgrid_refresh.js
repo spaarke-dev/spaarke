@@ -32,10 +32,16 @@ Spaarke.KpiSubgrid = Spaarke.KpiSubgrid || {};
 // =============================================================================
 
 /**
- * BFF API base URL (resolved on form load based on Dataverse environment).
+ * BFF API base URL (resolved from Dataverse Environment Variables on form load).
  * @type {string|null}
  */
 Spaarke.KpiSubgrid._apiBaseUrl = null;
+
+/**
+ * Cached BFF API base URL (module-level, set after first env var resolution).
+ * @type {string|null}
+ */
+Spaarke.KpiSubgrid._cachedApiBaseUrl = null;
 
 /**
  * Detected entity type: "matter" or "project".
@@ -71,33 +77,63 @@ Spaarke.KpiSubgrid._refreshTimer = null;
 Spaarke.KpiSubgrid._version = "1.1.0";
 
 // =============================================================================
-// ENVIRONMENT DETECTION
+// ENVIRONMENT VARIABLE RESOLUTION
 // =============================================================================
 
 /**
- * Determine the BFF API base URL based on the current Dataverse environment.
- * @returns {string} BFF API base URL
+ * Resolve the BFF API base URL from Dataverse Environment Variables.
+ * Queries environmentvariabledefinition + environmentvariablevalue for
+ * "sprk_BffApiBaseUrl". Caches the result module-level so subsequent calls
+ * skip the query.
+ *
+ * @returns {Promise<string>} BFF API base URL
+ * @throws {Error} If the environment variable is not configured
  */
 Spaarke.KpiSubgrid._getApiBaseUrl = function () {
-    try {
-        var globalContext = Xrm.Utility.getGlobalContext();
-        var clientUrl = globalContext.getClientUrl();
-
-        if (clientUrl.indexOf("spaarkedev1.crm.dynamics.com") !== -1) {
-            return "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarke-demo.crm.dynamics.com") !== -1) {
-            return "https://spaarke-bff-prod.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeuat.crm.dynamics.com") !== -1) {
-            return "https://spaarke-bff-uat.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeprod.crm.dynamics.com") !== -1) {
-            return "https://spaarke-bff-prod.azurewebsites.net";
-        } else {
-            return "https://localhost:5001";
-        }
-    } catch (error) {
-        console.error("[KPI Subgrid] Error determining API base URL:", error);
-        return "https://spe-api-dev-67e2xz.azurewebsites.net";
+    if (Spaarke.KpiSubgrid._cachedApiBaseUrl) {
+        return Promise.resolve(Spaarke.KpiSubgrid._cachedApiBaseUrl);
     }
+
+    var schemaName = "sprk_BffApiBaseUrl";
+
+    return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=schemaname eq '" + schemaName + "'&$select=environmentvariabledefinitionid,defaultvalue"
+    ).then(function (definitionResult) {
+        if (!definitionResult.entities || definitionResult.entities.length === 0) {
+            throw new Error(
+                '[KPI Subgrid] Required environment variable "' + schemaName + '" not found in Dataverse. ' +
+                'Ensure it is defined as an Environment Variable Definition in the solution.'
+            );
+        }
+
+        var definition = definitionResult.entities[0];
+        var definitionId = definition.environmentvariabledefinitionid;
+        var defaultValue = definition.defaultvalue || null;
+
+        return Xrm.WebApi.retrieveMultipleRecords(
+            "environmentvariablevalue",
+            "?$filter=_environmentvariabledefinitionid_value eq '" + definitionId + "'&$select=value"
+        ).then(function (valueResult) {
+            var finalValue = null;
+            if (valueResult.entities && valueResult.entities.length > 0) {
+                finalValue = valueResult.entities[0].value;
+            } else {
+                finalValue = defaultValue;
+            }
+
+            if (!finalValue) {
+                throw new Error(
+                    '[KPI Subgrid] Environment variable "' + schemaName + '" has no value. ' +
+                    'Set a default value on the definition or create an Environment Variable Value override.'
+                );
+            }
+
+            Spaarke.KpiSubgrid._cachedApiBaseUrl = finalValue;
+            console.log("[KPI Subgrid] Resolved BFF URL from env var: " + finalValue);
+            return finalValue;
+        });
+    });
 };
 
 /**
@@ -130,16 +166,22 @@ Spaarke.KpiSubgrid.onLoad = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
 
-        // Resolve API base URL and entity type
-        Spaarke.KpiSubgrid._apiBaseUrl = Spaarke.KpiSubgrid._getApiBaseUrl();
+        // Detect entity type synchronously
         Spaarke.KpiSubgrid._entityType = Spaarke.KpiSubgrid._detectEntityType(formContext);
 
-        // Subgrid may not be rendered yet on form load - retry until available
-        Spaarke.KpiSubgrid._waitForSubgrid(formContext, 0);
+        // Resolve API base URL from Dataverse Environment Variables (async)
+        Spaarke.KpiSubgrid._getApiBaseUrl().then(function (apiBaseUrl) {
+            Spaarke.KpiSubgrid._apiBaseUrl = apiBaseUrl;
 
-        console.log("[KPI Subgrid] v" + Spaarke.KpiSubgrid._version +
-            " loaded. Entity: " + Spaarke.KpiSubgrid._entityType +
-            ", API: " + Spaarke.KpiSubgrid._apiBaseUrl);
+            // Subgrid may not be rendered yet on form load - retry until available
+            Spaarke.KpiSubgrid._waitForSubgrid(formContext, 0);
+
+            console.log("[KPI Subgrid] v" + Spaarke.KpiSubgrid._version +
+                " loaded. Entity: " + Spaarke.KpiSubgrid._entityType +
+                ", API: " + Spaarke.KpiSubgrid._apiBaseUrl);
+        }).catch(function (error) {
+            console.error("[KPI Subgrid] Failed to resolve BFF URL from environment variables:", error);
+        });
     } catch (error) {
         console.error("[KPI Subgrid] Error in onLoad:", error);
     }

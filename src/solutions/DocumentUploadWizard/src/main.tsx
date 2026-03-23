@@ -29,7 +29,7 @@ import {
     webLightTheme,
     webDarkTheme,
 } from "@fluentui/react-components";
-import { resolveRuntimeConfig, initAuth } from "@spaarke/auth";
+import { resolveRuntimeConfig, initAuth, getAuthProvider } from "@spaarke/auth";
 import { App } from "./App";
 
 // ---------------------------------------------------------------------------
@@ -70,13 +70,28 @@ async function bootstrap(): Promise<void> {
     window.__SPAARKE_BFF_BASE_URL__ = runtimeConfig.bffBaseUrl;
     window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
 
-    // 3. Initialize auth with runtime-resolved values
+    // 3. Initialize auth with runtime-resolved values.
+    //    Eagerly warms the MSAL token cache so resolveTenantIdSync() can read
+    //    accounts[0].tenantId synchronously when "Find Similar" is clicked.
     try {
         await initAuth({
             clientId: runtimeConfig.msalClientId,
             bffApiScope: runtimeConfig.bffOAuthScope,
             bffBaseUrl: runtimeConfig.bffBaseUrl,
         });
+
+        // Patch window globals if tenantId was empty at resolveRuntimeConfig() time.
+        // resolveRuntimeConfig() reads organizationSettings.tenantId which may be
+        // empty on first page load (Dataverse initializes it asynchronously).
+        // getAuthProvider().getTenantId() reads from the JWT — always reliable post-auth.
+        if (!runtimeConfig.tenantId) {
+            const tenantId = await getAuthProvider().getTenantId();
+            if (tenantId) {
+                // Store for any code that reads from window globals directly
+                (window as Window & { __SPAARKE_TENANT_ID__?: string }).__SPAARKE_TENANT_ID__ = tenantId;
+                console.info('[DocumentUploadWizard] Tenant ID resolved from MSAL account:', tenantId.substring(0, 8) + '...');
+            }
+        }
     } catch (err) {
         console.warn("[DocumentUploadWizard] Auth init failed, proceeding without pre-warmed token:", err);
     }

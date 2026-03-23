@@ -223,41 +223,130 @@ The `navigateTo` promise in the calling PCF resolves when the dialog closes.
 
 ## Pattern 7: Code Page Wizard Wrapper
 
-A Code Page wizard wrapper is a thin `main.tsx` entry point that bootstraps a shared-library wizard component. The wrapper handles platform-specific setup (React 18 `createRoot`, Fluent theme, adapter wiring) while all wizard logic lives in `@spaarke/ui-components`.
+A Code Page wizard wrapper is a thin `main.tsx` entry point that bootstraps a shared-library wizard component. The wrapper handles platform-specific setup (React 18 `createRoot`, Fluent theme, **MSAL auth initialization**, and adapter wiring) while all wizard logic lives in `@spaarke/ui-components`.
+
+### 🚨 Auth Requirement
+
+Wizard code pages call the BFF API (e.g., `/api/workspace/matters/pre-fill`). These pages open as **standalone dialogs** (`Xrm.Navigation.navigateTo`) and do **not** inherit the caller's auth context. Using `fetch.bind(window)` returns **401 Unauthorized** because no bearer token is attached.
+
+**The fix**: initialize MSAL via `resolveRuntimeConfig()` + `initAuth()` from `@spaarke/auth` before rendering the wizard. This reads config from Dataverse environment variables using the session cookie (no pre-existing token needed), then performs a silent MSAL token acquisition.
 
 ```tsx
-// src/client/code-pages/CreateMatterWizard/main.tsx (thin wrapper — ~30 lines)
+// src/solutions/CreateMatterWizard/src/main.tsx
+import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider, webLightTheme, webDarkTheme } from "@fluentui/react-components";
+import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 import {
     CreateMatterWizard,
     createXrmDataService,
-    createXrmUploadService,
     createXrmNavigationService,
+    createXrmUploadService,
 } from "@spaarke/ui-components";
 
 const params = new URLSearchParams(window.location.search);
-const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-const bffBaseUrl = params.get("bffBaseUrl") ?? "";
+const isDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+const theme = isDark ? webDarkTheme : webLightTheme;
 
-// Wire platform adapters — shared wizard never touches Xrm directly
-const dataService = createXrmDataService();
-const uploadService = createXrmUploadService(bffBaseUrl);
-const navigationService = createXrmNavigationService();
+function App() {
+    const [isAuthReady, setIsAuthReady] = React.useState(false);
+    const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>("");
 
-createRoot(document.getElementById("root")!).render(
-    <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
-        <CreateMatterWizard
-            matterId={params.get("matterId") ?? ""}
-            dataService={dataService}
-            uploadService={uploadService}
-            navigationService={navigationService}
+    React.useEffect(() => {
+        let cancelled = false;
+        async function initializeAuth(): Promise<void> {
+            try {
+                const config = await resolveRuntimeConfig();
+                await initAuth({
+                    clientId: config.msalClientId,
+                    bffBaseUrl: config.bffBaseUrl,
+                    bffApiScope: config.bffOAuthScope,
+                    tenantId: config.tenantId || undefined,
+                    proactiveRefresh: true,
+                });
+                if (!cancelled) {
+                    setResolvedBffBaseUrl(config.bffBaseUrl);
+                    setIsAuthReady(true);
+                }
+            } catch (err) {
+                console.error("[CreateMatterWizard] Failed to initialize auth:", err);
+                if (!cancelled) setIsAuthReady(true); // render anyway, BFF calls will fail gracefully
+            }
+        }
+        void initializeAuth();
+        return () => { cancelled = true; };
+    }, []);
+
+    // Services that depend on bffBaseUrl must be memoized on it
+    const uploadService = React.useMemo(
+        () => createXrmUploadService(resolvedBffBaseUrl),
+        [resolvedBffBaseUrl]
+    );
+    const dataService = React.useMemo(() => createXrmDataService(), []);
+    const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+
+    if (!isAuthReady) {
+        return (
+            <FluentProvider theme={theme} style={{ height: "100%" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+                    <span>Initializing...</span>
+                </div>
+            </FluentProvider>
+        );
+    }
+
+    return (
+        <FluentProvider theme={theme} style={{ height: "100%" }}>
+            <CreateMatterWizard
+                matterId={params.get("matterId") ?? ""}
+                dataService={dataService}
+                uploadService={uploadService}
+                navigationService={navigationService}
+                authenticatedFetch={authenticatedFetch}   // ← MSAL-aware fetch, NOT fetch.bind(window)
+                bffBaseUrl={resolvedBffBaseUrl}
+            />
+        </FluentProvider>
+    );
+}
+
+createRoot(document.getElementById("root")!).render(<App />);
+```
+
+### Key rules
+
+- **NEVER pass `fetch.bind(window)`** as `authenticatedFetch` — results in 401 on all BFF calls
+- **`resolveRuntimeConfig()`** reads `sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId` from Dataverse env vars using the session cookie (no MSAL needed for this step)
+- **Services that use `bffBaseUrl`** (e.g., `createXrmUploadService`) must be created **after** config resolves and memoized on `resolvedBffBaseUrl`
+- **Render a loading state** while auth initializes — the wizard component should not mount until `isAuthReady`
+- **`cancelled` flag** prevents `setState` after unmount (React 18 safe pattern)
+- **Graceful failure**: if `initAuth` throws, set `isAuthReady = true` anyway — the BFF calls in wizard steps will fail individually with proper error handling
+
+### Wizards without uploadService
+
+For wizards that don't use `uploadService` (e.g., SummarizeFilesWizard, CreateWorkAssignmentWizard), omit `uploadService` and remove the `useMemo` for it:
+
+```tsx
+// Simpler case — no uploadService
+return (
+    <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <SummarizeFilesDialog
+            authenticatedFetch={authenticatedFetch}
+            bffBaseUrl={resolvedBffBaseUrl}
         />
     </FluentProvider>
 );
 ```
 
-**Key rule**: The Code Page wrapper contains **zero business logic** — it reads URL params, creates adapters, and renders the shared wizard. All wizard steps, validation, and orchestration live in the shared library.
+### Canonical implementations
+
+| Wizard | File | Has uploadService |
+|--------|------|-------------------|
+| CreateMatterWizard | `src/solutions/CreateMatterWizard/src/main.tsx` | ✅ |
+| CreateProjectWizard | `src/solutions/CreateProjectWizard/src/main.tsx` | ✅ |
+| CreateEventWizard | `src/solutions/CreateEventWizard/src/main.tsx` | ✅ |
+| CreateTodoWizard | `src/solutions/CreateTodoWizard/src/main.tsx` | ❌ |
+| CreateWorkAssignmentWizard | `src/solutions/CreateWorkAssignmentWizard/src/main.tsx` | ❌ |
+| SummarizeFilesWizard | `src/solutions/SummarizeFilesWizard/src/main.tsx` | ❌ |
 
 See also: [Full-Page Custom Page Template](../webresource/full-page-custom-page.md) for project structure and build tooling.
 
@@ -279,8 +368,9 @@ See also: [Full-Page Custom Page Template](../webresource/full-page-custom-page.
 2. **Pass parameters via URL** — `data: "key=value"` in navigateTo, read with URLSearchParams
 3. **For PCF close** — try multiple methods (navigateBack, ui.close, history, postMessage)
 4. **Use shared layout components** — WizardShell, CreateRecordWizard, SidePanel from `@spaarke/ui-components`
-5. **Code Page wrappers are thin** — only platform bootstrap; all wizard logic in shared library
+5. **Code Page wrappers are thin** — only platform bootstrap (auth init + adapter wiring); all wizard logic in shared library
 6. **Wire adapters in the wrapper** — `createXrmDataService()`, `createXrmUploadService()`, `createXrmNavigationService()`
+7. **🚨 Always initialize MSAL auth** — wizard code pages are standalone dialogs; use `resolveRuntimeConfig() + initAuth()` from `@spaarke/auth`. NEVER pass `fetch.bind(window)` as `authenticatedFetch` — causes 401 on all BFF calls
 
 ---
 

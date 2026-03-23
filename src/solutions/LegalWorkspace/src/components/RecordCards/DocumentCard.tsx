@@ -27,9 +27,9 @@ import type { IDocument } from "../../types/entities";
 import { getFileTypeIcon } from "../../utils/fileIconMap";
 import { navigateToEntity } from "../../utils/navigation";
 import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
-import { getTenantId, authenticatedFetch } from "../../services/authInit";
+import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
-import { getBffBaseUrl } from "../../config/runtimeConfig";
+import { getBffBaseUrl, getTenantId } from "../../config/runtimeConfig";
 import { AiSummaryPopover, type ISummaryData, FindSimilarDialog } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
@@ -283,11 +283,9 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
           (window as any)?.Xrm;
         const clientUrl =
           xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "";
-        // Read tenantId directly from the same Xrm context (same pattern as clientUrl).
-        // Falls back to authInit.getTenantId() (MSAL account or secondary frame-walk).
-        const xrmTenantId: string =
-          xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId ?? "";
-        const tenantId = xrmTenantId || (await getTenantId());
+        // tenantId is captured at bootstrap via resolveRuntimeConfig() which has
+        // reliable Xrm access. The runtimeConfig singleton is the authoritative source.
+        const tenantId = getTenantId();
 
         const theme = getEffectiveDarkMode() ? "dark" : "light";
         const data = new URLSearchParams({

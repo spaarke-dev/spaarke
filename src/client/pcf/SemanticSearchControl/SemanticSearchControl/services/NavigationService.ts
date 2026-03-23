@@ -8,7 +8,7 @@
  */
 
 import { SearchResult, SearchFilters, SearchScope } from '../types';
-import { getAuthProvider } from '@spaarke/auth';
+import { resolveTenantIdSync } from '@spaarke/auth';
 import { getEffectiveDarkMode } from './ThemeService';
 
 /**
@@ -154,9 +154,7 @@ export class NavigationService {
       return null;
     }
 
-    const authority = getAuthProvider().getConfig().authority ?? '';
-    const authorityParts = authority.split('/');
-    const tenantId = authorityParts[authorityParts.length - 1] ?? '';
+    const tenantId = resolveTenantIdSync();
     const theme = isDarkMode ? 'dark' : 'light';
     const data = new URLSearchParams({
       documentId: rawId,

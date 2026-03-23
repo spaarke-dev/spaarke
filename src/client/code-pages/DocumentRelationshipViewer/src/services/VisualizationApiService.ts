@@ -56,7 +56,7 @@ export class VisualizationApiService {
   }
 
   private buildUrl(documentId: string, params: VisualizationQueryParams): string {
-    const url = new URL(`${this.apiBaseUrl}/api/ai/visualization/related/${documentId}`);
+    const url = new URL(`${this.apiBaseUrl}/ai/visualization/related/${documentId}`);
     url.searchParams.set('tenantId', params.tenantId);
     if (params.threshold !== undefined) url.searchParams.set('threshold', params.threshold.toString());
     if (params.limit !== undefined) url.searchParams.set('limit', params.limit.toString());

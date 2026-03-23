@@ -4,8 +4,6 @@ import { FluentProvider, Theme, webLightTheme, webDarkTheme } from '@fluentui/re
 import { resolveTheme, setupThemeListener } from './services/ThemeService';
 import { SemanticSearchControl as SemanticSearchControlComponent } from './SemanticSearchControl';
 import { ISemanticSearchControlProps } from './types';
-import { initializeAuth } from './authInit';
-import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 /**
  * SemanticSearchControl PCF Control
@@ -28,8 +26,6 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<II
   private _theme: Theme = webLightTheme;
   private _cleanupThemeListener?: () => void;
   private _context: ComponentFramework.Context<IInputs>;
-  private _authInitialized = false;
-  private _resolvedApiBaseUrl = '';
 
   constructor() {
     // Constructor - initialization happens in init()
@@ -57,73 +53,9 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<II
       this.notifyOutputChanged();
     }, context);
 
-    // Resolve auth configuration from Dataverse environment variables at runtime.
-    // Manifest parameters serve as optional overrides; environment variables are canonical.
-    this.resolveAndInitAuth(context);
-  }
-
-  /**
-   * Resolve auth configuration from Dataverse environment variables and
-   * initialize @spaarke/auth. Falls back to manifest parameters if set.
-   */
-  private resolveAndInitAuth(context: ComponentFramework.Context<IInputs>): void {
-    const webApi = context.webAPI;
-
-    // Read manifest parameter overrides (may be empty)
-    const manifestApiBaseUrl = context.parameters.apiBaseUrl?.raw ?? '';
-    const manifestTenantId = context.parameters.tenantId?.raw ?? '';
-    const manifestClientAppId = context.parameters.clientAppId?.raw ?? '';
-    const manifestBffAppId = context.parameters.bffAppId?.raw ?? '';
-
-    // Resolve Dataverse org URL for redirect URI (runtime, no hardcoding)
-    let dataverseUrl: string;
-    try {
-      if (typeof Xrm !== 'undefined' && Xrm.Utility?.getGlobalContext) {
-        dataverseUrl = Xrm.Utility.getGlobalContext().getClientUrl();
-      } else {
-        dataverseUrl = window.location.origin;
-      }
-    } catch {
-      dataverseUrl = window.location.origin;
-    }
-
-    // Resolve config: prefer manifest parameters when set, otherwise query env vars
-    const resolveConfig = async (): Promise<{
-      tenantId: string;
-      clientAppId: string;
-      bffAppId: string;
-      apiBaseUrl: string;
-    }> => {
-      // BFF API Base URL -- from env var (canonical) or manifest override
-      const apiBaseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-
-      // Tenant ID -- from manifest or env var
-      const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId'));
-
-      // Client App ID -- from manifest or env var
-      const clientAppId =
-        manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId'));
-
-      // BFF App ID -- from manifest or env var
-      const bffAppId =
-        manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId'));
-
-      return { tenantId, clientAppId, bffAppId, apiBaseUrl };
-    };
-
-    void resolveConfig()
-      .then(async ({ tenantId, clientAppId, bffAppId, apiBaseUrl }) => {
-        this._resolvedApiBaseUrl = apiBaseUrl;
-        await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrl, dataverseUrl);
-        this._authInitialized = true;
-        console.info('[SemanticSearchControl] Auth initialized with runtime config');
-        // Force re-render so the component picks up auth-ready state
-        this.notifyOutputChanged();
-        return undefined;
-      })
-      .catch(error => {
-        console.error('[SemanticSearchControl] Auth initialization failed:', error);
-      });
+    // Auth initialization is handled inside the React component (SemanticSearchControl.tsx)
+    // via useEffect + useState. This allows the component to re-render itself when auth
+    // completes, without depending on notifyOutputChanged() triggering updateView().
   }
 
   /**
@@ -143,8 +75,6 @@ export class SemanticSearchControl implements ComponentFramework.ReactControl<II
       notifyOutputChanged: this.notifyOutputChanged,
       onDocumentSelect: this.handleDocumentSelect.bind(this),
       isDarkMode: this._theme === webDarkTheme,
-      authInitialized: this._authInitialized,
-      resolvedApiBaseUrl: this._resolvedApiBaseUrl,
     };
 
     // Create the main SemanticSearchControl component

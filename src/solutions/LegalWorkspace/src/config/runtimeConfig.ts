@@ -15,6 +15,7 @@
  */
 
 import type { IRuntimeConfig } from '@spaarke/auth';
+import { resolveTenantIdSync } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -78,4 +79,25 @@ export function getBffOAuthScope(): string {
  */
 export function getMsalClientId(): string {
   return getConfig().msalClientId;
+}
+
+/**
+ * Azure AD tenant ID for use in URL construction (e.g. DocumentRelationshipViewer).
+ *
+ * Primary: value captured from Xrm at bootstrap by resolveRuntimeConfig().
+ * Fallback: resolveTenantIdSync() from @spaarke/auth — MSAL authority first,
+ * then Xrm frame-walk. This handles the case where bootstrap ran before
+ * Xrm.organizationSettings was populated (intermittent timing issue).
+ */
+export function getTenantId(): string {
+  const stored = getConfig().tenantId;
+  if (stored) return stored;
+
+  // Lazy resolution: use the shared utility which tries MSAL authority first.
+  const resolved = resolveTenantIdSync();
+  if (resolved && _config) {
+    // Cache so subsequent calls are instant.
+    _config = { ..._config, tenantId: resolved };
+  }
+  return resolved;
 }

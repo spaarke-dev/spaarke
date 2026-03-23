@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { IPortfolioHealth } from "../types/portfolio";
 
 /** BFF endpoint path — absolute path assumes the BFF base URL is resolved at runtime */
-const PORTFOLIO_ENDPOINT = "/api/workspace/portfolio";
+const PORTFOLIO_ENDPOINT = "/workspace/portfolio";
 
 /** Cache duration in milliseconds (2 minutes — aligns with ADR-009 Redis TTL guidance) */
 const CACHE_TTL_MS = 2 * 60 * 1000;
