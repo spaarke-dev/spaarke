@@ -65,7 +65,7 @@ $jsContent   = [System.IO.File]::ReadAllText($appJsPath,  [System.Text.Encoding]
 $inlinedHtml = $htmlContent -replace '<script\s+(?:defer|type="module")\s+(?:crossorigin\s+)?src="[^"]*app\.js"[^>]*></script>', "<script>$jsContent</script>"
 
 if ($inlinedHtml -eq $htmlContent) {
-    Write-Host "      WARNING: Could not find app.js script tag in index.html — uploading as-is" -ForegroundColor Yellow
+    Write-Host "      WARNING: Could not find app.js script tag in index.html - uploading as-is" -ForegroundColor Yellow
 }
 
 $fileBytes = [System.Text.Encoding]::UTF8.GetBytes($inlinedHtml)
@@ -97,7 +97,7 @@ if ($searchResponse.value.Count -gt 0) {
     $createBody = @{
         name            = $webResourceName
         displayname     = $webResourceDisplayName
-        description     = 'Spaarke Secure Project External Workspace — React 18 SPA (Vite + Fluent UI v9)'
+        description     = 'Spaarke Secure Project External Workspace - React 18 SPA (Vite + Fluent UI v9)'
         webresourcetype = 1       # 1 = Webpage (HTML)
         content         = $fileContent
         languagecode    = 1033    # English

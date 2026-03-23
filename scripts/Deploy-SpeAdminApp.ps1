@@ -23,7 +23,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ── Environment config ────────────────────────────────────────────────────────
+# -- Environment config -------------------------------------------------------
 if ($DataverseUrl) {
     $orgUrl = $DataverseUrl
 } elseif ($Environment -eq 'prod') {
@@ -38,28 +38,29 @@ Write-Host 'SPE Admin App Web Resource Deployment'
 Write-Host "Environment : $Environment  ($orgUrl)"
 Write-Host '====================================='
 
-# ── Step 1: Build ─────────────────────────────────────────────────────────────
+# -- Step 1: Build ------------------------------------------------------------
 $scriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot    = Split-Path -Parent $scriptDir
 $appDir      = Join-Path $repoRoot 'src\solutions\SpeAdminApp'
 $filePath    = Join-Path $appDir 'dist\speadmin.html'
 
 Write-Host '[1/5] Building SPE Admin App...'
-Write-Host "      Universal build — BFF URL resolved at runtime via Dataverse env detection"
+Write-Host "      Universal build - BFF URL resolved at runtime via Dataverse env detection"
 Push-Location $appDir
 try {
     npx vite build
     if ($LASTEXITCODE -ne 0) { throw "vite build failed (exit $LASTEXITCODE)" }
-    # Rename dist/index.html → dist/speadmin.html
+    # Rename dist/index.html -> dist/speadmin.html
     if (Test-Path 'dist\index.html') {
-        Rename-Item 'dist\index.html' 'dist\speadmin.html' -Force
+        if (Test-Path 'dist\speadmin.html') { Remove-Item 'dist\speadmin.html' -Force }
+        Rename-Item 'dist\index.html' 'speadmin.html'
     }
 } finally {
     Pop-Location
 }
 Write-Host '      Build complete' -ForegroundColor Green
 
-# ── Step 2: Verify artifact ────────────────────────────────────────────────────
+# -- Step 2: Verify artifact --------------------------------------------------
 Write-Host '[2/5] Verifying build artifact...'
 if (-not (Test-Path $filePath)) {
     Write-Host "Error: Build artifact not found: $filePath" -ForegroundColor Red
@@ -67,9 +68,9 @@ if (-not (Test-Path $filePath)) {
 }
 $fileBytes  = [System.IO.File]::ReadAllBytes($filePath)
 $fileSizeKb = [math]::Round($fileBytes.Length / 1KB)
-Write-Host "      Found: speadmin.html ($fileSizeKb KB)" -ForegroundColor Green
+Write-Host "      Found: speadmin.html ($($fileSizeKb) KB)" -ForegroundColor Green
 
-# ── Step 3: Auth ───────────────────────────────────────────────────────────────
+# -- Step 3: Auth -------------------------------------------------------------
 Write-Host '[3/5] Getting access token...'
 $accessToken = az account get-access-token --resource $orgUrl --query accessToken -o tsv
 if ([string]::IsNullOrEmpty($accessToken)) {
@@ -88,14 +89,14 @@ $headers = @{
 }
 $fileContent = [Convert]::ToBase64String($fileBytes)
 
-# ── Step 4: Create or update web resource ────────────────────────────────────
+# -- Step 4: Create or update web resource -----------------------------------
 $wrName     = 'sprk_speadmin'
 Write-Host '[4/5] Checking for existing sprk_speadmin web resource...'
 $searchUrl      = "$apiUrl/webresourceset?`$filter=name eq '$wrName'"
 $searchResponse = Invoke-RestMethod -Uri $searchUrl -Headers $headers -Method Get
 
 if ($searchResponse.value.Count -eq 0) {
-    Write-Host '      Not found — creating new web resource...' -ForegroundColor Yellow
+    Write-Host '      Not found - creating new web resource...' -ForegroundColor Yellow
     $createBody = @{
         name            = $wrName
         displayname     = 'SPE Admin App'
@@ -119,7 +120,7 @@ if ($searchResponse.value.Count -eq 0) {
     Write-Host '      Updated' -ForegroundColor Green
 }
 
-# ── Step 5: Publish ────────────────────────────────────────────────────────────
+# -- Step 5: Publish ----------------------------------------------------------
 Write-Host '[5/5] Publishing customizations...'
 $publishXml  = "<importexportxml><webresources><webresource>{$webResourceId}</webresource></webresources></importexportxml>"
 Invoke-RestMethod -Uri "$apiUrl/PublishXml" -Headers $headers -Method Post `
