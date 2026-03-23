@@ -1,23 +1,12 @@
 import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Badge,
-  Button,
-  Spinner,
-} from "@fluentui/react-components";
-import { OpenRegular, ArrowClockwiseRegular, AddRegular } from "@fluentui/react-icons";
-import { GetStartedRow } from "../GetStarted";
-import { QuickSummaryRow } from "../QuickSummary";
-import { ActivityFeed } from "../ActivityFeed/ActivityFeed";
-import { SmartToDo } from "../SmartToDo/SmartToDo";
-import { DocumentsTab } from "../RecordCards/DocumentsTab";
+import { tokens, Spinner } from "@fluentui/react-components";
+import { WorkspaceShell } from "@spaarke/ui-components";
 import { useDataverseService } from "../../hooks/useDataverseService";
 import { navigateToEntityList } from "../../utils/navigation";
 import {
   createPlaybookHandlers,
 } from "../GetStarted/ActionCardHandlers";
+import { buildWorkspaceConfig } from "../../workspaceConfig";
 import type { IWebApi } from "../../types/xrm";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
 
@@ -81,122 +70,6 @@ export interface IWorkspaceGridProps {
 }
 
 // ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  grid: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalXL,
-    flex: "1 1 auto",
-    minHeight: 0,
-    overflow: "auto",
-  },
-  row1: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: tokens.spacingHorizontalL,
-    "@media (max-width: 767px)": {
-      gridTemplateColumns: "1fr",
-    },
-  },
-  row2Card: {
-    display: "flex",
-    flexDirection: "column",
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderTopColor: tokens.colorNeutralStroke2,
-    borderRightColor: tokens.colorNeutralStroke2,
-    borderBottomColor: tokens.colorNeutralStroke2,
-    borderLeftColor: tokens.colorNeutralStroke2,
-    borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
-    minHeight: "325px",
-  },
-  row2Header: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-  },
-  row2TitleArea: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-  },
-  row3: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: tokens.spacingHorizontalL,
-    "@media (max-width: 767px)": {
-      gridTemplateColumns: "1fr",
-    },
-  },
-  sectionCard: {
-    display: "flex",
-    flexDirection: "column",
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderTopColor: tokens.colorNeutralStroke2,
-    borderRightColor: tokens.colorNeutralStroke2,
-    borderBottomColor: tokens.colorNeutralStroke2,
-    borderLeftColor: tokens.colorNeutralStroke2,
-    borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
-    minHeight: "400px",
-  },
-  sectionTitle: {
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-  },
-  sectionContent: {
-    display: "flex",
-    flexDirection: "column",
-    flex: "1 1 0",
-    overflow: "hidden",
-  },
-  toolbar: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground2,
-    flexShrink: 0,
-    minHeight: "36px",
-  },
-  toolbarDivider: {
-    width: "1px",
-    height: "20px",
-    backgroundColor: tokens.colorNeutralStroke2,
-    marginLeft: tokens.spacingHorizontalXS,
-    marginRight: tokens.spacingHorizontalXS,
-    flexShrink: 0,
-  },
-  toolbarRightGroup: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: "15px",
-  },
-});
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -206,8 +79,6 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   webApi,
   userId,
 }) => {
-  const styles = useStyles();
-
   // -------------------------------------------------------------------------
   // DataverseService for DocumentsTab
   // -------------------------------------------------------------------------
@@ -584,193 +455,82 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   );
 
   // -------------------------------------------------------------------------
-  // Layout
+  // Stable callbacks for toolbar refetch buttons (avoid re-building config)
+  // -------------------------------------------------------------------------
+
+  const handleTodoRefetch = React.useCallback(() => {
+    todoRefetchRef.current?.();
+  }, []);
+
+  const handleDocRefetch = React.useCallback(() => {
+    docRefetchRef.current?.();
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Build declarative WorkspaceConfig and delegate layout to WorkspaceShell
+  // -------------------------------------------------------------------------
+
+  const workspaceConfig = React.useMemo(
+    () =>
+      buildWorkspaceConfig({
+        webApi,
+        userId,
+        service,
+        feedCount,
+        todoCount,
+        docCount,
+        onTodoRefetch: handleTodoRefetch,
+        onDocRefetch: handleDocRefetch,
+        onTodoRefetchReady: handleTodoRefetchReady,
+        onFeedRefetchReady: handleFeedRefetchReady,
+        onDocRefetchReady: handleDocRefetchReady,
+        onFeedCountChange: setFeedCount,
+        onTodoCountChange: setTodoCount,
+        onDocCountChange: setDocCount,
+        onExpandClick: handleExpandClick,
+        onDashboardOpen: handleDashboardOpen,
+        onOpenAllUpdates: handleOpenAllUpdates,
+        onCreateEvent: handleOpenEventWizard,
+        onOpenTodoWizard: handleOpenTodoWizard,
+        onOpenTodoDialog: handleOpenTodoDialog,
+        onAddDocument: handleAddDocument,
+        onOpenDocumentsDialog: handleOpenDocumentsDialog,
+        cardClickHandlers,
+      }),
+    // Re-build config whenever badge counts or handlers change so that
+    // badge counts in section titles stay reactive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      webApi,
+      userId,
+      service,
+      feedCount,
+      todoCount,
+      docCount,
+      handleTodoRefetch,
+      handleDocRefetch,
+      handleTodoRefetchReady,
+      handleFeedRefetchReady,
+      handleDocRefetchReady,
+      handleExpandClick,
+      handleDashboardOpen,
+      handleOpenAllUpdates,
+      handleOpenEventWizard,
+      handleOpenTodoWizard,
+      handleOpenTodoDialog,
+      handleAddDocument,
+      handleOpenDocumentsDialog,
+      cardClickHandlers,
+    ]
+  );
+
+  // -------------------------------------------------------------------------
+  // Layout — WorkspaceShell renders the full 3-row grid declaratively
   // -------------------------------------------------------------------------
 
   return (
     <>
-      <div className={styles.grid}>
-        {/* Row 1: Get Started (left) + Quick Summary (right) — 50/50 split */}
-        <div className={styles.row1}>
-          <div className={styles.sectionCard} style={{ minHeight: "auto" }}>
-            <Text className={styles.sectionTitle} size={400} weight="semibold">
-              Get Started
-            </Text>
-            <div className={styles.toolbar} role="toolbar" aria-label="Get Started toolbar">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<OpenRegular />}
-                onClick={handleExpandClick}
-                aria-label="Open Playbook Library"
-                style={{ marginLeft: "auto" }}
-              />
-            </div>
-            <div style={{ padding: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalS, paddingBottom: tokens.spacingVerticalM }}>
-              <GetStartedRow
-                onCardClick={cardClickHandlers}
-                maxVisible={4}
-              />
-            </div>
-          </div>
-          <div className={styles.sectionCard} style={{ minHeight: "auto" }}>
-            <Text className={styles.sectionTitle} size={400} weight="semibold">
-              Quick Summary
-            </Text>
-            <div className={styles.toolbar} role="toolbar" aria-label="Quick Summary toolbar">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<ArrowClockwiseRegular />}
-                aria-label="Refresh Quick Summary"
-              />
-              <span className={styles.toolbarDivider} aria-hidden="true" />
-              <div style={{ flex: 1 }} />
-              <div className={styles.toolbarRightGroup}>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<OpenRegular />}
-                  onClick={handleDashboardOpen}
-                  aria-label="Open Quick Summary Dashboard"
-                />
-              </div>
-            </div>
-            <div style={{ padding: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalS, paddingBottom: tokens.spacingVerticalM }}>
-              <QuickSummaryRow webApi={webApi} userId={userId} />
-            </div>
-          </div>
-        </div>
-
-        {/* Row 2: Latest Updates — full-width bordered card */}
-        <div className={styles.row2Card}>
-          <div className={styles.row2Header}>
-            <div className={styles.row2TitleArea}>
-              <Text size={400} weight="semibold">
-                Latest Updates
-              </Text>
-              {feedCount > 0 && (
-                <Badge appearance="filled" color="brand" size="small">
-                  {feedCount}
-                </Badge>
-              )}
-            </div>
-          </div>
-          <ActivityFeed
-            embedded
-            webApi={webApi}
-            userId={userId}
-            textOnlyFilter
-            gridLayout
-            hideOverflowMenu
-            onCountChange={setFeedCount}
-            onOpenAll={handleOpenAllUpdates}
-            onRefetchReady={handleFeedRefetchReady}
-            onCreateNew={handleOpenEventWizard}
-          />
-        </div>
-
-        {/* Row 3: My To Do List (left) + My Documents (right) — 50/50 split */}
-        <div className={styles.row3}>
-          <div className={styles.sectionCard} style={{ height: "560px" }}>
-            <div className={styles.row2TitleArea} style={{ paddingTop: tokens.spacingVerticalM, paddingBottom: tokens.spacingVerticalS, paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM }}>
-              <Text size={400} weight="semibold">
-                My To Do List
-              </Text>
-              {todoCount > 0 && (
-                <Badge appearance="filled" color="brand" size="small">
-                  {todoCount}
-                </Badge>
-              )}
-            </div>
-            <div className={styles.toolbar} role="toolbar" aria-label="To Do toolbar">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<ArrowClockwiseRegular />}
-                onClick={() => todoRefetchRef.current?.()}
-                aria-label="Refresh To Do list"
-              />
-              <span className={styles.toolbarDivider} aria-hidden="true" />
-              <div style={{ flex: 1 }} />
-              <div className={styles.toolbarRightGroup}>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<AddRegular />}
-                  onClick={handleOpenTodoWizard}
-                  aria-label="Create new to do"
-                />
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<OpenRegular />}
-                  onClick={handleOpenTodoDialog}
-                  aria-label="Open full To Do list"
-                />
-              </div>
-            </div>
-            <div className={styles.sectionContent}>
-              <SmartToDo
-                embedded
-                webApi={webApi}
-                userId={userId}
-                disableSidePane
-                onCountChange={setTodoCount}
-                onRefetchReady={handleTodoRefetchReady}
-              />
-            </div>
-          </div>
-          <div className={styles.sectionCard} style={{ minHeight: "auto", overflow: "visible" }}>
-            <div className={styles.row2TitleArea} style={{ paddingTop: tokens.spacingVerticalM, paddingBottom: tokens.spacingVerticalS, paddingLeft: tokens.spacingHorizontalM, paddingRight: tokens.spacingHorizontalM }}>
-              <Text size={400} weight="semibold">
-                My Documents
-              </Text>
-              {docCount > 0 && (
-                <Badge appearance="filled" color="brand" size="small">
-                  {docCount}
-                </Badge>
-              )}
-            </div>
-            <div className={styles.toolbar} role="toolbar" aria-label="Documents toolbar">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<ArrowClockwiseRegular />}
-                onClick={() => docRefetchRef.current?.()}
-                aria-label="Refresh documents"
-              />
-              <span className={styles.toolbarDivider} aria-hidden="true" />
-              <div style={{ flex: 1 }} />
-              <div className={styles.toolbarRightGroup}>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<AddRegular />}
-                  onClick={handleAddDocument}
-                  aria-label="Add document"
-                />
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<OpenRegular />}
-                  onClick={handleOpenDocumentsDialog}
-                  aria-label="Open all documents"
-                />
-              </div>
-            </div>
-            <div className={styles.sectionContent} style={{ overflow: "visible" }}>
-              <DocumentsTab
-                service={service}
-                userId={userId}
-                maxVisible={6}
-                onCountChange={setDocCount}
-                onRefetchReady={handleDocRefetchReady}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+      <WorkspaceShell config={workspaceConfig} />
 
       {/* GetStarted expand dialog — shows all 7 action cards in a grid */}
       {isExpandOpen && (
