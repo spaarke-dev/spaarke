@@ -12,11 +12,15 @@
   },
   "dependencies": {
     "@fluentui/react-components": "^9.46.2",
-    "@fluentui/react-icons": "^2.0.200"
+    "@fluentui/react-icons": "^2.0.200",
+    "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components"
   },
   "devDependencies": {
+    "@azure/msal-browser": "^4.30.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/xrm": "^9.0.0",
     "@vitejs/plugin-react": "^4.2.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
