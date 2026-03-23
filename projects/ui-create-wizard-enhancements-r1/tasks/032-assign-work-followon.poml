@@ -5,7 +5,7 @@
     <status>not-started</status>
     <estimated-effort>4 hours</estimated-effort>
     <tags>frontend, shared-library, wizard</tags>
-    <dependencies>WCWE-010</dependencies>
+    <dependencies>WCWE-010, WCWE-030, WCWE-031</dependencies>
   </metadata>
 
   <prompt>
