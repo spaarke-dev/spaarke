@@ -13,6 +13,37 @@ import type * as React from 'react';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
+import type { AssociationResult, EntityTypeOption } from '../AssociateToStep/types';
+import type { INavigationService } from '../../types/serviceInterfaces';
+
+// Re-export for convenience
+export type { AssociationResult, EntityTypeOption };
+
+// ---------------------------------------------------------------------------
+// Associate-To step configuration (optional first step)
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for the optional AssociateToStep prepended to the wizard as step 1.
+ *
+ * When present, the step sequence becomes:
+ *   1. Associate To  (new — optional, skip-able)
+ *   2. Add file(s)   (was step 1)
+ *   3. Entity info   (was step 2)
+ *   4. Next Steps    (was step 3)
+ */
+export interface IAssociateToStepConfig {
+  /**
+   * Entity types the user may associate the new record with.
+   * At least one entry is required.
+   */
+  entityTypes: EntityTypeOption[];
+  /**
+   * Navigation service used to open the Dataverse lookup side pane.
+   * Typically injected by the consuming wizard from a PCF or Code Page adapter.
+   */
+  navigationService: INavigationService;
+}
 
 // ---------------------------------------------------------------------------
 // Follow-on action identifiers
@@ -96,6 +127,11 @@ export interface IFinishContext {
   selectedActions: FollowOnActionId[];
   /** State from follow-on steps (assign, draft, email). */
   followOn: IFollowOnState;
+  /**
+   * Association selected in the optional AssociateToStep (step 1).
+   * `null` when AssociateToStep is not configured or the user skipped it.
+   */
+  association: AssociationResult | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +146,18 @@ export interface ICreateRecordWizardConfig {
   entityLabel: string;
   /** Subtitle for the Add Files step (optional override). */
   filesStepSubtitle?: string;
+  /**
+   * Optional configuration for an AssociateToStep prepended as step 1.
+   *
+   * When provided, the step sequence becomes:
+   *   Step 1: Associate To  (optional, skip-able)
+   *   Step 2: Add file(s)
+   *   Step 3: Entity info
+   *   Step 4: Next Steps
+   *
+   * The selected association is passed to `onFinish` via `context.association`.
+   */
+  associateToStep?: IAssociateToStepConfig;
   /** The entity-specific form step definition. */
   infoStep: IEntityInfoStep;
   /**

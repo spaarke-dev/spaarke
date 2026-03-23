@@ -2,7 +2,7 @@
   <metadata>
     <title>Integrate AssociateToStep as step 1 in CreateProject wizard</title>
     <phase>4</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <tags>frontend, shared-library, wizard</tags>
     <dependencies>WCWE-011</dependencies>

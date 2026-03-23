@@ -17,10 +17,11 @@
  *   - Search callbacks (contacts, organizations, users)
  *
  * Steps:
- *   [0] Add file(s) — always skip-able (canAdvance: true)
- *   [1] Entity info  — from config.infoStep
- *   [2] Next Steps   — follow-on action card selection
- *   [3+] Dynamic     — Assign Resources, Draft Summary, Send Email
+ *   [0] Associate To — optional; only when config.associateToStep is provided
+ *   [1] Add file(s)  — always skip-able (canAdvance: true)
+ *   [2] Entity info  — from config.infoStep
+ *   [3] Next Steps   — follow-on action card selection
+ *   [4+] Dynamic     — Assign Resources, Draft Summary, Send Email
  *
  * @see WizardShell — underlying generic dialog shell
  * @see ADR-012 — Shared Component Library
@@ -48,6 +49,9 @@ import {
 import { AssignResourcesStep } from './steps/AssignResourcesStep';
 import { DraftSummaryStep } from './steps/DraftSummaryStep';
 import { SendEmailStep } from './steps/SendEmailStep';
+
+import { AssociateToStep } from '../AssociateToStep/AssociateToStep';
+import type { AssociationResult } from '../AssociateToStep/types';
 
 // ---------------------------------------------------------------------------
 // File reducer
@@ -124,6 +128,11 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
+  // ── Associate To state ──────────────────────────────────────────────────
+  const [associationResult, setAssociationResult] = React.useState<AssociationResult | null>(null);
+  const associationResultRef = React.useRef<AssociationResult | null>(null);
+  associationResultRef.current = associationResult;
+
   // ── File state ──────────────────────────────────────────────────────────
   const [fileState, fileDispatch] = React.useReducer(fileReducer, {
     uploadedFiles: [],
@@ -164,6 +173,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   // ── Reset all state on open ─────────────────────────────────────────────
   React.useEffect(() => {
     if (open) {
+      setAssociationResult(null);
       fileDispatch({ type: 'RESET' });
       setSelectedActions([]);
       setAssignedAttorneyId('');
@@ -387,6 +397,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       uploadedFiles: fileStateRef.current.uploadedFiles,
       speContainerId: speContainerIdRef.current,
       selectedActions: selectedActionsRef.current,
+      association: associationResultRef.current,
       followOn: {
         assignedAttorneyId: assignedAttorneyIdRef.current,
         assignedAttorneyName: assignedAttorneyNameRef.current,
@@ -409,8 +420,10 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const filesStepSubtitle = config.filesStepSubtitle ?? 'Upload documents for AI analysis, or click Next to skip.';
 
   const stepConfigs: IWizardStepConfig[] = React.useMemo(
-    () => [
-      {
+    () => {
+      const associateToConfig = config.associateToStep;
+
+      const addFilesStep: IWizardStepConfig = {
         id: 'add-files',
         label: 'Add file(s)',
         canAdvance: () => true, // always skip-able
@@ -445,14 +458,16 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
             )}
           </>
         ),
-      },
-      {
+      };
+
+      const infoStep: IWizardStepConfig = {
         id: config.infoStep.id,
         label: config.infoStep.label,
         canAdvance: config.infoStep.canAdvance,
         renderContent: () => config.infoStep.renderContent(fileStateRef.current.uploadedFiles),
-      },
-      {
+      };
+
+      const nextStepsStep: IWizardStepConfig = {
         id: 'next-steps',
         label: 'Next Steps',
         canAdvance: () => true,
@@ -464,12 +479,46 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
             entityLabel={config.entityLabel}
           />
         ),
-      },
-    ],
+      };
+
+      const coreSteps: IWizardStepConfig[] = [addFilesStep, infoStep, nextStepsStep];
+
+      if (!associateToConfig) {
+        return coreSteps;
+      }
+
+      // Prepend the optional Associate To step when configured.
+      // The step is always skip-able — Next button is always enabled so
+      // the user can proceed with or without selecting a record.
+      const associateStep: IWizardStepConfig = {
+        id: 'associate-to',
+        label: 'Associate To',
+        canAdvance: () => true, // optional — always advance-able
+        isSkippable: true,
+        renderContent: (handle) => (
+          <AssociateToStep
+            entityTypes={associateToConfig.entityTypes}
+            navigationService={associateToConfig.navigationService}
+            value={associationResultRef.current}
+            onChange={setAssociationResult}
+            onSkip={() => {
+              setAssociationResult(null);
+              // Advance the wizard via the shell handle's requestUpdate
+              // then rely on the Next button for advancement.
+              // The WizardShell Skip button (isSkippable) handles navigation.
+              handle.requestUpdate();
+            }}
+          />
+        ),
+      };
+
+      return [associateStep, ...coreSteps];
+    },
     [
       fileState.uploadedFiles,
       fileState.validationErrors,
       selectedActions,
+      associationResult,
       config,
       styles,
       filesStepSubtitle,

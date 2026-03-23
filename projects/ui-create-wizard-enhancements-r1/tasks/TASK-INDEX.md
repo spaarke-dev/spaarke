@@ -43,7 +43,7 @@ No file overlap between tracks.
 | # | Task | Tags | Depends On | Status |
 |---|------|------|------------|--------|
 | 010 | Add openLookup() to INavigationService + adapters | shared-library | — | ✅ |
-| 011 | Create AssociateToStep shared component | shared-library, wizard | 010 | 🔲 |
+| 011 | Create AssociateToStep shared component | shared-library, wizard | 010 | ✅ |
 | 012 | Extract WorkspaceShell from LegalWorkspace | shared-library, workspace | — | ✅ |
 | 013 | Fix duplicate title bars (hideTitle) | shared-library, wizard | — | ✅ |
 | 014 | Move SecureProjectSection to top | shared-library, wizard | — | ✅ |
@@ -55,7 +55,7 @@ No file overlap between tracks.
 |---|------|------|------------|--------|
 | 020 | POST /api/ai/analysis/create BFF endpoint | bff-api, ai | — | ✅ |
 | 021 | IAnalysisDataverseService scope association | bff-api, dataverse | — | ✅ |
-| 022 | Rewrite analysisService.ts for BFF API | shared-library, ai | 020, 021 | 🔲 |
+| 022 | Rewrite analysisService.ts for BFF API | shared-library, ai | 020, 021 | ✅ |
 | 023 | MSAL auth standardization across Code Pages | code-pages, auth | — | ✅ |
 | 024 | bffBaseUrl propagation from launch points | webresource | — | ✅ |
 | 025 | Phase 3 deploy + verify | deploy | 020-024 | 🔲 |

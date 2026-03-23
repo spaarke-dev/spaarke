@@ -46,6 +46,83 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import { provisionSecureProject } from './provisioningService';
 
 // ---------------------------------------------------------------------------
+// Association wiring helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Create the N:N association between a sprk_project and a sprk_matter via the
+ * `sprk_Project_Matter_nn` intersect table using the OData $ref endpoint.
+ *
+ * Uses cookie-authenticated fetch (same origin, Dataverse) — no MSAL needed.
+ */
+async function associateProjectWithMatter(projectId: string, matterId: string): Promise<void> {
+  const orgUrl = window.location.origin;
+  const ref = `${orgUrl}/api/data/v9.0/sprk_matters(${matterId})`;
+
+  const response = await fetch(
+    `${orgUrl}/api/data/v9.0/sprk_projects(${projectId})/sprk_Project_Matter_nn/$ref`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+      },
+      body: JSON.stringify({ '@odata.id': ref }),
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Failed to associate project with matter (HTTP ${response.status}): ${text}`);
+  }
+}
+
+/**
+ * Update the sprk_project record to set its account lookup (N:1).
+ *
+ * Discovers the correct navigation property name at runtime so we don't
+ * hard-code a column name that may drift between environments.
+ */
+async function associateProjectWithAccount(
+  dataService: IDataService,
+  projectId: string,
+  accountId: string
+): Promise<void> {
+  // Attempt to discover the nav-prop for the account relationship.
+  // Fall back to a known column name if metadata is unavailable.
+  let navPropBind = `sprk_Account@odata.bind`;
+  try {
+    const orgUrl = window.location.origin;
+    const resp = await fetch(
+      `${orgUrl}/api/data/v9.0/EntityDefinitions(LogicalName='sprk_project')/ManyToOneRelationships` +
+        `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`,
+      { credentials: 'include' }
+    );
+    if (resp.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const json = await resp.json() as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rels: Array<any> = json.value ?? [];
+      const accountRel = rels.find(
+        (r: { ReferencedEntity: string }) => r.ReferencedEntity === 'account'
+      );
+      if (accountRel?.ReferencingEntityNavigationPropertyName) {
+        navPropBind = `${accountRel.ReferencingEntityNavigationPropertyName}@odata.bind`;
+      }
+    }
+  } catch {
+    // Use fallback column name
+  }
+
+  const orgUrl = window.location.origin;
+  await dataService.updateRecord('sprk_project', projectId, {
+    [navPropBind]: `/accounts(${accountId})`,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Search helper functions (use IDataService instead of IWebApi)
 // ---------------------------------------------------------------------------
 
@@ -199,6 +276,22 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         ? 'Creating project and provisioning secure infrastructure\u2026'
         : 'Creating project\u2026',
 
+      // ── Associate To step (step 1) ──────────────────────────────────────
+      // Allows the user to optionally link the new project to an Account or
+      // Matter before completing the wizard. The step is optional — the user
+      // can skip it and still create the project.
+      ...(navigationService
+        ? {
+            associateToStep: {
+              entityTypes: [
+                { label: 'Account', entityType: 'account' },
+                { label: 'Matter', entityType: 'sprk_matter' },
+              ],
+              navigationService,
+            },
+          }
+        : {}),
+
       infoStep: {
         id: 'create-record',
         label: 'Enter Info',
@@ -267,7 +360,27 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const projectId = result.projectId!;
         const projectName = result.projectName!;
 
-        // 1b. Provision Secure Project infrastructure (BU, SPE container, Account)
+        // 1b. Wire association from AssociateToStep (if the user made a selection)
+        const association = context.association;
+        if (association?.recordId) {
+          try {
+            if (association.entityType === 'sprk_matter') {
+              // N:N via sprk_Project_Matter_nn intersect
+              await associateProjectWithMatter(projectId, association.recordId);
+            } else if (association.entityType === 'account') {
+              // N:1 account lookup on the project record
+              await associateProjectWithAccount(dataService, projectId, association.recordId);
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            warnings.push(
+              `Association with "${association.recordName}" could not be created: ${message} — ` +
+              'You can link the record manually from the project form.'
+            );
+          }
+        }
+
+        // 1d. Provision Secure Project infrastructure (BU, SPE container, Account)
         //     when the Secure Project toggle is enabled.
         let provisioningWarning: string | undefined;
         if (mergedFormValues.isSecure && authFetch && bffBaseUrl) {
