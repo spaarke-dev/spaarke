@@ -84,7 +84,7 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
     badgeType: "overdue",
     badgeFilter: (userId) => {
       const now = new Date().toISOString();
-      return `_ownerid_value eq ${userId} and statecode eq 0 and sprk_duedate lt ${now}`;
+      return `_ownerid_value eq ${userId} and statecode eq 0 and sprk_responseduedate lt ${now}`;
     },
   },
   {
