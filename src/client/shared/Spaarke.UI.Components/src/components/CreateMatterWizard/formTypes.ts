@@ -11,7 +11,7 @@
  *   - ICreateRecordStepProps: props accepted by CreateRecordStep
  */
 
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { IUploadedFile } from './wizardTypes';
 
 // ---------------------------------------------------------------------------
@@ -211,4 +211,13 @@ export interface ICreateRecordStepProps {
    * Required for AI pre-fill. Injected by the host application.
    */
   bffBaseUrl: string;
+
+  /**
+   * Optional navigation service. When provided, Matter Type and Practice Area
+   * fields use the standard Dataverse lookup side pane (openLookup) instead of
+   * the inline search-as-you-type dropdown.
+   *
+   * Falls back to inline LookupField when absent (e.g., BFF SPA context).
+   */
+  navigationService?: INavigationService;
 }

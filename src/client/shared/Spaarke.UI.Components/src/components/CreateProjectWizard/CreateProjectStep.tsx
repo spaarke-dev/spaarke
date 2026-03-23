@@ -44,11 +44,11 @@ import {
   EMPTY_PROJECT_FORM,
 } from './projectFormTypes';
 import { ProjectService } from './projectService';
-import { LookupField } from '../LookupField';
+import { LookupField, DataverseLookupField } from '../LookupField';
 import { AiFieldTag } from '../AiFieldTag';
 import { SecureProjectSection } from './SecureProjectSection';
 import type { ILookupItem } from '../../types/LookupTypes';
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { useAiPrefill, type IResolvedPrefillFields } from '../../hooks/useAiPrefill';
 
@@ -85,6 +85,14 @@ export interface ICreateProjectStepProps {
   authenticatedFetch?: typeof fetch;
   /** BFF API base URL. */
   bffBaseUrl?: string;
+  /**
+   * Optional navigation service. When provided, Project Type and Practice Area
+   * fields use the standard Dataverse lookup side pane (openLookup) instead of
+   * the inline search-as-you-type dropdown.
+   *
+   * Falls back to inline LookupField when absent (e.g., BFF SPA context).
+   */
+  navigationService?: INavigationService;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +209,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
   initialFormValues,
   authenticatedFetch: authFetch,
   bffBaseUrl,
+  navigationService,
 }) => {
   const styles = useStyles();
 
@@ -436,22 +445,26 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
         <div className={styles.formGrid}>
           {/* ── Row 1: Project Type + Practice Area ── */}
 
-          <LookupField
+          <DataverseLookupField
             label="Project Type"
-            placeholder="Search project types..."
+            entityType="sprk_projecttype"
             value={projectTypeValue}
             onChange={handleProjectTypeChange}
+            navigationService={navigationService}
             onSearch={handleSearchProjectTypes}
+            placeholder="Search project types..."
             labelExtra={isAiField('projectTypeId') ? <AiFieldTag /> : undefined}
             minSearchLength={1}
           />
 
-          <LookupField
+          <DataverseLookupField
             label="Practice Area"
-            placeholder="Search practice areas..."
+            entityType="sprk_practicearea"
             value={practiceAreaValue}
             onChange={handlePracticeAreaChange}
+            navigationService={navigationService}
             onSearch={handleSearchPracticeAreas}
+            placeholder="Search practice areas..."
             labelExtra={isAiField('practiceAreaId') ? <AiFieldTag /> : undefined}
             minSearchLength={1}
           />

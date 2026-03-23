@@ -341,6 +341,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             initialFormValues={formValues}
             authenticatedFetch={authFetch}
             bffBaseUrl={bffBaseUrl}
+            navigationService={navigationService}
           />
         ),
       },

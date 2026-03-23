@@ -263,6 +263,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
             initialFormValues={step2FormValues}
             authenticatedFetch={authenticatedFetch}
             bffBaseUrl={bffBaseUrl}
+            navigationService={navigationService}
           />
         ),
       },

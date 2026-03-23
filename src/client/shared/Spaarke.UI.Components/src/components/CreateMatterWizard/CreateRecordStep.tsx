@@ -50,6 +50,7 @@ import {
 } from './formTypes';
 import { AiFieldTag } from './AiFieldTag';
 import { LookupField } from './LookupField';
+import { DataverseLookupField } from '../LookupField';
 import {
   searchMatterTypes,
   searchPracticeAreas,
@@ -304,6 +305,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
   initialFormValues,
   authenticatedFetch,
   bffBaseUrl,
+  navigationService,
 }) => {
   const styles = useStyles();
 
@@ -615,25 +617,29 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
         <div className={styles.formGrid}>
           {/* -- Row 1: Matter Type + Practice Area -- */}
 
-          <LookupField
+          <DataverseLookupField
             label="Matter Type"
             required
-            placeholder="Search matter types..."
+            entityType="sprk_mattertype"
             value={matterTypeValue}
             onChange={handleMatterTypeChange}
+            navigationService={navigationService}
             onSearch={handleSearchMatterTypes}
-            isAiPrefilled={isAiField('matterTypeId')}
+            placeholder="Search matter types..."
+            labelExtra={isAiField('matterTypeId') ? <AiFieldTag /> : undefined}
             minSearchLength={1}
           />
 
-          <LookupField
+          <DataverseLookupField
             label="Practice Area"
             required
-            placeholder="Search practice areas..."
+            entityType="sprk_practicearea"
             value={practiceAreaValue}
             onChange={handlePracticeAreaChange}
+            navigationService={navigationService}
             onSearch={handleSearchPracticeAreas}
-            isAiPrefilled={isAiField('practiceAreaId')}
+            placeholder="Search practice areas..."
+            labelExtra={isAiField('practiceAreaId') ? <AiFieldTag /> : undefined}
             minSearchLength={1}
           />
 
