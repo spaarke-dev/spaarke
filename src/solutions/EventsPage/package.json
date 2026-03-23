@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@fluentui/react-components": "^9.46.2",
-    "@fluentui/react-icons": "^2.0.200"
+    "@fluentui/react-icons": "^2.0.200",
+    "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components"
   },
   "devDependencies": {
     "@types/react": "^18.3.27",

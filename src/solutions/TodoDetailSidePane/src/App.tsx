@@ -11,12 +11,11 @@
 import * as React from "react";
 import {
   FluentProvider,
-  webLightTheme,
-  webDarkTheme,
   makeStyles,
   tokens,
   Text,
 } from "@fluentui/react-components";
+import { resolveCodePageTheme as resolveTheme } from "@spaarke/ui-components";
 import { parseSidePaneParams } from "./utils/parseParams";
 import {
   loadTodoRecord,
@@ -30,52 +29,6 @@ import { sendTodoSaved } from "./utils/broadcastChannel";
 import { TodoDetail } from "./components/TodoDetail";
 import type { ITodoRecord } from "./types/TodoRecord";
 import type { ITodoExtension } from "./types/TodoRecord";
-
-// ---------------------------------------------------------------------------
-// Theme resolution (matches EventDetailSidePane pattern)
-// ---------------------------------------------------------------------------
-
-/**
- * Theme resolution — matches EventDetailSidePane ThemeProvider pattern.
- * Priority: localStorage > navbar detection > default light.
- *
- * NOTE: System preference (prefers-color-scheme) is intentionally NOT used
- * as a fallback because side pane iframes cannot detect the Power Apps theme.
- * OS dark mode + Power Apps light mode would show dark incorrectly.
- */
-function resolveTheme(): typeof webLightTheme {
-  // 1. Check localStorage (shared across all Spaarke web resources)
-  try {
-    const pref = localStorage.getItem("spaarke-theme");
-    if (pref === "dark") return webDarkTheme;
-    if (pref === "light") return webLightTheme;
-  } catch {
-    // localStorage unavailable
-  }
-
-  // 2. Try to detect Power Apps navbar (works when same-origin)
-  const framesToCheck: Array<Window | null> = [];
-  try { framesToCheck.push(window.top); } catch { /* cross-origin */ }
-  try { framesToCheck.push(window.parent); } catch { /* cross-origin */ }
-  for (const frame of framesToCheck) {
-    if (!frame || frame === window) continue;
-    try {
-      const navBar = frame.document?.querySelector?.(
-        '[data-id="navbar-container"]'
-      ) as HTMLElement | null;
-      if (navBar) {
-        const bg = window.getComputedStyle(navBar).backgroundColor;
-        if (bg === "rgb(10, 10, 10)") return webDarkTheme;
-        return webLightTheme;
-      }
-    } catch {
-      // Cross-origin — try next frame
-    }
-  }
-
-  // 3. Default to light theme (safe default for Power Apps)
-  return webLightTheme;
-}
 
 // ---------------------------------------------------------------------------
 // Styles
