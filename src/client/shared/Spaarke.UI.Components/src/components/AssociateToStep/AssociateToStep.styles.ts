@@ -82,21 +82,8 @@ export const useAssociateToStepStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
-  // ── "or" divider row ─────────────────────────────────────────────────────
-  dividerRow: {
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-  },
-
-  // ── Skip section ─────────────────────────────────────────────────────────
-  skipSection: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalXS,
-  },
-
+  // ── Helper text (link records later) ────────────────────────────────────
   skipHint: {
     color: tokens.colorNeutralForeground3,
-    paddingLeft: tokens.spacingHorizontalXL,
   },
 });

@@ -5,7 +5,7 @@
  * Layout:
  *   ┌────────────────────────────────────────────────────────────────────┐
  *   │  Associate To                                                      │
- *   │  Link this record to an existing record, or skip this step.        │
+ *   │  Link this record to an existing record.                           │
  *   │                                                                    │
  *   │  Record Type:  [ Matter  ▼ ]      [ Select Record 🔍 ]           │
  *   │                                                                    │
@@ -13,9 +13,6 @@
  *   │  │  ✅ Smith v. Jones (MAT-2024-001)       [ ✕ Clear ]  │       │
  *   │  └────────────────────────────────────────────────────────┘       │
  *   │                                                                    │
- *   │  ─────────────────── or ───────────────────                        │
- *   │                                                                    │
- *   │  [ Skip — don't associate ]                                        │
  *   │  You can always link records later.                                │
  *   └────────────────────────────────────────────────────────────────────┘
  *
@@ -31,7 +28,6 @@
 import * as React from "react";
 import {
     Button,
-    Divider,
     Dropdown,
     MessageBar,
     MessageBarBody,
@@ -190,7 +186,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
                     Associate To
                 </Text>
                 <Text size={200} className={styles.subtitle}>
-                    Link this record to an existing record, or skip this step.
+                    Link this record to an existing record.
                 </Text>
             </div>
 
@@ -256,24 +252,10 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
                 </div>
             )}
 
-            {/* Divider */}
-            <div className={styles.dividerRow}>
-                <Divider>or</Divider>
-            </div>
-
-            {/* Skip section */}
-            <div className={styles.skipSection}>
-                <Button
-                    appearance="subtle"
-                    onClick={handleSkip}
-                    disabled={isInteractionDisabled}
-                >
-                    Skip — don't associate
-                </Button>
-                <Text size={200} className={styles.skipHint}>
-                    You can always link records later.
-                </Text>
-            </div>
+            {/* Helper text */}
+            <Text size={200} className={styles.skipHint}>
+                You can always link records later.
+            </Text>
         </div>
     );
 };

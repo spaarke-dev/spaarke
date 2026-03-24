@@ -606,7 +606,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
         const associateStepConfig: IWizardStepConfig = {
           id: 'associate-to',
           label: 'Associate To',
-          canAdvance: () => true, // optional -- always advanceable
+          canAdvance: () => Boolean(associationRef.current), // requires a record selection; Skip button bypasses this
           isSkippable: true,
           renderContent: (handle) => (
             <AssociateToStep
