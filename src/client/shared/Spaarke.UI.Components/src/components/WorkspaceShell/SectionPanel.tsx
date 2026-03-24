@@ -117,7 +117,7 @@ const useStyles = makeStyles({
   content: {
     display: "flex",
     flexDirection: "column",
-    flex: "1 1 0",
+    flex: "1 1 auto",
     overflow: "hidden",
   },
   contentCollapsed: {
