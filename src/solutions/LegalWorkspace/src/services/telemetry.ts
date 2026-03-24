@@ -38,9 +38,12 @@ export async function initTelemetry(): Promise<void> {
   if (_appInsights) return; // already initialised
 
   try {
-    const key = await resolveAppInsightsKey();
+    // Try Dataverse env var first, fall back to known dev instrumentation key.
+    // App Insights instrumentation keys are public by design (embedded in client JS).
+    const DEV_INSTRUMENTATION_KEY = "09a9beed-0dcd-4aad-84bb-3696372ed5d1";
+    const key = (await resolveAppInsightsKey()) ?? DEV_INSTRUMENTATION_KEY;
     if (!key) {
-      console.warn("[Telemetry] sprk_ApplicationInsightsKey not configured — telemetry disabled.");
+      console.warn("[Telemetry] No App Insights key available — telemetry disabled.");
       return;
     }
 

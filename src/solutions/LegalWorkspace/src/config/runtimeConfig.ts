@@ -16,6 +16,7 @@
 
 import type { IRuntimeConfig } from '@spaarke/auth';
 import { resolveTenantIdSync } from '@spaarke/auth';
+import { trackEvent } from '../services/telemetry';
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -99,5 +100,13 @@ export function getTenantId(): string {
     // Cache so subsequent calls are instant.
     _config = { ..._config, tenantId: resolved };
   }
+
+  // Telemetry: track when tenant ID is resolved lazily (indicates bootstrap didn't capture it)
+  trackEvent("TenantIdLazyResolve", {
+    resolved: String(!!resolved),
+    storedWasEmpty: "true",
+    caller: new Error().stack?.split("\n")[2]?.trim().substring(0, 100) ?? "unknown",
+  });
+
   return resolved;
 }

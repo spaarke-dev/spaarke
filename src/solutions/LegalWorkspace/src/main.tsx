@@ -49,17 +49,39 @@ async function bootstrap(): Promise<void> {
 
     // Patch the stored config if tenant ID was empty at resolveRuntimeConfig() time.
     // MSAL account.tenantId (from the authenticated JWT) is the authoritative source.
+    const xrmTenantId = config.tenantId;
     if (!config.tenantId) {
       const tenantId = await getAuthProvider().getTenantId();
       if (tenantId) {
         setRuntimeConfig({ ...config, tenantId });
         console.info('[LegalWorkspace] Tenant ID resolved from MSAL account:', tenantId.substring(0, 8) + '...');
       }
+      // Telemetry: track tenant ID resolution path
+      trackEvent("TenantIdResolution", {
+        source: tenantId ? "msal-fallback" : "missing",
+        xrmAvailable: String(!!xrmTenantId),
+        msalAvailable: String(!!tenantId),
+        bootstrapPhase: "eager-auth",
+      });
+    } else {
+      trackEvent("TenantIdResolution", {
+        source: "xrm-direct",
+        xrmAvailable: "true",
+        msalAvailable: "unknown",
+        bootstrapPhase: "config-resolve",
+      });
     }
   } catch (err) {
     // Auth init failure is non-fatal for rendering — authenticated API calls will
     // fail individually and surface errors in the relevant components.
     console.warn('[LegalWorkspace] Eager auth init failed, will retry on first use:', err);
+    trackEvent("TenantIdResolution", {
+      source: "auth-init-failed",
+      xrmAvailable: String(!!config.tenantId),
+      msalAvailable: "false",
+      error: err instanceof Error ? err.message : String(err),
+      bootstrapPhase: "eager-auth-error",
+    });
   }
 
   // 3. Render the app
