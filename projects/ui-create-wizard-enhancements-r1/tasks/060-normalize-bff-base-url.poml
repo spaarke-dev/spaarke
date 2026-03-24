@@ -1,0 +1,153 @@
+<task id="060" project="ui-create-wizard-enhancements-r1">
+  <metadata>
+    <title>Normalize bffBaseUrl: strip /api from source, standardize all route constants</title>
+    <phase>5</phase>
+    <tags>bff-api, shared-library, pcf, code-page, refactor</tags>
+    <priority>high</priority>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <dependencies>none — standalone refactor</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Eliminate the entire class of double /api/api/ URL bugs by normalizing bffBaseUrl
+      at the source (resolveRuntimeConfig) and standardizing all route constants to
+      include the /api prefix.
+    </goal>
+
+    <context>
+      ## Problem
+
+      `resolveRuntimeConfig()` returns bffBaseUrl as `https://host/api` (with /api suffix).
+      The codebase has two conflicting conventions for building API URLs:
+
+      **Convention A** — assumes bffBaseUrl INCLUDES /api:
+        Routes: `${bffBaseUrl}/obo/containers/...`, `${bffBaseUrl}/ai/search`, etc.
+        These work correctly today.
+
+      **Convention B** — assumes bffBaseUrl does NOT include /api:
+        Routes: `${baseUrl}/api/ai/chat/...`, `${apiBaseUrl}/api/documents/...`, etc.
+        These produce double /api/api/ unless each call site strips /api first.
+
+      The SprkChat hooks band-aid this with per-call `.replace(/\/api\/?$/, '')` normalization
+      (7+ locations). Other Convention B code (SemanticSearchControl, PlaybookBuilder,
+      SummarizeAnalysisStep, FilePreviewServiceAdapter) likely has the same double-prefix
+      bug but hasn't been caught yet.
+
+      ## Root Cause
+
+      The Dataverse environment variable `sprk_BffApiBaseUrl` stores the value WITH /api:
+        `https://spe-api-dev-67e2xz.azurewebsites.net/api`
+
+      `resolveRuntimeConfig()` in @spaarke/auth passes this through as-is.
+
+      ## Fix Strategy
+
+      1. Change `normalizeUrl()` in resolveRuntimeConfig.ts to strip trailing /api
+         bffBaseUrl becomes: `https://spe-api-dev-67e2xz.azurewebsites.net`
+
+      2. Standardize ALL route constants to include /api prefix:
+         Convention A locations need /api added to their routes
+         Convention B locations are already correct (keep /api in routes)
+
+      3. Remove ALL per-call .replace(/\/api\/?$/, '') normalizations from SprkChat hooks
+         and contextService.ts — no longer needed.
+
+      4. Update tests that assert URL patterns.
+
+      ## Files to Change
+
+      ### Source (1 file)
+      - src/client/shared/Spaarke.Auth/src/resolveRuntimeConfig.ts
+        → normalizeUrl() strips trailing /api
+
+      ### Convention A → add /api to routes (~15 files)
+      - src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts
+        → /obo/... becomes /api/obo/...
+        → /documents/... becomes /api/documents/...
+        → /communications/... becomes /api/communications/...
+      - src/client/shared/Spaarke.UI.Components/src/hooks/useAiSummary.ts
+        → /ai/playbooks/... becomes /api/ai/playbooks/...
+        → /ai/analysis/... becomes /api/ai/analysis/...
+      - src/client/shared/Spaarke.UI.Components/src/components/FindSimilar/findSimilarService.ts
+        → /workspace/... becomes /api/workspace/...
+        → /ai/search becomes /api/ai/search
+      - src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/closureService.ts
+        → /v1/external-access/... becomes /api/v1/external-access/...
+      - src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts
+        → /v1/external-access/... becomes /api/v1/external-access/...
+      - src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts
+        → /workspace/... becomes /api/workspace/...
+      - src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffUploadServiceAdapter.ts
+        → check route constants, add /api if missing
+      - src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmUploadServiceAdapter.ts
+        → check route constants, add /api if missing
+      - src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts
+        → /ai/visualization/... becomes /api/ai/visualization/...
+      - src/client/pcf/UniversalQuickCreate/control/components/DocumentUploadForm.tsx
+        → /ai/rag/... becomes /api/ai/rag/...
+      - src/client/pcf/UniversalQuickCreate/control/services/useRecordMatch.ts
+        → /ai/document-intelligence/... becomes /api/ai/document-intelligence/...
+      - src/client/office-addins/shared/taskpane/hooks/useEntitySearch.ts
+        → /office/... becomes /api/office/...
+      - src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts
+        → /office/... becomes /api/office/...
+
+      ### Convention B → remove normalization workarounds (~8 files)
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionMenuData.ts
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx
+      - src/client/code-pages/SprkChatPane/src/services/contextService.ts
+        → Remove all .replace(/\/+$/, '').replace(/\/api\/?$/, '') lines
+        → Routes already have /api prefix — they'll work directly
+
+      ### Tests to update
+      - src/client/code-pages/SprkChatPane/src/__tests__/services/contextService.test.ts
+      - src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/*
+      - src/client/office-addins/shared/services/__tests__/ApiClient.test.ts
+
+      ## Verification
+
+      After changes, grep for these patterns to confirm clean state:
+      - No remaining .replace(/\/api\/?$/, '') — all removed
+      - No ${baseUrl}/obo/ without /api — all have /api prefix
+      - No ${baseUrl}/ai/ without /api — all have /api prefix
+      - No ${baseUrl}/workspace/ without /api — all have /api prefix
+      - No ${baseUrl}/office/ without /api — all have /api prefix
+      - No ${baseUrl}/v1/ without /api — all have /api prefix
+      - No ${baseUrl}/documents/ without /api — all have /api prefix
+      - No ${baseUrl}/communications/ without /api — all have /api prefix
+    </context>
+
+    <constraints>
+      - Do NOT change the Dataverse environment variable value — code handles normalization
+      - Do NOT change BFF API endpoint routes (server-side) — only client URL construction
+      - Preserve all existing functionality — this is a refactor, not a feature change
+      - Build all affected code pages and PCF controls after changes to verify compilation
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step id="1">Change normalizeUrl() in resolveRuntimeConfig.ts to strip trailing /api</step>
+    <step id="2">Fix Convention A files — add /api prefix to all route constants</step>
+    <step id="3">Fix Convention B files — remove .replace normalization workarounds</step>
+    <step id="4">Update test files with corrected URL patterns</step>
+    <step id="5">Build LegalWorkspace, SprkChatPane, and verify no compilation errors</step>
+    <step id="6">Grep audit: confirm no remaining double-prefix patterns or missing /api prefixes</step>
+    <step id="7">Deploy LegalWorkspace and SprkChatPane to verify runtime behavior</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>resolveRuntimeConfig() returns bffBaseUrl WITHOUT /api suffix</criterion>
+    <criterion>All API URL constructions use /api prefix in route constants</criterion>
+    <criterion>Zero .replace(/\/api\/?$/, '') workarounds remain in codebase</criterion>
+    <criterion>grep confirms no ${baseUrl}/obo/, /ai/, /workspace/, /office/, /v1/, /documents/, /communications/ without /api prefix</criterion>
+    <criterion>LegalWorkspace and SprkChatPane build and deploy without errors</criterion>
+    <criterion>Corporate workspace loads, SprkChat connects, Find Similar works</criterion>
+  </acceptance-criteria>
+</task>

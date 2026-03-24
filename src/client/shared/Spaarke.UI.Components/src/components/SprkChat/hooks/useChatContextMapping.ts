@@ -190,8 +190,8 @@ export function useChatContextMapping(
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
 
-  // Normalise URL — remove trailing slash or stray /api suffix (same as useChatPlaybooks.ts)
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  // Normalise URL — remove trailing slash
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
 
   /**
    * Extract tenant ID from JWT for X-Tenant-Id header.

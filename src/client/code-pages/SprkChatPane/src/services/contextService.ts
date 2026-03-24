@@ -166,10 +166,8 @@ export async function resolveContextMapping(
   }
 
   // 2. Call API
-  // Normalize: strip trailing slashes and trailing /api to prevent double /api/api/ prefix.
-  // The SprkChat PCF control stores bffBaseUrl as "https://host/api" but all route
-  // constants below already include the /api prefix.
-  const normalizedBaseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  // Normalize: strip trailing slashes.
+  const normalizedBaseUrl = apiBaseUrl.replace(/\/+$/, '');
   const url = `${normalizedBaseUrl}/api/ai/chat/context-mappings?entityType=${encodeURIComponent(entityType)}&pageType=${encodeURIComponent(pageType)}`;
   try {
     // Extract tenant ID from JWT for X-Tenant-Id header fallback (BFF requires tid claim or header)

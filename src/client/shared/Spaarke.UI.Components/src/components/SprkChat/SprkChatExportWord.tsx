@@ -176,7 +176,7 @@ export const SprkChatExportWord: React.FC<ISprkChatExportWordProps> = ({
         throw new Error('No content to export');
       }
 
-      const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '');
       const url = `${baseUrl}/api/ai/chat/export/word`;
       const response = await fetch(url, {
         method: 'POST',

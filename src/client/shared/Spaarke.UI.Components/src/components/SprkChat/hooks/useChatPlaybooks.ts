@@ -54,7 +54,7 @@ export function useChatPlaybooks(options: UseChatPlaybooksOptions): IUseChatPlay
   const [error, setError] = useState<Error | null>(null);
 
   // Normalize URL
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
 
   /**
    * Extract tenant ID from JWT for X-Tenant-Id header.

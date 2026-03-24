@@ -123,7 +123,7 @@ export const useRecordMatch = (options: UseRecordMatchOptions): UseRecordMatchRe
           token = await getToken();
         }
 
-        const response = await fetch(`${apiBaseUrl}/ai/document-intelligence/match-records`, {
+        const response = await fetch(`${apiBaseUrl}/api/ai/document-intelligence/match-records`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -173,7 +173,7 @@ export const useRecordMatch = (options: UseRecordMatchOptions): UseRecordMatchRe
           token = await getToken();
         }
 
-        const response = await fetch(`${apiBaseUrl}/ai/document-intelligence/associate-record`, {
+        const response = await fetch(`${apiBaseUrl}/api/ai/document-intelligence/associate-record`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

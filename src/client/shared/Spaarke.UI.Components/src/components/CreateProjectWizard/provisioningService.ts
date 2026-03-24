@@ -84,7 +84,7 @@ export async function provisionSecureProject(
   authenticatedFetch: typeof fetch,
   bffBaseUrl: string,
 ): Promise<IProvisionProjectResult> {
-  const url = `${bffBaseUrl}/v1/external-access/provision-project`;
+  const url = `${bffBaseUrl}/api/v1/external-access/provision-project`;
 
   try {
     const response = await authenticatedFetch(url, {

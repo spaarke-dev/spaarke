@@ -34,7 +34,7 @@ async function extractTextFromFiles(
   signal?: AbortSignal
 ): Promise<string> {
   const bffBaseUrl = config.getBffBaseUrl();
-  const url = `${bffBaseUrl}/workspace/files/extract-text`;
+  const url = `${bffBaseUrl}/api/workspace/files/extract-text`;
 
   const formData = new FormData();
   for (const f of files) {
@@ -67,7 +67,7 @@ async function searchDocuments(
   signal?: AbortSignal
 ): Promise<{ results: IDocumentResult[]; totalCount: number }> {
   const bffBaseUrl = config.getBffBaseUrl();
-  const url = `${bffBaseUrl}/ai/search`;
+  const url = `${bffBaseUrl}/api/ai/search`;
 
   const response = await config.authenticatedFetch(url, {
     method: 'POST',
@@ -107,7 +107,7 @@ async function searchRecords(
   signal?: AbortSignal
 ): Promise<{ results: IRecordResult[]; totalCount: number }> {
   const bffBaseUrl = config.getBffBaseUrl();
-  const url = `${bffBaseUrl}/ai/search/records`;
+  const url = `${bffBaseUrl}/api/ai/search/records`;
 
   const response = await config.authenticatedFetch(url, {
     method: 'POST',

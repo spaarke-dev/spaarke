@@ -283,7 +283,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         // Step 1: Resolve Document Profile playbook
         let playbookId: string;
         try {
-          const playbookUrl = `${apiBaseUrl}/ai/playbooks/by-name/Document%20Profile`;
+          const playbookUrl = `${apiBaseUrl}/api/ai/playbooks/by-name/Document%20Profile`;
           const authHeaders = await getAuthHeaders();
           const playbookResponse = await fetch(playbookUrl, {
             method: 'GET',
@@ -307,7 +307,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         }
 
         // Step 2: Execute analysis with new unified endpoint
-        const streamUrl = `${apiBaseUrl}/ai/analysis/execute`;
+        const streamUrl = `${apiBaseUrl}/api/ai/analysis/execute`;
         console.log('[useAiSummary] Fetching:', streamUrl);
 
         const authHeaders = await getAuthHeaders();

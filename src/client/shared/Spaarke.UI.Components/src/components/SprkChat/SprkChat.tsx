@@ -714,8 +714,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       addMessage(assistantMessage);
       isStreamingRef.current = true;
 
-      // Start SSE stream — normalize URL to prevent double /api prefix
-      const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+      // Start SSE stream
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '');
       startStream(
         `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`,
         { message: messageText, documentId },
@@ -804,7 +804,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       );
 
       const planIdToApprove = pendingPlanId;
-      const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '');
       const approveUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/plan/approve`;
 
       // Add an assistant message placeholder to receive step execution output
@@ -1116,7 +1116,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       try {
         const tenantId = extractTenantIdFromToken(accessToken);
-        const normalizedBase = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+        const normalizedBase = apiBaseUrl.replace(/\/+$/, '');
         const persistUrl = `${normalizedBase}/api/ai/chat/sessions/${session.sessionId}/documents/${encodeURIComponent(docId)}/persist`;
 
         const response = await fetch(persistUrl, {
@@ -1407,7 +1407,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           });
 
           const tenantId = extractTenantIdFromToken(accessToken);
-          const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+          const baseUrl = apiBaseUrl.replace(/\/+$/, '');
           const refineUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`;
 
           const response = await fetch(refineUrl, {
@@ -1582,8 +1582,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       addMessage(assistantMessage);
       isStreamingRef.current = true;
 
-      // Start SSE stream to refine endpoint — normalize URL to prevent double /api prefix
-      const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+      // Start SSE stream to refine endpoint
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '');
       startStream(
         `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`,
         { selectedText, instruction },

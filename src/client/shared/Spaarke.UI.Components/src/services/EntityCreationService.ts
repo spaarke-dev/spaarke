@@ -152,7 +152,7 @@ export class EntityCreationService {
 
       try {
         const response = await this._authenticatedFetch(
-          `${this._bffBaseUrl}/obo/containers/${containerId}/files/${fileName}`,
+          `${this._bffBaseUrl}/api/obo/containers/${containerId}/files/${fileName}`,
           {
             method: 'PUT',
             body: file.file,
@@ -308,7 +308,7 @@ export class EntityCreationService {
   private async _triggerDocumentAnalysis(documentIds: string[], warnings: string[]): Promise<void> {
     for (const docId of documentIds) {
       try {
-        const response = await this._authenticatedFetch(`${this._bffBaseUrl}/documents/${docId}/analyze`, {
+        const response = await this._authenticatedFetch(`${this._bffBaseUrl}/api/documents/${docId}/analyze`, {
           method: 'POST',
         });
         if (response.ok) {
@@ -342,7 +342,7 @@ export class EntityCreationService {
       }
 
       const cc = normalize(input.cc);
-      const response = await this._authenticatedFetch(`${this._bffBaseUrl}/communications/send`, {
+      const response = await this._authenticatedFetch(`${this._bffBaseUrl}/api/communications/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

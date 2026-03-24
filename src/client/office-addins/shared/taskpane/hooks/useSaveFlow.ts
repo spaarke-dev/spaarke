@@ -521,7 +521,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const pollJobStatus = useCallback(
     async (jobId: string, accessToken: string) => {
       try {
-        const response = await fetch(`${apiBaseUrl}/office/jobs/${jobId}`, {
+        const response = await fetch(`${apiBaseUrl}/api/office/jobs/${jobId}`, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
@@ -857,7 +857,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
         // Submit save request
         console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, null, 2));
-        const response = await fetch(`${apiBaseUrl}/office/save`, {
+        const response = await fetch(`${apiBaseUrl}/api/office/save`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

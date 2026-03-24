@@ -190,8 +190,8 @@ export function useDynamicSlashCommands(
   // Derive scopeId from hostContext for cache key construction (ADR-014)
   const scopeId = hostContext?.entityId;
 
-  // Normalise URL — remove trailing slash or stray /api suffix (same as useChatContextMapping.ts)
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  // Normalise URL — remove trailing slash
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
 
   /**
    * Extract tenant ID from JWT for X-Tenant-Id header.

@@ -166,8 +166,8 @@ export function useActionMenuData(options: UseActionMenuDataOptions): IUseAction
   // Track the last fetched cache key to detect context changes
   const lastCacheKeyRef = useRef<string>('');
 
-  // Normalize URL: strip trailing slashes and trailing /api to prevent double /api/api/ prefix.
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  // Normalize URL: strip trailing slashes.
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
 
   /**
    * Extract tenant ID from JWT access token for X-Tenant-Id header.

@@ -331,7 +331,7 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
           const typeParam = filter.length > 0 ? `&type=${filter.join(',')}` : '';
 
           const response = await fetch(
-            `${apiBaseUrl}/office/search/entities?q=${encodeURIComponent(searchQuery)}${typeParam}&top=${maxResults}`,
+            `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(searchQuery)}${typeParam}&top=${maxResults}`,
             {
               headers: {
                 Authorization: `Bearer ${token}`,

@@ -313,7 +313,7 @@ export async function dispatchConfirmedAction(
   apiBaseUrl: string,
   accessToken: string
 ): Promise<{ success: boolean; message: string }> {
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
   const url = `${baseUrl}/api/ai/chat/sessions/${pendingAction.sessionId}/actions/${pendingAction.actionId}/confirm`;
 
   try {

@@ -372,8 +372,13 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
 }
 
 /**
- * Normalize a URL: trim whitespace, ensure no trailing slash.
+ * Normalize a URL: trim whitespace, strip trailing slashes, strip trailing /api.
+ *
+ * The Dataverse env var stores the BFF URL as "https://host/api" but all client-side
+ * route constants include the /api prefix (e.g., /api/ai/chat/sessions). Stripping
+ * /api here prevents the pervasive double /api/api/ bug and establishes a single
+ * convention: bffBaseUrl = host only, routes always start with /api.
  */
 function normalizeUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, '');
+  return raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
 }

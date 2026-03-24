@@ -41,10 +41,8 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
 
-  // Normalize: strip trailing slashes AND trailing /api to prevent double /api/api/ prefix.
-  // The AnalysisWorkspace PCF stores apiBaseUrl as "https://host/api" but all route
-  // constants below already include the /api prefix.
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  // Normalize: strip trailing slashes.
+  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
 
   /**
    * Make an authenticated API request.

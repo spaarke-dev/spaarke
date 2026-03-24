@@ -66,7 +66,7 @@ export async function closeSecureProject(
   authenticatedFetch: typeof fetch,
   bffBaseUrl: string,
 ): Promise<ICloseProjectResult> {
-  const url = `${bffBaseUrl}/v1/external-access/close-project`;
+  const url = `${bffBaseUrl}/api/v1/external-access/close-project`;
 
   try {
     const response = await authenticatedFetch(url, {

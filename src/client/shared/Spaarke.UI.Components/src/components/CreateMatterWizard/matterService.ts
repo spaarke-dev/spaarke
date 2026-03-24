@@ -568,7 +568,7 @@ export async function streamAiDraftSummary(
 
   try {
     const response = await authenticatedFetch(
-      `${bffBaseUrl}/workspace/matters/ai-summary`,
+      `${bffBaseUrl}/api/workspace/matters/ai-summary`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
