@@ -30,6 +30,7 @@
     "@lexical/react": "^0.41.0",
     "@lexical/rich-text": "^0.41.0",
     "@lexical/selection": "^0.41.0",
+    "@microsoft/applicationinsights-web": "^3.3.11",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@types/dompurify": "^3.0.5",

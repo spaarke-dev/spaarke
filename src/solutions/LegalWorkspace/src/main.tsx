@@ -19,9 +19,15 @@ import { createRoot } from "react-dom/client";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
+import { initTelemetry, trackMetric } from "./services/telemetry";
 import { App } from "./App";
 
 async function bootstrap(): Promise<void> {
+  const t0 = performance.now();
+
+  // 0. Initialize Application Insights telemetry (non-blocking — continues on failure)
+  await initTelemetry();
+
   // 1. Resolve runtime config from Dataverse Environment Variables
   const config = await resolveRuntimeConfig();
   setRuntimeConfig(config);
@@ -69,6 +75,11 @@ async function bootstrap(): Promise<void> {
       <App />
     </React.StrictMode>
   );
+
+  // 4. Log bootstrap duration to Application Insights
+  const bootstrapMs = Math.round(performance.now() - t0);
+  trackMetric("WorkspaceBootstrapMs", bootstrapMs);
+  console.info(`[LegalWorkspace] Bootstrap complete in ${bootstrapMs}ms`);
 }
 
 bootstrap().catch((err) => {
