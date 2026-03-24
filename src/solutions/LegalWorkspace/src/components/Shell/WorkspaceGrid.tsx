@@ -153,8 +153,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 85, unit: "%" },
-          height: { value: 85, unit: "%" },
+          width: { value: 60, unit: "%" },
+          height: { value: 70, unit: "%" },
           title: "Create New Matter",
         }
       );
@@ -184,8 +184,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 85, unit: "%" },
-          height: { value: 85, unit: "%" },
+          width: { value: 60, unit: "%" },
+          height: { value: 70, unit: "%" },
           title: "Create New Project",
         }
       );
@@ -204,7 +204,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       const data = documentIds ? `documentIds=${documentIds.join(",")}&${bffParam}` : bffParam;
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
-        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Summarize Files" }
+        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Summarize Files" }
       );
       docRefetchRef.current?.();
     } catch {
@@ -221,7 +221,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       const data = `documentId=${documentId || ""}&containerId=${containerId || ""}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
-        { target: 2, width: { value: 70, unit: "%" }, height: { value: 80, unit: "%" }, title: "Find Similar Documents" }
+        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Find Similar Documents" }
       );
       docRefetchRef.current?.();
     } catch {
@@ -237,7 +237,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createeventwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create New Event" }
+        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Create New Event" }
       );
       feedRefetchRef.current?.();
     } catch {
@@ -253,7 +253,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createtodowizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create New To Do" }
+        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Create New To Do" }
       );
       todoRefetchRef.current?.();
     } catch {
@@ -269,7 +269,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       await (window as any).Xrm?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" }, title: "Create Work Assignment" }
+        { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Create Work Assignment" }
       );
     } catch {
       // User cancelled or dialog error — ignore
