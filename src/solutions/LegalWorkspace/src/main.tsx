@@ -19,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
-import { initTelemetry, trackMetric } from "./services/telemetry";
+import { initTelemetry, trackEvent, trackMetric } from "./services/telemetry";
 import { App } from "./App";
 
 async function bootstrap(): Promise<void> {
