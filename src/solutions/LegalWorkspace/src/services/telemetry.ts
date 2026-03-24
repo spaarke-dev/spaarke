@@ -38,18 +38,22 @@ export async function initTelemetry(): Promise<void> {
   if (_appInsights) return; // already initialised
 
   try {
-    // Try Dataverse env var first, fall back to known dev instrumentation key.
-    // App Insights instrumentation keys are public by design (embedded in client JS).
-    const DEV_INSTRUMENTATION_KEY = "09a9beed-0dcd-4aad-84bb-3696372ed5d1";
-    const key = (await resolveAppInsightsKey()) ?? DEV_INSTRUMENTATION_KEY;
-    if (!key) {
-      console.warn("[Telemetry] No App Insights key available — telemetry disabled.");
+    // Full connection string includes the regional ingestion endpoint.
+    // Without it, the SDK defaults to a legacy global endpoint that may not route data.
+    const DEV_CONNECTION_STRING =
+      "InstrumentationKey=09a9beed-0dcd-4aad-84bb-3696372ed5d1;" +
+      "IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/;" +
+      "LiveEndpoint=https://westus2.livediagnostics.monitor.azure.com/";
+    const envKey = await resolveAppInsightsKey();
+    const connectionString = envKey ?? DEV_CONNECTION_STRING;
+    if (!connectionString) {
+      console.warn("[Telemetry] No App Insights connection string — telemetry disabled.");
       return;
     }
 
     _appInsights = new ApplicationInsights({
       config: {
-        instrumentationKey: key,
+        connectionString,
         enableAutoRouteTracking: false, // SPA inside Dataverse — no route changes
         disableFetchTracking: false,    // track fetch calls (BFF, Dataverse REST)
         enableCorsCorrelation: true,    // correlate cross-origin BFF calls
@@ -63,7 +67,7 @@ export async function initTelemetry(): Promise<void> {
     _appInsights.loadAppInsights();
     _appInsights.trackPageView({ name: "CorporateWorkspace" });
 
-    console.info("[Telemetry] Application Insights initialized.", key.substring(0, 8) + "...");
+    console.info("[Telemetry] Application Insights initialized.");
   } catch (err) {
     // Non-fatal — workspace works without telemetry
     console.warn("[Telemetry] Failed to initialize Application Insights:", err);
