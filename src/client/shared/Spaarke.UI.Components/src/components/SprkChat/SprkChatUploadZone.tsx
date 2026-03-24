@@ -447,7 +447,8 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
         setPhase('dragging');
       });
 
-      const uploadUrl = `${apiBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`;
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+      const uploadUrl = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`;
       xhr.open('POST', uploadUrl);
       xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
       xhr.send(formData);
