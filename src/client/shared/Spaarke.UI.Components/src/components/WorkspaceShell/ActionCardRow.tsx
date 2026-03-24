@@ -45,18 +45,18 @@ const useStyles = makeStyles({
   /**
    * Responsive CSS Grid row for ActionCards.
    *
-   * `grid-template-columns: repeat(auto-fill, minmax(100px, 1fr))` means:
-   *   - Create as many columns as fit with a minimum width of 100px
-   *   - Cards fill available space up to equal fractions (1fr)
-   *   - When viewport narrows, columns wrap to a new row — they do NOT stretch
-   *     past the column count established at the current viewport width
+   * `minmax(120px, 160px)` matches MetricCardRow exactly so both card types
+   * render at the same size in the workspace layout.
+   *   - Create as many columns as fit with a minimum width of 120px
+   *   - Cards are capped at 160px wide — they do NOT stretch to fill the row
+   *   - When viewport narrows, columns wrap to a new row
    *
    * The `aspect-ratio: 1` on each ActionCard ensures square proportions
-   * regardless of how wide 1fr resolves to at any given viewport width.
+   * regardless of how wide the column resolves to at any given viewport width.
    */
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(100px, 140px))",
+    gridTemplateColumns: "repeat(auto-fill, minmax(120px, 160px))",
     gap: tokens.spacingHorizontalL,
     // Align left — prevents last row from stretching if fewer cards than columns
     justifyContent: "start",
@@ -70,9 +70,9 @@ const useStyles = makeStyles({
 /**
  * ActionCardRow — renders a responsive grid of ActionCards.
  *
- * Cards wrap gracefully instead of stretching: the `minmax(100px, 140px)` column
- * definition caps card width at 140px, so at wide viewports cards align left
- * in a neat row rather than growing to fill the container.
+ * Cards wrap gracefully instead of stretching: the `minmax(120px, 160px)` column
+ * definition matches MetricCardRow exactly, so both card types render at the
+ * same size. Cards align left rather than growing to fill the container.
  *
  * @example
  * ```tsx
