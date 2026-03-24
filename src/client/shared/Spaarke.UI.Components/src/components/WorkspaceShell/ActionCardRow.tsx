@@ -54,12 +54,11 @@ const useStyles = makeStyles({
    * The `aspect-ratio: 1` on each ActionCard ensures square proportions
    * regardless of how wide the column resolves to at any given viewport width.
    */
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(120px, 160px))",
+  row: {
+    display: "flex",
+    flexDirection: "row",
     gap: tokens.spacingHorizontalL,
-    // Align left — prevents last row from stretching if fewer cards than columns
-    justifyContent: "start",
+    flexWrap: "wrap",
   },
 });
 
@@ -96,7 +95,7 @@ export const ActionCardRow: React.FC<ActionCardRowProps> = ({
 
   return (
     <div
-      className={`${styles.grid}${className ? ` ${className}` : ""}`}
+      className={`${styles.row}${className ? ` ${className}` : ""}`}
       role="group"
       aria-label="Quick actions"
     >

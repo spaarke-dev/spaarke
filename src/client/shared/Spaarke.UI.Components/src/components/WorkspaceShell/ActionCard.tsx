@@ -47,11 +47,12 @@ export interface ActionCardProps {
 const useStyles = makeStyles({
   card: {
     /**
-     * Square aspect ratio: the card height equals its width.
-     * Combined with minWidth in ActionCardRow this ensures each card
-     * remains square at every viewport width from 768px to 2560px.
+     * Flex-stretch sizing: cards grow equally to fill the row, matching
+     * QuickSummaryMetricCard behaviour so both rows render identically.
      */
-    aspectRatio: "1",
+    minWidth: "120px",
+    flex: "1 1 0",
+    height: "120px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
