@@ -182,7 +182,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   }, []);
 
   const handleSelectWorkValues = React.useCallback(
-    (values: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName' | 'assignWithoutRecord'>) => {
+    (values: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName'>) => {
       setFormState((prev) => ({ ...prev, ...values }));
     },
     []
@@ -190,8 +190,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
   // ── Pre-fill from selected record ─────────────────────────────────────
   React.useEffect(() => {
-    const { recordType, recordId, assignWithoutRecord } = formState;
-    if (!recordId || !recordType || assignWithoutRecord) {
+    const { recordType, recordId } = formState;
+    if (!recordId || !recordType) {
       setPrefillValues(undefined);
       return;
     }
@@ -215,7 +215,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     })();
 
     return () => { cancelled = true; };
-  }, [formState.recordId, formState.recordType, formState.assignWithoutRecord]);
+  }, [formState.recordId, formState.recordType]);
 
   const handleUploadedFilesChange = React.useCallback((files: IUploadedFile[]) => setUploadedFiles(files), []);
 
@@ -352,6 +352,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         id: 'select-work',
         label: 'Work to Assign',
         canAdvance: () => selectWorkValidRef.current,
+        isSkippable: true,
         renderContent: () => (
           <SelectWorkStep
             onValidChange={handleSelectWorkValid}

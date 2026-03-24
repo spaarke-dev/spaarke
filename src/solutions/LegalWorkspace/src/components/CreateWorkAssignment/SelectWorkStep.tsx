@@ -2,11 +2,12 @@
  * SelectWorkStep.tsx
  * Step 1: "Work to Assign" — select the entity record this work relates to.
  *
- * Follows the AssociateToStep pattern from DocumentUploadWizard:
+ * UAT pattern (matches AssociateToStep):
  *   - Record Type dropdown + "Select Record" button (Xrm.Utility.lookupObjects)
  *   - Selected record display with checkmark + clear
- *   - Divider with "or"
- *   - Checkbox: "Assign work without a specific record"
+ *   - No "Or" divider / no inline skip checkbox
+ *   - Step is marked isSkippable: true so the footer Skip button appears
+ *   - Next is only enabled when a record is selected
  */
 import * as React from 'react';
 import {
@@ -14,8 +15,6 @@ import {
   Dropdown,
   Option,
   Button,
-  Checkbox,
-  Divider,
   Spinner,
   MessageBar,
   MessageBarBody,
@@ -35,8 +34,8 @@ import type { ICreateWorkAssignmentFormState } from './formTypes';
 
 export interface ISelectWorkStepProps {
   onValidChange: (isValid: boolean) => void;
-  onFormValues: (values: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName' | 'assignWithoutRecord'>) => void;
-  initialValues?: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName' | 'assignWithoutRecord'>;
+  onFormValues: (values: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName'>) => void;
+  initialValues?: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName'>;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,14 +136,8 @@ const useStyles = makeStyles({
     flex: 1,
     color: tokens.colorNeutralForeground1,
   },
-  checkboxSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-  },
-  checkboxHint: {
+  skipHint: {
     color: tokens.colorNeutralForeground3,
-    paddingLeft: '30px',
   },
 });
 
@@ -162,16 +155,15 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
   const [recordType, setRecordType] = React.useState<'' | 'matter' | 'project' | 'invoice' | 'event'>(initialValues?.recordType ?? '');
   const [recordId, setRecordId] = React.useState(initialValues?.recordId ?? '');
   const [recordName, setRecordName] = React.useState(initialValues?.recordName ?? '');
-  const [assignWithoutRecord, setAssignWithoutRecord] = React.useState(initialValues?.assignWithoutRecord ?? false);
   const [isSelecting, setIsSelecting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Report validity + values
+  // Report validity + values — Next is enabled only when a record is selected
   React.useEffect(() => {
-    const isValid = assignWithoutRecord || recordId !== '';
+    const isValid = recordId !== '';
     onValidChange(isValid);
-    onFormValues({ recordType, recordId, recordName, assignWithoutRecord });
-  }, [recordType, recordId, recordName, assignWithoutRecord, onValidChange, onFormValues]);
+    onFormValues({ recordType, recordId, recordName });
+  }, [recordType, recordId, recordName, onValidChange, onFormValues]);
 
   const handleRecordTypeChange = React.useCallback(
     (_e: unknown, data: { optionValue?: string }) => {
@@ -227,18 +219,6 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
     setRecordName('');
   }, []);
 
-  const handleAssignWithoutChange = React.useCallback(
-    (_e: unknown, data: { checked: boolean | 'mixed' }) => {
-      const checked = data.checked === true;
-      setAssignWithoutRecord(checked);
-      if (checked) {
-        setRecordId('');
-        setRecordName('');
-      }
-    },
-    []
-  );
-
   const selectedTypeText = RECORD_TYPE_OPTIONS.find((o) => o.key === recordType)?.text ?? '';
   const hasSelection = recordId !== '';
 
@@ -272,7 +252,7 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
             selectedOptions={recordType ? [recordType] : []}
             onOptionSelect={handleRecordTypeChange}
             placeholder="Select record type..."
-            disabled={assignWithoutRecord || isSelecting}
+            disabled={isSelecting}
           >
             {RECORD_TYPE_OPTIONS.map((opt) => (
               <Option key={opt.key} value={opt.key}>
@@ -285,7 +265,7 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
           appearance="primary"
           icon={<SearchRegular />}
           onClick={handleSelectRecord}
-          disabled={!recordType || assignWithoutRecord || isSelecting}
+          disabled={!recordType || isSelecting}
         >
           Select Record
         </Button>
@@ -316,22 +296,10 @@ export const SelectWorkStep: React.FC<ISelectWorkStepProps> = ({
         <Spinner size="tiny" label="Opening record picker..." />
       )}
 
-      {/* Divider */}
-      <Divider>or</Divider>
-
-      {/* Assign without record checkbox */}
-      <div className={styles.checkboxSection}>
-        <Checkbox
-          label="Assign work without a specific record"
-          checked={assignWithoutRecord}
-          onChange={handleAssignWithoutChange}
-          disabled={isSelecting}
-        />
-        <Text size={200} className={styles.checkboxHint}>
-          The work assignment will be created without a parent record link.
-          You can associate it later.
-        </Text>
-      </div>
+      {/* Hint — Skip button in the wizard footer handles the skip flow */}
+      <Text size={200} className={styles.skipHint}>
+        You can always link to a record later. Use the Skip button to create the work assignment without a parent record.
+      </Text>
     </div>
   );
 };
