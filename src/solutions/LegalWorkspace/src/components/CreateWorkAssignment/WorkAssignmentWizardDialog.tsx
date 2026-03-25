@@ -357,6 +357,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
           <SelectWorkStep
             onValidChange={handleSelectWorkValid}
             onFormValues={handleSelectWorkValues}
+            navigationService={navigationService}
           />
         ),
       },
