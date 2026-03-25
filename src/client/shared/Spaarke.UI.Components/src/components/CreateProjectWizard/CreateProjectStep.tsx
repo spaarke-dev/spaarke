@@ -447,7 +447,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
 
           <DataverseLookupField
             label="Project Type"
-            entityType="sprk_projecttype"
+            entityType="sprk_projecttype_ref"
             value={projectTypeValue}
             onChange={handleProjectTypeChange}
             navigationService={navigationService}
@@ -459,7 +459,7 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
 
           <DataverseLookupField
             label="Practice Area"
-            entityType="sprk_practicearea"
+            entityType="sprk_practicearea_ref"
             value={practiceAreaValue}
             onChange={handlePracticeAreaChange}
             navigationService={navigationService}

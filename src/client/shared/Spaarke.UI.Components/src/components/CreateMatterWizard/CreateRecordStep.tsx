@@ -620,7 +620,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
           <DataverseLookupField
             label="Matter Type"
             required
-            entityType="sprk_mattertype"
+            entityType="sprk_mattertype_ref"
             value={matterTypeValue}
             onChange={handleMatterTypeChange}
             navigationService={navigationService}
@@ -633,7 +633,7 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
           <DataverseLookupField
             label="Practice Area"
             required
-            entityType="sprk_practicearea"
+            entityType="sprk_practicearea_ref"
             value={practiceAreaValue}
             onChange={handlePracticeAreaChange}
             navigationService={navigationService}

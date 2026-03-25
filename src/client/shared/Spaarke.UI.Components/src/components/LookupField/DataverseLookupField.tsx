@@ -15,7 +15,7 @@
  * <DataverseLookupField
  *   label="Matter Type"
  *   required
- *   entityType="sprk_mattertype"
+ *   entityType="sprk_mattertype_ref"
  *   value={matterTypeValue}
  *   onChange={handleMatterTypeChange}
  *   navigationService={navigationService}
@@ -107,10 +107,22 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
   },
 
-  // ── Empty state: "Select" button ──────────────────────────────────────────
+  // ── Empty state: search-input–styled button ─────────────────────────────
   selectRow: {
     display: 'flex',
     alignItems: 'center',
+    width: '100%',
+  },
+  selectButton: {
+    width: '100%',
+    justifyContent: 'flex-start',
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground4,
+    borderTopColor: tokens.colorNeutralStroke1,
+    borderRightColor: tokens.colorNeutralStroke1,
+    borderBottomColor: tokens.colorNeutralStroke1,
+    borderLeftColor: tokens.colorNeutralStroke1,
+    minHeight: '32px',
   },
 
   // ── Selected chip ─────────────────────────────────────────────────────────
@@ -290,14 +302,15 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
           // Empty: show "Select" button that opens the Dataverse lookup pane
           <div className={styles.selectRow}>
             <Button
+              className={styles.selectButton}
               appearance="outline"
-              size="small"
+              size="medium"
               icon={isOpening ? <Spinner size="extra-tiny" /> : <SearchRegular />}
               onClick={handleOpenLookup}
               disabled={isOpening}
               aria-label={`Select ${label}`}
             >
-              {isOpening ? 'Opening\u2026' : `Select ${label}`}
+              {isOpening ? 'Opening\u2026' : placeholder ?? `Search ${label.toLowerCase()}...`}
             </Button>
           </div>
         )}
