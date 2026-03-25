@@ -597,7 +597,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
       {/* Footer */}
       <div className={styles.footer}>
-        <span className={styles.versionText}>v3.15.0 • Built 2026-03-03</span>
+        <span className={styles.versionText}>v3.15.2 • Built 2026-03-24</span>
         <div className={styles.footerButtons}>
           <Button appearance="primary" onClick={handleUploadAndSave} disabled={mainButtonDisabled}>
             {mainButtonText}
