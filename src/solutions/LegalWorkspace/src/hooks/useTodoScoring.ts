@@ -136,7 +136,7 @@ export interface IUseTodoScoringOptions {
 // BFF endpoint path
 // ---------------------------------------------------------------------------
 
-const SCORES_ENDPOINT_TEMPLATE = '/workspace/events/{id}/scores';
+const SCORES_ENDPOINT_TEMPLATE = '/api/workspace/events/{id}/scores';
 
 /** Simulated delay for mock data — long enough to show the loading state */
 const MOCK_DELAY_MS = 1200;

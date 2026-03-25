@@ -95,7 +95,7 @@ export interface IUseAISummaryOptions {
 // BFF endpoint path
 // ---------------------------------------------------------------------------
 
-const AI_SUMMARY_ENDPOINT = '/workspace/ai-summary';
+const AI_SUMMARY_ENDPOINT = '/api/workspace/ai-summary';
 
 /** Simulated delay for mock data — long enough to show the loading state */
 const MOCK_DELAY_MS = 1500;

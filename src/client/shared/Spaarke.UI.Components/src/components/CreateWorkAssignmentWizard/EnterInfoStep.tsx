@@ -166,7 +166,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   );
 
   const prefill = useAiPrefill({
-    endpoint: '/workspace/matters/pre-fill',
+    endpoint: '/api/workspace/matters/pre-fill',
     uploadedFiles,
     authenticatedFetch,
     bffBaseUrl,

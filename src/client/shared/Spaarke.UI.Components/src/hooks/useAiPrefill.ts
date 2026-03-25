@@ -9,7 +9,7 @@
  * @example Matter wizard usage:
  * ```typescript
  * const prefill = useAiPrefill({
- *   endpoint: '/workspace/matters/pre-fill',
+ *   endpoint: '/api/workspace/matters/pre-fill',
  *   uploadedFiles,
  *   authenticatedFetch,
  *   bffBaseUrl: getBffBaseUrl(),
@@ -80,7 +80,7 @@ export interface IResolvedPrefillFields {
 
 /** Configuration for the useAiPrefill hook. */
 export interface IAiPrefillConfig {
-  /** BFF endpoint path, e.g. '/workspace/matters/pre-fill'. */
+  /** BFF endpoint path, e.g. '/api/workspace/matters/pre-fill'. */
   endpoint: string;
   /** Files from Step 1 to send for analysis. */
   uploadedFiles: IUploadedFile[];

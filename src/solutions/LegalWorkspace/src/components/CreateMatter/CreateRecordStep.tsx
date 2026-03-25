@@ -66,7 +66,7 @@ import { useAiPrefill, type IResolvedPrefillFields } from '../../../../../client
 // Constants
 // ---------------------------------------------------------------------------
 
-const PREFILL_PATH = '/workspace/matters/pre-fill';
+const PREFILL_PATH = '/api/workspace/matters/pre-fill';
 
 // ---------------------------------------------------------------------------
 // Initial state factories

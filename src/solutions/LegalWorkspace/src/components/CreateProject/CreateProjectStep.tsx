@@ -58,7 +58,7 @@ import { useAiPrefill, type IResolvedPrefillFields } from '../../../../../client
 // Constants
 // ---------------------------------------------------------------------------
 
-const PREFILL_PATH = '/workspace/projects/pre-fill';
+const PREFILL_PATH = '/api/workspace/projects/pre-fill';
 
 // ---------------------------------------------------------------------------
 // Props
