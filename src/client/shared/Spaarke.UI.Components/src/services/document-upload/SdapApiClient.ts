@@ -98,7 +98,7 @@ export class SdapApiClient {
     try {
       const token = await this.getAccessToken();
 
-      const url = `${this.baseUrl}/obo/containers/${encodeURIComponent(request.driveId)}/files/${encodeURIComponent(request.fileName)}`;
+      const url = `${this.baseUrl}/api/obo/containers/${encodeURIComponent(request.driveId)}/files/${encodeURIComponent(request.fileName)}`;
 
       const response = await this.fetchWithTimeout(url, {
         method: 'PUT',
@@ -131,7 +131,7 @@ export class SdapApiClient {
     try {
       const token = await this.getAccessToken();
 
-      const url = `${this.baseUrl}/obo/drives/${encodeURIComponent(request.driveId)}/items/${encodeURIComponent(request.itemId)}/content`;
+      const url = `${this.baseUrl}/api/obo/drives/${encodeURIComponent(request.driveId)}/items/${encodeURIComponent(request.itemId)}/content`;
 
       const response = await this.fetchWithTimeout(url, {
         method: 'GET',
@@ -172,7 +172,7 @@ export class SdapApiClient {
     try {
       const token = await this.getAccessToken();
 
-      const url = `${this.baseUrl}/obo/drives/${encodeURIComponent(request.driveId)}/items/${encodeURIComponent(request.itemId)}`;
+      const url = `${this.baseUrl}/api/obo/drives/${encodeURIComponent(request.driveId)}/items/${encodeURIComponent(request.itemId)}`;
 
       const response = await this.fetchWithTimeout(url, {
         method: 'DELETE',
