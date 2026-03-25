@@ -44,7 +44,7 @@ export interface IPreviewUrlResponse {
  */
 export async function getDocumentPreviewUrl(documentId: string): Promise<string | null> {
   const base = getBffBaseUrl();
-  const url = `${base}/documents/${encodeURIComponent(documentId)}/preview-url`;
+  const url = `${base}/api/documents/${encodeURIComponent(documentId)}/preview-url`;
 
   try {
     const response = await authenticatedFetch(url);
@@ -66,7 +66,7 @@ export async function getDocumentPreviewUrl(documentId: string): Promise<string 
  */
 export async function getDocumentOpenLinks(documentId: string): Promise<IOpenLinksResponse | null> {
   const base = getBffBaseUrl();
-  const url = `${base}/documents/${encodeURIComponent(documentId)}/open-links`;
+  const url = `${base}/api/documents/${encodeURIComponent(documentId)}/open-links`;
 
   try {
     const response = await authenticatedFetch(url);

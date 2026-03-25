@@ -256,7 +256,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     }
     // No desktop protocol — download file via BFF and let the OS open with default app
     try {
-      const contentUrl = `${getBffBaseUrl()}/documents/${encodeURIComponent(documentId)}/content`;
+      const contentUrl = `${getBffBaseUrl()}/api/documents/${encodeURIComponent(documentId)}/content`;
       const response = await authenticatedFetch(contentUrl);
       if (response.ok) {
         const blob = await response.blob();

@@ -252,7 +252,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
             return;
           }
           // No desktop protocol — download via BFF and let OS open with default app
-          const contentUrl = `${getBffBaseUrl()}/documents/${encodeURIComponent(doc.sprk_documentid)}/content`;
+          const contentUrl = `${getBffBaseUrl()}/api/documents/${encodeURIComponent(doc.sprk_documentid)}/content`;
           const response = await authenticatedFetch(contentUrl);
           if (response.ok) {
             const blob = await response.blob();
