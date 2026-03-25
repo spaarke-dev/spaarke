@@ -31,7 +31,7 @@ export async function streamSummarize(
   signal?: AbortSignal,
 ): Promise<ISummarizeResult> {
   const bffBaseUrl = getBffBaseUrl();
-  const url = `${bffBaseUrl}/workspace/files/summarize`;
+  const url = `${bffBaseUrl}/api/workspace/files/summarize`;
 
   const formData = new FormData();
   for (const f of files) {
@@ -247,7 +247,7 @@ export async function runSummarize(
   signal?: AbortSignal,
 ): Promise<ISummarizeResult> {
   const bffBaseUrl = getBffBaseUrl();
-  const url = `${bffBaseUrl}/workspace/files/summarize`;
+  const url = `${bffBaseUrl}/api/workspace/files/summarize`;
 
   const formData = new FormData();
   for (const f of files) {

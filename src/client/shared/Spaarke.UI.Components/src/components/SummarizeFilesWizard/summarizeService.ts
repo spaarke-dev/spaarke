@@ -44,7 +44,7 @@ export async function streamSummarize(
   bffBaseUrl?: string,
 ): Promise<ISummarizeResult> {
   const baseUrl = bffBaseUrl ?? '';
-  const url = `${baseUrl}/workspace/files/summarize`;
+  const url = `${baseUrl}/api/workspace/files/summarize`;
   if (!authenticatedFetch) {
     throw new Error(`${LOG_PREFIX} authenticatedFetch is required — unauthenticated BFF calls are not permitted.`);
   }
@@ -266,7 +266,7 @@ export async function runSummarize(
   bffBaseUrl?: string,
 ): Promise<ISummarizeResult> {
   const baseUrl = bffBaseUrl ?? '';
-  const url = `${baseUrl}/workspace/files/summarize`;
+  const url = `${baseUrl}/api/workspace/files/summarize`;
   if (!authenticatedFetch) {
     throw new Error(`${LOG_PREFIX} authenticatedFetch is required — unauthenticated BFF calls are not permitted.`);
   }
