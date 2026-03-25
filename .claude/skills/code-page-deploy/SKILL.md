@@ -1,8 +1,8 @@
 ---
 description: Build and deploy React Code Page web resources to Dataverse
 tags: [deploy, code-page, webresource, dataverse, react]
-techStack: [react, typescript, webpack, dataverse]
-appliesTo: ["**/code-pages/**", "deploy code page", "deploy web resource", "build webresource"]
+techStack: [react, typescript, webpack, vite, dataverse]
+appliesTo: ["**/code-pages/**", "**/solutions/**", "deploy code page", "deploy web resource", "build webresource", "deploy wizard"]
 alwaysApply: false
 ---
 
@@ -72,14 +72,73 @@ src/client/code-pages/{PageName}/
 
 ---
 
-## Two-Step Build Pipeline (MANDATORY)
+## 🚨 Critical: Clear Build Cache Before EVERY Build (MANDATORY)
 
-Code Pages require **both steps** to produce a deployable artifact. Skipping Step 2 means the code page cannot be deployed.
+**Vite and Webpack cache resolved dependencies. If a shared library (`@spaarke/ui-components`, `@spaarke/auth`) was modified, the build cache will contain STALE code. The deployed bundle will silently use old code even though the source files are correct.**
 
-### Step 1: Webpack Build → `out/bundle.js`
+This caused multiple production incidents where route constants, service changes, and auth fixes were NOT included in deployed bundles despite being correct in source.
+
+### Cache Clearing Rules
+
+| Build Tool | Cache Location | Clear Command |
+|-----------|---------------|---------------|
+| **Vite** (`src/solutions/`) | `node_modules/.vite/`, `.vite/` | `rm -rf dist/ node_modules/.vite/ .vite/` |
+| **Webpack** (`src/client/code-pages/`) | Webpack internal cache | `rm -rf out/` |
+
+**MUST clear cache before EVERY build. No exceptions.**
+
+```bash
+# Vite-based (src/solutions/)
+cd src/solutions/{PageName}
+rm -rf dist/ node_modules/.vite/ .vite/
+npm run build
+
+# Webpack-based (src/client/code-pages/)
+cd src/client/code-pages/{PageName}
+rm -rf out/
+npm run build
+```
+
+### Shared Library Dependency (CRITICAL)
+
+**If ANY files in `@spaarke/ui-components` or `@spaarke/auth` were modified, you MUST recompile those shared libraries BEFORE building code pages.** Vite/Webpack bundle pre-compiled JS from `dist/` — if `dist/` is stale, the code page bundle will contain OLD code.
+
+```bash
+# Step 0: Recompile shared libraries FIRST
+cd src/client/shared/Spaarke.UI.Components && npm run build
+cd src/client/shared/Spaarke.Auth && npm run build
+
+# Step 1: THEN clear cache and build code pages
+```
+
+### Verification After Build (MANDATORY)
+
+After building, verify the deployed bundle contains expected changes:
+
+```bash
+# Check a known string from your change is in the built output
+grep -oP '.{10}your_expected_string.{10}' dist/index.html
+# OR for webpack code pages:
+grep -oP '.{10}your_expected_string.{10}' out/sprk_{pagename}.html
+```
+
+**If the string is NOT found, the cache was stale. Clear and rebuild.**
+
+---
+
+## Two Build Pipelines
+
+This repo has **two types** of code pages with different build tools:
+
+### Type 1: Webpack Code Pages (`src/client/code-pages/`)
+
+Two-step pipeline — both steps required to produce a deployable artifact.
+
+**Step 1: Webpack Build → `out/bundle.js`**
 
 ```bash
 cd src/client/code-pages/{PageName}
+rm -rf out/
 npm run build
 ```
 
@@ -87,7 +146,7 @@ npm run build
 - Unlike PCF controls, Code Pages bundle everything (no platform libraries)
 - Output: `out/bundle.js` (~1 MB)
 
-### Step 2: Inline → `out/sprk_{pagename}.html`
+**Step 2: Inline → `out/sprk_{pagename}.html`**
 
 ```bash
 powershell -File build-webresource.ps1
@@ -99,9 +158,34 @@ powershell -File build-webresource.ps1
 
 **This is the ONLY file that gets deployed to Dataverse.**
 
-### Why Two Steps?
+**Why Two Steps?** Dataverse web resources are single files. Webpack cannot directly produce an inlined HTML, so `build-webresource.ps1` handles the merge.
 
-Dataverse web resources are single files. The convention for this repo is one self-contained HTML file with all JS inlined — matching how other code pages are built. Webpack cannot directly produce an inlined HTML, so `build-webresource.ps1` handles the merge.
+### Type 2: Vite Code Pages (`src/solutions/`)
+
+Single-step pipeline — Vite + vite-plugin-singlefile produces a self-contained HTML directly.
+
+```bash
+cd src/solutions/{PageName}
+rm -rf dist/ node_modules/.vite/ .vite/
+npm run build
+```
+
+- Output: `dist/index.html` (renamed to `{pagename}.html` by post-build script)
+- Single self-contained HTML with all JS/CSS inlined
+- Deploy via `Deploy-WizardCodePages.ps1` or `Deploy-CorporateWorkspace.ps1`
+
+| Solution | Deployable File | Deploy Script |
+|----------|----------------|---------------|
+| CreateMatterWizard | `dist/index.html` → `sprk_creatematterwizard` | `Deploy-WizardCodePages.ps1` |
+| CreateProjectWizard | `dist/index.html` → `sprk_createprojectwizard` | `Deploy-WizardCodePages.ps1` |
+| CreateEventWizard | `dist/index.html` → `sprk_createeventwizard` | `Deploy-WizardCodePages.ps1` |
+| CreateTodoWizard | `dist/index.html` → `sprk_createtodowizard` | `Deploy-WizardCodePages.ps1` |
+| CreateWorkAssignmentWizard | `dist/index.html` → `sprk_createworkassignmentwizard` | `Deploy-WizardCodePages.ps1` |
+| SummarizeFilesWizard | `dist/index.html` → `sprk_summarizefileswizard` | `Deploy-WizardCodePages.ps1` |
+| FindSimilarCodePage | `dist/index.html` → `sprk_findsimilar` | `Deploy-WizardCodePages.ps1` |
+| DocumentUploadWizard | `dist/index.html` → `sprk_documentuploadwizard` | `Deploy-WizardCodePages.ps1` |
+| PlaybookLibrary | `dist/index.html` → `sprk_playbooklibrary` | `Deploy-WizardCodePages.ps1` |
+| LegalWorkspace | `dist/corporateworkspace.html` → `sprk_corporateworkspace` | `Deploy-CorporateWorkspace.ps1` |
 
 ---
 
@@ -148,11 +232,14 @@ When the user wants to deploy manually for fastest iteration:
 
 ## Anti-Patterns (DO NOT)
 
+- ❌ **DO NOT** build without clearing cache first — Vite/Webpack cache stale shared lib code (this caused multiple production incidents)
+- ❌ **DO NOT** skip shared lib recompilation when shared components were modified — stale `dist/` causes silent failures
 - ❌ **DO NOT** deploy `index.html` to Dataverse — it references `bundle.js` externally and will not work
 - ❌ **DO NOT** deploy `bundle.js` as a separate web resource — Code Pages are single-file HTML
-- ❌ **DO NOT** skip `build-webresource.ps1` — the inline step is mandatory
+- ❌ **DO NOT** skip `build-webresource.ps1` for webpack code pages — the inline step is mandatory
 - ❌ **DO NOT** add Code Page HTML files to a PCF solution ZIP — they are separate web resources
 - ❌ **DO NOT** use `out/bundle.js` as the deployable artifact — it's an intermediate build output
+- ❌ **DO NOT** assume `Deploy-WizardCodePages.ps1` clears Vite cache — it doesn't; clear manually before running
 
 ---
 
@@ -165,6 +252,10 @@ When the user wants to deploy manually for fastest iteration:
 | `npm run build` fails | Missing node_modules | Run `npm install` first |
 | `build-webresource.ps1` fails "bundle.js not found" | Step 1 not completed | Run `npm run build` first |
 | Wrong theme in dialog | `theme` URL parameter not passed | Check PCF's NavigationService passes `theme=light` or `theme=dark` |
+| **Shared lib changes not in bundle** | **Vite dependency cache stale** (`node_modules/.vite/`) | `rm -rf dist/ node_modules/.vite/ .vite/` then rebuild. Verify with `grep` on built output. |
+| Shared lib changes not in bundle (webpack) | Stale `dist/` in shared lib — `tsc` not run | Recompile shared lib: `cd src/client/shared/Spaarke.UI.Components && npm run build` |
+| Route constants missing `/api` prefix | `bffBaseUrl` no longer includes `/api` (normalization) | All route constants must start with `/api/...` |
+| `Deploy-WizardCodePages.ps1` deploys stale code | Script rebuilds but doesn't clear Vite cache | Clear cache in EACH solution dir before running the deploy script |
 
 ---
 
