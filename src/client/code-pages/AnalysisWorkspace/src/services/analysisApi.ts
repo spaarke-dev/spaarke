@@ -218,7 +218,7 @@ export async function fetchDocumentMetadata(documentId: string, token: string): 
 
   const controller = createTimeoutController();
 
-  const response = await fetch(`${getApiBaseUrl()}/v1/documents/${documentId}`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/documents/${documentId}`, {
     method: 'GET',
     headers: buildHeaders(token),
     signal: controller.signal,
@@ -254,7 +254,7 @@ export async function getDocumentViewUrl(documentId: string, token: string): Pro
 
   const controller = createTimeoutController();
 
-  const response = await fetch(`${getApiBaseUrl()}/documents/${documentId}/preview-url`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/preview-url`, {
     method: 'GET',
     headers: buildHeaders(token),
     signal: controller.signal,
@@ -380,7 +380,7 @@ export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<vo
   if (actionId) body.actionId = actionId;
   if (playbookId) body.playbookId = playbookId;
 
-  const response = await fetch(`${getApiBaseUrl()}/ai/analysis/execute`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/ai/analysis/execute`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -490,7 +490,7 @@ export async function exportAnalysis(analysisId: string, format: ExportFormat, t
 
   const controller = createTimeoutController(60_000); // 60s timeout for export
 
-  const response = await fetch(`${getApiBaseUrl()}/ai/analysis/${analysisId}/export`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/ai/analysis/${analysisId}/export`, {
     method: 'POST',
     headers: buildHeaders(token),
     body: JSON.stringify({ format }),

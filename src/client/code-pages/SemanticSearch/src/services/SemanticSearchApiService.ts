@@ -21,7 +21,7 @@ import type { DocumentSearchRequest, DocumentSearchResponse } from '../types';
  * @throws Error on network failure or MSAL token acquisition failure
  */
 export async function search(request: DocumentSearchRequest): Promise<DocumentSearchResponse> {
-  const endpoint = `${getBffBaseUrl()}/ai/search`;
+  const endpoint = `${getBffBaseUrl()}/api/ai/search`;
   const headers = await buildAuthHeaders();
 
   const response = await fetch(endpoint, {

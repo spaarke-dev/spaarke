@@ -29,7 +29,14 @@
 
 /** Resolved runtime configuration for Spaarke applications. */
 export interface IRuntimeConfig {
-  /** BFF API base URL (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net/api"). */
+  /**
+   * BFF API base URL (host only, WITHOUT /api suffix).
+   * Example: "https://spe-api-dev-67e2xz.azurewebsites.net"
+   *
+   * IMPORTANT: normalizeUrl() strips /api from the environment variable value.
+   * All client-side URL paths MUST include the /api/ prefix themselves.
+   * e.g., fetch(`${bffBaseUrl}/api/ai/chat/sessions`)
+   */
   bffBaseUrl: string;
   /** BFF API OAuth scope (e.g., "api://<app-id>/user_impersonation"). */
   bffOAuthScope: string;
@@ -162,10 +169,7 @@ function resolveXrmContext(): XrmGlobalContext | null {
  * Query Dataverse environment variables using the session cookie (no bearer token).
  * This works in Dataverse web resources where the browser is already authenticated.
  */
-async function queryEnvironmentVariables(
-  clientUrl: string,
-  schemaNames: string[]
-): Promise<Map<string, string>> {
+async function queryEnvironmentVariables(clientUrl: string, schemaNames: string[]): Promise<Map<string, string>> {
   const results = new Map<string, string>();
   const apiBase = `${clientUrl}/api/data/v9.2`;
 
@@ -178,7 +182,7 @@ async function queryEnvironmentVariables(
     {
       method: 'GET',
       headers: {
-        'Accept': 'application/json',
+        Accept: 'application/json',
         'OData-MaxVersion': '4.0',
         'OData-Version': '4.0',
       },
@@ -189,7 +193,7 @@ async function queryEnvironmentVariables(
   if (!defResponse.ok) {
     throw new Error(
       `[Spaarke.RuntimeConfig] Failed to query environment variable definitions: ` +
-      `${defResponse.status} ${defResponse.statusText}`
+        `${defResponse.status} ${defResponse.statusText}`
     );
   }
 
@@ -209,16 +213,14 @@ async function queryEnvironmentVariables(
   }
 
   // 2. Fetch override values
-  const valueFilter = definitions
-    .map(d => `_environmentvariabledefinitionid_value eq '${d.id}'`)
-    .join(' or ');
+  const valueFilter = definitions.map(d => `_environmentvariabledefinitionid_value eq '${d.id}'`).join(' or ');
 
   const valResponse = await fetch(
     `${apiBase}/environmentvariablevalues?$filter=${valueFilter}&$select=_environmentvariabledefinitionid_value,value`,
     {
       method: 'GET',
       headers: {
-        'Accept': 'application/json',
+        Accept: 'application/json',
         'OData-MaxVersion': '4.0',
         'OData-Version': '4.0',
       },
@@ -268,7 +270,7 @@ async function queryEnvironmentVariables(
  * import { resolveRuntimeConfig } from '@spaarke/auth';
  *
  * const config = await resolveRuntimeConfig();
- * // config.bffBaseUrl  → "https://spe-api-dev-67e2xz.azurewebsites.net/api"
+ * // config.bffBaseUrl  → "https://spe-api-dev-67e2xz.azurewebsites.net" (host only, no /api)
  * // config.bffOAuthScope → "api://1e40baad-.../user_impersonation"
  * // config.msalClientId  → "170c98e1-..."
  * ```
@@ -287,8 +289,7 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
     const lsCached = loadFromLocalStorage();
     if (lsCached) {
       console.warn(
-        '[Spaarke.RuntimeConfig] Xrm not available — using localStorage cache. ' +
-        `bffBaseUrl=${lsCached.bffBaseUrl}`
+        '[Spaarke.RuntimeConfig] Xrm not available — using localStorage cache. ' + `bffBaseUrl=${lsCached.bffBaseUrl}`
       );
       cachedConfig = lsCached;
       cacheTimestamp = Date.now();
@@ -296,7 +297,7 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
     }
     throw new Error(
       '[Spaarke.RuntimeConfig] Xrm.Utility.getGlobalContext() not available. ' +
-      'resolveRuntimeConfig() must be called from within a Dataverse web resource.'
+        'resolveRuntimeConfig() must be called from within a Dataverse web resource.'
     );
   }
 
@@ -304,7 +305,7 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   if (!clientUrl) {
     throw new Error(
       '[Spaarke.RuntimeConfig] Xrm.Utility.getGlobalContext().getClientUrl() returned empty. ' +
-      'Cannot determine Dataverse organization URL.'
+        'Cannot determine Dataverse organization URL.'
     );
   }
 
@@ -323,7 +324,7 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   if (!bffBaseUrl) {
     throw new Error(
       `[Spaarke.RuntimeConfig] Environment variable '${ENV_VAR_NAMES.BFF_BASE_URL}' not found in Dataverse. ` +
-      'Ensure the SpaarkeCore solution is imported and the variable has a value.'
+        'Ensure the SpaarkeCore solution is imported and the variable has a value.'
     );
   }
 
@@ -331,21 +332,20 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   if (!bffAppId) {
     throw new Error(
       `[Spaarke.RuntimeConfig] Environment variable '${ENV_VAR_NAMES.BFF_APP_ID}' not found in Dataverse. ` +
-      'Ensure the SpaarkeCore solution is imported and the variable has a value.'
+        'Ensure the SpaarkeCore solution is imported and the variable has a value.'
     );
   }
 
   // MSAL client ID: try env var first, then window global
   let msalClientId = envVars.get(ENV_VAR_NAMES.MSAL_CLIENT_ID);
   if (!msalClientId) {
-    msalClientId =
-      typeof window !== 'undefined' ? window.__SPAARKE_MSAL_CLIENT_ID__ : undefined;
+    msalClientId = typeof window !== 'undefined' ? window.__SPAARKE_MSAL_CLIENT_ID__ : undefined;
   }
   if (!msalClientId) {
     throw new Error(
       `[Spaarke.RuntimeConfig] MSAL client ID not available. ` +
-      `Either set environment variable '${ENV_VAR_NAMES.MSAL_CLIENT_ID}' in Dataverse ` +
-      'or set window.__SPAARKE_MSAL_CLIENT_ID__ before calling resolveRuntimeConfig().'
+        `Either set environment variable '${ENV_VAR_NAMES.MSAL_CLIENT_ID}' in Dataverse ` +
+        'or set window.__SPAARKE_MSAL_CLIENT_ID__ before calling resolveRuntimeConfig().'
     );
   }
 
@@ -364,8 +364,8 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
 
   console.log(
     `[Spaarke.RuntimeConfig] Resolved: bffBaseUrl=${config.bffBaseUrl}, ` +
-    `scope=api://${bffAppId.substring(0, 8)}..., clientId=${msalClientId.substring(0, 8)}..., ` +
-    `tenantId=${xrmTenantId ? xrmTenantId.substring(0, 8) + '...' : '(empty)'}`
+      `scope=api://${bffAppId.substring(0, 8)}..., clientId=${msalClientId.substring(0, 8)}..., ` +
+      `tenantId=${xrmTenantId ? xrmTenantId.substring(0, 8) + '...' : '(empty)'}`
   );
 
   return config;
@@ -374,11 +374,20 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
 /**
  * Normalize a URL: trim whitespace, strip trailing slashes, strip trailing /api.
  *
- * The Dataverse env var stores the BFF URL as "https://host/api" but all client-side
- * route constants include the /api prefix (e.g., /api/ai/chat/sessions). Stripping
- * /api here prevents the pervasive double /api/api/ bug and establishes a single
- * convention: bffBaseUrl = host only, routes always start with /api.
+ * WHY: The Dataverse env var (sprk_BffApiBaseUrl) stores the BFF URL as
+ * "https://host/api", but all client-side route constants MUST include the
+ * /api prefix (e.g., `${bffBaseUrl}/api/ai/chat/sessions`). Stripping /api
+ * here prevents the double /api/api/ bug and establishes a single convention:
+ *
+ *   bffBaseUrl = host only (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net")
+ *   fetch URLs = `${bffBaseUrl}/api/...`
+ *
+ * If you are adding a new fetch() call, remember: the /api prefix is YOUR
+ * responsibility, NOT included in bffBaseUrl.
  */
 function normalizeUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+  return raw
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
 }
