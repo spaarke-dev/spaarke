@@ -1,0 +1,86 @@
+<task id="CHAT-004" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Implement auto-reopen with session persistence on return</title>
+    <status>not-started</status>
+    <phase>0</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, side-pane, lifecycle, session</tags>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    When user navigates back to an Analysis record, SprkChat MUST auto-reopen and restore
+    the previous session from sessionStorage (keyed by pane ID). Existing infrastructure
+    in SprkChatPane/App.tsx (lines 262-271) already handles sessionStorage persistence.
+    Verify and enhance this to handle the close→navigate→return→reopen cycle. This is FR-04.
+  </prompt>
+
+  <role>
+    Frontend developer experienced with Dataverse side pane APIs and session management.
+  </role>
+
+  <goal>
+    Returning to the same analysis record auto-reopens SprkChat and restores the previous
+    chat history and context from sessionStorage.
+  </goal>
+
+  <inputs>
+    <file purpose="target">src/client/code-pages/SprkChatPane/src/App.tsx</file>
+    <file purpose="target">src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+    <file purpose="reference">src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Code Page pattern — React 18+</constraint>
+    <constraint source="FR-04">Must restore previous session from sessionStorage keyed by pane ID</constraint>
+    <constraint source="project">Reuse existing sessionStorage persistence in App.tsx</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>session-persistence, side-pane-lifecycle</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing session persistence">
+      Read SprkChatPane/App.tsx around lines 262-271 to understand existing sessionStorage mechanism.
+    </step>
+    <step order="2" name="Read contextService auto-open logic">
+      Understand how contextService detects return to analysis and triggers pane open.
+    </step>
+    <step order="3" name="Verify/enhance auto-reopen trigger">
+      Ensure contextService detects return to sprk_analysisoutput entityType and triggers
+      side pane open via Xrm.App.sidePanes API or openSprkChatPane.
+    </step>
+    <step order="4" name="Verify session restore on reopen">
+      Ensure that when pane reopens, App.tsx reads sessionStorage and restores chat history.
+      Test the full cycle: open → chat → navigate away → return → verify history restored.
+    </step>
+    <step order="5" name="Handle edge cases">
+      Handle: different analysis record (new session), same record (restore session),
+      expired session data.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SprkChatPane/src/App.tsx (modified if needed)</output>
+    <output type="code">src/client/code-pages/SprkChatPane/src/services/contextService.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Return to same analysis record restores chat history</criterion>
+    <criterion testable="true">Return to different analysis record starts fresh session</criterion>
+    <criterion testable="true">SprkChat auto-reopens on return to analysis page</criterion>
+  </acceptance-criteria>
+</task>

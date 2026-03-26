@@ -1,0 +1,72 @@
+<task id="CHAT-090" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Project wrap-up and documentation</title>
+    <status>not-started</status>
+    <phase>wrap-up</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>documentation, cleanup</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>All previous tasks</dependencies>
+  </metadata>
+
+  <prompt>
+    Final project wrap-up: update README status to Complete, create lessons-learned.md,
+    verify all acceptance criteria met, run /repo-cleanup, and prepare for merge to master.
+  </prompt>
+
+  <role>Project coordinator.</role>
+
+  <goal>
+    Project marked complete with all documentation updated, lessons learned captured,
+    and branch ready for merge to master.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">projects/ai-sprk-chat-extensibility-r1/README.md</file>
+    <file purpose="reference">projects/ai-sprk-chat-extensibility-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">All graduation criteria must be verified</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-wrap-up</topic>
+    <files>
+      <file>projects/ai-sprk-chat-extensibility-r1/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify all tasks complete">Check TASK-INDEX.md — all tasks should be ✅.</step>
+    <step order="2" name="Verify graduation criteria">Check each criterion in README.md against actual state.</step>
+    <step order="3" name="Update README status">Set status to Complete, fill completed date.</step>
+    <step order="4" name="Create lessons-learned.md">
+      Document: what went well, what was challenging, patterns discovered,
+      recommendations for future projects.
+    </step>
+    <step order="5" name="Run /repo-cleanup">Validate repository structure, remove ephemeral files.</step>
+    <step order="6" name="Prepare for merge">Ensure all changes committed, tests pass, PR ready for review.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control</tool>
+    <tool name="dotnet">Run tests</tool>
+    <tool name="npm">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-sprk-chat-extensibility-r1/README.md (updated to Complete)</output>
+    <output type="docs">projects/ai-sprk-chat-extensibility-r1/notes/lessons-learned.md (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tasks in TASK-INDEX.md show ✅</criterion>
+    <criterion testable="true">All graduation criteria verified</criterion>
+    <criterion testable="true">README status set to Complete</criterion>
+    <criterion testable="true">lessons-learned.md created</criterion>
+    <criterion testable="true">All tests pass (dotnet test + npm test)</criterion>
+  </acceptance-criteria>
+</task>

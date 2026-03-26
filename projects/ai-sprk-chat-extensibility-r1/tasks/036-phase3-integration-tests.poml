@@ -1,0 +1,64 @@
+<task id="CHAT-036" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Phase 3 integration tests for compound actions</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-030, CHAT-031, CHAT-032, CHAT-033, CHAT-034, CHAT-035</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for Phase 3: compound action → plan preview → approval → execution,
+    email draft → refine → send flow, write-back → diff preview → confirmation → update,
+    and progress indicator correctness.
+  </prompt>
+
+  <role>Test engineer with full-stack testing expertise.</role>
+
+  <goal>
+    Comprehensive integration tests validating all Phase 3 compound action flows.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">All Phase 3 task outputs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">80% coverage on new code</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>integration-testing</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Test compound action flow">Plan preview → edit → approve → execute with progress.</step>
+    <step order="2" name="Test email flow">Draft → refine → approve → send → success in chat.</step>
+    <step order="3" name="Test write-back flow">Propose change → show diff → confirm → update Dataverse.</step>
+    <step order="4" name="Test failure scenarios">Partial failure, cancel mid-execution, network error.</step>
+    <step order="5" name="Run full test suite">Verify no regressions across all phases.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run Jest tests</tool>
+    <tool name="dotnet">Run .NET tests</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">Phase 3 integration test files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Phase 3 integration tests pass</criterion>
+    <criterion testable="true">All existing tests still pass</criterion>
+    <criterion testable="true">80% coverage on new Phase 3 code</criterion>
+  </acceptance-criteria>
+</task>

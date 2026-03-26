@@ -1,16 +1,20 @@
-# SprkChat Extensibility — Contextual Command Center
+# SprkChat Extensibility — Analysis Workspace Command Center
 
 > **Project**: ai-sprk-chat-extensibility-r1
 > **Status**: Design
 > **Priority**: 2 (Parallel with #3, depends on #1 for context-aware commands)
 > **Branch**: work/ai-sprk-chat-extensibility-r1
-> **Last Updated**: March 16, 2026
+> **Last Updated**: March 25, 2026
+>
+> **Scope Change (March 25, 2026)**: Narrowed from "all Spaarke contexts" to **Analysis Workspace only**. General Spaarke AI queries (Corporate Workspace, matter-level Q&A, navigation) are now served by M365 Copilot integration — see `projects/ai-m365-copilot-integration/design.md`. SprkChat's SidePaneManager injection on the Corporate Workspace will be removed; SprkChat is exclusively the Analysis Workspace AI companion.
 
 ---
 
 ## Executive Summary
 
-Transform SprkChat from a text-in/text-out chat interface into a **contextual command center** — the universal action surface that bridges conversational AI, playbook execution, and workflow actions across all Spaarke contexts. Playbooks remain the core AI orchestrator, running either explicitly (user-invoked) or implicitly (triggered in the background). The chat must be "smart" — understanding natural language intent and mapping it to system capabilities, just as Claude Code understands "run a report of all PCF controls" without explicit commands.
+Transform SprkChat from a text-in/text-out chat interface into a **contextual command center for the Analysis Workspace** — the interactive AI surface that bridges conversational AI, playbook execution, and workflow actions within analysis contexts. Playbooks remain the core AI orchestrator, running either explicitly (user-invoked) or implicitly (triggered in the background). The chat must be "smart" — understanding natural language intent and mapping it to system capabilities, just as Claude Code understands "run a report of all PCF controls" without explicit commands.
+
+> **Note**: UC1 (Corporate Workspace — Proactive Dashboard Assistant) has been moved to the M365 Copilot integration project. SprkChat no longer launches on the Corporate Workspace. UC2-UC4 remain in scope as they operate within analysis/document contexts accessible from the Analysis Workspace.
 
 ---
 
@@ -165,36 +169,11 @@ Three-axis model for structured interaction:
 
 ## Use Cases
 
-### UC1: Corporate Workspace — Proactive Dashboard Assistant
+### ~~UC1: Corporate Workspace — Proactive Dashboard Assistant~~ (MOVED)
 
-**Context**: User logs into the system. Start page is the Corporate Workspace. SprkChat is in the side pane, open state.
-
-**User experience**:
-```
-┌──────────────────────────────────────────────┐
-│  SprkChat                          [⚙️] [—] │
-├──────────────────────────────────────────────┤
-│                                              │
-│  Good morning, Ralph                         │
-│  You're on the Corporate Workspace.          │
-│                                              │
-│  [📅 My Due Dates Today]                     │
-│  [📬 My Assignments]                         │
-│  [📊 Matter Activity This Week]              │
-│                                              │
-├──────────────────────────────────────────────┤
-│  Type a message...               [📎] [/] ▶ │
-└──────────────────────────────────────────────┘
-```
-
-**Behavior**:
-- Pre-loaded quick-action chips are context-specific to the workspace page type
-- User clicks "My Due Dates Today" → SprkChat returns structured card list (event name, due date, matter link) with clickable links to open Event records
-- User can also type naturally: "put together a list of my upcoming tasks" → SprkChat understands intent, queries Events where `duedate >= today` and `assignedto = currentuser`, returns the same structured result
-- Responses include navigable links — clicking an item opens the record in the main content area
-- A workspace-scoped playbook sits in the background providing the system prompt and tool registrations for workspace-level queries
-
-**Key requirement**: The quick-action chips here are **data queries returning navigable results**, not AI analysis. SprkChat must handle both structured data retrieval and AI-powered analysis seamlessly.
+> **Moved to**: `projects/ai-m365-copilot-integration/design.md`
+>
+> **Reason (March 25, 2026)**: Corporate Workspace general queries (due dates, assignments, matter activity) are better served by M365 Copilot, which goes GA in model-driven apps on April 13, 2026. SprkChat's SidePaneManager injection on the Corporate Workspace will be removed. These data-query use cases (navigable results, entity queries) align with Copilot's native Dataverse integration capabilities and do not require SprkChat's analysis-specific features (streaming, editor integration, write-back).
 
 ### UC2: Matter Context — Email with Summary to Outside Counsel
 
@@ -587,6 +566,17 @@ SlashCommandMenu opens as Fluent Popover above input
 ---
 
 ## Phases
+
+### Phase 0: Scope Enforcement + Side Pane Lifecycle
+
+**Goal**: SprkChat only appears in Analysis Workspace; clean lifecycle management.
+
+- **Remove SidePaneManager injection** from Corporate Workspace (`src/solutions/LegalWorkspace/index.html` — remove `sprk_SidePaneManager` script injection)
+- **Remove global ribbon button** for SprkChat (or scope to analysis-context-only via enable rule)
+- **Close side pane on navigation away**: When the user navigates away from an Analysis record (to Corporate Workspace, matter form, etc.), the `sprkchat-analysis` side pane MUST be explicitly closed. Two mechanisms:
+  - **AnalysisWorkspace cleanup**: `useEffect` cleanup function in `App.tsx` calls `Xrm.App.sidePanes.getPane('sprkchat-analysis')?.close()` on unmount
+  - **Context poll fallback**: Existing `contextService.ts` poll (2-second interval) detects entityType change away from `sprk_analysisoutput` → triggers pane close via `Xrm.App.sidePanes` API
+- **Verify**: SprkChat is ONLY launchable from AnalysisWorkspace (`App.tsx` lines 446-493) after these changes
 
 ### Phase 1: Smart Chat Foundation (MVP)
 

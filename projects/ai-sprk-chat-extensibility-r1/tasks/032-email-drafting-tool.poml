@@ -1,0 +1,85 @@
+<task id="CHAT-032" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Implement email drafting tool and preview in chat</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>bff-api, ai, email, code-page</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-016</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the email drafting compound action (FR-13, part 1). AI generates email draft
+    (recipient, subject, body) using matter/analysis context. Draft shown as email preview
+    in chat. User can refine conversationally ("make it more formal", "add the deadline").
+  </prompt>
+
+  <role>Full-stack developer with BFF AI tool and React component expertise.</role>
+
+  <goal>
+    An email drafting AI tool that generates contextual email drafts, and an EmailPreviewCard
+    component that renders the draft in chat with refinement capability.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/</file>
+    <file purpose="reference">.claude/patterns/api/send-email-integration.md</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns</constraint>
+    <constraint source="ADR-013">AI tool extends BFF; register via playbook capabilities</constraint>
+    <constraint source="FR-13">AI uses matter/analysis context for email generation</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>email-drafting, ai-tools, compound-actions</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing AI tools">Understand tool registration pattern from existing tools in Tools/ folder.</step>
+    <step order="2" name="Read email integration pattern">Understand send-email-integration pattern for Graph API.</step>
+    <step order="3" name="Create EmailDraftTool">
+      BFF AI tool that generates email draft (recipient, subject, body) using ChatHostContext
+      for matter/analysis information.
+    </step>
+    <step order="4" name="Build EmailPreviewCard component">
+      Shared component showing email preview (To, Subject, Body) in chat message.
+      Uses Fluent v9 Card component with semantic tokens.
+    </step>
+    <step order="5" name="Add refinement support">
+      After showing draft, user messages in the conversation refine the draft.
+      AI updates draft based on instructions ("make it more formal").
+    </step>
+    <step order="6" name="Register tool in playbook">Register email draft as a playbook capability/tool.</step>
+    <step order="7" name="Write tests">Test draft generation, preview rendering, refinement flow.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET</tool>
+    <tool name="npm">Build TypeScript</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/EmailDraftTools.cs (new)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/EmailPreviewCard.tsx (new)</output>
+    <output type="test">Tests for EmailDraftTools and EmailPreviewCard</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AI generates email draft with recipient, subject, body from context</criterion>
+    <criterion testable="true">EmailPreviewCard renders draft in chat</criterion>
+    <criterion testable="true">User can refine draft conversationally</criterion>
+    <criterion testable="true">Tool registered as playbook capability</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,79 @@
+<task id="CHAT-041" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Template parameter fill-in UI in slash menu</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>fluent-ui, code-page, component</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-040</dependencies>
+  </metadata>
+
+  <prompt>
+    Build the UI for selecting and filling prompt template parameters (FR-16 client-side).
+    User selects template from slash menu → fills parameters → executes. Template appears
+    as inline form with parameter fields.
+  </prompt>
+
+  <role>React/Fluent UI v9 developer.</role>
+
+  <goal>
+    Users can select a prompt template from the slash menu, fill in parameters via inline
+    form, and execute the resolved prompt.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SlashCommandMenu.tsx</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Callback-based props; shared component</constraint>
+    <constraint source="ADR-021">Fluent v9; dark mode</constraint>
+    <constraint source="NFR-05">Keyboard accessible; screen reader labels</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>template-ui, parameter-forms</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Design template selection flow">
+      Template appears as a command in slash menu. Selecting it opens parameter form inline.
+    </step>
+    <step order="2" name="Build TemplateParameterForm component">
+      Fluent v9 form with fields for each parameter. Supports free text parameters.
+      Submit button sends resolved prompt as chat message.
+    </step>
+    <step order="3" name="Integrate with slash menu">
+      Templates shown as a category in SlashCommandMenu. Selecting a template
+      replaces the menu with the parameter form.
+    </step>
+    <step order="4" name="Add keyboard navigation">Full keyboard support for form fields and submit.</step>
+    <step order="5" name="Write tests">Test template selection, parameter filling, form submission.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/TemplateParameterForm.tsx (new)</output>
+    <output type="code">SlashCommandMenu.tsx (modified for template integration)</output>
+    <output type="test">TemplateParameterForm tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Templates appear as commands in slash menu</criterion>
+    <criterion testable="true">Selecting template shows inline parameter form</criterion>
+    <criterion testable="true">Filled parameters resolve and send as chat message</criterion>
+    <criterion testable="true">Full keyboard accessibility</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

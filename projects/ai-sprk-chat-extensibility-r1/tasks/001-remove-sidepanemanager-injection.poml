@@ -1,0 +1,78 @@
+<task id="CHAT-001" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Remove SidePaneManager injection from Corporate Workspace</title>
+    <status>not-started</status>
+    <phase>0</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>code-page, corporate-workspace, scope-enforcement</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove the SidePaneManager script injection from the Corporate Workspace HTML page.
+    SprkChat must NOT appear in the side pane rail when users are on the Corporate Workspace.
+    This is FR-01 from the spec — scope enforcement.
+  </prompt>
+
+  <role>
+    Frontend developer familiar with Dataverse web resources and side pane APIs.
+  </role>
+
+  <goal>
+    The Corporate Workspace page (LegalWorkspace/index.html) no longer injects the SidePaneManager
+    script, so no SprkChat icon appears in the side pane rail on Corporate Workspace.
+  </goal>
+
+  <inputs>
+    <file purpose="target">src/solutions/LegalWorkspace/index.html</file>
+    <file purpose="reference">src/client/side-pane-manager/SidePaneManager.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">No legacy JavaScript webresources</constraint>
+    <constraint source="FR-01">SidePaneManager injection MUST be removed from Corporate Workspace</constraint>
+    <constraint source="project">Do NOT remove SidePaneManager.ts itself — it may be used by AnalysisWorkspace</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>corporate-workspace, side-pane-manager</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read LegalWorkspace index.html">
+      Read src/solutions/LegalWorkspace/index.html and identify the SidePaneManager script injection line(s).
+    </step>
+    <step order="2" name="Remove SidePaneManager injection">
+      Remove the script tag or injection code that loads sprk_SidePaneManager into the Corporate Workspace page.
+    </step>
+    <step order="3" name="Verify no other dependencies">
+      Search the codebase for any other references to SidePaneManager from Corporate Workspace context.
+      Ensure AnalysisWorkspace still has its own SprkChat launch mechanism (openSprkChatPane.ts).
+    </step>
+    <step order="4" name="Build and verify">
+      Verify the HTML is still valid. Check that the Corporate Workspace page loads correctly without the injection.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Search for SidePaneManager references</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/index.html (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LegalWorkspace/index.html does NOT contain sprk_SidePaneManager script injection</criterion>
+    <criterion testable="true">No SprkChat icon appears in Corporate Workspace side pane rail</criterion>
+    <criterion testable="true">AnalysisWorkspace SprkChat launch mechanism is unaffected</criterion>
+  </acceptance-criteria>
+</task>

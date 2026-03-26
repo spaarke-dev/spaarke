@@ -1,0 +1,72 @@
+<task id="CHAT-021" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Analysis-type-aware chip set configuration</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, configuration, analysis</tags>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the analysis-type-to-chip mapping configuration so that different analysis types
+    (NDA, contract review, patent, compliance, etc.) display context-appropriate quick-action
+    chips. This configuration feeds into the enhanced QuickActionChips component.
+  </prompt>
+
+  <role>Frontend developer with analysis domain knowledge.</role>
+
+  <goal>
+    A type-safe configuration mapping analysis types to recommended chip actions,
+    integrated with the QuickActionChips enhancement.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Configuration in shared components; no service dependencies</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>analysis-types, chip-configuration</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Identify analysis types">Read contextService and analysis components for supported analysis types.</step>
+    <step order="2" name="Define chip action map">
+      Create a typed map: analysisType → chip actions (label, prompt, icon).
+      E.g., NDA → ["Refine Analysis", "Compare to Standard", "Find Key Clauses"].
+    </step>
+    <step order="3" name="Create configuration file">
+      New file: analysisChipConfig.ts with type-safe configuration.
+    </step>
+    <step order="4" name="Integrate with QuickActionChips">
+      QuickActionChips uses this config to select analysis-type chips based on context.
+    </step>
+    <step order="5" name="Write tests">Test chip selection for each analysis type.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/analysisChipConfig.ts (new)</output>
+    <output type="test">Tests for analysis chip configuration</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each analysis type maps to appropriate chip actions</criterion>
+    <criterion testable="true">Configuration is type-safe</criterion>
+    <criterion testable="true">Unknown analysis types fall back to generic chips</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,88 @@
+<task id="CHAT-010" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Create context enrichment types and useContextEnrichment hook</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>code-page, typescript, context-enrichment</tags>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 0 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the client-side context enrichment infrastructure (FR-05). Define TypeScript types
+    for context signals (source, editor_selection, document_type, available_actions, conversation_phase)
+    and a useContextEnrichment hook that enriches outgoing messages before sending to BFF.
+  </prompt>
+
+  <role>Senior TypeScript/React developer with SprkChat component expertise.</role>
+
+  <goal>
+    A useContextEnrichment hook that produces a ContextSignals object attached to each outgoing
+    chat message, containing source, editor_selection, document_type, available_actions, and
+    conversation_phase fields.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSelectionListener.ts</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts</file>
+    <file purpose="reference">src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components use callback-based props; zero service dependencies</constraint>
+    <constraint source="ADR-021">Fluent v9; dark mode support</constraint>
+    <constraint source="NFR-07">Context enrichment payload MUST add less than 1KB per message</constraint>
+    <constraint source="FR-05">Must include: source, editor_selection, document_type, available_actions, conversation_phase</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>context-enrichment, chat-types</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing types">Read SprkChat/types.ts to understand current message types and metadata.</step>
+    <step order="2" name="Read existing hooks">Read useSelectionListener and useChatPlaybooks to understand available data sources.</step>
+    <step order="3" name="Define ContextSignals type">
+      Create IContextSignals interface with: source ("natural_language"|"slash_command"|"chip_click"),
+      editor_selection (string|null), document_type (string|null), available_actions (string[]),
+      conversation_phase ("initial"|"refinement"|"follow_up").
+    </step>
+    <step order="4" name="Create useContextEnrichment hook">
+      Hook that composes data from useSelectionListener, useChatPlaybooks, and contextService
+      to produce IContextSignals. Include conversation_phase heuristic (first msg = initial,
+      after AI response = follow_up, referencing prior = refinement).
+    </step>
+    <step order="5" name="Integrate into SprkChatInput">
+      Modify SprkChatInput to call useContextEnrichment and attach signals to outgoing messages.
+    </step>
+    <step order="6" name="Write unit tests">Test the hook with various scenarios (initial, follow-up, with selection, etc.).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test TypeScript</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts (modified - new IContextSignals)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useContextEnrichment.ts (new)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx (modified)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/useContextEnrichment.test.ts (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IContextSignals type exported from types.ts</criterion>
+    <criterion testable="true">useContextEnrichment hook returns valid ContextSignals for all scenarios</criterion>
+    <criterion testable="true">Enriched payload adds less than 1KB to each message</criterion>
+    <criterion testable="true">Unit tests pass for initial, follow-up, and refinement phases</criterion>
+  </acceptance-criteria>
+</task>

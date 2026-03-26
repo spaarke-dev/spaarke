@@ -1,0 +1,83 @@
+<task id="CHAT-031" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Build CompoundActionProgress component</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>fluent-ui, code-page, component</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-030</dependencies>
+  </metadata>
+
+  <prompt>
+    Build the CompoundActionProgress component (FR-15) that shows real-time step-by-step
+    progress for multi-step compound actions. Each step shows status: pending, in-progress,
+    complete, or failed.
+  </prompt>
+
+  <role>React/Fluent UI v9 developer.</role>
+
+  <goal>
+    A CompoundActionProgress component that renders real-time step progress with visual
+    indicators for each step's status during compound action execution.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlanPreviewCard.tsx</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Callback-based props; shared component</constraint>
+    <constraint source="ADR-021">Fluent v9; semantic tokens; dark mode</constraint>
+    <constraint source="NFR-05">Keyboard navigation and screen reader labels</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>progress-indicators, compound-actions</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Design component API">
+      Props: steps (array with name, status, result), onCancel callback.
+      Status types: pending, in-progress, complete, failed.
+    </step>
+    <step order="2" name="Build progress visualization">
+      Vertical step list with Fluent v9 icons/spinners for each status.
+      In-progress shows spinner, complete shows checkmark, failed shows error icon.
+    </step>
+    <step order="3" name="Add real-time updates">
+      Component re-renders as step statuses update (controlled by parent via props).
+    </step>
+    <step order="4" name="Handle failure state">
+      Failed step shows error message. Completed steps remain visible with results.
+      Cancel button available during execution.
+    </step>
+    <step order="5" name="Accessibility">ARIA live region for status changes; screen reader announces step transitions.</step>
+    <step order="6" name="Write tests">Test all status transitions, failure handling, accessibility.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/CompoundActionProgress.tsx (new)</output>
+    <output type="test">CompoundActionProgress tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All four step statuses render with correct visual indicators</criterion>
+    <criterion testable="true">Real-time updates reflect as steps complete</criterion>
+    <criterion testable="true">Failed steps show error message with completed steps preserved</criterion>
+    <criterion testable="true">Screen reader announces step transitions</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

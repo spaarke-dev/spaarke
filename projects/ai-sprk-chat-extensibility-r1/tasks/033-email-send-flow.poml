@@ -1,0 +1,84 @@
+<task id="CHAT-033" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Implement email send flow via sprk_communication module</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, email, graph-api</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-032</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the email send flow (FR-13, part 2). After user approves the draft:
+    Option A: Launch email Code Page modal (existing sprk_communication pattern)
+    Option B: Send via BFF → Graph API through sprk_communication services.
+    User confirms → email is sent. Success/failure shown in chat.
+  </prompt>
+
+  <role>Full-stack developer with Graph API and email service expertise.</role>
+
+  <goal>
+    Complete email send flow from approved draft to actual email delivery via Graph API,
+    with success/failure feedback in chat.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">.claude/patterns/api/send-email-integration.md</file>
+    <file purpose="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/EmailDraftTools.cs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns</constraint>
+    <constraint source="ADR-008">Endpoint filters for authorization</constraint>
+    <constraint source="FR-13">Send via BFF → Graph API through sprk_communication services</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>email-send, graph-api, sprk-communication</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read email integration pattern">Understand existing sprk_communication email flow.</step>
+    <step order="2" name="Add send confirmation in EmailPreviewCard">
+      Add "Send Email" button on approved draft. Shows confirmation dialog before sending.
+    </step>
+    <step order="3" name="Create BFF email send endpoint">
+      BFF endpoint that accepts draft (to, subject, body) and sends via Graph API
+      using existing sprk_communication services.
+    </step>
+    <step order="4" name="Wire chat to send flow">
+      When user confirms send: call BFF endpoint, show progress, report success/failure in chat.
+    </step>
+    <step order="5" name="Add Code Page modal fallback">
+      Option to open email Code Page modal for advanced editing before send.
+    </step>
+    <step order="6" name="Write tests">Test send flow, confirmation, success/failure states.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET</tool>
+    <tool name="npm">Build TypeScript</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">BFF email send endpoint (new or enhanced)</output>
+    <output type="code">EmailPreviewCard send integration (modified)</output>
+    <output type="test">Tests for email send flow</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User can send approved email draft from chat</criterion>
+    <criterion testable="true">Confirmation required before sending</criterion>
+    <criterion testable="true">Success/failure reported in chat</criterion>
+    <criterion testable="true">Code Page modal fallback available for advanced editing</criterion>
+  </acceptance-criteria>
+</task>

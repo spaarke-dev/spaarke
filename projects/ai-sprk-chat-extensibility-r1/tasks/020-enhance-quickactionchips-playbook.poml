@@ -1,0 +1,90 @@
+<task id="CHAT-020" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Enhance QuickActionChips with playbook capabilities source</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>fluent-ui, code-page, component</tags>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-010, CHAT-014</dependencies>
+  </metadata>
+
+  <prompt>
+    Enhance the existing QuickActionChips component (FR-11) to populate chips from:
+    1. Active playbook capabilities (top 2-3 from sprk_playbookcapabilities)
+    2. Analysis-type-aware actions
+    Maximum 4 chips, hidden when pane width &lt; 350px.
+    Chips update on playbook switch or context change.
+    Tapping a chip sends structured message with source: "chip_click".
+  </prompt>
+
+  <role>React/Fluent UI v9 developer with component enhancement expertise.</role>
+
+  <goal>
+    QuickActionChips dynamically populated from playbook capabilities and analysis context,
+    with responsive behavior and proper source tagging on chip clicks.
+  </goal>
+
+  <inputs>
+    <file purpose="target">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/QuickActionChips.tsx</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useContextEnrichment.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Callback-based props; zero service dependencies</constraint>
+    <constraint source="ADR-021">Fluent v9; semantic tokens; dark mode</constraint>
+    <constraint source="NFR-03">Chips update within 500ms of context change</constraint>
+    <constraint source="FR-11">Max 4 chips; hidden when pane &lt; 350px</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>quick-action-chips, playbook-capabilities</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing QuickActionChips">Understand current chip rendering and data source.</step>
+    <step order="2" name="Add playbook capability data source">
+      Pull top 2-3 capabilities from active playbook via useChatPlaybooks.
+      Map capabilities to chip labels and actions.
+    </step>
+    <step order="3" name="Add analysis-type-aware chips">
+      Based on analysis type (NDA, contract review, etc.), show context-specific chips
+      (e.g., "Refine Analysis", "Compare to Standard").
+    </step>
+    <step order="4" name="Enforce max 4 chips">Priority: analysis-type chips first, then playbook capabilities.</step>
+    <step order="5" name="Add responsive hide">Hide chip bar when pane width &lt; 350px using ResizeObserver or media query.</step>
+    <step order="6" name="Tag chip clicks with source">
+      Chip tap sends structured message with source: "chip_click" via context enrichment.
+    </step>
+    <step order="7" name="Add reactivity on playbook/context change">
+      Chips re-render within 500ms when playbook switches or analysis context changes.
+    </step>
+    <step order="8" name="Write tests">Test chip population, responsive hide, source tagging.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/QuickActionChips.tsx (modified)</output>
+    <output type="test">Enhanced QuickActionChips tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Chips populate from playbook capabilities</criterion>
+    <criterion testable="true">Max 4 chips displayed at any time</criterion>
+    <criterion testable="true">Chips hidden when pane width &lt; 350px</criterion>
+    <criterion testable="true">Chips update within 500ms of context change</criterion>
+    <criterion testable="true">Chip click sends message with source: "chip_click"</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>
