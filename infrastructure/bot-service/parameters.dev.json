@@ -9,10 +9,10 @@
       "value": "https://spe-api-dev-67e2xz.azurewebsites.net/api/agent/message"
     },
     "appId": {
-      "value": "<REPLACE-WITH-ENTRA-APP-REGISTRATION-CLIENT-ID>"
+      "value": "f257a0a9-1061-4f9b-8918-3ad056fe90db"
     },
     "location": {
-      "value": "westus2"
+      "value": "global"
     },
     "botDisplayName": {
       "value": "Spaarke AI Assistant"

@@ -78,7 +78,7 @@ resource botService 'Microsoft.BotService/botServices@2022-09-15' = {
     endpoint: messagingEndpoint
     msaAppId: appId
     msaAppType: 'SingleTenant'
-    msaAppMSIResourceId: enableManagedIdentity ? botService.id : null
+    msaAppMSIResourceId: null
     msaAppTenantId: tenant().tenantId
     schemaTransformationVersion: '1.3'
     disableLocalAuth: true
