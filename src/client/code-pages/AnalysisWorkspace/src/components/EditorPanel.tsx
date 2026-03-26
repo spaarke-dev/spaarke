@@ -6,7 +6,7 @@
  * output. This is the streaming write target where SprkChat writes token-by-token.
  *
  * Task 062: Toolbar with Save, Export, Copy, Undo/Redo (replaces PH-061-A).
- * Task 064: Selection broadcast via SprkChatBridge (useSelectionBroadcast).
+ * Task 064/010: Selection broadcast now uses React context (useSelectionBroadcast removed).
  * Task 065: Analysis loading and content population from BFF API.
  * Task 031: InlineAiToolbar overlay — appears on text selection; dispatches inline
  *           actions to SprkChat (chat type) or DiffReviewPanel (diff type).
@@ -15,7 +15,7 @@
  * @see ADR-021 - Fluent UI v9 design system
  */
 
-import { forwardRef, useCallback, useRef, type RefObject } from 'react';
+import { forwardRef, useCallback, useEffect, useRef, type RefObject } from 'react';
 import { makeStyles, Spinner, Text, tokens } from '@fluentui/react-components';
 import { RichTextEditor, InlineAiToolbar } from '@spaarke/ui-components';
 import type { RichTextEditorRef, InlineAiAction } from '@spaarke/ui-components';
@@ -23,6 +23,7 @@ import { AnalysisToolbar } from './AnalysisToolbar';
 import type { SaveState, ExportState, ExportFormat } from '../types';
 import { useInlineAiToolbarState } from '../hooks/useInlineAiToolbar';
 import { useDocumentInsert } from '../hooks/useDocumentInsert';
+import { useAnalysisAi } from '../context/AnalysisAiContext';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -185,6 +186,50 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
 ): JSX.Element {
   const styles = useStyles();
 
+  // ── Task 005: Wire editorRef from AnalysisAiContext ──────────────────
+  //
+  // Expose the Lexical editor's insert and getContent methods through the
+  // shared AnalysisAiContext editorRef. This enables the full callback chain:
+  //   ChatPanel → SprkChat → onInsertToEditor → editorRef.current.insert()
+  //     → RichTextEditorRef.insertAtCursor() → Lexical editor
+  //
+  // insertAtCursor uses Lexical's $getSelection() internally:
+  //   - Range selection (non-collapsed) → replaces selected text
+  //   - Cursor only (collapsed) → inserts at cursor position
+  //   - No selection → appends to end of document
+  //
+  // The discrete:true flag in the Lexical update ensures each insert creates
+  // its own undo history entry (Ctrl+Z support preserved).
+  const { editorRef: contextEditorRef, setEditorSelection } = useAnalysisAi();
+
+  // Stable ref to latest `value` prop so the getContent fallback never
+  // causes the useEffect to re-run (value changes on every keystroke).
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    contextEditorRef.current = {
+      insert: (content: string) => {
+        if (ref && typeof ref === 'object' && ref.current) {
+          ref.current.insertAtCursor(content, 'html');
+        }
+      },
+      getContent: () => {
+        if (ref && typeof ref === 'object' && ref.current) {
+          return ref.current.getHtml();
+        }
+        return valueRef.current;
+      },
+    };
+
+    return () => {
+      // Clean up on unmount so stale ref doesn't get called
+      contextEditorRef.current = null;
+    };
+  }, [contextEditorRef, ref]);
+
   // Determine if toolbar should render (all required callbacks provided)
   const hasToolbar = !!(onForceSave && onExport && onUndo && onRedo);
 
@@ -220,6 +265,25 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
     actions: toolbarActions,
     onAction: dispatchInlineAction,
   } = useInlineAiToolbarState({ editorContainerRef, analysisId });
+
+  // ── Task 006: Sync editor selection to AnalysisAiContext ────────────
+  //
+  // Debounce the selectedText value from the inline toolbar hook before
+  // writing it to context. This prevents excessive re-renders during
+  // rapid drag-select operations while keeping the context up-to-date
+  // for SprkChat's highlight-refine feature (editorSelection prop).
+  //
+  // The 150ms debounce keeps context updates responsive without causing
+  // excessive re-renders during rapid drag-select operations.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setEditorSelection(selectedText);
+    }, 150);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [selectedText, setEditorSelection]);
 
   // ── Task 051: document_insert BroadcastChannel handler ──────────────
   //
@@ -330,7 +394,7 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
               visible={toolbarVisible}
               position={toolbarPosition}
               actions={toolbarActions}
-              onAction={(action) => handleInlineAction(action, selectedText)}
+              onAction={action => handleInlineAction(action, selectedText)}
             />
           </div>
         </>

@@ -1,0 +1,49 @@
+<task id="016" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Deprecate SprkChatBridge in shared library</title>
+    <phase>2</phase>
+    <stream>shared-library</stream>
+    <tags>shared-library, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>009</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Mark SprkChatBridge as deprecated in the shared library. Do NOT delete it — it may be useful for future cross-pane scenarios.</goal>
+    <context>SprkChatBridge (BroadcastChannel + postMessage fallback) is no longer used by AnalysisWorkspace but is kept for potential future use in other cross-pane contexts.</context>
+    <constraints>
+      - MUST add @deprecated JSDoc tag to SprkChatBridge class and all public methods
+      - MUST add deprecation notice at top of file
+      - MUST NOT delete the file
+      - MUST NOT remove exports (would break any external consumers)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/SprkChatBridge.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read SprkChatBridge.ts</step>
+    <step>Add @deprecated JSDoc to class declaration</step>
+    <step>Add @deprecated to all public methods</step>
+    <step>Add deprecation notice comment at top of file</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: SprkChatBridge.ts (deprecated annotations added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatBridge class marked @deprecated</criterion>
+    <criterion>All public methods marked @deprecated</criterion>
+    <criterion>File NOT deleted</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

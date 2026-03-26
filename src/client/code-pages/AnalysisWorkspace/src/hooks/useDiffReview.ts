@@ -159,7 +159,7 @@ export function useDiffReview(options: UseDiffReviewOptions): UseDiffReviewResul
     // If this is a diff-mode stream, buffer the token instead of writing.
     const unsubToken = bridge.subscribe('document_stream_token', (payload: DocumentStreamTokenPayload) => {
       if (activeDiffOpRef.current !== payload.operationId) {
-        return; // Not a diff-mode stream, let DocumentStreamBridge handle it
+        return; // Not a diff-mode stream, handled by streaming pipeline
       }
       tokenBufferRef.current.push(payload.token);
     });

@@ -1,0 +1,47 @@
+<task id="033" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Add panel visibility keyboard shortcuts</title>
+    <phase>4</phase>
+    <stream>frontend</stream>
+    <tags>code-page, a11y</tags>
+    <estimate>1h</estimate>
+    <rigor>MINIMAL</rigor>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add keyboard shortcuts for panel visibility toggles (e.g., Ctrl+Shift+S for Source, Ctrl+Shift+C for Chat).</goal>
+    <context>Power users should be able to toggle panels without clicking toolbar buttons.</context>
+    <constraints>
+      - MUST not conflict with existing browser or Dataverse shortcuts
+      - MUST use Ctrl+Shift+{key} pattern to avoid conflicts
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add useEffect with keydown listener for panel shortcuts</step>
+    <step>Ctrl+Shift+S toggles Source panel</step>
+    <step>Ctrl+Shift+C toggles Chat panel</step>
+    <step>Wire to usePanelLayout toggle functions</step>
+    <step>Verify shortcuts work and don't conflict</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: App.tsx (keyboard shortcut handler)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Keyboard shortcuts toggle panels</criterion>
+    <criterion>No shortcut conflicts</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

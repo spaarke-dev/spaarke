@@ -90,6 +90,7 @@ export type {
   IQuickAction,
   IRefineRequest,
   IDocumentInsertEvent,
+  IDocumentStreamSseEvent,
   DocumentProcessingStatus,
   IDocumentStatusMessage,
   IDocumentStatusChatMessage,

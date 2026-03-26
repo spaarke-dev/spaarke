@@ -1,0 +1,54 @@
+<task id="020" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Consolidate to single MSAL initialization</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>code-page, auth</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>018</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Consolidate to a single MSAL initialization in AnalysisWorkspace, removing the duplicate auth path that existed for SprkChatPane.</goal>
+    <context>Previously both AnalysisWorkspace and SprkChatPane independently initialized MSAL and acquired tokens. Now with SprkChatPane removed, verify AnalysisWorkspace's single auth flow serves both editor and chat operations.</context>
+    <constraints>
+      - MUST have exactly one MSAL PublicClientApplication instance
+      - MUST acquire tokens once for all operations (editor API calls + chat API calls)
+      - MUST provide authenticatedFetch to ChatPanel via AnalysisAiContext
+      - MUST NOT break existing editor auth flow
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/config/msalConfig.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/authInit.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/authService.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAuth.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/context/AuthContext.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read all auth-related files to understand current initialization flow</step>
+    <step>Verify single MSAL instance in authInit.ts</step>
+    <step>Ensure authenticatedFetch is exposed via AnalysisAiContext for ChatPanel</step>
+    <step>Remove any duplicate MSAL config references (SprkChatPane config was removed in Phase 2)</step>
+    <step>Verify token acquisition works for both editor and chat API calls</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Verified/modified: auth files consolidated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Single MSAL PublicClientApplication instance</criterion>
+    <criterion>authenticatedFetch available to ChatPanel via context</criterion>
+    <criterion>No duplicate auth initialization code</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

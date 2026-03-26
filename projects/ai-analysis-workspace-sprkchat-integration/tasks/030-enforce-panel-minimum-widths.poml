@@ -1,0 +1,46 @@
+<task id="030" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Enforce panel minimum widths</title>
+    <phase>4</phase>
+    <stream>frontend</stream>
+    <tags>code-page, layout</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Enforce minimum widths on all three panels: Editor 300px, Source 200px, Chat 280px. Splitter stops at minimum width.</goal>
+    <context>usePanelLayout should already handle this from task 002 — this task verifies and hardens the behavior.</context>
+    <constraints>
+      - Editor minimum: 300px
+      - Source minimum: 200px
+      - Chat minimum: 280px
+      - Splitter must stop at minimum width (not allow panels below minimum)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/usePanelLayout.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify usePanelLayout enforces minimum widths during drag</step>
+    <step>Add constraints if not already present</step>
+    <step>Verify splitter stops at minimum boundaries</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Verified/modified: usePanelLayout.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Panels cannot be dragged below minimum widths</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

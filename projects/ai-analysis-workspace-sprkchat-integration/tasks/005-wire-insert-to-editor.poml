@@ -1,0 +1,56 @@
+<task id="005" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Wire onInsertToEditor callback via context</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, editor</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Wire the onInsertToEditor callback from the Lexical editor ref through AnalysisAiContext to the SprkChat ChatPanel, replacing the BroadcastChannel document_stream path.</goal>
+    <context>
+      Currently, when a user clicks "Insert" on a chat response, SprkChatBridge emits a BroadcastChannel message which DocumentStreamBridge receives and writes to the editor.
+      In the unified page, onInsertToEditor is a direct callback: ChatPanel passes it as a prop to SprkChat, and it writes directly to the Lexical editor via ref.
+    </context>
+    <constraints>
+      - MUST write directly to editor via ref (no BroadcastChannel)
+      - MUST handle cursor position (insert at selection or end)
+      - MUST preserve undo history in Lexical editor
+      - MUST NOT modify SprkChat components in shared library
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentInsert.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read EditorPanel.tsx and useDocumentInsert.ts to understand current editor ref and insert mechanism</step>
+    <step>Read DocumentStreamBridge.tsx to understand what BroadcastChannel events trigger editor inserts</step>
+    <step>Expose editor insert function via AnalysisAiContext (from EditorPanel's ref)</step>
+    <step>Wire onInsertToEditor in AnalysisAiProvider to the editor ref's insert method</step>
+    <step>Verify ChatPanel passes onInsertToEditor to SprkChat</step>
+    <step>Test: content insertion works without BroadcastChannel</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: AnalysisAiContext.tsx (add insert callback)</output>
+    <output>Modified: EditorPanel.tsx (expose editor ref to context)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>onInsertToEditor writes directly to Lexical editor via ref</criterion>
+    <criterion>No BroadcastChannel involved in insert path</criterion>
+    <criterion>Cursor position respected</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

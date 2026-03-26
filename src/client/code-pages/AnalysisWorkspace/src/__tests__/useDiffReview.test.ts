@@ -1,4 +1,10 @@
 /**
+ * @deprecated OBSOLETE — This test imports MockSprkChatBridge which has been deleted.
+ * The useDiffReview hook was refactored to use direct React refs instead of
+ * SprkChatBridge events. This test file needs rewriting against the new architecture.
+ * See task 043 notes.
+ *
+ * ORIGINAL DESCRIPTION:
  * useDiffReview Hook Tests
  *
  * Tests the diff-mode streaming pipeline: bridge events trigger token buffering,

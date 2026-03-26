@@ -1,0 +1,51 @@
+<task id="090" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>5</phase>
+    <stream>docs</stream>
+    <tags>docs, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>MINIMAL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>045</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project wrap-up: update README status, create lessons-learned, archive notes, prepare for merge to master.</goal>
+    <context>All implementation tasks complete. Final administrative wrap-up before merging branch to master.</context>
+    <constraints>
+      - MUST update README status to Complete
+      - MUST update TASK-INDEX.md with all tasks completed
+      - MUST create notes/lessons-learned.md if applicable
+      - MUST recommend running /merge-to-master
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/README.md</file>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update README.md status to Complete</step>
+    <step>Verify all tasks in TASK-INDEX.md are marked complete</step>
+    <step>Create notes/lessons-learned.md with key decisions and gotchas</step>
+    <step>Clean up notes/ directory (remove debug artifacts)</step>
+    <step>Recommend: run /merge-to-master to merge branch into master</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: README.md (status: Complete)</output>
+    <output>Created: notes/lessons-learned.md</output>
+    <output>Project ready for merge</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is Complete</criterion>
+    <criterion>All tasks marked complete in TASK-INDEX.md</criterion>
+    <criterion>Project ready for /merge-to-master</criterion>
+  </acceptance-criteria>
+</task>

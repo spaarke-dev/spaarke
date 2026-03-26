@@ -1,0 +1,44 @@
+<task id="041" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Verify bundle size delta (measure before/after)</title>
+    <phase>5</phase>
+    <stream>testing</stream>
+    <tags>testing, performance</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>040</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Measure and document bundle size before and after the integration to verify acceptable increase.</goal>
+    <context>SprkChat components are in the shared library and tree-shaken. The combined bundle should not be significantly larger since the components were already in the dependency tree.</context>
+    <constraints>
+      - MUST document before/after bundle sizes
+      - MUST flag if increase exceeds 200KB (investigate lazy-loading)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Build AnalysisWorkspace and record output size</step>
+    <step>Compare with pre-integration size (from git history or initial measurement)</step>
+    <step>Document delta in project notes</step>
+    <step>If delta > 200KB, investigate lazy-loading ChatPanel</step>
+  </steps>
+
+  <outputs>
+    <output>Bundle size measurement documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Bundle size delta documented</criterion>
+    <criterion>Delta acceptable (or lazy-loading applied)</criterion>
+  </acceptance-criteria>
+</task>

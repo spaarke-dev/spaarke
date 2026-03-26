@@ -1,0 +1,49 @@
+<task id="023" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Wire chat playbook resolution from AnalysisAiContext</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, sprkchat</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>021</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Wire chat playbook resolution from the unified analysis context, so SprkChat receives the correct playbook based on the current analysis record type.</goal>
+    <context>SprkChatPane previously resolved its own playbook via useChatContextMapping. Now the playbook should come from AnalysisAiContext, which gets it from useAnalysisLoader.</context>
+    <constraints>
+      - MUST resolve playbook from analysis context (not separate API call)
+      - MUST pass playbook ID to ChatPanel → SprkChat as prop
+      - MUST handle case where no playbook is mapped (fallback behavior)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Identify how SprkChatPane previously received playbook ID</step>
+    <step>Map playbook resolution into AnalysisAiContext from analysis loader data</step>
+    <step>Pass playbook ID through ChatPanel to SprkChat props</step>
+    <step>Handle fallback when no playbook is mapped</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: AnalysisAiContext.tsx (playbook from analysis context)</output>
+    <output>Modified: ChatPanel.tsx (pass playbook prop)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Chat playbook resolved from analysis context</criterion>
+    <criterion>No separate playbook API call</criterion>
+    <criterion>Fallback behavior when no mapping exists</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,51 @@
+<task id="010" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Remove DocumentStreamBridge and useSelectionBroadcast</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>code-page, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>009</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Remove DocumentStreamBridge component and useSelectionBroadcast hook from AnalysisWorkspace — these are replaced by direct context/ref communication.</goal>
+    <context>DocumentStreamBridge listened to BroadcastChannel for streaming events. useSelectionBroadcast broadcast editor selection changes. Both are now handled via AnalysisAiContext.</context>
+    <constraints>
+      - MUST remove files entirely (not deprecate)
+      - MUST remove all imports and usages from App.tsx and other files
+      - MUST remove associated test files
+      - MUST verify build succeeds after removal
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useSelectionBroadcast.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/__tests__/useSelectionBroadcast.test.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Remove DocumentStreamBridge.tsx</step>
+    <step>Remove useSelectionBroadcast.ts</step>
+    <step>Remove useSelectionBroadcast.test.ts and MockBroadcastChannel.ts</step>
+    <step>Remove all imports/usages from App.tsx and any other consumers</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Deleted: DocumentStreamBridge.tsx, useSelectionBroadcast.ts, related tests</output>
+    <output>Modified: App.tsx (removed imports)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Files deleted</criterion>
+    <criterion>No remaining imports of deleted files</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

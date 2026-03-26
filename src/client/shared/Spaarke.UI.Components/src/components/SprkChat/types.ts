@@ -392,6 +392,23 @@ export interface ISprkChatProps {
    * Pass null or omit when no bridge is available (standalone mode).
    */
   bridge?: import('../../services/SprkChatBridge').SprkChatBridge | null;
+
+  /**
+   * Direct callback for document stream SSE events (Task 007).
+   *
+   * When provided, SprkChat forwards document_stream_start/token/end events
+   * through this callback instead of (or in addition to) the BroadcastChannel
+   * bridge. This enables zero-serialization streaming in the unified
+   * AnalysisWorkspace where SprkChat and the editor share the same React tree.
+   *
+   * When both `bridge` and `onDocumentStreamEvent` are provided, events are
+   * forwarded to BOTH (bridge for legacy compatibility, callback for direct path).
+   * When only `onDocumentStreamEvent` is provided (bridge is null), events go
+   * exclusively through the callback.
+   *
+   * SECURITY (ADR-015): Only content tokens and structural metadata are included.
+   */
+  onDocumentStreamEvent?: ((event: IDocumentStreamSseEvent) => void) | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
@@ -1122,8 +1139,6 @@ export interface IUseChatSessionResult {
    */
   updateMessageMetadataAt: (
     index: number,
-    metadataOrUpdater:
-      | IChatMessageMetadata
-      | ((current: IChatMessageMetadata | undefined) => IChatMessageMetadata)
+    metadataOrUpdater: IChatMessageMetadata | ((current: IChatMessageMetadata | undefined) => IChatMessageMetadata)
   ) => void;
 }

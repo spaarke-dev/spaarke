@@ -2,7 +2,7 @@
  * Integration tests for App (root component)
  *
  * Tests the root layout of the AnalysisWorkspace Code Page. Covers:
- *   - Valid params: renders 2-panel layout when authenticated and loaded
+ *   - Valid params: renders 3-panel layout when authenticated and loaded
  *   - Missing params: shows appropriate error state
  *   - Auth loading: shows spinner while authenticating
  *   - Auth error: shows error with retry button
@@ -55,22 +55,23 @@ jest.mock('../hooks/useExportAnalysis', () => ({
   useExportAnalysis: (opts: unknown) => mockUseExportAnalysis(opts),
 }));
 
-// Mock useSelectionBroadcast hook (void return, just needs to not crash)
-jest.mock('../hooks/useSelectionBroadcast', () => ({
-  useSelectionBroadcast: jest.fn(),
-}));
-
-// Mock usePanelResize hook
-jest.mock('../hooks/usePanelResize', () => ({
-  usePanelResize: () => ({
-    leftPanelWidth: 600,
-    rightPanelWidth: 400,
-    isDragging: false,
+// Mock usePanelLayout hook (replaced usePanelResize in task 002)
+jest.mock('../hooks/usePanelLayout', () => ({
+  usePanelLayout: () => ({
     containerRef: { current: null },
-    onSplitterMouseDown: jest.fn(),
-    onSplitterKeyDown: jest.fn(),
-    resetToDefault: jest.fn(),
-    currentRatio: 0.6,
+    editorWidth: 450,
+    sourceWidth: 300,
+    chatWidth: 250,
+    sourceVisible: true,
+    chatVisible: true,
+    isDragging: false,
+    toggleSource: jest.fn(),
+    toggleChat: jest.fn(),
+    onSplitter1MouseDown: jest.fn(),
+    onSplitter2MouseDown: jest.fn(),
+    onSplitter1KeyDown: jest.fn(),
+    onSplitter2KeyDown: jest.fn(),
+    resetToDefaults: jest.fn(),
   }),
 }));
 
@@ -94,12 +95,6 @@ jest.mock('../components/SourceViewerPanel', () => ({
 jest.mock('../components/PanelSplitter', () => ({
   PanelSplitter: function MockPanelSplitter() {
     return React.createElement('div', { 'data-testid': 'panel-splitter' }, 'Splitter');
-  },
-}));
-
-jest.mock('../components/DocumentStreamBridge', () => ({
-  DocumentStreamBridge: function MockDocStreamBridge() {
-    return null;
   },
 }));
 
@@ -170,7 +165,7 @@ describe('App', () => {
   // 1. Valid Params - Authenticated Layout
   // -----------------------------------------------------------------------
 
-  it('render_ValidParamsAndAuthenticated_ShowsTwoPanelLayout', () => {
+  it('render_ValidParamsAndAuthenticated_ShowsThreePanelLayout', () => {
     // Arrange
     setupAuthenticatedAndLoaded();
 

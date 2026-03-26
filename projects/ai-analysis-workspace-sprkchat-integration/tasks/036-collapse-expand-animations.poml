@@ -1,0 +1,50 @@
+<task id="036" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Smooth collapse/expand animations</title>
+    <phase>4</phase>
+    <stream>frontend</stream>
+    <tags>code-page, fluent-ui</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add smooth CSS transitions for panel collapse/expand when toggling visibility, and smooth splitter drag feel.</goal>
+    <context>Currently panel show/hide is instant. Add CSS transitions for width changes during toggle (not during drag — drag should be immediate).</context>
+    <constraints>
+      - MUST use CSS transitions for toggle animations (not drag)
+      - MUST use Fluent design tokens for timing (durationNormal, curveEasyEase) (ADR-021)
+      - MUST disable transitions during drag to prevent lag
+      - MUST use prefers-reduced-motion media query
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add CSS transition to panel containers (width, flex-basis)</step>
+    <step>Use Fluent tokens: tokens.durationNormal, tokens.curveEasyEase</step>
+    <step>Disable transition class during drag (add/remove via state)</step>
+    <step>Add prefers-reduced-motion: reduce check</step>
+    <step>Verify smooth toggle animations</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: App.tsx or panel components (CSS transitions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Smooth animation on panel toggle</criterion>
+    <criterion>No lag during drag (transitions disabled)</criterion>
+    <criterion>Respects reduced-motion preference</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

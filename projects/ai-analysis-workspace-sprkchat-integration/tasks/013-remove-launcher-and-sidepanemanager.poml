@@ -1,0 +1,48 @@
+<task id="013" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Remove openSprkChatPane launcher and SidePaneManager</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>code-page, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>009</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the openSprkChatPane launcher script and the SidePaneManager module — both are no longer needed with embedded chat.</goal>
+    <context>openSprkChatPane.ts was a launcher that opened the SprkChatPane Code Page in a Dataverse side pane. SidePaneManager managed side pane lifecycle. Neither is needed now.</context>
+    <constraints>
+      - MUST remove src/client/code-pages/SprkChatPane/launcher/ (if not already removed with task 012)
+      - MUST remove src/client/side-pane-manager/ directory
+      - MUST remove any imports of these modules from other files
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep for openSprkChatPane and SidePaneManager imports across codebase</step>
+    <step>Remove src/client/side-pane-manager/ directory (if exists)</step>
+    <step>Remove any launcher references not covered by task 012</step>
+    <step>Remove imports from consuming files</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Deleted: SidePaneManager directory</output>
+    <output>Deleted: openSprkChatPane launcher</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SidePaneManager directory removed</criterion>
+    <criterion>No openSprkChatPane references remain</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

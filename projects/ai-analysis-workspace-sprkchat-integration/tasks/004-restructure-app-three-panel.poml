@@ -1,0 +1,65 @@
+<task id="004" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Restructure App.tsx to three-panel layout with AnalysisAiProvider</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, layout</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Restructure App.tsx from the current 2-panel layout to a 3-panel layout (Editor + Source + Chat) wrapped in AnalysisAiProvider, using usePanelLayout for sizing and ChatPanel for the right panel.</goal>
+    <context>
+      App.tsx is currently ~743 lines with a 2-panel layout (Editor + Source) and side pane launch code.
+      This task adds the AnalysisAiProvider wrapper, integrates usePanelLayout for three panels, adds a second PanelSplitter, and mounts ChatPanel in the right panel.
+      The legacy side pane launch code (lines 416-493 approximately) should be kept for now (Phase 1 parallel operation) but the embedded ChatPanel is the primary path.
+    </context>
+    <constraints>
+      - MUST wrap component tree in AnalysisAiProvider
+      - MUST use usePanelLayout for three-panel management
+      - MUST add second PanelSplitter between Source and Chat panels
+      - MUST keep existing EditorPanel and SourceViewerPanel functioning
+      - MUST maintain dark mode support (FluentProvider + theme detection)
+      - MUST NOT remove side pane code yet (Phase 2 task)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/EditorPanel.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/SourceViewerPanel.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read current App.tsx thoroughly — understand layout structure, hook usage, rendering flow</step>
+    <step>Add AnalysisAiProvider as wrapper around the main content area</step>
+    <step>Replace usePanelResize with usePanelLayout for three-panel management</step>
+    <step>Add ChatPanel as the third (right) panel</step>
+    <step>Add second PanelSplitter between Source and Chat panels</step>
+    <step>Wire panel sizes from usePanelLayout to flex styles on all three panels</step>
+    <step>Verify existing functionality still works (editor, source viewer, toolbar)</step>
+    <step>Run build and fix any type errors</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: src/client/code-pages/AnalysisWorkspace/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>App.tsx renders three panels: Editor + Source + Chat</criterion>
+    <criterion>AnalysisAiProvider wraps the component tree</criterion>
+    <criterion>Two PanelSplitters present and draggable</criterion>
+    <criterion>Existing editor and source viewer functionality preserved</criterion>
+    <criterion>ChatPanel renders SprkChat component</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

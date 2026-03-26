@@ -1,4 +1,11 @@
 /**
+ * @deprecated OBSOLETE — This entire test file tests the old BroadcastChannel/SprkChatBridge
+ * streaming pipeline which was removed in the SprkChat integration project (Phase 2).
+ * Streaming now flows via direct React refs (useDocumentStreaming -> EditorPanel ref).
+ * These tests will not compile until rewritten against the new direct-ref architecture.
+ * See task 043 notes. MockSprkChatBridge.ts has been deleted.
+ *
+ * ORIGINAL DESCRIPTION:
  * E2E Streaming Write Integration Tests
  *
  * Validates the full streaming pipeline end-to-end:

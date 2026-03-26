@@ -26,7 +26,14 @@ import {
   ArrowSyncRegular,
   StopRegular,
 } from '@fluentui/react-icons';
-import { ISprkChatProps, IChatMessage, IPlaybookOption, IDocumentInsertEvent, IDocumentStatusChatMessage, IDocumentStatusMessage } from './types';
+import {
+  ISprkChatProps,
+  IChatMessage,
+  IPlaybookOption,
+  IDocumentInsertEvent,
+  IDocumentStatusChatMessage,
+  IDocumentStatusMessage,
+} from './types';
 import { SprkChatMessage, ISprkChatMessageExtendedProps } from './SprkChatMessage';
 import { SprkChatInput } from './SprkChatInput';
 import { SprkChatContextSelector } from './SprkChatContextSelector';
@@ -196,7 +203,7 @@ function mapActionIdToIcon(id: string): React.ReactElement {
  * are derived from the capability ID via mapActionIdToIcon().
  */
 function mapInlineActionsToChipActions(actions: IInlineActionInfo[]): InlineAiAction[] {
-  return actions.map((a) => ({
+  return actions.map(a => ({
     id: a.id,
     label: a.label,
     icon: mapActionIdToIcon(a.id),
@@ -222,6 +229,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   maxCharCount,
   hostContext,
   bridge,
+  onDocumentStreamEvent: onDocumentStreamEventProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -420,22 +428,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    *
    * @see ADR-006 — MUST use Xrm.Navigation.navigateTo with pageType="webresource"
    */
-  const handleDialogOpenEvent = React.useCallback(
-    (data: IChatSseEventData) => {
-      if (!data.targetPage) {
-        console.warn('[SprkChat] dialog_open event missing targetPage, ignoring.');
-        return;
-      }
+  const handleDialogOpenEvent = React.useCallback((data: IChatSseEventData) => {
+    if (!data.targetPage) {
+      console.warn('[SprkChat] dialog_open event missing targetPage, ignoring.');
+      return;
+    }
 
-      openCodePageDialog({
-        targetPage: data.targetPage,
-        prePopulateFields: data.prePopulateFields || {},
-        width: data.width,
-        height: data.height,
-      });
-    },
-    []
-  );
+    openCodePageDialog({
+      targetPage: data.targetPage,
+      prePopulateFields: data.prePopulateFields || {},
+      width: data.width,
+      height: data.height,
+    });
+  }, []);
 
   /**
    * Handle navigate SSE event (Task R2-052).
@@ -443,22 +448,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    *
    * @see ADR-006 — MUST use Xrm.Navigation for Code Page navigation
    */
-  const handleNavigateEvent = React.useCallback(
-    (data: IChatSseEventData) => {
-      if (!data.url && !data.targetPage) {
-        console.warn('[SprkChat] navigate event missing both url and targetPage, ignoring.');
-        return;
-      }
+  const handleNavigateEvent = React.useCallback((data: IChatSseEventData) => {
+    if (!data.url && !data.targetPage) {
+      console.warn('[SprkChat] navigate event missing both url and targetPage, ignoring.');
+      return;
+    }
 
-      navigateToTarget({
-        url: data.url,
-        targetPage: data.targetPage,
-        parameters: data.parameters || {},
-        playbookId: data.playbookId,
-      });
-    },
-    []
-  );
+    navigateToTarget({
+      url: data.url,
+      targetPage: data.targetPage,
+      parameters: data.parameters || {},
+      playbookId: data.playbookId,
+    });
+  }, []);
 
   /**
    * Confirm the pending action (user clicked Confirm in ActionConfirmationDialog).
@@ -619,66 +621,78 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     clearPendingActionEvent,
   ]);
 
-  // ── Task R2-051: Forward BFF document_stream SSE events to SprkChatBridge ──
+  // ── Task R2-051 + Task 007: Forward BFF document_stream SSE events ──
   //
   // Registers a synchronous callback with useSseStream that fires for every
-  // document_stream_start/token/end SSE event. This callback calls bridge.emit()
-  // to deliver each event via BroadcastChannel to the AnalysisWorkspace's
-  // useDocumentStreamConsumer hook.
+  // document_stream_start/token/end SSE event.
+  //
+  // Two forwarding paths (may both be active simultaneously):
+  //   1. bridge.emit() → BroadcastChannel → useDocumentStreamConsumer (legacy)
+  //   2. onDocumentStreamEventProp → direct callback → AnalysisAiContext (unified page)
+  //
+  // When bridge is null and onDocumentStreamEventProp is provided, events go
+  // exclusively through the direct callback (zero-serialization path).
   //
   // Uses a callback (not React state) because document_stream_token events
   // arrive at high frequency (one per AI-generated token). React state batching
   // would coalesce multiple token events in a single render frame, causing
   // lost tokens. The synchronous callback ensures every token is forwarded.
   //
-  // Data flow: BFF SSE → useSseStream (fetch loop) → callback →
-  //            bridge.emit() → BroadcastChannel →
-  //            useDocumentStreamConsumer → RichTextEditor (Lexical)
-  //
   // SECURITY (ADR-015): Only content tokens and structural metadata are forwarded.
   // Auth tokens, credentials, and user PII are NEVER included in bridge messages.
   React.useEffect(() => {
-    if (!bridge) {
+    const hasBridge = !!bridge;
+    const hasDirectCallback = !!onDocumentStreamEventProp;
+
+    if (!hasBridge && !hasDirectCallback) {
       setOnDocumentStreamEvent(null);
       return;
     }
 
-    setOnDocumentStreamEvent((event) => {
+    setOnDocumentStreamEvent(event => {
       try {
-        switch (event.type) {
-          case 'document_stream_start':
-            bridge.emit('document_stream_start', {
-              operationId: event.operationId,
-              targetPosition: event.targetPosition,
-              operationType: event.operationType,
-            });
-            break;
+        // Path 1: BroadcastChannel bridge (legacy cross-pane path)
+        if (bridge) {
+          switch (event.type) {
+            case 'document_stream_start':
+              bridge.emit('document_stream_start', {
+                operationId: event.operationId,
+                targetPosition: event.targetPosition,
+                operationType: event.operationType,
+              });
+              break;
 
-          case 'document_stream_token':
-            bridge.emit('document_stream_token', {
-              operationId: event.operationId,
-              token: event.token,
-              index: event.index,
-            });
-            break;
+            case 'document_stream_token':
+              bridge.emit('document_stream_token', {
+                operationId: event.operationId,
+                token: event.token,
+                index: event.index,
+              });
+              break;
 
-          case 'document_stream_end':
-            bridge.emit('document_stream_end', {
-              operationId: event.operationId,
-              cancelled: event.cancelled,
-              totalTokens: event.totalTokens,
-            });
-            break;
+            case 'document_stream_end':
+              bridge.emit('document_stream_end', {
+                operationId: event.operationId,
+                cancelled: event.cancelled,
+                totalTokens: event.totalTokens,
+              });
+              break;
+          }
+        }
+
+        // Path 2: Direct callback (unified page, zero-serialization)
+        if (onDocumentStreamEventProp) {
+          onDocumentStreamEventProp(event);
         }
       } catch (err) {
-        console.error('[SprkChat] Failed to forward document_stream event to bridge:', err);
+        console.error('[SprkChat] Failed to forward document_stream event:', err);
       }
     });
 
     return () => {
       setOnDocumentStreamEvent(null);
     };
-  }, [bridge, setOnDocumentStreamEvent]);
+  }, [bridge, onDocumentStreamEventProp, setOnDocumentStreamEvent]);
 
   // Auto-scroll to bottom on new messages
   React.useEffect(() => {
@@ -779,9 +793,12 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     (messageIndex: number) => {
       if (!session || !pendingPlanId || isPlanApproving) {
         console.warn(
-          '[SprkChat] handlePlanProceed: cannot proceed — session:', !!session,
-          ', pendingPlanId:', pendingPlanId,
-          ', isPlanApproving:', isPlanApproving
+          '[SprkChat] handlePlanProceed: cannot proceed — session:',
+          !!session,
+          ', pendingPlanId:',
+          pendingPlanId,
+          ', isPlanApproving:',
+          isPlanApproving
         );
         return;
       }
@@ -798,9 +815,12 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       // Diagnostic: log plan approval context
       console.log(
         '[SprkChat] handlePlanProceed: approving plan —',
-        'planId:', pendingPlanId,
-        ', pendingPlanData:', JSON.stringify(pendingPlanData),
-        ', sessionId:', session.sessionId
+        'planId:',
+        pendingPlanId,
+        ', pendingPlanData:',
+        JSON.stringify(pendingPlanData),
+        ', sessionId:',
+        session.sessionId
       );
 
       const planIdToApprove = pendingPlanId;
@@ -877,9 +897,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                   updateMessageMetadataAt(messageIndex, current => ({
                     ...current,
                     responseType: 'plan_preview',
-                    plan: current?.plan?.map(s =>
-                      s.id === stepId ? { ...s, status: 'running' as const } : s
-                    ) ?? current?.plan,
+                    plan:
+                      current?.plan?.map(s => (s.id === stepId ? { ...s, status: 'running' as const } : s)) ??
+                      current?.plan,
                   }));
                 } else if (event.type === 'token' && event.content) {
                   accumulated += event.content;
@@ -893,11 +913,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                   updateMessageMetadataAt(messageIndex, current => ({
                     ...current,
                     responseType: 'plan_preview',
-                    plan: current?.plan?.map(s =>
-                      s.id === stepId
-                        ? { ...s, status: stepStatus as 'completed' | 'failed', result: stepResult }
-                        : s
-                    ) ?? current?.plan,
+                    plan:
+                      current?.plan?.map(s =>
+                        s.id === stepId ? { ...s, status: stepStatus as 'completed' | 'failed', result: stepResult } : s
+                      ) ?? current?.plan,
                   }));
                 } else if (event.type === 'done') {
                   if (accumulated.length === 0) {
@@ -909,9 +928,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                   updateMessageMetadataAt(messageIndex, current => ({
                     ...current,
                     responseType: 'plan_preview',
-                    plan: current?.plan?.map(s =>
-                      s.status === 'completed' ? s : { ...s, status: 'failed' as const }
-                    ) ?? current?.plan,
+                    plan:
+                      current?.plan?.map(s => (s.status === 'completed' ? s : { ...s, status: 'failed' as const })) ??
+                      current?.plan,
                   }));
                   updateLastMessage(`Plan execution error: ${event.content ?? 'Unknown error'}`);
                 }
@@ -937,9 +956,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 updateMessageMetadataAt(messageIndex, current => ({
                   ...current,
                   responseType: 'plan_preview',
-                  plan: current?.plan?.map(s =>
-                    s.status === 'completed' ? s : { ...s, status: 'failed' as const }
-                  ) ?? current?.plan,
+                  plan:
+                    current?.plan?.map(s => (s.status === 'completed' ? s : { ...s, status: 'failed' as const })) ??
+                    current?.plan,
                 }));
                 updateLastMessage(`Plan execution error: ${event.content ?? 'Unknown error'}`);
               }
@@ -956,9 +975,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           updateMessageMetadataAt(messageIndex, current => ({
             ...current,
             responseType: 'plan_preview',
-            plan: current?.plan?.map(s =>
-              s.status === 'completed' ? s : { ...s, status: 'failed' as const }
-            ) ?? current?.plan,
+            plan:
+              current?.plan?.map(s => (s.status === 'completed' ? s : { ...s, status: 'failed' as const })) ??
+              current?.plan,
           }));
           updateLastMessage(`Plan approval failed: ${errorMsg}`);
         } finally {
@@ -986,12 +1005,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    * Called when the user clicks Cancel on a PlanPreviewCard.
    * Logs the cancellation; full dismissal logic added in task 072.
    */
-  const handlePlanCancel = React.useCallback(
-    (_messageIndex: number) => {
-      console.log('[SprkChat] Plan preview cancelled by user');
-    },
-    []
-  );
+  const handlePlanCancel = React.useCallback((_messageIndex: number) => {
+    console.log('[SprkChat] Plan preview cancelled by user');
+  }, []);
 
   /**
    * Called when the user submits an edit message from within PlanPreviewCard.
@@ -1027,9 +1043,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       updateMessageMetadataAt(messageIndex, current => ({
         ...current,
         responseType: 'plan_preview',
-        plan: current?.plan?.map(s =>
-          s.status === 'completed' ? s : { ...s, status: 'failed' as const }
-        ) ?? current?.plan,
+        plan:
+          current?.plan?.map(s => (s.status === 'completed' ? s : { ...s, status: 'failed' as const })) ??
+          current?.plan,
       }));
     },
     [updateMessageMetadataAt]
@@ -1144,7 +1160,12 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         }
 
         // Parse response -- BFF returns SpeFilePersistResponse: { speFileId, filename, url, sizeBytes, uploadedAt }
-        const result = await response.json() as { speFileId: string; filename: string; url: string; sizeBytes: number };
+        const result = (await response.json()) as {
+          speFileId: string;
+          filename: string;
+          url: string;
+          sizeBytes: number;
+        };
 
         // Update persistence state to saved
         setDocumentPersistenceState(prev => {
@@ -1174,49 +1195,37 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    * Used to conditionally show the "Save to matter files" button on
    * document_status messages (FR-14: hide when containerId is absent).
    */
-  const hasContainerId = !!(hostContext?.entityId);
+  const hasContainerId = !!hostContext?.entityId;
 
   // ── FR-13: Drag-and-drop event handlers for document upload ──────────────
 
-  const handleRootDragEnter = React.useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      dragCounterRef.current += 1;
-      if (dragCounterRef.current === 1) {
-        setIsDragging(true);
-      }
-    },
-    [],
-  );
+  const handleRootDragEnter = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (dragCounterRef.current === 1) {
+      setIsDragging(true);
+    }
+  }, []);
 
-  const handleRootDragOver = React.useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-    },
-    [],
-  );
+  const handleRootDragOver = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+  }, []);
 
-  const handleRootDragLeave = React.useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      dragCounterRef.current -= 1;
-      if (dragCounterRef.current <= 0) {
-        dragCounterRef.current = 0;
-        setIsDragging(false);
-      }
-    },
-    [],
-  );
-
-  const handleRootDrop = React.useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
+  const handleRootDragLeave = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
       dragCounterRef.current = 0;
-      // Don't dismiss isDragging here — let SprkChatUploadZone handle the drop
-      // and control the phase transition (success/error auto-dismiss overlay).
-    },
-    [],
-  );
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleRootDrop = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    // Don't dismiss isDragging here — let SprkChatUploadZone handle the drop
+    // and control the phase transition (success/error auto-dismiss overlay).
+  }, []);
 
   /**
    * Handle successful document upload from SprkChatUploadZone.
@@ -1235,7 +1244,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const handleUploadComplete = React.useCallback(
     (doc: UploadedDocument) => {
       // Map BFF response status to document processing status
-      const processingStatus = doc.status === 'ready' ? 'complete' as const : 'processing' as const;
+      const processingStatus = doc.status === 'ready' ? ('complete' as const) : ('processing' as const);
 
       // Build the document status metadata
       const docStatus: IDocumentStatusMessage = {
@@ -1267,12 +1276,15 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       console.debug(
         '[SprkChat] Document uploaded and added to context:',
-        'docId:', doc.documentId,
-        ', fileName:', doc.fileName,
-        ', status:', doc.status,
+        'docId:',
+        doc.documentId,
+        ', fileName:',
+        doc.fileName,
+        ', status:',
+        doc.status
       );
     },
-    [addMessage],
+    [addMessage]
   );
 
   /**
@@ -1286,9 +1298,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           Toast,
           null,
           React.createElement(ToastTitle, null, 'Upload Failed'),
-          React.createElement(ToastBody, null, errorMsg),
+          React.createElement(ToastBody, null, errorMsg)
         ),
-        { intent: 'error', timeout: 8000 },
+        { intent: 'error', timeout: 8000 }
       );
 
       // Dismiss the upload overlay after showing the error briefly
@@ -1296,7 +1308,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         setIsDragging(false);
       }, 2000);
     },
-    [dispatchToast],
+    [dispatchToast]
   );
 
   // Handle context changes — clear cross-pane selection when document/record changes
@@ -1730,11 +1742,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const handleExportWordSuccess = React.useCallback(
     (_wordOnlineUrl: string) => {
       dispatchToast(
-        React.createElement(
-          Toast,
-          null,
-          React.createElement(ToastTitle, null, 'Document opened in Word Online')
-        ),
+        React.createElement(Toast, null, React.createElement(ToastTitle, null, 'Document opened in Word Online')),
         { intent: 'success' }
       );
     },
@@ -1885,18 +1893,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             }),
           };
 
-          return (
-            <SprkChatMessage
-              key={`msg-${index}`}
-              {...msgProps}
-            />
-          );
+          return <SprkChatMessage key={`msg-${index}`} {...msgProps} />;
         })}
 
         {/* Typing indicator — visible between typing_start and first token arrival */}
-        {isTyping && !streamedContent && (
-          <SprkChatTypingIndicator />
-        )}
+        {isTyping && !streamedContent && <SprkChatTypingIndicator />}
 
         {/* Follow-up suggestions shown after the latest assistant response */}
         {suggestions.length > 0 && (

@@ -1,4 +1,9 @@
 /**
+ * @deprecated Use AnalysisAiContext streaming callbacks instead.
+ * This bridge is retained for potential future cross-pane scenarios.
+ * In the unified AnalysisWorkspace, SprkChat communicates via React
+ * context (AnalysisAiContext) rather than BroadcastChannel.
+ *
  * SprkChatBridge - Cross-pane communication bridge for Code Pages
  *
  * Enables typed communication between the SprkChat side pane and Analysis
@@ -227,6 +232,9 @@ function createPostMessageTransport(channelName: string, allowedOrigin: string):
 // ---------------------------------------------------------------------------
 
 /**
+ * @deprecated Use AnalysisAiContext streaming callbacks instead.
+ * This class is retained for potential future cross-pane scenarios.
+ *
  * Cross-pane communication bridge for SprkChat Code Pages.
  *
  * Uses BroadcastChannel as the primary transport (same-origin, low latency)
@@ -295,6 +303,8 @@ export class SprkChatBridge {
   }
 
   /**
+   * @deprecated Use AnalysisAiContext streaming callbacks instead.
+   *
    * Emit a typed event to all listeners on the channel.
    *
    * @param event - The event name
@@ -315,6 +325,8 @@ export class SprkChatBridge {
   }
 
   /**
+   * @deprecated Use AnalysisAiContext streaming callbacks instead.
+   *
    * Subscribe to a typed event. Returns an unsubscribe function.
    *
    * @param event - The event name to listen for
@@ -346,6 +358,8 @@ export class SprkChatBridge {
   }
 
   /**
+   * @deprecated Use AnalysisAiContext streaming callbacks instead.
+   *
    * Close the channel and remove all event listeners.
    * After calling disconnect(), emit() and subscribe() will throw.
    */
@@ -360,6 +374,8 @@ export class SprkChatBridge {
   }
 
   /**
+   * @deprecated Use AnalysisAiContext streaming callbacks instead.
+   *
    * Whether the bridge has been disconnected.
    */
   get isDisconnected(): boolean {

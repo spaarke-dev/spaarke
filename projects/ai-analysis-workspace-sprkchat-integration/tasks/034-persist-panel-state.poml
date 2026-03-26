@@ -1,0 +1,48 @@
+<task id="034" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Persist panel sizes and visibility to sessionStorage</title>
+    <phase>4</phase>
+    <stream>frontend</stream>
+    <tags>code-page, layout</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Ensure panel sizes and visibility state persist to sessionStorage and restore on page load. Verify the full persistence lifecycle.</goal>
+    <context>usePanelLayout should already persist to sessionStorage from task 002. This task hardens and verifies the persistence: save on resize/toggle, restore on mount, handle invalid/missing values gracefully.</context>
+    <constraints>
+      - MUST persist panel sizes on splitter drag end
+      - MUST persist visibility toggles immediately
+      - MUST restore on page load (sessionStorage read in usePanelLayout init)
+      - MUST handle missing/corrupt sessionStorage gracefully (fall back to defaults)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/usePanelLayout.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify usePanelLayout saves sizes on drag end</step>
+    <step>Verify usePanelLayout saves visibility on toggle</step>
+    <step>Verify usePanelLayout reads from sessionStorage on mount</step>
+    <step>Add error handling for corrupt sessionStorage values</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Verified/modified: usePanelLayout.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Panel state persists across page refreshes (within session)</criterion>
+    <criterion>Graceful fallback for missing/corrupt data</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

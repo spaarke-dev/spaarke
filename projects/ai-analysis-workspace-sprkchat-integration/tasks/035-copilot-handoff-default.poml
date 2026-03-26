@@ -1,0 +1,46 @@
+<task id="035" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Default Chat panel visible on M365 Copilot handoff URL</title>
+    <phase>4</phase>
+    <stream>frontend</stream>
+    <tags>code-page, layout</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>When the page loads from an M365 Copilot handoff URL (contains analysisId params), ensure the Chat panel defaults to visible regardless of sessionStorage state.</goal>
+    <context>M365 Copilot handoff sends users to the Analysis Workspace with analysisId and sourceFileId URL params. The Chat panel should be visible by default in this scenario to provide immediate AI assistance.</context>
+    <constraints>
+      - MUST detect handoff URL params (analysisId, sourceFileId)
+      - MUST override sessionStorage chat visibility to show Chat panel
+      - MUST NOT override source panel visibility (respect user preference)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/index.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read index.tsx and URL param parsing</step>
+    <step>Add handoff URL detection (check for analysisId param)</step>
+    <step>Override usePanelLayout initial visibility: Chat=true when handoff detected</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: usePanelLayout.ts or App.tsx (handoff detection)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Chat panel visible by default on handoff URL</criterion>
+    <criterion>Normal loads respect sessionStorage</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

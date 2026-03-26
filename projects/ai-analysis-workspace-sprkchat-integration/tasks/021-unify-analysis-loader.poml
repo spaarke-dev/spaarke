@@ -1,0 +1,50 @@
+<task id="021" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Unify useAnalysisLoader to serve both editor and chat</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, hooks</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Ensure useAnalysisLoader provides all context needed by both the editor and chat panels — analysis record, content, metadata, playbook context — via AnalysisAiContext.</goal>
+    <context>Previously SprkChatPane had its own context resolution (useChatContextMapping). Now useAnalysisLoader in AnalysisWorkspace must provide everything, including chat playbook context.</context>
+    <constraints>
+      - MUST provide analysis record, content, metadata to both editor and chat
+      - MUST resolve chat playbook from analysis context (not separate API call)
+      - MUST NOT duplicate API calls (context loaded once)
+      - MUST expose via AnalysisAiContext for all consumers
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAnalysisLoader.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read useAnalysisLoader.ts to understand what context it currently provides</step>
+    <step>Identify what SprkChatPane's useChatContextMapping provided that useAnalysisLoader doesn't</step>
+    <step>Extend useAnalysisLoader or AnalysisAiProvider to include chat playbook context</step>
+    <step>Wire extended context through AnalysisAiContext</step>
+    <step>Verify no duplicate API calls (context API called once)</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: useAnalysisLoader.ts or AnalysisAiContext.tsx (extended context)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Both editor and chat receive context from single loader</criterion>
+    <criterion>Chat playbook resolved from analysis context</criterion>
+    <criterion>No duplicate API calls</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

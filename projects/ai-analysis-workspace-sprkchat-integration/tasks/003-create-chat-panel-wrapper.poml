@@ -1,0 +1,57 @@
+<task id="003" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Create ChatPanel wrapper component</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, sprkchat</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create a thin ChatPanel wrapper that mounts SprkChat from @spaarke/ui-components with props sourced from AnalysisAiContext. This is the only AnalysisWorkspace-specific file for chat integration.</goal>
+    <context>
+      SprkChat is a shared library component with callback-based props (ADR-012). The ChatPanel wrapper bridges between the workspace-specific AnalysisAiContext and the reusable SprkChat component.
+      ChatPanel reads from useAnalysisAi() context and maps to SprkChatProps: onInsertToEditor, editorSelection, analysisContext, authenticatedFetch, bffBaseUrl.
+    </context>
+    <constraints>
+      - MUST import SprkChat from @spaarke/ui-components (ADR-012)
+      - MUST source all props from AnalysisAiContext (not direct service calls)
+      - MUST use React.memo for performance (prevent re-renders during streaming)
+      - MUST use Fluent design tokens for wrapper styling (ADR-021)
+      - MUST NOT add AnalysisWorkspace dependencies to shared library
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file>src/client/code-pages/SprkChatPane/src/App.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read SprkChat types.ts to understand SprkChatProps interface</step>
+    <step>Read SprkChatPane App.tsx to understand current prop wiring</step>
+    <step>Create ChatPanel.tsx that uses useAnalysisAi() and maps context to SprkChatProps</step>
+    <step>Wrap in React.memo for performance</step>
+    <step>Use makeStyles for wrapper container styling (fill parent, overflow handling)</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/client/code-pages/AnalysisWorkspace/src/components/ChatPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ChatPanel imports SprkChat from @spaarke/ui-components</criterion>
+    <criterion>All props sourced from AnalysisAiContext</criterion>
+    <criterion>Wrapped in React.memo</criterion>
+    <criterion>No shared library modifications</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,47 @@
+<task id="024" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Auth verification — single token acquisition confirmed</title>
+    <phase>3</phase>
+    <stream>testing</stream>
+    <tags>testing, auth</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>020, 021, 022, 023</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Verify unified auth: single MSAL init, single token acquisition, single BFF URL — both editor and chat operations work with shared auth.</goal>
+    <context>Phase 3 consolidated auth. This task verifies the consolidation is complete and correct.</context>
+    <constraints>
+      - MUST verify single MSAL instance (grep for PublicClientApplication)
+      - MUST verify single token acquisition path
+      - MUST run build and tests
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep for PublicClientApplication — expect exactly one instantiation</step>
+    <step>Grep for acquireTokenSilent — verify single acquisition path</step>
+    <step>Verify authenticatedFetch used by both editor and chat operations</step>
+    <step>Run build and tests</step>
+    <step>Document Phase 3 completion</step>
+  </steps>
+
+  <outputs>
+    <output>Phase 3 auth verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Single MSAL instance confirmed</criterion>
+    <criterion>Single token path confirmed</criterion>
+    <criterion>Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

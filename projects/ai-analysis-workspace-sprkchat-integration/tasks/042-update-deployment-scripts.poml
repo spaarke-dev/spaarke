@@ -1,0 +1,44 @@
+<task id="042" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Update deployment scripts for removed web resources</title>
+    <phase>5</phase>
+    <stream>deploy</stream>
+    <tags>deploy, scripts</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>041</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Update deployment scripts and code-page-deploy skill references to remove deprecated web resources (sprk_SprkChatPane, sprk_openSprkChatPane, sprk_SidePaneManager).</goal>
+    <context>Three web resources have been removed from the solution. Deployment scripts and skill references should no longer reference them.</context>
+    <constraints>
+      - MUST update any deployment scripts that reference removed web resources
+      - MUST verify code-page-deploy skill handles AnalysisWorkspace correctly
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep for sprk_SprkChatPane, sprk_openSprkChatPane, sprk_SidePaneManager in scripts/</step>
+    <step>Remove or update references in deployment scripts</step>
+    <step>Verify code-page-deploy skill works for AnalysisWorkspace</step>
+    <step>Document deployment changes</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: deployment scripts (removed references)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No deployment scripts reference removed web resources</criterion>
+    <criterion>AnalysisWorkspace deployment works</criterion>
+  </acceptance-criteria>
+</task>
