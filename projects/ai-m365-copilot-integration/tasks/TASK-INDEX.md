@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-03-26
 > **Total Tasks**: 31
-> **Status**: ✅ 17/31 complete
+> **Status**: ✅ 20/31 complete
 
 ## Status Legend
 
@@ -58,9 +58,9 @@
 
 | # | Task | Status | Tags | Dependencies | Parallel Group |
 |---|------|--------|------|-------------|----------------|
-| 024 | Error Handling and Graceful Degradation | 🔲 | bff-api, error-handling, resilience | 013, 019 | **Group F** |
-| 025 | Telemetry and Interaction Logging | 🔲 | telemetry, logging, observability | 013 | **Group F** |
-| 026 | Admin Controls and Configuration | 🔲 | admin, configuration, dataverse | 010 | **Group F** |
+| 024 | Error Handling and Graceful Degradation | ✅ | bff-api, error-handling, resilience | 013, 019 | **Group F** |
+| 025 | Telemetry and Interaction Logging | ✅ | telemetry, logging, observability | 013 | **Group F** |
+| 026 | Admin Controls and Configuration | ✅ | admin, configuration, dataverse | 010 | **Group F** |
 | 027 | BYOK Deployment Templates | 🔲 | infrastructure, bicep, byok | 012 | **Group F** |
 | 028 | User Documentation | 🔲 | documentation, user-guide | 023 | **Group F** |
 | 029 | Agent Gateway Unit Tests | 🔲 | testing, unit-test | 019, 020, 021 | **Group F** |
