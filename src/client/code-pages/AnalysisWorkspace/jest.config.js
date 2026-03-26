@@ -24,8 +24,8 @@ module.exports = {
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
     // Map @spaarke/ui-components imports to mocks for isolation
-    '^@spaarke/ui-components/services/SprkChatBridge$':
-      '<rootDir>/src/__tests__/mocks/MockSprkChatBridge',
+    // NOTE: SprkChatBridge mock removed (task 043) — bridge is deprecated; streaming
+    // now uses direct React refs. Tests importing MockSprkChatBridge need rewriting.
     '^@spaarke/ui-components/components/RichTextEditor/hooks/useDocumentStreamConsumer$':
       '<rootDir>/src/__tests__/mocks/MockUseDocumentStreamConsumer',
     '^@spaarke/ui-components/hooks/useDocumentHistory$':

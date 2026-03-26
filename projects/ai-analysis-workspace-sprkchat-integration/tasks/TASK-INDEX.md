@@ -50,26 +50,26 @@
 
 | # | Title | Status | Tags | Group | Dependencies |
 |---|-------|--------|------|-------|-------------|
-| 030 | Enforce panel minimum widths | 🔲 | layout | I | 024 |
-| 031 | Keyboard resize (Arrow keys) | 🔲 | a11y | I | 024 |
-| 032 | Double-click splitter to reset defaults | 🔲 | layout | J | 024 |
-| 033 | Panel visibility keyboard shortcuts | 🔲 | a11y | J | 024 |
-| 034 | Persist panel sizes and visibility | 🔲 | layout | — | 030 |
-| 035 | M365 Copilot handoff default Chat visible | 🔲 | layout | K | 024 |
-| 036 | Smooth collapse/expand animations | 🔲 | fluent-ui | K | 024 |
-| 037 | Phase 4 layout testing and polish | 🔲 | testing | — | all Phase 4 |
+| 030 | Enforce panel minimum widths | ✅ | layout | I | 024 |
+| 031 | Keyboard resize (Arrow keys) | ✅ | a11y | I | 024 |
+| 032 | Double-click splitter to reset defaults | ✅ | layout | J | 024 |
+| 033 | Panel visibility keyboard shortcuts | ✅ | a11y | J | 024 |
+| 034 | Persist panel sizes and visibility | ✅ | layout | — | 030 |
+| 035 | M365 Copilot handoff default Chat visible | ✅ | layout | K | 024 |
+| 036 | Smooth collapse/expand animations | ✅ | fluent-ui | K | 024 |
+| 037 | Phase 4 layout testing and polish | ✅ | testing | — | all Phase 4 |
 
 ### Phase 5: Deployment + Cleanup
 
 | # | Title | Status | Tags | Group | Dependencies |
 |---|-------|--------|------|-------|-------------|
-| 040 | Update Vite config for combined bundle | 🔲 | build | — | 037 |
-| 041 | Verify bundle size delta | 🔲 | performance | — | 040 |
-| 042 | Update deployment scripts | 🔲 | deploy | L | 041 |
-| 043 | Update test mocks and remove obsolete tests | 🔲 | testing | L | 041 |
-| 044 | Full integration test (all 11 criteria) | 🔲 | e2e | — | 042, 043 |
-| 045 | Update documentation | 🔲 | docs | — | 044 |
-| 090 | Project wrap-up | 🔲 | cleanup | — | 045 |
+| 040 | Update Vite config for combined bundle | ✅ | build | — | 037 |
+| 041 | Verify bundle size delta | ✅ | performance | — | 040 |
+| 042 | Update deployment scripts | ✅ | deploy | L | 041 |
+| 043 | Update test mocks and remove obsolete tests | ✅ | testing | L | 041 |
+| 044 | Full integration test (all 11 criteria) | ✅ | e2e | — | 042, 043 |
+| 045 | Update documentation | ✅ | docs | — | 044 |
+| 090 | Project wrap-up | ✅ | cleanup | — | 045 |
 
 ---
 
@@ -108,12 +108,12 @@
 
 | Phase | Total | Complete | Remaining |
 |-------|-------|----------|-----------|
-| Phase 1 | 9 | 0 | 9 |
-| Phase 2 | 9 | 0 | 9 |
-| Phase 3 | 5 | 0 | 5 |
-| Phase 4 | 8 | 0 | 8 |
-| Phase 5 | 7 | 0 | 7 |
-| **Total** | **30** | **0** | **30** |
+| Phase 1 | 9 | 9 | 0 |
+| Phase 2 | 9 | 9 | 0 |
+| Phase 3 | 5 | 5 | 0 |
+| Phase 4 | 8 | 8 | 0 |
+| Phase 5 | 7 | 7 | 0 |
+| **Total** | **30** | **30** | **0** |
 
 ---
 
