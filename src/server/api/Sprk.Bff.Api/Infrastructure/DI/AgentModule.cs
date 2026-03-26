@@ -16,21 +16,23 @@ public static class AgentModule
         IConfiguration configuration)
     {
         // Agent token exchange (OBO flow for M365 → Graph/Dataverse)
+        // Note: ValidateOnStart deferred — AgentToken config may not exist until
+        // Entra app registration is complete. Validation happens at first token request.
         services.AddOptions<AgentTokenOptions>()
-            .Bind(configuration.GetSection(AgentTokenOptions.SectionName))
-            .ValidateOnStart();
+            .Bind(configuration.GetSection(AgentTokenOptions.SectionName));
         services.AddSingleton<IValidateOptions<AgentTokenOptions>, AgentTokenOptionsValidator>();
         services.AddScoped<AgentTokenService>();
 
         // Agent configuration (playbook visibility, role restrictions, feature toggles)
         services.AddOptions<AgentConfigurationOptions>()
-            .Bind(configuration.GetSection(AgentConfigurationOptions.SectionName))
-            .ValidateOnStart();
+            .Bind(configuration.GetSection(AgentConfigurationOptions.SectionName));
         services.AddSingleton<AgentConfigurationService>();
 
         // Adaptive Card formatter (loads templates, transforms responses → card JSON)
-        var cardTemplatesPath = Path.Combine(
-            AppContext.BaseDirectory, "cards");
+        // Card templates are in src/solutions/CopilotAgent/cards/ — at runtime, the
+        // formatter builds cards programmatically and doesn't require template files on disk.
+        var cardTemplatesPath = configuration["CopilotAgent:CardTemplatesPath"]
+            ?? Path.Combine(AppContext.BaseDirectory, "cards");
         services.AddSingleton(new AdaptiveCardFormatterService(cardTemplatesPath));
 
         // Handoff URL builder (deep-links to Analysis Workspace + wizard Code Pages)
