@@ -1,14 +1,22 @@
 # Azure Resource Naming Convention
 
-> **Version**: 2.0
-> **Date**: March 13, 2026
-> **Status**: Adopted
+> **Version**: 3.0
+> **Date**: March 25, 2026
+> **Status**: Adopted (v3 — replaces v2)
 
 ## Overview
 
-This document establishes the **authoritative naming convention** for all Azure resources, Dataverse components, code namespaces, Service Bus queues, Redis keys, and Entra ID registrations in the Spaarke deployment package. It supersedes the previous v1.1 "Proposed" version and is now the binding standard for all production resource naming decisions.
+This document establishes the **authoritative naming convention** for all Azure resources, Azure subscriptions, Dataverse components, SharePoint Embedded (SPE) resources, code namespaces, Service Bus queues, Redis keys, and Entra ID registrations in the Spaarke deployment package.
 
-All new production resources **MUST** follow these conventions. The existing dev environment retains its legacy names; production starts clean.
+**v3 changes from v2**:
+- Replaced "shared platform" + "per-customer" model with **per-environment** model
+- AI resources are **per-environment** (not shared) for data separation
+- Added **Azure subscription organization** and billing structure
+- Added **SPE container type** naming convention
+- Removed ambiguous `-prod` suffix on environment-specific resources
+- Added Dataverse solution naming for ALM (SpaarkeCore, SpaarkeFeatures)
+
+All new resources **MUST** follow these conventions. The existing dev environment retains its legacy names; new environments (demo, prod, customer-dedicated) start clean.
 
 ---
 
@@ -17,9 +25,42 @@ All new production resources **MUST** follow these conventions. The existing dev
 1. **Two standard prefixes only**: `sprk_` (Dataverse/code — underscore required by platform) and `spaarke` (Azure resources — descriptive, recognizable)
 2. **Descriptive names** — Every resource name should make its purpose obvious at a glance. No cryptic abbreviations, random suffixes, or legacy holdovers
 3. **Consistent structure** — Same pattern for every resource of the same type
-4. **Environment-aware** — Environment suffix (`-dev`, `-prod`) for isolation
-5. **Customer-scoped** — Customer identifier included in per-customer resources
+4. **Environment is the primary organizer** — The environment name (`dev`, `demo`, `prod`) identifies the deployment purpose, NOT the Dataverse environment type
+5. **One resource group per environment** — Each environment gets a single resource group containing ALL its resources (BFF API, AI, storage, etc.)
 6. **No legacy prefixes** — `spe-*` and `sdap-*` prefixes are **prohibited** for new resources
+
+---
+
+## Azure Subscription Organization
+
+Each environment gets its own Azure subscription for clean cost allocation, quota isolation, and RBAC boundaries.
+
+```
+Billing Account: Spaarke
+└── Management Group: Spaarke Environments
+    ├── Subscription: spaarke-dev            ← Development (existing: "Spaarke SPE Subscription 1")
+    │   └── Dev resources (legacy names, not renamed)
+    │
+    ├── Subscription: spaarke-demo           ← Beta/demo environment
+    │   └── rg-spaarke-demo                  ← All demo resources
+    │
+    ├── Subscription: spaarke-prod           ← Production (future - shared infra for paying customers)
+    │   ├── rg-spaarke-prod                  ← Shared prod BFF API, AI services
+    │   └── rg-spaarke-prod-{customer}       ← Per-customer resources (future)
+    │
+    └── Subscription: spaarke-{customer}     ← Dedicated customer (future, if needed)
+        └── rg-spaarke-{customer}            ← All customer resources
+```
+
+**Cost tracking**: Each subscription has independent billing. Use Azure Cost Management > Cost Analysis to see per-subscription spend. Tag all resources with `environment` and `component` tags for drill-down.
+
+**Required tags on all resources**:
+
+| Tag | Values | Purpose |
+|-----|--------|---------|
+| `environment` | `dev`, `demo`, `prod`, `{customer}` | Cost allocation |
+| `component` | `bff-api`, `ai`, `storage`, `cache`, `messaging` | Component-level costs |
+| `managedBy` | `bicep`, `manual`, `script` | Track how resource was created |
 
 ---
 
@@ -27,14 +68,13 @@ All new production resources **MUST** follow these conventions. The existing dev
 
 ### Azure Resources
 
-Use `spaarke-` for resources with generous name length limits, or `sprk-` when constrained to 24 characters or fewer.
+Use `spaarke-` for resources with generous name length limits, or `sprk-` when constrained to 24 characters or fewer. The `{env}` segment is the **environment name** (dev, demo, prod) — NOT the Dataverse environment type.
 
 ```
-Long names (>24 chars allowed):   spaarke-{purpose}-{env}
-Short names (<=24 char limit):    sprk-{purpose}-{env}
-Per-customer (long):              spaarke-{customer}-{purpose}-{env}
-Per-customer (short):             sprk-{customer}-{purpose}-{env}
-Storage accounts (no hyphens):    sprk{customer}{env}sa
+Standard (>24 chars allowed):    spaarke-{purpose}-{env}
+Short (<=24 char limit):         sprk-{env}-{purpose}
+Storage accounts (no hyphens):   sprk{env}sa
+Per-customer (future):           spaarke-{purpose}-{env}-{customer}
 ```
 
 ### Dataverse Components
@@ -45,11 +85,32 @@ All Dataverse components use the `sprk_` publisher prefix (underscore required b
 Tables:            sprk_{entityname}           e.g., sprk_documentprofile
 Columns:           sprk_{columnname}           e.g., sprk_containerid
 Security Roles:    Spaarke - {Role Name}       e.g., Spaarke - Standard User
-Solutions:         Spaarke{Feature}             e.g., SpaarkeCore, SpaarkeAnalysis
-Environment Vars:  sprk_{variablename}         e.g., sprk_bffapiurl
+Solutions:         Spaarke{Feature}             e.g., SpaarkeCore, SpaarkeFeatures
+Environment Vars:  sprk_{VariableName}         e.g., sprk_BffApiBaseUrl
 Web Resources:     sprk_{resourcename}         e.g., sprk_documentviewer.html
 PCF Controls:      sprk_{ControlName}          e.g., sprk_AiToolAgent
 ```
+
+### Dataverse Solutions (ALM)
+
+| Solution | Purpose | Update Strategy |
+|----------|---------|-----------------|
+| `SpaarkeCore` | Schema: entities, fields, option sets, security roles, sitemaps, model-driven apps, environment variable definitions, business rules, dashboards, connection roles, modifications to standard entities | Full re-export + re-import (unmanaged during beta, managed for prod customers) |
+| `SpaarkeFeatures` | UI: web resources, PCF controls, code pages, ribbon customizations, icons | Full re-export + re-import per release |
+
+### SharePoint Embedded (SPE) Resources
+
+```
+Container Type Name:   Spaarke {Environment} Documents    e.g., "Spaarke Demo Documents"
+Container Type Owner:  BFF API app registration for that environment
+Container Display:     {BusinessUnit} Documents           e.g., "Root BU Documents"
+```
+
+| SPE Resource | Pattern | Dev Example | Demo Example |
+|-------------|---------|-------------|--------------|
+| Container Type Name | `Spaarke {Env} Documents` | `Spaarke PAYGO 1` (legacy) | `Spaarke Demo Documents` |
+| Container Type Owner | BFF API app for that env | `170c98e1-...` (legacy PCF app) | `{demo-bff-app-id}` |
+| Default Container | `{env} Root Documents` | _(existing)_ | `Demo Root Documents` |
 
 ### Code Components
 
@@ -68,142 +129,166 @@ Queue names are descriptive and do not need a prefix — they are scoped by the 
 document-processing          (replaces legacy: sdap-jobs)
 document-indexing
 ai-indexing
-customer-onboarding
-communication-inbound
+sdap-communication
+sdap-jobs
 ```
 
 ### Redis Key Prefixes
 
 ```
-sprk-{env}:{area}:{key}     e.g., sprk-prod:graph:token:{hash}
+sprk-{env}:{area}:{key}     e.g., sprk-demo:graph:token:{hash}
 ```
+
+### Entra ID App Registrations
+
+Each environment gets its **own app registrations** to ensure credential and scope isolation.
+
+| Registration | Pattern | Dev | Demo |
+|-------------|---------|-----|------|
+| BFF API | `Spaarke BFF API - {Env}` | `spe-bff-api` (legacy) | `Spaarke BFF API - Demo` |
+| Dataverse S2S | `Spaarke Dataverse S2S - {Env}` | _(shared)_ | `Spaarke Dataverse S2S - Demo` |
+| UI SPA (MSAL) | `Spaarke UI - {Env}` | _(existing)_ | `Spaarke UI - Demo` |
+| API Scope URI | `api://{appId}/user_impersonation` | `api://spe-bff-api/...` (legacy) | `api://{guid}/user_impersonation` |
 
 ---
 
 ## Complete Resource Naming Matrix
 
-### Azure Resource Types
+### Per-Environment Resources
 
-| Resource Type | Max Length | Convention | Example Dev | Example Prod |
-|--------------|------------|------------|-------------|--------------|
-| Resource Group | 90 | `rg-spaarke-{purpose}-{env}` | `rg-spaarke-shared-dev` | `rg-spaarke-platform-prod` |
-| Key Vault | 24 | `sprk-{purpose}-{env}-kv` | `sprk-shared-dev-kv` | `sprk-platform-prod-kv` |
-| App Service | 60 | `spaarke-{app}-{env}` | `spaarke-bff-dev` | `spaarke-bff-prod` |
-| App Service Plan | 40 | `spaarke-{tier}-{env}-plan` | `spaarke-shared-dev-plan` | `spaarke-platform-prod-plan` |
-| App Service Slot | — | `{app-service}/staging` | `spaarke-bff-dev/staging` | `spaarke-bff-prod/staging` |
-| App Registration | 120 | `Spaarke {Purpose} - {Environment}` | `Spaarke BFF API - Dev` | `Spaarke BFF API - Production` |
+Each environment gets **one resource group** containing ALL its resources. No shared platform resources across environments — each environment is fully self-contained for data separation.
+
+| Resource Type | Max Length | Pattern | Demo Example | Prod Example |
+|--------------|------------|---------|--------------|--------------|
+| Resource Group | 90 | `rg-spaarke-{env}` | `rg-spaarke-demo` | `rg-spaarke-prod` |
+| Key Vault | 24 | `sprk-{env}-kv` | `sprk-demo-kv` | `sprk-prod-kv` |
+| App Service Plan | 40 | `spaarke-{env}-plan` | `spaarke-demo-plan` | `spaarke-prod-plan` |
+| App Service (BFF API) | 60 | `spaarke-bff-{env}` | `spaarke-bff-demo` | `spaarke-bff-prod` |
+| App Service Slot | — | `{app-service}/staging` | `spaarke-bff-demo/staging` | `spaarke-bff-prod/staging` |
+| Azure OpenAI | 64 | `spaarke-openai-{env}` | `spaarke-openai-demo` | `spaarke-openai-prod` |
+| AI Search | 60 | `spaarke-search-{env}` | `spaarke-search-demo` | `spaarke-search-prod` |
+| Document Intelligence | 64 | `spaarke-docintel-{env}` | `spaarke-docintel-demo` | `spaarke-docintel-prod` |
+| Service Bus Namespace | 50 | `spaarke-{env}-sbus` | `spaarke-demo-sbus` | `spaarke-prod-sbus` |
+| Service Bus Queue | 260 | `{purpose}` | `document-processing` | `document-processing` |
+| Redis Cache | 63 | `spaarke-{env}-cache` | `spaarke-demo-cache` | `spaarke-prod-cache` |
+| Redis Key Prefix | N/A | `sprk-{env}:` | `sprk-demo:` | `sprk-prod:` |
+| Storage Account | 24 | `sprk{env}sa` | `sprkdemosa` | `sprkprodsa` |
+| Application Insights | 255 | `spaarke-{env}-insights` | `spaarke-demo-insights` | `spaarke-prod-insights` |
+| Log Analytics | 63 | `spaarke-{env}-logs` | `spaarke-demo-logs` | `spaarke-prod-logs` |
+| AI Foundry Hub | 63 | `sprk-{env}-aif-hub` | `sprk-demo-aif-hub` | `sprk-prod-aif-hub` |
+| AI Foundry Project | 63 | `sprk-{env}-aif-proj` | `sprk-demo-aif-proj` | `sprk-prod-aif-proj` |
+| AI Foundry Storage | 24 | `sprk{env}aifsa` | `sprkdemoaifsa` | `sprkprodaifsa` |
+| App Registration (BFF) | 120 | `Spaarke BFF API - {Env}` | `Spaarke BFF API - Demo` | `Spaarke BFF API - Production` |
+| App Registration (DV) | 120 | `Spaarke Dataverse S2S - {Env}` | `Spaarke Dataverse S2S - Demo` | `Spaarke Dataverse S2S - Production` |
+| App Registration (UI) | 120 | `Spaarke UI - {Env}` | `Spaarke UI - Demo` | `Spaarke UI - Production` |
 | API Scope URI | N/A | `api://{appId}/user_impersonation` | Use Application ID GUID | Use Application ID GUID |
-| Service Bus Namespace | 50 | `spaarke-{customer}-{env}-sb` | `spaarke-servicebus-dev` | `spaarke-demo-prod-sb` |
-| Service Bus Queue | 260 | `{purpose}` (descriptive) | `document-processing` | `document-processing` |
-| Redis Cache | 63 | `spaarke-{customer}-{env}-cache` | `spaarke-cache-dev` | `spaarke-demo-prod-cache` |
-| Redis Key Prefix | N/A | `sprk-{env}:` | `sprk-dev:` | `sprk-prod:` |
-| Storage Account | 24 | `sprk{customer}{env}sa` | `sprkshareddevsa` | `sprkdemoprodsa` |
-| Application Insights | 255 | `spaarke-{purpose}-{env}-insights` | `spaarke-bff-dev-insights` | `spaarke-platform-prod-insights` |
-| Log Analytics | 63 | `spaarke-{purpose}-{env}-logs` | `spaarke-shared-dev-logs` | `spaarke-platform-prod-logs` |
-| Azure OpenAI | 64 | `spaarke-openai-{env}` | `spaarke-openai-dev` | `spaarke-openai-prod` |
-| AI Search | 60 | `spaarke-search-{env}` | `spaarke-search-dev` | `spaarke-search-prod` |
-| Document Intelligence | 64 | `spaarke-docintel-{env}` | `spaarke-docintel-dev` | `spaarke-docintel-prod` |
-| AI Foundry Hub | 63 | `sprk{customer}{env}-aif-hub` | `sprkspaarkedev-aif-hub` | `sprkspaarke-aif-hub` |
-| AI Foundry Project | 63 | `sprk{customer}{env}-aif-proj` | `sprkspaarkedev-aif-proj` | `sprkspaarke-aif-proj` |
-| AI Foundry Storage | 24 | `sprk{customer}{env}aifsa` | `sprkspaarkedevaifsa` | `sprkspaarkeaifsa` |
-| AI Foundry Key Vault | 24 | `sprk{customer}{env}-aif-kv` | `sprkspaarkedev-aif-kv` | `sprkspaarke-aif-kv` |
+
+**API Scope URI**: Always use the Application ID GUID, not a friendly name. This avoids coupling scope URIs to human-readable names.
 
 ---
 
-### Shared Platform Resources (`rg-spaarke-platform-prod`)
+### Demo Environment Full Resource Inventory (`rg-spaarke-demo`)
 
-These resources are deployed once and shared across all customers.
+| Resource Type | Name | Purpose |
+|--------------|------|---------|
+| Resource Group | `rg-spaarke-demo` | All demo environment resources |
+| App Service Plan | `spaarke-demo-plan` | Compute (B1 or P1v3) |
+| App Service (BFF API) | `spaarke-bff-demo` | BFF API for demo |
+| App Service Slot | `spaarke-bff-demo/staging` | Zero-downtime deploy |
+| Key Vault | `sprk-demo-kv` | Demo secrets |
+| Azure OpenAI | `spaarke-openai-demo` | Demo AI models |
+| AI Search | `spaarke-search-demo` | Demo search indexes |
+| Document Intelligence | `spaarke-docintel-demo` | Demo document processing |
+| Service Bus | `spaarke-demo-sbus` | Demo async messaging |
+| Redis Cache | `spaarke-demo-cache` | Demo caching |
+| Storage Account | `sprkdemosa` | Demo file storage |
+| App Insights | `spaarke-demo-insights` | Demo monitoring |
+| Log Analytics | `spaarke-demo-logs` | Demo log aggregation |
 
-| Resource Type | Production Name | Purpose |
-|--------------|----------------|---------|
-| Resource Group | `rg-spaarke-platform-prod` | All shared platform resources |
-| App Service Plan | `spaarke-platform-prod-plan` | Shared compute plan (P1v3) |
-| App Service (BFF API) | `spaarke-bff-prod` | BFF API production instance |
-| App Service Slot | `spaarke-bff-prod/staging` | Staging slot for zero-downtime deploy |
-| Azure OpenAI | `spaarke-openai-prod` | Shared AI models (GPT-4o, GPT-4o-mini, embeddings) |
-| AI Search | `spaarke-search-prod` | Shared search indexes (Standard2, 2 replicas) |
-| Document Intelligence | `spaarke-docintel-prod` | Shared document processing (S0) |
-| App Insights | `spaarke-platform-prod-insights` | Centralized monitoring |
-| Log Analytics | `spaarke-platform-prod-logs` | Centralized log aggregation (180-day retention) |
-| Platform Key Vault | `sprk-platform-prod-kv` | Shared secrets (AI keys, platform creds) |
+### Per-Customer Resources (Future — Production Multi-Tenant)
 
-### Per-Customer Resources (`rg-spaarke-{customer}-prod`)
+When production supports multiple paying customers, each gets isolated data resources within the prod subscription:
 
-These resources are provisioned for each customer onboarding.
+| Resource Type | Pattern | Example (Acme) |
+|--------------|---------|----------------|
+| Resource Group | `rg-spaarke-prod-{customer}` | `rg-spaarke-prod-acme` |
+| Storage Account | `sprk{customer}sa` | `sprkacmesa` |
+| Key Vault | `sprk-{customer}-kv` | `sprk-acme-kv` |
+| Service Bus Namespace | `spaarke-{customer}-sbus` | `spaarke-acme-sbus` |
+| Redis Cache | `spaarke-{customer}-cache` | `spaarke-acme-cache` |
 
-| Resource Type | Production Name Pattern | Demo Example |
-|--------------|------------------------|--------------|
-| Resource Group | `rg-spaarke-{customer}-prod` | `rg-spaarke-demo-prod` |
-| Storage Account | `sprk{customer}prodsa` | `sprkdemoprodsa` |
-| Key Vault | `sprk-{customer}-prod-kv` | `sprk-demo-prod-kv` |
-| Service Bus Namespace | `spaarke-{customer}-prod-sb` | `spaarke-demo-prod-sb` |
-| Redis Cache | `spaarke-{customer}-prod-cache` | `spaarke-demo-prod-cache` |
+> These customer resources share the environment-level AI services and BFF API from `rg-spaarke-prod`.
 
 ---
 
-### Entra ID App Registrations
+### SharePoint Embedded (SPE) Resources
 
-| Registration | Name | Purpose |
-|-------------|------|---------|
-| BFF API (single-tenant) | `Spaarke BFF API - Production` | BFF API auth + Graph access |
-| BFF API (multi-tenant) | `Spaarke Platform - Multi-Tenant` | Cross-tenant Graph access (future) |
-| Dataverse S2S | `Spaarke Dataverse S2S - Production` | Server-to-server Dataverse access |
-| Website (public) | `Spaarke Website - Production` | Self-service registration app auth |
+| SPE Resource | Pattern | Dev (Legacy) | Demo |
+|-------------|---------|--------------|------|
+| Container Type Name | `Spaarke {Env} Documents` | `Spaarke PAYGO 1` | `Spaarke Demo Documents` |
+| Container Type Owner | BFF API app for env | `170c98e1-...` (legacy) | Demo BFF API app ID |
+| Default Container | `{Env} Root Documents` | _(existing)_ | `Demo Root Documents` |
 
-**API Scope URI**: Use the Application ID GUID, not a friendly name.
-
-```
-api://{application-id-guid}/user_impersonation
-```
-
-This avoids coupling scope URIs to human-readable names that may change.
+Each environment gets its **own Container Type** owned by that environment's BFF API app registration. This ensures:
+- Data separation between environments
+- Independent permission management
+- No cross-environment container access
 
 ---
 
 ### Dataverse Environments
 
-| Environment | URL Pattern | Purpose |
-|-------------|-------------|---------|
-| Dev | `spaarkedev1.crm.dynamics.com` | Development/testing (existing) |
-| Demo | `spaarke-demo.crm.dynamics.com` | Demo/trial environment |
-| Customer | `spaarke-{customer}.crm.dynamics.com` | Per-customer environment |
+| Environment | URL Pattern | Dataverse Type | Purpose |
+|-------------|-------------|----------------|---------|
+| Dev | `spaarkedev1.crm.dynamics.com` | Sandbox | Development/testing (legacy name) |
+| Demo | `spaarke-demo.crm.dynamics.com` | Production | Beta testers, demos |
+| Prod | `spaarke-prod.crm.dynamics.com` | Production | Paying customers (future) |
+| Customer | `spaarke-{customer}.crm.dynamics.com` | Production | Dedicated customer (future) |
 
 ---
 
-### Service Bus Queue Names
+## Current State & Migration Plan
 
-Queues are descriptive and scoped by the per-customer Service Bus namespace.
+### Existing Resources (R1 Deployment — March 2026)
 
-| Queue Name | Purpose | Legacy Name (Dev) |
-|------------|---------|-------------------|
-| `document-processing` | Document upload and processing jobs | `sdap-jobs` |
-| `document-indexing` | Document indexing for search | _(new)_ |
-| `ai-indexing` | AI semantic indexing jobs | _(new)_ |
-| `customer-onboarding` | Customer provisioning workflow | _(new)_ |
-| `communication-inbound` | Inbound communication processing | _(new)_ |
+R1 created resources using v2 naming with `-prod` suffix. These need to be migrated to v3 naming.
 
----
+#### Resources to Rename/Recreate for Demo
 
-### Redis Key Prefix Convention
+| Current Name (v2) | New Name (v3) | Action |
+|-------------------|---------------|--------|
+| `rg-spaarke-demo-prod` | `rg-spaarke-demo` | Rename or recreate |
+| `sprk-demo-prod-kv` | `sprk-demo-kv` | Recreate (Key Vaults can't be renamed) |
+| `spaarke-demo-prod-cache` | `spaarke-demo-cache` | Recreate |
+| `sprkdemoprodsa` | `sprkdemosa` | Recreate |
+| `spaarke-demo-prod-sbus` | `spaarke-demo-sbus` | Recreate |
 
-```
-sprk-{env}:{area}:{key}
-```
+#### Resources to Create (New for Demo)
 
-| Area | Key Pattern | Example |
-|------|------------|---------|
-| `graph` | `graph:token:{hash}` | `sprk-prod:graph:token:abc123` |
-| `cache` | `cache:{entity}:{id}` | `sprk-prod:cache:document:42` |
-| `session` | `session:{userId}` | `sprk-prod:session:user-guid` |
-| `job` | `job:status:{jobId}` | `sprk-prod:job:status:job-guid` |
+| Resource | Name | Notes |
+|----------|------|-------|
+| App Service Plan | `spaarke-demo-plan` | New |
+| App Service (BFF API) | `spaarke-bff-demo` | New — each env gets its own BFF API |
+| Azure OpenAI | `spaarke-openai-demo` | New — per-env for data separation |
+| AI Search | `spaarke-search-demo` | New — per-env |
+| Document Intelligence | `spaarke-docintel-demo` | New — per-env |
+| App Insights | `spaarke-demo-insights` | New |
+| Log Analytics | `spaarke-demo-logs` | New |
 
----
+#### Existing "Platform" Resources (R1) — Disposition
 
-## Current State: Legacy Names Audit
+| Current Name | Decision | Reason |
+|-------------|----------|--------|
+| `rg-spaarke-platform-prod` | **Rename to `rg-spaarke-legacy-r1`** or delete | No longer fits the per-env model |
+| `spaarke-bff-prod` | **Keep temporarily** — currently serves dev Dataverse | Reconfigure or replace per env |
+| `sprk-platform-prod-kv` | **Keep as dev secrets** until dev gets proper Key Vault | Contains dev-pointing secrets |
+| `spaarke-openai-prod` | **Rename or keep as dev AI** | Currently used by dev BFF API |
+| `spaarke-search-prod` | **Rename or keep as dev AI** | Same |
+| `spaarke-docintel-prod` | **Rename or keep as dev AI** | Same |
 
 ### Dev Environment (DO NOT RENAME)
 
-The dev environment retains its legacy names. These are documented for reference only.
+The dev environment retains its legacy names. Documented for reference only.
 
 | Resource Type | Current Dev Name | Issue |
 |--------------|-----------------|-------|
@@ -212,89 +297,51 @@ The dev environment retains its legacy names. These are documented for reference
 | Key Vault | `spaarke-spekvcert` | Mixed `spaarke` + `spe` |
 | App Registration | `spe-bff-api` | Uses legacy `spe` prefix |
 | API Scope | `api://spe-bff-api/user_impersonation` | Uses legacy `spe` prefix |
-| Service Bus Namespace | `spaarke-servicebus-dev` | Uses `spaarke` prefix (acceptable) |
+| Service Bus Namespace | `spaarke-servicebus-dev` | `spaarke` prefix (acceptable) |
 | Service Bus Queue | `sdap-jobs` | Uses legacy `sdap` prefix |
-| Redis Instance Prefix | `sdap-dev:` | Uses legacy `sdap` prefix |
-
-### Code References (Dev)
-
-| Location | Current Reference | Impact |
-|----------|-------------------|--------|
-| `appsettings.json` | `spaarke-spekvcert.vault.azure.net` | Key Vault URL |
-| `appsettings.json` | `sdap-dev:` Redis instance | Redis key prefix |
-| PCF Controls | `api://spe-bff-api/user_impersonation` | OAuth scope |
-| Service Bus config | `sdap-jobs` queue | Queue name |
-| Bicep modules | `sdap-jobs` | Infrastructure as Code |
 
 ---
 
-## Migration Notes: Dev vs Production
+## Configuration Strategy
 
-### Strategy
-
-**Dev environment stays as-is. Production starts clean.**
-
-This approach was chosen because:
-1. **No risk to active development** — Renaming dev resources would break existing workflows, configurations, and developer setups
-2. **Clean production baseline** — Production resources use the adopted naming standard from day one, with no legacy artifacts
-3. **No data migration needed** — There is no production data to migrate; production is a greenfield deployment
-4. **Gradual dev cleanup (optional)** — Dev resources can be renamed in a future project when there is a natural opportunity (e.g., environment rebuild)
-
-### What Changes from Dev to Production
-
-| Component | Dev (Legacy -- DO NOT COPY) | Production (Standard) |
-|-----------|---------------------------|----------------------|
-| Resource Group | `spe-infrastructure-westus2` | `rg-spaarke-platform-prod` |
-| App Service | `spe-api-dev-67e2xz` | `spaarke-bff-prod` |
-| Key Vault | `spaarke-spekvcert` | `sprk-platform-prod-kv` |
-| Service Bus Namespace | `spaarke-servicebus-dev` | `spaarke-demo-prod-sb` |
-| Service Bus Queue | `sdap-jobs` | `document-processing` |
-| Redis Key Prefix | `sdap-dev:` | `sprk-prod:` |
-| App Registration | `spe-bff-api` | `Spaarke BFF API - Production` |
-| API Scope | `api://spe-bff-api/...` | `api://{app-id-guid}/...` |
-
-### Configuration Strategy
-
-Production uses environment variables and Key Vault references to decouple resource names from application code:
+Each environment uses **Key Vault references** in App Service settings. The Key Vault name is the only environment-specific value in `appsettings.{Environment}.json`:
 
 ```json
-// appsettings.Production.json — Key Vault references
+// appsettings.Demo.json
 {
-  "ConnectionStrings": {
-    "ServiceBus": "@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=servicebus-connection)",
-    "Redis": "@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=redis-connection)",
-    "Storage": "@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=storage-connection)"
+  "KeyVault": {
+    "VaultName": "sprk-demo-kv"
   }
 }
 ```
 
+All other secrets resolve at runtime via Key Vault references:
+
 ```bash
-# App Service Configuration (environment variables)
-KEY_VAULT_NAME=sprk-platform-prod-kv
-REDIS_INSTANCE_NAME=sprk-prod:
-JOB_QUEUE_NAME=document-processing
-BFF_API_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# App Service Configuration (Key Vault references — same secret names across all environments)
+Dataverse__ServiceUrl = @Microsoft.KeyVault(VaultName=sprk-demo-kv;SecretName=Dataverse-ServiceUrl)
+AzureOpenAI__Endpoint = @Microsoft.KeyVault(VaultName=sprk-demo-kv;SecretName=AzureOpenAI-Endpoint)
+# etc.
 ```
+
+This means the **same BFF API code artifact** deploys to any environment — only the Key Vault name and its secrets differ.
 
 ---
 
-## Customer Deployment Naming
+## Automation Auth Requirements
 
-For customer-hosted deployments, include the customer identifier:
+For fully automated provisioning (CI/CD, `Provision-Customer.ps1`), these service principal permissions are required:
 
-```
-Per-customer:  sprk-{customer}-{purpose}-{env}
-```
+| Service Principal | Scope | Required Roles/Permissions |
+|-------------------|-------|----------------------------|
+| `Spaarke Provisioning SP` | Azure Subscription | Contributor, Key Vault Secrets Officer |
+| `Spaarke Provisioning SP` | Entra ID | Application Administrator (app registrations) |
+| `Spaarke BFF API - {Env}` | Microsoft Graph | `FileStorageContainer.Selected` (Application) |
+| `Spaarke BFF API - {Env}` | SharePoint | `Container.Selected` (Application) |
+| `Spaarke Dataverse S2S - {Env}` | Dataverse | System Administrator security role |
+| PAC CLI auth | Dataverse | System Administrator (for solution import) |
 
-**Example (Contoso):**
-
-| Resource | Name |
-|----------|------|
-| Resource Group | `rg-spaarke-contoso-prod` |
-| Key Vault | `sprk-contoso-prod-kv` |
-| Storage Account | `sprkcontosoprodsa` |
-| Service Bus | `spaarke-contoso-prod-sb` |
-| Redis | `spaarke-contoso-prod-cache` |
+**For manual provisioning** (current approach): Azure CLI interactive login (`az login`) + PAC CLI interactive login (`pac auth create`) are sufficient.
 
 ---
 
@@ -317,4 +364,4 @@ Per-customer:  sprk-{customer}-{purpose}-{env}
 
 ---
 
-*Adopted: March 13, 2026. This is the authoritative naming reference for all Spaarke production resources.*
+*v3 Adopted: March 25, 2026. Supersedes v2 (March 13, 2026). This is the authoritative naming reference for all Spaarke resources.*
