@@ -333,7 +333,7 @@ M365 Copilot Chat is **limited to model-driven apps** — it does NOT extend to 
 | **Custom Engine Agent via web channel** | M365 Agents SDK supports web/custom app channel — embed in external workspace | Medium |
 | **Direct SprkChat embed** | Continue current approach — SprkChat React component in our SPA | Already done |
 
-**Recommendation**: Phase 2 — evaluate once MCP server (Tier 3) is built, since the same tools serve all channels.
+**Recommendation**: Phase 2 — evaluate once Custom Engine Agent is shipping, since the same BFF tools serve all channels.
 
 ---
 
@@ -715,7 +715,7 @@ All wizards use the same launch pattern: `Xrm.Navigation.navigateTo({ pageType: 
 | **SSO Token Flow** | M365 → OBO → BFF token exchange (pattern exists from Outlook add-in) | Medium |
 | **Azure Bot Service Registration** | Bot registration, channel config, Teams app manifest | Small |
 | **Declarative Agent Manifest** | `declarativeAgent.json` + `spaarke-api-plugin.json` + `spaarke-bff-openapi.yaml` for Tier 1 agent | Small-Medium |
-| **MCP Server** | Expose BFF tools via Model Context Protocol (Phase 3) | Medium-Large |
+| **MCP Server** | Expose BFF tools via Model Context Protocol (R2 — customer extensibility play) | Medium-Large |
 
 ### Existing Components Reused (No Changes)
 
@@ -763,7 +763,7 @@ Copilot Studio adds value only for specific interaction patterns Path A cannot d
 
 ### Where Copilot Studio DOES Fit: Customer Extensibility
 
-Copilot Studio becomes relevant for **customer extensibility** after we ship the MCP server (Tier 3). At that point:
+Copilot Studio becomes relevant for **customer extensibility** after we ship the MCP server (R2, Tier 3). At that point:
 
 ```
 SPAARKE SHIPS (We build):
@@ -919,8 +919,8 @@ The following are **out of scope for R1** but architecturally enabled by the wor
 | **Teams bot** | Different channel, different UX patterns | Agent gateway endpoint, Adaptive Card templates |
 | **Outlook plugin** | Requires message extension architecture | SSO token flow, playbook invocation |
 | **Copilot Chat standalone** | Broader distribution, different auth model | Custom Engine Agent pattern |
-| **Power Pages Agent API** | External portal, different security model | MCP server (uses same BFF tools) |
-| **MCP server** | Universal tool exposure — enables customer extensibility | BFF tool handlers already exposed via agent gateway |
+| **Power Pages Agent API** | External portal, different security model | Agent gateway endpoint, BFF tools |
+| **MCP server** | Customer extensibility play — not needed when we control both sides | BFF tool handlers exposed via agent gateway |
 | **Agent 365 governance** | Enterprise control plane (GA May 1) | Agent registration pattern from Phase 4 |
 | **Cross-agent orchestration** | Multi-agent delegation | Playbook dispatcher + structured outputs |
 
@@ -979,7 +979,7 @@ Results returned with user's authorization enforced
 - **M365 Copilot GA in MDA** (April 13, 2026) — for Declarative Agent deployment
 - **M365 Agents SDK** (GA) — for Custom Engine Agent
 - **Azure Bot Service** — hosting for the agent handler
-- **MCP specification** — for Tier 3 tool exposure
+- **MCP specification** — for Tier 3 tool exposure (R2)
 - **Agent 365** (GA May 1, 2026) — for Tier 4 governance
 
 ---
