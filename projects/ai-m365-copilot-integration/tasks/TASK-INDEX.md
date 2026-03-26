@@ -26,7 +26,7 @@
 | 004 | Spike: Action.Submit in API Plugin Responses | 🔲 | spike, m365, adaptive-cards | 002 | **Group A** |
 | 005 | Spike: End-to-End File Pipeline | 🔲 | spike, m365, documents | 003 | Serial (after Spike 1) |
 | 006 | BFF API OpenAPI Specification | ✅ | api, openapi, declarative-agent | 001 | **Group B** |
-| 007 | Declarative Agent Manifest | 🔲 | m365, declarative-agent, manifest | 001 | **Group B** |
+| 007 | Declarative Agent Manifest | ✅ | m365, declarative-agent, manifest | 001 | **Group B** |
 | 008 | API Plugin Function Definitions | 🔲 | m365, api-plugin, declarative-agent | 006 | Serial (after OpenAPI) |
 | 009 | Sideload and Validate Declarative Agent | 🔲 | m365, declarative-agent, validation | 006, 007, 008 | Serial |
 
@@ -34,7 +34,7 @@
 
 | # | Task | Status | Tags | Dependencies | Parallel Group |
 |---|------|--------|------|-------------|----------------|
-| 010 | Agent Gateway Adapter Endpoints | 🔲 | bff-api, api, agent-gateway | 009 | **Group C** |
+| 010 | Agent Gateway Adapter Endpoints | ✅ | bff-api, api, agent-gateway | 009 | **Group C** |
 | 011 | SSO Token Flow for M365 Agent | 🔲 | auth, sso, obo | 009 | **Group C** |
 | 012 | Azure Bot Service Registration | 🔲 | infrastructure, azure, bot-service | 002 | **Group C** |
 | 013 | SpaarkeAgentHandler Implementation | 🔲 | bff-api, m365, agents-sdk | 010, 011 | **Group D** |
