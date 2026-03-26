@@ -1,0 +1,46 @@
+<task id="017" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Remove contextService.ts and related test files</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>code-page, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>MINIMAL</rigor>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>012</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Remove contextService.ts (Xrm context polling) and its test file — context now comes from AnalysisWorkspace's own loader.</goal>
+    <context>contextService.ts polled Xrm every 2 seconds to detect navigation context for SprkChatPane. This polling approach is no longer needed — context comes from useAnalysisLoader in the unified page.</context>
+    <constraints>
+      - MUST remove contextService.ts (if not already removed with SprkChatPane directory in task 012)
+      - MUST remove contextService.test.ts
+      - MUST verify no remaining references
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SprkChatPane/src/services/contextService.ts</file>
+      <file>src/client/code-pages/SprkChatPane/src/__tests__/services/contextService.test.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify files are removed (may already be gone from task 012 directory removal)</step>
+    <step>Grep for contextService imports across entire codebase</step>
+    <step>Remove any remaining references</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Verified: contextService.ts removed (or confirmed removed by task 012)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No contextService references in codebase</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

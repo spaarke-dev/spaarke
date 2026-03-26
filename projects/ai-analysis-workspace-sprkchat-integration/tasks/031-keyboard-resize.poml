@@ -1,0 +1,51 @@
+<task id="031" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Add keyboard resize (Arrow keys on focused splitter)</title>
+    <phase>4</phase>
+    <stream>frontend</stream>
+    <tags>code-page, a11y</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add keyboard accessibility to PanelSplitter: Arrow Left/Right resize panels, Tab focuses splitter, role="separator" for screen readers.</goal>
+    <context>Splitters should be keyboard-accessible per WCAG 2.1 AA. When focused, Left/Right arrows adjust panel sizes by a fixed step (e.g., 20px).</context>
+    <constraints>
+      - MUST add tabIndex, role="separator", aria-valuenow, aria-valuemin, aria-valuemax
+      - MUST handle ArrowLeft/ArrowRight keys to resize
+      - MUST respect minimum panel widths during keyboard resize
+      - MUST meet WCAG 2.1 AA (ADR-021)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read PanelSplitter.tsx</step>
+    <step>Add tabIndex={0}, role="separator", and ARIA attributes</step>
+    <step>Add onKeyDown handler for ArrowLeft/ArrowRight</step>
+    <step>Wire keyboard resize to usePanelLayout</step>
+    <step>Verify focus indicator visible (Fluent tokens)</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: PanelSplitter.tsx (keyboard accessibility)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Splitter focusable via Tab</criterion>
+    <criterion>Arrow keys resize panels</criterion>
+    <criterion>ARIA attributes present</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

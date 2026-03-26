@@ -1,0 +1,47 @@
+<task id="014" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Remove ribbon button XML and LegalWorkspace script injection</title>
+    <phase>2</phase>
+    <stream>dataverse</stream>
+    <tags>dataverse, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>009</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the global ribbon button XML that launched SprkChat side pane, and remove the SidePaneManager script injection from LegalWorkspace.</goal>
+    <context>The SprkChat ribbon button opened the side pane. LegalWorkspace index.html had a script tag injecting SidePaneManager. Both are no longer needed.</context>
+    <constraints>
+      - MUST remove ribbon XML file for SprkChat button
+      - MUST remove SidePaneManager script injection from LegalWorkspace index.html
+      - MUST NOT remove other ribbon buttons or LegalWorkspace functionality
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/index.html</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Find and remove SprkChat ribbon button XML file</step>
+    <step>Read LegalWorkspace index.html and remove SidePaneManager script injection</step>
+    <step>Verify LegalWorkspace still functions without SidePaneManager</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Deleted: SprkChat ribbon button XML</output>
+    <output>Modified: LegalWorkspace/index.html (removed script injection)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChat ribbon button XML removed</criterion>
+    <criterion>SidePaneManager script injection removed from LegalWorkspace</criterion>
+    <criterion>LegalWorkspace still builds and functions</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,66 @@
+<task id="001" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Create AnalysisAiContext and AnalysisAiProvider</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, context</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create the AnalysisAiContext shared React context and AnalysisAiProvider that provides analysis state, chat state, editor refs, selection state, and auth context to all panels in the unified workspace.</goal>
+    <context>
+      Currently AnalysisWorkspace and SprkChatPane are separate Code Pages communicating via BroadcastChannel.
+      This task creates the foundational shared context that replaces cross-pane messaging with React context + callback props.
+      The context must provide everything both the editor and chat panels need, sourced from the existing useAnalysisLoader, useAuth, and editor ref patterns.
+    </context>
+    <constraints>
+      - MUST use React 19 APIs (this is a Code Page, not PCF)
+      - MUST keep SprkChat-compatible types (callback-based props per ADR-012)
+      - MUST use Fluent design tokens for any styling (ADR-021)
+      - MUST NOT import SprkChat components — only define the context shape
+      - MUST NOT add AnalysisWorkspace-specific types to shared library
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAnalysisLoader.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/context/AuthContext.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/types/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-012-shared-components.md</adr>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read existing AuthContext.tsx, useAnalysisLoader.ts, and SprkChat types.ts to understand current state shapes</step>
+    <step>Define AnalysisAiContextValue interface with: analysisState, chatState (session, playbook), editorRef, editorSelection, auth (authenticatedFetch, bffBaseUrl), panel callbacks (onInsertToEditor, onSendMessage)</step>
+    <step>Create AnalysisAiContext.tsx in src/client/code-pages/AnalysisWorkspace/src/context/ with createContext and useAnalysisAi hook</step>
+    <step>Create AnalysisAiProvider component that composes existing hooks (useAnalysisLoader, useAuth) and exposes unified context</step>
+    <step>Export context, provider, and hook from context module</step>
+    <step>Verify build: npm run build in AnalysisWorkspace</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/client/code-pages/AnalysisWorkspace/src/context/AnalysisAiContext.tsx</output>
+    <output>Successful build with no errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AnalysisAiContext created with typed context value</criterion>
+    <criterion>AnalysisAiProvider composes useAnalysisLoader and useAuth</criterion>
+    <criterion>useAnalysisAi hook exported for consumer components</criterion>
+    <criterion>No shared library dependencies added — context is workspace-local</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

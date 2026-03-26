@@ -1,0 +1,48 @@
+<task id="011" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Remove SprkChat side pane launch code from App.tsx</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>code-page, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>009</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the legacy SprkChat side pane launch code from App.tsx (approximately lines 416-493) and all related side pane management logic.</goal>
+    <context>During Phase 1, both embedded and side pane approaches worked simultaneously. Now that embedded is verified, remove the side pane launch path entirely.</context>
+    <constraints>
+      - MUST remove all sidePanes.create/open/close calls
+      - MUST remove useEffect hooks related to side pane lifecycle
+      - MUST remove any sidePaneManager references
+      - MUST NOT remove the embedded ChatPanel (that's the new path)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Identify all side pane related code in App.tsx (Xrm.App.sidePanes calls, launch functions, state)</step>
+    <step>Remove side pane launch code block</step>
+    <step>Remove side pane state variables and useEffect hooks</step>
+    <step>Remove any orphaned imports</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: App.tsx (side pane code removed, significantly shorter)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No Xrm.App.sidePanes references in App.tsx</criterion>
+    <criterion>Embedded ChatPanel remains functional</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

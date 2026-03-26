@@ -1,0 +1,52 @@
+<task id="043" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Update test mocks and remove obsolete test files</title>
+    <phase>5</phase>
+    <stream>testing</stream>
+    <tags>testing, cleanup</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>041</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Update AnalysisWorkspace test mocks for the new three-panel architecture, remove obsolete test files (BroadcastChannel mocks, SprkChatBridge mocks), and ensure all tests pass.</goal>
+    <context>The test suite has mocks for BroadcastChannel, SprkChatBridge, and the old two-panel layout. These need to be updated for the new architecture.</context>
+    <constraints>
+      - MUST remove MockBroadcastChannel.ts, MockSprkChatBridge.ts
+      - MUST update App.test.tsx for three-panel layout
+      - MUST add basic tests for AnalysisAiContext
+      - MUST ensure all existing tests pass (with updates)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/__tests__/App.test.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/__tests__/mocks/MockBroadcastChannel.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/__tests__/mocks/MockSprkChatBridge.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Remove obsolete mock files (MockBroadcastChannel, MockSprkChatBridge)</step>
+    <step>Update App.test.tsx for three-panel layout</step>
+    <step>Add AnalysisAiContext provider mock for tests</step>
+    <step>Update any tests that reference removed components</step>
+    <step>Run full test suite and fix failures</step>
+  </steps>
+
+  <outputs>
+    <output>Deleted: obsolete mock files</output>
+    <output>Modified: test files updated for new architecture</output>
+    <output>All tests passing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Obsolete mocks removed</criterion>
+    <criterion>Tests updated for three-panel layout</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

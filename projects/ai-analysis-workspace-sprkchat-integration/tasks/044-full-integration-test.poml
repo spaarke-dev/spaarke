@@ -1,0 +1,55 @@
+<task id="044" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Full integration test — Analysis Workspace with embedded chat</title>
+    <phase>5</phase>
+    <stream>testing</stream>
+    <tags>testing, e2e</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>042, 043</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Comprehensive integration testing of the unified Analysis Workspace: all 11 graduation criteria from spec.md verified.</goal>
+    <context>This is the final verification before project completion. Every success criterion must be checked.</context>
+    <constraints>
+      - MUST verify all 11 graduation criteria from spec.md
+      - MUST run full build and test suite
+      - MUST verify single HTML file deployment artifact
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/spec.md</file>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify: Single Code Page (one iframe, no side pane)</step>
+    <step>Verify: Zero BroadcastChannel (grep returns zero)</step>
+    <step>Verify: Single MSAL auth (one PublicClientApplication)</step>
+    <step>Verify: Insert to editor works</step>
+    <step>Verify: Inline toolbar round-trip works</step>
+    <step>Verify: SSE streaming to editor works</step>
+    <step>Verify: Resizable three-panel layout with min widths</step>
+    <step>Verify: Collapsible panels with persistence</step>
+    <step>Verify: No AnalysisWorkspace imports in shared library</step>
+    <step>Verify: SprkChatPane web resource removed</step>
+    <step>Verify: Build produces single HTML file</step>
+    <step>Document all results</step>
+  </steps>
+
+  <outputs>
+    <output>Integration test report with all 11 criteria verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 11 graduation criteria pass</criterion>
+    <criterion>Build succeeds</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

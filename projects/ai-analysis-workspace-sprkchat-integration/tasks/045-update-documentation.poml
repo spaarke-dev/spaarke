@@ -1,0 +1,46 @@
+<task id="045" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Update project documentation and CLAUDE.md references</title>
+    <phase>5</phase>
+    <stream>docs</stream>
+    <tags>docs</tags>
+    <estimate>1h</estimate>
+    <rigor>MINIMAL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>044</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Update project CLAUDE.md, README graduation criteria, and any repository-level documentation that references SprkChatPane or the side pane architecture.</goal>
+    <context>Multiple docs may reference the old two-pane architecture. Update to reflect the unified single-page architecture.</context>
+    <constraints>
+      - MUST update project CLAUDE.md with final status
+      - MUST check off graduation criteria in README.md
+      - MUST update any docs that reference SprkChatPane
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/README.md</file>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update README.md graduation criteria (check off completed items)</step>
+    <step>Update CLAUDE.md project status to Complete</step>
+    <step>Grep docs/ for SprkChatPane references and update</step>
+    <step>Update any architecture diagrams mentioning side pane</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: README.md, CLAUDE.md, relevant docs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Graduation criteria updated</criterion>
+    <criterion>No stale SprkChatPane references in docs</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,51 @@
+<task id="018" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Phase 2 verification — grep for BroadcastChannel returns zero</title>
+    <phase>2</phase>
+    <stream>testing</stream>
+    <tags>testing, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>010, 011, 012, 013, 014, 015, 016, 017</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Verify Phase 2 cleanup is complete: zero BroadcastChannel references in AnalysisWorkspace, all removed files confirmed gone, SprkChatBridge properly deprecated.</goal>
+    <context>Phase 2 removed all cross-pane infrastructure. This verification ensures nothing was missed.</context>
+    <constraints>
+      - MUST grep for BroadcastChannel in AnalysisWorkspace — must return zero
+      - MUST grep for openSprkChatPane, SidePaneManager — must return zero
+      - MUST verify SprkChatBridge has @deprecated annotations
+      - MUST run full build and tests
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep for BroadcastChannel in src/client/code-pages/AnalysisWorkspace/ — expect zero results</step>
+    <step>Grep for openSprkChatPane across codebase — expect zero results</step>
+    <step>Grep for SidePaneManager across codebase — expect zero results (except deprecated reference)</step>
+    <step>Verify SprkChatBridge.ts has @deprecated tags</step>
+    <step>Run full build: npm run build in AnalysisWorkspace</step>
+    <step>Run tests: npm test in AnalysisWorkspace</step>
+    <step>Document Phase 2 completion</step>
+  </steps>
+
+  <outputs>
+    <output>Phase 2 verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Zero BroadcastChannel references in AnalysisWorkspace</criterion>
+    <criterion>Zero openSprkChatPane references</criterion>
+    <criterion>SprkChatBridge deprecated properly</criterion>
+    <criterion>Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

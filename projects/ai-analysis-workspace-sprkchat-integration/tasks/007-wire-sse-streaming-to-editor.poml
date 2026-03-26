@@ -1,0 +1,58 @@
+<task id="007" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Wire SSE streaming to editor via direct ref</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, streaming</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>005</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Wire SprkChat's SSE streaming to write tokens directly to the Lexical editor via ref, replacing the BroadcastChannel document_stream_start/token/end event path.</goal>
+    <context>
+      Currently, SprkChat SSE streaming emits tokens via SprkChatBridge (BroadcastChannel) and DocumentStreamBridge receives them to write to the editor.
+      In the unified page, streaming callbacks go directly through AnalysisAiContext to the editor ref — zero serialization, zero latency.
+      The useDocumentStreaming hook in AnalysisWorkspace currently listens to BroadcastChannel; it should be updated to receive tokens directly.
+    </context>
+    <constraints>
+      - MUST bypass React re-render cycle during streaming (write directly to editor via ref)
+      - MUST maintain start/token/end lifecycle for editor state management
+      - MUST NOT modify SprkChat streaming internals in shared library
+      - MUST preserve undo/redo behavior after streaming completes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useDocumentStreaming.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/DocumentStreamBridge.tsx</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/StreamingIndicator.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read useDocumentStreaming.ts and DocumentStreamBridge.tsx to understand current streaming flow</step>
+    <step>Define streaming callbacks in AnalysisAiContext: onStreamStart, onStreamToken, onStreamEnd</step>
+    <step>Wire streaming callbacks to editor ref methods (bypass React state updates during token flow)</step>
+    <step>Update useDocumentStreaming to consume context callbacks instead of BroadcastChannel</step>
+    <step>Verify StreamingIndicator still shows during active streaming</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: AnalysisAiContext.tsx (streaming callbacks)</output>
+    <output>Modified: useDocumentStreaming.ts (context-based instead of BroadcastChannel)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SSE tokens write directly to editor via ref</criterion>
+    <criterion>No BroadcastChannel in streaming path</criterion>
+    <criterion>No jank during streaming (bypasses React re-render)</criterion>
+    <criterion>StreamingIndicator shows during active stream</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

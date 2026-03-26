@@ -1,0 +1,50 @@
+<task id="040" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Update AnalysisWorkspace Vite config for combined bundle</title>
+    <phase>5</phase>
+    <stream>frontend</stream>
+    <tags>code-page, build</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>037</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Update AnalysisWorkspace Vite config to ensure the combined bundle (editor + chat) produces a valid single-file HTML output with acceptable size.</goal>
+    <context>AnalysisWorkspace now includes SprkChat components (from shared library). Verify the Vite config handles the larger bundle correctly with vite-plugin-singlefile, and optimize if needed (lazy-loading, tree-shaking).</context>
+    <constraints>
+      - MUST use Vite + vite-plugin-singlefile (ADR-026)
+      - MUST produce single HTML file output
+      - MUST verify tree-shaking works for SprkChat shared library imports
+      - Consider lazy-loading ChatPanel if bundle size is excessive
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read current Vite config</step>
+    <step>Build and measure current bundle size</step>
+    <step>Verify single HTML file output</step>
+    <step>Check if ChatPanel should be lazy-loaded (React.lazy + Suspense)</step>
+    <step>Optimize if bundle exceeds reasonable size</step>
+    <step>Verify build produces valid output</step>
+  </steps>
+
+  <outputs>
+    <output>Verified/modified: vite.config.ts</output>
+    <output>Bundle size measurement documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Single HTML file produced</criterion>
+    <criterion>Bundle size measured and documented</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

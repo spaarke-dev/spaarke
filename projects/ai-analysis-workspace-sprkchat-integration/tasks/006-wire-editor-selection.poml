@@ -1,0 +1,58 @@
+<task id="006" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Wire editorSelection from editor state to SprkChat props</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, editor</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Wire editor text selection state through AnalysisAiContext to SprkChat's editorSelection prop, replacing the BroadcastChannel selection_changed event path.</goal>
+    <context>
+      Currently, useSelectionBroadcast listens for text selection in the editor and broadcasts selection_changed via BroadcastChannel.
+      SprkChatPane receives this event to show the InlineAiToolbar and route inline actions.
+      In the unified page, selection state flows through React context — no serialization needed.
+    </context>
+    <constraints>
+      - MUST update selection state via React context (no BroadcastChannel)
+      - MUST debounce selection updates to prevent excessive re-renders
+      - MUST NOT modify InlineAiToolbar in shared library
+      - MUST use React.memo patterns to prevent unnecessary re-renders
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useSelectionBroadcast.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useInlineAiToolbar.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/InlineAiToolbar/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read useSelectionBroadcast.ts to understand current selection detection and broadcast</step>
+    <step>Read useInlineAiToolbar.ts to understand how selection state is consumed</step>
+    <step>Add editorSelection state to AnalysisAiContext</step>
+    <step>Update EditorPanel to write selection text to context instead of BroadcastChannel</step>
+    <step>Add debouncing to selection updates (e.g., 150ms)</step>
+    <step>Verify ChatPanel passes editorSelection to SprkChat</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: AnalysisAiContext.tsx (add editorSelection state)</output>
+    <output>Modified: EditorPanel.tsx (selection state writes to context)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Editor selection text flows to SprkChat via context</criterion>
+    <criterion>Selection updates debounced</criterion>
+    <criterion>No BroadcastChannel in selection path</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

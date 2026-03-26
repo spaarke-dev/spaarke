@@ -1,0 +1,60 @@
+<task id="002" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Create usePanelLayout hook for three-panel management</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, hooks</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create a usePanelLayout hook that manages three-panel visibility, sizes, splitter positions, and sessionStorage persistence for the Editor + Source + Chat layout.</goal>
+    <context>
+      The existing usePanelResize handles two panels with one splitter. The new layout needs three panels (Editor, Source, Chat) with two splitters.
+      Default ratios: ~45% Editor / ~30% Source / ~25% Chat. Panel minimum widths: Editor 300px, Source 200px, Chat 280px.
+      Panel visibility toggleable: Source and Chat can be hidden independently. Editor always visible.
+      State persists to sessionStorage.
+    </context>
+    <constraints>
+      - MUST enforce minimum widths (Editor 300px, Source 200px, Chat 280px)
+      - MUST persist visibility and sizes to sessionStorage
+      - MUST handle all panel visibility combinations (3 visible, 2 visible, 1 visible)
+      - MUST use Fluent design tokens for any styling (ADR-021)
+      - Follow existing usePanelResize patterns where applicable
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/usePanelResize.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read existing usePanelResize.ts and PanelSplitter.tsx to understand current resize patterns</step>
+    <step>Design usePanelLayout API: input (containerRef), output (panelSizes, visibility, splitter handlers, toggle functions)</step>
+    <step>Implement three-panel size calculation with two splitters and minimum width enforcement</step>
+    <step>Implement visibility toggles (toggleSource, toggleChat) with proper redistribution of space</step>
+    <step>Add sessionStorage persistence for sizes and visibility state</step>
+    <step>Export hook from hooks module</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/client/code-pages/AnalysisWorkspace/src/hooks/usePanelLayout.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Hook manages three panels with two splitters</criterion>
+    <criterion>Minimum widths enforced on all panels</criterion>
+    <criterion>Panel visibility toggleable with proper space redistribution</criterion>
+    <criterion>State persisted to sessionStorage</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

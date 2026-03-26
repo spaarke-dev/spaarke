@@ -1,0 +1,55 @@
+<task id="008" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Add panel visibility toggles to toolbar</title>
+    <phase>1</phase>
+    <stream>frontend</stream>
+    <tags>code-page, react, fluent-ui</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add toolbar toggle buttons for Source and Chat panel visibility, with visual indicators showing panel state (visible/hidden).</goal>
+    <context>
+      The AnalysisToolbar currently has buttons for analysis actions. Add two toggle buttons: "Source" and "Chat" that control panel visibility via usePanelLayout.
+      Use Fluent v9 ToggleButton with appropriate icons. State reflects usePanelLayout's visibility state.
+    </context>
+    <constraints>
+      - MUST use Fluent v9 ToggleButton (not custom toggle) (ADR-021)
+      - MUST use @fluentui/react-icons for panel icons
+      - MUST use design tokens for all colors/spacing (ADR-021)
+      - MUST support dark mode (toggle buttons adapt to theme)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/AnalysisToolbar.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read AnalysisToolbar.tsx to understand existing button layout</step>
+    <step>Add Source toggle button (DocumentRegular/DocumentDismissRegular icon)</step>
+    <step>Add Chat toggle button (ChatRegular/ChatDismissRegular icon)</step>
+    <step>Wire toggle handlers to usePanelLayout visibility functions</step>
+    <step>Verify visual state matches panel visibility</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: AnalysisToolbar.tsx (two new toggle buttons)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Source toggle button shows/hides Source panel</criterion>
+    <criterion>Chat toggle button shows/hides Chat panel</criterion>
+    <criterion>Toggle state visually reflects panel visibility</criterion>
+    <criterion>Uses Fluent v9 ToggleButton and react-icons</criterion>
+    <criterion>Dark mode compatible</criterion>
+  </acceptance-criteria>
+</task>

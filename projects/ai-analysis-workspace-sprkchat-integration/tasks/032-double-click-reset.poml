@@ -1,0 +1,45 @@
+<task id="032" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Add double-click splitter to reset default ratios</title>
+    <phase>4</phase>
+    <stream>frontend</stream>
+    <tags>code-page, layout</tags>
+    <estimate>1h</estimate>
+    <rigor>MINIMAL</rigor>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Add double-click handler on PanelSplitter to reset panels to default ratios (45%/30%/25%).</goal>
+    <context>Common UX pattern — double-clicking a splitter resets to default sizes. Also clears sessionStorage for that splitter.</context>
+    <constraints>
+      - MUST reset to default ratios on double-click
+      - MUST clear persisted sizes from sessionStorage
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add onDoubleClick handler to PanelSplitter</step>
+    <step>Reset panel sizes to defaults via usePanelLayout</step>
+    <step>Clear sessionStorage for panel sizes</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Modified: PanelSplitter.tsx (double-click reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Double-click resets to default ratios</criterion>
+    <criterion>SessionStorage cleared</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

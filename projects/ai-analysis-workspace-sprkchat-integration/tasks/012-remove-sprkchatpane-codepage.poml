@@ -1,0 +1,47 @@
+<task id="012" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Remove SprkChatPane Code Page directory entirely</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>code-page, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>009</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the entire SprkChatPane Code Page directory (src/client/code-pages/SprkChatPane/) — it is no longer needed.</goal>
+    <context>SprkChatPane was a separate Code Page that ran in a Dataverse side pane. SprkChat is now embedded directly in AnalysisWorkspace. No other consumers of SprkChatPane exist.</context>
+    <constraints>
+      - MUST remove entire directory: src/client/code-pages/SprkChatPane/
+      - MUST remove any workspace-level references (tsconfig paths, package.json workspaces)
+      - MUST verify no other files import from SprkChatPane
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SprkChatPane/src/App.tsx</file>
+      <file>src/client/code-pages/SprkChatPane/src/index.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep codebase for imports from SprkChatPane to verify no external consumers</step>
+    <step>Remove entire src/client/code-pages/SprkChatPane/ directory</step>
+    <step>Remove any workspace-level references (package.json, tsconfig)</step>
+    <step>Verify build succeeds without SprkChatPane</step>
+  </steps>
+
+  <outputs>
+    <output>Deleted: src/client/code-pages/SprkChatPane/ (entire directory)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SprkChatPane directory does not exist</criterion>
+    <criterion>No broken imports referencing SprkChatPane</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,51 @@
+<task id="037" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Phase 4 layout testing and polish</title>
+    <phase>4</phase>
+    <stream>testing</stream>
+    <tags>testing, code-page</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030, 031, 032, 033, 034, 035, 036</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Comprehensive testing of Phase 4 layout polish: min widths, keyboard resize, persistence, handoff, animations.</goal>
+    <context>Phase 4 added multiple UX enhancements. Verify they all work together without conflicts.</context>
+    <constraints>
+      - MUST test all panel visibility combinations
+      - MUST test keyboard resize with min width constraints
+      - MUST test persistence round-trip
+      - MUST test handoff URL override
+      - MUST run build and all tests
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Test all 4 panel visibility combinations</step>
+    <step>Test keyboard resize (Arrow keys) with min widths</step>
+    <step>Test double-click reset</step>
+    <step>Test persistence: resize → refresh → verify restored</step>
+    <step>Test handoff URL: add analysisId param → verify Chat visible</step>
+    <step>Test reduced-motion: verify animations disabled</step>
+    <step>Run full build and tests</step>
+  </steps>
+
+  <outputs>
+    <output>Phase 4 testing report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All layout features work correctly</criterion>
+    <criterion>No conflicts between features</criterion>
+    <criterion>Build and tests pass</criterion>
+  </acceptance-criteria>
+</task>

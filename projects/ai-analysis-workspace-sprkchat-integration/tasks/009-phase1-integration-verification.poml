@@ -1,0 +1,56 @@
+<task id="009" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Phase 1 integration verification</title>
+    <phase>1</phase>
+    <stream>testing</stream>
+    <tags>testing, code-page</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>004, 005, 006, 007, 008</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Verify Phase 1 integration: three-panel layout works, editor ↔ chat communication works via context, both embedded (new) and side pane (legacy) approaches functional.</goal>
+    <context>
+      Phase 1 should result in a working three-panel layout with SprkChat embedded. The legacy side pane path should still work as fallback.
+      This task verifies all Phase 1 acceptance criteria before proceeding to Phase 2 (removal).
+    </context>
+    <constraints>
+      - MUST verify all Phase 1 deliverables
+      - MUST run existing tests and fix any failures
+      - MUST verify build produces valid single-file output
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/__tests__/App.test.tsx</file>
+      <file>projects/ai-analysis-workspace-sprkchat-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Run full build: npm run build in AnalysisWorkspace</step>
+    <step>Run existing tests: npm test in AnalysisWorkspace</step>
+    <step>Fix any test failures caused by layout restructuring</step>
+    <step>Verify three-panel layout renders (Editor + Source + Chat)</step>
+    <step>Verify panel toggle buttons work (show/hide Source and Chat)</step>
+    <step>Verify build output is single HTML file (Vite + singlefile)</step>
+    <step>Document any issues found for resolution</step>
+  </steps>
+
+  <outputs>
+    <output>All tests passing</output>
+    <output>Build produces valid single-file HTML</output>
+    <output>Phase 1 verification complete</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Build succeeds with no errors</criterion>
+    <criterion>Existing tests pass (with updates for new layout)</criterion>
+    <criterion>Three-panel layout renders correctly</criterion>
+    <criterion>Panel toggles work</criterion>
+  </acceptance-criteria>
+</task>

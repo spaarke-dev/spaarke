@@ -1,0 +1,51 @@
+<task id="022" project="ai-analysis-workspace-sprkchat-integration">
+  <metadata>
+    <title>Single BFF base URL resolution and authenticated fetch</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>code-page, auth, api</tags>
+    <estimate>2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Ensure single BFF base URL resolution and single authenticatedFetch function serve both editor API calls and chat API calls.</goal>
+    <context>Previously SprkChatPane resolved BFF base URL independently. Now AnalysisWorkspace resolves it once and provides it via context.</context>
+    <constraints>
+      - MUST resolve BFF base URL once (from Dataverse Environment Variable or config)
+      - MUST provide single authenticatedFetch function via AnalysisAiContext
+      - MUST use Xrm frame-walk pattern for URL resolution (ADR-026)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/hostContext.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/authService.ts</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read hostContext.ts to understand BFF base URL resolution</step>
+    <step>Verify single BFF URL resolution point</step>
+    <step>Ensure authenticatedFetch wraps MSAL token acquisition + fetch</step>
+    <step>Wire bffBaseUrl and authenticatedFetch through AnalysisAiContext</step>
+    <step>Verify ChatPanel receives both via context</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <outputs>
+    <output>Verified/modified: hostContext.ts, AnalysisAiContext.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Single BFF URL resolution</criterion>
+    <criterion>Single authenticatedFetch for all API calls</criterion>
+    <criterion>ChatPanel receives bffBaseUrl and authenticatedFetch from context</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>
