@@ -49,7 +49,7 @@
 | 017 | Adaptive Card Templates — Playbooks + Analysis | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
 | 018 | Adaptive Card Templates — Communication + Handoff | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
 | 019 | AdaptiveCardFormatterService | 🔲 | bff-api, adaptive-cards, service | 010, 016, 017, 018 | Serial |
-| 020 | HandoffUrlBuilder Service | 🔲 | bff-api, handoff, deep-links | 010 | **Group E** |
+| 020 | HandoffUrlBuilder Service | ✅ | bff-api, handoff, deep-links | 010 | **Group E** |
 | 021 | Playbook Invocation Flow | 🔲 | bff-api, playbooks, agent-gateway | 010, 019 | Serial |
 | 022 | Email Drafting via Agent | 🔲 | bff-api, communications | 010, 019 | **Group E-2** |
 | 023 | Async Playbook Pattern + Status Endpoint | 🔲 | bff-api, api, async, playbooks | 021 | Serial |
