@@ -1,0 +1,115 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "prod",
+      "metadata": {
+        "description": "Environment name: dev, staging, or prod. Drives resource naming and default configurations."
+      }
+    },
+    "location": {
+      "value": "westus2",
+      "metadata": {
+        "description": "Primary Azure region. Choose a region that supports Azure OpenAI and AI Search. See: https://learn.microsoft.com/azure/ai-services/openai/concepts/models#model-summary-table-and-region-availability"
+      }
+    },
+    "dataverseUrl": {
+      "value": "REPLACE_WITH_YOUR_DATAVERSE_URL",
+      "metadata": {
+        "description": "Your Dataverse environment URL, e.g., https://contoso.crm.dynamics.com"
+      }
+    },
+    "botAppId": {
+      "value": "REPLACE_WITH_YOUR_BOT_APP_ID",
+      "metadata": {
+        "description": "Microsoft App ID from your Entra app registration for the Bot Service. Create a single-tenant app registration in Azure Portal > Entra ID > App registrations."
+      }
+    },
+    "appServicePlanSku": {
+      "value": "S1",
+      "metadata": {
+        "description": "App Service Plan SKU. Recommended: S1 for staging, P1v3 for production. Options: B1, B2, B3, S1, S2, S3, P1v3, P2v3, P3v3"
+      }
+    },
+    "openAiModelDeployments": {
+      "value": [
+        {
+          "name": "gpt-4o",
+          "model": "gpt-4o",
+          "version": "2024-08-06",
+          "capacity": 150
+        },
+        {
+          "name": "gpt-4o-mini",
+          "model": "gpt-4o-mini",
+          "version": "2024-07-18",
+          "capacity": 200
+        },
+        {
+          "name": "text-embedding-3-large",
+          "model": "text-embedding-3-large",
+          "version": "1",
+          "capacity": 350
+        }
+      ],
+      "metadata": {
+        "description": "Azure OpenAI model deployments. Capacity is in thousands of tokens per minute (TPM). Adjust capacity based on expected workload. The embedding model is required for AI Search vector indexing."
+      }
+    },
+    "aiSearchSku": {
+      "value": "standard",
+      "metadata": {
+        "description": "Azure AI Search SKU. Recommended: basic for dev, standard for production. Options: basic, standard, standard2, standard3"
+      }
+    },
+    "aiSearchReplicaCount": {
+      "value": 1,
+      "metadata": {
+        "description": "Number of AI Search replicas. Use 2+ for production high availability. Maximum: 12."
+      }
+    },
+    "redisSku": {
+      "value": "Standard",
+      "metadata": {
+        "description": "Redis Cache SKU. Recommended: Basic for dev, Standard for staging, Premium for production (adds persistence and VNet support). Options: Basic, Standard, Premium"
+      }
+    },
+    "redisCapacity": {
+      "value": 1,
+      "metadata": {
+        "description": "Redis capacity. For Basic/Standard (C-family): 0-6. For Premium (P-family): 1-5."
+      }
+    },
+    "botServiceSku": {
+      "value": "F0",
+      "metadata": {
+        "description": "Bot Service SKU. F0 is free tier (10K messages/month). S1 for production (unlimited messages). Options: F0, S1"
+      }
+    },
+    "botDisplayName": {
+      "value": "Spaarke AI Assistant",
+      "metadata": {
+        "description": "Display name for the bot shown in Microsoft Teams and M365 Copilot."
+      }
+    },
+    "logRetentionDays": {
+      "value": 90,
+      "metadata": {
+        "description": "Log Analytics workspace data retention in days. Range: 30-730. 90 days recommended for production."
+      }
+    },
+    "tags": {
+      "value": {
+        "environment": "prod",
+        "application": "spaarke",
+        "deploymentModel": "byok",
+        "managedBy": "bicep",
+        "customer": "REPLACE_WITH_CUSTOMER_NAME"
+      },
+      "metadata": {
+        "description": "Tags applied to all deployed resources. Update the 'customer' tag with your organization name for cost tracking."
+      }
+    }
+  }
+}
