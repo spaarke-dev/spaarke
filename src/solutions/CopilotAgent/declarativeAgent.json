@@ -30,11 +30,10 @@
       "text": "Show my assignments this week"
     }
   ],
-  "capabilities": [
+  "actions": [
     {
-      "name": "actions",
-      "description": "Spaarke BFF API integration for document search, playbook invocation, matter queries, and email drafting",
-      "plugin_file": "spaarke-api-plugin.json"
+      "id": "spaarkeApiPlugin",
+      "file": "spaarke-api-plugin.json"
     }
   ]
 }
