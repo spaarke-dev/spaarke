@@ -7,8 +7,8 @@
  * the document is replaced or an error/cancellation occurs.
  *
  * NOTE: The actual document content replacement (undo snapshot + setHtml) is handled
- * by the existing DocumentStreamBridge / useDocumentStreaming pipeline. This hook
- * only manages overlay visibility and progress state.
+ * by the streaming pipeline via AnalysisAiContext. This hook only manages overlay
+ * visibility and progress state.
  *
  * Data flow:
  *   Backend SSE "progress" → SprkChat → BroadcastChannel → SprkChatBridge
@@ -40,7 +40,7 @@ import type { SprkChatBridge } from '@spaarke/ui-components/services/SprkChatBri
 export interface UseReAnalysisProgressOptions {
   /**
    * SprkChatBridge instance to subscribe to events on.
-   * Typically obtained from the bridge created in App.tsx or DocumentStreamBridge.
+   * Typically obtained from the bridge created in App.tsx.
    * When null, subscriptions are skipped.
    */
   bridge: SprkChatBridge | null;

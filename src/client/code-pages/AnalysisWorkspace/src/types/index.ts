@@ -153,33 +153,6 @@ export interface HostContext {
 }
 
 // ---------------------------------------------------------------------------
-// Selection Event Types (for SprkChatBridge)
-// ---------------------------------------------------------------------------
-
-/**
- * Payload for selection_changed events emitted to SprkChat.
- * Used by useSelectionBroadcast to communicate editor selections.
- */
-export interface SelectionEventPayload {
-  /** Plain text of the selected content */
-  selectedText: string;
-  /** HTML content of the selected content */
-  selectedHtml: string;
-  /** Viewport-relative bounding rectangle of the selection */
-  boundingRect: SelectionBoundingRect;
-  /** Identifies the originating panel */
-  source: 'analysis-editor';
-}
-
-/** Viewport-relative bounding rectangle for a text selection */
-export interface SelectionBoundingRect {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
-// ---------------------------------------------------------------------------
 // Diff Review Types (Task 103)
 // ---------------------------------------------------------------------------
 

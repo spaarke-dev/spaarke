@@ -55,11 +55,6 @@ jest.mock('../hooks/useExportAnalysis', () => ({
   useExportAnalysis: (opts: unknown) => mockUseExportAnalysis(opts),
 }));
 
-// Mock useSelectionBroadcast hook (void return, just needs to not crash)
-jest.mock('../hooks/useSelectionBroadcast', () => ({
-  useSelectionBroadcast: jest.fn(),
-}));
-
 // Mock usePanelResize hook
 jest.mock('../hooks/usePanelResize', () => ({
   usePanelResize: () => ({
@@ -97,11 +92,6 @@ jest.mock('../components/PanelSplitter', () => ({
   },
 }));
 
-jest.mock('../components/DocumentStreamBridge', () => ({
-  DocumentStreamBridge: function MockDocStreamBridge() {
-    return null;
-  },
-}));
 
 // ---------------------------------------------------------------------------
 // Helpers

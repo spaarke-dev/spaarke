@@ -20,16 +20,13 @@
  * Task 062: Toolbar functionality (Save, Export, Copy, Undo/Redo) via
  * useAutoSave, useExportAnalysis, useDocumentHistory, and AnalysisToolbar.
  *
- * Task 002: openSprkChatPane is now called with a SprkChatLaunchContext (analysisId, mode,
- * sourceFileId) so the BFF resolves the correct playbook and knowledge sources. Fires once
- * per analysisId load via a useEffect with [analysisId] dependency array.
+ * Task 002 / Task 011: SprkChat is now embedded directly as a ChatPanel in the right
+ * panel via AnalysisAiContext. The previous Xrm.App.sidePanes launch code and
+ * SprkChatLaunchContext interface have been removed.
  *
- * Task 063: SprkChatBridge document streaming integration via DocumentStreamBridge.
- * The DocumentStreamBridge component wires SprkChatBridge events (document_stream_start,
- * document_stream_token, document_stream_end, document_replaced) to the RichTextEditor's
- * streaming API via useDocumentStreamConsumer. StreamingIndicator renders above the editor.
- *
- * Task 064: Selection broadcast via useSelectionBroadcast (editor -> SprkChat).
+ * Task 010: DocumentStreamBridge and useSelectionBroadcast have been removed.
+ * Streaming state now flows through AnalysisAiContext directly. Selection context
+ * is communicated via React context rather than BroadcastChannel.
  *
  * Task 065: Analysis loading from BFF API via useAnalysisLoader. Document viewer
  * wired into SourceViewerPanel with real preview URLs.
@@ -82,7 +79,6 @@ import { useAuth } from './hooks/useAuth';
 import { useAnalysisLoader } from './hooks/useAnalysisLoader';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useExportAnalysis } from './hooks/useExportAnalysis';
-import { useSelectionBroadcast } from './hooks/useSelectionBroadcast';
 import { useReAnalysisProgress } from './hooks/useReAnalysisProgress';
 import { useAnalysisExecution } from './hooks/useAnalysisExecution';
 import { useDiffReview } from './hooks/useDiffReview';
@@ -91,42 +87,12 @@ import { EditorPanel } from './components/EditorPanel';
 import { SourceViewerPanel } from './components/SourceViewerPanel';
 import { ChatPanel } from './components/ChatPanel';
 import { PanelSplitter } from './components/PanelSplitter';
-import { DocumentStreamBridge } from './components/DocumentStreamBridge';
 import { ReAnalysisProgressOverlay } from './components/ReAnalysisProgressOverlay';
 import { DiffReviewPanel } from './components/DiffReviewPanel';
 import { AnalysisAiProvider } from './context/AnalysisAiContext';
 import { usePanelLayout } from './hooks/usePanelLayout';
 import { getRuntimeConfig } from './services/authInit';
 import { markdownToHtml } from './utils/markdownToHtml';
-
-// ---------------------------------------------------------------------------
-// SprkChat Launch Context (task 002)
-// ---------------------------------------------------------------------------
-
-/**
- * Optional analysis context passed when launching SprkChatPane from AnalysisWorkspace.
- * Mirrors the SprkChatLaunchContext interface in SprkChatPane/launcher/openSprkChatPane.ts.
- * Defined locally to avoid cross-project rootDir violations (each Code Page is self-contained).
- *
- * Consumed by SprkChatPane/src via URLSearchParams; used by the BFF to resolve
- * the correct playbook and knowledge sources for the analysis context.
- */
-interface SprkChatLaunchContext {
-  /** Analysis type identifier (e.g. 'patent-claims', 'contract-review') */
-  analysisType?: string;
-  /** Matter type from the related matter record */
-  matterType?: string;
-  /** Practice area from the analysis or matter */
-  practiceArea?: string;
-  /** sprk_analysisoutput record ID (GUID without braces) */
-  analysisId?: string;
-  /** Source SPE file ID associated with the analysis */
-  sourceFileId?: string;
-  /** SPE container ID for the source document */
-  sourceContainerId?: string;
-  /** Interaction mode: 'analysis' for contextual workspace, 'general' for generic chat */
-  mode?: 'analysis' | 'general';
-}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -352,21 +318,15 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   // ---- Task 062: Document history for Undo/Redo ----
   const { undo, redo, canUndo, canRedo, historyLength, pushVersion } = useDocumentHistory(editorRef);
 
-  // ---- Task 064: Selection broadcast to SprkChat ----
-  // The bridge is created by DocumentStreamBridge. We need to access it.
-  // For simplicity, we create a separate bridge ref for selection broadcast.
-  // The useSelectionBroadcast hook uses the same bridge pattern.
-  // Since DocumentStreamBridge creates the bridge internally, we use a
-  // streaming state callback to get a reference. For selection, we use
-  // a lightweight approach: listen on document selectionchange directly.
-  // The bridge for selection is obtained from the DocumentStreamBridge's
-  // onStreamingStateChange callback. However, to keep things clean,
-  // we import SprkChatBridge directly for selection and re-analysis progress events.
+  // ---- SprkChatBridge for re-analysis progress + diff review events ----
+  // A lightweight bridge instance for subscribing to reanalysis_progress and
+  // document_stream events used by useReAnalysisProgress and useDiffReview.
+  // Selection broadcast (task 064) and DocumentStreamBridge (task 063) have been
+  // removed — streaming state now flows through AnalysisAiContext directly.
   const [appBridge, setAppBridge] = useState<
     import('@spaarke/ui-components/services/SprkChatBridge').SprkChatBridge | null
   >(null);
 
-  // Create bridge for selection + re-analysis progress events (uses same channel as streaming)
   useEffect(() => {
     if (!analysisId || !isAuthenticated) {
       return;
@@ -400,12 +360,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     };
   }, [analysisId, isAuthenticated]);
 
-  useSelectionBroadcast({
-    editorRef,
-    bridge: appBridge,
-    enabled: isAuthenticated && !!analysisId,
-  });
-
   // ---- Task 081: Re-analysis progress tracking ----
   const {
     isAnalyzing: isReAnalyzing,
@@ -423,88 +377,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     enabled: isAuthenticated && !!analysisId,
     pushUndoVersion: pushVersion,
   });
-
-  // ---- Task 063 / Task 002: Auto-load SprkChat side pane with analysis context ----
-  // NOTE: The embedded ChatPanel (right panel) is now the primary SprkChat integration.
-  // This side pane code is retained for backward compatibility but may be inactive
-  // when Xrm.App.sidePanes is unavailable. Phase 2 (task 011) will clean this up.
-  // Fires once per analysis record load (deps: analysisId only — not the full analysis
-  // object — to prevent re-running on every field update after initial load).
-  // Builds enriched URL params (SprkChatLaunchContext) so the BFF can resolve the
-  // correct playbook and knowledge sources for the analysis context.
-  useEffect(() => {
-    if (!analysisId || !analysis) return;
-
-    const launchContext: SprkChatLaunchContext = {
-      analysisId,
-      mode: 'analysis',
-      // sourceDocumentId from the analysis record maps to the source SPE file
-      sourceFileId: analysis.sourceDocumentId || undefined,
-    };
-
-    // Build URL params including the analysis context fields.
-    // Mirrors buildDataParams() in openSprkChatPane.ts, extended with SprkChatLaunchContext.
-    const params = new URLSearchParams();
-    if (launchContext.analysisType) params.set('analysisType', launchContext.analysisType);
-    if (launchContext.matterType) params.set('matterType', launchContext.matterType);
-    if (launchContext.practiceArea) params.set('practiceArea', launchContext.practiceArea);
-    if (launchContext.analysisId) params.set('analysisId', launchContext.analysisId);
-    if (launchContext.sourceFileId) params.set('sourceFileId', launchContext.sourceFileId);
-    if (launchContext.sourceContainerId) params.set('sourceContainerId', launchContext.sourceContainerId);
-    if (launchContext.mode) params.set('mode', launchContext.mode);
-    if (analysis.playbookId) params.set('playbookId', analysis.playbookId);
-    const dataParams = params.toString();
-
-    console.log('[AnalysisWorkspace] Opening SprkChat side pane with analysis context:', launchContext);
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm;
-      if (!xrm?.App?.sidePanes) {
-        console.warn('[AnalysisWorkspace] SprkChat side pane unavailable — Xrm.App.sidePanes not found');
-        return;
-      }
-
-      const existingPane = xrm.App.sidePanes.getPane('sprkchat-analysis');
-      if (existingPane) {
-        // Re-navigate existing pane with updated analysis context
-        existingPane
-          .navigate({
-            pageType: 'webresource',
-            webresourceName: 'sprk_SprkChatPane',
-            data: dataParams,
-          })
-          .then(() => existingPane.select())
-          .catch((err: unknown) => {
-            console.warn('[AnalysisWorkspace] SprkChat pane navigate failed:', err);
-          });
-      } else {
-        xrm.App.sidePanes
-          .createPane({
-            paneId: 'sprkchat-analysis',
-            title: 'SprkChat',
-            canClose: true,
-            width: 400,
-            isSelected: true,
-          })
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .then((pane: any) => {
-            pane.navigate({
-              pageType: 'webresource',
-              webresourceName: 'sprk_SprkChatPane',
-              data: dataParams,
-            });
-          })
-          .catch((err: unknown) => {
-            console.warn('[AnalysisWorkspace] SprkChat side pane failed to create:', err);
-          });
-      }
-    } catch (err) {
-      console.warn('[AnalysisWorkspace] SprkChat side pane unavailable:', err);
-    }
-    // Only re-run when the analysis record identity changes (not on every field update)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisId]);
 
   // ---- Task 065: Populate editor with loaded analysis content ----
   // Content in sprk_workingdocument may be markdown (from BFF streaming)
@@ -636,8 +508,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         <div className={styles.content}>
           {/* Editor Panel (always visible) */}
           <div className={styles.editorPanel} style={{ width: panelSizes.editor }}>
-            {/* Task 063: SprkChatBridge document streaming wiring */}
-            <DocumentStreamBridge context={analysisId} editorRef={editorRef} enabled={!!analysisId} />
             {/* Show error state if analysis load or execution failed */}
             {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
               <div

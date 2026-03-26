@@ -6,7 +6,7 @@
  * output. This is the streaming write target where SprkChat writes token-by-token.
  *
  * Task 062: Toolbar with Save, Export, Copy, Undo/Redo (replaces PH-061-A).
- * Task 064: Selection broadcast via SprkChatBridge (useSelectionBroadcast).
+ * Task 064/010: Selection broadcast now uses React context (useSelectionBroadcast removed).
  * Task 065: Analysis loading and content population from BFF API.
  * Task 031: InlineAiToolbar overlay — appears on text selection; dispatches inline
  *           actions to SprkChat (chat type) or DiffReviewPanel (diff type).
@@ -273,9 +273,8 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
   // rapid drag-select operations while keeping the context up-to-date
   // for SprkChat's highlight-refine feature (editorSelection prop).
   //
-  // The 150ms debounce is intentionally shorter than the 300ms used by
-  // useSelectionBroadcast (BroadcastChannel path) because React context
-  // updates are cheaper than cross-window messaging.
+  // The 150ms debounce keeps context updates responsive without causing
+  // excessive re-renders during rapid drag-select operations.
   useEffect(() => {
     const timer = setTimeout(() => {
       setEditorSelection(selectedText);

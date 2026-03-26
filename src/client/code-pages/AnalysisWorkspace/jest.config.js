@@ -6,7 +6,6 @@ module.exports = {
   collectCoverageFrom: [
     'src/hooks/useAnalysisLoader.ts',
     'src/hooks/useAutoSave.ts',
-    'src/hooks/useSelectionBroadcast.ts',
     'src/components/AnalysisToolbar.tsx',
     'src/App.tsx',
     '!src/**/*.d.ts',
