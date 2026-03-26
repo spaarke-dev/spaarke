@@ -38,7 +38,7 @@
 | 011 | SSO Token Flow for M365 Agent | 🔲 | auth, sso, obo | 009 | **Group C** |
 | 012 | Azure Bot Service Registration | ✅ | infrastructure, azure, bot-service | 002 | **Group C** |
 | 013 | SpaarkeAgentHandler Implementation | 🔲 | bff-api, m365, agents-sdk | 010, 011 | **Group D** |
-| 014 | Multi-Turn Conversation Support | 🔲 | bff-api, agent-gateway, chat | 010 | **Group D** |
+| 014 | Multi-Turn Conversation Support | ✅ | bff-api, agent-gateway, chat | 010 | **Group D** |
 | 015 | Agent Gateway Integration Tests | 🔲 | testing, integration-test | 010, 011, 013 | Serial |
 
 ## Phase 3: Rich Interactions + Playbook Integration
