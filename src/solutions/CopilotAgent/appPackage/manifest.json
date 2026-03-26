@@ -1,0 +1,41 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/vDevPreview/MicrosoftTeams.schema.json",
+  "manifestVersion": "devPreview",
+  "version": "1.0.0",
+  "id": "${{TEAMS_APP_ID}}",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://spaarke.com",
+    "privacyUrl": "https://spaarke.com/privacy",
+    "termsOfUseUrl": "https://spaarke.com/terms"
+  },
+  "name": {
+    "short": "Spaarke AI",
+    "full": "Spaarke AI Assistant for Legal Operations"
+  },
+  "description": {
+    "short": "Search documents, run playbooks, and manage matters with Spaarke AI",
+    "full": "Spaarke AI integrates your legal document management, playbook analysis, and matter tracking into M365 Copilot. Search SPE documents, invoke analysis playbooks, query matters and tasks, draft communications, and seamlessly hand off to the Analysis Workspace for deep analysis work."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#4F6BED",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "spaarkeAiAgent",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "spe-api-dev-67e2xz.azurewebsites.net",
+    "spaarkedev1.crm.dynamics.com"
+  ]
+}

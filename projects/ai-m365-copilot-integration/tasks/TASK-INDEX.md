@@ -21,7 +21,7 @@
 | # | Task | Status | Tags | Dependencies | Parallel Group |
 |---|------|--------|------|-------------|----------------|
 | 001 | Project Scaffolding and Folder Structure | ✅ | foundation, setup | none | Serial |
-| 002 | M365 Agents Toolkit Setup and Dev Environment | 🔲 | foundation, setup, m365 | 001 | Serial |
+| 002 | M365 Agents Toolkit Setup and Dev Environment | ✅ | foundation, setup, m365 | 001 | Serial |
 | 003 | Spike: ConversationFileReference Validation | 🔲 | spike, m365 | 002 | **Group A** |
 | 004 | Spike: Action.Submit in API Plugin Responses | 🔲 | spike, m365, adaptive-cards | 002 | **Group A** |
 | 005 | Spike: End-to-End File Pipeline | 🔲 | spike, m365, documents | 003 | Serial (after Spike 1) |
