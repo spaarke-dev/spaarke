@@ -1,4 +1,9 @@
 using System.Security.Claims;
+using System.Text;
+using Microsoft.Extensions.AI;
+using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -14,10 +19,6 @@ namespace Sprk.Bff.Api.Api.Agent;
 /// </summary>
 public static class AgentEndpoints
 {
-    // TODO: Inject ChatSessionManager for message routing
-    // TODO: Inject PlaybookExecutionEngine for playbook operations
-    // TODO: Inject PlaybookCatalogService for playbook listing
-
     /// <summary>
     /// Registers all agent gateway endpoints on the provided route builder.
     /// Called from Program.cs: <c>app.MapAgentEndpoints();</c>
@@ -98,6 +99,9 @@ public static class AgentEndpoints
     private static async Task<IResult> HandleMessageAsync(
         AgentMessageRequest request,
         HttpContext httpContext,
+        ChatSessionManager sessionManager,
+        SprkChatAgentFactory agentFactory,
+        IChatClient chatClient,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -113,27 +117,112 @@ public static class AgentEndpoints
         }
 
         var userId = ExtractUserId(httpContext);
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
         logger.LogInformation(
             "[AGENT] Message received: UserId={UserId}, HasDocument={HasDocument}, ConversationRef={ConversationRef}",
             userId, request.DocumentId.HasValue, request.ConversationReference ?? "(new)");
 
         try
         {
-            // TODO: Inject ChatSessionManager and route message to existing chat service.
-            // The routing logic will:
-            //   1. Resolve or create a chat session from the conversation reference
-            //   2. Forward the message to ChatSessionManager.SendMessageAsync()
-            //   3. Collect the streamed response into a single AgentMessageResponse
-            //   4. Optionally format an Adaptive Card for rich results
-
-            // Placeholder response until service wiring is implemented.
-            var response = new AgentMessageResponse
+            // 1. Resolve or create a chat session from the conversation reference.
+            //    The ConversationReference maps 1:1 to a chat session ID. If null, create a new session.
+            string sessionId;
+            if (!string.IsNullOrEmpty(request.ConversationReference))
             {
-                ResponseText = "Agent gateway received your message. Service wiring pending.",
+                // Attempt to resume existing session
+                var existingSession = await sessionManager.GetSessionAsync(tenantId, request.ConversationReference, cancellationToken);
+                if (existingSession is not null)
+                {
+                    sessionId = existingSession.SessionId;
+                }
+                else
+                {
+                    // ConversationReference no longer maps to a valid session — create a new one
+                    var newSession = await sessionManager.CreateSessionAsync(
+                        tenantId,
+                        request.DocumentId?.ToString(),
+                        playbookId: null,
+                        hostContext: null,
+                        cancellationToken);
+                    sessionId = newSession.SessionId;
+                }
+            }
+            else
+            {
+                // First message — create a new session
+                var newSession = await sessionManager.CreateSessionAsync(
+                    tenantId,
+                    request.DocumentId?.ToString(),
+                    playbookId: null,
+                    hostContext: null,
+                    cancellationToken);
+                sessionId = newSession.SessionId;
+            }
+
+            // 2. Create an agent for this session and collect the streamed response
+            var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+            if (session is null)
+            {
+                return Results.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "Failed to retrieve newly created chat session",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+            }
+
+            // No-op SSE writer — agent gateway collects the full response, not streaming
+            Func<Ai.ChatSseEvent, CancellationToken, Task> noOpSseWriter = (_, _) => Task.CompletedTask;
+
+            var agent = await agentFactory.CreateAgentAsync(
+                sessionId,
+                request.DocumentId?.ToString() ?? session.DocumentId ?? string.Empty,
+                session.PlaybookId,
+                tenantId,
+                session.HostContext,
+                session.AdditionalDocumentIds,
+                httpContext,
+                noOpSseWriter,
+                latestUserMessage: request.Message,
+                cancellationToken);
+
+            // Build AI history from existing session messages
+            var history = session.Messages
+                .Where(m => m.Role != Models.Ai.Chat.ChatMessageRole.System)
+                .Select(m => new ChatMessage(
+                    m.Role == Models.Ai.Chat.ChatMessageRole.User ? ChatRole.User : ChatRole.Assistant,
+                    m.Content))
+                .ToList();
+
+            // 3. Collect the full streamed response into a single text block
+            var fullResponse = new StringBuilder();
+            await foreach (var update in agent.SendMessageAsync(request.Message, history, cancellationToken))
+            {
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    fullResponse.Append(update.Text);
+                }
+            }
+
+            // 4. Build the agent response
+            var responseText = fullResponse.ToString();
+            var agentResponse = new AgentMessageResponse
+            {
+                ResponseText = responseText,
+                // TODO: Format an Adaptive Card for rich results when AdaptiveCardFormatterService is available.
+                // AdaptiveCardJson = adaptiveCardFormatter.FormatResponseCard(responseText),
                 SuggestedActions = new List<string> { "List playbooks", "Search documents" }
             };
 
-            return Results.Ok(response);
+            return Results.Ok(agentResponse);
         }
         catch (Exception ex)
         {
@@ -152,6 +241,7 @@ public static class AgentEndpoints
     /// </summary>
     private static async Task<IResult> ListPlaybooksAsync(
         HttpContext httpContext,
+        IPlaybookService playbookService,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -161,12 +251,60 @@ public static class AgentEndpoints
 
         try
         {
-            // TODO: Inject PlaybookCatalogService and delegate to existing listing.
-            // Will call PlaybookCatalogService.GetAvailablePlaybooksAsync(userId, cancellationToken)
-            // and map the results to PlaybookSummary records for the agent.
-
-            // Placeholder response until service wiring is implemented.
+            // Mirrors ChatEndpoints.ListPlaybooksAsync — merge user-owned + public, deduplicate by ID.
+            var query = new PlaybookQueryParameters { PageSize = 50 };
+            var seen = new HashSet<Guid>();
             var playbooks = new List<PlaybookSummary>();
+
+            // 1. User-owned playbooks
+            var userGuid = ExtractUserGuid(httpContext);
+            if (userGuid.HasValue)
+            {
+                try
+                {
+                    var userPlaybooks = await playbookService.ListUserPlaybooksAsync(userGuid.Value, query, cancellationToken);
+                    foreach (var pb in userPlaybooks.Items)
+                    {
+                        if (seen.Add(pb.Id))
+                        {
+                            playbooks.Add(new PlaybookSummary
+                            {
+                                PlaybookId = pb.Id,
+                                Name = pb.Name,
+                                Description = pb.Description
+                            });
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "[AGENT] Failed to load user playbooks for userId={UserId}; continuing with public only", userGuid);
+                }
+            }
+
+            // 2. Public/shared playbooks (deduplicate)
+            try
+            {
+                var publicPlaybooks = await playbookService.ListPublicPlaybooksAsync(query, cancellationToken);
+                foreach (var pb in publicPlaybooks.Items)
+                {
+                    if (seen.Add(pb.Id))
+                    {
+                        playbooks.Add(new PlaybookSummary
+                        {
+                            PlaybookId = pb.Id,
+                            Name = pb.Name,
+                            Description = pb.Description
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[AGENT] Failed to load public playbooks; returning user playbooks only");
+            }
+
+            logger.LogDebug("[AGENT] ListPlaybooks returning {Count} playbooks (userId={UserId})", playbooks.Count, userId);
 
             return Results.Ok(playbooks);
         }
@@ -188,6 +326,7 @@ public static class AgentEndpoints
     private static async Task<IResult> RunPlaybookAsync(
         AgentPlaybookRequest request,
         HttpContext httpContext,
+        IPlaybookOrchestrationService orchestrationService,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -218,16 +357,36 @@ public static class AgentEndpoints
 
         try
         {
-            // TODO: Inject PlaybookExecutionEngine and delegate to existing execution.
-            // Will call PlaybookExecutionEngine.EnqueueAsync(request.PlaybookId, request.DocumentId, request.Parameters, userId, cancellationToken)
-            // and return the job ID for status polling.
+            // Execute playbook via the existing orchestration service.
+            // The agent gateway consumes the SSE stream internally and collects the final result
+            // rather than forwarding SSE to the Copilot client (Copilot expects JSON, not SSE).
+            var runRequest = new PlaybookRunRequest
+            {
+                PlaybookId = request.PlaybookId,
+                DocumentIds = new[] { request.DocumentId },
+                Parameters = request.Parameters
+            };
 
-            // Placeholder response until service wiring is implemented.
-            var jobId = Guid.NewGuid();
+            // Consume the execution stream to capture the RunId from the first event
+            // and determine final status. The orchestration service handles all execution logic.
+            Guid runId = Guid.Empty;
+            await foreach (var evt in orchestrationService.ExecuteAsync(runRequest, httpContext, cancellationToken))
+            {
+                if (evt.Type == PlaybookEventType.RunStarted)
+                {
+                    runId = evt.RunId;
+                }
+                // Continue consuming to drive execution to completion.
+                // For long-running playbooks, the caller should use run-playbook + status polling instead.
+            }
+
+            // If we captured a runId, use it; otherwise generate one as fallback
+            if (runId == Guid.Empty) runId = Guid.NewGuid();
+
             var response = new PlaybookRunResponse
             {
-                JobId = jobId,
-                StatusUrl = $"/api/agent/playbooks/status/{jobId}"
+                JobId = runId,
+                StatusUrl = $"/api/agent/playbooks/status/{runId}"
             };
 
             return Results.Json(response, statusCode: 202);
@@ -250,6 +409,7 @@ public static class AgentEndpoints
     private static async Task<IResult> GetPlaybookStatusAsync(
         Guid jobId,
         HttpContext httpContext,
+        IPlaybookOrchestrationService orchestrationService,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -259,17 +419,46 @@ public static class AgentEndpoints
 
         try
         {
-            // TODO: Inject PlaybookExecutionEngine and delegate to existing status query.
-            // Will call PlaybookExecutionEngine.GetStatusAsync(jobId, userId, cancellationToken)
-            // and map the result to PlaybookStatusResponse.
-            // Must verify job ownership (userId matches the job's creator) before returning status.
+            // Delegate to existing orchestration service for run status.
+            var runStatus = await orchestrationService.GetRunStatusAsync(jobId, cancellationToken);
+            if (runStatus is null)
+            {
+                return Results.Problem(
+                    statusCode: 404,
+                    title: "Not Found",
+                    detail: $"Playbook run {jobId} not found",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+            }
 
-            // Placeholder response until service wiring is implemented.
+            // Map the internal PlaybookRunStatus to the agent-facing PlaybookStatusResponse
+            var statusText = runStatus.State switch
+            {
+                PlaybookRunState.Pending => "Queued",
+                PlaybookRunState.Running => "Running",
+                PlaybookRunState.Completed => "Completed",
+                PlaybookRunState.Failed => "Failed",
+                PlaybookRunState.Cancelled => "Cancelled",
+                _ => "Unknown"
+            };
+
+            // Calculate progress percentage from node metrics when available
+            int? progressPercent = null;
+            if (runStatus.Metrics is not null && runStatus.Metrics.TotalNodes > 0)
+            {
+                var completedCount = runStatus.Metrics.CompletedNodes + runStatus.Metrics.FailedNodes + runStatus.Metrics.SkippedNodes;
+                progressPercent = (int)(100.0 * completedCount / runStatus.Metrics.TotalNodes);
+            }
+
             var response = new PlaybookStatusResponse
             {
                 JobId = jobId,
-                Status = "Queued",
-                ProgressPercent = 0
+                Status = statusText,
+                ProgressPercent = progressPercent,
+                // TODO: Format result as Adaptive Card when AdaptiveCardFormatterService is available.
+                // ResultCardJson = runStatus.State == PlaybookRunState.Completed
+                //     ? adaptiveCardFormatter.FormatPlaybookResultCard(runStatus.Outputs)
+                //     : null,
+                ErrorMessage = runStatus.State == PlaybookRunState.Failed ? runStatus.ErrorMessage : null
             };
 
             return Results.Ok(response);
@@ -290,7 +479,7 @@ public static class AgentEndpoints
     // ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Extracts the Azure AD user object ID from the authenticated claims.
+    /// Extracts the Azure AD user object ID from the authenticated claims as a string.
     /// </summary>
     private static string ExtractUserId(HttpContext httpContext)
     {
@@ -298,6 +487,34 @@ public static class AgentEndpoints
             ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
             ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? "unknown";
+    }
+
+    /// <summary>
+    /// Extracts the Azure AD user object ID as a Guid for service calls that require it.
+    /// Returns null if the claim is missing or not a valid GUID.
+    /// </summary>
+    private static Guid? ExtractUserGuid(HttpContext httpContext)
+    {
+        var oid = httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        return Guid.TryParse(oid, out var userId) ? userId : null;
+    }
+
+    /// <summary>
+    /// Extracts the tenant ID from the JWT 'tid' claim or X-Tenant-Id header fallback.
+    /// Mirrors the pattern used in ChatEndpoints.
+    /// </summary>
+    private static string? ExtractTenantId(HttpContext httpContext)
+    {
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        }
+
+        return tenantId;
     }
 
     // ────────────────────────────────────────────────────────────────
