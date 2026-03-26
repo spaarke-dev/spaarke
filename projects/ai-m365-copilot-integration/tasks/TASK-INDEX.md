@@ -35,7 +35,7 @@
 | # | Task | Status | Tags | Dependencies | Parallel Group |
 |---|------|--------|------|-------------|----------------|
 | 010 | Agent Gateway Adapter Endpoints | ✅ | bff-api, api, agent-gateway | 009 | **Group C** |
-| 011 | SSO Token Flow for M365 Agent | 🔲 | auth, sso, obo | 009 | **Group C** |
+| 011 | SSO Token Flow for M365 Agent | ✅ | auth, sso, obo | 009 | **Group C** |
 | 012 | Azure Bot Service Registration | ✅ | infrastructure, azure, bot-service | 002 | **Group C** |
 | 013 | SpaarkeAgentHandler Implementation | 🔲 | bff-api, m365, agents-sdk | 010, 011 | **Group D** |
 | 014 | Multi-Turn Conversation Support | ✅ | bff-api, agent-gateway, chat | 010 | **Group D** |
@@ -48,7 +48,7 @@
 | 016 | Adaptive Card Templates — Documents + Matters | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
 | 017 | Adaptive Card Templates — Playbooks + Analysis | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
 | 018 | Adaptive Card Templates — Communication + Handoff | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
-| 019 | AdaptiveCardFormatterService | 🔲 | bff-api, adaptive-cards, service | 010, 016, 017, 018 | Serial |
+| 019 | AdaptiveCardFormatterService | ✅ | bff-api, adaptive-cards, service | 010, 016, 017, 018 | Serial |
 | 020 | HandoffUrlBuilder Service | ✅ | bff-api, handoff, deep-links | 010 | **Group E** |
 | 021 | Playbook Invocation Flow | 🔲 | bff-api, playbooks, agent-gateway | 010, 019 | Serial |
 | 022 | Email Drafting via Agent | 🔲 | bff-api, communications | 010, 019 | **Group E-2** |
