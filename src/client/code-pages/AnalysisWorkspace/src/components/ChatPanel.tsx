@@ -15,7 +15,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { SprkChat } from '@spaarke/ui-components';
-import type { IChatSession, IHostContext } from '@spaarke/ui-components';
+import type { IChatSession, IHostContext, IDocumentStreamSseEvent } from '@spaarke/ui-components';
 import { useAnalysisAi } from '../context/AnalysisAiContext';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +55,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     setPlaybookId,
     bffBaseUrl,
     token,
+    streaming,
   } = useAnalysisAi();
 
   // Map onSessionCreated to setChatSessionId (extract sessionId from session object)
@@ -74,6 +75,33 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
       workspaceType: 'AnalysisWorkspace',
     };
   }, [analysisId]);
+
+  // ── Task 007: Wire document stream events through context callbacks ────
+  //
+  // In the unified workspace, bridge is null so SprkChat cannot forward
+  // document_stream SSE events via BroadcastChannel. Instead, we pass a
+  // direct callback that routes events to AnalysisAiContext's streaming
+  // callbacks, which write tokens directly to the Lexical editor via ref.
+  //
+  // Data flow: BFF SSE → useSseStream → onDocumentStreamEvent callback →
+  //            streaming.onStreamStart/onStreamToken/onStreamEnd →
+  //            editorRef.current.insert() → Lexical editor
+  const handleDocumentStreamEvent = useCallback(
+    (event: IDocumentStreamSseEvent) => {
+      switch (event.type) {
+        case 'document_stream_start':
+          streaming.onStreamStart(event.operationId);
+          break;
+        case 'document_stream_token':
+          streaming.onStreamToken(event.token);
+          break;
+        case 'document_stream_end':
+          streaming.onStreamEnd(event.operationId);
+          break;
+      }
+    },
+    [streaming]
+  );
 
   // Note on contentRef: SprkChat's contentRef expects a RefObject<HTMLElement>
   // for DOM-level text selection detection (highlight-refine). In the unified
@@ -95,6 +123,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
         onPlaybookChange={setPlaybookId}
         hostContext={hostContext}
         bridge={null}
+        onDocumentStreamEvent={handleDocumentStreamEvent}
       />
     </div>
   );

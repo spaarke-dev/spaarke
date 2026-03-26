@@ -43,6 +43,16 @@ export interface StreamingCallbacks {
   onStreamEnd: (operationId: string) => void;
 }
 
+/** Streaming state tracked by the context for UI indicators. */
+export interface StreamingState {
+  /** Whether a document stream is currently in progress */
+  isStreaming: boolean;
+  /** The operationId of the current (or last) streaming operation */
+  operationId: string | null;
+  /** Number of tokens received in the current streaming operation */
+  tokenCount: number;
+}
+
 /** The full context value provided to all workspace panels. */
 export interface AnalysisAiContextValue {
   // ── Analysis State ──────────────────────────────────────────────────────
@@ -84,6 +94,8 @@ export interface AnalysisAiContextValue {
   onInsertToEditor: (content: string) => void;
   /** Streaming callbacks for SSE token flow to editor */
   streaming: StreamingCallbacks;
+  /** Current streaming state (isStreaming, operationId, tokenCount) for UI indicators */
+  streamingState: StreamingState;
 
   // ── Chat State ──────────────────────────────────────────────────────────
   /** Current chat session ID (persisted to sessionStorage) */
@@ -190,17 +202,48 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
     editorRef.current?.insert(content);
   }, []);
 
+  // ── Streaming state (Task 007) ──────────────────────────────────────────
+  //
+  // Tracks streaming lifecycle for UI indicators (StreamingIndicator).
+  // Token count uses a ref for high-frequency updates (one per SSE token)
+  // to avoid React re-render storms. State is synced at start/end boundaries.
+  const [streamingState, setStreamingState] = useState<StreamingState>({
+    isStreaming: false,
+    operationId: null,
+    tokenCount: 0,
+  });
+  const tokenCountRef = useRef<number>(0);
+
   // Streaming callbacks (bypass React re-render — write directly to editor via ref)
   const streaming: StreamingCallbacks = useMemo(
     () => ({
-      onStreamStart: (_operationId: string) => {
-        // Editor can show streaming indicator via separate state if needed
+      onStreamStart: (operationId: string) => {
+        tokenCountRef.current = 0;
+        setStreamingState({
+          isStreaming: true,
+          operationId,
+          tokenCount: 0,
+        });
       },
       onStreamToken: (token: string) => {
         editorRef.current?.insert(token);
+        tokenCountRef.current += 1;
+        // Batch token count updates: sync to React state every 10 tokens
+        // to give StreamingIndicator a reasonable update cadence without
+        // re-rendering on every single token.
+        if (tokenCountRef.current % 10 === 0) {
+          setStreamingState((prev) => ({
+            ...prev,
+            tokenCount: tokenCountRef.current,
+          }));
+        }
       },
-      onStreamEnd: (_operationId: string) => {
-        // Editor can finalize streaming state
+      onStreamEnd: (operationId: string) => {
+        setStreamingState({
+          isStreaming: false,
+          operationId,
+          tokenCount: tokenCountRef.current,
+        });
       },
     }),
     []
@@ -233,6 +276,7 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
       // Panel callbacks
       onInsertToEditor,
       streaming,
+      streamingState,
 
       // Chat state
       chatSessionId,
@@ -250,6 +294,7 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
       setEditorSelection,
       onInsertToEditor,
       streaming,
+      streamingState,
       chatSessionId,
       setChatSessionId,
       playbookId,

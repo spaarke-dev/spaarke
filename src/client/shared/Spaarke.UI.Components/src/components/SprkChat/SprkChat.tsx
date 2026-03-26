@@ -222,6 +222,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   maxCharCount,
   hostContext,
   bridge,
+  onDocumentStreamEvent: onDocumentStreamEventProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -619,66 +620,78 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     clearPendingActionEvent,
   ]);
 
-  // ── Task R2-051: Forward BFF document_stream SSE events to SprkChatBridge ──
+  // ── Task R2-051 + Task 007: Forward BFF document_stream SSE events ──
   //
   // Registers a synchronous callback with useSseStream that fires for every
-  // document_stream_start/token/end SSE event. This callback calls bridge.emit()
-  // to deliver each event via BroadcastChannel to the AnalysisWorkspace's
-  // useDocumentStreamConsumer hook.
+  // document_stream_start/token/end SSE event.
+  //
+  // Two forwarding paths (may both be active simultaneously):
+  //   1. bridge.emit() → BroadcastChannel → useDocumentStreamConsumer (legacy)
+  //   2. onDocumentStreamEventProp → direct callback → AnalysisAiContext (unified page)
+  //
+  // When bridge is null and onDocumentStreamEventProp is provided, events go
+  // exclusively through the direct callback (zero-serialization path).
   //
   // Uses a callback (not React state) because document_stream_token events
   // arrive at high frequency (one per AI-generated token). React state batching
   // would coalesce multiple token events in a single render frame, causing
   // lost tokens. The synchronous callback ensures every token is forwarded.
   //
-  // Data flow: BFF SSE → useSseStream (fetch loop) → callback →
-  //            bridge.emit() → BroadcastChannel →
-  //            useDocumentStreamConsumer → RichTextEditor (Lexical)
-  //
   // SECURITY (ADR-015): Only content tokens and structural metadata are forwarded.
   // Auth tokens, credentials, and user PII are NEVER included in bridge messages.
   React.useEffect(() => {
-    if (!bridge) {
+    const hasBridge = !!bridge;
+    const hasDirectCallback = !!onDocumentStreamEventProp;
+
+    if (!hasBridge && !hasDirectCallback) {
       setOnDocumentStreamEvent(null);
       return;
     }
 
     setOnDocumentStreamEvent((event) => {
       try {
-        switch (event.type) {
-          case 'document_stream_start':
-            bridge.emit('document_stream_start', {
-              operationId: event.operationId,
-              targetPosition: event.targetPosition,
-              operationType: event.operationType,
-            });
-            break;
+        // Path 1: BroadcastChannel bridge (legacy cross-pane path)
+        if (bridge) {
+          switch (event.type) {
+            case 'document_stream_start':
+              bridge.emit('document_stream_start', {
+                operationId: event.operationId,
+                targetPosition: event.targetPosition,
+                operationType: event.operationType,
+              });
+              break;
 
-          case 'document_stream_token':
-            bridge.emit('document_stream_token', {
-              operationId: event.operationId,
-              token: event.token,
-              index: event.index,
-            });
-            break;
+            case 'document_stream_token':
+              bridge.emit('document_stream_token', {
+                operationId: event.operationId,
+                token: event.token,
+                index: event.index,
+              });
+              break;
 
-          case 'document_stream_end':
-            bridge.emit('document_stream_end', {
-              operationId: event.operationId,
-              cancelled: event.cancelled,
-              totalTokens: event.totalTokens,
-            });
-            break;
+            case 'document_stream_end':
+              bridge.emit('document_stream_end', {
+                operationId: event.operationId,
+                cancelled: event.cancelled,
+                totalTokens: event.totalTokens,
+              });
+              break;
+          }
+        }
+
+        // Path 2: Direct callback (unified page, zero-serialization)
+        if (onDocumentStreamEventProp) {
+          onDocumentStreamEventProp(event);
         }
       } catch (err) {
-        console.error('[SprkChat] Failed to forward document_stream event to bridge:', err);
+        console.error('[SprkChat] Failed to forward document_stream event:', err);
       }
     });
 
     return () => {
       setOnDocumentStreamEvent(null);
     };
-  }, [bridge, setOnDocumentStreamEvent]);
+  }, [bridge, onDocumentStreamEventProp, setOnDocumentStreamEvent]);
 
   // Auto-scroll to bottom on new messages
   React.useEffect(() => {

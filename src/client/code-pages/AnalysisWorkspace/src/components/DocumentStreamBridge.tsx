@@ -35,6 +35,7 @@
 import { useEffect, useCallback } from 'react';
 import type { RichTextEditorRef } from '@spaarke/ui-components/components/RichTextEditor';
 import { useDocumentStreaming, type UseDocumentStreamingResult } from '../hooks/useDocumentStreaming';
+import { useAnalysisAi } from '../context/AnalysisAiContext';
 import { StreamingIndicator } from './StreamingIndicator';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,21 +92,36 @@ export function DocumentStreamBridge({
     enabled,
   });
 
+  // ── Task 007: Merge context-based streaming state ──────────────────────
+  //
+  // In the unified workspace, document stream events bypass BroadcastChannel
+  // and flow through AnalysisAiContext callbacks directly to the editor ref.
+  // The streaming state is tracked in AnalysisAiContext.streamingState.
+  // We merge both sources so the StreamingIndicator works regardless of
+  // which path is active (BroadcastChannel or context-direct).
+  const { streamingState: contextStreamingState } = useAnalysisAi();
+
+  // Merge: either source being active means we're streaming
+  const mergedIsStreaming = streaming.isStreaming || contextStreamingState.isStreaming;
+  const mergedTokenCount = streaming.isStreaming
+    ? streaming.tokenCount
+    : contextStreamingState.tokenCount;
+
   // ─────────────────────────────────────────────────────────────────────
   // Notify parent of streaming state changes
   // ─────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     onStreamingStateChange?.({
-      isStreaming: streaming.isStreaming,
+      isStreaming: mergedIsStreaming,
       isReplacing: streaming.isReplacing,
-      tokenCount: streaming.tokenCount,
+      tokenCount: mergedTokenCount,
       operationId: streaming.operationId,
     });
   }, [
-    streaming.isStreaming,
+    mergedIsStreaming,
     streaming.isReplacing,
-    streaming.tokenCount,
+    mergedTokenCount,
     streaming.operationId,
     onStreamingStateChange,
   ]);
@@ -116,23 +132,23 @@ export function DocumentStreamBridge({
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && streaming.isStreaming) {
+      if (event.key === 'Escape' && mergedIsStreaming) {
         event.preventDefault();
         event.stopPropagation();
         streaming.cancelStream();
       }
     },
-    [streaming.isStreaming, streaming.cancelStream]
+    [mergedIsStreaming, streaming.cancelStream]
   );
 
   useEffect(() => {
-    if (streaming.isStreaming) {
+    if (mergedIsStreaming) {
       document.addEventListener('keydown', handleKeyDown, true);
       return () => {
         document.removeEventListener('keydown', handleKeyDown, true);
       };
     }
-  }, [streaming.isStreaming, handleKeyDown]);
+  }, [mergedIsStreaming, handleKeyDown]);
 
   // ─────────────────────────────────────────────────────────────────────
   // Render streaming indicator
@@ -140,8 +156,8 @@ export function DocumentStreamBridge({
 
   return (
     <StreamingIndicator
-      isStreaming={streaming.isStreaming}
-      tokenCount={streaming.tokenCount}
+      isStreaming={mergedIsStreaming}
+      tokenCount={mergedTokenCount}
       isReplacing={streaming.isReplacing}
       onCancel={streaming.cancelStream}
     />
