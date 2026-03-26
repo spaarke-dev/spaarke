@@ -1,0 +1,70 @@
+<task id="MCI-007" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Declarative Agent Manifest</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>m365, declarative-agent, manifest</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the declarativeAgent.json manifest that defines the Spaarke Copilot agent identity, system instructions,
+    conversation starters, and capability declarations. The instructions must scope the agent to legal operations
+    vocabulary and Spaarke domain concepts, ensuring Copilot understands the agent's purpose and boundaries.
+  </prompt>
+
+  <role>M365 Copilot extensibility developer with expertise in declarative agent configuration and legal technology domain knowledge</role>
+
+  <goal>
+    A complete declarativeAgent.json that configures the Spaarke Copilot agent with domain-scoped instructions
+    covering all 8 use cases, meaningful conversation starters, and proper capability references so the agent
+    presents correctly in the M365 Copilot experience.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Instructions must scope agent to legal operations vocabulary and Spaarke domain concepts</constraint>
+    <constraint source="project">Must cover all 8 use cases defined in the design document</constraint>
+    <constraint source="project">Conversation starters must be practical and demonstrate key capabilities</constraint>
+    <constraint source="project">JSON must conform to M365 Declarative Agent schema</constraint>
+    <constraint source="project">Instructions should guide Copilot on when to invoke API plugin functions vs. use built-in capabilities</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>docs/architecture/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review use cases">Read the design document use cases section and spec.md to identify all 8 use cases the agent must support</step>
+    <step order="2" name="Review Copilot vs SprkChat strategy">Read the AI chat strategy doc to understand boundaries between Copilot agent and SprkChat capabilities</step>
+    <step order="3" name="Draft system instructions">Write comprehensive instructions that define the agent's persona, domain scope (legal operations, matter management, document handling), and behavioral guidelines</step>
+    <step order="4" name="Define conversation starters">Create conversation starters that demonstrate key capabilities: "What are my overdue tasks?", "Find documents for...", "Run a risk scan on...", "What analysis tools are available?"</step>
+    <step order="5" name="Declare capabilities">Configure capability references linking to the API plugin for function invocation</step>
+    <step order="6" name="Assemble manifest JSON">Create the complete declarativeAgent.json with all sections: schema version, name, description, instructions, conversation_starters, capabilities</step>
+    <step order="7" name="Validate JSON structure">Validate the manifest against M365 Declarative Agent schema requirements</step>
+    <step order="8" name="Review instruction quality">Verify instructions are specific enough to guide Copilot behavior without being overly restrictive</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read design documents and strategy docs</tool>
+    <tool name="write">Create the declarative agent manifest</tool>
+  </tools>
+
+  <outputs>
+    <output type="manifest">src/solutions/CopilotAgent/declarativeAgent.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Valid JSON conforming to M365 Declarative Agent schema</criterion>
+    <criterion testable="true">System instructions cover all 8 use cases from the design document</criterion>
+    <criterion testable="true">Conversation starters present and cover key scenarios: overdue tasks, document search, risk scanning, analysis tools</criterion>
+    <criterion testable="true">Instructions scope agent to legal operations vocabulary and Spaarke domain</criterion>
+    <criterion testable="true">Capability references correctly link to API plugin</criterion>
+    <criterion testable="true">Instructions distinguish when to use API plugin functions vs. built-in Copilot capabilities</criterion>
+  </acceptance-criteria>
+</task>

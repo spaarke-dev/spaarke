@@ -1,0 +1,80 @@
+<task id="MCI-018" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Adaptive Card Templates — Communication and Handoff Cards</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>adaptive-cards, m365, ui</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Create Adaptive Card JSON templates for communication previews and platform handoff
+    actions in the M365 Copilot agent. These cards handle email draft previews, handoff
+    navigation to the Analysis Workspace, wizard launch prompts, and structured error
+    display — bridging the Copilot chat experience with the full Spaarke platform.
+  </prompt>
+
+  <role>Senior UI developer experienced with Adaptive Cards, M365 Copilot, and deep-link navigation</role>
+
+  <goal>
+    Deliver four production-ready Adaptive Card JSON templates for communication and handoff
+    scenarios that render correctly in Microsoft 365 Copilot and Teams, following the ASCII
+    mockups defined in design.md.
+  </goal>
+
+  <constraints>
+    - Adaptive Card schema version 1.5 (required for M365 Copilot compatibility)
+    - All cards must render correctly in both Teams and M365 Copilot surfaces
+    - Follow the ASCII mockups from design.md for layout and field placement
+    - Deep-link URLs must use Xrm.Navigation.navigateTo-compatible format with parameterized values
+    - Email preview card must include editable text fields for subject and body
+    - Error card must support multiple error types (validation, auth, timeout, not-found)
+    - Keep card payload under 28 KB (Copilot limit)
+    - Support dark mode via Adaptive Card host config (no hard-coded colors)
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review the ASCII mockups in design.md for email preview, handoff, wizard launch, and error cards</step>
+    <step order="2">Create email-preview.json — email draft card with editable subject/body Input.Text fields, recipient display, and Edit/Send/Cancel Action.Submit buttons</step>
+    <step order="3">Create handoff-card.json — navigation card with context summary, deep-link Action.OpenUrl to the Analysis Workspace Code Page, and option to continue in chat</step>
+    <step order="4">Create wizard-launch.json — prompt card describing the wizard purpose, pre-filled parameter summary, and Action.OpenUrl deep-link to the target Code Page wizard</step>
+    <step order="5">Create error-card.json — structured error display with error type icon, message, suggestion text, and retry Action.Submit button</step>
+    <step order="6">Validate all four templates against Adaptive Card schema 1.5</step>
+    <step order="7">Verify deep-link URL placeholders follow the Xrm.Navigation.navigateTo webresource format</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+  </tools>
+
+  <outputs>
+    <output>src/solutions/CopilotAgent/cards/email-preview.json</output>
+    <output>src/solutions/CopilotAgent/cards/handoff-card.json</output>
+    <output>src/solutions/CopilotAgent/cards/wizard-launch.json</output>
+    <output>src/solutions/CopilotAgent/cards/error-card.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - All four JSON files are valid Adaptive Card schema 1.5
+    - email-preview.json includes editable Input.Text for subject and body, plus Edit/Send/Cancel actions
+    - handoff-card.json displays context summary and a deep-link to the Analysis Workspace
+    - wizard-launch.json shows wizard description, pre-filled parameters, and a launch deep-link
+    - error-card.json supports parameterized error type, message, suggestion, and retry action
+    - All deep-link URLs use data-binding placeholders matching Xrm.Navigation.navigateTo webresource format
+    - Card payloads are each under 28 KB
+    - No hard-coded colors (dark mode compatible)
+  </acceptance-criteria>
+</task>

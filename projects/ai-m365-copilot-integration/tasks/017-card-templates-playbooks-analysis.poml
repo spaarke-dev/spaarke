@@ -1,0 +1,82 @@
+<task id="MCI-017" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Adaptive Card Templates — Playbook and Analysis Cards</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>adaptive-cards, m365, ui</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Create Adaptive Card JSON templates for playbook and analysis presentation in the M365
+    Copilot agent. These cards enable users to browse the playbook library, select playbooks
+    to run, view risk findings from analysis, and monitor playbook execution progress — all
+    within the Copilot chat surface.
+  </prompt>
+
+  <role>Senior UI developer experienced with Adaptive Cards, M365 Copilot, and JSON templating</role>
+
+  <goal>
+    Deliver four production-ready Adaptive Card JSON templates for playbook interactions
+    that render correctly in Microsoft 365 Copilot and Teams, following the ASCII mockups
+    defined in design.md.
+  </goal>
+
+  <constraints>
+    - Adaptive Card schema version 1.5 (required for M365 Copilot compatibility)
+    - All cards must render correctly in both Teams and M365 Copilot surfaces
+    - Follow the ASCII mockups from design.md for layout and field placement
+    - Include Action.Submit buttons for playbook selection and execution triggers
+    - Use data-binding syntax ($\{property}) for dynamic content placeholders
+    - Keep card payload under 28 KB (Copilot limit)
+    - Support dark mode via Adaptive Card host config (no hard-coded colors)
+    - Progress indicator must use ColumnSet-based visual bar (no custom rendering)
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review the ASCII mockups in design.md for playbook menu, risk findings, playbook library, and progress indicator cards</step>
+    <step order="2">Create playbook-menu.json — contextual menu card listing applicable playbooks for the current document/matter with Action.Submit to trigger execution</step>
+    <step order="3">Create risk-findings.json — findings card showing risk level badges, finding summaries, severity indicators, and links to detailed analysis</step>
+    <step order="4">Create playbook-library.json — browsable catalog card showing available playbooks with descriptions, categories, and selection actions</step>
+    <step order="5">Create progress-indicator.json — execution status card with ColumnSet-based progress bar, current step label, and elapsed time</step>
+    <step order="6">Validate all four templates against Adaptive Card schema 1.5</step>
+    <step order="7">Verify data-binding placeholders match expected playbook API response shapes</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+  </tools>
+
+  <outputs>
+    <output>src/solutions/CopilotAgent/cards/playbook-menu.json</output>
+    <output>src/solutions/CopilotAgent/cards/risk-findings.json</output>
+    <output>src/solutions/CopilotAgent/cards/playbook-library.json</output>
+    <output>src/solutions/CopilotAgent/cards/progress-indicator.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - All four JSON files are valid Adaptive Card schema 1.5
+    - playbook-menu.json lists playbooks with descriptions and Action.Submit buttons for each
+    - risk-findings.json displays findings with severity badges (High/Medium/Low) and summary text
+    - playbook-library.json presents a browsable catalog with category grouping and selection actions
+    - progress-indicator.json shows a visual progress bar using ColumnSet, current step name, and elapsed time
+    - All cards use data-binding syntax for dynamic content
+    - Action.Submit payloads include playbook ID and execution parameters
+    - Card payloads are each under 28 KB
+    - No hard-coded colors (dark mode compatible)
+  </acceptance-criteria>
+</task>

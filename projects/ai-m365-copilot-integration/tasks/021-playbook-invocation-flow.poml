@@ -1,0 +1,90 @@
+<task id="MCI-021" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Playbook Invocation Flow</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>bff-api, playbooks, agent-gateway</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010, MCI-019</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the full playbook invocation flow for the M365 Copilot agent: starting from a
+    user's natural language request, the service searches for relevant documents, maps context
+    to the appropriate analysis scope, selects and executes a playbook, and returns results
+    as an Adaptive Card. Quick playbooks return inline results; long-running playbooks return
+    a deep-link to the Analysis code page instead.
+  </prompt>
+
+  <role>Senior .NET developer experienced with AI orchestration, playbook execution, and BFF API patterns</role>
+
+  <goal>
+    Deliver a PlaybookInvocationService that orchestrates the end-to-end flow from document
+    search through playbook execution to Adaptive Card result rendering, integrating with
+    existing PlaybookExecutionEngine and ChatContextMappingService.
+  </goal>
+
+  <constraints>
+    - Use existing PlaybookExecutionEngine — do not reimplement execution logic
+    - Use existing ChatContextMappingService for context-to-scope mapping
+    - Follow ADR-013: extend BFF, not a separate service
+    - Quick playbooks (estimated &lt; 30s): return inline Adaptive Card with findings via AdaptiveCardFormatterService
+    - Long-running playbooks (estimated >= 30s): return handoff card with deep-link to Analysis code page via HandoffUrlBuilder
+    - Log playbook invocations for audit trail
+    - Handle playbook-not-found and execution-failure scenarios gracefully with error cards
+    - Follow ADR-010 DI minimalism for service registration
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing PlaybookExecutionEngine and ChatContextMappingService interfaces and usage patterns</step>
+    <step order="2">Review AI-ARCHITECTURE.md for the dual pipeline pattern and tool framework integration</step>
+    <step order="3">Create PlaybookInvocationService.cs with constructor injecting PlaybookExecutionEngine, ChatContextMappingService, AdaptiveCardFormatterService, and HandoffUrlBuilder</step>
+    <step order="4">Implement InvokePlaybookAsync method: accept user query, document references, and optional playbook hint</step>
+    <step order="5">Implement document search step — resolve document references from user query using existing search infrastructure</step>
+    <step order="6">Implement context mapping step — use ChatContextMappingService to determine analysis scope and applicable playbooks</step>
+    <step order="7">Implement playbook selection — auto-select if single match, return playbook-menu card if multiple options</step>
+    <step order="8">Implement execution branching — quick playbooks execute inline and return risk-findings card; long-running playbooks return handoff card</step>
+    <step order="9">Implement error handling — playbook-not-found returns error card, execution failure returns error card with retry action</step>
+    <step order="10">Register service in DI and wire into Agent Gateway endpoints from MCI-010</step>
+    <step order="11">Add unit tests for the orchestration flow covering quick, long-running, not-found, and failure scenarios</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/PlaybookInvocationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - PlaybookInvocationService is registered in DI and callable from Agent Gateway endpoints
+    - InvokePlaybookAsync accepts user query and document references, returns Adaptive Card JSON
+    - Quick playbooks (&lt;30s estimated) return inline risk-findings Adaptive Card
+    - Long-running playbooks (>=30s estimated) return handoff card with Analysis Workspace deep-link
+    - Multiple matching playbooks return playbook-menu card for user selection
+    - Playbook-not-found scenario returns descriptive error card
+    - Execution failure returns error card with retry action
+    - Service delegates to existing PlaybookExecutionEngine (no reimplemented execution logic)
+    - Service delegates to ChatContextMappingService for scope resolution
+    - All invocations are logged for audit trail
+    - Unit tests cover quick, long-running, multi-match, not-found, and failure scenarios
+  </acceptance-criteria>
+</task>

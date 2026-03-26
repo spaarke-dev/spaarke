@@ -1,0 +1,85 @@
+<task id="MCI-029" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Agent Gateway Unit Tests</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>testing, unit-test</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-019, MCI-020, MCI-021</dependencies>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for the agent gateway services: AdaptiveCardFormatterService,
+    HandoffUrlBuilder, PlaybookInvocationService, EmailDraftService, and AgentConversationService.
+    Target 80% code coverage. Test edge cases including null inputs, unauthorized access,
+    timeout scenarios, and malformed data.
+  </prompt>
+
+  <role>Senior .NET test engineer with expertise in xUnit, Moq, and test-driven development for API services.</role>
+
+  <goal>
+    Achieve 80%+ code coverage across all agent gateway services with tests that cover
+    happy paths, edge cases, error conditions, and security boundaries.
+  </goal>
+
+  <constraints>
+    - Use xUnit and Moq (or NSubstitute) matching existing test project conventions
+    - Follow existing test patterns in tests/unit/
+    - Test edge cases: null inputs, empty collections, unauthorized callers, timeout scenarios
+    - Mock external dependencies (Dataverse, OpenAI, Graph) — do not make real calls
+    - Each test class should have Arrange/Act/Assert structure with descriptive method names
+    - Test Adaptive Card JSON output structure (valid JSON, required fields present)
+    - Verify security: unauthorized users get 403, not data leakage
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Features/Agent/</file>
+      <file>tests/unit/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing test patterns and conventions in tests/unit/.</step>
+    <step order="2">Inventory all public methods in the five target services that need test coverage.</step>
+    <step order="3">Create AdaptiveCardFormatterTests.cs: test card generation for each card type, verify JSON structure, test null/empty inputs, test special character escaping.</step>
+    <step order="4">Create HandoffUrlBuilderTests.cs: test URL generation for each handoff target, test parameter encoding, test missing parameters, test unauthorized access.</step>
+    <step order="5">Create PlaybookInvocationTests.cs: test invocation routing, test timeout handling, test invalid playbook names, test result formatting.</step>
+    <step order="6">Create EmailDraftServiceTests.cs: test draft generation, test missing matter context, test template rendering, test attachment handling.</step>
+    <step order="7">Create AgentConversationServiceTests.cs: test conversation state management, test message routing, test concurrent access, test session expiry.</step>
+    <step order="8">Run all tests and verify they pass: dotnet test.</step>
+    <step order="9">Run coverage report and verify 80%+ coverage on target services.</step>
+    <step order="10">Fix any gaps identified by coverage analysis.</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet build *)</tool>
+    <tool>Bash(dotnet test *)</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Agent/AdaptiveCardFormatterTests.cs</output>
+    <output>tests/unit/Agent/HandoffUrlBuilderTests.cs</output>
+    <output>tests/unit/Agent/PlaybookInvocationTests.cs</output>
+    <output>tests/unit/Agent/EmailDraftServiceTests.cs</output>
+    <output>tests/unit/Agent/AgentConversationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All five test classes are created with tests for happy paths and edge cases.</criterion>
+    <criterion>All unit tests pass (dotnet test exits with 0).</criterion>
+    <criterion>Code coverage for the five target services is 80% or higher.</criterion>
+    <criterion>Null input, unauthorized access, and timeout edge cases are tested.</criterion>
+    <criterion>Adaptive Card JSON output is validated for structure (valid JSON, required fields).</criterion>
+    <criterion>All external dependencies are mocked — no real HTTP, Dataverse, or OpenAI calls.</criterion>
+    <criterion>Test method names are descriptive and follow existing naming conventions.</criterion>
+  </acceptance-criteria>
+</task>

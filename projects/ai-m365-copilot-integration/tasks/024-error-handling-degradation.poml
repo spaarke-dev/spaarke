@@ -1,0 +1,80 @@
+<task id="MCI-024" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Error Handling and Graceful Degradation</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>bff-api, error-handling, resilience</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-013, MCI-019</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement comprehensive error handling for the Copilot agent gateway so that every
+    failure mode returns a user-friendly Adaptive Card instead of a raw error. Cover
+    BFF unavailability, token-exchange failure, playbook timeout, Dataverse query errors,
+    and unexpected exceptions. Follow the ProblemDetails pattern from ADR-019.
+  </prompt>
+
+  <role>Senior .NET backend engineer with expertise in resilience patterns and API error handling.</role>
+
+  <goal>
+    All agent gateway failures produce structured, user-friendly Adaptive Card error
+    responses with correlation IDs, retry guidance, and no leaked internal details.
+  </goal>
+
+  <constraints>
+    - Follow ADR-019 ProblemDetails patterns for all error responses
+    - Return Adaptive Card JSON for errors surfaced to Copilot users, not raw ProblemDetails
+    - Include correlation ID in every error card for support traceability
+    - MUST NOT expose stack traces, internal URLs, or secret material in user-facing cards
+    - Implement circuit-breaker or retry logic where appropriate (ADR resilience patterns)
+    - Log full error details server-side at Warning/Error level with correlation ID
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/patterns/api/resilience.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Features/Agent/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing error-handling patterns in Sprk.Bff.Api and ADR-019.</step>
+    <step order="2">Create AgentErrorHandler.cs with methods for each failure category: BffUnavailable, TokenExchangeFailure, PlaybookTimeout, DataverseError, UnexpectedError.</step>
+    <step order="3">Implement Adaptive Card error templates — one per failure category — with user-friendly message, correlation ID, and retry hint.</step>
+    <step order="4">Wire AgentErrorHandler into AgentEndpoints.cs using try/catch around each endpoint handler.</step>
+    <step order="5">Add circuit-breaker wrapper for downstream BFF calls using Polly or equivalent.</step>
+    <step order="6">Ensure all ProblemDetails logged server-side include correlation ID, error category, and elapsed time.</step>
+    <step order="7">Write unit tests for each error path: verify card JSON structure, verify no leaked internals.</step>
+    <step order="8">Test manually: simulate each failure (e.g., stop BFF, revoke token, slow playbook) and confirm card rendering.</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet build *)</tool>
+    <tool>Bash(dotnet test *)</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentErrorHandler.cs</output>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentEndpoints.cs (updated)</output>
+    <output>tests/unit/Agent/AgentErrorHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AgentErrorHandler covers all five failure categories with distinct Adaptive Card templates.</criterion>
+    <criterion>No raw ProblemDetails or stack traces reach the Copilot user — only formatted cards.</criterion>
+    <criterion>Every error card includes a correlation ID matching server-side logs.</criterion>
+    <criterion>Circuit-breaker or retry logic is present for BFF downstream calls.</criterion>
+    <criterion>Unit tests pass for all error paths and verify card JSON structure.</criterion>
+    <criterion>Solution builds without warnings (dotnet build succeeds).</criterion>
+  </acceptance-criteria>
+</task>

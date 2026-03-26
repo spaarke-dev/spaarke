@@ -1,0 +1,91 @@
+<task id="MCI-027" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>BYOK Deployment Templates</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>infrastructure, bicep, byok, azure</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-012</dependencies>
+  </metadata>
+
+  <prompt>
+    Create Bicep templates for customer-hosted (BYOK) deployment of the Copilot integration
+    stack: BFF API App Service, Azure OpenAI, AI Search, and Bot Service. Parameterize
+    all templates for customer Azure subscription. Include deployment scripts and
+    documentation.
+  </prompt>
+
+  <role>Senior Azure infrastructure engineer with expertise in Bicep, ARM templates, and multi-tenant deployment patterns.</role>
+
+  <goal>
+    Customers can deploy the complete Copilot integration stack into their own Azure
+    subscription using a single parameterized Bicep deployment with clear documentation.
+  </goal>
+
+  <constraints>
+    - All resource names must be parameterized (no hard-coded Spaarke resource names)
+    - Follow Azure naming conventions documented in AZURE-RESOURCE-NAMING-CONVENTION.md
+    - Include Key Vault for secrets management (not plain-text connection strings)
+    - Use managed identities where possible (avoid service principal secrets)
+    - Bot Service registration must be parameterized for customer's M365 tenant
+    - Include parameters.template.json with descriptive comments for each parameter
+    - Deployment script must be idempotent (safe to re-run)
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-foundry/README.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing Bicep templates in infrastructure/ and the naming convention doc.</step>
+    <step order="2">Create infrastructure/byok/ directory structure.</step>
+    <step order="3">Create main.bicep with modules for: App Service Plan + App Service, Azure OpenAI, AI Search, Bot Service, Key Vault, managed identities.</step>
+    <step order="4">Parameterize all resource names, SKUs, regions, and tenant-specific values.</step>
+    <step order="5">Create parameters.template.json with all parameters, descriptions, and example values.</step>
+    <step order="6">Wire Key Vault references for secrets (OpenAI key, Bot secret) instead of plain-text outputs.</step>
+    <step order="7">Create Deploy-Byok.ps1 deployment script: validate parameters, run az deployment, configure app settings.</step>
+    <step order="8">Write infrastructure/byok/README.md with prerequisites, parameter descriptions, and step-by-step deployment instructions.</step>
+    <step order="9">Validate Bicep compiles: run az bicep build on main.bicep.</step>
+    <step order="10">Review all templates for hard-coded values or Spaarke-specific references.</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Bash(az bicep build *)</tool>
+    <tool>Bash(az bicep lint *)</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>infrastructure/byok/main.bicep</output>
+    <output>infrastructure/byok/modules/app-service.bicep</output>
+    <output>infrastructure/byok/modules/openai.bicep</output>
+    <output>infrastructure/byok/modules/ai-search.bicep</output>
+    <output>infrastructure/byok/modules/bot-service.bicep</output>
+    <output>infrastructure/byok/modules/key-vault.bicep</output>
+    <output>infrastructure/byok/parameters.template.json</output>
+    <output>infrastructure/byok/README.md</output>
+    <output>scripts/Deploy-Byok.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>main.bicep compiles without errors (az bicep build succeeds).</criterion>
+    <criterion>All resource names are parameterized — no hard-coded Spaarke values.</criterion>
+    <criterion>parameters.template.json includes every required parameter with descriptions.</criterion>
+    <criterion>Key Vault is used for all secrets; no plain-text secrets in outputs or app settings.</criterion>
+    <criterion>Managed identities are used for service-to-service authentication where supported.</criterion>
+    <criterion>Deploy-Byok.ps1 is idempotent and validates parameters before deployment.</criterion>
+    <criterion>README.md provides complete prerequisites and step-by-step deployment instructions.</criterion>
+    <criterion>Bot Service module includes M365 tenant parameterization.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,63 @@
+<task id="MCI-001" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Project Scaffolding and Folder Structure</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>foundation, setup</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the project folder structure for the M365 Copilot integration. Set up the CopilotAgent solution directory for manifest files,
+    the Agent feature directory in BFF API for gateway endpoints, and the infrastructure directory for Bot Service Bicep templates.
+    Install required NuGet packages for M365 Agents SDK.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Minimal APIs, M365 Agents SDK, and Spaarke BFF architecture</role>
+
+  <goal>
+    All project directories created, NuGet packages for M365 Agents SDK added to Sprk.Bff.Api.csproj,
+    and placeholder files in place for subsequent tasks to populate.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — prepare but do not register services yet</constraint>
+    <constraint source="project">Follow existing BFF folder structure conventions in src/server/api/Sprk.Bff.Api/Features/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create CopilotAgent directory">Create src/solutions/CopilotAgent/ with subdirectories: cards/, appPackage/</step>
+    <step order="2" name="Create Agent feature directory">Create src/server/api/Sprk.Bff.Api/Features/Agent/ for gateway endpoints and services</step>
+    <step order="3" name="Create infrastructure directory">Create infrastructure/bot-service/ for Bicep templates</step>
+    <step order="4" name="Add NuGet packages">Add Microsoft.Agents.Hosting.AspNetCore and Microsoft.Agents.AI to Sprk.Bff.Api.csproj</step>
+    <step order="5" name="Verify build">Run dotnet build to confirm no breaks</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="directory">src/solutions/CopilotAgent/</output>
+    <output type="directory">src/server/api/Sprk.Bff.Api/Features/Agent/</output>
+    <output type="directory">infrastructure/bot-service/</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (package additions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All directories exist with correct structure</criterion>
+    <criterion testable="true">NuGet packages added and dotnet build succeeds</criterion>
+    <criterion testable="true">No existing functionality broken</criterion>
+  </acceptance-criteria>
+</task>

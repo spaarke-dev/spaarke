@@ -1,0 +1,79 @@
+<task id="MCI-020" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>HandoffUrlBuilder Service</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>bff-api, handoff, deep-links</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the HandoffUrlBuilder service that generates deep-link URLs for navigating users
+    from M365 Copilot back into the Spaarke platform. The service constructs URLs that open
+    specific Code Page wizards and the Analysis Workspace within Dataverse, pre-filling
+    parameters so the user lands in the right context without re-entering information.
+  </prompt>
+
+  <role>Senior .NET developer experienced with Dataverse navigation, Code Page deep-links, and URL construction</role>
+
+  <goal>
+    Deliver a HandoffUrlBuilder service that generates correct, parameterized deep-link URLs
+    for all supported handoff targets — wizards and workspace pages — using the
+    Xrm.Navigation.navigateTo webresource URL format.
+  </goal>
+
+  <constraints>
+    - URLs must follow the Xrm.Navigation.navigateTo webresource format: pageType=webresource, webresourceName, data parameter with query string
+    - Support all handoff targets: DocumentUploadWizard, SummarizeFilesWizard, CreateMatterWizard, CreateEventWizard, PlaybookLibrary, AnalysisWorkspace
+    - Pre-fill parameters (documentId, matterId, containerId, playbook context) in the URL data query string
+    - URL-encode all parameter values
+    - Service must be stateless and registered as singleton
+    - Follow ADR-010 DI minimalism — single registration
+    - Construct URLs that work when opened from both Teams and Copilot surfaces
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-006.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review design.md wizard deep-link section to understand all handoff targets and their required parameters</step>
+    <step order="2">Define an enum or constants for supported handoff targets (DocumentUploadWizard, SummarizeFilesWizard, CreateMatterWizard, CreateEventWizard, PlaybookLibrary, AnalysisWorkspace)</step>
+    <step order="3">Create HandoffUrlBuilder.cs with a BuildUrl method that accepts a target type and parameter dictionary</step>
+    <step order="4">Implement URL construction using the Xrm.Navigation.navigateTo webresource format with proper encoding</step>
+    <step order="5">Add overloaded convenience methods for common handoff scenarios (e.g., BuildAnalysisWorkspaceUrl(matterId, documentIds))</step>
+    <step order="6">Register service as singleton in DI</step>
+    <step order="7">Add unit tests verifying URL format and parameter encoding for each handoff target</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/HandoffUrlBuilder.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - HandoffUrlBuilder is registered as singleton in DI
+    - BuildUrl method generates valid Xrm.Navigation.navigateTo webresource URLs
+    - All six handoff targets are supported with correct webresource names
+    - Parameters are URL-encoded in the data query string
+    - Convenience methods exist for common handoff scenarios
+    - Unit tests verify URL format correctness for each target type
+    - Missing required parameters throw ArgumentException with descriptive message
+    - URLs work when opened from M365 Copilot deep-link actions
+  </acceptance-criteria>
+</task>

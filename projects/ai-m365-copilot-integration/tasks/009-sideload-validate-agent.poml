@@ -1,0 +1,71 @@
+<task id="MCI-009" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Sideload and Validate Declarative Agent</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>m365, declarative-agent, validation, deploy</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>MCI-006, MCI-007, MCI-008</dependencies>
+  </metadata>
+
+  <prompt>
+    Package the Declarative Agent using the M365 Agents Toolkit, sideload it to the dev tenant
+    (spaarkedev1.crm.dynamics.com), and validate end-to-end functionality. Confirm the agent appears
+    in the MDA Copilot side pane, conversation starters display correctly, and at least one API plugin
+    function call succeeds. Document all issues, workarounds, and observations.
+  </prompt>
+
+  <role>M365 platform developer with experience in Copilot agent deployment, sideloading, and integration testing</role>
+
+  <goal>
+    A validated, sideloaded Declarative Agent running in the dev tenant with confirmed functionality:
+    agent visible in Copilot, conversation starters working, and at least one successful API function call.
+    All issues and workarounds documented for future reference.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Deploy to dev tenant: spaarkedev1.crm.dynamics.com</constraint>
+    <constraint source="project">Use M365 Agents Toolkit for packaging and sideloading</constraint>
+    <constraint source="project">Must validate in MDA (Model-Driven App) Copilot side pane, not just Teams</constraint>
+    <constraint source="project">Document ALL issues encountered, even if resolved — this is a first deployment</constraint>
+    <constraint source="project">Do not modify production tenant or other environments</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/notes/spikes/toolkit-setup.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Pre-flight checks">Verify all prerequisite artifacts exist: spaarke-bff-openapi.yaml, declarativeAgent.json, spaarke-api-plugin.json</step>
+    <step order="2" name="Package agent">Use M365 Agents Toolkit to package the Declarative Agent into a deployable app package (ZIP with manifest, icons, and agent files)</step>
+    <step order="3" name="Configure app registration">Verify or create the required Azure AD app registration for the API plugin OAuth flow</step>
+    <step order="4" name="Sideload to dev tenant">Sideload the packaged agent to spaarkedev1.crm.dynamics.com using the Agents Toolkit CLI or Teams Admin Center</step>
+    <step order="5" name="Validate agent visibility">Open a Model-Driven App in the dev tenant and confirm the Spaarke agent appears in the Copilot side pane</step>
+    <step order="6" name="Test conversation starters">Verify all conversation starters display correctly and clicking them initiates appropriate conversations</step>
+    <step order="7" name="Test function call">Execute at least one end-to-end function call through the agent — confirm the API plugin invokes the BFF API and returns a result</step>
+    <step order="8" name="Test error handling">Deliberately trigger an error scenario to verify the agent handles failures gracefully</step>
+    <step order="9" name="Document results">Create a validation report documenting: what worked, what failed, issues encountered, workarounds applied, and recommendations</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">Run M365 Agents Toolkit CLI commands for packaging and sideloading</tool>
+    <tool name="read">Read prerequisite artifacts and spike notes</tool>
+    <tool name="write">Create validation documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">projects/ai-m365-copilot-integration/notes/spikes/declarative-agent-validation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Agent loads and is visible in the MDA Copilot side pane on spaarkedev1.crm.dynamics.com</criterion>
+    <criterion testable="true">All conversation starters display correctly in the Copilot UI</criterion>
+    <criterion testable="true">At least one API plugin function call succeeds end-to-end (user query -> Copilot -> API plugin -> BFF API -> response)</criterion>
+    <criterion testable="true">Validation report documents all issues encountered and their resolutions or workarounds</criterion>
+    <criterion testable="true">App package is reproducible — packaging steps are documented</criterion>
+  </acceptance-criteria>
+</task>

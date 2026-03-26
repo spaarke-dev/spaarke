@@ -1,0 +1,78 @@
+<task id="MCI-012" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Azure Bot Service Registration</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>infrastructure, azure, bot-service</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+    <dependencies>MCI-002</dependencies>
+  </metadata>
+
+  <prompt>
+    Create Azure Bot Service infrastructure using Bicep templates. Register the bot with Teams and
+    M365 Copilot channels, configure the messaging endpoint to route to the BFF API, and store
+    all secrets in Key Vault following existing infrastructure patterns.
+  </prompt>
+
+  <role>Azure infrastructure developer familiar with Bicep, Bot Service, and Spaarke infrastructure conventions</role>
+
+  <goal>
+    Provision Azure Bot Service via Bicep template with Teams and Copilot channel registrations,
+    messaging endpoint pointing to the BFF API agent gateway, and secrets stored in Key Vault.
+    Follow existing infrastructure patterns from the ai-foundry module.
+  </goal>
+
+  <constraints>
+    - Use Bicep templates — no ARM JSON or Terraform
+    - Follow existing naming conventions from docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md
+    - Store all secrets (bot app password, connection strings) in Key Vault — never in app settings directly
+    - Messaging endpoint must point to the BFF API /api/agent/ path
+    - Use existing resource group spe-infrastructure-westus2
+    - Parameters file must support dev environment with room for future environments
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-foundry/README.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>scripts/Register-EntraAppRegistrations.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing Bicep templates in infrastructure/ for patterns, naming, and module structure</step>
+    <step order="2">Create infrastructure/bot-service/ directory</step>
+    <step order="3">Create main.bicep with Azure Bot Service resource, Teams channel, and Copilot channel registrations</step>
+    <step order="4">Configure messaging endpoint to point to BFF API (https://spe-api-dev-67e2xz.azurewebsites.net/api/agent/messages)</step>
+    <step order="5">Add Key Vault secret references for bot app password and any connection strings</step>
+    <step order="6">Create parameters.dev.json with dev environment values</step>
+    <step order="7">Document the Entra app registration requirements for the bot (update Register-EntraAppRegistrations.ps1 if needed)</step>
+    <step order="8">Validate Bicep template compiles with az bicep build</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>infrastructure/bot-service/main.bicep</output>
+    <output>infrastructure/bot-service/parameters.dev.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Bicep template defines Azure Bot Service resource with correct SKU and configuration</criterion>
+    <criterion>Teams channel is registered on the bot</criterion>
+    <criterion>M365 Copilot channel (or Microsoft 365 Extensions) is registered on the bot</criterion>
+    <criterion>Messaging endpoint is configured to BFF API agent gateway URL</criterion>
+    <criterion>Bot app password and secrets are referenced from Key Vault</criterion>
+    <criterion>Resource naming follows conventions in AZURE-RESOURCE-NAMING-CONVENTION.md</criterion>
+    <criterion>parameters.dev.json contains correct dev environment values</criterion>
+    <criterion>Bicep template compiles successfully with az bicep build</criterion>
+  </acceptance-criteria>
+</task>

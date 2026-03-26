@@ -1,0 +1,85 @@
+<task id="MCI-011" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>SSO Token Flow for M365 Agent</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>auth, sso, obo, bff-api</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+    <dependencies>MCI-009</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the SSO/OBO token flow that enables M365 Copilot user identity to flow through the Custom Connector
+    into the BFF API, where an On-Behalf-Of token exchange produces tokens scoped for Graph and Dataverse access.
+    Reuse the existing OBO pattern established in the sdap-office-integration project for the Outlook add-in.
+  </prompt>
+
+  <role>Auth specialist familiar with Entra ID, OBO flow, MSAL, and Spaarke auth patterns</role>
+
+  <goal>
+    Implement end-to-end SSO/OBO token flow: M365 Copilot user identity arrives via Custom Connector,
+    BFF API validates the token, performs OBO exchange for agent-specific scopes (Graph, Dataverse),
+    and caches tokens per tenant. Handle all error scenarios (expired tokens, consent required, insufficient permissions).
+  </goal>
+
+  <constraints>
+    - ADR-008: Use endpoint filters for token validation — no global auth middleware
+    - ADR-014: Cache tokens by tenant — do not use a global token cache
+    - Reuse existing OBO infrastructure from sdap-office-integration — do not create parallel implementations
+    - Token exchange must support agent-specific scopes distinct from the main web app scopes
+    - Handle consent-required errors gracefully with actionable error messages
+    - Never log or expose raw tokens in error responses or application logs
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/dataverse-obo.md</file>
+      <file>.claude/patterns/auth/token-caching.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>docs/architecture/sdap-auth-patterns.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing OBO flow implementation in sdap-office-integration for patterns to reuse</step>
+    <step order="2">Define agent-specific OAuth scopes required for Graph and Dataverse access via the agent channel</step>
+    <step order="3">Create AgentTokenService.cs in Features/Agent/ that wraps MSAL ConfidentialClientApplication for OBO exchange</step>
+    <step order="4">Implement token validation for incoming Custom Connector tokens (issuer, audience, signature)</step>
+    <step order="5">Implement OBO token exchange — exchange validated token for Graph-scoped and Dataverse-scoped tokens</step>
+    <step order="6">Integrate per-tenant token caching using existing Redis cache infrastructure (ADR-014)</step>
+    <step order="7">Handle error scenarios: expired tokens, consent required, insufficient permissions, network failures</step>
+    <step order="8">Add agent app registration configuration to appsettings (ClientId, ClientSecret reference, Scopes)</step>
+    <step order="9">Wire AgentTokenService into DI and integrate with AgentAuthorizationFilter from MCI-010</step>
+    <step order="10">Verify build succeeds and token flow is testable with mock tokens</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentTokenService.cs</output>
+    <output>Configuration additions to appsettings.json for agent app registration</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AgentTokenService validates incoming tokens from the Custom Connector (issuer, audience, signature)</criterion>
+    <criterion>OBO token exchange successfully produces Graph-scoped and Dataverse-scoped tokens</criterion>
+    <criterion>Token caching is per-tenant using existing Redis infrastructure per ADR-014</criterion>
+    <criterion>Consent-required errors return actionable ProblemDetails responses</criterion>
+    <criterion>Expired token and insufficient permission errors are handled gracefully</criterion>
+    <criterion>No raw tokens appear in logs or error responses</criterion>
+    <criterion>Agent-specific scopes are configurable via appsettings</criterion>
+    <criterion>Existing OBO patterns from sdap-office-integration are reused, not duplicated</criterion>
+    <criterion>Solution builds successfully with dotnet build</criterion>
+  </acceptance-criteria>
+</task>

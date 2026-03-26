@@ -1,0 +1,74 @@
+<task id="MCI-005" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Spike 3 - End-to-End File Pipeline</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>spike, m365, documents</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-003</dependencies>
+  </metadata>
+
+  <prompt>
+    Validate the complete file processing chain: user attaches file in Copilot conversation → API plugin
+    receives the file reference → BFF API retrieves file content from OneDrive via Graph → runs a quick
+    AI playbook analysis → returns results as an Adaptive Card. If Spike 1 (MCI-003) determined that
+    ConversationFileReference is not viable, test the search-by-name fallback path instead (search user's
+    OneDrive by filename, retrieve matching item).
+  </prompt>
+
+  <role>M365 platform developer with expertise in Copilot extensibility, Graph API, and Adaptive Cards</role>
+
+  <goal>
+    Prove or disprove the end-to-end file pipeline from Copilot attachment through BFF processing to
+    Adaptive Card response. Identify latency bottlenecks, error modes, and any platform constraints that
+    affect the production design.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Document all findings regardless of outcome — negative results are valuable</constraint>
+    <constraint source="project">Use dev tenant spaarkedev1.crm.dynamics.com for testing</constraint>
+    <constraint source="ADR-013">AI features extend BFF, not a separate service</constraint>
+    <constraint source="ADR-001">Use Minimal API endpoints; no Azure Functions</constraint>
+    <constraint source="spike">Do not build production code — use minimal throwaway implementations to validate the chain</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>projects/ai-m365-copilot-integration/notes/spikes/spike-1-conversation-file-reference.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review Spike 1 results">Read spike-1-conversation-file-reference.md to determine whether ConversationFileReference path is viable or fallback is needed</step>
+    <step order="2" name="Create file retrieval endpoint">Implement a minimal BFF endpoint that accepts a file reference (driveItem ID or filename) and retrieves content via Graph OBO flow</step>
+    <step order="3" name="Add quick playbook stub">Create a lightweight AI processing stub that accepts file content and returns a summary (use existing AiToolService pattern or simple OpenAI call)</step>
+    <step order="4" name="Build Adaptive Card response">Construct an Adaptive Card that displays the file analysis results (filename, summary, key findings)</step>
+    <step order="5" name="Wire API plugin to BFF">Connect the API plugin endpoint to call the BFF file retrieval and processing chain, returning the Adaptive Card</step>
+    <step order="6" name="Test happy path">Attach a file in MDA Copilot, trigger the full chain, and verify the Adaptive Card appears with analysis results</step>
+    <step order="7" name="Test fallback path (if needed)">If ConversationFileReference is not viable, test: user says "analyze my file report.pdf" → API plugin searches OneDrive by name → retrieves → processes → returns card</step>
+    <step order="8" name="Measure latency">Record end-to-end latency for the pipeline and identify which segments are slowest (Graph call, AI processing, card rendering)</step>
+    <step order="9" name="Document findings">Write spike results including: pipeline diagram, latency breakdown, error modes encountered, and production design recommendations</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="npm">Agents Toolkit</tool>
+    <tool name="dotnet">BFF API for endpoint implementation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-m365-copilot-integration/notes/spikes/spike-3-e2e-file-pipeline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least one file pipeline path (direct reference or search-by-name) is tested end-to-end</criterion>
+    <criterion testable="true">End-to-end latency is measured and broken down by pipeline segment</criterion>
+    <criterion testable="true">Adaptive Card with file analysis results renders correctly in MDA Copilot</criterion>
+    <criterion testable="true">Error modes are documented (auth failures, file not found, timeout, unsupported format)</criterion>
+    <criterion testable="true">Spike notes include production design recommendations with clear go/no-go for each pipeline path</criterion>
+  </acceptance-criteria>
+</task>

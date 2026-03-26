@@ -1,0 +1,62 @@
+<task id="MCI-002" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>M365 Agents Toolkit Setup and Dev Environment</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>foundation, setup, m365</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-001</dependencies>
+  </metadata>
+
+  <prompt>
+    Set up the M365 Agents Toolkit VS Code extension and configure the dev environment for sideloading
+    Declarative Agents to the Spaarke dev tenant. Create the Teams app manifest structure and configure
+    app registration in Entra ID for the Copilot agent.
+  </prompt>
+
+  <role>M365 platform developer with expertise in Teams app packaging, Entra ID app registrations, and Copilot extensibility</role>
+
+  <goal>
+    M365 Agents Toolkit installed, Teams app manifest created, Entra ID app registration configured,
+    and able to sideload a minimal agent to the dev tenant's MDA Copilot.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use dev tenant: spaarkedev1.crm.dynamics.com</constraint>
+    <constraint source="project">App registration must support OAuth 2.0 delegated permissions for BFF API</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>scripts/Register-EntraAppRegistrations.ps1</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Install Agents Toolkit">Verify M365 Agents Toolkit VS Code extension is available; document setup steps</step>
+    <step order="2" name="Create Teams app manifest">Create src/solutions/CopilotAgent/appPackage/manifest.json with app identity, bot registration reference, and Copilot extensions</step>
+    <step order="3" name="Configure Entra app registration">Create or configure Entra ID app for the Copilot agent with required API permissions (Graph, Dataverse, BFF API)</step>
+    <step order="4" name="Create environment config">Create local environment configuration for dev tenant targeting</step>
+    <step order="5" name="Validate sideload">Package and attempt sideload of minimal agent to dev tenant</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Agents Toolkit CLI</tool>
+    <tool name="az">Azure CLI for app registration</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/CopilotAgent/appPackage/manifest.json</output>
+    <output type="docs">projects/ai-m365-copilot-integration/notes/spikes/toolkit-setup.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Teams app manifest is valid JSON with correct schema</criterion>
+    <criterion testable="true">Entra app registration exists with required permissions</criterion>
+    <criterion testable="true">Minimal agent can be sideloaded to dev tenant (or clear documentation of blocking issues)</criterion>
+  </acceptance-criteria>
+</task>

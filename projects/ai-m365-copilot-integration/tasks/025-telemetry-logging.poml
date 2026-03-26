@@ -1,0 +1,80 @@
+<task id="MCI-025" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Telemetry and Interaction Logging</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>telemetry, logging, observability</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-013</dependencies>
+  </metadata>
+
+  <prompt>
+    Add structured telemetry for the Copilot agent gateway covering interaction types,
+    playbook invocation counts, handoff events, and response latencies. Use Application
+    Insights and OpenTelemetry. Strictly avoid logging document content or prompts per
+    ADR-015 data governance requirements.
+  </prompt>
+
+  <role>Senior .NET engineer with expertise in observability, OpenTelemetry, and Application Insights.</role>
+
+  <goal>
+    Production-ready telemetry that provides full operational visibility into agent
+    interactions without logging any sensitive content (document bodies, prompts, PII).
+  </goal>
+
+  <constraints>
+    - MUST NOT log document content, user prompts, or AI-generated responses (ADR-015)
+    - Log only identifiers, sizes, timings, outcome codes, and interaction types
+    - Use OpenTelemetry Activity/Metric APIs for structured telemetry
+    - Emit custom metrics: agent_interaction_total, agent_playbook_invocation_total, agent_handoff_total, agent_response_latency_ms
+    - Include correlation ID, user tenant ID, and interaction type on all telemetry
+    - Follow ADR-016 for cost/rate-limit tracking dimensions
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-cost-rate-limits.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Features/Agent/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review ADR-015 and ADR-016 for data governance and cost tracking constraints.</step>
+    <step order="2">Create AgentTelemetry.cs with static ActivitySource and Meter for the agent feature area.</step>
+    <step order="3">Define custom metrics: interaction counter (by type), playbook invocation counter (by playbook name), handoff counter, response latency histogram.</step>
+    <step order="4">Add Activity spans to each agent endpoint: start span on request, record dimensions, stop on response.</step>
+    <step order="5">Integrate AgentTelemetry calls into existing endpoint handlers and services.</step>
+    <step order="6">Register ActivitySource and Meter in DI/OpenTelemetry configuration.</step>
+    <step order="7">Verify no sensitive data is logged: review all telemetry calls for content leakage.</step>
+    <step order="8">Write unit tests that verify metric emission and confirm no content fields are recorded.</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet build *)</tool>
+    <tool>Bash(dotnet test *)</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentTelemetry.cs</output>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/ (updated endpoint files with telemetry calls)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AgentTelemetry.cs defines ActivitySource and Meter with four custom metrics.</criterion>
+    <criterion>All agent endpoints emit telemetry spans with correlation ID, tenant ID, and interaction type.</criterion>
+    <criterion>No document content, prompts, or AI responses appear in any telemetry output.</criterion>
+    <criterion>Playbook invocations are counted by playbook name with latency histograms.</criterion>
+    <criterion>Handoff events are tracked with destination type dimension.</criterion>
+    <criterion>OpenTelemetry registration is wired into the DI container.</criterion>
+    <criterion>Unit tests verify metric emission and absence of sensitive data fields.</criterion>
+  </acceptance-criteria>
+</task>

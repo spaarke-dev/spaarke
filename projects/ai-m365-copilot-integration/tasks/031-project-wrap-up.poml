@@ -1,0 +1,80 @@
+<task id="MCI-031" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>wrap-up, documentation</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>MCI-030</dependencies>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: update README.md status to Complete, verify all graduation
+    criteria are met, create lessons-learned.md, run /repo-cleanup, and prepare the
+    branch for merge to master.
+  </prompt>
+
+  <role>Project lead responsible for final quality verification and project closure.</role>
+
+  <goal>
+    Project is fully closed out with updated documentation, verified graduation criteria,
+    captured lessons learned, and a clean branch ready for merge to master.
+  </goal>
+
+  <constraints>
+    - Do not merge to master — only prepare the branch for merge
+    - Verify ALL tasks in TASK-INDEX.md are marked complete before closing
+    - README.md status must reflect actual project state
+    - Lessons learned must include what went well, what could improve, and technical decisions worth revisiting
+    - Run /repo-cleanup to ensure no ephemeral files, broken links, or stale artifacts remain
+    - Ensure all test suites pass before marking project complete
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/README.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>projects/ai-m365-copilot-integration/tasks/TASK-INDEX.md</file>
+      <file>projects/ai-m365-copilot-integration/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review TASK-INDEX.md and verify all tasks are marked complete (no remaining 🔲 items).</step>
+    <step order="2">Run full test suite: dotnet test. Confirm all tests pass.</step>
+    <step order="3">Update README.md: set project status to "Complete", update completion date, summarize delivered capabilities.</step>
+    <step order="4">Verify graduation criteria from spec.md are met: review each criterion and document status.</step>
+    <step order="5">Create lessons-learned.md: what went well (successes, good patterns), what could improve (friction points, gaps), technical decisions worth revisiting, recommendations for future projects.</step>
+    <step order="6">Run /repo-cleanup to clean ephemeral files and validate repository structure.</step>
+    <step order="7">Verify branch is clean: git status shows no uncommitted changes.</step>
+    <step order="8">Commit final updates and prepare branch for merge to master (do not merge).</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet test *)</tool>
+    <tool>Bash(git *)</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(repo-cleanup)</tool>
+    <tool>Skill(merge-to-master)</tool>
+  </tools>
+
+  <outputs>
+    <output>projects/ai-m365-copilot-integration/README.md (updated to Complete)</output>
+    <output>projects/ai-m365-copilot-integration/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tasks in TASK-INDEX.md are marked complete (✅).</criterion>
+    <criterion>Full test suite passes (dotnet test exits with 0).</criterion>
+    <criterion>README.md status is updated to "Complete" with completion date.</criterion>
+    <criterion>All graduation criteria from spec.md are verified and documented.</criterion>
+    <criterion>lessons-learned.md captures successes, improvements, and recommendations.</criterion>
+    <criterion>/repo-cleanup runs clean with no issues.</criterion>
+    <criterion>Branch has no uncommitted changes and is ready for merge to master.</criterion>
+  </acceptance-criteria>
+</task>

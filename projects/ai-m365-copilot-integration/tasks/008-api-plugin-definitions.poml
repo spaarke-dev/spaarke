@@ -1,0 +1,73 @@
+<task id="MCI-008" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>API Plugin Function Definitions</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>m365, api-plugin, declarative-agent</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-006</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the spaarke-api-plugin.json that maps human-readable function names and descriptions to OpenAPI operations
+    defined in spaarke-bff-openapi.yaml. Function descriptions must be clear and specific enough for Copilot's AI
+    to determine WHEN to call each function based on user intent. Group functions by domain: document operations,
+    playbook operations, matter queries, communication, and workspace management.
+  </prompt>
+
+  <role>M365 API Plugin developer with expertise in Copilot function design and natural language intent mapping</role>
+
+  <goal>
+    A complete API plugin definition that Copilot can use to discover and invoke Spaarke BFF API functions,
+    with descriptions optimized for AI-driven function selection based on user queries.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Function descriptions must be clear enough for Copilot AI to decide WHEN to call them based on user intent</constraint>
+    <constraint source="project">Must reference operations defined in spaarke-bff-openapi.yaml by operationId</constraint>
+    <constraint source="project">Functions must be logically grouped: document operations, playbook operations, matter queries, communication, workspace</constraint>
+    <constraint source="project">JSON must conform to M365 API Plugin schema</constraint>
+    <constraint source="project">Descriptions should use natural language that maps to how legal professionals phrase requests</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/CopilotAgent/spaarke-bff-openapi.yaml</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review OpenAPI spec">Read spaarke-bff-openapi.yaml to catalog all available operationIds and their purposes</step>
+    <step order="2" name="Review use cases for intent mapping">Read design.md use cases to understand how users will phrase requests that should trigger each function</step>
+    <step order="3" name="Define document operation functions">Create function entries for document search, retrieval, metadata queries, and file operations with intent-optimized descriptions</step>
+    <step order="4" name="Define playbook operation functions">Create function entries for playbook listing, execution, status tracking, and result retrieval</step>
+    <step order="5" name="Define matter query functions">Create function entries for matter-related queries, workspace lookups, and scope-based filtering</step>
+    <step order="6" name="Define communication functions">Create function entries for correspondence tracking, notification queries, and communication history</step>
+    <step order="7" name="Define workspace functions">Create function entries for workspace management, member access, and settings operations</step>
+    <step order="8" name="Define analysis and AI functions">Create function entries for analysis actions, risk scanning, and AI-powered operations</step>
+    <step order="9" name="Assemble plugin JSON">Create the complete spaarke-api-plugin.json with schema version, runtime configuration, and all function definitions</step>
+    <step order="10" name="Validate references">Verify every function references a valid operationId from the OpenAPI spec</step>
+    <step order="11" name="Test description quality">Review each function description for AI readability — ensure Copilot can distinguish between similar functions</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read OpenAPI spec and design documents</tool>
+    <tool name="write">Create the API plugin definition</tool>
+  </tools>
+
+  <outputs>
+    <output type="plugin-definition">src/solutions/CopilotAgent/spaarke-api-plugin.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Valid JSON conforming to M365 API Plugin schema</criterion>
+    <criterion testable="true">Every function references a valid operationId from spaarke-bff-openapi.yaml</criterion>
+    <criterion testable="true">Function descriptions are AI-readable and distinguish between similar operations</criterion>
+    <criterion testable="true">Functions are logically grouped by domain: documents, playbooks, matters, communication, workspace</criterion>
+    <criterion testable="true">Descriptions use natural language matching how legal professionals phrase requests</criterion>
+    <criterion testable="true">Runtime configuration correctly points to OpenAPI spec and authentication</criterion>
+  </acceptance-criteria>
+</task>
