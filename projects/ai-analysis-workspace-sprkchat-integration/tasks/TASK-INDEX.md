@@ -13,13 +13,13 @@
 | # | Title | Status | Tags | Group | Dependencies |
 |---|-------|--------|------|-------|-------------|
 | 001 | Create AnalysisAiContext and AnalysisAiProvider | ✅ | code-page, react, context | — | none |
-| 002 | Create usePanelLayout hook | 🔲 | code-page, react, hooks | A | 001 |
-| 003 | Create ChatPanel wrapper component | 🔲 | code-page, react, sprkchat | A | 001 |
-| 004 | Restructure App.tsx to three-panel layout | 🔲 | code-page, react, layout | — | 001, 002, 003 |
-| 005 | Wire onInsertToEditor callback via context | 🔲 | code-page, react, editor | B | 004 |
+| 002 | Create usePanelLayout hook | ✅ | code-page, react, hooks | A | 001 |
+| 003 | Create ChatPanel wrapper component | ✅ | code-page, react, sprkchat | A | 001 |
+| 004 | Restructure App.tsx to three-panel layout | ✅ | code-page, react, layout | — | 001, 002, 003 |
+| 005 | Wire onInsertToEditor callback via context | ✅ | code-page, react, editor | B | 004 |
 | 006 | Wire editorSelection to SprkChat props | 🔲 | code-page, react, editor | B | 004 |
 | 007 | Wire SSE streaming to editor via direct ref | 🔲 | code-page, react, streaming | — | 005 |
-| 008 | Add panel visibility toggles to toolbar | 🔲 | code-page, react, fluent-ui | C | 004 |
+| 008 | Add panel visibility toggles to toolbar | ✅ | code-page, react, fluent-ui | C | 004 |
 | 009 | Phase 1 integration verification | 🔲 | testing | — | all Phase 1 |
 
 ### Phase 2: Remove Cross-Pane Infrastructure
