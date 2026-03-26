@@ -40,11 +40,11 @@
 
 | # | Title | Status | Tags | Group | Dependencies |
 |---|-------|--------|------|-------|-------------|
-| 020 | Consolidate to single MSAL initialization | 🔲 | auth | — | 018 |
-| 021 | Unify useAnalysisLoader for editor and chat | 🔲 | react, hooks | H | 020 |
-| 022 | Single BFF base URL and authenticated fetch | 🔲 | auth, api | H | 020 |
-| 023 | Wire chat playbook from AnalysisAiContext | 🔲 | react, sprkchat | — | 021 |
-| 024 | Auth verification — single token acquisition | 🔲 | testing | — | all Phase 3 |
+| 020 | Consolidate to single MSAL initialization | ✅ | auth | — | 018 |
+| 021 | Unify useAnalysisLoader for editor and chat | ✅ | react, hooks | H | 020 |
+| 022 | Single BFF base URL and authenticated fetch | ✅ | auth, api | H | 020 |
+| 023 | Wire chat playbook from AnalysisAiContext | ✅ | react, sprkchat | — | 021 |
+| 024 | Auth verification — single token acquisition | ✅ | testing | — | all Phase 3 |
 
 ### Phase 4: Layout Polish + Persistence
 

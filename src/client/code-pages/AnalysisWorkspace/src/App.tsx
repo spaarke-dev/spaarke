@@ -52,6 +52,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
   Spinner,
@@ -150,6 +151,16 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     flexShrink: 0,
   },
+  // Task 036: Smooth collapse/expand animation for panel toggle transitions.
+  // Applied only when NOT dragging to avoid janky animation during mouse resize.
+  panelAnimated: {
+    transitionProperty: 'width, opacity',
+    transitionDuration: tokens.durationNormal,
+    transitionTimingFunction: tokens.curveEasyEase,
+    '@media (prefers-reduced-motion: reduce)': {
+      transitionDuration: '0ms',
+    },
+  },
   // ---- Auth states (task 066) ----
   authContainer: {
     display: 'flex',
@@ -226,6 +237,38 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     containerRef,
     currentRatios,
   } = usePanelLayout();
+
+  // ---- Task 035: M365 Copilot handoff — ensure Chat panel is visible ----
+  // When the page is opened with an analysisId (via Copilot handoff or navigateTo),
+  // force the Chat panel visible on first render even if sessionStorage had it hidden.
+  // Uses a ref to ensure this only runs once per mount (not on re-renders).
+  const handoffAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!handoffAppliedRef.current && analysisId && !isChatVisible) {
+      handoffAppliedRef.current = true;
+      toggleChat();
+    } else {
+      handoffAppliedRef.current = true;
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally once on mount
+
+  // ---- Task 033: Keyboard shortcuts for panel toggle (Ctrl+Shift+S / Ctrl+Shift+C) ----
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || !e.shiftKey) return;
+
+      if (e.key === 'S' || e.key === 's') {
+        e.preventDefault();
+        toggleSource();
+      } else if (e.key === 'C' || e.key === 'c') {
+        e.preventDefault();
+        toggleChat();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [toggleSource, toggleChat]);
 
   // ---- BFF base URL for AnalysisAiProvider ----
   // Resolved lazily from Dataverse Environment Variables via resolveRuntimeConfig()
@@ -507,7 +550,7 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         {/* Content area: 3-panel layout (Editor | Source | Chat) */}
         <div className={styles.content}>
           {/* Editor Panel (always visible) */}
-          <div className={styles.editorPanel} style={{ width: panelSizes.editor }}>
+          <div className={mergeClasses(styles.editorPanel, !isDragging && styles.panelAnimated)} style={{ width: panelSizes.editor }}>
             {/* Show error state if analysis load or execution failed */}
             {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
               <div
@@ -614,7 +657,7 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                 />
               )}
               <div
-                className={styles.sourcePanel}
+                className={mergeClasses(styles.sourcePanel, !isDragging && styles.panelAnimated)}
                 style={isSourceCollapsed ? undefined : { width: panelSizes.source }}
               >
                 <SourceViewerPanel
@@ -644,7 +687,7 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                 currentRatio={isSourceVisible ? currentRatios.source : currentRatios.editor}
               />
               <div
-                className={styles.chatPanel}
+                className={mergeClasses(styles.chatPanel, !isDragging && styles.panelAnimated)}
                 style={{ width: panelSizes.chat }}
                 data-testid="chat-panel-container"
               >
