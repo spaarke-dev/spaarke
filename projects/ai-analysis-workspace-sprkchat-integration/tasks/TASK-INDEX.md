@@ -26,15 +26,15 @@
 
 | # | Title | Status | Tags | Group | Dependencies |
 |---|-------|--------|------|-------|-------------|
-| 010 | Remove DocumentStreamBridge and useSelectionBroadcast | 🔲 | cleanup | D | 009 |
-| 011 | Remove side pane launch code from App.tsx | 🔲 | cleanup | D | 009 |
+| 010 | Remove DocumentStreamBridge and useSelectionBroadcast | ✅ | cleanup | D | 009 |
+| 011 | Remove side pane launch code from App.tsx | ✅ | cleanup | D | 009 |
 | 012 | Remove SprkChatPane Code Page entirely | ✅ | cleanup | E | 009 |
 | 013 | Remove openSprkChatPane launcher and SidePaneManager | ✅ | cleanup | E | 009 |
 | 014 | Remove ribbon button XML and LegalWorkspace injection | ✅ | dataverse | F | 009 |
 | 015 | Remove web resources from Dataverse solution | ✅ | dataverse | F | 009 |
 | 016 | Deprecate SprkChatBridge in shared library | ✅ | shared-library | G | 009 |
 | 017 | Remove contextService.ts and related tests | ✅ | cleanup | G | 012 |
-| 018 | Phase 2 verification — grep BroadcastChannel = 0 | 🔲 | testing | — | all Phase 2 |
+| 018 | Phase 2 verification — grep BroadcastChannel = 0 | ✅ | testing | — | all Phase 2 |
 
 ### Phase 3: Unified Auth + Context Resolution
 
