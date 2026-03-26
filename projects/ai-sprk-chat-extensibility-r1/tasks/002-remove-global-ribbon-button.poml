@@ -1,0 +1,75 @@
+<task id="CHAT-002" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Remove global ribbon button for SprkChat</title>
+    <status>not-started</status>
+    <phase>0</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>ribbon, scope-enforcement, dataverse</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Remove the global SprkChat ribbon button from the deployed solution. The ribbon XML
+    file sprk_application_ribbon_sprkchat.xml must be removed or emptied so no "SprkChat"
+    button appears in the global command bar on any Dataverse page. This is FR-02.
+  </prompt>
+
+  <role>
+    Developer familiar with Dataverse ribbon customizations and solution packaging.
+  </role>
+
+  <goal>
+    The sprk_application_ribbon_sprkchat.xml ribbon definition is removed from the solution,
+    and no global "SprkChat" button appears in the command bar on any page.
+  </goal>
+
+  <inputs>
+    <file purpose="target">src/client/webresources/ribbon/sprk_application_ribbon_sprkchat.xml</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-02">Global ribbon button MUST be removed entirely</constraint>
+    <constraint source="project">SprkChat launches ONLY from AnalysisWorkspace Code Page</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ribbon-customization, dataverse-solution</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ribbon XML">
+      Read src/client/webresources/ribbon/sprk_application_ribbon_sprkchat.xml to understand the current ribbon definition.
+    </step>
+    <step order="2" name="Check solution references">
+      Search for references to this ribbon XML file in solution definition files, customizations.xml, or build scripts.
+    </step>
+    <step order="3" name="Remove or empty ribbon XML">
+      Remove the ribbon XML file or empty its CustomAction/CommandDefinition content.
+      Update any solution references accordingly.
+    </step>
+    <step order="4" name="Verify launcher still works">
+      Confirm that openSprkChatPane.ts (the AnalysisWorkspace launcher) does not depend on the ribbon enable rule or command definition.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Search for ribbon references</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/ribbon/sprk_application_ribbon_sprkchat.xml (removed or emptied)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No "SprkChat" button in global command bar on any page</criterion>
+    <criterion testable="true">Ribbon XML file removed or emptied of CustomAction definitions</criterion>
+    <criterion testable="true">AnalysisWorkspace launcher unaffected</criterion>
+  </acceptance-criteria>
+</task>

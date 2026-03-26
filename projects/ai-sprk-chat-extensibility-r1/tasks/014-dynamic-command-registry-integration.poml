@@ -1,0 +1,83 @@
+<task id="CHAT-014" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Integrate dynamic command registry with playbook capabilities</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>code-page, commands, playbook</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-012, CHAT-013</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the dynamic command registry (FR-06) so that available slash commands are populated
+    from three sources: system commands (static, from CHAT-013), active playbook capabilities
+    (dynamic), and playbook switching options (dynamic). Commands MUST update when playbook changes.
+  </prompt>
+
+  <role>Full-stack developer bridging SprkChat UI and BFF playbook services.</role>
+
+  <goal>
+    SlashCommandMenu displays commands from all three sources (system, playbook capabilities,
+    playbook switching), and commands update within 1 second when playbook changes.
+  </goal>
+
+  <inputs>
+    <file purpose="target">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts</file>
+    <file purpose="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Callback-based props in shared components</constraint>
+    <constraint source="NFR-02">Playbook switch completes within 1 second</constraint>
+    <constraint source="FR-06">Three sources: system, playbook capabilities, playbook switching</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>command-registry, playbook-capabilities</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read useDynamicSlashCommands">Understand current command resolution logic.</step>
+    <step order="2" name="Read DynamicCommandResolver">Understand BFF-side command resolution from playbooks.</step>
+    <step order="3" name="Enhance useDynamicSlashCommands">
+      Merge three command sources: system commands (always present), active playbook capabilities
+      (from useChatPlaybooks), and available playbook switching options.
+    </step>
+    <step order="4" name="Add playbook change reactivity">
+      Ensure command list updates reactively when useChatPlaybooks.activePlaybook changes.
+      Target: update within 1 second of playbook switch.
+    </step>
+    <step order="5" name="Handle namespace collisions">
+      If two playbooks define overlapping capability names, prefix with playbook name.
+    </step>
+    <step order="6" name="Wire to SlashCommandMenu">
+      Pass merged command list to SlashCommandMenu component with proper categories.
+    </step>
+    <step order="7" name="Write tests">Test command merging, playbook switch reactivity, collision handling.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts (modified)</output>
+    <output type="test">Unit tests for command registry integration</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Commands from all three sources appear in slash menu</criterion>
+    <criterion testable="true">Commands update within 1 second of playbook switch</criterion>
+    <criterion testable="true">Namespace collisions handled with playbook prefix</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,84 @@
+<task id="CHAT-013" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Implement system commands (/clear, /new, /export, /help)</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>code-page, commands, system</tags>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 0 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement built-in system commands (FR-08) that execute locally without sending to BFF AI:
+    /clear — Delete session, start fresh
+    /new — New session with current context
+    /export — Download conversation as markdown
+    /help — Display available commands
+  </prompt>
+
+  <role>Frontend developer with SprkChat session management expertise.</role>
+
+  <goal>
+    Four system commands implemented and registered in the slash command system.
+    Each executes its action locally without sending to BFF AI.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatExportWord.tsx</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Callback-based; no service dependencies in shared components</constraint>
+    <constraint source="FR-08">Commands execute without sending to BFF AI</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>system-commands, session-management</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read session management hooks">Understand useChatSession for clear/new operations.</step>
+    <step order="2" name="Read export functionality">Understand SprkChatExportWord for export pattern.</step>
+    <step order="3" name="Create system command handlers">
+      Create useSystemCommands hook with handlers for /clear, /new, /export, /help.
+      Each handler operates locally (no BFF call).
+    </step>
+    <step order="4" name="Register in slash command system">
+      Register system commands under "System" category in useDynamicSlashCommands.
+      Always available regardless of active playbook.
+    </step>
+    <step order="5" name="Implement /clear">Delete current session from sessionStorage, reset chat state.</step>
+    <step order="6" name="Implement /new">Create new session retaining current context (analysis, playbook).</step>
+    <step order="7" name="Implement /export">Download conversation as markdown file using existing export pattern.</step>
+    <step order="8" name="Implement /help">Display formatted help message listing all available commands in chat.</step>
+    <step order="9" name="Write unit tests">Test each command handler independently.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSystemCommands.ts (new)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts (modified)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/useSystemCommands.test.ts (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/clear deletes session and resets chat</criterion>
+    <criterion testable="true">/new creates fresh session with current context</criterion>
+    <criterion testable="true">/export downloads conversation as markdown</criterion>
+    <criterion testable="true">/help displays available commands</criterion>
+    <criterion testable="true">System commands never send to BFF AI</criterion>
+    <criterion testable="true">Unit tests pass for all four commands</criterion>
+  </acceptance-criteria>
+</task>

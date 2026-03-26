@@ -1,0 +1,66 @@
+<task id="CHAT-017" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Phase 1 integration tests</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-010, CHAT-011, CHAT-012, CHAT-013, CHAT-014, CHAT-015, CHAT-016</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for Phase 1 features: slash menu → system command execution,
+    context enrichment → BFF routing, playbook switch → command update, and the full
+    slash command flow (type `/` → filter → select → execute).
+  </prompt>
+
+  <role>Test engineer with React testing library and .NET integration test expertise.</role>
+
+  <goal>
+    Comprehensive integration tests validating the Phase 1 feature interactions work
+    correctly end-to-end.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">All Phase 1 task outputs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">80% coverage target for new code</constraint>
+    <constraint source="project">Must not break existing tests</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>integration-testing, react-testing</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Test slash menu → system command">Type `/clear` → verify session cleared without BFF call.</step>
+    <step order="2" name="Test context enrichment → BFF">Send message → verify enriched payload reaches BFF.</step>
+    <step order="3" name="Test playbook switch → commands">Switch playbook → verify command list updates.</step>
+    <step order="4" name="Test keyboard navigation flow">Full keyboard flow: type `/` → Arrow → Enter → verify action.</step>
+    <step order="5" name="Verify all existing tests still pass">Run full test suite.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run Jest tests</tool>
+    <tool name="dotnet">Run .NET tests</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">Integration test files for Phase 1 features</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Phase 1 integration tests pass</criterion>
+    <criterion testable="true">All existing tests still pass</criterion>
+    <criterion testable="true">80% coverage on new Phase 1 code</criterion>
+  </acceptance-criteria>
+</task>

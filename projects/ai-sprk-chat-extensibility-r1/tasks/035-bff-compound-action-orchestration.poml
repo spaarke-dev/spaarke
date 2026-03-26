@@ -1,0 +1,89 @@
+<task id="CHAT-035" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>BFF compound action orchestration and plan management</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>bff-api, ai, compound-actions</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-030, CHAT-031</dependencies>
+  </metadata>
+
+  <prompt>
+    Enhance the BFF to orchestrate compound actions: detect multi-step intents, generate
+    step plans, manage plan approval state, execute approved plans step-by-step with
+    progress streaming, and handle partial failures.
+  </prompt>
+
+  <role>Senior .NET developer with AI orchestration expertise.</role>
+
+  <goal>
+    BFF compound action pipeline: detect multi-step → generate plan → wait for approval
+    → execute steps → stream progress → handle failures.
+  </goal>
+
+  <inputs>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns</constraint>
+    <constraint source="ADR-013">AI extends BFF; ChatHostContext pipeline</constraint>
+    <constraint source="FR-12">2+ tool calls require plan preview; data-modifying always requires preview</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compound-actions, plan-management, ai-orchestration</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read CompoundIntentDetector and PendingPlanManager">Understand current detection and plan state management.</step>
+    <step order="2" name="Enhance plan generation">
+      After detecting compound intent, generate numbered step plan with tool assignments.
+      Return plan to client for preview (not execution).
+    </step>
+    <step order="3" name="Add plan approval endpoint">
+      Endpoint to approve, edit, or cancel a pending plan. Edit modifies plan via AI re-generation.
+    </step>
+    <step order="4" name="Implement step-by-step execution">
+      Execute approved plan steps sequentially. Stream progress via SSE (step started,
+      step completed, step failed) using existing streaming pattern.
+    </step>
+    <step order="5" name="Handle partial failures">
+      On step failure: preserve completed step results, report failure, offer retry or cancel.
+      Do not rollback completed steps by default.
+    </step>
+    <step order="6" name="Write tests">Test plan generation, approval, execution, failure handling.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs (modified)</output>
+    <output type="code">New plan approval endpoint</output>
+    <output type="test">Unit and integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Multi-step intents generate step plan for preview</criterion>
+    <criterion testable="true">Plan approval/edit/cancel endpoint works</criterion>
+    <criterion testable="true">Approved plan executes step-by-step with SSE progress</criterion>
+    <criterion testable="true">Partial failures preserve completed results</criterion>
+    <criterion testable="true">dotnet build succeeds; tests pass</criterion>
+  </acceptance-criteria>
+</task>

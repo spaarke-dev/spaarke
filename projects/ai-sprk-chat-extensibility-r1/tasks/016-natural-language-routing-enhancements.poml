@@ -1,0 +1,79 @@
+<task id="CHAT-016" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Natural language routing enhancements with context signals</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, ai, routing</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-011</dependencies>
+  </metadata>
+
+  <prompt>
+    Enhance natural language routing (FR-10) so the BFF AI model selects appropriate tools
+    based on enriched context signals, playbook-scoped tool registrations, and entity metadata.
+    Single-step actions execute immediately; multi-step detected for plan preview (Phase 3).
+  </prompt>
+
+  <role>Senior .NET developer with AI routing and playbook dispatch expertise.</role>
+
+  <goal>
+    Natural language messages (without slash commands) route to the correct playbook tool
+    using enriched context signals for improved accuracy. Multi-step actions are detected
+    and flagged for plan preview.
+  </goal>
+
+  <inputs>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+    <file purpose="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI extends BFF; use ChatHostContext</constraint>
+    <constraint source="FR-10">Use context signals for routing; single-step immediate, multi-step flagged</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai-routing, playbook-dispatch, compound-intent</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read PlaybookDispatcher">Understand current semantic matching for natural language → playbook.</step>
+    <step order="2" name="Read CompoundIntentDetector">Understand multi-step detection logic.</step>
+    <step order="3" name="Enhance PlaybookDispatcher with context signals">
+      Use document_type, available_actions, and conversation_phase from context signals
+      to improve routing accuracy. Weight matching based on context relevance.
+    </step>
+    <step order="4" name="Enhance CompoundIntentDetector">
+      Detect multi-step actions and flag for plan preview. Data-modifying or email-sending
+      actions always require plan preview regardless of step count.
+    </step>
+    <step order="5" name="Write tests">Test routing accuracy with various context signal combinations.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs (modified)</output>
+    <output type="test">Unit tests for enhanced routing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Summarize this document" routes to SummaryGenerator tool</criterion>
+    <criterion testable="true">Context signals improve routing over baseline (no signals)</criterion>
+    <criterion testable="true">Multi-step actions flagged for plan preview</criterion>
+    <criterion testable="true">Data-modifying actions always require plan preview</criterion>
+  </acceptance-criteria>
+</task>

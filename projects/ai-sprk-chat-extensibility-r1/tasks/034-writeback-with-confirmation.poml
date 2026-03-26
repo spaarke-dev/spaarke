@@ -1,0 +1,82 @@
+<task id="CHAT-034" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Implement write-back with before/after preview and confirmation</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>bff-api, ai, dataverse, code-page</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-016</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement write-back with confirmation (FR-14). Chat can update Dataverse records (e.g.,
+    correct an analysis finding) via write_back playbook capability. All write-backs MUST show
+    before/after preview and require explicit user confirmation.
+  </prompt>
+
+  <role>Full-stack developer with Dataverse and AI tool expertise.</role>
+
+  <goal>
+    A write-back AI tool that shows before/after diff preview and requires explicit user
+    confirmation before updating Dataverse records from chat.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/ActionConfirmationDialog.tsx</file>
+    <file purpose="reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">AI extends BFF; tool pattern</constraint>
+    <constraint source="FR-14">MUST show before/after preview; MUST require explicit confirmation</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>write-back, dataverse-update, confirmation</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/dataverse/</file>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ActionConfirmationDialog">Understand existing confirmation dialog pattern.</step>
+    <step order="2" name="Create WriteBackTool">
+      BFF AI tool that reads current record value, accepts proposed change, and returns
+      before/after diff without applying the change.
+    </step>
+    <step order="3" name="Build WriteBackPreviewCard">
+      Shared component showing before/after diff (old value → new value) with
+      Confirm and Cancel buttons.
+    </step>
+    <step order="4" name="Add confirmation flow">
+      User confirms → BFF applies the write-back to Dataverse record.
+      User cancels → no change, message in chat.
+    </step>
+    <step order="5" name="Register as playbook capability">Register write_back tool in playbook capabilities.</step>
+    <step order="6" name="Write tests">Test diff generation, preview rendering, confirmation/cancel flows.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET</tool>
+    <tool name="npm">Build TypeScript</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WriteBackTools.cs (new)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/WriteBackPreviewCard.tsx (new)</output>
+    <output type="test">Tests for write-back tool and preview card</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Before/after diff displayed for proposed write-back</criterion>
+    <criterion testable="true">Explicit user confirmation required before Dataverse update</criterion>
+    <criterion testable="true">Cancel prevents any data change</criterion>
+    <criterion testable="true">Success/failure reported in chat after write-back</criterion>
+  </acceptance-criteria>
+</task>

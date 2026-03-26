@@ -1,0 +1,83 @@
+<task id="CHAT-042" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Build playbook library browser component</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>fluent-ui, code-page, component</tags>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 3 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Build the PlaybookLibraryBrowser component (FR-17) — a browsable playbook catalog
+    accessible via /playbooks command. Shows playbook name, description, capabilities,
+    and recommended use cases. "Try this playbook" activates in current session.
+  </prompt>
+
+  <role>React/Fluent UI v9 developer with component library expertise.</role>
+
+  <goal>
+    A PlaybookLibraryBrowser component that renders a browsable catalog of available playbooks
+    within the chat, with "Try this playbook" activation.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts</file>
+    <file purpose="reference">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Callback-based props; zero service dependencies</constraint>
+    <constraint source="ADR-021">Fluent v9; semantic tokens; dark mode</constraint>
+    <constraint source="NFR-05">Keyboard navigation and screen reader labels</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>playbook-library, catalog-browser</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read useChatPlaybooks">Understand available playbook data and switching mechanism.</step>
+    <step order="2" name="Design catalog UI">
+      Card list showing each playbook: name, description, capabilities, use cases.
+      Search/filter for large catalogs. "Try this playbook" button on each card.
+    </step>
+    <step order="3" name="Build PlaybookLibraryBrowser component">
+      Fluent v9 Card components in a scrollable list. Each card shows playbook info
+      with "Try this playbook" action.
+    </step>
+    <step order="4" name="Add search/filter">Filter playbooks by name, description, or capability keywords.</step>
+    <step order="5" name="Wire activation">
+      "Try this playbook" calls useChatPlaybooks.switchContext to activate in current session.
+    </step>
+    <step order="6" name="Register /playbooks command">Add /playbooks as system command that renders the browser in chat.</step>
+    <step order="7" name="Write tests">Test rendering, search, activation, accessibility.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/PlaybookLibraryBrowser.tsx (new)</output>
+    <output type="code">useSystemCommands.ts (modified — add /playbooks)</output>
+    <output type="test">PlaybookLibraryBrowser tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Playbook catalog renders with name, description, capabilities</criterion>
+    <criterion testable="true">Search/filter narrows playbook list</criterion>
+    <criterion testable="true">"Try this playbook" activates playbook in current session</criterion>
+    <criterion testable="true">/playbooks command opens browser in chat</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+    <criterion testable="true">Keyboard navigable</criterion>
+  </acceptance-criteria>
+</task>

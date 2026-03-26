@@ -1,0 +1,63 @@
+<task id="CHAT-022" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Phase 2 integration tests for quick-action chips</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-020, CHAT-021</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for Phase 2 quick-action chips: chip population from playbook
+    capabilities, analysis-type-aware chip sets, responsive hide behavior, and chip click
+    source tagging.
+  </prompt>
+
+  <role>Test engineer with React Testing Library expertise.</role>
+
+  <goal>
+    Integration tests validating QuickActionChips enhancements work correctly
+    across analysis types, playbook switches, and responsive breakpoints.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">All Phase 2 task outputs</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="testing">80% coverage on new code</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>integration-testing</topic>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Test chip population">Verify chips populate from playbook capabilities.</step>
+    <step order="2" name="Test analysis-type chips">Verify correct chips for NDA, contract, etc.</step>
+    <step order="3" name="Test responsive behavior">Verify chips hide when pane &lt; 350px.</step>
+    <step order="4" name="Test chip click tagging">Verify chip click sends source: "chip_click".</step>
+    <step order="5" name="Run full test suite">Verify no regressions.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run Jest tests</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">Phase 2 integration test files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Phase 2 integration tests pass</criterion>
+    <criterion testable="true">All existing tests still pass</criterion>
+  </acceptance-criteria>
+</task>

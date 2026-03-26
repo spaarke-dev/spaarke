@@ -1,0 +1,78 @@
+<task id="CHAT-015" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Enable playbook switching from slash command menu</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, playbook, commands</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>CHAT-014</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement playbook switching via the slash command menu (FR-09). Under "Switch Assistant"
+    category, list available playbooks. Selecting one switches the active playbook, updating
+    system prompt, registered tools, available commands, and quick-action chips.
+  </prompt>
+
+  <role>Frontend developer with SprkChat playbook switching expertise.</role>
+
+  <goal>
+    User can switch active playbook from the slash menu "Switch Assistant" category.
+    Switching updates the entire capability set within the same chat session.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-02">Playbook switch completes within 1 second</constraint>
+    <constraint source="FR-09">Uses existing useChatPlaybooks hook + switchContext</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>playbook-switching, chat-session</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read useChatPlaybooks">Understand switchContext mechanism and available playbooks.</step>
+    <step order="2" name="Add Switch Assistant category">
+      In useDynamicSlashCommands, populate "Switch Assistant" category with available playbooks
+      (excluding currently active one).
+    </step>
+    <step order="3" name="Implement switch handler">
+      When user selects a playbook from "Switch Assistant", call useChatPlaybooks.switchContext
+      to change active playbook. This should cascade: system prompt, tools, commands, chips.
+    </step>
+    <step order="4" name="Add visual feedback">
+      Show brief notification or system message in chat when playbook switches
+      (e.g., "Switched to Document Analysis assistant").
+    </step>
+    <step order="5" name="Write tests">Test playbook switch flow end-to-end within component.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts (modified)</output>
+    <output type="code">SprkChat integration for switch handler (modified)</output>
+    <output type="test">Unit tests for playbook switching</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Switch Assistant" category shows available playbooks</criterion>
+    <criterion testable="true">Selecting playbook switches context within 1 second</criterion>
+    <criterion testable="true">Commands and capabilities update after switch</criterion>
+    <criterion testable="true">System message confirms switch in chat</criterion>
+  </acceptance-criteria>
+</task>

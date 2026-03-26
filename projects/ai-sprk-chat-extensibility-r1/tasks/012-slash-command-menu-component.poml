@@ -1,0 +1,98 @@
+<task id="CHAT-012" project="SprkChat Analysis Workspace Command Center">
+  <metadata>
+    <title>Build SlashCommandMenu Fluent v9 component</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>fluent-ui, code-page, component</tags>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 0 complete</dependencies>
+  </metadata>
+
+  <prompt>
+    Build the SlashCommandMenu component (FR-07) — a Fluent v9 Popover that opens when `/`
+    is typed as the first character in empty input (or [/] button clicked). Must support
+    keyboard navigation, type-ahead filtering, categorized commands, and responsive sizing.
+  </prompt>
+
+  <role>Senior React/Fluent UI v9 developer with component library experience.</role>
+
+  <goal>
+    A SlashCommandMenu component in @spaarke/ui-components that opens on `/` trigger,
+    supports keyboard navigation (Arrow Up/Down, Enter, Esc), type-ahead filtering,
+    and categorized command display.
+  </goal>
+
+  <inputs>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts</file>
+    <file purpose="spec">projects/ai-sprk-chat-extensibility-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared component; callback-based props; zero service dependencies</constraint>
+    <constraint source="ADR-021">Fluent v9 Popover, MenuList; semantic tokens; dark mode</constraint>
+    <constraint source="NFR-01">Menu MUST open within 100ms of `/` keypress</constraint>
+    <constraint source="NFR-05">Full keyboard navigation and screen reader labels (WCAG 2.1 AA)</constraint>
+    <constraint source="FR-07">Categories: active playbook actions, Switch Assistant, System</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-ui-v9, slash-commands, component-design</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read SprkChatInput and ActionMenu">Understand input interception pattern and existing menu component.</step>
+    <step order="2" name="Read useDynamicSlashCommands">Understand how commands are resolved from playbook capabilities.</step>
+    <step order="3" name="Design component API">
+      Define props: commands (categorized), onSelect callback, isOpen, filterText, onDismiss.
+      Use callback-based props — no service dependencies.
+    </step>
+    <step order="4" name="Build SlashCommandMenu component">
+      Fluent v9 Popover + MenuList. Categories: playbook actions (labeled with playbook name),
+      "Switch Assistant", "System". Width matches input; max-height ~300px with scroll.
+    </step>
+    <step order="5" name="Add keyboard navigation">
+      Arrow Up/Down moves selection, Enter selects, Esc dismisses, Backspace past `/` dismisses.
+      Type-ahead filtering: `/se` shows commands matching "se".
+    </step>
+    <step order="6" name="Add accessibility">
+      ARIA roles (menu, menuitem), live region for filter results count, screen reader labels.
+    </step>
+    <step order="7" name="Integrate with SprkChatInput">
+      Detect `/` as first character in empty input → open SlashCommandMenu.
+      Detect [/] button click → open menu. Pass filter text as user types after `/`.
+    </step>
+    <step order="8" name="Write unit tests">
+      Test: rendering, keyboard nav, filtering, selection, dismissal, accessibility.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SlashCommandMenu.tsx (new)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx (modified)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SlashCommandMenu.test.tsx (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Menu opens within 100ms of `/` keypress</criterion>
+    <criterion testable="true">Arrow Up/Down, Enter, Esc keyboard navigation works</criterion>
+    <criterion testable="true">Type-ahead filtering narrows command list</criterion>
+    <criterion testable="true">Commands displayed in categories (playbook, Switch Assistant, System)</criterion>
+    <criterion testable="true">Dark mode renders correctly with semantic tokens</criterion>
+    <criterion testable="true">Screen reader announces menu open/close and selection changes</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>
