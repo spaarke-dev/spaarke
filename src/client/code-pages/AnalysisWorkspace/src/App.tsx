@@ -2,10 +2,11 @@
  * AnalysisWorkspace App Component
  *
  * Root layout for the AnalysisWorkspace Code Page. Renders a full-viewport
- * 2-panel layout:
+ * 3-panel layout:
  *   - Left panel: RichTextEditor (analysis output / streaming write target)
- *   - Right panel: Collapsible SourceDocumentViewer (original document reference)
- *   - Draggable, keyboard-accessible splitter between panels
+ *   - Center panel: Collapsible SourceDocumentViewer (original document reference)
+ *   - Right panel: Embedded ChatPanel (SprkChat via AnalysisAiContext)
+ *   - Draggable, keyboard-accessible splitters between panels (via usePanelLayout)
  *
  * Authentication (task 066):
  *   - Uses useAuth() hook to gate rendering until token is acquired
@@ -72,6 +73,7 @@ import {
   ArrowClockwise20Regular,
   Play20Regular,
   PanelRight20Regular,
+  Chat20Regular,
 } from '@fluentui/react-icons';
 import type { RichTextEditorRef } from '@spaarke/ui-components';
 import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS } from '@spaarke/ui-components';
@@ -87,11 +89,14 @@ import { useDiffReview } from './hooks/useDiffReview';
 
 import { EditorPanel } from './components/EditorPanel';
 import { SourceViewerPanel } from './components/SourceViewerPanel';
+import { ChatPanel } from './components/ChatPanel';
 import { PanelSplitter } from './components/PanelSplitter';
 import { DocumentStreamBridge } from './components/DocumentStreamBridge';
 import { ReAnalysisProgressOverlay } from './components/ReAnalysisProgressOverlay';
 import { DiffReviewPanel } from './components/DiffReviewPanel';
-import { usePanelResize } from './hooks/usePanelResize';
+import { AnalysisAiProvider } from './context/AnalysisAiContext';
+import { usePanelLayout } from './hooks/usePanelLayout';
+import { getRuntimeConfig } from './services/authInit';
 import { markdownToHtml } from './utils/markdownToHtml';
 
 // ---------------------------------------------------------------------------
@@ -166,22 +171,18 @@ const useStyles = makeStyles({
     flex: 1,
     overflow: 'hidden',
   },
-  leftPanel: {
+  editorPanel: {
     overflow: 'hidden',
     flexShrink: 0,
     position: 'relative',
   },
-  rightPanel: {
+  sourcePanel: {
     overflow: 'hidden',
     flexShrink: 0,
   },
-  rightPanelExpanded: {
-    // When expanded, the right panel uses the width from usePanelResize
-    flexGrow: 0,
-  },
-  rightPanelCollapsed: {
-    // When collapsed, the strip is handled by SourceViewerPanel internally
-    width: 'auto',
+  chatPanel: {
+    overflow: 'hidden',
+    flexShrink: 0,
   },
   // ---- Auth states (task 066) ----
   authContainer: {
@@ -234,7 +235,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
 
   // ---- State (all hooks must be called before any early return) ----
   const [isSourceCollapsed, setIsSourceCollapsed] = useState(false);
-  const [showSourcePane, setShowSourcePane] = useState(true);
   const [editorContent, setEditorContent] = useState('');
 
   // ---- Resolved documentId: URL prop → Dataverse lookup fallback ----
@@ -246,22 +246,33 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   // Ref for programmatic access to the RichTextEditor (streaming insert, etc.)
   const editorRef = useRef<RichTextEditorRef>(null);
 
-  // ---- Panel resize ----
+  // ---- Three-panel layout (Editor / Source / Chat) ----
   const {
-    leftPanelWidth,
-    rightPanelWidth,
+    panelSizes,
+    isSourceVisible,
+    isChatVisible,
+    toggleSource,
+    toggleChat,
+    splitter1Handlers,
+    splitter2Handlers,
     isDragging,
+    activeSplitter,
     containerRef,
-    onSplitterMouseDown,
-    onSplitterKeyDown,
-    resetToDefault,
-    currentRatio,
-  } = usePanelResize({
-    defaultRatio: 0.6,
-    minLeftWidth: 300,
-    minRightWidth: 200,
-    isRightCollapsed: isSourceCollapsed,
-  });
+    currentRatios,
+  } = usePanelLayout();
+
+  // ---- BFF base URL for AnalysisAiProvider ----
+  // Resolved lazily from Dataverse Environment Variables via resolveRuntimeConfig()
+  // (called during bootstrap in index.tsx). Safe to call after authentication.
+  const bffBaseUrl = (() => {
+    try {
+      return getRuntimeConfig().bffBaseUrl;
+    } catch {
+      // Fallback: runtime config not yet resolved (pre-auth). Return empty string;
+      // AnalysisAiProvider will use it once auth completes and re-renders.
+      return '';
+    }
+  })();
 
   // ---- Task 065: Analysis loading (Dataverse) + document metadata (BFF) ----
   // Pass resolvedDocumentId so document metadata loads once the ID is available
@@ -414,6 +425,9 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   });
 
   // ---- Task 063 / Task 002: Auto-load SprkChat side pane with analysis context ----
+  // NOTE: The embedded ChatPanel (right panel) is now the primary SprkChat integration.
+  // This side pane code is retained for backward compatibility but may be inactive
+  // when Xrm.App.sidePanes is unavailable. Phase 2 (task 011) will clean this up.
   // Fires once per analysis record load (deps: analysisId only — not the full analysis
   // object — to prevent re-running on every field update after initial load).
   // Builds enriched URL params (SprkChatLaunchContext) so the BFF can resolve the
@@ -581,163 +595,195 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   }
 
   // ---- Authenticated: Render workspace layout ----
-  // Column: toolbar → content (2-panel row)
+  // Column: toolbar → content (3-panel row: Editor | Source | Chat)
+  // Wrapped in AnalysisAiProvider for shared context between editor and chat.
   return (
-    <div className={styles.root} ref={containerRef}>
-      {/* Task 061: Toast provider */}
-      <Toaster toasterId={toasterId} position="top-end" />
+    <AnalysisAiProvider bffBaseUrl={bffBaseUrl}>
+      <div className={styles.root} ref={containerRef}>
+        {/* Task 061: Toast provider */}
+        <Toaster toasterId={toasterId} position="top-end" />
 
-      {/* Task 062: Workspace toolbar — Run Analysis + Source toggle */}
-      <div className={styles.toolbar}>
-        <Button
-          appearance="primary"
-          icon={isExecuting ? <Spinner size="tiny" /> : <Play20Regular />}
-          onClick={triggerExecute}
-          disabled={isExecuting || (!analysis?.playbookId && !analysis?.actionId)}
-          data-testid="run-analysis-button"
-        >
-          {isExecuting ? 'Running...' : 'Run Analysis'}
-        </Button>
-        <ToggleButton
-          icon={<PanelRight20Regular />}
-          checked={showSourcePane}
-          onClick={() => setShowSourcePane(prev => !prev)}
-          data-testid="source-pane-toggle"
-        >
-          Source
-        </ToggleButton>
-      </div>
-
-      {/* Content area: 2-panel layout */}
-      <div className={styles.content}>
-        {/* Left Panel -- Editor + Streaming Bridge + Re-Analysis Overlay */}
-        <div className={styles.leftPanel} style={{ width: showSourcePane ? leftPanelWidth : '100%' }}>
-          {/* Task 063: SprkChatBridge document streaming wiring */}
-          <DocumentStreamBridge context={analysisId} editorRef={editorRef} enabled={!!analysisId} />
-          {/* Show error state if analysis load or execution failed */}
-          {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                gap: '12px',
-                padding: '24px',
-                textAlign: 'center',
-              }}
-              role="alert"
-              data-testid="analysis-load-error"
-            >
-              <ErrorCircle20Regular className={styles.errorIcon} />
-              <Text size={400} className={styles.errorTitle}>
-                Failed to Load Analysis
-              </Text>
-              <Text size={200} className={styles.errorDetail}>
-                {executionError?.message || analysisError?.message || 'Unable to load the analysis record.'}
-              </Text>
-              <Button appearance="primary" icon={<ArrowClockwise20Regular />} onClick={retryLoad}>
-                Retry
-              </Button>
-            </div>
-          ) : (
-            <EditorPanel
-              ref={editorRef}
-              value={editorContent}
-              onChange={handleEditorChange}
-              placeholder={
-                isExecuting ? executionProgress || 'Running analysis...' : 'Analysis output will appear here...'
-              }
-              isLoading={isAnalysisLoading}
-              isStreaming={isExecuting}
-              streamingMessage={executionProgress}
-              // Task 062: Toolbar props
-              saveState={saveState}
-              onForceSave={forceSave}
-              saveError={saveError}
-              exportState={exportState}
-              onExport={doExport}
-              onUndo={undo}
-              onRedo={redo}
-              canUndo={canUndo}
-              canRedo={canRedo}
-              historyLength={historyLength}
-              // Task 031: Inline AI Toolbar props
-              analysisId={analysisId}
-              onDiffAction={(selectedText: string) => {
-                // Diff-type inline actions (Simplify, Expand) are handled by the
-                // existing bridge-based diff review flow in useDiffReview. SprkChat
-                // receives the [Label] {selectedText} message via BroadcastChannel,
-                // processes it, and emits document_stream_start(operationType="diff")
-                // back through the bridge. useDiffReview then buffers tokens and opens
-                // DiffReviewPanel when the stream completes (task 103 pattern).
-                //
-                // This callback exists so App.tsx can show an optimistic loading state
-                // or log the initiation of a diff operation for diagnostics.
-                console.debug('[AnalysisWorkspace] Diff inline action initiated for selection length:', selectedText.length);
-              }}
-            />
-          )}
-          {/* AI analysis progress stepper (new analysis only — hide once streaming begins) */}
-          {isExecuting && chunkCount < 5 && (
-            <AiProgressStepper
-              variant="card"
-              steps={DOCUMENT_ANALYSIS_STEPS}
-              activeStepId={activeStepId}
-              completedStepIds={completedStepIds}
-              title="Analyzing Document"
-              onCancel={cancelExecution}
-              isStreaming={isExecuting}
-            />
-          )}
-          {/* Task 081: Re-analysis progress overlay (positioned over editor) */}
-          <ReAnalysisProgressOverlay
-            isVisible={isReAnalyzing}
-            percent={reAnalysisPercent}
-            message={reAnalysisMessage}
-          />
-          {/* Task 103: Diff review panel for AI-proposed revisions */}
-          <DiffReviewPanel
-            isOpen={diffState.isOpen}
-            originalText={diffState.originalText}
-            proposedText={diffState.proposedText}
-            onAccept={acceptDiff}
-            onReject={rejectDiff}
-          />
+        {/* Task 062: Workspace toolbar — Run Analysis + Source toggle + Chat toggle */}
+        <div className={styles.toolbar}>
+          <Button
+            appearance="primary"
+            icon={isExecuting ? <Spinner size="tiny" /> : <Play20Regular />}
+            onClick={triggerExecute}
+            disabled={isExecuting || (!analysis?.playbookId && !analysis?.actionId)}
+            data-testid="run-analysis-button"
+          >
+            {isExecuting ? 'Running...' : 'Run Analysis'}
+          </Button>
+          <ToggleButton
+            icon={<PanelRight20Regular />}
+            checked={isSourceVisible}
+            onClick={toggleSource}
+            data-testid="source-pane-toggle"
+          >
+            Source
+          </ToggleButton>
+          <ToggleButton
+            icon={<Chat20Regular />}
+            checked={isChatVisible}
+            onClick={toggleChat}
+            data-testid="chat-pane-toggle"
+          >
+            Chat
+          </ToggleButton>
         </div>
 
-        {/* Splitter + Right Panel — visible only when source pane is shown */}
-        {showSourcePane && (
-          <>
-            {!isSourceCollapsed && (
-              <PanelSplitter
-                onMouseDown={onSplitterMouseDown}
-                onKeyDown={onSplitterKeyDown}
-                onDoubleClick={resetToDefault}
-                isDragging={isDragging}
-                currentRatio={currentRatio}
+        {/* Content area: 3-panel layout (Editor | Source | Chat) */}
+        <div className={styles.content}>
+          {/* Editor Panel (always visible) */}
+          <div className={styles.editorPanel} style={{ width: panelSizes.editor }}>
+            {/* Task 063: SprkChatBridge document streaming wiring */}
+            <DocumentStreamBridge context={analysisId} editorRef={editorRef} enabled={!!analysisId} />
+            {/* Show error state if analysis load or execution failed */}
+            {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: '100%',
+                  gap: '12px',
+                  padding: '24px',
+                  textAlign: 'center',
+                }}
+                role="alert"
+                data-testid="analysis-load-error"
+              >
+                <ErrorCircle20Regular className={styles.errorIcon} />
+                <Text size={400} className={styles.errorTitle}>
+                  Failed to Load Analysis
+                </Text>
+                <Text size={200} className={styles.errorDetail}>
+                  {executionError?.message || analysisError?.message || 'Unable to load the analysis record.'}
+                </Text>
+                <Button appearance="primary" icon={<ArrowClockwise20Regular />} onClick={retryLoad}>
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <EditorPanel
+                ref={editorRef}
+                value={editorContent}
+                onChange={handleEditorChange}
+                placeholder={
+                  isExecuting ? executionProgress || 'Running analysis...' : 'Analysis output will appear here...'
+                }
+                isLoading={isAnalysisLoading}
+                isStreaming={isExecuting}
+                streamingMessage={executionProgress}
+                // Task 062: Toolbar props
+                saveState={saveState}
+                onForceSave={forceSave}
+                saveError={saveError}
+                exportState={exportState}
+                onExport={doExport}
+                onUndo={undo}
+                onRedo={redo}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                historyLength={historyLength}
+                // Task 031: Inline AI Toolbar props
+                analysisId={analysisId}
+                onDiffAction={(selectedText: string) => {
+                  // Diff-type inline actions (Simplify, Expand) are handled by the
+                  // existing bridge-based diff review flow in useDiffReview. SprkChat
+                  // receives the [Label] {selectedText} message via BroadcastChannel,
+                  // processes it, and emits document_stream_start(operationType="diff")
+                  // back through the bridge. useDiffReview then buffers tokens and opens
+                  // DiffReviewPanel when the stream completes (task 103 pattern).
+                  //
+                  // This callback exists so App.tsx can show an optimistic loading state
+                  // or log the initiation of a diff operation for diagnostics.
+                  console.debug('[AnalysisWorkspace] Diff inline action initiated for selection length:', selectedText.length);
+                }}
               />
             )}
-            <div
-              className={`${styles.rightPanel} ${
-                isSourceCollapsed ? styles.rightPanelCollapsed : styles.rightPanelExpanded
-              }`}
-              style={isSourceCollapsed ? undefined : { width: rightPanelWidth }}
-            >
-              <SourceViewerPanel
-                isCollapsed={isSourceCollapsed}
-                onToggleCollapse={handleToggleCollapse}
-                // Task 065: Document viewer props
-                documentMetadata={documentMetadata}
-                isLoading={isDocumentLoading}
-                documentError={documentError}
-                onRetry={retryLoad}
+            {/* AI analysis progress stepper (new analysis only — hide once streaming begins) */}
+            {isExecuting && chunkCount < 5 && (
+              <AiProgressStepper
+                variant="card"
+                steps={DOCUMENT_ANALYSIS_STEPS}
+                activeStepId={activeStepId}
+                completedStepIds={completedStepIds}
+                title="Analyzing Document"
+                onCancel={cancelExecution}
+                isStreaming={isExecuting}
               />
-            </div>
-          </>
-        )}
+            )}
+            {/* Task 081: Re-analysis progress overlay (positioned over editor) */}
+            <ReAnalysisProgressOverlay
+              isVisible={isReAnalyzing}
+              percent={reAnalysisPercent}
+              message={reAnalysisMessage}
+            />
+            {/* Task 103: Diff review panel for AI-proposed revisions */}
+            <DiffReviewPanel
+              isOpen={diffState.isOpen}
+              originalText={diffState.originalText}
+              proposedText={diffState.proposedText}
+              onAccept={acceptDiff}
+              onReject={rejectDiff}
+            />
+          </div>
+
+          {/* Splitter 1 + Source Panel — visible when source is shown */}
+          {isSourceVisible && (
+            <>
+              {!isSourceCollapsed && (
+                <PanelSplitter
+                  onMouseDown={splitter1Handlers.onMouseDown}
+                  onKeyDown={splitter1Handlers.onKeyDown}
+                  onDoubleClick={splitter1Handlers.onDoubleClick}
+                  isDragging={isDragging && activeSplitter === 1}
+                  currentRatio={currentRatios.editor}
+                />
+              )}
+              <div
+                className={styles.sourcePanel}
+                style={isSourceCollapsed ? undefined : { width: panelSizes.source }}
+              >
+                <SourceViewerPanel
+                  isCollapsed={isSourceCollapsed}
+                  onToggleCollapse={handleToggleCollapse}
+                  // Task 065: Document viewer props
+                  documentMetadata={documentMetadata}
+                  isLoading={isDocumentLoading}
+                  documentError={documentError}
+                  onRetry={retryLoad}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Splitter + Chat Panel — visible when chat is shown.
+              When source is visible, splitter 2 separates Source from Chat.
+              When source is hidden, splitter 1 separates Editor from Chat
+              (usePanelLayout handles the Editor<->Chat transfer in splitter 1). */}
+          {isChatVisible && (
+            <>
+              <PanelSplitter
+                onMouseDown={isSourceVisible ? splitter2Handlers.onMouseDown : splitter1Handlers.onMouseDown}
+                onKeyDown={isSourceVisible ? splitter2Handlers.onKeyDown : splitter1Handlers.onKeyDown}
+                onDoubleClick={isSourceVisible ? splitter2Handlers.onDoubleClick : splitter1Handlers.onDoubleClick}
+                isDragging={isDragging && (isSourceVisible ? activeSplitter === 2 : activeSplitter === 1)}
+                currentRatio={isSourceVisible ? currentRatios.source : currentRatios.editor}
+              />
+              <div
+                className={styles.chatPanel}
+                style={{ width: panelSizes.chat }}
+                data-testid="chat-panel-container"
+              >
+                <ChatPanel />
+              </div>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </AnalysisAiProvider>
   );
 }
