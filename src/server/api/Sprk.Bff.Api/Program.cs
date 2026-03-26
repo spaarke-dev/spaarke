@@ -66,6 +66,9 @@ builder.Services.AddEmailServicesModule(builder.Configuration);
 // Job processing (handlers, Service Bus, background services, AI platform options)
 builder.Services.AddJobProcessingModule(builder.Configuration, builder.Logging);
 
+// M365 Copilot Agent module (gateway, auth, cards, conversation, playbook invocation, telemetry)
+builder.Services.AddAgentModule(builder.Configuration);
+
 // CORS (secure, fail-closed configuration)
 builder.Services.AddCorsModule(builder.Configuration, builder.Environment);
 

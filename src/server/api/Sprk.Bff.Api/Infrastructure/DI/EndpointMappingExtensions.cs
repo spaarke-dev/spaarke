@@ -1,6 +1,7 @@
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
+using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.ExternalAccess;
@@ -168,6 +169,9 @@ public static class EndpointMappingExtensions
         // Registered separately because ContainerItemEndpoints maps absolute paths (not relative to the /api/spe group).
         // Inherits auth via RequireAuthorization() called inside MapContainerItemEndpoints. (SPE-017 through SPE-021)
         app.MapContainerItemEndpoints();
+
+        // M365 Copilot Agent gateway endpoints (/api/agent/*)
+        app.MapAgentEndpoints();
 
         // External access endpoints:
         //   /api/v1/external/*        — Power Pages portal users (portal JWT auth)
