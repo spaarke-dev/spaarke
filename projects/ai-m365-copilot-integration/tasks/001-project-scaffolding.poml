@@ -1,7 +1,7 @@
 <task id="MCI-001" project="M365 Copilot Integration R1">
   <metadata>
     <title>Project Scaffolding and Folder Structure</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1</phase>
     <tags>foundation, setup</tags>
