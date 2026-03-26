@@ -1,0 +1,45 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "📚 Available Playbooks",
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "Container",
+      "$data": "${categories}",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "${categoryName}:",
+          "weight": "Bolder",
+          "spacing": "Medium"
+        },
+        {
+          "type": "Container",
+          "$data": "${playbooks}",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "• 📋 ${name} (${documentTypes})",
+              "wrap": true,
+              "size": "Small"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "Tell me which one and I'll help you get started, or describe what you need and I'll recommend one.",
+      "wrap": true,
+      "spacing": "Medium",
+      "isSubtle": true,
+      "size": "Small"
+    }
+  ]
+}

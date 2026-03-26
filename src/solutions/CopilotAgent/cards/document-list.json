@@ -1,0 +1,84 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "📄 Documents Found (${count})",
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "Container",
+      "$data": "${documents}",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "stretch",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "${name}",
+                  "weight": "Bolder",
+                  "wrap": true
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Matter: ${matterName} | Type: ${documentType}",
+                  "spacing": "None",
+                  "isSubtle": true,
+                  "size": "Small"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Uploaded: ${uploadedAt} | Pages: ${pageCount}",
+                  "spacing": "None",
+                  "isSubtle": true,
+                  "size": "Small"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "ActionSet",
+          "actions": [
+            {
+              "type": "Action.Submit",
+              "title": "📋 Analyze",
+              "data": {
+                "action": "analyze_document",
+                "documentId": "${id}"
+              }
+            },
+            {
+              "type": "Action.Submit",
+              "title": "📝 Summary",
+              "data": {
+                "action": "summarize_document",
+                "documentId": "${id}"
+              }
+            },
+            {
+              "type": "Action.Submit",
+              "title": "View",
+              "data": {
+                "action": "view_document",
+                "documentId": "${id}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "TextBlock",
+          "text": "",
+          "separator": true
+        }
+      ]
+    }
+  ]
+}

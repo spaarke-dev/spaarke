@@ -1,0 +1,39 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "⏳ Analyzing ${documentName}...",
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "Container",
+      "$data": "${steps}",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "${statusIcon} Step ${order}/${totalSteps}: ${stepName}",
+          "size": "Small"
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "This analysis may take a few minutes. You can continue chatting — I'll update you when it's done.",
+      "wrap": true,
+      "isSubtle": true,
+      "size": "Small",
+      "spacing": "Medium"
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Open in Workspace",
+      "data": { "action": "handoff_workspace", "analysisId": "${analysisId}", "documentId": "${documentId}" }
+    }
+  ]
+}

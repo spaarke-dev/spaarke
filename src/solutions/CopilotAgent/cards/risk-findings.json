@@ -1,0 +1,64 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "${playbookName} — ${documentName}",
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "TextBlock",
+      "text": "Risk Flags (${riskCount}):",
+      "weight": "Bolder",
+      "color": "Attention",
+      "spacing": "Medium"
+    },
+    {
+      "type": "Container",
+      "$data": "${riskFlags}",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "• ${description}",
+          "wrap": true,
+          "color": "Attention",
+          "size": "Small"
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "Standard Clauses (${standardCount} confirmed) ✅",
+      "spacing": "Medium",
+      "color": "Good"
+    },
+    {
+      "type": "FactSet",
+      "spacing": "Medium",
+      "facts": [
+        { "title": "Source", "value": "${playbookName}" },
+        { "title": "Confidence", "value": "${confidence}" }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "📊 Full Analysis",
+      "data": { "action": "view_full_analysis", "analysisId": "${analysisId}" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "📄 View Document",
+      "data": { "action": "view_document", "documentId": "${documentId}" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Open in Workspace",
+      "data": { "action": "handoff_workspace", "analysisId": "${analysisId}", "documentId": "${documentId}" }
+    }
+  ]
+}

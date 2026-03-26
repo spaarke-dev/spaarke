@@ -45,9 +45,9 @@
 
 | # | Task | Status | Tags | Dependencies | Parallel Group |
 |---|------|--------|------|-------------|----------------|
-| 016 | Adaptive Card Templates — Documents + Matters | 🔲 | adaptive-cards, m365, ui | 010 | **Group E** |
-| 017 | Adaptive Card Templates — Playbooks + Analysis | 🔲 | adaptive-cards, m365, ui | 010 | **Group E** |
-| 018 | Adaptive Card Templates — Communication + Handoff | 🔲 | adaptive-cards, m365, ui | 010 | **Group E** |
+| 016 | Adaptive Card Templates — Documents + Matters | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
+| 017 | Adaptive Card Templates — Playbooks + Analysis | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
+| 018 | Adaptive Card Templates — Communication + Handoff | ✅ | adaptive-cards, m365, ui | 010 | **Group E** |
 | 019 | AdaptiveCardFormatterService | 🔲 | bff-api, adaptive-cards, service | 010, 016, 017, 018 | Serial |
 | 020 | HandoffUrlBuilder Service | 🔲 | bff-api, handoff, deep-links | 010 | **Group E** |
 | 021 | Playbook Invocation Flow | 🔲 | bff-api, playbooks, agent-gateway | 010, 019 | Serial |

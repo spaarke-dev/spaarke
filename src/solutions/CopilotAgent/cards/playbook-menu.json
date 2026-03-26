@@ -1,0 +1,54 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "📄 ${documentName}",
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        { "title": "Matter", "value": "${matterName}" },
+        { "title": "Type", "value": "${documentType}" },
+        { "title": "Pages", "value": "${pageCount}" }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "What would you like to do?",
+      "spacing": "Medium",
+      "weight": "Bolder"
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "📋 ${playbook1Name}",
+      "data": { "action": "run_playbook", "playbookId": "${playbook1Id}", "documentId": "${documentId}" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "⚠️ Risk Scan",
+      "data": { "action": "run_playbook", "playbookId": "${riskScanId}", "documentId": "${documentId}" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "📝 Quick Summary",
+      "data": { "action": "summarize_document", "documentId": "${documentId}" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "🔍 Full Analysis",
+      "data": { "action": "deep_analysis", "documentId": "${documentId}" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Open in Workspace",
+      "data": { "action": "handoff_workspace", "documentId": "${documentId}" }
+    }
+  ]
+}
