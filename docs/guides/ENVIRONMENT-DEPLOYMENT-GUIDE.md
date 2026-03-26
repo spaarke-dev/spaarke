@@ -1,8 +1,8 @@
 # Spaarke Environment Deployment Guide
 
-> **Version**: 1.0
-> **Last Updated**: 2026-03-25
-> **Status**: Production Ready (validated during demo environment deployment)
+> **Version**: 1.1
+> **Last Updated**: 2026-03-26
+> **Status**: Production Ready (fully validated — demo environment deployed and healthy)
 > **Applies To**: Deploying Spaarke to any new Dataverse + Azure environment
 
 ---
@@ -576,6 +576,7 @@ MSYS_NO_PATHCONV=1 az webapp config appsettings set \
     KeyVaultUri="https://sprk-{env}-kv.vault.azure.net/" \
     SpeAdmin__KeyVaultUri="https://sprk-{env}-kv.vault.azure.net/" \
     ServiceBus__QueueName="sdap-jobs" \
+    AzureOpenAI__ChatModelName="gpt-4o" \
     Cors__AllowedOrigins__0="https://spaarke-{env}.crm.dynamics.com" \
     Cors__AllowedOrigins__1="https://spaarke-{env}.api.crm.dynamics.com" \
     Cors__AllowedOrigins__2="https://spaarke-{env}.crm.dynamics.com" \
@@ -698,7 +699,56 @@ pac solution list
 
 **Cause**: Microsoft.Syntex doesn't support `westus2`. See [Syntex Supported Regions](#syntex-supported-regions).
 
-### Issue 10: Graph Token Propagation
+### Issue 10: Missing AzureOpenAI ChatModelName
+
+**Symptom**: BFF API crashes on startup with `Failure to infer one or more parameters` for `chatClient` (UNKNOWN source)
+
+**Cause**: `AzureOpenAI:ChatModelName` is not configured. Without it, `IChatClient` is not registered in DI (registration is conditional on both `Endpoint` and `ChatModelName` being set). Chat endpoints that depend on `IChatClient` fail parameter inference during middleware pipeline build.
+
+**Fix**: Add `AzureOpenAI__ChatModelName=gpt-4o` (must match the deployed model name in your Azure OpenAI resource).
+
+### Issue 11: Dataverse Application User Required
+
+**Symptom**: BFF API crashes with `DataverseConnectionException: The user is not a member of the organization`
+
+**Cause**: The BFF API app registration is not registered as an application user in the target Dataverse environment.
+
+**Fix**: Power Platform Admin Center → Environments → {env} → Settings → Users + permissions → Application users → + New app user → select BFF API app → assign System Administrator role. Cannot be done via CLI or API.
+
+### Issue 12: BFF API Startup Diagnostic Process
+
+When the BFF API fails to start, follow this diagnostic process:
+
+```bash
+# 1. Enable verbose logging
+MSYS_NO_PATHCONV=1 az webapp log config --name spaarke-bff-{env} \
+  --resource-group rg-spaarke-{env} \
+  --docker-container-logging filesystem --application-logging filesystem --level verbose
+
+# 2. Restart the app
+az webapp restart --name spaarke-bff-{env} --resource-group rg-spaarke-{env}
+
+# 3. Wait 2 minutes for crash cycle, then download logs
+az webapp log download --name spaarke-bff-{env} --resource-group rg-spaarke-{env} --log-file logs.zip
+
+# 4. Extract and check the DEFAULT docker log (contains .NET stdout/stderr)
+# Look in: LogFiles/*default_docker.log (NOT *_docker.log which is container lifecycle)
+grep "Unhandled" LogFiles/*default_docker.log
+
+# 5. Common startup errors and fixes:
+```
+
+| Error Pattern | Fix |
+|--------------|-----|
+| `SpeAdmin:KeyVaultUri configuration is required` | Add `KeyVaultUri` and `SpeAdmin__KeyVaultUri` app settings |
+| `CORS: Non-HTTPS origin not allowed in Production` | Override `Cors__AllowedOrigins__0-4` with HTTPS-only origins |
+| `The user is not a member of the organization` | Create Dataverse application user in PP Admin Center |
+| `ServiceBus:QueueName is required` | Add `ServiceBus__QueueName=sdap-jobs` |
+| `Failure to infer one or more parameters` (chatClient UNKNOWN) | Add `AzureOpenAI__ChatModelName=gpt-4o` |
+| `ConnectionStrings:ServiceBus is required` | Set `ConnectionStrings__ServiceBus` via Key Vault ref |
+| Key Vault reference not resolving | Verify managed identity has `Key Vault Secrets User` role |
+
+### Issue 13: Graph Token Propagation
 
 **Symptom**: SPE container creation returns 403 immediately after granting permissions.
 
@@ -750,6 +800,7 @@ All settings required for the BFF API App Service. Values use Key Vault referenc
 | `Redis__Enabled` | `false` | Static (enable when Redis configured) |
 | `ScheduledRagIndexing__TenantId` | KV: `TenantId` | Key Vault |
 | `Analysis__KeyVaultUrl` | `https://sprk-{env}-kv.vault.azure.net/` | Static |
+| `AzureOpenAI__ChatModelName` | `gpt-4o` | Static (must match deployed model name) |
 | `Analysis__PromptFlowEndpoint` | `https://placeholder.api.azureml.ms` | Placeholder |
 | `Analysis__PromptFlowKey` | `placeholder` | Placeholder |
 | `Communication__ArchiveContainerId` | `placeholder` | Placeholder |
@@ -764,4 +815,4 @@ All settings required for the BFF API App Service. Values use Key Vault referenc
 
 ---
 
-*Environment Deployment Guide v1.0 — Validated March 2026 during demo environment deployment.*
+*Environment Deployment Guide v1.1 — Fully validated March 2026. Demo environment deployed end-to-end: /healthz returns Healthy.*

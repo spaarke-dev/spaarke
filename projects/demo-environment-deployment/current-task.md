@@ -1,6 +1,6 @@
 # Current Task State - Demo Environment Deployment
 
-> **Last Updated**: 2026-03-25 21:00 (by context-handoff)
+> **Last Updated**: 2026-03-26 03:05 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Deploy Spaarke to spaarke-demo environment |
-| **Step** | BFF API deployment + model-driven app + validation |
-| **Status** | in-progress |
-| **Next Action** | 1. Deploy BFF API code to spaarke-bff-demo (dotnet publish + zip deploy). 2. Configure BFF API app settings with Key Vault refs. 3. Create model-driven app in demo. 4. Run validation. 5. Document release process + SPE setup. |
+| **Step** | DEPLOYMENT COMPLETE — remaining: model-driven app, PCF migration, cleanup |
+| **Status** | complete (core deployment) |
+| **Next Action** | 1. Create model-driven app in demo. 2. Migrate 3 PCF controls to env var resolution. 3. Clean up old R1 resources. 4. Rotate BFF API secret. |
 
 ### Files Modified This Session
 - `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` — Updated to v3 (per-env model, subscriptions, SPE naming)
@@ -72,43 +72,36 @@ TenantId, BFF-API-ClientId, BFF-API-ClientSecret, BFF-API-Audience, Dataverse-Se
 - sprk_TenantId = a221a95e-6abc-4434-aecc-e48338a1b2f2
 - sprk_AzureOpenAiEndpoint = https://spaarke-openai-demo.openai.azure.com/
 - sprk_ShareLinkBaseUrl = https://spaarke-bff-demo.azurewebsites.net/share
-- sprk_SharePointEmbeddedContainerId = pending-spe-setup
+- sprk_SharePointEmbeddedContainerId = b!FzmtPrWQEEi1yPtUOXM4_h7X4udVbCVJgu1ClOi23elAbPdL3-EGQK-D8YZ9tcZp
 
-### SPE (SharePoint Embedded) — PARTIALLY COMPLETE
+### SPE (SharePoint Embedded) — COMPLETE
 - **Container Type**: `Spaarke Demo Documents` (362f90b3-7b72-4ab1-bb4c-20a1399ca838)
   - Owner: da03fe1a-4b1d-4297-a4ce-4b83cae498a9 (Demo BFF API)
   - Classification: Standard
   - Billing: Linked to demo subscription, region westus (not westus2 — Syntex limitation)
   - Registration: Done via Graph API (full delegated + full appOnly)
-- **Root Container**: NOT CREATED — 403 Access Denied
-  - Likely cause: Graph token doesn't reflect recently added permissions
-  - Fix: Wait for token cache to expire (~1 hour) OR generate new client secret
-  - Alternative: Create container via SPO Management Shell
+- **Root Container**: `Demo Root Documents` — ACTIVE
+  - Container ID: `b!FzmtPrWQEEi1yPtUOXM4_h7X4udVbCVJgu1ClOi23elAbPdL3-EGQK-D8YZ9tcZp`
+  - Stored in Key Vault and Dataverse env var
 
-### BFF API — CODE DEPLOYED, STARTUP FAILING
+### BFF API — COMPLETE AND HEALTHY
 - App Service: `spaarke-bff-demo.azurewebsites.net`
-- Code: Deployed (dotnet publish + az webapp deploy)
-- App settings: 43+ settings configured with Key Vault references to `sprk-demo-kv`
-- CORS: Fixed (overridden to HTTPS-only demo origins)
+- Code: Deployed (.NET 8, Release build, zip deploy)
+- App settings: 44 settings configured with Key Vault references to `sprk-demo-kv`
+- CORS: Overridden to HTTPS-only (`spaarke-demo.crm.dynamics.com`)
 - Dataverse app user: Created (da03fe1a, System Administrator role)
-- **CURRENT ISSUE**: Service Bus background worker crashes the host on startup
-  - Error 1: `ServiceBusOptions.QueueName is required` → fixed with `ServiceBus__QueueName=sdap-jobs`
-  - Error 2: Service Bus AMQP CBS auth timeout → crashes process (exit code 134)
-  - Error 3: `Failure to infer one or more parameters` → DI registration issue
-  - Setting `ServiceBus__Enabled=false` / `BackgroundServices__Enabled=false` doesn't help (code may not check these flags)
-- **FIX NEEDED**: Investigate Program.cs DI registration — need way to disable Service Bus workers for demo, or fix the connection
-- KeyVault URI: Fixed (`SpeAdmin__KeyVaultUri` and `KeyVaultUri` settings added)
-- All configuration errors resolved EXCEPT Service Bus worker crash
+- Health: `/healthz` → `Healthy` (HTTP 200), `/ping` → `pong`
+- **All startup errors resolved** (6 total — see DEPLOYMENT-ASSESSMENT.md for full sequence)
+- Key missing setting was `AzureOpenAI__ChatModelName=gpt-4o` — without it, `IChatClient` was never registered in DI
 
-### Remaining Work
-1. **SPE container creation** — Debug 403, create root container, set sprk_SharePointEmbeddedContainerId
-2. **BFF API deployment** — Configure app settings with KV refs, deploy code, verify health
-3. **Model-driven app** — Remove custom page dependencies in dev, then deploy app to demo
-4. **Update SPE documentation** — Document the full container type creation process with correct permissions, SPO commands, billing setup, Syntex region limitations
-5. **Clean up legacy custom pages** — Remove 6 canvas apps from dev (replaced by code pages)
-6. **Clean up old R1 resources** — Delete rg-spaarke-demo-prod (old naming) after everything works
-7. **Run validation** — Validate-DeployedEnvironment.ps1 + Test-Deployment.ps1
-8. **Document release process** — How to push dev→demo updates (Dataverse solutions + BFF API + web resources)
+### Remaining Work (Post-Deployment)
+1. **Model-driven app** — Create Corporate Counsel app in demo (canvas app deps removed, but app module wasn't in solution)
+2. **PCF control migration** — Migrate SpeDocumentViewer, EmailProcessingMonitor, UpdateRelatedButton to env var resolution
+3. **Rotate BFF API secret** — Secret was exposed during session; generate new one and update Key Vault
+4. **Clean up old R1 resources** — Delete `rg-spaarke-demo-prod` (old naming)
+5. **Clean up legacy canvas apps** — Remove 6 canvas apps from dev (replaced by code pages per ADR-006)
+6. **Create automated export script** — `Export-SpaarkeCoreSolution.ps1` with fix pipeline built in
+7. **Document incremental update process** — How to push dev→demo updates for Dataverse solutions + BFF API
 
 ### Issues Discovered During This Session (Document These)
 1. **PCF manifest mismatch** — R2 migration removed tenantId/apiBaseUrl from runtime code but not from manifests. Forms still had stale static values. Fix: remove from form XML in exported solution ZIP.
