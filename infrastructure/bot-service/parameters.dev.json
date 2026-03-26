@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "botServiceName": {
+      "value": "spaarke-bot-dev"
+    },
+    "messagingEndpoint": {
+      "value": "https://spe-api-dev-67e2xz.azurewebsites.net/api/agent/message"
+    },
+    "appId": {
+      "value": "<REPLACE-WITH-ENTRA-APP-REGISTRATION-CLIENT-ID>"
+    },
+    "location": {
+      "value": "westus2"
+    },
+    "botDisplayName": {
+      "value": "Spaarke AI Assistant"
+    },
+    "sku": {
+      "value": "F0"
+    },
+    "keyVaultName": {
+      "value": "spaarke-spekvcert"
+    },
+    "tags": {
+      "value": {
+        "environment": "dev",
+        "application": "spaarke",
+        "layer": "platform",
+        "managedBy": "bicep",
+        "component": "m365-copilot-integration"
+      }
+    }
+  }
+}

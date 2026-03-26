@@ -1,0 +1,158 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.2/schema.json",
+  "schema_version": "v2.2",
+  "name_for_human": "Spaarke Legal AI",
+  "description_for_human": "Access legal documents, run AI analysis playbooks, manage matters, tasks, and communications through Spaarke.",
+  "description_for_model": "This plugin connects to the Spaarke legal document management platform. Use it when the user asks about legal documents, matters, tasks, deadlines, playbook analysis, financial summaries, or communications. All data is scoped to what the authenticated user is permitted to access.",
+  "namespace": "spaarke",
+  "api": {
+    "type": "openapi",
+    "url": "spaarke-bff-openapi.yaml"
+  },
+  "auth": {
+    "type": "OAuthPluginVault",
+    "reference_id": "spaarke-bff-oauth"
+  },
+  "functions": [
+    {
+      "name": "semanticSearch",
+      "description": "Call this when the user wants to find documents by topic, name, content, or description. Performs hybrid semantic and keyword search across all documents the user has access to. Returns matching documents with relevance scores and snippets.",
+      "operationId": "semanticSearch"
+    },
+    {
+      "name": "listDocuments",
+      "description": "Call this when the user wants to see a list of documents, optionally filtered by matter, project, or document type. Use this for browsing documents rather than searching by content.",
+      "operationId": "listDocuments"
+    },
+    {
+      "name": "getDocument",
+      "description": "Call this when the user asks for details about a specific document, such as its metadata, type, matter association, or upload date.",
+      "operationId": "getDocument"
+    },
+    {
+      "name": "getDocumentPreviewUrl",
+      "description": "Call this when the user wants to view or preview a document. Returns a URL that opens the document in a browser preview.",
+      "operationId": "getDocumentPreviewUrl"
+    },
+    {
+      "name": "summarizeFile",
+      "description": "Call this when the user wants a summary of a document's content, key points, or an overview of what a file contains. Returns an AI-generated summary with key points.",
+      "operationId": "summarizeFile"
+    },
+    {
+      "name": "listChatPlaybooks",
+      "description": "Call this when the user asks what analysis playbooks or AI capabilities are available for chat. Returns playbooks the user can run in the current context.",
+      "operationId": "listChatPlaybooks"
+    },
+    {
+      "name": "listPublicPlaybooks",
+      "description": "Call this when the user asks 'What analysis tools are available?' or wants to browse all publicly shared playbooks. Returns playbooks available to everyone.",
+      "operationId": "listPublicPlaybooks"
+    },
+    {
+      "name": "executePlaybook",
+      "description": "Call this when the user wants to run a document analysis playbook on a specific document. Starts playbook execution and returns results directly for quick playbooks or a run ID for long-running ones.",
+      "operationId": "executePlaybook"
+    },
+    {
+      "name": "getPlaybookRunStatus",
+      "description": "Call this to check the progress of a running playbook execution. Use after executePlaybook returns a run ID for a long-running analysis. Returns current status and progress percentage.",
+      "operationId": "getPlaybookRunStatus"
+    },
+    {
+      "name": "getPlaybookRunDetail",
+      "description": "Call this when a playbook execution has completed and the user wants to see the full results, findings, risk flags, and extracted data.",
+      "operationId": "getPlaybookRunDetail"
+    },
+    {
+      "name": "listEvents",
+      "description": "Call this when the user asks about their tasks, deadlines, due dates, assignments, or upcoming events. Supports filtering by matter, assignee, status, and date range. Use for questions like 'What's due this week?' or 'Show my tasks for matter X'.",
+      "operationId": "listEvents"
+    },
+    {
+      "name": "getEvent",
+      "description": "Call this when the user asks for details about a specific task, deadline, or event, including its description, logs, and associations.",
+      "operationId": "getEvent"
+    },
+    {
+      "name": "createEvent",
+      "description": "Call this when the user wants to create a new task, deadline, or appointment. Requires a title and typically a matter association and due date.",
+      "operationId": "createEvent"
+    },
+    {
+      "name": "completeEvent",
+      "description": "Call this when the user wants to mark a task or event as completed or done.",
+      "operationId": "completeEvent"
+    },
+    {
+      "name": "getPortfolio",
+      "description": "Call this when the user asks for an overview of their matters, projects, or portfolio. Returns summary metrics including total and active matters and projects.",
+      "operationId": "getPortfolio"
+    },
+    {
+      "name": "getBriefing",
+      "description": "Call this when the user asks for their daily briefing, morning summary, or wants to know what needs attention today. Returns upcoming deadlines, recent activity, and priority items.",
+      "operationId": "getBriefing"
+    },
+    {
+      "name": "getMatterAiSummary",
+      "description": "Call this when the user asks for a summary of a specific matter, including recent activity, key documents, and current status. Generates an AI-powered matter overview.",
+      "operationId": "getMatterAiSummary"
+    },
+    {
+      "name": "getMatterFinanceSummary",
+      "description": "Call this when the user asks about the budget, spending, costs, or invoices for a matter. Returns financial summary including total budget, spend, and invoice count.",
+      "operationId": "getMatterFinanceSummary"
+    },
+    {
+      "name": "searchRecords",
+      "description": "Call this when the user wants to search for Dataverse records such as matters, projects, events, or documents by name or description. Use for entity-level searches rather than document content searches.",
+      "operationId": "searchRecords"
+    },
+    {
+      "name": "sendCommunication",
+      "description": "Call this when the user wants to draft and send an email or other communication, typically related to a matter. Requires recipient, subject, and body.",
+      "operationId": "sendCommunication"
+    },
+    {
+      "name": "handleAgentMessage",
+      "description": "Call this to route a conversational message through the Spaarke agent gateway. The gateway determines the appropriate BFF service to handle the request and returns a response with optional Adaptive Card formatting.",
+      "operationId": "handleAgentMessage"
+    },
+    {
+      "name": "listAgentPlaybooks",
+      "description": "Call this to get the list of playbooks available for the agent to offer to users, optionally filtered by document type.",
+      "operationId": "listAgentPlaybooks"
+    },
+    {
+      "name": "runAgentPlaybook",
+      "description": "Call this to invoke a playbook on a document through the agent gateway. Returns results as an Adaptive Card for quick playbooks or a deep-link for long-running analysis.",
+      "operationId": "runAgentPlaybook"
+    },
+    {
+      "name": "getAgentPlaybookStatus",
+      "description": "Call this to check the status of a long-running playbook execution that was started through the agent gateway. Returns progress and result card when complete.",
+      "operationId": "getAgentPlaybookStatus"
+    },
+    {
+      "name": "createAnalysis",
+      "description": "Call this when the user wants to start a deep document analysis that requires the Analysis Workspace. Creates an analysis record and optionally begins execution.",
+      "operationId": "createAnalysis"
+    },
+    {
+      "name": "getAnalysis",
+      "description": "Call this to check the status and results of a document analysis, including its output, findings, and current state.",
+      "operationId": "getAnalysis"
+    },
+    {
+      "name": "getCurrentUser",
+      "description": "Call this when the user asks 'Who am I?' or when you need to identify the current user's profile and permissions.",
+      "operationId": "getCurrentUser"
+    },
+    {
+      "name": "getUserCapabilities",
+      "description": "Call this to determine what the current user is permitted to do, such as which playbooks they can access and whether they can search documents. Use before offering features the user may not have access to.",
+      "operationId": "getUserCapabilities"
+    }
+  ]
+}
