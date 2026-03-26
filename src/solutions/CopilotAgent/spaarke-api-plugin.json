@@ -9,8 +9,7 @@
     {
       "type": "OpenApi",
       "auth": {
-        "type": "OAuthPluginVault",
-        "reference_id": "spaarke-bff-oauth"
+        "type": "None"
       },
       "spec": {
         "url": "spaarke-bff-openapi.yaml"
