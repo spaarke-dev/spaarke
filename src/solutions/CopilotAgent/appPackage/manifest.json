@@ -1,7 +1,7 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
-  "manifestVersion": "1.19",
-  "version": "1.0.0",
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/vDevPreview/MicrosoftTeams.schema.json",
+  "manifestVersion": "devPreview",
+  "version": "1.0.2",
   "id": "f257a0a9-1061-4f9b-8918-3ad056fe90db",
   "developer": {
     "name": "Spaarke",
@@ -37,5 +37,9 @@
   "validDomains": [
     "spe-api-dev-67e2xz.azurewebsites.net",
     "spaarkedev1.crm.dynamics.com"
-  ]
+  ],
+  "webApplicationInfo": {
+    "id": "1e40baad-e065-4aea-a8d4-4b7ab273458c",
+    "resource": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"
+  }
 }
