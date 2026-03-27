@@ -32,6 +32,39 @@ public static class EndpointMappingExtensions
     private static void MapHealthEndpoints(WebApplication app)
     {
         app.MapHealthChecks("/healthz").AllowAnonymous();
+
+        // DEBUG: Token inspection endpoint - logs token claims from Copilot
+        // TODO: Remove before production
+        app.MapGet("/debug/token", (HttpContext ctx) =>
+        {
+            var authHeader = ctx.Request.Headers.Authorization.ToString();
+            if (string.IsNullOrEmpty(authHeader))
+                return Results.Ok(new { error = "No Authorization header" });
+
+            try
+            {
+                var token = authHeader.Replace("Bearer ", "");
+                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                var jwt = handler.ReadJwtToken(token);
+                return Results.Ok(new
+                {
+                    audience = jwt.Audiences,
+                    issuer = jwt.Issuer,
+                    subject = jwt.Subject,
+                    appId = jwt.Claims.FirstOrDefault(c => c.Type == "appid")?.Value,
+                    azp = jwt.Claims.FirstOrDefault(c => c.Type == "azp")?.Value,
+                    scp = jwt.Claims.FirstOrDefault(c => c.Type == "scp")?.Value,
+                    oid = jwt.Claims.FirstOrDefault(c => c.Type == "oid")?.Value,
+                    tid = jwt.Claims.FirstOrDefault(c => c.Type == "tid")?.Value,
+                    validFrom = jwt.ValidFrom,
+                    validTo = jwt.ValidTo
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { error = ex.Message, headerLength = authHeader.Length });
+            }
+        }).AllowAnonymous().WithTags("Debug").ExcludeFromDescription();
         app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
         app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
