@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-03-26
 > **Total Tasks**: 31
-> **Status**: ✅ 23/31 complete
+> **Status**: ✅ 23/31 complete | BLOCKED: API Plugin auth (Copilot tokens rejected by BFF)
 
 ## Status Legend
 
