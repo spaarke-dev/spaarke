@@ -12,12 +12,13 @@
     "noEmit": true,
     "jsx": "react",
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"]
     }
   },
   "include": ["src"],

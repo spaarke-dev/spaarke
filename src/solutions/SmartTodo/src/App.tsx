@@ -14,7 +14,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
-} from "@spaarke/ui-components";
+} from "@spaarke/ui-components/utils";
 import { SmartTodoApp } from "./SmartTodoApp";
 
 export function App() {

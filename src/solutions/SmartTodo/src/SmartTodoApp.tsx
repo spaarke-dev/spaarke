@@ -23,10 +23,12 @@
 
 import * as React from "react";
 import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
-import { PanelSplitter, useTwoPanelLayout } from "@spaarke/ui-components";
+import { PanelSplitter } from "@spaarke/ui-components/PanelSplitter";
+import { useTwoPanelLayout } from "@spaarke/ui-components/hooks";
 import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 import { TodoDetailPanel } from "./components/TodoDetailPanel";
+import { getWebApi, getUserId } from "./services/xrmProvider";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -96,7 +98,7 @@ function SmartTodoLayout(): React.ReactElement {
     <div ref={containerRef} className={styles.container}>
       {/* Left panel — Kanban Board */}
       <div className={styles.primaryPanel} style={{ width: primaryWidth }}>
-        <SmartToDo />
+        <SmartToDo webApi={getWebApi()} userId={getUserId()} />
       </div>
 
       {/* Splitter + Detail Panel (only when visible) */}

@@ -17,8 +17,8 @@ import type {
   IEventFieldUpdates,
   ITodoExtensionUpdates,
   IContactOption,
-} from "@spaarke/ui-components";
-import { TODO_DETAIL_SELECT, TODO_EXTENSION_SELECT } from "@spaarke/ui-components";
+} from "@spaarke/ui-components/TodoDetail";
+import { TODO_DETAIL_SELECT, TODO_EXTENSION_SELECT } from "@spaarke/ui-components/TodoDetail";
 
 // ---------------------------------------------------------------------------
 // Result types

@@ -25,13 +25,13 @@ import {
   Spinner,
 } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
-import { TodoDetail } from "@spaarke/ui-components";
+import { TodoDetail } from "@spaarke/ui-components/TodoDetail";
 import type {
   ITodoRecord,
   ITodoExtension,
   IEventFieldUpdates,
   ITodoExtensionUpdates,
-} from "@spaarke/ui-components";
+} from "@spaarke/ui-components/TodoDetail";
 import { useTodoContext } from "../context/TodoContext";
 import {
   loadTodoRecord,
