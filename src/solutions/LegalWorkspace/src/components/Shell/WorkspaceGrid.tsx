@@ -343,17 +343,21 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // Opens Playbook Library Code Page via Xrm.Navigation.navigateTo
   // -------------------------------------------------------------------------
 
-  const playbookHandlers = React.useMemo(
-    () =>
-      createPlaybookHandlers({
-        onDialogClose: () => {
-          feedRefetchRef.current?.();
-          todoRefetchRef.current?.();
-        },
-        bffBaseUrl: getBffBaseUrl(),
-      }),
-    []
-  );
+  const playbookHandlers = React.useMemo(() => {
+    let bffUrl = "";
+    try {
+      bffUrl = getBffBaseUrl();
+    } catch {
+      // Runtime config not yet initialized — playbook handlers will be inert
+    }
+    return createPlaybookHandlers({
+      onDialogClose: () => {
+        feedRefetchRef.current?.();
+        todoRefetchRef.current?.();
+      },
+      bffBaseUrl: bffUrl,
+    });
+  }, []);
 
   // -------------------------------------------------------------------------
   // To Do and Documents: open full list dialog handlers
