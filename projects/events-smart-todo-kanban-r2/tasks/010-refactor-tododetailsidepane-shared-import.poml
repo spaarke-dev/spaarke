@@ -1,0 +1,60 @@
+<task id="010" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Refactor TodoDetailSidePane to use shared TodoDetail</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <tags>refactoring, code-page</tags>
+    <estimate>2h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies code files (.tsx), refactoring with file deletions, ADR constraints on shared component usage</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Refactor TodoDetailSidePane to import TodoDetail, ITodoRecord, and ITodoExtension from @spaarke/ui-components instead of local copies. Delete local components/TodoDetail.tsx and types/TodoRecord.ts. Wire up Xrm-specific callback props in App.tsx.</goal>
+    <context>
+      After task 003 extracts TodoDetail to the shared library, the TodoDetailSidePane solution
+      should consume the shared version instead of maintaining its own copy. Local services
+      (todoService.ts), utilities (broadcastChannel.ts, xrmAccess.ts), and Xrm-specific wiring
+      remain in the solution. App.tsx passes onSearchContacts callback wrapping the local
+      searchContacts function that uses getXrmWebApi().
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Consume shared components from @spaarke/ui-components. Do not duplicate shared code locally.</constraint>
+      <constraint source="ADR-026">Code pages opened via Xrm.Navigation.navigateTo follow the full-page custom page standard.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read TodoDetailSidePane App.tsx to understand how TodoDetail is currently imported and used.</step>
+    <step order="2">Update App.tsx to import TodoDetail, ITodoRecord, and ITodoExtension from @spaarke/ui-components instead of local paths.</step>
+    <step order="3">Wire up callback props in App.tsx: pass onSearchContacts wrapping local searchContacts, onSaveEventFields, onSaveTodoExtFields, onDeactivateTodoExt, onRemoveTodo, and onClose using existing local service functions.</step>
+    <step order="4">Delete src/solutions/TodoDetailSidePane/src/components/TodoDetail.tsx (now consumed from shared library).</step>
+    <step order="5">Delete src/solutions/TodoDetailSidePane/src/types/TodoRecord.ts (types now consumed from shared library).</step>
+    <step order="6">Update any remaining local imports that referenced the deleted files to use @spaarke/ui-components.</step>
+    <step order="7">Run npm run build in TodoDetailSidePane to verify it produces working output HTML.</step>
+  </steps>
+
+  <outputs>
+    <output type="modify">src/solutions/TodoDetailSidePane/src/App.tsx</output>
+    <output type="delete">src/solutions/TodoDetailSidePane/src/components/TodoDetail.tsx</output>
+    <output type="delete">src/solutions/TodoDetailSidePane/src/types/TodoRecord.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build in TodoDetailSidePane produces working output HTML without errors.</criterion>
+    <criterion testable="true">TodoDetail is imported from @spaarke/ui-components, not from a local path.</criterion>
+    <criterion testable="true">Local components/TodoDetail.tsx and types/TodoRecord.ts files are deleted.</criterion>
+    <criterion testable="true">Local services (todoService.ts, broadcastChannel.ts, xrmAccess.ts) are preserved and wired as callback props.</criterion>
+    <criterion testable="true">FR-08 functionality is verified: TodoDetail displays and edits todo items correctly through shared component.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,76 @@
+<task id="022" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Copy SmartToDo domain files to SmartTodo Code Page</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <tags>code-page, react, refactoring</tags>
+    <estimate>3h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Copies and adapts multiple .tsx/.ts files; requires import rewiring and removal of legacy patterns; modifies code files</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Copy SmartToDo domain files from LegalWorkspace to SmartTodo Code Page and adapt imports. Files to copy: Components (KanbanBoard, KanbanCard, KanbanHeader, AddTodoBar, DismissedSection, TodoItem, ThresholdSettings, TodoAISummaryDialog, PriorityScoreCard, EffortScoreCard), Hooks (useTodoItems, useKanbanColumns, useUserPreferences), Services (DataverseService — todo-relevant methods), Types (IEvent, enums, xrm types), Utils (todoScoreUtils, dueLabelUtils). Remove BroadcastChannel listener, Xrm.App.sidePanes code, and navigation detection from SmartToDo.tsx.</goal>
+    <context>
+      The SmartToDo feature currently lives inside the LegalWorkspace Code Page. This task extracts the domain
+      files into the new standalone SmartTodo Code Page. All imports must be updated to reference local paths
+      instead of LegalWorkspace paths. Legacy integration patterns (BroadcastChannel for side pane communication,
+      Xrm.App.sidePanes API calls, navigation detection) must be removed since the new Code Page uses
+      TodoContext for state management instead.
+    </context>
+    <constraints>
+      <constraint source="ADR-006">Code Page architecture — no legacy integration patterns (BroadcastChannel, sidePanes)</constraint>
+      <constraint source="ADR-012">Import shared components from @spaarke/ui-components where applicable</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</file>
+      <file>docs/architecture/event-to-do-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Inventory all SmartToDo domain files in src/solutions/LegalWorkspace/src/components/SmartToDo/</step>
+    <step order="2">Create target directories: src/solutions/SmartTodo/src/components/, hooks/, services/, types/, utils/</step>
+    <step order="3">Copy component files (KanbanBoard, KanbanCard, KanbanHeader, AddTodoBar, DismissedSection, TodoItem, ThresholdSettings, TodoAISummaryDialog, PriorityScoreCard, EffortScoreCard)</step>
+    <step order="4">Copy hook files (useTodoItems, useKanbanColumns, useUserPreferences)</step>
+    <step order="5">Copy service files (DataverseService — only todo-relevant methods)</step>
+    <step order="6">Copy type definitions (IEvent, enums, xrm types)</step>
+    <step order="7">Copy utility files (todoScoreUtils, dueLabelUtils)</step>
+    <step order="8">Update all import paths to reference local SmartTodo project paths</step>
+    <step order="9">Remove BroadcastChannel listener code from copied files</step>
+    <step order="10">Remove Xrm.App.sidePanes API calls from copied files</step>
+    <step order="11">Remove navigation detection logic from copied files</step>
+    <step order="12">Verify all copied files compile within SmartTodo project</step>
+  </steps>
+  <outputs>
+    <output type="create">src/solutions/SmartTodo/src/components/KanbanBoard.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/KanbanCard.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/KanbanHeader.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/AddTodoBar.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/DismissedSection.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/TodoItem.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/ThresholdSettings.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/TodoAISummaryDialog.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/PriorityScoreCard.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/components/EffortScoreCard.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/hooks/useTodoItems.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/hooks/useKanbanColumns.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/hooks/useUserPreferences.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/services/DataverseService.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/types/IEvent.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/types/enums.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/types/xrm.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/utils/todoScoreUtils.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/utils/dueLabelUtils.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All domain files compile without errors within the SmartTodo project</criterion>
+    <criterion testable="true">No imports reference LegalWorkspace paths</criterion>
+    <criterion testable="true">No BroadcastChannel usage exists in the SmartTodo project</criterion>
+    <criterion testable="true">No Xrm.App.sidePanes calls exist in the SmartTodo project</criterion>
+    <criterion testable="true">No navigation detection logic exists in the SmartTodo project</criterion>
+  </acceptance-criteria>
+</task>

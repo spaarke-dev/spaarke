@@ -1,0 +1,44 @@
+<task id="042" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Dark mode and high-contrast verification</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <tags>a11y, code-page</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification task with potential fixes; has explicit ADR-021 constraints for theming compliance</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify all three theme modes (light, dark, high-contrast) render correctly across entire SmartTodo Code Page: Kanban board, KanbanCards, PanelSplitter, TodoDetail panel. Ensure no hard-coded colors. All colors from Fluent v9 tokens.</goal>
+    <context>
+      ADR-021 mandates Fluent UI v9 exclusively with dark mode support. All custom styles must use
+      design tokens, not hard-coded color values. The SmartTodo Code Page uses resolveCodePageTheme()
+      to detect the Dataverse theme context and apply the correct FluentProvider theme.
+    </context>
+    <constraints>
+      <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens; no hard-coded colors; dark mode required</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Search for hard-coded color values (#hex, rgb(), rgba(), named colors) in SmartTodo src/</step>
+    <step order="2">Verify all makeStyles calls use Fluent v9 tokens (tokens.colorXxx)</step>
+    <step order="3">Verify FluentProvider receives theme from resolveCodePageTheme()</step>
+    <step order="4">Verify PanelSplitter uses tokens.colorNeutralStroke1, tokens.colorBrandBackground, etc.</step>
+    <step order="5">Fix any hard-coded colors found by replacing with appropriate Fluent v9 tokens</step>
+  </steps>
+  <outputs>
+    <output type="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Success criterion 7: All components respond to theme toggle (light, dark, high-contrast)</criterion>
+    <criterion testable="true">Zero hard-coded color values in SmartTodo src/ directory</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,51 @@
+<task id="011" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Refactor AnalysisWorkspace to use shared PanelSplitter</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <tags>refactoring, code-page</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Simple import swap and file deletion, no new logic, single ADR constraint</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Update AnalysisWorkspace to import PanelSplitter from @spaarke/ui-components instead of the local copy. Delete the local PanelSplitter.tsx. Local usePanelLayout.ts stays (three-panel specific, not shared).</goal>
+    <context>
+      After task 001 extracts PanelSplitter to the shared library, AnalysisWorkspace should consume
+      it from @spaarke/ui-components rather than maintaining its own copy. The local usePanelLayout.ts
+      hook remains because it is three-panel specific and not suitable for the shared library.
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Consume shared components from @spaarke/ui-components. Do not duplicate shared code locally.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AnalysisWorkspace App.tsx to find the local PanelSplitter import.</step>
+    <step order="2">Update the import in App.tsx (and any other files) to use @spaarke/ui-components instead of the local path.</step>
+    <step order="3">Delete src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx.</step>
+    <step order="4">Verify AnalysisWorkspace builds successfully with the shared PanelSplitter.</step>
+  </steps>
+
+  <outputs>
+    <output type="modify">src/client/code-pages/AnalysisWorkspace/src/App.tsx</output>
+    <output type="delete">src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AnalysisWorkspace builds successfully without errors.</criterion>
+    <criterion testable="true">PanelSplitter is imported from @spaarke/ui-components, not from a local path.</criterion>
+    <criterion testable="true">Local PanelSplitter.tsx file is deleted from AnalysisWorkspace.</criterion>
+    <criterion testable="true">Local usePanelLayout.ts hook is preserved (not deleted or moved).</criterion>
+  </acceptance-criteria>
+</task>

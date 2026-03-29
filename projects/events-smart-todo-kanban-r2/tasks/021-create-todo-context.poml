@@ -1,0 +1,52 @@
+<task id="021" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Create TodoContext</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <tags>react, code-page</tags>
+    <estimate>2h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates core React context with state management logic; modifies .tsx files; central to application architecture</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create TodoContext providing shared state between Kanban and Detail panels. Provides: items (IEvent[]), dismissedItems, selectedEventId (string|null), selectItem (toggles selection), updateItem (optimistic single-item merge), refetch, isLoading, error, action callbacks (handleDismiss, handleRestore, handleAdd, handleStatusToggle), column data from useKanbanColumns, preference data from useUserPreferences. The provider wraps useTodoItems, useKanbanColumns, useUserPreferences.</goal>
+    <context>
+      TodoContext is the central state store for the SmartTodo Code Page. It aggregates data from three hooks
+      (useTodoItems, useKanbanColumns, useUserPreferences) into a single context that both the KanbanBoard
+      and TodoDetailPanel consume. The selectItem function toggles selection: calling with the same ID deselects,
+      calling with a different ID selects it. updateItem performs an optimistic merge of partial fields into
+      the items array without triggering a full refetch.
+    </context>
+    <constraints>
+      <constraint source="ADR-006">Code Page architecture — standalone React 18+ context, no PCF dependencies</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</file>
+      <file>docs/architecture/event-to-do-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create src/solutions/SmartTodo/src/context/ directory</step>
+    <step order="2">Create TodoContext.tsx with context type definition including all specified fields</step>
+    <step order="3">Implement TodoProvider component that wraps useTodoItems, useKanbanColumns, useUserPreferences</step>
+    <step order="4">Implement selectItem as a toggle function (same ID deselects, different ID selects)</step>
+    <step order="5">Implement updateItem for optimistic partial merge into items array</step>
+    <step order="6">Wire action callbacks (handleDismiss, handleRestore, handleAdd, handleStatusToggle) from useTodoItems</step>
+    <step order="7">Create context/index.ts barrel export</step>
+  </steps>
+  <outputs>
+    <output type="create">src/solutions/SmartTodo/src/context/TodoContext.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/context/index.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">TodoContext compiles without errors within the SmartTodo project</criterion>
+    <criterion testable="true">TodoProvider wraps children and provides all specified context values</criterion>
+    <criterion testable="true">updateItem performs optimistic merge of partial fields into items array</criterion>
+    <criterion testable="true">selectItem toggles selection: same ID deselects, different ID selects</criterion>
+  </acceptance-criteria>
+</task>

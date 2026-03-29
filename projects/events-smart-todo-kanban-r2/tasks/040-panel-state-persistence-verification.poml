@@ -1,0 +1,43 @@
+<task id="040" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Panel state localStorage persistence verification</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <tags>code-page, testing</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification task — confirms existing functionality works end-to-end; no new code expected</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify useTwoPanelLayout persists panel width and visibility to localStorage under key "smarttodo-panel-layout". On Code Page load, restore previous state. Should already work from task 002; this verifies end-to-end.</goal>
+    <context>
+      The useTwoPanelLayout hook (task 002) stores panel width and collapsed state in localStorage.
+      The SmartTodo Code Page (task 030) passes a storageKey option to the hook. This task verifies
+      the persistence round-trip works correctly in the integrated Code Page context.
+    </context>
+    <constraints>
+      <constraint source="ADR-026">Code Page must function correctly as a Dataverse web resource with localStorage available</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useTwoPanelLayout.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read SmartTodoApp.tsx, verify storageKey option is passed to useTwoPanelLayout</step>
+    <step order="2">Verify useTwoPanelLayout reads/writes localStorage correctly with the "smarttodo-panel-layout" key</step>
+    <step order="3">Test: set panel width → reload → width restored</step>
+    <step order="4">Test: collapse panel → reload → still collapsed</step>
+  </steps>
+  <outputs>
+    <output type="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">FR-06 verified: panel width persists across page loads via localStorage</criterion>
+    <criterion testable="true">FR-06 verified: panel collapsed state persists across page loads via localStorage</criterion>
+  </acceptance-criteria>
+</task>

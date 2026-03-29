@@ -1,0 +1,53 @@
+<task id="055" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Project wrap-up and documentation</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <tags>documentation</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation and verification only; no code implementation; updates README and TASK-INDEX</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>001, 002, 003, 010, 011, 020, 021, 022, 030, 031, 032, 033, 040, 041, 042, 050, 051, 052</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify all 10 success criteria from spec.md. Run final builds (SmartTodo, TodoDetailSidePane, AnalysisWorkspace). Create src/solutions/SmartTodo/README.md. Update project README.md status to Complete. Update TASK-INDEX.md with all tasks marked complete.</goal>
+    <context>
+      This is the final task in the events-smart-todo-kanban-r2 project. All implementation, verification,
+      deployment, and refactoring tasks are complete. This task performs a final end-to-end verification
+      of all success criteria and updates project documentation to reflect completion.
+    </context>
+    <constraints>
+      <constraint source="spec">All 10 success criteria from spec.md must be verified before marking project complete</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/events-smart-todo-kanban-r2/spec.md</file>
+      <file>projects/events-smart-todo-kanban-r2/README.md</file>
+      <file>projects/events-smart-todo-kanban-r2/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">npm run build in src/solutions/SmartTodo — verify single HTML output</step>
+    <step order="2">npm run build in src/solutions/TodoDetailSidePane — verify it still builds</step>
+    <step order="3">npm run build in src/client/code-pages/AnalysisWorkspace — verify no regressions</step>
+    <step order="4">Grep BroadcastChannel in SmartTodo-related files — expect 0 matches</step>
+    <step order="5">Grep Xrm.App.sidePanes in SmartTodo-related files — expect 0 matches</step>
+    <step order="6">Verify all 10 spec.md success criteria systematically</step>
+    <step order="7">Create src/solutions/SmartTodo/README.md with project overview</step>
+    <step order="8">Update projects/events-smart-todo-kanban-r2/README.md status to Complete</step>
+  </steps>
+  <outputs>
+    <output type="create">src/solutions/SmartTodo/README.md</output>
+    <output type="modify">projects/events-smart-todo-kanban-r2/README.md</output>
+    <output type="modify">projects/events-smart-todo-kanban-r2/tasks/TASK-INDEX.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All 10 success criteria from spec.md verified and passing</criterion>
+    <criterion testable="true">SmartTodo, TodoDetailSidePane, and AnalysisWorkspace all build successfully</criterion>
+    <criterion testable="true">src/solutions/SmartTodo/README.md exists with project documentation</criterion>
+    <criterion testable="true">Project README.md status updated to Complete</criterion>
+  </acceptance-criteria>
+</task>

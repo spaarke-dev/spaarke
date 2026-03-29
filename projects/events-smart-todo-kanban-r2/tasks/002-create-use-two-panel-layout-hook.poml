@@ -1,0 +1,61 @@
+<task id="002" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Create useTwoPanelLayout hook in shared library</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <tags>shared-library, react, code-page</tags>
+    <estimate>3h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new shared library code (.ts files), 6+ steps, ADR constraints, complex hook logic</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Create a two-panel layout hook adapted from the three-panel usePanelLayout, with mouse drag resize, keyboard resize (ArrowLeft/ArrowRight 20px steps), double-click reset, localStorage persistence, min-width enforcement, and collapse/expand toggle. Return SplitterHandlers compatible with PanelSplitter props.</goal>
+    <context>
+      The existing usePanelLayout hook in AnalysisWorkspace (600 lines) manages a three-panel layout.
+      The Events Smart ToDo Kanban needs a simpler two-panel variant: a primary panel (kanban board) and
+      a detail panel (todo detail). The hook should follow the same patterns (mouse drag, keyboard resize,
+      localStorage persistence, min-width enforcement) but simplified for two panels.
+      Reference: src/client/code-pages/AnalysisWorkspace/src/hooks/usePanelLayout.ts
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Shared hooks must be exported from @spaarke/ui-components. Follow existing patterns in the shared library.</constraint>
+      <constraint source="ADR-021">Layout must support dark mode via Fluent v9 tokens. No hard-coded dimensions that break responsive behavior.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/usePanelLayout.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the existing usePanelLayout.ts from AnalysisWorkspace to understand the three-panel patterns for drag, keyboard, persistence, and min-width enforcement.</step>
+    <step order="2">Design the UseTwoPanelLayoutOptions interface: defaultDetailWidth (400), minPrimaryWidth (300), minDetailWidth (280), storageKey (string).</step>
+    <step order="3">Design the return type: primaryWidth (CSS string), detailWidth (CSS string), isDetailVisible, toggleDetail, showDetail, hideDetail, splitterHandlers (compatible with PanelSplitter props), isDragging, containerRef, currentRatio.</step>
+    <step order="4">Create src/client/shared/Spaarke.UI.Components/src/hooks/useTwoPanelLayout.ts — implement the hook with mouse drag resize, keyboard resize (ArrowLeft/ArrowRight 20px steps), double-click reset to default, localStorage persistence of panel ratio, min-width enforcement, and collapse/expand toggle.</step>
+    <step order="5">Modify src/client/shared/Spaarke.UI.Components/src/hooks/index.ts — add useTwoPanelLayout export.</step>
+    <step order="6">Verify the shared library compiles with the new hook.</step>
+    <step order="7">Verify that splitterHandlers return type is compatible with PanelSplitter props interface from task 001.</step>
+  </steps>
+
+  <outputs>
+    <output type="create">src/client/shared/Spaarke.UI.Components/src/hooks/useTwoPanelLayout.ts</output>
+    <output type="modify">src/client/shared/Spaarke.UI.Components/src/hooks/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">import { useTwoPanelLayout } from "@spaarke/ui-components" compiles without errors.</criterion>
+    <criterion testable="true">Hook returns primaryWidth and detailWidth as CSS-ready strings (e.g., "calc(100% - 400px)" or pixel values).</criterion>
+    <criterion testable="true">localStorage round-trips: setting a ratio, reloading, and reading back produces the same panel sizes.</criterion>
+    <criterion testable="true">splitterHandlers object is compatible with PanelSplitter component props (onMouseDown, onKeyDown, onDoubleClick handlers).</criterion>
+    <criterion testable="true">Keyboard resize moves panels by 20px per ArrowLeft/ArrowRight keypress.</criterion>
+    <criterion testable="true">Double-click on splitter resets to defaultDetailWidth.</criterion>
+    <criterion testable="true">Min-width constraints are enforced: primary panel never smaller than minPrimaryWidth, detail panel never smaller than minDetailWidth.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,49 @@
+<task id="051" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Remove BroadcastChannel from LegalWorkspace SmartToDo</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <tags>refactoring, cleanup</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies existing .tsx code; has explicit constraints; removes ~140 lines of legacy integration code</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030, 031, 032, 033</dependencies>
+  </metadata>
+  <prompt>
+    <goal>In LegalWorkspace SmartToDo.tsx, remove: BroadcastChannel listener, Xrm.App.sidePanes card click handler, 6-layer navigation detection cleanup code (~140 lines), inline iframe detail panel code. Keep disableSidePane prop (workspace glance mode).</goal>
+    <context>
+      The new SmartTodo Code Page (tasks 020-033) replaces the old BroadcastChannel-based communication
+      between the Kanban board and TodoDetailSidePane. The LegalWorkspace embedded SmartToDo component
+      still contains the legacy integration code that must be removed. The disableSidePane prop is
+      retained for workspace glance mode (embedded Kanban without detail panel).
+    </context>
+    <constraints>
+      <constraint source="spec">BroadcastChannel must not appear in SmartTodo-related code (success criterion 4)</constraint>
+      <constraint source="spec">Xrm.App.sidePanes must not be called from SmartTodo (success criterion 5)</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read SmartToDo.tsx and identify all BroadcastChannel-related code</step>
+    <step order="2">Identify Xrm.App.sidePanes card click handler code</step>
+    <step order="3">Identify 6-layer navigation detection cleanup code</step>
+    <step order="4">Identify inline iframe detail panel code</step>
+    <step order="5">Remove all identified code (~140 lines) while preserving disableSidePane prop and Kanban board functionality</step>
+    <step order="6">Verify LegalWorkspace builds successfully after removal</step>
+  </steps>
+  <outputs>
+    <output type="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Success criterion 4: grep BroadcastChannel in SmartToDo.tsx returns 0 matches</criterion>
+    <criterion testable="true">Success criterion 5: grep Xrm.App.sidePanes in SmartToDo.tsx returns 0 matches</criterion>
+    <criterion testable="true">LegalWorkspace builds without errors</criterion>
+    <criterion testable="true">Embedded Kanban mode (disableSidePane=true) still renders correctly</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,47 @@
+<task id="052" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Update LegalWorkspace to open SmartTodo Code Page</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <tags>refactoring, code-page</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies existing .tsx code; integrates with Xrm.Navigation API; replaces legacy side pane approach</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>051</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Update LegalWorkspace SmartToDo so that card click (when disableSidePane=false) or "Show more" button opens the new SmartTodo Code Page via Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: "sprk_smarttodo" }). This replaces the old side pane approach.</goal>
+    <context>
+      After task 051 removed the BroadcastChannel and sidePanes code, the LegalWorkspace SmartToDo
+      needs a new way to open the detail view. The SmartTodo Code Page (sprk_smarttodo) is now the
+      target, opened via Xrm.Navigation.navigateTo as a dialog or full page. This follows the
+      standard Code Page navigation pattern from ADR-006.
+    </context>
+    <constraints>
+      <constraint source="ADR-006">Use Xrm.Navigation.navigateTo with pageType "webresource" for standalone dialogs — no custom page + PCF wrapper</constraint>
+      <constraint source="ADR-026">Web resource name is sprk_smarttodo</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Add card click handler that calls Xrm.Navigation.navigateTo with sprk_smarttodo web resource</step>
+    <step order="2">Add "Show more" button handler using the same navigateTo call</step>
+    <step order="3">Pass relevant context (e.g., selected card ID) as data parameter in the navigateTo call</step>
+    <step order="4">Ensure disableSidePane=true mode does not trigger navigation (glance mode only)</step>
+    <step order="5">Verify LegalWorkspace builds successfully</step>
+  </steps>
+  <outputs>
+    <output type="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">"Show more" or card click in LegalWorkspace opens SmartTodo Code Page as dialog</criterion>
+    <criterion testable="true">navigateTo uses pageType "webresource" and webresourceName "sprk_smarttodo"</criterion>
+    <criterion testable="true">disableSidePane=true mode does not open Code Page on card click</criterion>
+  </acceptance-criteria>
+</task>

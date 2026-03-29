@@ -1,0 +1,64 @@
+<task id="003" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Extract TodoDetail to shared library</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <tags>shared-library, react, refactoring</tags>
+    <estimate>3h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies shared library code (.tsx files), complex refactoring to decouple from Xrm, ADR constraints, 7+ steps</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Extract core TodoDetail component and dependencies from TodoDetailSidePane to @spaarke/ui-components shared library. Decouple from Xrm by accepting callback props (onSearchContacts, onSaveEventFields, onSaveTodoExtFields, onDeactivateTodoExt, onRemoveTodo, onClose) instead of calling Xrm APIs directly.</goal>
+    <context>
+      TodoDetail is a 1032-line component in TodoDetailSidePane that displays and edits todo items.
+      It currently calls getXrmWebApi() internally for contact search and CRUD operations.
+      The shared version must accept all Xrm-specific operations as callback props so consumers
+      can provide their own data layer (Xrm WebAPI, BFF API, etc.).
+      Source files:
+      - src/solutions/TodoDetailSidePane/src/components/TodoDetail.tsx (1032 lines)
+      - src/solutions/TodoDetailSidePane/src/types/TodoRecord.ts (type definitions)
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Shared components must follow the IDataService callback pattern for data access. No platform-specific imports (Xrm, ComponentFramework) in shared code.</constraint>
+      <constraint source="ADR-021">All UI must use Fluent UI v9. Dark mode support required. No hard-coded colors.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/TodoDetailSidePane/src/components/TodoDetail.tsx</file>
+      <file>src/solutions/TodoDetailSidePane/src/types/TodoRecord.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read TodoDetail.tsx from TodoDetailSidePane to catalog all Xrm-dependent code paths (searchContacts, save operations, deactivate, remove, close).</step>
+    <step order="2">Read TodoRecord.ts to understand the ITodoRecord and ITodoExtension type interfaces.</step>
+    <step order="3">Design the callback props interface: onSearchContacts, onSaveEventFields, onSaveTodoExtFields, onDeactivateTodoExt, onRemoveTodo, onClose — each with appropriate parameter and return types.</step>
+    <step order="4">Create src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/types.ts — export ITodoRecord, ITodoExtension, and the callback props interface (TodoDetailProps).</step>
+    <step order="5">Create src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx — copy the component, replacing all internal Xrm calls with the callback props. Remove all imports of getXrmWebApi or Xrm-specific utilities.</step>
+    <step order="6">Create src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/index.ts — export the component and all types.</step>
+    <step order="7">Modify src/client/shared/Spaarke.UI.Components/src/components/index.ts — add TodoDetail export to the barrel file.</step>
+    <step order="8">Verify the shared library compiles. Confirm no Xrm or platform-specific imports remain in the shared TodoDetail.</step>
+  </steps>
+
+  <outputs>
+    <output type="create">src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx</output>
+    <output type="create">src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/types.ts</output>
+    <output type="create">src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/index.ts</output>
+    <output type="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">import { TodoDetail, ITodoRecord, ITodoExtension } from "@spaarke/ui-components" compiles without errors.</criterion>
+    <criterion testable="true">TodoDetailProps includes callback props: onSearchContacts, onSaveEventFields, onSaveTodoExtFields, onDeactivateTodoExt, onRemoveTodo, onClose.</criterion>
+    <criterion testable="true">No imports of getXrmWebApi, Xrm, or ComponentFramework exist in the shared TodoDetail code.</criterion>
+    <criterion testable="true">All Fluent UI v9 tokens are preserved — no hard-coded color values.</criterion>
+  </acceptance-criteria>
+</task>

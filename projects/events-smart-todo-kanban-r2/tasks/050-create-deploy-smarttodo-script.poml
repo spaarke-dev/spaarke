@@ -1,0 +1,44 @@
+<task id="050" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Create Deploy-SmartTodo.ps1 script</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <tags>deployment, script</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Follows existing Deploy-EventDetailSidePane.ps1 pattern; no architecture decisions needed</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create Deploy-SmartTodo.ps1 following the Deploy-EventDetailSidePane.ps1 pattern. Steps: get access token via az CLI, find/create sprk_smarttodo web resource in Dataverse, npm run build in src/solutions/SmartTodo, base64-encode dist/index.html, upload via REST API, publish customizations.</goal>
+    <context>
+      The SmartTodo Code Page produces a single HTML file via Vite + vite-plugin-singlefile. Deployment
+      to Dataverse requires uploading this file as a web resource named sprk_smarttodo. The existing
+      Deploy-EventDetailSidePane.ps1 script provides the exact pattern to follow.
+    </context>
+    <constraints>
+      <constraint source="ADR-026">Web resource name must be sprk_smarttodo; single HTML output from Vite build</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-EventDetailSidePane.ps1</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read Deploy-EventDetailSidePane.ps1 to understand the deployment pattern</step>
+    <step order="2">Create scripts/Deploy-SmartTodo.ps1 following the same pattern, targeting src/solutions/SmartTodo and sprk_smarttodo web resource</step>
+    <step order="3">Verify script runs npm run build in the correct directory</step>
+    <step order="4">Verify script base64-encodes dist/index.html and uploads to Dataverse</step>
+  </steps>
+  <outputs>
+    <output type="create">scripts/Deploy-SmartTodo.ps1</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">scripts/Deploy-SmartTodo.ps1 exists and follows Deploy-EventDetailSidePane.ps1 pattern</criterion>
+    <criterion testable="true">Script deploys sprk_smarttodo web resource to Dataverse dev environment</criterion>
+  </acceptance-criteria>
+</task>

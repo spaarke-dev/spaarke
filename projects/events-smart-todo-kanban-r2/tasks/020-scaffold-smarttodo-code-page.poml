@@ -1,0 +1,60 @@
+<task id="020" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Scaffold SmartTodo Code Page project</title>
+    <phase>2</phase>
+    <status>not-started</status>
+    <tags>code-page, react, scaffold</tags>
+    <estimate>2h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new code-page project with build tooling; modifies .ts/.tsx files; scaffold must conform to ADR-006, ADR-021, ADR-026</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create src/solutions/SmartTodo/ as a new Vite + React 19 Code Page following ADR-026 standard. Single HTML output via vite-plugin-singlefile. Web resource name: sprk_smarttodo.</goal>
+    <context>
+      SmartTodo is a standalone Code Page (not a PCF control) that will host the Kanban board and detail panel.
+      It follows the same pattern as TodoDetailSidePane and other Code Pages: Vite build producing a single
+      HTML file for deployment as a Dataverse web resource. React 19 with createRoot, Fluent UI v9 theming,
+      and resolveCodePageTheme for Dataverse iframe integration.
+    </context>
+    <constraints>
+      <constraint source="ADR-006">Code Page is the default for standalone dialogs and pages — no legacy JS webresources</constraint>
+      <constraint source="ADR-021">All UI must use Fluent UI v9 components and design tokens; theme detection via resolveCodePageTheme</constraint>
+      <constraint source="ADR-026">Vite + vite-plugin-singlefile for single HTML output; standard Code Page build pipeline</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>src/solutions/TodoDetailSidePane/vite.config.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create directory structure: src/solutions/SmartTodo/ with src/ subdirectory</step>
+    <step order="2">Create package.json with React 19, Fluent UI v9, @spaarke/ui-components, @hello-pangea/dnd for drag-drop, vite, vite-plugin-singlefile, and TypeScript dev dependencies</step>
+    <step order="3">Create vite.config.ts with singlefile plugin producing single HTML output</step>
+    <step order="4">Create tsconfig.json (strict mode, bundler module resolution) and tsconfig.node.json</step>
+    <step order="5">Create index.html with CSS reset appropriate for Dataverse iframe embedding</step>
+    <step order="6">Create src/main.tsx with createRoot, FluentProvider, and resolveCodePageTheme</step>
+    <step order="7">Create src/App.tsx with FluentProvider wrapper and placeholder content</step>
+  </steps>
+  <outputs>
+    <output type="create">src/solutions/SmartTodo/package.json</output>
+    <output type="create">src/solutions/SmartTodo/vite.config.ts</output>
+    <output type="create">src/solutions/SmartTodo/tsconfig.json</output>
+    <output type="create">src/solutions/SmartTodo/tsconfig.node.json</output>
+    <output type="create">src/solutions/SmartTodo/index.html</output>
+    <output type="create">src/solutions/SmartTodo/src/main.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/App.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">npm install && npm run build produces a single HTML file in dist/</criterion>
+    <criterion testable="true">React 19 createRoot renders FluentProvider with theme resolved via resolveCodePageTheme</criterion>
+    <criterion testable="true">vite-plugin-singlefile is configured and inlines all assets into one HTML file</criterion>
+    <criterion testable="true">Fluent UI v9 is the only UI framework dependency</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,46 @@
+<task id="041" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Accessibility audit for PanelSplitter</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <tags>a11y, shared-library</tags>
+    <estimate>1h</estimate>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification and potential fixes for accessibility compliance; has explicit constraints from ADR-021</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify PanelSplitter ARIA compliance in SmartTodo context. Check role="separator", aria-orientation="vertical", aria-valuenow, aria-valuemin, aria-valuemax, tabIndex={0}, focus-visible indicator. Verify keyboard resize (ArrowLeft/ArrowRight 20px steps). Fix any gaps.</goal>
+    <context>
+      PanelSplitter was extracted to the shared library in task 001 and is used in the SmartTodo Code Page.
+      Accessibility compliance is a non-functional requirement (NFR-04). This audit ensures the splitter
+      meets WCAG standards for keyboard operability and screen reader compatibility.
+    </context>
+    <constraints>
+      <constraint source="ADR-021">All UI must use Fluent UI v9 design tokens; focus indicators must use tokens</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Inspect PanelSplitter for role="separator", aria-orientation="vertical", aria-valuenow, aria-valuemin, aria-valuemax attributes</step>
+    <step order="2">Verify tabIndex={0} is set on the splitter element</step>
+    <step order="3">Verify focus-visible indicator uses Fluent v9 tokens (not hard-coded colors)</step>
+    <step order="4">Verify keyboard handler: ArrowLeft/ArrowRight resize in 20px steps</step>
+    <step order="5">Fix any accessibility gaps found</step>
+  </steps>
+  <outputs>
+    <output type="modify">src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">NFR-04 verified: Tab to splitter places focus with visible indicator</criterion>
+    <criterion testable="true">NFR-04 verified: ArrowLeft/ArrowRight resize panel in 20px steps</criterion>
+    <criterion testable="true">NFR-04 verified: Screen reader announces separator role with current value</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,69 @@
+<task id="030" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Build SmartTodoApp two-panel layout</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <tags>code-page, react</tags>
+    <estimate>3h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements core layout component with .tsx files; architecture-critical two-panel design with resizable splitter</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>002, 021, 022</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create SmartTodoApp.tsx — the main layout component with two-panel structure: KanbanBoard (left, resizable) + PanelSplitter + TodoDetailPanel (right, collapsible). Uses useTwoPanelLayout from shared lib. TodoProvider wraps both panels. CSS transition for panel open animation (&lt;200ms). Default detail width: 400px.</goal>
+    <context>
+      SmartTodoApp is the root application component rendered by App.tsx. It uses useTwoPanelLayout (task 002)
+      for resize/collapse logic and PanelSplitter (task 001) for the drag handle. TodoProvider (task 021)
+      wraps both panels so they share state. The detail panel slides in from the right when a Kanban card
+      is selected and collapses when deselected.
+
+      Layout structure:
+      &lt;TodoProvider&gt;
+        &lt;div ref={containerRef} display:flex&gt;
+          &lt;div width={primaryWidth}&gt;
+            &lt;KanbanHeader/&gt;
+            &lt;KanbanBoard/&gt;
+            &lt;DismissedSection/&gt;
+          &lt;/div&gt;
+          {isDetailVisible &amp;&amp; &lt;PanelSplitter/&gt;}
+          {isDetailVisible &amp;&amp; &lt;div width={detailWidth}&gt;&lt;TodoDetailPanel/&gt;&lt;/div&gt;}
+        &lt;/div&gt;
+      &lt;/TodoProvider&gt;
+    </context>
+    <constraints>
+      <constraint source="ADR-021">All styling must use Fluent UI v9 design tokens — no hard-coded colors or spacing values</constraint>
+      <constraint source="ADR-012">Import PanelSplitter and useTwoPanelLayout from @spaarke/ui-components shared library</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create SmartTodoApp.tsx with two-panel flex layout</step>
+    <step order="2">Import and configure useTwoPanelLayout with defaultDetailWidth: 400, minDetailWidth: 300</step>
+    <step order="3">Import PanelSplitter from @spaarke/ui-components</step>
+    <step order="4">Wrap layout in TodoProvider from context/TodoContext</step>
+    <step order="5">Render KanbanHeader, KanbanBoard, and DismissedSection in primary panel</step>
+    <step order="6">Conditionally render PanelSplitter and TodoDetailPanel when isDetailVisible</step>
+    <step order="7">Add CSS transition for panel open/close animation (max 200ms)</step>
+    <step order="8">Update App.tsx to render SmartTodoApp as the main component</step>
+  </steps>
+  <outputs>
+    <output type="create">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+    <output type="modify">src/solutions/SmartTodo/src/App.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Two-panel layout renders with KanbanBoard on left and TodoDetailPanel on right</criterion>
+    <criterion testable="true">PanelSplitter allows drag-resizing between panels</criterion>
+    <criterion testable="true">Detail panel opens and collapses with CSS transition under 200ms</criterion>
+    <criterion testable="true">Default detail panel width is 400px</criterion>
+    <criterion testable="true">FR-01: Two-panel layout with resizable splitter</criterion>
+    <criterion testable="true">FR-02: Detail panel is collapsible</criterion>
+    <criterion testable="true">FR-03: Panel open animation is smooth</criterion>
+  </acceptance-criteria>
+</task>

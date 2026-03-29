@@ -1,0 +1,53 @@
+<task id="032" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Wire card click to TodoContext selection</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <tags>code-page, react</tags>
+    <estimate>2h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies multiple .tsx files; wires interaction between KanbanCard, TodoContext, and panel visibility</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030, 031</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Wire KanbanCard click to TodoContext.selectItem(eventId). When selectedEventId changes to non-null, call showDetail(). Clicking same card calls selectItem(null) which triggers hideDetail(). Update KanbanCard to show selected state (highlight). Ensure embedded mode (disableSidePane prop) prevents card click from opening detail.</goal>
+    <context>
+      This task connects the KanbanCard click interaction to the TodoContext selection state and panel
+      visibility. When a card is clicked, selectItem toggles the selection. The SmartTodoApp component
+      reacts to selectedEventId changes: non-null shows the detail panel, null hides it. KanbanCard
+      receives a visual highlight when its eventId matches selectedEventId. In embedded mode (when
+      disableSidePane prop is true), card clicks do not trigger detail panel opening.
+    </context>
+    <constraints>
+      <constraint source="ADR-021">Selected card highlight must use Fluent v9 design tokens for colors</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>docs/architecture/event-to-do-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Add onClick handler to KanbanCard that calls TodoContext.selectItem(eventId)</step>
+    <step order="2">Add selected visual state to KanbanCard using Fluent v9 tokens (e.g., colorNeutralBackground1Selected)</step>
+    <step order="3">Compare card eventId with TodoContext.selectedEventId to determine selected state</step>
+    <step order="4">In SmartTodoApp, add useEffect that calls showDetail() when selectedEventId becomes non-null</step>
+    <step order="5">In SmartTodoApp, add useEffect that calls hideDetail() when selectedEventId becomes null</step>
+    <step order="6">Guard card click handler: if disableSidePane prop is true, do not call selectItem</step>
+    <step order="7">Verify toggle behavior: clicking same card deselects and hides panel</step>
+  </steps>
+  <outputs>
+    <output type="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+    <output type="modify">src/solutions/SmartTodo/src/components/KanbanCard.tsx</output>
+    <output type="modify">src/solutions/SmartTodo/src/context/TodoContext.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">FR-01: Clicking a Kanban card opens the detail panel</criterion>
+    <criterion testable="true">FR-03: Clicking the same card again collapses the detail panel</criterion>
+    <criterion testable="true">FR-05: KanbanBoard and TodoDetailPanel share state via TodoContext</criterion>
+    <criterion testable="true">FR-07: Embedded mode (disableSidePane=true) prevents card click from opening detail</criterion>
+    <criterion testable="true">Selected card has visual highlight using Fluent v9 design tokens</criterion>
+  </acceptance-criteria>
+</task>

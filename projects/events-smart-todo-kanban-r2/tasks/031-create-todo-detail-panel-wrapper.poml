@@ -1,0 +1,59 @@
+<task id="031" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Create TodoDetailPanel wrapper</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <tags>code-page, react</tags>
+    <estimate>2h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements .tsx component with Dataverse data access, optimistic update wiring, and shared component integration</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003, 021, 030</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create TodoDetailPanel that wraps the shared TodoDetail component with SmartTodo-specific wiring. Consumes selectedEventId from TodoContext. Loads ITodoRecord and ITodoExtension from Dataverse (parallel load). Passes save callbacks that call Dataverse AND TodoContext.updateItem for optimistic update. Passes onSearchContacts via local Xrm.WebApi. Passes onClose that calls selectItem(null) + hideDetail(). Header with event name and close button.</goal>
+    <context>
+      TodoDetailPanel is the right-side panel in the two-panel layout. It wraps the shared TodoDetail component
+      (extracted in task 003) with SmartTodo-specific data loading and save logic. When selectedEventId changes,
+      it loads the full ITodoRecord and ITodoExtension from Dataverse in parallel. Save callbacks write to
+      Dataverse first, then call TodoContext.updateItem for optimistic Kanban card updates. The panel includes
+      a header showing the event name and a close button. No BroadcastChannel — all communication goes through
+      TodoContext.
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Import TodoDetail from @spaarke/ui-components shared library</constraint>
+      <constraint source="ADR-006">No BroadcastChannel — use TodoContext for state sharing</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/TodoDetailSidePane/src/App.tsx</file>
+      <file>src/solutions/TodoDetailSidePane/src/services/todoService.ts</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create todoDetailService.ts with functions to load ITodoRecord and ITodoExtension from Dataverse</step>
+    <step order="2">Create xrmAccess.ts utility for Xrm.WebApi contact search</step>
+    <step order="3">Create TodoDetailPanel.tsx component</step>
+    <step order="4">Consume selectedEventId from TodoContext via useContext</step>
+    <step order="5">Implement parallel load of ITodoRecord and ITodoExtension when selectedEventId changes</step>
+    <step order="6">Wire save callbacks to call Dataverse service then TodoContext.updateItem</step>
+    <step order="7">Wire onSearchContacts to Xrm.WebApi via xrmAccess utility</step>
+    <step order="8">Wire onClose to call selectItem(null) and hideDetail</step>
+    <step order="9">Add header with event name and close button using Fluent v9 components</step>
+  </steps>
+  <outputs>
+    <output type="create">src/solutions/SmartTodo/src/components/TodoDetailPanel.tsx</output>
+    <output type="create">src/solutions/SmartTodo/src/services/todoDetailService.ts</output>
+    <output type="create">src/solutions/SmartTodo/src/utils/xrmAccess.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Selecting a Kanban card loads and displays TodoDetail in the right panel</criterion>
+    <criterion testable="true">ITodoRecord and ITodoExtension load in parallel from Dataverse</criterion>
+    <criterion testable="true">Save updates the single Kanban card optimistically via TodoContext.updateItem (FR-04)</criterion>
+    <criterion testable="true">No BroadcastChannel usage — all communication via TodoContext</criterion>
+    <criterion testable="true">Close button calls selectItem(null) and hides detail panel</criterion>
+  </acceptance-criteria>
+</task>

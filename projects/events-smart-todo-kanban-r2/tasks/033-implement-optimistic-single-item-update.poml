@@ -1,0 +1,57 @@
+<task id="033" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Implement optimistic single-item update</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <tags>code-page, react</tags>
+    <estimate>2h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies core state management in .tsx files; implements optimistic update with rollback — architecture-critical pattern</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>031</dependencies>
+  </metadata>
+  <prompt>
+    <goal>When TodoDetailPanel saves, call TodoContext.updateItem(eventId, updatedFields) which merges partial update into items array. Kanban card re-renders with updated data within one React render cycle (NFR-02). If Dataverse save fails, revert to previous state. No full refetch on success.</goal>
+    <context>
+      This task implements the optimistic update pattern for the SmartTodo Code Page. When a user edits
+      a field in the TodoDetailPanel and saves, the flow is:
+      1. Capture current item state (for rollback)
+      2. Immediately merge updated fields into the items array via updateItem
+      3. KanbanCard re-renders with new data (same React render cycle)
+      4. Persist to Dataverse in background
+      5. If Dataverse save fails, revert items array to captured state
+
+      This avoids the full-list refetch pattern used in the LegalWorkspace implementation, providing
+      instant visual feedback when editing priority, effort, status, or other fields.
+    </context>
+    <constraints>
+      <constraint source="ADR-006">Code Page architecture — no BroadcastChannel for update propagation</constraint>
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>docs/architecture/event-to-do-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">In TodoContext, implement updateItem(eventId, updatedFields) that performs shallow merge into matching item in items array</step>
+    <step order="2">Capture previous item state before merge for rollback capability</step>
+    <step order="3">Use functional setState to ensure merge happens in single render cycle</step>
+    <step order="4">In TodoDetailPanel, update save callback to call updateItem immediately after Dataverse save call (optimistic path)</step>
+    <step order="5">Add error handling: if Dataverse save rejects, revert items array to previous state</step>
+    <step order="6">Show error toast/notification on failed save with revert</step>
+    <step order="7">Verify no full refetch occurs on successful save</step>
+  </steps>
+  <outputs>
+    <output type="modify">src/solutions/SmartTodo/src/context/TodoContext.tsx</output>
+    <output type="modify">src/solutions/SmartTodo/src/components/TodoDetailPanel.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">FR-04: Editing a field in detail panel and saving updates the Kanban card without full list refresh</criterion>
+    <criterion testable="true">NFR-02: Kanban card re-renders with updated data within one React render cycle</criterion>
+    <criterion testable="true">Dataverse save failure reverts the optimistic update to previous state</criterion>
+    <criterion testable="true">No refetch call is triggered on successful save</criterion>
+    <criterion testable="true">Priority slider change in detail panel reflects immediately on Kanban card score</criterion>
+  </acceptance-criteria>
+</task>

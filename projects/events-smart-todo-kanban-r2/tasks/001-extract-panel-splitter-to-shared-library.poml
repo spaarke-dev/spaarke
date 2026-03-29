@@ -1,0 +1,56 @@
+<task id="001" project="events-smart-todo-kanban-r2">
+  <metadata>
+    <title>Extract PanelSplitter to shared library</title>
+    <phase>1</phase>
+    <status>not-started</status>
+    <tags>shared-library, react, refactoring</tags>
+    <estimate>2h</estimate>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies shared library code (.tsx files), refactoring task with ADR constraints</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Copy PanelSplitter from AnalysisWorkspace to @spaarke/ui-components shared library so it can be reused across code pages. The component is generic and can be copied as-is.</goal>
+    <context>
+      PanelSplitter is a generic resizable panel divider component currently living in AnalysisWorkspace.
+      Source: src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx (125 lines).
+      It uses Fluent UI v9 tokens for styling and accepts handlers for mouse/keyboard drag operations.
+      This extraction enables reuse in the Events Smart ToDo Kanban and other future code pages.
+    </context>
+    <constraints>
+      <constraint source="ADR-012">Reuse @spaarke/ui-components across modules. All shared components must be exported from the library barrel file.</constraint>
+      <constraint source="ADR-021">All UI must use Fluent UI v9 tokens. No hard-coded colors. Dark mode support required.</constraint>
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/components/PanelSplitter.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the existing PanelSplitter.tsx from AnalysisWorkspace to understand its props interface and implementation.</step>
+    <step order="2">Create the PanelSplitter directory in the shared library: src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/</step>
+    <step order="3">Create src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx — copy the component as-is, ensuring all Fluent v9 token references are preserved.</step>
+    <step order="4">Create src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/index.ts — export the component and its props interface.</step>
+    <step order="5">Modify src/client/shared/Spaarke.UI.Components/src/components/index.ts — add PanelSplitter export to the barrel file.</step>
+    <step order="6">Verify the shared library compiles with the new component.</step>
+  </steps>
+
+  <outputs>
+    <output type="create">src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx</output>
+    <output type="create">src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/index.ts</output>
+    <output type="modify">src/client/shared/Spaarke.UI.Components/src/components/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">import { PanelSplitter } from "@spaarke/ui-components" compiles without errors.</criterion>
+    <criterion testable="true">Props interface (PanelSplitterProps) is unchanged from the original AnalysisWorkspace version.</criterion>
+    <criterion testable="true">Component uses only Fluent UI v9 tokens for styling — no hard-coded color values.</criterion>
+  </acceptance-criteria>
+</task>
