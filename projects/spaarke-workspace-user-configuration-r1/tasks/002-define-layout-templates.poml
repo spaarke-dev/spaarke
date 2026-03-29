@@ -1,0 +1,69 @@
+<task id="WKSP-002" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Define layout template configurations</title>
+    <phase>1</phase>
+    <tags>shared-components, types</tags>
+    <estimated-effort>2h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <dependencies>WKSP-001</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Define the LayoutTemplate type and 6 layout template constants that describe the available grid arrangements users can choose in the Layout Wizard.</goal>
+    <context>
+      The workspace personalization feature allows users to pick a layout template that defines the grid
+      structure of their dashboard. Each template specifies named slots arranged in rows and columns using
+      CSS grid. The Layout Wizard (Phase 5) will present these as visual thumbnails.
+
+      The existing WorkspaceShell already supports a "rows" layout variant with WorkspaceRowConfig defining
+      gridTemplateColumns per row. Layout templates formalize this: each template is a constant object with
+      an id, human-readable name, description, a rows array (each row has column definitions and slot names),
+      and total slot count.
+
+      Templates to define:
+      1. "2-col-equal" — 2 rows: top row 2 equal columns, bottom row 2 equal columns (4 slots)
+      2. "3-row-mixed" — 3 rows: top 2-col, middle full-width, bottom 2-col (5 slots) [current default]
+      3. "sidebar-main" — 2 columns: narrow sidebar (1fr) + wide main (2fr), 3 rows each side (6 slots)
+      4. "single-column" — 4 stacked full-width rows (4 slots)
+      5. "3-col-equal" — 2 rows of 3 equal columns each (6 slots)
+      6. "hero-grid" — hero full-width top row + 3-col bottom row (4 slots)
+    </context>
+    <constraints>
+      - All types and constants MUST be in @spaarke/ui-components shared library (ADR-012)
+      - LayoutTemplate type MUST include: id, name, description, rows (array with columns + slot definitions), slotCount
+      - Each row definition MUST include gridTemplateColumns (CSS value) and slots (array of slot identifiers)
+      - Template IDs MUST be stable string literals used as discriminators in Dataverse storage
+      - MUST export both the type and the LAYOUT_TEMPLATES constant array from the barrel
+      - MUST NOT depend on any runtime code — these are pure data constants
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read existing WorkspaceRowConfig type to understand the gridTemplateColumns pattern and ensure layout templates align with the existing row model.</step>
+    <step id="2">Define LayoutTemplateRow interface with: slots (string array of slot identifiers like "slot-1", "slot-2"), gridTemplateColumns (CSS string), and optional gridTemplateColumnsSmall (responsive override).</step>
+    <step id="3">Define LayoutTemplate interface with: id (string literal union type), name (string), description (string), rows (LayoutTemplateRow[]), slotCount (number), and thumbnail (optional string for preview image path).</step>
+    <step id="4">Define the LayoutTemplateId string union type for all 6 template IDs: "2-col-equal" | "3-row-mixed" | "sidebar-main" | "single-column" | "3-col-equal" | "hero-grid".</step>
+    <step id="5">Create the 6 template constant objects with correct grid definitions. Ensure "3-row-mixed" matches the current LegalWorkspace default layout (row1: 2-col 1fr 1fr, row2: full-width, row3: 2-col 1fr 1fr).</step>
+    <step id="6">Export LAYOUT_TEMPLATES as a readonly array and a getLayoutTemplate(id) lookup helper function.</step>
+    <step id="7">Update barrel exports and verify TypeScript compilation succeeds.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>LayoutTemplate and LayoutTemplateId types are exported from @spaarke/ui-components</criterion>
+    <criterion>LAYOUT_TEMPLATES constant array contains exactly 6 template definitions</criterion>
+    <criterion>"3-row-mixed" template matches the current LegalWorkspace default: row1 (1fr 1fr), row2 (1fr full), row3 (1fr 1fr) with 5 slots</criterion>
+    <criterion>getLayoutTemplate(id) returns the matching template or undefined</criterion>
+    <criterion>TypeScript compilation succeeds with no errors</criterion>
+  </acceptance-criteria>
+</task>

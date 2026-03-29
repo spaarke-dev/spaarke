@@ -1,0 +1,66 @@
+<task id="WKSP-060" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Write BFF integration tests for workspace layout endpoints</title>
+    <phase>7</phase>
+    <tags>testing, bff-api</tags>
+    <estimated-effort>6h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <dependencies>021, 022, 023</dependencies>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Write comprehensive integration tests for the workspace layout BFF API endpoints covering CRUD operations, business rules, and authorization.</goal>
+    <context>
+      The workspace layout BFF API exposes endpoints for managing user workspace layouts stored in
+      Dataverse. Integration tests must verify the full request/response cycle through the API layer,
+      including Dataverse interaction (via test doubles or integration environment).
+
+      Key business rules to test:
+      - Users can create up to 10 workspace layouts (max enforcement)
+      - System layouts are immutable (cannot be updated or deleted by users)
+      - Only one layout can be the default at a time (toggling default unsets others)
+      - Users can only access their own layouts (authorization boundary)
+      - CRUD operations (create, read, update, delete) with valid and invalid inputs
+
+      Follow the existing test patterns in the tests/ directory and the testing constraint docs.
+    </context>
+    <constraints>
+      - MUST follow existing integration test patterns in the tests/ directory
+      - MUST test all CRUD endpoints: GET list, GET by ID, POST, PUT, DELETE
+      - MUST test max 10 layout enforcement (POST should return 409 when limit reached)
+      - MUST test system layout immutability (PUT/DELETE on system layout should return 403)
+      - MUST test default toggle behavior (setting new default unsets previous)
+      - MUST test authorization boundary (user A cannot access user B's layouts)
+      - MUST test validation errors (missing name, invalid templateId, malformed sectionsJson)
+      - MUST follow testing constraints from .claude/constraints/testing.md
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>tests/</file>
+    <file>src/server/api/Sprk.Bff.Api/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read existing integration test files in tests/ to understand the project's test patterns, base classes, test fixtures, and how Dataverse/API mocking is handled.</step>
+    <step id="2">Create a WorkspaceLayoutEndpointTests test class with the appropriate base class and test fixture setup for BFF API integration tests.</step>
+    <step id="3">Write CRUD happy-path tests: GET /api/workspace/layouts returns list, GET by ID returns specific layout, POST creates layout, PUT updates layout, DELETE removes layout.</step>
+    <step id="4">Write business rule tests: POST returns 409 when user already has 10 layouts, PUT/DELETE on system layout returns 403, setting new default unsets previous default.</step>
+    <step id="5">Write authorization tests: requests with user A's token cannot access user B's layouts (returns 404 or 403).</step>
+    <step id="6">Write validation tests: POST/PUT with missing name returns 400, invalid templateId returns 400, malformed sectionsJson returns 400.</step>
+    <step id="7">Run all tests and verify they pass. Fix any test infrastructure issues.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All CRUD endpoints have happy-path integration tests that pass</criterion>
+    <criterion>Max 10 layout limit is tested and returns 409 on violation</criterion>
+    <criterion>System layout immutability is tested (403 on PUT/DELETE)</criterion>
+    <criterion>Authorization boundary is tested (cross-user access denied)</criterion>
+    <criterion>Validation error responses are tested for all required fields</criterion>
+  </acceptance-criteria>
+</task>

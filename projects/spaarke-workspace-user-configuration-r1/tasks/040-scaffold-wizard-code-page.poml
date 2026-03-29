@@ -1,0 +1,68 @@
+<task id="WKSP-040" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Scaffold Layout Wizard Code Page project</title>
+    <phase>5</phase>
+    <tags>frontend, code-page</tags>
+    <estimated-effort>4h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>none</dependencies>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Scaffold the WorkspaceLayoutWizard Code Page project with Vite + React 19 + vite-plugin-singlefile, following ADR-026 exactly, using EventsPage as a reference implementation.</goal>
+    <context>
+      The Layout Wizard is a standalone dialog opened via Xrm.Navigation.navigateTo as a webresource.
+      It must be built as a single HTML file (no external assets) per ADR-026 which mandates
+      vite-plugin-singlefile for inlining all JS/CSS. The project uses React 19 (bundled, not
+      platform-provided) and Fluent UI v9 for theming.
+
+      The EventsPage project (src/solutions/EventsPage/) is an existing Code Page that follows
+      this exact pattern and should be used as the reference for project structure, Vite config,
+      theme detection, and Xrm frame-walk utilities.
+    </context>
+    <constraints>
+      - MUST use Vite + vite-plugin-singlefile to produce a single HTML output file
+      - MUST use React 19 with createRoot (bundled, not platform-provided) per react-versioning constraint
+      - MUST include Fluent UI v9 FluentProvider with theme detection (webLightTheme/webDarkTheme)
+      - MUST include Xrm frame-walk utility to access parent Xrm context from webresource iframe
+      - MUST include Dataverse CSS reset in index.html (matching EventsPage pattern)
+      - MUST parse URL data parameter for wizard mode (create/edit/saveAs) and layoutId
+      - MUST follow ADR-026 single-file build standard exactly
+      - Project location: src/solutions/WorkspaceLayoutWizard/
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/EventsPage/</file>
+    <file>src/solutions/EventsPage/package.json</file>
+    <file>src/solutions/EventsPage/vite.config.ts</file>
+    <file>src/solutions/EventsPage/src/main.tsx</file>
+    <file>src/solutions/EventsPage/index.html</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the EventsPage project files (package.json, vite.config.ts, tsconfig.json, index.html, main.tsx) to understand the reference Code Page pattern.</step>
+    <step id="2">Create src/solutions/WorkspaceLayoutWizard/ directory with package.json mirroring EventsPage dependencies (React 19, Vite, vite-plugin-singlefile, Fluent UI v9, TypeScript).</step>
+    <step id="3">Create vite.config.ts with singlefile plugin, build output to dist/, and any Dataverse-specific configuration from the reference.</step>
+    <step id="4">Create tsconfig.json with strict mode, JSX react-jsx, and module resolution matching the EventsPage pattern.</step>
+    <step id="5">Create index.html with Dataverse CSS reset, viewport meta, and root div — matching the EventsPage template.</step>
+    <step id="6">Create src/main.tsx with createRoot, FluentProvider wrapping, theme detection (light/dark from Dataverse context), Xrm frame-walk utility, and URL data parameter parsing for mode and layoutId.</step>
+    <step id="7">Create a placeholder App.tsx component that displays the parsed mode and layoutId, ready for wizard step components.</step>
+    <step id="8">Run npm install and npm run build to verify the scaffold produces a single HTML file in dist/.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>npm run build produces a single HTML file in dist/ with all JS/CSS inlined</criterion>
+    <criterion>main.tsx uses React 19 createRoot with FluentProvider and theme detection</criterion>
+    <criterion>Xrm frame-walk utility is included and finds parent Xrm context</criterion>
+    <criterion>URL data parameter is parsed for mode (create/edit/saveAs) and layoutId</criterion>
+    <criterion>Project structure matches ADR-026 Code Page standard</criterion>
+  </acceptance-criteria>
+</task>

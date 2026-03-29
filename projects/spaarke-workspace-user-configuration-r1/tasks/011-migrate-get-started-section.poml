@@ -1,0 +1,72 @@
+<task id="WKSP-011" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Migrate Get Started section to SectionRegistration</title>
+    <phase>2</phase>
+    <tags>shared-components, frontend</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>WKSP-001</dependencies>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Create a getStarted.registration.ts file that implements SectionRegistration for the Get Started (action-cards) section, moving card definitions and toolbar construction into a self-contained factory function.</goal>
+    <context>
+      The Get Started section currently lives in buildWorkspaceConfig() in workspaceConfig.tsx. It renders
+      an "action-cards" type section with ACTION_CARD_CONFIGS (7 cards, max 4 visible), a card click handler
+      map, and a toolbar with an expand/Playbook Library button.
+
+      The migration extracts this into a SectionRegistration object:
+      - metadata: id="get-started", title="Get Started", category="action-cards", icon=RocketRegular
+      - factory: receives SectionFactoryContext, builds the ActionCardSectionConfig internally
+      - The factory imports ACTION_CARD_CONFIGS and constructs the toolbar JSX
+      - Card click handlers use context.openDialog() for wizard dialogs
+
+      After migration, workspaceConfig.tsx will import the registration and call its factory, but Phase 4
+      (dynamic config builder) will replace that entirely. For now, the registration just needs to exist
+      and produce an equivalent SectionConfig.
+    </context>
+    <constraints>
+      - MUST implement SectionRegistration interface from task WKSP-001
+      - MUST produce an identical ActionCardSectionConfig to the current workspaceConfig.tsx output
+      - Factory MUST use SectionFactoryContext for all external dependencies (no closure over parent state)
+      - MUST import ACTION_CARD_CONFIGS from existing getStartedConfig.ts (do not duplicate)
+      - MUST use Fluent v9 icons only (ADR-021)
+      - File location: src/solutions/LegalWorkspace/src/sections/getStarted.registration.ts
+      - MUST NOT modify the existing workspaceConfig.tsx in this task — coexistence required
+      - Toolbar expand button MUST use context.openDialog() helper from SectionFactoryContext
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/GetStarted/getStartedConfig.ts</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/GetStarted/getStartedConfig.ts</file>
+    <file>src/solutions/LegalWorkspace/src/components/GetStarted/ActionCardHandlers.ts</file>
+    <file>src/solutions/LegalWorkspace/src/components/GetStarted/GetStartedExpandDialog.tsx</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the current Get Started section definition in workspaceConfig.tsx (lines 239-251) and the ACTION_CARD_CONFIGS in getStartedConfig.ts to understand the full section shape.</step>
+    <step id="2">Read ActionCardHandlers.ts to understand how card click handlers are wired and what dependencies they need from the parent.</step>
+    <step id="3">Create the sections/ directory at src/solutions/LegalWorkspace/src/sections/ if it does not exist.</step>
+    <step id="4">Create getStarted.registration.ts with the SectionRegistration metadata: id "get-started", title "Get Started", description "Quick-action cards for common workflows", category "action-cards", icon (RocketRegular or similar Fluent v9 icon).</step>
+    <step id="5">Implement the factory function: receive SectionFactoryContext, import ACTION_CARD_CONFIGS, map to ActionCardConfig[], build the expand toolbar button using context.openDialog, build card click handler map using context helpers, return ActionCardSectionConfig with maxVisible: 4.</step>
+    <step id="6">Export the registration as a named export (e.g., getStartedRegistration) and as default export.</step>
+    <step id="7">Verify TypeScript compilation succeeds and the factory return type matches ActionCardSectionConfig.</step>
+    <step id="8">Verify the registration can be imported without side effects (no top-level code execution beyond the constant definition).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>getStarted.registration.ts exports a SectionRegistration object with id "get-started" and category "action-cards"</criterion>
+    <criterion>Factory function returns an ActionCardSectionConfig with ACTION_CARD_CONFIGS cards, maxVisible: 4, and toolbar with expand button</criterion>
+    <criterion>Factory uses only SectionFactoryContext for external dependencies — no imports of WorkspaceConfigParams or parent-scoped callbacks</criterion>
+    <criterion>TypeScript compilation succeeds with no errors</criterion>
+    <criterion>Existing workspaceConfig.tsx is not modified</criterion>
+  </acceptance-criteria>
+</task>

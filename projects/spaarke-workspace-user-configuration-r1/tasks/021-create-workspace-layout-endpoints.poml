@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="WKSP-021" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Create WorkspaceLayoutEndpoints — 8 Minimal API endpoints for workspace management</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>bff-api</tags>
+    <estimated-effort>5h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>BFF API code implementation — creates 8 new Minimal API endpoints with authorization, ProblemDetails error handling, and route group registration; ADR-001 and ADR-008 constraints apply</rigor-reason>
+    <dependencies>003, 020</dependencies>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET developer implementing workspace layout API</role>
+    <goal>
+      Create WorkspaceLayoutEndpoints.cs with 8 Minimal API endpoints mapped to the /api/workspace/
+      route group. These endpoints expose the WorkspaceLayoutService operations to the frontend,
+      plus two static data endpoints for sections and templates. All endpoints require authorization.
+      Errors are returned as ProblemDetails responses.
+    </goal>
+    <context>
+      The BFF API follows the Minimal API pattern established in DocumentsEndpoints.cs. Endpoints
+      are defined as static methods in a dedicated class, registered via a MapGroup extension method.
+      The WorkspaceLayoutService (Task 020) provides all Dataverse CRUD operations. The sections
+      and templates endpoints return static data from code constants — sections from the Section
+      Registry definitions and templates from predefined layout template constants (both defined
+      in Task 003/004). The WorkspaceLayoutAuthorizationFilter (Task 022) will be applied to
+      individual layout mutation endpoints.
+    </context>
+    <constraints>
+      - MUST use Minimal API MapGet/MapPost/MapPut/MapDelete — no MVC controllers (ADR-001)
+      - MUST apply authorization via endpoint filters, not global middleware (ADR-008)
+      - MUST return ProblemDetails for all error responses (ADR-001)
+      - MUST use RequireAuthorization() on the route group
+      - MUST map all endpoints under /api/workspace/ route prefix
+      - MUST return 404 NotFound with ProblemDetails when layout not found
+      - MUST return 409 Conflict with ProblemDetails when max 10 layouts exceeded
+      - MUST return 403 Forbidden with ProblemDetails when mutating system layouts
+      - MUST return 201 Created with Location header on successful POST
+      - Sections and templates endpoints return static data — no Dataverse calls
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/spec.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Documents/DocumentsEndpoints.cs</file>
+    </files>
+    <patterns>
+      <pattern>Route group: var group = app.MapGroup("/api/workspace").RequireAuthorization(); then group.MapGet("/layouts", GetLayouts)</pattern>
+      <pattern>ProblemDetails: TypedResults.Problem(detail: "...", statusCode: 404, title: "Not Found")</pattern>
+      <pattern>201 Created: TypedResults.Created($"/api/workspace/layouts/{id}", layoutDto)</pattern>
+      <pattern>Endpoint filter on individual routes: group.MapPut("/layouts/{id}", UpdateLayout).AddEndpointFilter&lt;WorkspaceLayoutAuthorizationFilter&gt;()</pattern>
+    </patterns>
+  </knowledge>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Api/Workspace/ (new WorkspaceLayoutEndpoints.cs)</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Documents/DocumentsEndpoints.cs (pattern reference)</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs (from Task 020)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read DocumentsEndpoints.cs to understand the existing endpoint registration pattern, route group setup, and static method convention</step>
+    <step order="2">Read the endpoint-definition.md and endpoint-filters.md patterns for canonical structure</step>
+    <step order="3">Create the Api/Workspace/ directory and WorkspaceLayoutEndpoints.cs file with a static class and MapWorkspaceEndpoints extension method</step>
+    <step order="4">Implement GET /api/workspace/layouts — calls WorkspaceLayoutService.GetLayoutsAsync, returns 200 OK with list of WorkspaceLayoutDto</step>
+    <step order="5">Implement GET /api/workspace/layouts/default — calls GetDefaultLayoutAsync, returns 200 OK with the default layout (system default if user has none)</step>
+    <step order="6">Implement GET /api/workspace/layouts/{id} — calls GetLayoutByIdAsync, returns 200 OK or 404 NotFound with ProblemDetails</step>
+    <step order="7">Implement POST /api/workspace/layouts — accepts CreateWorkspaceLayoutRequest body, calls CreateLayoutAsync, returns 201 Created with Location header or 409 Conflict if max 10 exceeded</step>
+    <step order="8">Implement PUT /api/workspace/layouts/{id} — accepts UpdateWorkspaceLayoutRequest body, calls UpdateLayoutAsync, returns 200 OK or 403/404 with ProblemDetails</step>
+    <step order="9">Implement DELETE /api/workspace/layouts/{id} — calls DeleteLayoutAsync, returns 204 NoContent or 403/404 with ProblemDetails</step>
+    <step order="10">Implement GET /api/workspace/sections — returns static section registry data (section ID, label, icon, category, description) as 200 OK</step>
+    <step order="11">Implement GET /api/workspace/templates — returns static layout template definitions (template ID, name, description, grid configuration) as 200 OK</step>
+    <step order="12">Run dotnet build to verify compilation succeeds with no errors</step>
+    <step order="13">Update TASK-INDEX.md: change task 021 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutEndpoints.cs — 8 Minimal API endpoint handlers with route group registration</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 8 endpoints are registered under the /api/workspace/ route group with RequireAuthorization()</criterion>
+    <criterion testable="true">GET /api/workspace/layouts returns 200 OK with a JSON array of WorkspaceLayoutDto objects</criterion>
+    <criterion testable="true">POST /api/workspace/layouts returns 201 Created with a Location header pointing to the new layout</criterion>
+    <criterion testable="true">PUT and DELETE on system layout IDs return 403 Forbidden with ProblemDetails</criterion>
+    <criterion testable="true">GET /api/workspace/sections and GET /api/workspace/templates return static data without Dataverse calls</criterion>
+    <criterion testable="true">dotnet build passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 3 Group B — depends on 003 (types) and 020 (service). Can start after Task 020 completes. Task 023 depends on this task. Own files: WorkspaceLayoutEndpoints.cs (new).</protocol>
+  </execution>
+</task>

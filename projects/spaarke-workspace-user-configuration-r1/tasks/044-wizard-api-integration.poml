@@ -1,0 +1,65 @@
+<task id="WKSP-044" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Wire wizard save flow to BFF API endpoints</title>
+    <phase>5</phase>
+    <tags>frontend, code-page, bff-api</tags>
+    <estimated-effort>5h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>021, 043</dependencies>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Wire the Layout Wizard's save flow to the BFF API, handling create, edit, and Save As modes with proper error handling and dialog result communication.</goal>
+    <context>
+      The Layout Wizard operates in three modes:
+      - Create: POST /api/workspace/layouts — new user workspace from scratch
+      - Edit: PUT /api/workspace/layouts/{id} — update existing user workspace
+      - Save As: POST /api/workspace/layouts — new workspace pre-filled from a system workspace
+
+      The wizard collects templateId, slotAssignments (sectionId -> slot mapping), workspace name,
+      and isDefault flag from the 3 wizard steps. This must be transformed into the API request
+      body format (sprk_name, sprk_templateid, sprk_sectionsjson, sprk_isdefault).
+
+      On success, the wizard dialog closes and returns the saved layout ID to the parent window
+      via the navigateTo promise result. On failure, errors are displayed inline (e.g., max 10
+      layouts reached, validation errors).
+    </context>
+    <constraints>
+      - Create mode MUST use POST /api/workspace/layouts
+      - Edit mode MUST use PUT /api/workspace/layouts/{id}
+      - Save As mode MUST use POST (creates new) with name pre-filled as "{name} (copy)"
+      - MUST transform wizard state into correct API request body format
+      - MUST handle error responses: max 10 layouts (409), validation errors (400)
+      - MUST display errors inline using Fluent MessageBar component
+      - On success, MUST close dialog and return result to parent via navigateTo promise
+      - MUST show a saving/spinner state on the Save button during API call
+      - MUST use /api prefix for all BFF API URLs per existing convention
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/WorkspaceLayoutWizard/src/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Create a buildLayoutPayload utility that transforms wizard state (templateId, slotAssignments, name, isDefault) into the API request body format with sprk_name, sprk_templateid, sprk_sectionsjson (serialized JSON), and sprk_isdefault.</step>
+    <step id="2">Create a saveLayout async function that determines the HTTP method and URL based on wizard mode: POST for create/saveAs, PUT for edit. Include /api prefix on all URLs.</step>
+    <step id="3">Wire the save function to the WizardDialog's final step "Save" button. Add loading state: disable the button and show Spinner while the API call is in flight.</step>
+    <step id="4">Handle success response: extract the saved layout ID from the response, close the wizard dialog using Xrm.Navigation.navigateTo's close/result mechanism to pass the layout ID back to the parent window.</step>
+    <step id="5">Handle error responses: parse error body, display specific messages using Fluent MessageBar — "Maximum 10 workspaces reached" for 409, field-level validation messages for 400, generic "Save failed" for other errors.</step>
+    <step id="6">Handle Save As mode specifically: when mode is "saveAs", pre-fill the name as "{originalName} (copy)" in Step 3, and always use POST (never PUT) regardless of having an original layoutId.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Create mode successfully POSTs to /api/workspace/layouts and closes dialog on success</criterion>
+    <criterion>Edit mode successfully PUTs to /api/workspace/layouts/{id} and closes dialog on success</criterion>
+    <criterion>Save As mode POSTs a new layout with pre-filled name "{name} (copy)"</criterion>
+    <criterion>Error responses display inline MessageBar with appropriate error messages</criterion>
+    <criterion>Save button shows spinner during API call and is disabled to prevent double-submit</criterion>
+  </acceptance-criteria>
+</task>

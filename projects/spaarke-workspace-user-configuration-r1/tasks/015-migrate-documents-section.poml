@@ -1,0 +1,75 @@
+<task id="WKSP-015" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Migrate My Documents section to SectionRegistration</title>
+    <phase>2</phase>
+    <tags>shared-components, frontend</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>WKSP-001</dependencies>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Create a documents.registration.ts file that implements SectionRegistration for the My Documents (DocumentsTab content) section. Move toolbar construction and handler wiring into the factory.</goal>
+    <context>
+      The My Documents section renders DocumentsTab with a complex toolbar similar to the To Do section:
+      refresh (left), divider, add document + open all documents (right with 15px gap).
+
+      Current definition in workspaceConfig.tsx (lines 324-343):
+      - type: "content", id: "documents", title: "My Documents"
+      - badgeCount: p.docCount
+      - toolbar: refresh + divider + add + open (4 buttons)
+      - style: { minHeight: "auto", overflow: "visible" }
+      - renderContent: DocumentsTab wrapped in flex column div with overflow visible
+
+      DocumentsTab needs: service (DataverseService), userId, maxVisible (6), onCountChange, onRefetchReady.
+      The DataverseService is a runtime dependency that must come from SectionFactoryContext. The factory
+      context will need either a service instance or the webApi to construct one.
+
+      The toolbar callbacks (onDocRefetch, onAddDocument, onOpenDocumentsDialog) come from parent state.
+      The factory must use SectionFactoryContext navigation helpers for add and open actions.
+    </context>
+    <constraints>
+      - MUST implement SectionRegistration interface from task WKSP-001
+      - Factory MUST reconstruct the toolbar: refresh (left) | divider | add + open (right, 15px gap)
+      - DocumentsTab MUST be rendered with maxVisible: 6
+      - The wrapper div MUST have display:flex, flexDirection:column, flex:"1 1 0", overflow:"visible"
+      - Section style MUST include minHeight: "auto" and overflow: "visible"
+      - DataverseService dependency: factory should receive webApi from context and construct DataverseService, or context should provide it directly
+      - Add button MUST use context for document upload action
+      - Open button MUST use context.openDialog() for full documents view
+      - File location: src/solutions/LegalWorkspace/src/sections/documents.registration.ts
+      - MUST NOT modify existing workspaceConfig.tsx
+      - MUST use Fluent v9 components for toolbar (ADR-021)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/RecordCards/DocumentsTab.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the current Documents section definition in workspaceConfig.tsx (lines 324-343) and the documentsToolbar definition (lines 186-214) to understand the complete configuration.</step>
+    <step id="2">Read DocumentsTab props interface to understand required dependencies: service, userId, maxVisible, onCountChange, onRefetchReady.</step>
+    <step id="3">Read DataverseService to understand its constructor — it likely needs webApi. Determine if the factory should construct it or receive it from context.</step>
+    <step id="4">Create documents.registration.ts in src/solutions/LegalWorkspace/src/sections/ with metadata: id "documents", title "My Documents", description "Recent documents with quick actions", category "content", icon (DocumentRegular or similar).</step>
+    <step id="5">Implement toolbar construction in factory: ToolbarDivider, refresh Button (ArrowClockwiseRegular, left-aligned), divider, add Button (AddRegular, onClick via context), open Button (OpenRegular, onClick via context.openDialog for documents dialog). Match exact flex layout.</step>
+    <step id="6">Implement renderContent: construct DataverseService from context.webApi, render DocumentsTab wrapped in flex column div with overflow visible, maxVisible=6.</step>
+    <step id="7">Return ContentSectionConfig with style: { minHeight: "auto", overflow: "visible" } and toolbar.</step>
+    <step id="8">Export registration. Verify TypeScript compilation succeeds.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>documents.registration.ts exports a SectionRegistration with id "documents" and category "content"</criterion>
+    <criterion>Factory returns ContentSectionConfig with DocumentsTab rendered with maxVisible: 6 in a flex wrapper with overflow: visible</criterion>
+    <criterion>Toolbar matches current layout: refresh (left) | divider | add + open (right, 15px gap)</criterion>
+    <criterion>Section style includes minHeight: "auto" and overflow: "visible"</criterion>
+    <criterion>Factory constructs or receives DataverseService dependency through SectionFactoryContext — no parent-scoped closures</criterion>
+  </acceptance-criteria>
+</task>

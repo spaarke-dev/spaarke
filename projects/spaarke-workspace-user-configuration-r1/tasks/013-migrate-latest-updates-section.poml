@@ -1,0 +1,72 @@
+<task id="WKSP-013" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Migrate Latest Updates section to SectionRegistration</title>
+    <phase>2</phase>
+    <tags>shared-components, frontend</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>WKSP-001</dependencies>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Create a latestUpdates.registration.ts file that implements SectionRegistration for the Latest Updates (ActivityFeed content) section. Move onOpenAll and onCreateNew handler construction into the factory using SectionFactoryContext.</goal>
+    <context>
+      The Latest Updates section renders the ActivityFeed component in embedded mode. It currently receives
+      several callbacks from the parent config factory: onOpenAll (navigates to full updates view),
+      onCreateNew (opens event creation), onCountChange (updates badge), onRefetchReady (registers refetch).
+
+      Current definition in workspaceConfig.tsx (lines 277-297):
+      - type: "content", id: "latest-updates", title: "Latest Updates"
+      - badgeCount: p.feedCount (live count from parent state)
+      - style: { minHeight: "325px" }
+      - No custom toolbar (ActivityFeed has its own internal toolbar)
+      - renderContent: ActivityFeed with embedded, webApi, userId, textOnlyFilter, gridLayout, hideOverflowMenu
+
+      Medium refactor: the onOpenAll and onCreateNew callbacks currently come from parent state. In the
+      registry pattern, the factory must construct these using SectionFactoryContext navigation helpers.
+      Badge count and refetch callbacks need a different approach — the factory returns a SectionConfig
+      that includes callback registration props, and the dynamic config builder (Phase 4) will wire
+      the badge count updates.
+    </context>
+    <constraints>
+      - MUST implement SectionRegistration interface from task WKSP-001
+      - Factory MUST use SectionFactoryContext for navigation (openDialog for create event, navigateToRecord for open all)
+      - Badge count management will be handled by dynamic config builder in Phase 4 — factory should set badgeCount to undefined initially
+      - onCountChange and onRefetchReady: factory should accept these as optional SectionFactoryContext extensions or leave them for the config builder to inject
+      - ActivityFeed props: embedded=true, textOnlyFilter=true, gridLayout=true, hideOverflowMenu=true MUST be preserved
+      - File location: src/solutions/LegalWorkspace/src/sections/latestUpdates.registration.ts
+      - MUST NOT modify existing workspaceConfig.tsx
+      - MUST use Fluent v9 only (ADR-021)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/ActivityFeed/ActivityFeed.tsx</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/ActivityFeed/ActivityFeed.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/ActivityFeed/index.ts</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the current Latest Updates section definition in workspaceConfig.tsx (lines 277-297) and the ActivityFeed component props to understand all required dependencies.</step>
+    <step id="2">Read ActivityFeed.tsx to understand the full props interface, particularly onOpenAll, onCreateNew, onCountChange, and onRefetchReady signatures.</step>
+    <step id="3">Create latestUpdates.registration.ts in src/solutions/LegalWorkspace/src/sections/ with metadata: id "latest-updates", title "Latest Updates", description "Recent activity feed with flagging", category "content".</step>
+    <step id="4">Implement the factory function: construct onOpenAll using context navigation helper (e.g., navigating to full activity view), construct onCreateNew using context.openDialog for the event wizard.</step>
+    <step id="5">Build renderContent: render ActivityFeed with embedded=true, webApi=context.webApi, userId=context.userId, textOnlyFilter=true, gridLayout=true, hideOverflowMenu=true. Wire onOpenAll and onCreateNew from step 4. Leave onCountChange and onRefetchReady as pass-through from context if available.</step>
+    <step id="6">Return ContentSectionConfig with style: { minHeight: "325px" }, no toolbar (ActivityFeed handles internally).</step>
+    <step id="7">Export registration. Verify TypeScript compilation succeeds.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>latestUpdates.registration.ts exports a SectionRegistration with id "latest-updates" and category "content"</criterion>
+    <criterion>Factory returns ContentSectionConfig rendering ActivityFeed with embedded=true, textOnlyFilter=true, gridLayout=true, hideOverflowMenu=true</criterion>
+    <criterion>onOpenAll and onCreateNew handlers are constructed within the factory using SectionFactoryContext — not passed from parent</criterion>
+    <criterion>Section style includes minHeight: "325px"</criterion>
+    <criterion>TypeScript compilation succeeds with no errors</criterion>
+  </acceptance-criteria>
+</task>

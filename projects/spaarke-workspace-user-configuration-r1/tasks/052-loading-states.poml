@@ -1,0 +1,66 @@
+<task id="WKSP-052" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Implement workspace loading states and error handling</title>
+    <phase>6</phase>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>5h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>032, 051</dependencies>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Implement three distinct loading states for the workspace: first visit (no saved layouts), returning user (fetching layout), and fetch failure (graceful degradation).</goal>
+    <context>
+      The workspace needs polished loading behavior for three scenarios:
+
+      1. First visit (no saved layouts): The user has never personalized their workspace. Render the
+         system default layout immediately (no loading state needed) and show a subtle
+         "Personalize your workspace" banner with a link to open the Layout Wizard.
+
+      2. Returning user: The user has saved layouts. Show a Fluent skeleton/shimmer effect in the
+         workspace grid area while the layout data is being fetched from the API or sessionStorage.
+
+      3. Fetch failure: The API call fails. Fall back to the cached layout (if available from
+         sessionStorage) or the system default layout. Show an inline Fluent Toast notification
+         informing the user that their custom layout couldn't be loaded.
+
+      These states ensure the workspace never shows a blank screen or an unhandled error.
+    </context>
+    <constraints>
+      - First visit MUST render system default immediately + "Personalize your workspace" banner
+      - Banner MUST link to Layout Wizard (open via Xrm.Navigation.navigateTo)
+      - Returning user MUST show Fluent SkeletonItem/Shimmer in workspace grid during fetch
+      - Skeleton layout MUST approximate the grid structure (not a single full-page shimmer)
+      - Fetch failure MUST fall back to cached layout or system default (never blank screen)
+      - Fetch failure MUST show an inline Toast notification (Fluent useToastController)
+      - MUST use Fluent UI v9 components (SkeletonItem, MessageBar, Toast) per ADR-021
+      - All states MUST render correctly in both light and dark themes
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Create a WorkspaceSkeleton component that renders Fluent SkeletonItem elements in a grid layout approximating the workspace structure (header skeleton + grid cell skeletons).</step>
+    <step id="2">Create a PersonalizeBanner component: subtle MessageBar with "Personalize your workspace" text and an action link that opens the Layout Wizard via Xrm.Navigation.navigateTo.</step>
+    <step id="3">Update the useWorkspaceLayouts hook to expose a status field: "loading" | "loaded" | "error" | "first-visit" based on fetch state and whether any user layouts exist.</step>
+    <step id="4">Update LegalWorkspaceApp to render based on status: "first-visit" shows system default + PersonalizeBanner, "loading" shows WorkspaceSkeleton, "loaded" shows WorkspaceShell, "error" triggers fallback + toast.</step>
+    <step id="5">Implement the error fallback: try sessionStorage cache first, then SYSTEM_DEFAULT_LAYOUT. Dispatch a Fluent Toast notification ("Couldn't load your workspace layout. Showing default.") using useToastController.</step>
+    <step id="6">Ensure all three states render correctly in both light and dark themes. Verify skeleton colors use Fluent design tokens.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>First visit renders system default immediately with "Personalize your workspace" banner</criterion>
+    <criterion>Returning user sees skeleton/shimmer grid while layout fetches</criterion>
+    <criterion>Fetch failure falls back to cached layout or system default without blank screen</criterion>
+    <criterion>Fetch failure shows an inline toast notification about the fallback</criterion>
+    <criterion>All loading states render correctly in both light and dark Fluent themes</criterion>
+  </acceptance-criteria>
+</task>

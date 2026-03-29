@@ -1,0 +1,72 @@
+<task id="WKSP-016" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Create aggregated section registry</title>
+    <phase>2</phase>
+    <tags>shared-components</tags>
+    <estimated-effort>1h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <dependencies>WKSP-011, WKSP-012, WKSP-013, WKSP-014, WKSP-015</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Create sectionRegistry.ts that imports all 5 section registrations and exports a single SECTION_REGISTRY array as the canonical source of truth for available workspace sections.</goal>
+    <context>
+      After tasks WKSP-011 through WKSP-015, each of the 5 workspace sections has its own
+      SectionRegistration file in src/solutions/LegalWorkspace/src/sections/:
+      - getStarted.registration.ts (Get Started — action-cards)
+      - quickSummary.registration.ts (Quick Summary — metrics)
+      - latestUpdates.registration.ts (Latest Updates — content)
+      - todo.registration.ts (My To Do List — embedded-app)
+      - documents.registration.ts (My Documents — content)
+
+      The section registry aggregates these into a single typed array that the dynamic config builder
+      (Phase 4) will consume. It also provides lookup helpers: getSectionById(id) and
+      getSectionsByCategory(category). This is the single import point for all section metadata.
+
+      Adding a new section to the workspace requires only:
+      1. Create a new {name}.registration.ts file
+      2. Import and add it to SECTION_REGISTRY in sectionRegistry.ts
+    </context>
+    <constraints>
+      - MUST import all 5 registration files and aggregate into a single SECTION_REGISTRY array
+      - SECTION_REGISTRY MUST be typed as readonly SectionRegistration[] (using as const or ReadonlyArray)
+      - MUST export getSectionById(id: string) helper returning SectionRegistration | undefined
+      - MUST export getSectionsByCategory(category: SectionCategory) helper returning SectionRegistration[]
+      - Registry order MUST match the default display order: get-started, quick-summary, latest-updates, todo, documents
+      - File location: src/solutions/LegalWorkspace/src/sectionRegistry.ts
+      - MUST validate no duplicate IDs at module load time (development guard with console.error)
+      - MUST NOT import any React or runtime dependencies — this is a pure data module
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/sections/getStarted.registration.ts</file>
+    <file>src/solutions/LegalWorkspace/src/sections/quickSummary.registration.ts</file>
+    <file>src/solutions/LegalWorkspace/src/sections/latestUpdates.registration.ts</file>
+    <file>src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+    <file>src/solutions/LegalWorkspace/src/sections/documents.registration.ts</file>
+    <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Verify all 5 registration files exist in src/solutions/LegalWorkspace/src/sections/ and export their SectionRegistration objects.</step>
+    <step id="2">Create sectionRegistry.ts at src/solutions/LegalWorkspace/src/sectionRegistry.ts. Import all 5 registrations by name.</step>
+    <step id="3">Define SECTION_REGISTRY as a readonly array containing all 5 registrations in default display order: getStarted, quickSummary, latestUpdates, todo, documents.</step>
+    <step id="4">Add a development-time duplicate ID check: on module load, verify all registration IDs are unique. Log console.error if duplicates found.</step>
+    <step id="5">Implement getSectionById(id: string): SectionRegistration | undefined using SECTION_REGISTRY.find().</step>
+    <step id="6">Implement getSectionsByCategory(category: SectionCategory): SectionRegistration[] using SECTION_REGISTRY.filter().</step>
+    <step id="7">Verify TypeScript compilation and that the module can be imported without side effects (no React rendering at import time).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>sectionRegistry.ts exports SECTION_REGISTRY array with exactly 5 SectionRegistration entries</criterion>
+    <criterion>Registry order is: get-started, quick-summary, latest-updates, todo, documents</criterion>
+    <criterion>getSectionById("todo") returns the todo registration; getSectionById("nonexistent") returns undefined</criterion>
+    <criterion>getSectionsByCategory("content") returns latest-updates and documents registrations</criterion>
+    <criterion>Duplicate ID detection logs console.error in development</criterion>
+  </acceptance-criteria>
+</task>

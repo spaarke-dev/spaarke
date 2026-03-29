@@ -1,0 +1,65 @@
+<task id="WKSP-003" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Define BFF API DTOs for workspace layout</title>
+    <phase>1</phase>
+    <tags>bff-api, types</tags>
+    <estimated-effort>2h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <dependencies>none</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Define C# record types for workspace layout API DTOs: WorkspaceLayoutDto, CreateWorkspaceLayoutRequest, UpdateWorkspaceLayoutRequest, SectionPlacementDto, and LayoutTemplateDto.</goal>
+    <context>
+      The BFF API (Sprk.Bff.Api) will expose CRUD endpoints for user workspace layouts stored in Dataverse.
+      Before implementing endpoints (Phase 3), the DTO types must exist. These DTOs map to the Dataverse
+      sprk_workspacelayout entity and the client-side TypeScript types.
+
+      The API follows .NET 8 Minimal API patterns (ADR-001) with record types for immutable DTOs.
+      Request types use data annotations for validation. Response types are clean projections of Dataverse data.
+
+      Key data flow:
+      - Dataverse stores: layout template ID, sections JSON (array of {sectionId, slotIndex}), sort order
+      - API returns: full DTO with sections deserialized, template metadata resolved
+      - Client sends: create/update requests with template ID, section placements, display name
+    </context>
+    <constraints>
+      - MUST use C# record types for all DTOs (immutable by convention)
+      - MUST place files in src/server/api/Sprk.Bff.Api/Models/Workspace/ directory
+      - MUST use System.ComponentModel.DataAnnotations for request validation
+      - MUST follow existing DTO naming conventions in the API project (check Models/ for patterns)
+      - CreateWorkspaceLayoutRequest MUST validate: Name (required, max 100), LayoutTemplateId (required), Sections (required, non-empty)
+      - WorkspaceLayoutDto MUST include: Id (Guid), Name, LayoutTemplateId, Sections (list), IsDefault, SortOrder, CreatedOn, ModifiedOn
+      - SectionPlacementDto MUST include: SectionId (string), SlotIndex (int)
+      - MUST NOT add any Dataverse/Graph SDK dependencies — these are pure DTOs
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Models/</file>
+    <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Examine existing DTO patterns in src/server/api/Sprk.Bff.Api/Models/ to match naming and structure conventions used by other feature areas.</step>
+    <step id="2">Create the Models/Workspace/ directory and add SectionPlacementDto.cs as a record: SectionId (string), SlotIndex (int).</step>
+    <step id="3">Create WorkspaceLayoutDto.cs as a record with: Id (Guid), Name (string), LayoutTemplateId (string), Sections (IReadOnlyList of SectionPlacementDto), IsDefault (bool), SortOrder (int), CreatedOn (DateTimeOffset), ModifiedOn (DateTimeOffset).</step>
+    <step id="4">Create CreateWorkspaceLayoutRequest.cs with data annotation validation: [Required] Name ([MaxLength(100)]), [Required] LayoutTemplateId, [Required][MinLength(1)] Sections list.</step>
+    <step id="5">Create UpdateWorkspaceLayoutRequest.cs with optional fields: Name, LayoutTemplateId, Sections, IsDefault, SortOrder. Use nullable types so partial updates are supported.</step>
+    <step id="6">Create LayoutTemplateDto.cs as a lightweight record: Id (string), Name (string), Description (string), SlotCount (int) — for the GET /api/workspace/templates endpoint.</step>
+    <step id="7">Verify the solution builds with dotnet build on the API project.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 5 DTO record types compile and are in the Sprk.Bff.Api.Models.Workspace namespace</criterion>
+    <criterion>CreateWorkspaceLayoutRequest has [Required] on Name, LayoutTemplateId, and Sections with [MaxLength(100)] on Name</criterion>
+    <criterion>WorkspaceLayoutDto includes all 8 properties: Id, Name, LayoutTemplateId, Sections, IsDefault, SortOrder, CreatedOn, ModifiedOn</criterion>
+    <criterion>dotnet build succeeds for the API project with no errors or warnings on the new files</criterion>
+  </acceptance-criteria>
+</task>

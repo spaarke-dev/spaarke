@@ -1,0 +1,58 @@
+<task id="WKSP-053" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Implement Save As flow for system workspaces</title>
+    <phase>6</phase>
+    <tags>frontend, integration</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <dependencies>031, 044</dependencies>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Implement the Save As flow that allows users to create a personal copy of a system workspace, opening the wizard in Save As mode with pre-populated data.</goal>
+    <context>
+      System workspaces are read-only — users cannot edit them directly. However, users should be
+      able to create a personal copy based on a system workspace. When the user clicks the gear
+      button on a system workspace, the wizard opens in "saveAs" mode instead of "edit" mode.
+
+      In Save As mode, the wizard pre-fills all steps:
+      - Step 1: The template matching the system layout is pre-selected
+      - Step 2: All sections from the system layout are pre-checked
+      - Step 3: Name is pre-filled as "{systemWorkspaceName} (copy)", slot assignments are pre-populated
+
+      The save always creates a NEW user workspace (POST, never PUT) regardless of having the
+      original system layout's ID.
+    </context>
+    <constraints>
+      - Gear button on system workspace MUST open wizard in "saveAs" mode (not "edit")
+      - MUST pass the system layout data to the wizard via navigateTo data parameter
+      - Wizard MUST pre-populate all 3 steps from the source system layout
+      - Name MUST be pre-filled as "{originalName} (copy)" and be editable
+      - Save MUST always use POST /api/workspace/layouts (never PUT for Save As)
+      - MUST NOT modify the source system workspace in any way
+      - "Set as default" checkbox MUST default to unchecked for Save As copies
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files />
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/WorkspaceLayoutWizard/src/</file>
+    <file>src/solutions/LegalWorkspace/src/components/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Update WorkspaceHeader's gear button handler: detect if active layout isSystem, pass mode="saveAs" and full layout data to the navigateTo data parameter instead of mode="edit".</step>
+    <step id="2">Update the wizard's data parameter parsing in main.tsx to handle saveAs mode: extract the source layout data (templateId, sections, name) from the data parameter.</step>
+    <step id="3">Wire saveAs initialization through the wizard steps: Step 1 pre-selects the template, Step 2 pre-checks the sections, Step 3 pre-fills name as "{name} (copy)" and slot assignments.</step>
+    <step id="4">Ensure the save handler in saveAs mode always uses POST (create) and does not include the source layout ID in the request.</step>
+    <step id="5">Verify the "Set as default" checkbox defaults to unchecked in saveAs mode.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Clicking gear on a system workspace opens wizard in saveAs mode with all steps pre-populated</criterion>
+    <criterion>Name is pre-filled as "{originalName} (copy)" and is editable by the user</criterion>
+    <criterion>Save creates a new user workspace via POST (does not modify the system workspace)</criterion>
+    <criterion>"Set as default" defaults to unchecked in Save As mode</criterion>
+  </acceptance-criteria>
+</task>

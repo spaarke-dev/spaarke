@@ -1,0 +1,52 @@
+<task id="WKSP-061" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Build and deploy Layout Wizard Code Page to Dataverse</title>
+    <phase>7</phase>
+    <tags>deploy, code-page</tags>
+    <estimated-effort>2h</estimated-effort>
+    <rigor-level>MINIMAL</rigor-level>
+    <dependencies>044</dependencies>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Build the Layout Wizard Code Page into a single HTML file and deploy it as the sprk_workspacelayoutwizard web resource to Dataverse.</goal>
+    <context>
+      The Layout Wizard is a Vite + React 19 Code Page that builds to a single HTML file via
+      vite-plugin-singlefile. The built artifact must be deployed to Dataverse as a web resource
+      so it can be opened via Xrm.Navigation.navigateTo from the workspace page.
+
+      Follow the code-page-deploy skill for the two-step build pipeline (npm run build producing
+      the single HTML, then deployment script to upload to Dataverse).
+    </context>
+    <constraints>
+      - MUST run npm run build in src/solutions/WorkspaceLayoutWizard/ to produce dist/index.html
+      - MUST verify the build output is a single HTML file with all JS/CSS inlined
+      - MUST deploy as sprk_workspacelayoutwizard web resource name
+      - MUST use the code-page-deploy skill or equivalent deployment script
+      - MUST publish customizations after web resource upload
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/WorkspaceLayoutWizard/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Run npm install and npm run build in src/solutions/WorkspaceLayoutWizard/ to produce the single HTML output.</step>
+    <step id="2">Verify dist/index.html exists and contains inlined JS/CSS (no external asset references).</step>
+    <step id="3">Deploy the built HTML as sprk_workspacelayoutwizard web resource to Dataverse using the code-page-deploy skill or deployment script.</step>
+    <step id="4">Publish customizations in Dataverse to make the web resource available.</step>
+    <step id="5">Verify the wizard opens correctly via Xrm.Navigation.navigateTo from a test page.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>npm run build produces a single index.html file with no external dependencies</criterion>
+    <criterion>sprk_workspacelayoutwizard web resource is deployed and published in Dataverse</criterion>
+    <criterion>Wizard opens correctly when invoked via Xrm.Navigation.navigateTo</criterion>
+  </acceptance-criteria>
+</task>

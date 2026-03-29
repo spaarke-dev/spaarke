@@ -1,0 +1,69 @@
+<task id="WKSP-001" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Define SectionRegistration and SectionFactoryContext interfaces</title>
+    <phase>1</phase>
+    <tags>shared-components, types</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>none</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Define the SectionRegistration interface, SectionFactoryContext interface, and SectionCategory type in the shared @spaarke/ui-components library so that workspace sections can self-register with a standard contract.</goal>
+    <context>
+      The LegalWorkspace currently uses a monolithic buildWorkspaceConfig() factory in workspaceConfig.tsx that
+      hard-wires all 5 sections (Get Started, Quick Summary, Latest Updates, To Do, Documents) with inline
+      toolbar JSX and renderContent callbacks. This couples section behavior to the parent config factory.
+
+      The new Section Registry pattern decouples sections: each section provides a SectionRegistration object
+      with metadata (id, title, category, icon, default size) and a factory function that receives a
+      SectionFactoryContext and returns a SectionConfig. The SectionFactoryContext provides runtime dependencies
+      (webApi, userId, navigation helpers) so factories are self-contained.
+
+      These types must live in the shared library (ADR-012) alongside the existing WorkspaceShell types so
+      both LegalWorkspace and future workspaces can consume them.
+    </context>
+    <constraints>
+      - All types MUST be in @spaarke/ui-components shared library (ADR-012)
+      - MUST use Fluent UI v9 icon types (FluentIcon from @fluentui/react-icons) (ADR-021)
+      - MUST NOT import any LegalWorkspace-specific types — these are generic contracts
+      - MUST export all new types from the barrel index (src/index.ts)
+      - SectionFactoryContext MUST include: webApi, userId, navigation helpers (openDialog, navigateToRecord)
+      - SectionRegistration.factory MUST return SectionConfig (the existing discriminated union)
+      - SectionCategory type MUST be a string union: "action-cards" | "metrics" | "content" | "embedded-app"
+      - MUST NOT break any existing WorkspaceShell type exports
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts</file>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the existing WorkspaceShell types.ts to understand SectionConfig, SectionType, and WorkspaceConfig interfaces that the new types must compose with.</step>
+    <step id="2">Define the SectionCategory string union type: "action-cards" | "metrics" | "content" | "embedded-app". This categorizes sections for the layout wizard's section picker UI.</step>
+    <step id="3">Define the SectionFactoryContext interface with runtime dependencies: webApi (IWebApi-compatible generic), userId (string), openDialog (navigateTo helper), navigateToRecord (open entity form), and any additional helpers sections need to be self-contained.</step>
+    <step id="4">Define the SectionRegistration interface with: id (string), title (string), description (string), category (SectionCategory), icon (FluentIcon), defaultHeight (optional string), defaultWidth (optional "full" | "half" | "third"), and factory ((ctx: SectionFactoryContext) => SectionConfig).</step>
+    <step id="5">Add the new types to the WorkspaceShell types.ts file (or a new sectionRegistry.types.ts alongside it) and ensure they are exported.</step>
+    <step id="6">Update the barrel exports: ensure src/components/WorkspaceShell/index.ts re-exports the new types, and verify src/index.ts transitively exports them via the components barrel.</step>
+    <step id="7">Verify the build compiles without errors by running the TypeScript compiler on the shared library.</step>
+    <step id="8">Review that existing WorkspaceShell exports are unchanged — no breaking changes to current consumers.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>SectionRegistration interface is exported from @spaarke/ui-components with id, title, description, category, icon, defaultHeight, defaultWidth, and factory properties</criterion>
+    <criterion>SectionFactoryContext interface is exported with webApi, userId, openDialog, and navigateToRecord members</criterion>
+    <criterion>SectionCategory type is exported as "action-cards" | "metrics" | "content" | "embedded-app"</criterion>
+    <criterion>factory property signature is (ctx: SectionFactoryContext) => SectionConfig</criterion>
+    <criterion>TypeScript compilation succeeds with no errors in the shared library</criterion>
+  </acceptance-criteria>
+</task>

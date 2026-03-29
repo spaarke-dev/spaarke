@@ -1,0 +1,64 @@
+<task id="WKSP-043" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Build wizard Step 3: Arrange Sections and Name Workspace</title>
+    <phase>5</phase>
+    <tags>frontend, fluent-ui, code-page</tags>
+    <estimated-effort>8h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>042</dependencies>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Build wizard Step 3 where users arrange selected sections into grid slots via drag-and-drop, name their workspace, and optionally set it as default.</goal>
+    <context>
+      Step 3 is the final wizard step before saving. It shows the chosen template's grid layout with
+      the selected sections as draggable cards. Users drag section cards between slots to arrange their
+      workspace. An unassigned section area holds sections not yet placed in a slot.
+
+      The workspace name input is required for create/saveAs modes. A "Set as default" checkbox lets
+      users mark this layout as their default workspace. Section cards display the section icon and label.
+
+      Drag-and-drop is the primary interaction model (no keyboard alternative was requested by the owner).
+      The grid visually reflects the chosen template structure from Step 1.
+    </context>
+    <constraints>
+      - MUST render the template grid layout matching the Step 1 selection
+      - MUST implement drag-and-drop for moving section cards between grid slots
+      - Each section card MUST show icon + label from the section catalog
+      - MUST include an "unassigned sections" area for sections not yet placed in slots
+      - Workspace name Input is REQUIRED (non-empty validation) for create and saveAs modes
+      - "Set as default" Checkbox MUST be included
+      - MUST use Fluent UI v9 components (Input, Checkbox, Card) per ADR-021
+      - In edit mode, MUST pre-populate slot assignments and workspace name
+      - "Save" button (final step) MUST be disabled if name is empty
+      - Drag-and-drop only — no keyboard reordering alternative required
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/WorkspaceLayoutWizard/src/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Create a DraggableSectionCard component that renders a section as a compact card (icon + label) with HTML5 drag-and-drop attributes (draggable, onDragStart with section ID in dataTransfer).</step>
+    <step id="2">Create a GridSlot component representing a single slot in the template grid. Accepts onDrop, shows the assigned section card or an empty placeholder with dashed border. Implements onDragOver (preventDefault) and onDrop (extract section ID from dataTransfer).</step>
+    <step id="3">Create the ArrangeStep component that renders the template grid using CSS grid matching the selected template's rows/columns. Place GridSlot components in each grid cell.</step>
+    <step id="4">Add the unassigned sections area below the grid: renders DraggableSectionCards for sections not yet placed in any slot. Sections dragged from here to a slot move between areas.</step>
+    <step id="5">Manage slot assignments in state: Map of slotIndex -> sectionId. Support drag from unassigned to slot, slot to slot (swap), and slot back to unassigned (drag to unassigned area).</step>
+    <step id="6">Add workspace name Input (required, with validation) and "Set as default" Checkbox above the grid area.</step>
+    <step id="7">Handle edit mode: pre-populate slot assignments from existing layout, pre-fill name, pre-set default checkbox state.</step>
+    <step id="8">Wire "Save" as the final WizardDialog action: disabled if name is empty, passes complete wizard state (templateId, slotAssignments, name, isDefault) to parent save handler.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Grid layout visually matches the selected template structure with correct rows and columns</criterion>
+    <criterion>Section cards can be dragged between grid slots and the unassigned area</criterion>
+    <criterion>Workspace name input validates as required (non-empty) before save is enabled</criterion>
+    <criterion>"Set as default" checkbox is functional and its value is included in save payload</criterion>
+    <criterion>In edit mode, existing slot assignments, name, and default state are pre-populated</criterion>
+  </acceptance-criteria>
+</task>

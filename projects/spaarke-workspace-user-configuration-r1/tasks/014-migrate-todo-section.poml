@@ -1,0 +1,76 @@
+<task id="WKSP-014" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Migrate My To Do List section to SectionRegistration</title>
+    <phase>2</phase>
+    <tags>shared-components, frontend</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>WKSP-001, WKSP-010</dependencies>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Create a todo.registration.ts file that implements SectionRegistration for the My To Do List (SmartToDo embedded) section. Move the complex toolbar (refresh + add + open) into the factory and ensure SmartToDo works with the NOOP_SYNC fallback from WKSP-010.</goal>
+    <context>
+      The My To Do List section renders SmartToDo in embedded mode with disableSidePane=true. It has the
+      most complex toolbar: refresh (left, with marginRight:auto), divider, add new (opens todo wizard),
+      open full list (opens todo dialog). It also tracks badge count and refetch callbacks.
+
+      Current definition in workspaceConfig.tsx (lines 302-319):
+      - type: "content", id: "todo", title: "My To Do List"
+      - badgeCount: p.todoCount
+      - toolbar: refresh + divider + add + open (4 buttons)
+      - style: { height: "560px" }
+      - renderContent: SmartToDo with embedded, webApi, userId, disableSidePane, onCountChange, onRefetchReady
+
+      This section depends on WKSP-010 (useFeedTodoSync no-op fix) because SmartToDo uses useFeedTodoSync
+      internally. Without the fix, placing SmartToDo in a workspace without ActivityFeed would crash.
+
+      The toolbar callbacks (onTodoRefetch, onOpenTodoWizard, onOpenTodoDialog) currently come from parent.
+      The factory must reconstruct these using SectionFactoryContext navigation helpers.
+    </context>
+    <constraints>
+      - MUST implement SectionRegistration interface from task WKSP-001
+      - MUST depend on WKSP-010 completion (useFeedTodoSync no-op fix) to ensure SmartToDo works without FeedTodoSyncProvider
+      - Factory toolbar MUST match current layout: refresh (left) | divider | add + open (right with 15px gap)
+      - SmartToDo MUST be rendered with embedded=true and disableSidePane=true
+      - Section height MUST be "560px" to match current layout
+      - Add button MUST use context.openDialog() to open the TodoWizardDialog
+      - Open button MUST use context.openDialog() to open the full To Do list dialog
+      - File location: src/solutions/LegalWorkspace/src/sections/todo.registration.ts
+      - MUST NOT modify existing workspaceConfig.tsx
+      - MUST use Fluent v9 components for toolbar (ADR-021)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useFeedTodoSync.ts</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/CreateTodo/TodoWizardDialog.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/hooks/useFeedTodoSync.ts</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the current To Do section definition in workspaceConfig.tsx (lines 302-319) and the todoToolbar definition (lines 155-183) to understand the full toolbar layout and all callback dependencies.</step>
+    <step id="2">Read SmartToDo.tsx props to understand all required props including embedded, disableSidePane, onCountChange, onRefetchReady.</step>
+    <step id="3">Create todo.registration.ts in src/solutions/LegalWorkspace/src/sections/ with metadata: id "todo", title "My To Do List", description "Embedded smart to-do list with flag sync", category "embedded-app", icon (CheckmarkCircleRegular or similar).</step>
+    <step id="4">Implement the toolbar construction inside the factory: ToolbarDivider component (inline span), refresh Button (ArrowClockwiseRegular, left-aligned with marginRight:auto), divider, add Button (AddRegular, onClick via context.openDialog for TodoWizard), open Button (OpenRegular, onClick via context.openDialog for full todo list). Match the exact flex layout with 15px gap between add and open.</step>
+    <step id="5">Implement renderContent: SmartToDo with embedded=true, webApi=context.webApi, userId=context.userId, disableSidePane=true. Wire onCountChange and onRefetchReady through context extensions.</step>
+    <step id="6">Return ContentSectionConfig with style: { height: "560px" } and the constructed toolbar.</step>
+    <step id="7">Export registration. Verify TypeScript compilation succeeds.</step>
+    <step id="8">Verify that SmartToDo can be rendered without FeedTodoSyncProvider in the tree (depends on WKSP-010 no-op fix).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>todo.registration.ts exports a SectionRegistration with id "todo" and category "embedded-app"</criterion>
+    <criterion>Factory returns ContentSectionConfig with SmartToDo rendered in embedded mode with disableSidePane=true</criterion>
+    <criterion>Toolbar matches current layout: refresh (left) | divider | add + open (right, 15px gap)</criterion>
+    <criterion>Section style has height: "560px"</criterion>
+    <criterion>Factory uses SectionFactoryContext for all navigation callbacks — no parent-scoped closures</criterion>
+  </acceptance-criteria>
+</task>

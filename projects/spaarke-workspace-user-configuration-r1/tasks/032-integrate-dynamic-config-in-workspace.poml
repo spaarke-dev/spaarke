@@ -1,0 +1,65 @@
+<task id="WKSP-032" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Integrate dynamic config builder and header into LegalWorkspace</title>
+    <phase>4</phase>
+    <tags>frontend, integration</tags>
+    <estimated-effort>6h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>016, 020, 030, 031</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Replace the hardcoded buildWorkspaceConfig() call in LegalWorkspace with the dynamic config flow, fetching the user's default layout from the BFF API, building config via buildDynamicWorkspaceConfig(), and wiring the WorkspaceHeader into the page.</goal>
+    <context>
+      LegalWorkspaceApp.tsx currently calls buildWorkspaceConfig() which returns a static WorkspaceConfig
+      with hardcoded sections. The new flow must:
+      1. On mount, fetch the user's workspace layouts list from GET /api/workspace/layouts
+      2. Identify the default layout (isDefault=true) or fall back to SYSTEM_DEFAULT_LAYOUT
+      3. Build SectionFactoryContext from existing runtime dependencies (webApi, userId, service instances)
+      4. Call buildDynamicWorkspaceConfig(layoutJson, SECTION_REGISTRY, context) to produce WorkspaceConfig
+      5. Render WorkspaceHeader above WorkspaceShell for layout switching
+      6. Handle layout changes by re-fetching the selected layout and rebuilding config
+
+      This is the critical integration point where all Phase 1-4 work comes together.
+    </context>
+    <constraints>
+      - MUST preserve existing WorkspaceShell behavior — only the config source changes
+      - MUST build SectionFactoryContext from existing runtime deps (webApi, userId, navigation helpers)
+      - MUST fetch layouts from GET /api/workspace/layouts on mount
+      - MUST fall back to SYSTEM_DEFAULT_LAYOUT if no user layouts exist or fetch fails
+      - MUST re-build WorkspaceConfig when user switches layouts via WorkspaceHeader
+      - MUST NOT break the existing workspace if the BFF API is unavailable (graceful degradation)
+      - WorkspaceHeader MUST open the Layout Wizard via Xrm.Navigation.navigateTo for create/edit actions
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read LegalWorkspaceApp.tsx to understand the current mount flow, how buildWorkspaceConfig() is called, and what runtime dependencies are available (webApi, userId, etc.).</step>
+    <step id="2">Create a useWorkspaceLayouts custom hook that fetches layouts from GET /api/workspace/layouts, manages loading/error state, and exposes the active layout, all layouts, and a setActiveLayout function.</step>
+    <step id="3">Build the SectionFactoryContext from existing runtime dependencies: extract webApi, userId, and navigation helpers (openDialog wrapping Xrm.Navigation.navigateTo, navigateToRecord wrapping Xrm.Navigation.openForm) from the current component scope.</step>
+    <step id="4">Replace the buildWorkspaceConfig() call with buildDynamicWorkspaceConfig(activeLayout.sectionsJson, SECTION_REGISTRY, factoryContext), using SYSTEM_DEFAULT_LAYOUT as fallback when no layout is available.</step>
+    <step id="5">Wire WorkspaceHeader above WorkspaceShell: pass layouts, activeLayout, onLayoutChange (updates active + rebuilds config), onEditClick (opens wizard in edit/saveAs mode via navigateTo), onCreateClick (opens wizard in create mode).</step>
+    <step id="6">Implement the navigateTo calls for wizard launch: Xrm.Navigation.navigateTo with pageType "webresource", webresourceName "sprk_workspacelayoutwizard", and data parameter encoding mode and layoutId.</step>
+    <step id="7">Add error handling: if layout fetch fails, fall back to SYSTEM_DEFAULT_LAYOUT with console.warn. Ensure WorkspaceShell always receives a valid config.</step>
+    <step id="8">Verify the workspace renders correctly with both dynamic and fallback configs. Ensure no regressions in existing section rendering.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>LegalWorkspace fetches layouts from BFF API on mount and renders the default layout dynamically</criterion>
+    <criterion>WorkspaceHeader appears above WorkspaceShell with layout switcher dropdown</criterion>
+    <criterion>Switching layouts via dropdown rebuilds WorkspaceConfig and re-renders sections</criterion>
+    <criterion>Workspace falls back to SYSTEM_DEFAULT_LAYOUT when API is unavailable or returns empty</criterion>
+    <criterion>Wizard launch via navigateTo passes correct mode (create/edit/saveAs) and layoutId</criterion>
+  </acceptance-criteria>
+</task>

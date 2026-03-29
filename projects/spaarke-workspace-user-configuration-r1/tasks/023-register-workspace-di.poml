@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="WKSP-023" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Register WorkspaceLayoutService DI and wire workspace endpoints in Program.cs</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>bff-api</tags>
+    <estimated-effort>2h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-reason>DI wiring and endpoint registration — constrained task following established patterns; no new business logic; ADR-010 DI minimalism constraint applies</rigor-reason>
+    <dependencies>020, 021, 022</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET developer implementing workspace layout API</role>
+    <goal>
+      Register WorkspaceLayoutService in the DI container and wire the workspace endpoint route
+      group in Program.cs, following the existing registration patterns in SpaarkeCore.cs and
+      the module registration approach used by DocumentsEndpoints. This is the final wiring step
+      that connects the service (Task 020), endpoints (Task 021), and authorization filter
+      (Task 022) into the running application.
+    </goal>
+    <context>
+      The BFF API registers services in SpaarkeCore.cs (or similar DI module files) and maps
+      endpoint route groups in Program.cs. The existing DocumentsEndpoints registration serves
+      as the pattern. WorkspaceLayoutService should be registered as a concrete type (ADR-010
+      prefers concrete over interface unless a seam is needed). The workspace route group needs
+      RequireAuthorization() applied at the group level, and the WorkspaceLayoutAuthorizationFilter
+      applied to individual endpoints that accept an {id} parameter (GET by ID, PUT, DELETE).
+    </context>
+    <constraints>
+      - MUST register WorkspaceLayoutService as concrete type — no interface unless seam is required (ADR-010)
+      - MUST stay within the 15 non-framework DI registration budget (ADR-010) — verify count after adding
+      - MUST follow existing DI module pattern (SpaarkeCore.cs style)
+      - MUST wire endpoint route group in Program.cs using MapWorkspaceEndpoints extension method
+      - MUST apply RequireAuthorization() at the route group level
+      - MUST apply WorkspaceLayoutAuthorizationFilter to endpoints with {id} parameter
+      - MUST NOT introduce new DI abstractions (no IWorkspaceLayoutService interface)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/spec.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+    <patterns>
+      <pattern>DI registration: services.AddSingleton&lt;WorkspaceLayoutService&gt;() or services.AddScoped&lt;WorkspaceLayoutService&gt;() depending on service lifetime requirements</pattern>
+      <pattern>Endpoint wiring: app.MapWorkspaceEndpoints() called in Program.cs alongside other MapXxxEndpoints calls</pattern>
+      <pattern>DI budget check: count all non-framework AddSingleton/AddScoped/AddTransient calls — must be &lt;= 15</pattern>
+    </patterns>
+  </knowledge>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs (modify — add registration)</file>
+    <file>src/server/api/Sprk.Bff.Api/Program.cs (modify — add endpoint mapping)</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs (from Task 020)</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceLayoutEndpoints.cs (from Task 021)</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/WorkspaceLayoutAuthorizationFilter.cs (from Task 022)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read SpaarkeCore.cs to understand the existing DI registration pattern and count current non-framework registrations against the 15-registration budget</step>
+    <step order="2">Read Program.cs to understand where endpoint route groups are mapped and identify the correct location for workspace endpoint registration</step>
+    <step order="3">Add WorkspaceLayoutService registration to SpaarkeCore.cs (or create a new WorkspaceModule.cs if the pattern uses per-feature modules) — register as concrete type with appropriate lifetime (Scoped if it holds per-request state like OBO tokens, Singleton if stateless)</step>
+    <step order="4">Verify the DI registration count remains at or below 15 non-framework registrations after adding the new service</step>
+    <step order="5">Add app.MapWorkspaceEndpoints() call in Program.cs at the appropriate location alongside other endpoint mappings</step>
+    <step order="6">Verify that WorkspaceLayoutEndpoints.MapWorkspaceEndpoints applies RequireAuthorization() at the group level and AddEndpointFilter&lt;WorkspaceLayoutAuthorizationFilter&gt;() on the GET/{id}, PUT/{id}, and DELETE/{id} routes</step>
+    <step order="7">Run dotnet build to verify the full application compiles with all workspace components wired together</step>
+    <step order="8">Update TASK-INDEX.md: change task 023 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs (modified — added WorkspaceLayoutService registration)</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified — added MapWorkspaceEndpoints call)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">WorkspaceLayoutService is registered in the DI container as a concrete type (no interface wrapper)</criterion>
+    <criterion testable="true">Total non-framework DI registrations remain at or below 15 (ADR-010 budget)</criterion>
+    <criterion testable="true">app.MapWorkspaceEndpoints() is called in Program.cs and all 8 workspace endpoints are reachable</criterion>
+    <criterion testable="true">The workspace route group has RequireAuthorization() applied at the group level</criterion>
+    <criterion testable="true">dotnet build passes with no errors for the complete application</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 3 serial — depends on 020 (service), 021 (endpoints), and 022 (auth filter). This is the final wiring task for Phase 3 Backend API. Modifies existing files: SpaarkeCore.cs and Program.cs.</protocol>
+  </execution>
+</task>

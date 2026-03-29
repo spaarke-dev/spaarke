@@ -1,0 +1,56 @@
+<task id="WKSP-050" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Support workspaceId URL parameter for deep-linking</title>
+    <phase>6</phase>
+    <tags>frontend, integration</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <dependencies>032</dependencies>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Support a workspaceId URL parameter so that direct links can open a specific workspace layout instead of the user's default.</goal>
+    <context>
+      The LegalWorkspace is loaded as a Dataverse webresource. URL parameters are passed via the
+      Xrm data parameter (query string encoded). When a workspaceId is present, the workspace should
+      load that specific layout instead of the user's default.
+
+      This enables scenarios like: sharing a link to a specific workspace view, bookmarking a
+      preferred layout, or navigating back to a specific workspace from another page.
+
+      If the specified workspaceId is invalid or the layout doesn't exist (deleted, or belongs to
+      another user), the workspace should gracefully fall back to the user's default layout.
+    </context>
+    <constraints>
+      - MUST parse workspaceId from Xrm data parameter (URL query string)
+      - MUST fetch the specific layout by ID from GET /api/workspace/layouts/{id}
+      - MUST fall back to user's default layout if workspaceId is invalid or layout not found
+      - MUST NOT show an error dialog for missing layouts — silent fallback with console.warn
+      - MUST update the WorkspaceHeader dropdown to reflect the deep-linked layout as active
+      - MUST work with the existing useWorkspaceLayouts hook from Task 032
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/main.tsx</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the existing main.tsx to understand how Xrm data parameters are currently parsed (if at all) and how the app receives initialization context.</step>
+    <step id="2">Add workspaceId extraction from the Xrm data parameter: parse the data query string, extract workspaceId value if present.</step>
+    <step id="3">Update the useWorkspaceLayouts hook to accept an optional initialWorkspaceId parameter. When provided, attempt to fetch that specific layout first.</step>
+    <step id="4">Add fallback logic: if the deep-linked layout fetch returns 404 or fails, console.warn and fall back to the default layout selection flow.</step>
+    <step id="5">Ensure the WorkspaceHeader dropdown reflects the deep-linked layout as the active selection.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Navigating with workspaceId parameter loads the specified layout instead of default</criterion>
+    <criterion>Invalid or missing workspaceId falls back to default layout without error dialog</criterion>
+    <criterion>WorkspaceHeader dropdown shows the deep-linked layout as active</criterion>
+  </acceptance-criteria>
+</task>

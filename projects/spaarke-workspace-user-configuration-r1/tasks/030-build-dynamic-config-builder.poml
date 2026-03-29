@@ -1,0 +1,69 @@
+<task id="WKSP-030" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Build dynamic workspace config builder function</title>
+    <phase>4</phase>
+    <tags>shared-components, frontend</tags>
+    <estimated-effort>6h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>001, 002, 016</dependencies>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Create the buildDynamicWorkspaceConfig() function that merges stored layout JSON with the SECTION_REGISTRY to produce a WorkspaceConfig consumable by WorkspaceShell.</goal>
+    <context>
+      The workspace personalization feature stores user layouts as JSON in the sprk_sectionsjson column of
+      sprk_workspacelayout records. Each layout JSON contains a schemaVersion, a grid template definition,
+      and an array of slot assignments mapping section IDs to grid positions.
+
+      The SECTION_REGISTRY (created in Task 002) maps section IDs to SectionRegistration objects with factory
+      functions. The dynamic config builder must reconcile these two data sources: the layout JSON says
+      "which sections go where" and the registry says "how to create each section."
+
+      This function replaces the hardcoded buildWorkspaceConfig() currently in workspaceConfig.tsx. It must
+      handle edge cases gracefully: unknown section IDs (removed/renamed), more sections than slots,
+      empty rows, and schema version mismatches.
+
+      A SYSTEM_DEFAULT_LAYOUT constant provides the fallback layout matching the current hardcoded config.
+    </context>
+    <constraints>
+      - Function MUST live in LegalWorkspace src (not shared library) since it depends on SECTION_REGISTRY
+      - MUST validate schemaVersion field and reject unsupported versions with console.warn + fallback
+      - MUST skip sections whose IDs are not found in SECTION_REGISTRY with console.warn (not throw)
+      - MUST handle slot overflow: if more sections than template slots, auto-append 1fr rows to grid
+      - MUST skip empty rows (rows where no sections were assigned after filtering)
+      - MUST export a SYSTEM_DEFAULT_LAYOUT constant matching the current hardcoded 5-section config
+      - MUST accept SectionFactoryContext as a parameter and pass it to each section factory
+      - Return type MUST be WorkspaceConfig (from @spaarke/ui-components)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</file>
+    <file>src/solutions/LegalWorkspace/src/sections/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the existing workspaceConfig.tsx and WorkspaceShell types.ts to understand the current WorkspaceConfig shape and how sections are wired today.</step>
+    <step id="2">Define the LayoutJson TypeScript interface representing the stored layout structure: schemaVersion, gridTemplate (rows/columns), and slots array with sectionId and grid position properties.</step>
+    <step id="3">Create the SYSTEM_DEFAULT_LAYOUT constant that mirrors the current hardcoded 5-section layout, using the same section IDs from SECTION_REGISTRY.</step>
+    <step id="4">Implement buildDynamicWorkspaceConfig(layoutJson, registry, context) with schemaVersion validation — if version is unsupported, console.warn and fall back to SYSTEM_DEFAULT_LAYOUT.</step>
+    <step id="5">Add section resolution logic: iterate slots, look up each sectionId in registry, call factory(context) for found sections, console.warn and skip missing IDs.</step>
+    <step id="6">Add slot overflow handling: if resolved sections exceed template slot count, compute additional 1fr rows and extend the grid template accordingly.</step>
+    <step id="7">Add empty row filtering: after section assignment, remove any grid rows that contain no sections.</step>
+    <step id="8">Verify TypeScript compilation and ensure the function signature returns WorkspaceConfig compatible with WorkspaceShell props.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>buildDynamicWorkspaceConfig() accepts layout JSON, SECTION_REGISTRY, and SectionFactoryContext and returns a valid WorkspaceConfig</criterion>
+    <criterion>Unknown section IDs are skipped with console.warn, not thrown as errors</criterion>
+    <criterion>Slot overflow auto-appends 1fr rows to accommodate extra sections</criterion>
+    <criterion>Empty rows (no assigned sections after filtering) are removed from the final grid</criterion>
+    <criterion>SYSTEM_DEFAULT_LAYOUT constant is exported and matches the current 5-section hardcoded layout</criterion>
+  </acceptance-criteria>
+</task>

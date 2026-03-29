@@ -1,0 +1,55 @@
+<task id="WKSP-090" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Project wrap-up: code review, ADR check, and cleanup</title>
+    <phase>7</phase>
+    <tags>wrap-up</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>MINIMAL</rigor-level>
+    <dependencies>030, 031, 032, 040, 041, 042, 043, 044, 050, 051, 052, 053, 060, 061, 062, 063</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Complete the project with a final code review, ADR compliance check, repository cleanup, and documentation updates.</goal>
+    <context>
+      All implementation, testing, and deployment tasks for workspace user configuration are complete.
+      This wrap-up task ensures code quality, architectural compliance, and clean project closure.
+
+      Run the code-review and adr-check skills against all changed files, perform repository cleanup
+      to remove ephemeral files, update the project README status, create a lessons-learned document,
+      and finalize all task statuses in TASK-INDEX.md.
+    </context>
+    <constraints>
+      - MUST run /code-review on all files changed in this project branch
+      - MUST run /adr-check to validate compliance with all referenced ADRs
+      - MUST run /repo-cleanup to remove ephemeral files and validate structure
+      - MUST update project README.md status to "Complete"
+      - MUST create a lessons-learned.md in the project notes/ directory
+      - MUST update TASK-INDEX.md with final statuses for all tasks
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files />
+  </knowledge>
+  <relevant-files>
+    <file>projects/spaarke-workspace-user-configuration-r1/</file>
+    <file>projects/spaarke-workspace-user-configuration-r1/README.md</file>
+    <file>projects/spaarke-workspace-user-configuration-r1/tasks/TASK-INDEX.md</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Run /code-review on all files changed in the work/spaarke-workspace-user-configuration-r1 branch compared to master. Address any critical findings.</step>
+    <step id="2">Run /adr-check to validate compliance with ADR-012 (shared components), ADR-021 (Fluent v9), ADR-026 (Code Page standard), and all other referenced ADRs. Address any violations.</step>
+    <step id="3">Run /repo-cleanup to remove ephemeral files (node_modules artifacts, build outputs committed by mistake, temporary notes).</step>
+    <step id="4">Update the project README.md: set status to "Complete", update the summary with final feature list, note any deferred items.</step>
+    <step id="5">Create projects/spaarke-workspace-user-configuration-r1/notes/lessons-learned.md documenting key decisions, challenges encountered, and recommendations for future workspace projects.</step>
+    <step id="6">Update TASK-INDEX.md with final statuses for all tasks (all should be marked complete).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Code review passes with no critical or high-severity findings unaddressed</criterion>
+    <criterion>ADR compliance check passes for all referenced ADRs</criterion>
+    <criterion>Repository cleanup completes with no structural issues</criterion>
+    <criterion>Project README.md status is updated to "Complete"</criterion>
+    <criterion>TASK-INDEX.md shows all tasks with final completed status</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,77 @@
+<task id="WKSP-010" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Fix useFeedTodoSync to return no-op stubs when provider is missing</title>
+    <phase>2</phase>
+    <tags>shared-components, bugfix</tags>
+    <estimated-effort>2h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>WKSP-001</dependencies>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Fix the useFeedTodoSync hook to return safe no-op stubs when FeedTodoSyncProvider is absent, instead of throwing an error. This enables SmartToDo to work independently outside the provider tree.</goal>
+    <context>
+      Currently, useFeedTodoSync() throws an error if called outside FeedTodoSyncProvider. This was
+      intentional for the original LegalWorkspace where both ActivityFeed and SmartToDo are always
+      rendered together inside the provider.
+
+      With the Section Registry, SmartToDo can now be placed in a workspace layout without ActivityFeed.
+      In that scenario, there is no FeedTodoSyncProvider in the tree, and useFeedTodoSync throws,
+      crashing the entire workspace.
+
+      The fix: when context is null (no provider), return a NOOP_SYNC constant that satisfies the
+      IFeedTodoSyncContextValue interface with safe defaults:
+      - isFlagged() returns false
+      - toggleFlag() returns resolved Promise
+      - getFlaggedCount() returns 0
+      - isPending() returns false
+      - getError() returns undefined
+      - subscribe() returns a no-op unsubscribe function
+      - initFlags() is a no-op
+      - _flagsSnapshot is an empty ReadonlyMap
+
+      This is a critical behavioral change — SmartToDo's flag sync features silently degrade rather than crash.
+    </context>
+    <constraints>
+      - MUST NOT break existing behavior when FeedTodoSyncProvider IS present — all current consumers must work identically
+      - MUST return a stable singleton NOOP_SYNC object (not recreated on each call) to avoid unnecessary re-renders
+      - MUST add a console.debug() warning when falling back to no-op, so developers notice the missing provider during development
+      - MUST NOT change the IFeedTodoSyncContextValue interface
+      - MUST NOT modify FeedTodoSyncContext.tsx or the provider implementation
+      - The NOOP_SYNC constant MUST satisfy the full IFeedTodoSyncContextValue interface
+      - toggleFlag MUST return Promise.resolve() (not throw)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useFeedTodoSync.ts</file>
+      <file>src/solutions/LegalWorkspace/src/contexts/FeedTodoSyncContext.tsx</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/hooks/useFeedTodoSync.ts</file>
+    <file>src/solutions/LegalWorkspace/src/contexts/FeedTodoSyncContext.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read useFeedTodoSync.ts and FeedTodoSyncContext.tsx to fully understand the IFeedTodoSyncContextValue interface and all its method signatures.</step>
+    <step id="2">Define a NOOP_SYNC constant in useFeedTodoSync.ts that implements IFeedTodoSyncContextValue with safe no-op stubs: isFlagged returns false, toggleFlag returns Promise.resolve(), getFlaggedCount returns 0, isPending returns false, getError returns undefined, subscribe returns () => {}, initFlags is () => {}, _flagsSnapshot is new Map().</step>
+    <step id="3">Modify the useFeedTodoSync function: replace the throw statement with a console.debug warning and return NOOP_SYNC when ctx is null.</step>
+    <step id="4">Verify that the NOOP_SYNC object is module-level (singleton) so it does not cause referential inequality on re-renders.</step>
+    <step id="5">Check all consumers of useFeedTodoSync (search for imports) to confirm none rely on the throw behavior for error boundary detection.</step>
+    <step id="6">Verify TypeScript compilation succeeds and the hook's return type is still IFeedTodoSyncContextValue.</step>
+    <step id="7">Export the NOOP_SYNC constant for testing purposes (named export, secondary to the hook default).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>useFeedTodoSync returns NOOP_SYNC (not throws) when FeedTodoSyncProvider is absent from the component tree</criterion>
+    <criterion>NOOP_SYNC satisfies the complete IFeedTodoSyncContextValue interface with all 8 members</criterion>
+    <criterion>NOOP_SYNC is a stable module-level singleton (same reference on every call)</criterion>
+    <criterion>A console.debug message is logged when falling back to NOOP_SYNC</criterion>
+    <criterion>Existing behavior is unchanged when FeedTodoSyncProvider IS in the tree</criterion>
+  </acceptance-criteria>
+</task>

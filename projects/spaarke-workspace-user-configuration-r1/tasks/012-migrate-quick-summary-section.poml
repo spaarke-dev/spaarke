@@ -1,0 +1,68 @@
+<task id="WKSP-012" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Migrate Quick Summary section to SectionRegistration</title>
+    <phase>2</phase>
+    <tags>shared-components, frontend</tags>
+    <estimated-effort>2h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>WKSP-001</dependencies>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Create a quickSummary.registration.ts file that implements SectionRegistration for the Quick Summary (content) section. This is a minimal migration since QuickSummaryRow is already self-contained.</goal>
+    <context>
+      The Quick Summary section renders a QuickSummaryRow component that manages its own data fetching
+      internally. It only needs webApi and userId from the parent. The toolbar has refresh and open-dashboard
+      buttons.
+
+      Current definition in workspaceConfig.tsx (lines 257-272):
+      - type: "content", id: "quick-summary", title: "Quick Summary"
+      - toolbar: refresh button + divider + open dashboard button
+      - renderContent: wraps QuickSummaryRow in a padded div
+      - style: { minHeight: "auto" }
+
+      This is the simplest migration — QuickSummaryRow is already self-contained. The factory just needs
+      to construct the toolbar and renderContent using SectionFactoryContext.webApi and .userId.
+    </context>
+    <constraints>
+      - MUST implement SectionRegistration interface from task WKSP-001
+      - MUST produce an identical ContentSectionConfig to the current workspaceConfig.tsx output
+      - Factory MUST use SectionFactoryContext.webApi and .userId (not closure variables)
+      - Toolbar refresh button can be a placeholder (QuickSummaryRow manages its own data)
+      - Open dashboard button MUST use context.openDialog() for the QuickSummaryDashboardDialog
+      - File location: src/solutions/LegalWorkspace/src/sections/quickSummary.registration.ts
+      - MUST NOT modify the existing workspaceConfig.tsx
+      - MUST use Fluent v9 components only (ADR-021)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/QuickSummary/QuickSummaryRow.tsx</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/QuickSummary/QuickSummaryRow.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/QuickSummary/QuickSummaryDashboardDialog.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/components/QuickSummary/index.ts</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the current Quick Summary section definition in workspaceConfig.tsx (lines 257-272) to understand the exact section configuration including toolbar and renderContent.</step>
+    <step id="2">Read QuickSummaryRow.tsx props interface to confirm it only needs webApi and userId.</step>
+    <step id="3">Create quickSummary.registration.ts in src/solutions/LegalWorkspace/src/sections/ with SectionRegistration metadata: id "quick-summary", title "Quick Summary", description "Key metrics at a glance", category "metrics".</step>
+    <step id="4">Implement the factory function: construct the toolbar (refresh ArrowClockwiseRegular + ToolbarDivider + open dashboard OpenRegular button), build renderContent as padded div wrapping QuickSummaryRow with context.webApi and context.userId.</step>
+    <step id="5">Return ContentSectionConfig with style: { minHeight: "auto" } matching the current config.</step>
+    <step id="6">Export the registration as named and default export. Verify TypeScript compilation.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>quickSummary.registration.ts exports a SectionRegistration object with id "quick-summary" and category "metrics"</criterion>
+    <criterion>Factory returns a ContentSectionConfig with QuickSummaryRow in renderContent, matching current toolbar layout</criterion>
+    <criterion>Factory uses SectionFactoryContext.webApi and .userId — no parent-scoped closures</criterion>
+    <criterion>TypeScript compilation succeeds with no errors</criterion>
+    <criterion>Existing workspaceConfig.tsx is not modified</criterion>
+  </acceptance-criteria>
+</task>

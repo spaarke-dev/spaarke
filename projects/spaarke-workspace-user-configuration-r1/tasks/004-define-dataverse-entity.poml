@@ -1,0 +1,59 @@
+<task id="WKSP-004" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Define sprk_workspacelayout Dataverse entity schema</title>
+    <phase>1</phase>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>1h</estimated-effort>
+    <rigor-level>MINIMAL</rigor-level>
+    <dependencies>none</dependencies>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior TypeScript/C# developer implementing workspace personalization</role>
+    <goal>Define the sprk_workspacelayout Dataverse entity schema documentation and deployment reference for the workspace layout persistence entity.</goal>
+    <context>
+      User workspace layouts are persisted in Dataverse as sprk_workspacelayout records. Each record stores
+      the layout template ID, the sections JSON (array of section placements with slot indices), a display
+      name, whether it's the user's default layout, and a sort order for the workspace switcher.
+
+      The entity uses Owner security model so each user owns their own layout records. The BFF API reads
+      and writes these records via Dataverse Web API. The sections JSON is a multiline text column storing
+      a JSON array of {sectionId, slotIndex} objects — no serialized JSX or component references.
+
+      This task creates the entity definition documentation and any solution XML or metadata files needed
+      for entity deployment to the Dataverse dev environment.
+    </context>
+    <constraints>
+      - Entity logical name MUST be sprk_workspacelayout with publisher prefix "sprk"
+      - Primary key: sprk_workspacelayoutid (GUID, auto-generated)
+      - MUST use Owner security model (sprk_ownerid via standard ownership)
+      - sprk_sectionsjson MUST be Multiline Text with max length (1048576) to accommodate large section arrays
+      - sprk_name MUST be String with max length 100
+      - sprk_layouttemplateid MUST be String with max length 50
+      - sprk_isdefault MUST be Boolean (default: false)
+      - sprk_sortorder MUST be Integer (default: 0)
+      - MUST document the JSON schema for sprk_sectionsjson content
+      - Entity MUST be included in the Spaarke unmanaged solution for deployment
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>projects/spaarke-workspace-user-configuration-r1/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Create entity schema definition file at projects/spaarke-workspace-user-configuration-r1/notes/entity-schema-sprk_workspacelayout.md documenting all columns, types, constraints, and the JSON schema for sprk_sectionsjson.</step>
+    <step id="2">Document the column definitions: sprk_workspacelayoutid (Uniqueidentifier PK), sprk_name (String 100, required, display name), sprk_layouttemplateid (String 50, required), sprk_sectionsjson (Multiline 1048576, required), sprk_isdefault (Boolean, default false), sprk_sortorder (WholeNumber, default 0).</step>
+    <step id="3">Document the sprk_sectionsjson JSON schema: array of objects with "sectionId" (string, matches SectionRegistration.id) and "slotIndex" (integer, 0-based position in template slots).</step>
+    <step id="4">Document the security model: Owner-based access, users can only CRUD their own layouts. System workspaces are defined in code, not stored in this entity.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Entity schema document exists with all 6 custom columns fully specified (name, type, constraints, defaults)</criterion>
+    <criterion>JSON schema for sprk_sectionsjson is documented with example payload</criterion>
+    <criterion>Security model (Owner) is documented with access control expectations</criterion>
+  </acceptance-criteria>
+</task>

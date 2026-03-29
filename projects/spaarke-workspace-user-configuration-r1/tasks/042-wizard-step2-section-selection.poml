@@ -1,0 +1,62 @@
+<task id="WKSP-042" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Build wizard Step 2: Select Sections</title>
+    <phase>5</phase>
+    <tags>frontend, fluent-ui, code-page</tags>
+    <estimated-effort>5h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>041</dependencies>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Build wizard Step 2 where users select which sections to include in their workspace layout from a grouped, categorized checklist with a section/slot counter.</goal>
+    <context>
+      After choosing a layout template (Step 1), the user selects which sections to place in the
+      available slots. Sections are fetched from GET /api/workspace/sections which returns the
+      section catalog (id, title, description, category, icon). Sections are grouped by category
+      (overview, data, ai, productivity) for easy browsing.
+
+      A counter shows "Selected: N sections | Layout slots: M" to help users understand capacity.
+      Users can select more sections than slots (overflow handling happens in Step 3 arrange phase)
+      or fewer (empty slots are allowed).
+
+      In edit mode, sections from the existing layout are pre-checked.
+    </context>
+    <constraints>
+      - MUST fetch available sections from GET /api/workspace/sections endpoint
+      - MUST group sections by category with category headers
+      - Each section item MUST show: Checkbox, icon, label (title), and description
+      - MUST display "Selected: N sections | Layout slots: M" counter that updates in real-time
+      - MUST use Fluent UI v9 components (Checkbox, Text, Accordion or grouped list) per ADR-021
+      - In edit mode, MUST pre-check sections from the existing layout
+      - MUST handle API errors gracefully (show error message, allow retry)
+      - "Next" button MUST be disabled if zero sections are selected
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/WorkspaceLayoutWizard/src/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Create a useSectionCatalog hook that fetches sections from GET /api/workspace/sections, groups them by category, and manages loading/error state.</step>
+    <step id="2">Create a SectionCheckItem component rendering a single section: Fluent Checkbox, icon (rendered from icon name mapping), title (Text semibold), and description (Text caption).</step>
+    <step id="3">Create the SectionSelectionStep component with an Accordion or grouped list layout. Each category group has a header showing the category name and a list of SectionCheckItems.</step>
+    <step id="4">Track selectedSectionIds as a Set in local state. Toggle section selection on checkbox change.</step>
+    <step id="5">Add the counter display: "Selected: {selectedCount} sections | Layout slots: {templateSlotCount}" using Fluent Badge or Text components. Update reactively as selections change.</step>
+    <step id="6">Handle edit mode: initialize selectedSectionIds from the existing layout's section list on mount.</step>
+    <step id="7">Wire into WizardDialog: disable "Next" if selectedSectionIds is empty, pass selected section IDs to parent wizard state on navigation.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Sections are fetched from the API and displayed grouped by category</criterion>
+    <criterion>Each section shows checkbox, icon, title, and description</criterion>
+    <criterion>"Selected: N | Slots: M" counter updates in real-time as checkboxes toggle</criterion>
+    <criterion>"Next" is disabled when zero sections are selected</criterion>
+    <criterion>In edit mode, existing layout sections are pre-checked on mount</criterion>
+  </acceptance-criteria>
+</task>

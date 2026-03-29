@@ -1,0 +1,62 @@
+<task id="WKSP-031" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Build WorkspaceHeader component with layout switcher dropdown</title>
+    <phase>4</phase>
+    <tags>shared-components, frontend, fluent-ui</tags>
+    <estimated-effort>5h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>001, 003</dependencies>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Create a WorkspaceHeader component featuring a Fluent UI v9 dropdown for switching between workspace layouts, with system/user grouping and actions for editing and creating layouts.</goal>
+    <context>
+      The workspace page needs a header bar that lets users switch between their saved workspace layouts
+      and system-provided defaults. System workspaces are read-only (shown with a lock icon) while user
+      workspaces are editable. The header also provides entry points to the Layout Wizard: a settings/gear
+      button that opens edit mode for user layouts or Save As mode for system layouts, and a "+ New Workspace"
+      option at the bottom of the dropdown.
+
+      This component lives in LegalWorkspace since it is specific to workspace personalization behavior,
+      though it uses Fluent UI v9 primitives and shared component patterns from ADR-021.
+    </context>
+    <constraints>
+      - MUST use Fluent UI v9 components exclusively (Dropdown, Option, Divider, Button) per ADR-021
+      - MUST support dark mode via Fluent v9 design tokens (no hard-coded colors)
+      - System workspaces MUST appear first with a lock icon (LockClosed from @fluentui/react-icons)
+      - User workspaces MUST appear after a Divider
+      - "+ New Workspace" option MUST appear at the bottom of the dropdown
+      - Settings button behavior: edit mode for user layouts, Save As mode for system layouts
+      - Props interface: activeLayout, layouts[], onLayoutChange, onEditClick, onCreateClick
+      - MUST NOT contain any API call logic — parent provides data and callbacks
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/components/</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read ADR-021 for Fluent v9 component usage patterns and ADR-012 for shared component conventions. Review existing LegalWorkspace components for code style consistency.</step>
+    <step id="2">Define the WorkspaceHeaderProps interface: activeLayout (WorkspaceLayoutSummary), layouts (WorkspaceLayoutSummary[]), onLayoutChange (id: string) => void, onEditClick (layout: WorkspaceLayoutSummary) => void, onCreateClick () => void.</step>
+    <step id="3">Create the WorkspaceHeader component with a Fluent Dropdown displaying the active layout name as the selected value.</step>
+    <step id="4">Populate dropdown options: system layouts first (each with LockClosed icon prefix), then a Divider, then user layouts, then a Divider, then "+ New Workspace" action item.</step>
+    <step id="5">Add a settings gear IconButton (Settings24Regular) next to the dropdown. Wire onClick to call onEditClick(activeLayout) — the parent determines edit vs Save As based on layout.isSystem.</step>
+    <step id="6">Style the header using Fluent v9 makeStyles with design tokens for spacing, ensuring dark mode compatibility. Layout: flex row, dropdown on left, gear button on right.</step>
+    <step id="7">Export the component and its props interface from the LegalWorkspace components directory.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>WorkspaceHeader renders a Fluent v9 Dropdown showing the active layout name</criterion>
+    <criterion>System layouts appear first with a lock icon, separated from user layouts by a Divider</criterion>
+    <criterion>"+ New Workspace" option appears at the bottom and triggers onCreateClick</criterion>
+    <criterion>Settings gear button is visible and calls onEditClick with the active layout</criterion>
+    <criterion>Component renders correctly in both light and dark themes</criterion>
+  </acceptance-criteria>
+</task>

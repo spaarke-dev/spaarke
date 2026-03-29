@@ -1,0 +1,64 @@
+<task id="WKSP-041" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Build wizard Step 1: Choose Layout Template</title>
+    <phase>5</phase>
+    <tags>frontend, fluent-ui, code-page</tags>
+    <estimated-effort>5h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <dependencies>002, 040</dependencies>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Build the first wizard step where users choose from 6 layout templates, each displayed as a visual card with grid thumbnail, name, and slot count.</goal>
+    <context>
+      The Layout Wizard is a 3-step dialog (template -> sections -> arrange). Step 1 presents the
+      available layout templates defined in the LAYOUT_TEMPLATES constant (Task 002). Each template
+      specifies a grid structure (rows, columns, slot count) and has a human-friendly name.
+
+      Users select one template to define the structural grid for their workspace. The selected template
+      is highlighted. The wizard shell (header, step navigation, cancel button) comes from the shared
+      WizardDialog component in @spaarke/ui-components.
+
+      In edit mode, the template matching the existing layout is pre-selected. In create mode, no
+      template is selected initially.
+    </context>
+    <constraints>
+      - MUST use WizardDialog from @spaarke/ui-components for wizard shell (header, navigation, cancel)
+      - MUST display 6 template cards in a responsive grid (2-3 columns depending on width)
+      - Each card MUST show: visual grid thumbnail (SVG or CSS grid preview), template name, slot count
+      - Selected card MUST be visually highlighted (Fluent v9 selection pattern)
+      - MUST use Fluent UI v9 components exclusively (Card, Text, Badge) per ADR-021
+      - "Next" button MUST be disabled until a template is selected
+      - In edit mode, pre-select the template matching the current layout's grid structure
+      - MUST support dark mode via Fluent design tokens
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/WorkspaceLayoutWizard/src/</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/WizardShell/</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Read the WizardDialog component from shared library to understand its API: steps definition, activeStep, onNext, onBack, onCancel props.</step>
+    <step id="2">Create a TemplateCard component that renders a single template option: CSS grid thumbnail showing the slot structure, template name (Text), and slot count (Badge).</step>
+    <step id="3">Build CSS grid thumbnails for each of the 6 templates — use small div grids with Fluent design token colors to visually represent the layout structure (e.g., 2-column shows two equal boxes, sidebar shows narrow+wide).</step>
+    <step id="4">Create the TemplateSelectionStep component that renders a responsive grid of 6 TemplateCards. Track selectedTemplateId in local state.</step>
+    <step id="5">Add selection styling: selected card gets a highlighted border using Fluent v9 tokens (colorBrandStroke1), unselected cards use subtle border (colorNeutralStroke1).</step>
+    <step id="6">Wire into WizardDialog: configure step 1 with this component, disable "Next" until selectedTemplateId is set, pass selected template to parent wizard state on navigation.</step>
+    <step id="7">Handle edit mode: if wizard receives an existing layout, pre-select the matching template based on grid structure comparison.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>6 template cards are displayed in a responsive grid with visual grid thumbnails</criterion>
+    <criterion>Clicking a card selects it with a visible highlight (brand color border)</criterion>
+    <criterion>"Next" button is disabled until a template is selected</criterion>
+    <criterion>In edit mode, the template matching the existing layout is pre-selected</criterion>
+    <criterion>Component renders correctly in both light and dark Fluent themes</criterion>
+  </acceptance-criteria>
+</task>

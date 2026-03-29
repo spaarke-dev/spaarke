@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="WKSP-022" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Create WorkspaceLayoutAuthorizationFilter — ownership validation endpoint filter</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>BFF API code implementation with auth tag — creates an authorization endpoint filter enforcing ownership rules and system layout protection; ADR-008 constraint applies; security-sensitive code</rigor-reason>
+    <dependencies>020</dependencies>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET developer implementing workspace layout API</role>
+    <goal>
+      Create a WorkspaceLayoutAuthorizationFilter as an endpoint filter that validates layout
+      ownership for mutation operations (PUT, DELETE) and read-by-ID operations. System layouts
+      bypass ownership checks for read access (all users can read them) but reject all write
+      and delete attempts with 403 Forbidden.
+    </goal>
+    <context>
+      The BFF API uses endpoint filters (not global middleware) for resource-level authorization
+      per ADR-008. The existing DocumentAuthorizationFilter demonstrates this pattern — it
+      extracts the resource ID from the route, checks ownership, and short-circuits with 403/404
+      if unauthorized. WorkspaceLayoutAuthorizationFilter follows the same pattern but adds
+      system layout awareness: system layout IDs are well-known constants, and any PUT/DELETE
+      targeting a system layout is immediately rejected. For GET by ID, system layouts are
+      allowed for all authenticated users. For user layouts, the filter verifies the calling
+      user is the owner via Dataverse query or by delegating to WorkspaceLayoutService.
+    </context>
+    <constraints>
+      - MUST implement IEndpointFilter (ADR-008)
+      - MUST NOT use global middleware for authorization (ADR-008)
+      - MUST extract layout ID from route values ({id} parameter)
+      - MUST allow all authenticated users to read system layouts (GET)
+      - MUST reject PUT and DELETE on system layout IDs with 403 Forbidden and ProblemDetails
+      - MUST verify calling user owns the layout for user layout mutations
+      - MUST return 404 NotFound with ProblemDetails if layout does not exist
+      - MUST return 403 Forbidden with ProblemDetails if user does not own the layout
+      - MUST extract user identity from HttpContext.User claims
+      - MUST be applied per-endpoint, not globally — only on routes that accept {id} parameter
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/spec.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+    </files>
+    <patterns>
+      <pattern>Endpoint filter: public class WorkspaceLayoutAuthorizationFilter : IEndpointFilter { public async ValueTask&lt;object?&gt; InvokeAsync(EndpointFilterInvocationContext ctx, EndpointFilterDelegate next) }</pattern>
+      <pattern>Route value extraction: ctx.HttpContext.Request.RouteValues["id"]</pattern>
+      <pattern>User identity: ctx.HttpContext.User.FindFirst("oid")?.Value for Azure AD object ID</pattern>
+      <pattern>Short-circuit: return TypedResults.Problem(detail: "...", statusCode: 403, title: "Forbidden")</pattern>
+      <pattern>System layout check: SystemWorkspaceLayouts.IsSystemLayout(layoutId) returns true for well-known GUIDs</pattern>
+    </patterns>
+  </knowledge>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/WorkspaceLayoutAuthorizationFilter.cs (new)</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs (pattern reference)</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs (from Task 020)</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Workspace/SystemWorkspaceLayouts.cs (from Task 020)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read DocumentAuthorizationFilter.cs to understand the existing endpoint filter pattern — how it extracts route values, checks ownership, and returns ProblemDetails on failure</step>
+    <step order="2">Read the endpoint-filters.md pattern for the canonical filter structure and registration approach</step>
+    <step order="3">Create WorkspaceLayoutAuthorizationFilter.cs in the Api/Filters/ directory implementing IEndpointFilter</step>
+    <step order="4">Implement route value extraction — parse the {id} parameter as a GUID; return 400 BadRequest if malformed</step>
+    <step order="5">Implement system layout detection — check if the layout ID matches a well-known system layout GUID; for GET requests, allow and call next(); for PUT/DELETE, short-circuit with 403 Forbidden ProblemDetails ("System layouts cannot be modified")</step>
+    <step order="6">Implement user layout ownership check — extract the user's Azure AD object ID from HttpContext.User claims, call WorkspaceLayoutService to verify the layout exists and is owned by the calling user; return 404 if not found, 403 if not owned</step>
+    <step order="7">Implement the happy path — if all checks pass, call next() to proceed to the endpoint handler</step>
+    <step order="8">Run dotnet build to verify compilation succeeds with no errors</step>
+    <step order="9">Update TASK-INDEX.md: change task 022 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Api/Filters/WorkspaceLayoutAuthorizationFilter.cs — endpoint filter for layout ownership and system layout protection</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">WorkspaceLayoutAuthorizationFilter implements IEndpointFilter and compiles without errors</criterion>
+    <criterion testable="true">GET requests for system layout IDs pass through the filter (allowed for all authenticated users)</criterion>
+    <criterion testable="true">PUT and DELETE requests targeting system layout IDs are rejected with 403 Forbidden and a ProblemDetails body stating "System layouts cannot be modified"</criterion>
+    <criterion testable="true">PUT and DELETE requests for user layouts owned by a different user are rejected with 403 Forbidden</criterion>
+    <criterion testable="true">Requests for non-existent layout IDs return 404 NotFound with ProblemDetails</criterion>
+    <criterion testable="true">dotnet build passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 3 Group B — depends on 020 (service with system layout constants). Can run in parallel with Task 021. Task 023 depends on this task. Own files: WorkspaceLayoutAuthorizationFilter.cs (new).</protocol>
+  </execution>
+</task>

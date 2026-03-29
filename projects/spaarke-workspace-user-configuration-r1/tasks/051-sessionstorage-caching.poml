@@ -1,0 +1,57 @@
+<task id="WKSP-051" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Implement sessionStorage caching for workspace layouts</title>
+    <phase>6</phase>
+    <tags>frontend, performance</tags>
+    <estimated-effort>3h</estimated-effort>
+    <rigor-level>STANDARD</rigor-level>
+    <dependencies>032</dependencies>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <role>Senior developer implementing workspace personalization</role>
+    <goal>Implement sessionStorage-based caching for workspace layout data to enable instant rendering on same-session navigation and reduce redundant API calls.</goal>
+    <context>
+      When a user navigates between Dataverse forms and returns to the workspace page, the layout
+      data must be re-fetched from the BFF API. This creates a visible loading delay on every
+      navigation. By caching the last-used layout in sessionStorage, we can render instantly from
+      cache while optionally revalidating in the background.
+
+      The cache must be invalidated when the user saves a layout in the wizard (POST or PUT success)
+      to ensure stale data is never shown after edits.
+
+      sessionStorage is appropriate because layout data should not persist across browser sessions
+      (the API is the source of truth) but should persist across same-session navigations.
+    </context>
+    <constraints>
+      - MUST use sessionStorage (not localStorage) — data should not persist across sessions
+      - MUST cache the active layout JSON and layouts list on successful API fetch
+      - MUST use cached data for instant render on same-session return navigation
+      - MUST invalidate cache on wizard save success (POST/PUT layout)
+      - MUST fall back to API fetch on cache miss (first visit, cache cleared, new session)
+      - Cache key MUST be scoped to avoid conflicts (e.g., "sprk:workspace:layouts" prefix)
+      - MUST handle sessionStorage quota errors gracefully (try/catch, skip caching)
+      - MUST NOT block rendering on cache write operations
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files />
+  </knowledge>
+  <relevant-files>
+    <file>src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx</file>
+  </relevant-files>
+  <steps>
+    <step id="1">Create a workspaceLayoutCache utility module with get/set/clear functions wrapping sessionStorage with the "sprk:workspace:" key prefix and try/catch for quota errors.</step>
+    <step id="2">Add cache write: after successful API fetch of layouts list and active layout, write to sessionStorage via the cache utility.</step>
+    <step id="3">Add cache read: in the useWorkspaceLayouts hook, check sessionStorage first. If cached data exists, use it for immediate render and skip the API call (or optionally revalidate in background).</step>
+    <step id="4">Add cache invalidation: export a clearWorkspaceCache function. Call it from the wizard save success handler (after POST/PUT returns success) so stale data is never served after edits.</step>
+    <step id="5">Add error handling: wrap all sessionStorage operations in try/catch to handle quota exceeded, private browsing restrictions, and other storage errors without breaking the app.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Returning to workspace page within the same session renders instantly from cache without API delay</criterion>
+    <criterion>Cache is invalidated when a layout is saved via the wizard</criterion>
+    <criterion>First visit or new session correctly fetches from API when cache is empty</criterion>
+    <criterion>sessionStorage errors (quota, private browsing) are handled gracefully without breaking the app</criterion>
+  </acceptance-criteria>
+</task>

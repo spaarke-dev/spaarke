@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="WKSP-020" project="spaarke-workspace-user-configuration-r1">
+  <metadata>
+    <title>Create WorkspaceLayoutService — Dataverse CRUD for sprk_workspacelayout</title>
+    <status>pending</status>
+    <phase>3</phase>
+    <tags>bff-api</tags>
+    <estimated-effort>6h</estimated-effort>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>BFF API code implementation — creates a new service class with Dataverse WebApi CRUD operations, OBO auth, business rule enforcement (max 10, single default); ADR-001 and ADR-010 constraints apply</rigor-reason>
+    <dependencies>003, 004</dependencies>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET developer implementing workspace layout API</role>
+    <goal>
+      Create a WorkspaceLayoutService class that handles all Dataverse CRUD operations for the
+      sprk_workspacelayout entity via OBO-authenticated Dataverse WebApi calls. This service is
+      the single backend component for reading, creating, updating, and deleting user workspace
+      layouts. System layouts (e.g., "Corporate Workspace") are defined as code constants and
+      returned alongside user layouts — they are never stored in Dataverse.
+    </goal>
+    <context>
+      The BFF API uses .NET 8 Minimal API with OBO (On-Behalf-Of) authentication to call the
+      Dataverse WebApi. Existing services like SpeFileStore demonstrate the pattern for making
+      authenticated Dataverse calls. The sprk_workspacelayout entity stores per-user layout
+      configurations with fields: sprk_workspacelayoutid (GUID PK), sprk_name, sprk_templateid,
+      sprk_sectionsjson (JSON blob with schemaVersion), sprk_isdefault (boolean), sprk_sortorder
+      (int), and standard owner fields. Task 003 defines the entity schema and Task 004 defines
+      the DTO types (WorkspaceLayoutDto, CreateWorkspaceLayoutRequest, UpdateWorkspaceLayoutRequest).
+    </context>
+    <constraints>
+      - MUST use Minimal API patterns — no MVC controllers (ADR-001)
+      - MUST register as concrete type, not interface, unless a seam is required (ADR-010)
+      - MUST enforce max 10 user layouts per user on create — return 409 Conflict if exceeded
+      - MUST enforce single default — when setting a layout as default, clear isDefault on all other user layouts
+      - MUST NOT store system layouts in Dataverse — define as code constants
+      - MUST return system layouts alongside user layouts in list operations
+      - MUST use OBO-authenticated Dataverse WebApi calls
+      - MUST return ProblemDetails-compatible error information for service-level failures
+      - MUST filter Dataverse queries by ownerid to ensure user isolation
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/spec.md</file>
+      <file>projects/spaarke-workspace-user-configuration-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern>Dataverse WebApi CRUD: use HttpClient with OBO token to call /api/data/v9.2/sprk_workspacelayouts</pattern>
+      <pattern>OBO auth: acquire token via ITokenAcquisition for Dataverse scope, pass as Bearer header</pattern>
+      <pattern>System layouts: define as static readonly WorkspaceLayoutDto constants, merge into list results</pattern>
+      <pattern>Max 10 enforcement: query count of user layouts before insert, reject with 409 if >= 10</pattern>
+      <pattern>Single default: on create/update with isDefault=true, issue PATCH to clear isDefault on all other user layouts first</pattern>
+    </patterns>
+  </knowledge>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/ (new WorkspaceLayoutService.cs)</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs (pattern reference)</file>
+    <file>src/server/api/Sprk.Bff.Api/Models/ (DTO types from Task 004)</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read the existing service pattern in SpeFileStore.cs and the BFF API CLAUDE.md to understand DI registration, authentication, and Dataverse WebApi call patterns</step>
+    <step order="2">Read the DTO types created in Task 004 (WorkspaceLayoutDto, CreateWorkspaceLayoutRequest, UpdateWorkspaceLayoutRequest) to understand the data contracts</step>
+    <step order="3">Define system layout constants — create a static class or static field holding the "Corporate Workspace" system layout as a WorkspaceLayoutDto with a well-known GUID, marked as system (isSystem=true)</step>
+    <step order="4">Implement GetLayoutsAsync — query Dataverse for user layouts filtered by ownerid, prepend system layout constants, return combined list sorted by system-first then sortOrder</step>
+    <step order="5">Implement GetLayoutByIdAsync — check system layout constants first (return immediately if match), otherwise query Dataverse by ID with ownerid filter</step>
+    <step order="6">Implement GetDefaultLayoutAsync — query Dataverse for the user layout with sprk_isdefault=true; if none found, return the system default layout constant</step>
+    <step order="7">Implement CreateLayoutAsync — count existing user layouts (enforce max 10, return error if exceeded), handle isDefault toggle (clear others if setting as default), POST to Dataverse WebApi, return created layout</step>
+    <step order="8">Implement UpdateLayoutAsync — verify layout exists and is not a system layout, handle isDefault toggle, PATCH to Dataverse WebApi, return updated layout</step>
+    <step order="9">Implement DeleteLayoutAsync — verify layout exists and is not a system layout, DELETE via Dataverse WebApi; if deleted layout was default, do not auto-assign a new default</step>
+    <step order="10">Run dotnet build to verify compilation succeeds with no errors</step>
+    <step order="11">Update TASK-INDEX.md: change task 020 status from pending to completed</step>
+  </steps>
+
+  <outputs>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceLayoutService.cs — Dataverse CRUD service</artifact>
+    <artifact type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/SystemWorkspaceLayouts.cs — static system layout definitions</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">WorkspaceLayoutService compiles and exposes GetLayoutsAsync, GetLayoutByIdAsync, GetDefaultLayoutAsync, CreateLayoutAsync, UpdateLayoutAsync, and DeleteLayoutAsync methods</criterion>
+    <criterion testable="true">GetLayoutsAsync returns system layouts prepended to user layouts, filtered by the calling user's ownerid</criterion>
+    <criterion testable="true">CreateLayoutAsync returns a 409-equivalent error when the user already has 10 layouts</criterion>
+    <criterion testable="true">Setting isDefault=true on create or update clears isDefault on all other user layouts before applying</criterion>
+    <criterion testable="true">System layouts are defined as code constants and are never written to or read from Dataverse</criterion>
+    <criterion testable="true">dotnet build passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Phase 3 Group B — depends on 003 (entity schema) and 004 (DTO types). Safe to run in parallel with other Group B tasks. Tasks 021 and 022 depend on this task. Own files: WorkspaceLayoutService.cs (new), SystemWorkspaceLayouts.cs (new).</protocol>
+  </execution>
+</task>
