@@ -60,6 +60,14 @@ export type {
   DialogOptions,
 } from "./types";
 
+// Layout templates (workspace personalization)
+export { LAYOUT_TEMPLATES, getLayoutTemplate } from "./layoutTemplates";
+export type {
+  LayoutTemplate,
+  LayoutTemplateId,
+  LayoutTemplateRow,
+} from "./layoutTemplates";
+
 // Style hooks (optional, for advanced consumers)
 export {
   useWorkspaceShellStyles,
