@@ -22,11 +22,11 @@
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
 | 010 | Fix useFeedTodoSync no-op fallback | FULL | 2h | 001 | ✅ |
-| 011 | Migrate Get Started to SectionRegistration | FULL | 3h | 001 | 🔲 |
-| 012 | Migrate Quick Summary to SectionRegistration | FULL | 2h | 001 | 🔲 |
-| 013 | Migrate Latest Updates to SectionRegistration | FULL | 3h | 001 | 🔲 |
-| 014 | Migrate My To Do List to SectionRegistration | FULL | 3h | 001, 010 | 🔲 |
-| 015 | Migrate My Documents to SectionRegistration | FULL | 3h | 001 | 🔲 |
+| 011 | Migrate Get Started to SectionRegistration | FULL | 3h | 001 | ✅ |
+| 012 | Migrate Quick Summary to SectionRegistration | FULL | 2h | 001 | ✅ |
+| 013 | Migrate Latest Updates to SectionRegistration | FULL | 3h | 001 | ✅ |
+| 014 | Migrate My To Do List to SectionRegistration | FULL | 3h | 001, 010 | ✅ |
+| 015 | Migrate My Documents to SectionRegistration | FULL | 3h | 001 | ✅ |
 | 016 | Create aggregated SECTION_REGISTRY | STANDARD | 1h | 011-015 | 🔲 |
 
 ### Phase 3: Backend API (Group B — Parallel, after 003+004)
@@ -34,8 +34,8 @@
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
 | 020 | Create WorkspaceLayoutService | FULL | 6h | 003, 004 | ✅ |
-| 021 | Create workspace layout endpoints (8 endpoints) | FULL | 5h | 003, 020 | 🔲 |
-| 022 | Create workspace authorization filter | FULL | 3h | 020 | 🔲 |
+| 021 | Create workspace layout endpoints (8 endpoints) | FULL | 5h | 003, 020 | ✅ |
+| 022 | Create workspace authorization filter | FULL | 3h | 020 | ✅ |
 | 023 | Register workspace DI + wire endpoints | STANDARD | 2h | 020, 021, 022 | 🔲 |
 
 ### Phase 4: Dynamic Config & Header (Group C — after Phase 1+2)
