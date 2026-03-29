@@ -1,4 +1,4 @@
-<task id="WKSP-062" project="spaarke-workspace-user-configuration-r1">
+<task id="WKSP-062" project="spaarke-workspace-user-configuration-r1" status="completed">
   <metadata>
     <title>Deploy updated BFF API with workspace layout endpoints</title>
     <phase>7</phase>

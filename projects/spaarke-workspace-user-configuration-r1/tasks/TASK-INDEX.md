@@ -69,10 +69,10 @@
 
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
-| 060 | BFF integration tests | STANDARD | 6h | 021, 022, 023 | 🔲 |
-| 061 | Deploy wizard Code Page | MINIMAL | 2h | 044 | 🔲 |
-| 062 | Deploy BFF API | MINIMAL | 1h | 023 | 🔲 |
-| 063 | Deploy Corporate Workspace | MINIMAL | 2h | 032, 052 | 🔲 |
+| 060 | BFF integration tests | STANDARD | 6h | 021, 022, 023 | ✅ |
+| 061 | Deploy wizard Code Page | MINIMAL | 2h | 044 | ✅ |
+| 062 | Deploy BFF API | MINIMAL | 1h | 023 | ✅ |
+| 063 | Deploy Corporate Workspace | MINIMAL | 2h | 032, 052 | ✅ |
 | 090 | Project wrap-up | MINIMAL | 3h | all | 🔲 |
 
 ---
