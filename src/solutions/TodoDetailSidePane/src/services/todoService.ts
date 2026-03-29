@@ -7,12 +7,14 @@
  */
 
 import { getXrmWebApi, setRecordState } from "../utils/xrmAccess";
-import {
+import type {
   ITodoRecord,
   ITodoExtension,
-  TODO_DETAIL_SELECT,
-  TODO_EXTENSION_SELECT,
-} from "../types/TodoRecord";
+  IEventFieldUpdates,
+  ITodoExtensionUpdates,
+  IContactOption,
+} from "@spaarke/ui-components";
+import { TODO_DETAIL_SELECT, TODO_EXTENSION_SELECT } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -101,17 +103,8 @@ export async function loadTodoExtension(
 // Save sprk_event fields
 // ---------------------------------------------------------------------------
 
-/** Fields that can be saved on sprk_event. */
-export interface IEventFieldUpdates {
-  sprk_description?: string;
-  sprk_duedate?: string | null;
-  sprk_priorityscore?: number;
-  sprk_effortscore?: number;
-  /** Boolean flag — set to false to remove event from To Do board. */
-  sprk_todoflag?: boolean;
-  /** OData bind for the Assigned To lookup (contact table). */
-  "sprk_AssignedTo@odata.bind"?: string | null;
-}
+// Re-export shared types for backward compatibility
+export type { IEventFieldUpdates } from "@spaarke/ui-components";
 
 /**
  * Save one or more editable fields on the sprk_event record.
@@ -139,14 +132,8 @@ export async function saveTodoFields(
 // Save sprk_eventtodo fields
 // ---------------------------------------------------------------------------
 
-/** Fields that can be saved on sprk_eventtodo. */
-export interface ITodoExtensionUpdates {
-  sprk_todonotes?: string;
-  sprk_completed?: boolean;
-  sprk_completeddate?: string;
-  statecode?: number;
-  statuscode?: number;
-}
+// Re-export shared type for backward compatibility
+export type { ITodoExtensionUpdates } from "@spaarke/ui-components";
 
 /**
  * Save fields on the sprk_eventtodo record.
@@ -197,10 +184,8 @@ export async function deactivateTodoExtension(
 // Contact search for Assigned To lookup
 // ---------------------------------------------------------------------------
 
-export interface IContactOption {
-  id: string;
-  name: string;
-}
+// Re-export shared type for backward compatibility
+export type { IContactOption } from "@spaarke/ui-components";
 
 /**
  * Search standard contact records by name for the Assigned To picker.

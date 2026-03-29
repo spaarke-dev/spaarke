@@ -10,19 +10,19 @@
 
 | ID | Title | Status | Tags | Group | Dependencies |
 |----|-------|--------|------|-------|-------------|
-| 001 | Extract PanelSplitter to shared library | 🔲 | shared-library, react, refactoring | A | none |
-| 002 | Create useTwoPanelLayout hook | 🔲 | shared-library, react, code-page | B | 001 |
-| 003 | Extract TodoDetail to shared library | 🔲 | shared-library, react, refactoring | A | none |
-| 010 | Refactor TodoDetailSidePane to use shared TodoDetail | 🔲 | refactoring, code-page | C | 003 |
-| 011 | Refactor AnalysisWorkspace to use shared PanelSplitter | 🔲 | refactoring, code-page | C | 001 |
+| 001 | Extract PanelSplitter to shared library | ✅ | shared-library, react, refactoring | A | none |
+| 002 | Create useTwoPanelLayout hook | ✅ | shared-library, react, code-page | B | 001 |
+| 003 | Extract TodoDetail to shared library | ✅ | shared-library, react, refactoring | A | none |
+| 010 | Refactor TodoDetailSidePane to use shared TodoDetail | ✅ | refactoring, code-page | C | 003 |
+| 011 | Refactor AnalysisWorkspace to use shared PanelSplitter | ✅ | refactoring, code-page | C | 001 |
 
 ### Phase 2: SmartTodo Code Page Scaffold
 
 | ID | Title | Status | Tags | Group | Dependencies |
 |----|-------|--------|------|-------|-------------|
-| 020 | Scaffold SmartTodo Code Page project | 🔲 | code-page, react, scaffold | D | none |
-| 021 | Create TodoContext | 🔲 | react, code-page | E | 020 |
-| 022 | Copy SmartToDo domain files | 🔲 | code-page, react, refactoring | E | 020 |
+| 020 | Scaffold SmartTodo Code Page project | ✅ | code-page, react, scaffold | D | none |
+| 021 | Create TodoContext | ✅ | react, code-page | E | 020 |
+| 022 | Copy SmartToDo domain files | ✅ | code-page, react, refactoring | E | 020 |
 
 ### Phase 3: Integration
 

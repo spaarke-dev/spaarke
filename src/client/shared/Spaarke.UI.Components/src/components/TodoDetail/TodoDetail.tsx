@@ -1,5 +1,5 @@
 /**
- * TodoDetail — Main content component for the To Do Detail side pane.
+ * TodoDetail — Shared content component for the To Do Detail side pane.
  *
  * Layout (top to bottom):
  *   1. Description (editable, auto-expands, no scroll)
@@ -12,6 +12,8 @@
  *   - sprk_event: description, due date, scores, lookups
  *   - sprk_eventtodo: notes, completed flag/date, statuscode
  *
+ * Context-agnostic (ADR-012): No Xrm, no PCF APIs.
+ * All external I/O is via callback props.
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
 
@@ -46,15 +48,13 @@ import {
   CheckmarkRegular,
   OpenRegular,
 } from "@fluentui/react-icons";
-import { ITodoRecord } from "../types/TodoRecord";
-import type { ITodoExtension } from "../types/TodoRecord";
-import { searchContacts } from "../services/todoService";
 import type {
+  ITodoRecord,
+  ITodoExtension,
   IEventFieldUpdates,
   ITodoExtensionUpdates,
   IContactOption,
-} from "../services/todoService";
-import { getXrm } from "../utils/xrmAccess";
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
@@ -110,12 +110,6 @@ function toDateInputValue(dateStr?: string | null): string {
   if (isNaN(d.getTime())) return "";
   return d.toISOString().split("T")[0];
 }
-
-/** Map record type display name → Dataverse entity logical name for navigation. */
-const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
-  Matter: "sprk_matter",
-  Project: "sprk_project",
-};
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -314,7 +308,24 @@ export interface ITodoDetailProps {
   onRemoveTodo?: (eventId: string) => Promise<void>;
   /** Close the side pane. */
   onClose?: () => void;
+  /**
+   * Search contacts by name for the Assigned To picker.
+   * Decoupled from Xrm — host provides the implementation (ADR-012).
+   */
+  onSearchContacts: (query: string) => Promise<IContactOption[]>;
+  /**
+   * Open the regarding record (matter/project) in a new tab/window.
+   * Decoupled from Xrm — host provides the navigation implementation (ADR-012).
+   * Called with the entity logical name and record ID.
+   */
+  onOpenRegardingRecord?: (entityName: string, recordId: string) => void;
 }
+
+/** Map record type display name to Dataverse entity logical name for navigation. */
+const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
+  Matter: "sprk_matter",
+  Project: "sprk_project",
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -331,6 +342,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     onDeactivateTodoExt,
     onRemoveTodo,
     onClose,
+    onSearchContacts,
+    onOpenRegardingRecord,
   }) => {
     const styles = useStyles();
 
@@ -490,7 +503,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       []
     );
 
-    // Debounced contact search
+    // Debounced contact search (uses onSearchContacts callback prop)
     const searchTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
     const handleContactInput: ComboboxProps["onInput"] = React.useCallback(
       (ev: React.ChangeEvent<HTMLInputElement>) => {
@@ -503,12 +516,12 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         }
         setIsSearching(true);
         searchTimerRef.current = setTimeout(async () => {
-          const results = await searchContacts(q);
+          const results = await onSearchContacts(q);
           setContactOptions(results);
           setIsSearching(false);
         }, 300);
       },
-      []
+      [onSearchContacts]
     );
 
     const handleContactSelect: ComboboxProps["onOptionSelect"] = React.useCallback(
@@ -654,7 +667,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         }
 
         // Mark as completed on sprk_eventtodo — TWO separate calls:
-        // 1) Data fields via Xrm.WebApi  2) State change via direct REST API
+        // 1) Data fields via callback  2) State change via deactivate callback
         if (todoExtension?.sprk_eventtodoid) {
           // 1) Save data fields (completed flag, date, notes) while record is still active
           const dataUpdates: ITodoExtensionUpdates = {
@@ -674,7 +687,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             return;
           }
 
-          // 2) Deactivate via direct REST API (Xrm.WebApi ignores statecode/statuscode)
+          // 2) Deactivate via callback
           const stateResult = await onDeactivateTodoExt(
             todoExtension.sprk_eventtodoid
           );
@@ -705,30 +718,17 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       onDeactivateTodoExt,
     ]);
 
-    // Open regarding record in a new browser tab
+    // Open regarding record — delegates to host via callback prop
     const handleOpenRegardingRecord = React.useCallback(() => {
-      if (!record?.sprk_regardingrecordid) return;
+      if (!record?.sprk_regardingrecordid || !onOpenRegardingRecord) return;
       const typeName =
         record[
           "_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"
         ] ?? "";
       const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
       if (!entityName) return;
-
-      const xrm = getXrm();
-      if (xrm?.Navigation) {
-        xrm.Navigation.navigateTo(
-          {
-            pageType: "entityrecord",
-            entityName,
-            entityId: record.sprk_regardingrecordid,
-          },
-          { target: 1 } // 1 = new window/tab
-        ).catch(() => {
-          // Fallback: open via URL
-        });
-      }
-    }, [record]);
+      onOpenRegardingRecord(entityName, record.sprk_regardingrecordid);
+    }, [record, onOpenRegardingRecord]);
 
     // --- Render states ---
 
@@ -769,7 +769,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </MessageBar>
           )}
 
-          {/* ── Description (top) ──────────────────────────────────────── */}
+          {/* -- Description (top) -- */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
               Description
@@ -788,7 +788,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <div className={styles.divider} role="separator" />
 
-          {/* ── Details ────────────────────────────────────────────────── */}
+          {/* -- Details -- */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
               Details
@@ -878,7 +878,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <div className={styles.divider} role="separator" />
 
-          {/* ── To Do Notes (from sprk_eventtodo) ──────────────────────── */}
+          {/* -- To Do Notes (from sprk_eventtodo) -- */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
               To Do Notes
@@ -897,7 +897,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <div className={styles.divider} role="separator" />
 
-          {/* ── To Do Score: title row with circle + info, then sliders ── */}
+          {/* -- To Do Score: title row with circle + info, then sliders -- */}
           <div className={styles.section} style={{ marginBottom: "20px" }}>
             <div className={styles.sectionTitleRow}>
               <Text className={styles.sectionTitle} size={300}>
@@ -983,7 +983,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           </div>
         </div>
 
-        {/* ── Sticky footer ────────────────────────────────────────────── */}
+        {/* -- Sticky footer -- */}
         <div className={styles.footer}>
           {onRemoveTodo && (
             <Button

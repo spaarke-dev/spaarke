@@ -2,7 +2,7 @@
   <metadata>
     <title>Copy SmartToDo domain files to SmartTodo Code Page</title>
     <phase>2</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>code-page, react, refactoring</tags>
     <estimate>3h</estimate>
     <rigor-hint>FULL</rigor-hint>

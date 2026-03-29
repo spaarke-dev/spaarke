@@ -99,3 +99,9 @@ export * from './WorkspaceShell';
 
 // AssociateToStep - Wizard step for optionally associating a new record with an existing parent
 export * from './AssociateToStep';
+
+// PanelSplitter - Draggable, keyboard-accessible vertical panel divider
+export * from './PanelSplitter';
+
+// TodoDetail - Shared To Do Detail component (context-agnostic, ADR-012)
+export * from './TodoDetail';

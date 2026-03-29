@@ -92,11 +92,15 @@ jest.mock('../components/SourceViewerPanel', () => ({
   },
 }));
 
-jest.mock('../components/PanelSplitter', () => ({
-  PanelSplitter: function MockPanelSplitter() {
-    return React.createElement('div', { 'data-testid': 'panel-splitter' }, 'Splitter');
-  },
-}));
+jest.mock('@spaarke/ui-components', () => {
+  const actual = jest.requireActual('@spaarke/ui-components');
+  return {
+    ...actual,
+    PanelSplitter: function MockPanelSplitter() {
+      return React.createElement('div', { 'data-testid': 'panel-splitter' }, 'Splitter');
+    },
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

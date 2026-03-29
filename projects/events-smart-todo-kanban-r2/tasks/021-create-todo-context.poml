@@ -2,7 +2,7 @@
   <metadata>
     <title>Create TodoContext</title>
     <phase>2</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>react, code-page</tags>
     <estimate>2h</estimate>
     <rigor-hint>FULL</rigor-hint>

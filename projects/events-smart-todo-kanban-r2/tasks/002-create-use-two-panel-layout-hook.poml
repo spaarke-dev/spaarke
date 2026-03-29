@@ -2,7 +2,7 @@
   <metadata>
     <title>Create useTwoPanelLayout hook in shared library</title>
     <phase>1</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>shared-library, react, code-page</tags>
     <estimate>3h</estimate>
     <rigor-hint>FULL</rigor-hint>

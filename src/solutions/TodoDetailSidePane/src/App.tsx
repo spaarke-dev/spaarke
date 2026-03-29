@@ -23,12 +23,17 @@ import {
   saveTodoFields,
   saveTodoExtensionFields,
   deactivateTodoExtension,
+  searchContacts,
 } from "./services/todoService";
-import type { IEventFieldUpdates, ITodoExtensionUpdates } from "./services/todoService";
 import { sendTodoSaved } from "./utils/broadcastChannel";
-import { TodoDetail } from "./components/TodoDetail";
-import type { ITodoRecord } from "./types/TodoRecord";
-import type { ITodoExtension } from "./types/TodoRecord";
+import { getXrm } from "./utils/xrmAccess";
+import { TodoDetail } from "@spaarke/ui-components";
+import type {
+  ITodoRecord,
+  ITodoExtension,
+  IEventFieldUpdates,
+  ITodoExtensionUpdates,
+} from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -202,6 +207,32 @@ export function App() {
     [eventId]
   );
 
+  // Search contacts for the Assigned To picker
+  const handleSearchContacts = React.useCallback(
+    async (query: string) => searchContacts(query),
+    []
+  );
+
+  // Open regarding record in a new browser tab via Xrm.Navigation
+  const handleOpenRegardingRecord = React.useCallback(
+    (entityName: string, recordId: string) => {
+      const xrm = getXrm();
+      if (xrm?.Navigation) {
+        xrm.Navigation.navigateTo(
+          {
+            pageType: "entityrecord",
+            entityName,
+            entityId: recordId,
+          },
+          { target: 1 } // 1 = new window/tab
+        ).catch(() => {
+          // Fallback: silent — Xrm navigation failed
+        });
+      }
+    },
+    []
+  );
+
   // Remove from To Do — sets sprk_todoflag = false, notifies Kanban, closes pane
   const handleRemoveTodo = React.useCallback(
     async (evtId: string) => {
@@ -242,6 +273,8 @@ export function App() {
             onDeactivateTodoExt={handleDeactivateTodoExt}
             onRemoveTodo={handleRemoveTodo}
             onClose={handleClose}
+            onSearchContacts={handleSearchContacts}
+            onOpenRegardingRecord={handleOpenRegardingRecord}
           />
         </div>
       </div>

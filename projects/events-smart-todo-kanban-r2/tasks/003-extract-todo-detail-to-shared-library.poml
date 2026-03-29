@@ -2,7 +2,7 @@
   <metadata>
     <title>Extract TodoDetail to shared library</title>
     <phase>1</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>shared-library, react, refactoring</tags>
     <estimate>3h</estimate>
     <rigor-hint>FULL</rigor-hint>

@@ -2,7 +2,7 @@
   <metadata>
     <title>Refactor AnalysisWorkspace to use shared PanelSplitter</title>
     <phase>1</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>refactoring, code-page</tags>
     <estimate>1h</estimate>
     <rigor-hint>STANDARD</rigor-hint>

@@ -74,7 +74,7 @@ import {
   Chat20Regular,
 } from '@fluentui/react-icons';
 import type { RichTextEditorRef } from '@spaarke/ui-components';
-import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS } from '@spaarke/ui-components';
+import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS, PanelSplitter } from '@spaarke/ui-components';
 import { useDocumentHistory } from '@spaarke/ui-components/hooks/useDocumentHistory';
 import { useAuth } from './hooks/useAuth';
 import { useAnalysisLoader } from './hooks/useAnalysisLoader';
@@ -87,7 +87,6 @@ import { useDiffReview } from './hooks/useDiffReview';
 import { EditorPanel } from './components/EditorPanel';
 import { SourceViewerPanel } from './components/SourceViewerPanel';
 import { ChatPanel } from './components/ChatPanel';
-import { PanelSplitter } from './components/PanelSplitter';
 import { ReAnalysisProgressOverlay } from './components/ReAnalysisProgressOverlay';
 import { DiffReviewPanel } from './components/DiffReviewPanel';
 import { AnalysisAiProvider } from './context/AnalysisAiContext';

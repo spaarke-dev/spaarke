@@ -1,9 +1,11 @@
 /**
- * TodoRecord — Fields needed for the Todo Detail side pane display.
+ * TodoDetail types — Shared type definitions for the Todo Detail component.
  *
  * Data comes from TWO entities:
  *   - sprk_event: core event fields (description, due date, scores, lookups)
  *   - sprk_eventtodo: to-do extension fields (notes, completed, statuscode)
+ *
+ * Extracted from TodoDetailSidePane for reuse across solutions (ADR-012).
  */
 
 // ---------------------------------------------------------------------------
@@ -79,3 +81,31 @@ export const TODO_EXTENSION_SELECT = [
   "statecode",
   "statuscode",
 ].join(",");
+
+// ---------------------------------------------------------------------------
+// Field update types (for save callbacks)
+// ---------------------------------------------------------------------------
+
+export interface IEventFieldUpdates {
+  sprk_description?: string;
+  sprk_duedate?: string | null;
+  sprk_priorityscore?: number;
+  sprk_effortscore?: number;
+  /** Boolean flag — set to false to remove event from To Do board. */
+  sprk_todoflag?: boolean;
+  /** OData bind for the Assigned To lookup (contact table). */
+  "sprk_AssignedTo@odata.bind"?: string | null;
+}
+
+export interface ITodoExtensionUpdates {
+  sprk_todonotes?: string;
+  sprk_completed?: boolean;
+  sprk_completeddate?: string;
+  statecode?: number;
+  statuscode?: number;
+}
+
+export interface IContactOption {
+  id: string;
+  name: string;
+}

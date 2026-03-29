@@ -15,3 +15,4 @@ export * from './useForceSimulation';
 export * from './useInlineAiToolbar';
 export * from './useInlineAiActions';
 export * from './useSlashCommands';
+export * from './useTwoPanelLayout';

@@ -1,18 +1,19 @@
 /**
  * PanelSplitter Component
  *
- * A draggable, keyboard-accessible vertical splitter between the editor and
- * source viewer panels. Renders a 4px grip area with hover/focus indicators
- * and an ARIA role="separator" for accessibility compliance.
+ * A draggable, keyboard-accessible vertical splitter between resizable panels.
+ * Renders a 4px grip area with hover/focus indicators and an ARIA role="separator"
+ * for accessibility compliance.
  *
  * Features:
  * - Mouse drag to resize
  * - Keyboard resize (ArrowLeft / ArrowRight)
- * - Double-click to reset to default 60/40 split
+ * - Double-click to reset to default split
  * - ARIA separator role with aria-valuenow
  * - Fluent v9 design tokens for all styling (ADR-021)
  *
  * @see ADR-021 - Fluent UI v9 design system
+ * @see ADR-012 - Shared component library
  */
 
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
