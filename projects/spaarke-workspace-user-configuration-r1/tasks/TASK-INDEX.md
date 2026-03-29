@@ -21,7 +21,7 @@
 
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
-| 010 | Fix useFeedTodoSync no-op fallback | FULL | 2h | 001 | 🔲 |
+| 010 | Fix useFeedTodoSync no-op fallback | FULL | 2h | 001 | ✅ |
 | 011 | Migrate Get Started to SectionRegistration | FULL | 3h | 001 | 🔲 |
 | 012 | Migrate Quick Summary to SectionRegistration | FULL | 2h | 001 | 🔲 |
 | 013 | Migrate Latest Updates to SectionRegistration | FULL | 3h | 001 | 🔲 |
@@ -33,7 +33,7 @@
 
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
-| 020 | Create WorkspaceLayoutService | FULL | 6h | 003, 004 | 🔲 |
+| 020 | Create WorkspaceLayoutService | FULL | 6h | 003, 004 | ✅ |
 | 021 | Create workspace layout endpoints (8 endpoints) | FULL | 5h | 003, 020 | 🔲 |
 | 022 | Create workspace authorization filter | FULL | 3h | 020 | 🔲 |
 | 023 | Register workspace DI + wire endpoints | STANDARD | 2h | 020, 021, 022 | 🔲 |
@@ -50,7 +50,7 @@
 
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
-| 040 | Scaffold wizard Code Page project | FULL | 4h | — | 🔲 |
+| 040 | Scaffold wizard Code Page project | FULL | 4h | — | ✅ |
 | 041 | Wizard Step 1: Template selection | FULL | 5h | 002, 040 | 🔲 |
 | 042 | Wizard Step 2: Section selection | FULL | 5h | 041 | 🔲 |
 | 043 | Wizard Step 3: Arrange sections (DnD) | FULL | 8h | 042 | 🔲 |

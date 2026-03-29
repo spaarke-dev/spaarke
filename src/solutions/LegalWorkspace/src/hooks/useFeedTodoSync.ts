@@ -1,8 +1,10 @@
 /**
  * useFeedTodoSync — convenient hook to access FeedTodoSyncContext.
  *
- * Throws a descriptive error if consumed outside FeedTodoSyncProvider,
- * making misconfiguration immediately visible during development.
+ * Returns a no-op fallback when consumed outside FeedTodoSyncProvider,
+ * allowing SmartToDo (and other consumers) to work independently in any
+ * context — workspace with ActivityFeed, without ActivityFeed, or
+ * standalone Code Page.
  *
  * Usage:
  *   const { isFlagged, toggleFlag, isPending, getError } = useFeedTodoSync();
@@ -26,21 +28,31 @@ import {
 } from '../contexts/FeedTodoSyncContext';
 
 /**
+ * No-op fallback returned when the hook is consumed outside of a
+ * FeedTodoSyncProvider. Every method is a safe stub that does nothing,
+ * so SmartToDo can render independently without crashing.
+ */
+const NOOP_SYNC: IFeedTodoSyncContextValue = {
+  isFlagged: () => false,
+  toggleFlag: async () => {},
+  getFlaggedCount: () => 0,
+  isPending: () => false,
+  getError: () => undefined,
+  subscribe: () => () => {},
+  initFlags: () => {},
+  _flagsSnapshot: new Map(),
+};
+
+/**
  * Access the FeedTodoSyncContext value.
  *
- * @returns IFeedTodoSyncContextValue — the full context API
- * @throws  Error if called outside of FeedTodoSyncProvider
+ * When a FeedTodoSyncProvider is present in the tree the real context is
+ * returned. Otherwise a safe no-op fallback ({@link NOOP_SYNC}) is
+ * returned so consumers do not need to guard against missing providers.
+ *
+ * @returns IFeedTodoSyncContextValue — the full context API (or no-op stubs)
  */
 export function useFeedTodoSync(): IFeedTodoSyncContextValue {
   const ctx = useContext(FeedTodoSyncContext);
-
-  if (ctx === null) {
-    throw new Error(
-      'useFeedTodoSync must be used within a <FeedTodoSyncProvider>. ' +
-        'Ensure FeedTodoSyncProvider wraps both Block 3 (ActivityFeed) and ' +
-        'Block 4 (SmartToDo) in the component tree, typically at LegalWorkspaceApp level.'
-    );
-  }
-
-  return ctx;
+  return ctx ?? NOOP_SYNC;
 }

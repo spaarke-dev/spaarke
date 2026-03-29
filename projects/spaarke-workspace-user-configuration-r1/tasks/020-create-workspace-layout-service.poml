@@ -2,7 +2,7 @@
 <task id="WKSP-020" project="spaarke-workspace-user-configuration-r1">
   <metadata>
     <title>Create WorkspaceLayoutService — Dataverse CRUD for sprk_workspacelayout</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>3</phase>
     <tags>bff-api</tags>
     <estimated-effort>6h</estimated-effort>
