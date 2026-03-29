@@ -262,3 +262,12 @@ export function useTodoContext(): TodoContextValue {
   }
   return ctx;
 }
+
+/**
+ * Access the TodoContext optionally. Returns null if no provider is present.
+ * Use this in components that may render both inside and outside a TodoProvider
+ * (e.g. SmartToDo used standalone vs. inside SmartTodoApp Code Page).
+ */
+export function useOptionalTodoContext(): TodoContextValue | null {
+  return React.useContext(TodoContext);
+}

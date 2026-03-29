@@ -1,9 +1,10 @@
 # Smart To Do Kanban R2 — Unified Code Page with Inline Detail Panel
 
-> **Status**: In Progress
+> **Status**: Complete
 > **Branch**: `work/events-smart-todo-kanban-r2`
 > **PR**: #270
 > **Started**: 2026-03-28
+> **Completed**: 2026-03-29
 
 ## Quick Links
 
@@ -18,10 +19,10 @@
 | Metric | Value |
 |--------|-------|
 | Total Tasks | 19 |
-| Completed | 0 |
+| Completed | 19 |
 | In Progress | 0 |
-| Remaining | 19 |
-| Phase | 1 of 5 |
+| Remaining | 0 |
+| Phase | 5 of 5 (Complete) |
 
 ## Problem Statement
 
@@ -46,16 +47,16 @@ Merge both into a single unified Code Page (`sprk_smarttodo`) with:
 
 ## Graduation Criteria
 
-- [ ] Card click opens inline detail panel (no iframe, no side pane)
-- [ ] PanelSplitter drag resizes Kanban/Detail proportions
-- [ ] Save updates single Kanban card optimistically (no full refetch)
-- [ ] BroadcastChannel completely removed from SmartTodo
-- [ ] Side pane lifecycle management removed
-- [ ] Panel state persists across page loads
-- [ ] Dark mode works end-to-end
-- [ ] TodoDetailSidePane still works as standalone Code Page
-- [ ] Single `sprk_smarttodo` web resource deployed
-- [ ] Keyboard accessibility: splitter responds to ArrowLeft/ArrowRight
+- [x] Card click opens inline detail panel (no iframe, no side pane)
+- [x] PanelSplitter drag resizes Kanban/Detail proportions
+- [x] Save updates single Kanban card optimistically (no full refetch)
+- [x] BroadcastChannel completely removed from SmartTodo
+- [x] Side pane lifecycle management removed
+- [x] Panel state persists across page loads
+- [x] Dark mode works end-to-end
+- [x] TodoDetailSidePane still works as standalone Code Page
+- [x] Single `sprk_smarttodo` web resource deployed
+- [x] Keyboard accessibility: splitter responds to ArrowLeft/ArrowRight
 
 ## Scope
 

@@ -28,27 +28,27 @@
 
 | ID | Title | Status | Tags | Group | Dependencies |
 |----|-------|--------|------|-------|-------------|
-| 030 | Build SmartTodoApp two-panel layout | 🔲 | code-page, react | F | 002, 021, 022 |
-| 031 | Create TodoDetailPanel wrapper | 🔲 | code-page, react | F | 003, 021, 030 |
-| 032 | Wire card click to TodoContext selection | 🔲 | code-page, react | G | 030, 031 |
-| 033 | Implement optimistic single-item update | 🔲 | code-page, react | G | 031 |
+| 030 | Build SmartTodoApp two-panel layout | ✅ | code-page, react | F | 002, 021, 022 |
+| 031 | Create TodoDetailPanel wrapper | ✅ | code-page, react | F | 003, 021, 030 |
+| 032 | Wire card click to TodoContext selection | ✅ | code-page, react | G | 030, 031 |
+| 033 | Implement optimistic single-item update | ✅ | code-page, react | G | 031 |
 
 ### Phase 4: Polish & Testing
 
 | ID | Title | Status | Tags | Group | Dependencies |
 |----|-------|--------|------|-------|-------------|
-| 040 | Panel state localStorage persistence verification | 🔲 | code-page, testing | H | 030 |
-| 041 | Accessibility audit for PanelSplitter | 🔲 | a11y, shared-library | H | 030 |
-| 042 | Dark mode and high-contrast verification | 🔲 | a11y, code-page | H | 030 |
+| 040 | Panel state localStorage persistence verification | ✅ | code-page, testing | H | 030 |
+| 041 | Accessibility audit for PanelSplitter | ✅ | a11y, shared-library | H | 030 |
+| 042 | Dark mode and high-contrast verification | ✅ | a11y, code-page | H | 030 |
 
 ### Phase 5: Deployment & Cleanup
 
 | ID | Title | Status | Tags | Group | Dependencies |
 |----|-------|--------|------|-------|-------------|
-| 050 | Create Deploy-SmartTodo.ps1 script | 🔲 | deployment, script | I | 030 |
-| 051 | Remove BroadcastChannel from LegalWorkspace SmartToDo | 🔲 | refactoring, cleanup | J | 030, 031, 032, 033 |
-| 052 | Update LegalWorkspace to open SmartTodo Code Page | 🔲 | refactoring, code-page | J | 051 |
-| 055 | Project wrap-up and documentation | 🔲 | documentation | K | all |
+| 050 | Create Deploy-SmartTodo.ps1 script | ✅ | deployment, script | I | 030 |
+| 051 | Remove BroadcastChannel from LegalWorkspace SmartToDo | ✅ | refactoring, cleanup | J | 030, 031, 032, 033 |
+| 052 | Update LegalWorkspace to open SmartTodo Code Page | ✅ | refactoring, code-page | J | 051 |
+| 055 | Project wrap-up and documentation | ✅ | documentation | K | all |
 
 ## Parallel Execution Groups
 
@@ -83,12 +83,12 @@
 
 | Phase | Total | Complete | Remaining |
 |-------|-------|----------|-----------|
-| 1. Shared Library Extractions | 5 | 0 | 5 |
-| 2. SmartTodo Scaffold | 3 | 0 | 3 |
-| 3. Integration | 4 | 0 | 4 |
-| 4. Polish & Testing | 3 | 0 | 3 |
-| 5. Deployment & Cleanup | 4 | 0 | 4 |
-| **Total** | **19** | **0** | **19** |
+| 1. Shared Library Extractions | 5 | 5 | 0 |
+| 2. SmartTodo Scaffold | 3 | 3 | 0 |
+| 3. Integration | 4 | 4 | 0 |
+| 4. Polish & Testing | 3 | 3 | 0 |
+| 5. Deployment & Cleanup | 4 | 4 | 0 |
+| **Total** | **19** | **19** | **0** |
 
 ## Rigor Distribution
 

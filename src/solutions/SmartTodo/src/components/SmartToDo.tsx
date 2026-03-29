@@ -56,6 +56,7 @@ import { useUserPreferences } from "../hooks/useUserPreferences";
 import { DataverseService } from "../services/DataverseService";
 import { IEvent } from "../types/entities";
 import { computeTodoScore } from "../utils/todoScoreUtils";
+import { useOptionalTodoContext } from "../context/TodoContext";
 import type { TodoColumn } from "../types/enums";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { IWebApi } from "../types/xrm";
@@ -262,6 +263,23 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onShowMore,
 }) => {
   const styles = useStyles();
+
+  // -------------------------------------------------------------------------
+  // TodoContext integration (optional — only available inside TodoProvider)
+  // When embedded mode is active (disableSidePane), card clicks do NOT
+  // open the detail panel.
+  // -------------------------------------------------------------------------
+
+  const todoCtx = useOptionalTodoContext();
+
+  const handleCardClick = React.useCallback(
+    (eventId: string) => {
+      // In embedded mode, card clicks should NOT open the detail panel
+      if (embedded) return;
+      todoCtx?.selectItem(eventId);
+    },
+    [embedded, todoCtx],
+  );
 
   // Stable DataverseService reference
   const serviceRef = React.useRef<DataverseService>(new DataverseService(webApi));
@@ -566,6 +584,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // renderCard for KanbanBoard
   // -------------------------------------------------------------------------
 
+  const selectedEventId = todoCtx?.selectedEventId ?? null;
+
   const renderCard = React.useCallback(
     (item: IEvent, _index: number, columnId: string) => {
       // Get column accent colour from the columns array
@@ -574,11 +594,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         <KanbanCard
           event={item}
           onPinToggle={handlePinToggle}
+          onClick={handleCardClick}
           accentColor={col?.accentColor}
+          isSelected={item.sprk_eventid === selectedEventId}
         />
       );
     },
-    [columns, handlePinToggle]
+    [columns, handlePinToggle, handleCardClick, selectedEventId]
   );
 
   const getItemId = React.useCallback(

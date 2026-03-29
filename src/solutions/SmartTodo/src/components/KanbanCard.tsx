@@ -124,6 +124,13 @@ const useStyles = makeStyles({
     },
   },
 
+  cardSelected: {
+    backgroundColor: tokens.colorNeutralBackground1Selected,
+    ":hover": {
+      backgroundColor: tokens.colorNeutralBackground1Selected,
+    },
+  },
+
   cardCompleted: {
     opacity: "0.6",
   },
@@ -218,6 +225,8 @@ export interface IKanbanCardProps {
   onClick?: (eventId: string) => void;
   /** Left border accent colour from parent column. */
   accentColor?: string;
+  /** Whether this card is currently selected (detail panel open). */
+  isSelected?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +234,7 @@ export interface IKanbanCardProps {
 // ---------------------------------------------------------------------------
 
 export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
-  ({ event, onPinToggle, onClick, accentColor }) => {
+  ({ event, onPinToggle, onClick, accentColor, isSelected = false }) => {
     const styles = useStyles();
 
     // Derived display values
@@ -273,6 +282,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
 
     const cardAriaLabel = [
       event.sprk_eventname,
+      isSelected ? "Selected." : "",
       isCompleted ? "Completed." : "Open.",
       isPinned ? "Pinned." : "",
       dueDateFormatted ? `Due: ${dueDateFormatted}.` : "",
@@ -286,7 +296,11 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
     // Class composition
     // -----------------------------------------------------------------------
 
-    const cardClassName = [styles.card, isCompleted ? styles.cardCompleted : ""]
+    const cardClassName = [
+      styles.card,
+      isSelected ? styles.cardSelected : "",
+      isCompleted ? styles.cardCompleted : "",
+    ]
       .filter(Boolean)
       .join(" ");
 
@@ -321,6 +335,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
         role="listitem"
         tabIndex={0}
         aria-label={cardAriaLabel}
+        aria-selected={isSelected}
         onClick={handleCardClick}
         onKeyDown={handleCardKeyDown}
       >

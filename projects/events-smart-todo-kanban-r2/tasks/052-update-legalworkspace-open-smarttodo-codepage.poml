@@ -2,7 +2,7 @@
   <metadata>
     <title>Update LegalWorkspace to open SmartTodo Code Page</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>refactoring, code-page</tags>
     <estimate>1h</estimate>
     <rigor-hint>STANDARD</rigor-hint>

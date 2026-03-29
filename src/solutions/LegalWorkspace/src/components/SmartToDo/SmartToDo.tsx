@@ -9,7 +9,6 @@
  *   - KanbanHeader: title, AddTodoBar, recalculate button, settings gear
  *   - KanbanBoard: drag-and-drop columns with KanbanCard items
  *   - DismissedSection: collapsible section for dismissed items
- *   - TodoDetailSidePane: Xrm.App.sidePanes web resource for full event details
  *
  * Data:
  *   - Fetches active to-do items via useTodoItems hook
@@ -196,36 +195,6 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalS,
   },
 
-  // ── Split layout: Kanban + inline detail panel ──────────────────────────
-  splitContainer: {
-    display: "flex",
-    flexDirection: "row",
-    flex: "1 1 0",
-    minHeight: 0,
-    overflow: "hidden",
-  },
-  splitKanban: {
-    flex: "1 1 0",
-    display: "flex",
-    flexDirection: "column",
-    minWidth: 0,
-    overflow: "hidden",
-  },
-  inlineDetailPanel: {
-    width: "420px",
-    flexShrink: 0,
-    display: "flex",
-    flexDirection: "column",
-    borderLeftWidth: "1px",
-    borderLeftStyle: "solid",
-    borderLeftColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  inlineDetailIframe: {
-    flex: "1 1 0",
-    border: "none",
-    width: "100%",
-  },
 });
 
 // ---------------------------------------------------------------------------
@@ -282,10 +251,8 @@ export interface ISmartToDoProps {
   onRefetchReady?: (refetch: () => void) => void;
   /** Called when "Show more" is clicked. */
   onShowMore?: () => void;
-  /** When true, disables card click → side pane behavior. */
+  /** When true, disables card click behavior (used for workspace glance mode). */
   disableSidePane?: boolean;
-  /** When true, opens todo detail as a nested dialog instead of a side pane (for dialog context). */
-  useDialogForDetail?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +268,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onRefetchReady,
   onShowMore,
   disableSidePane = false,
-  useDialogForDetail = false,
 }) => {
   const styles = useStyles();
 
@@ -583,213 +549,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   );
 
   // -------------------------------------------------------------------------
-  // Card click handler: open Xrm.App.sidePanes detail pane
-  // -------------------------------------------------------------------------
-
-  // -------------------------------------------------------------------------
-  // Xrm resolution — try all frame levels (matches EventsPage getXrm pattern)
-  // -------------------------------------------------------------------------
-
-  const getXrm = React.useCallback((): any | null => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (typeof Xrm !== "undefined" && (Xrm as any)?.App?.sidePanes) return Xrm;
-    try {
-      const p = (window.parent as any)?.Xrm;
-      if (p?.App?.sidePanes) return p;
-    } catch { /* cross-origin */ }
-    try {
-      const t = (window.top as any)?.Xrm;
-      if (t?.App?.sidePanes) return t;
-    } catch { /* cross-origin */ }
-    return null;
-  }, []);
-
-  const TODO_PANE_ID = "todoDetailPane";
-
-  const handleCardClick = React.useCallback(async (eventId: string) => {
-    try {
-      const xrm = getXrm();
-      const sidePanes = xrm?.App?.sidePanes;
-      if (!sidePanes) {
-        console.warn("[SmartToDo] Xrm.App.sidePanes not available");
-        return;
-      }
-
-      const pageInput = {
-        pageType: "webresource",
-        webresourceName: "sprk_tododetailsidepane",
-        data: `eventId=${eventId}`,
-      };
-
-      const existingPane = sidePanes.getPane(TODO_PANE_ID);
-      if (existingPane) {
-        await existingPane.navigate(pageInput);
-        existingPane.select();
-      } else {
-        const pane = await sidePanes.createPane({
-          title: "To Do Details",
-          paneId: TODO_PANE_ID,
-          canClose: true,
-          width: 400,
-          isSelected: true,
-        });
-        await pane.navigate(pageInput);
-      }
-    } catch (err) {
-      console.warn("[SmartToDo] Side pane unavailable", err);
-    }
-  }, [getXrm]);
-
-  // -------------------------------------------------------------------------
-  // Inline detail panel (for dialog context — useDialogForDetail)
-  // Renders the TodoDetailSidePane as an iframe panel alongside the Kanban.
-  // The parent exposes Xrm on window (via xrmProvider.ts) so the child
-  // iframe can access it via window.parent.Xrm.
-  // -------------------------------------------------------------------------
-
-  const [inlineDetailEventId, setInlineDetailEventId] = React.useState<string | null>(null);
-
-  const handleCardClickInline = React.useCallback(
-    (eventId: string) => {
-      setInlineDetailEventId(eventId);
-    },
-    []
-  );
-
-  const handleCloseInlineDetail = React.useCallback(() => {
-    setInlineDetailEventId(null);
-    refetch(); // Sync changes when panel closes
-  }, [refetch]);
-
-  // Build iframe URL using the Dataverse client URL
-  const inlineDetailUrl = React.useMemo(() => {
-    if (!inlineDetailEventId) return "";
-    try {
-      const xrm = getXrm();
-      const ctx = xrm?.Utility?.getGlobalContext?.();
-      const clientUrl = ctx?.getClientUrl?.() ?? "";
-      return `${clientUrl}/WebResources/sprk_tododetailsidepane?data=eventId%3D${inlineDetailEventId}`;
-    } catch {
-      return "";
-    }
-  }, [inlineDetailEventId, getXrm]);
-
-  // -------------------------------------------------------------------------
-  // BroadcastChannel: listen for saves from TodoDetailSidePane → refetch
-  // -------------------------------------------------------------------------
-
-  React.useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    try {
-      channel = new BroadcastChannel("spaarke-todo-detail-channel");
-      channel.onmessage = (ev: MessageEvent) => {
-        if (ev.data?.type === "TODO_SAVED" || ev.data?.type === "TODO_DETAIL_SAVED") {
-          refetch();
-        }
-      };
-    } catch {
-      // BroadcastChannel not supported — ignore
-    }
-    return () => {
-      channel?.close();
-    };
-  }, [refetch]);
-
-  // -------------------------------------------------------------------------
-  // Close side pane on navigation away or when user interacts elsewhere.
-  //
-  // Strategies (layered):
-  //   1. URL polling (200ms) — Dataverse SPA navigation doesn't fire unload
-  //   2. beforeunload / pagehide — standard browser navigation
-  //   3. Parent frame hashchange / popstate — SPA route changes
-  //   4. IntersectionObserver — tab switch sets display:none
-  //   5. Document mousedown — user clicks outside SmartToDo (flat grid nav)
-  //   6. React cleanup — component unmount
-  // -------------------------------------------------------------------------
-
-  const rootRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    const closeTodoPane = () => {
-      try {
-        const xrm = getXrm();
-        const pane = xrm?.App?.sidePanes?.getPane(TODO_PANE_ID);
-        if (pane) pane.close();
-      } catch {
-        // Side pane API unavailable — ignore
-      }
-    };
-
-    // Capture initial parent URL for SPA navigation detection
-    let lastParentHref = "";
-    try { lastParentHref = window.parent?.location?.href ?? ""; } catch { /* cross-origin */ }
-
-    // Poll for Dataverse SPA navigation (URL changes without unload events)
-    const navCheckInterval = setInterval(() => {
-      try {
-        const currentHref = window.parent?.location?.href ?? "";
-        if (lastParentHref && currentHref && currentHref !== lastParentHref) {
-          closeTodoPane();
-          lastParentHref = currentHref;
-        }
-      } catch { /* cross-origin — ignore */ }
-    }, 200);
-
-    // Standard browser events
-    window.addEventListener("beforeunload", closeTodoPane);
-    window.addEventListener("pagehide", closeTodoPane);
-
-    // Parent frame navigation events
-    const handleParentNav = () => closeTodoPane();
-    try {
-      window.parent?.addEventListener("hashchange", handleParentNav);
-      window.parent?.addEventListener("popstate", handleParentNav);
-    } catch { /* cross-origin — ignore */ }
-
-    // IntersectionObserver: detect when SmartToDo is hidden (e.g. tab switch
-    // sets display:none on the parent tab panel)
-    let observer: IntersectionObserver | undefined;
-    if (rootRef.current) {
-      observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) {
-              closeTodoPane();
-            }
-          }
-        },
-        { threshold: 0 }
-      );
-      observer.observe(rootRef.current);
-    }
-
-    // Document mousedown: close pane when user clicks outside SmartToDo.
-    // In a flat-grid workspace, all sections are always visible — this
-    // detects when the user interacts with another part of the page.
-    const handleDocumentMouseDown = (ev: MouseEvent) => {
-      if (!rootRef.current) return;
-      const target = ev.target as Node | null;
-      if (target && !rootRef.current.contains(target)) {
-        closeTodoPane();
-      }
-    };
-    document.addEventListener("mousedown", handleDocumentMouseDown, true);
-
-    return () => {
-      clearInterval(navCheckInterval);
-      observer?.disconnect();
-      document.removeEventListener("mousedown", handleDocumentMouseDown, true);
-      window.removeEventListener("beforeunload", closeTodoPane);
-      window.removeEventListener("pagehide", closeTodoPane);
-      try {
-        window.parent?.removeEventListener("hashchange", handleParentNav);
-        window.parent?.removeEventListener("popstate", handleParentNav);
-      } catch { /* cross-origin — ignore */ }
-      closeTodoPane();
-    };
-  }, [getXrm]);
-
-  // -------------------------------------------------------------------------
   // Settings: save thresholds
   // -------------------------------------------------------------------------
 
@@ -812,6 +571,55 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   );
 
   // -------------------------------------------------------------------------
+  // Open SmartTodo Code Page via Xrm.Navigation.navigateTo (ADR-006)
+  // -------------------------------------------------------------------------
+
+  const handleOpenSmartTodo = React.useCallback(
+    (eventId?: string) => {
+      try {
+        const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
+        if (xrm?.Navigation?.navigateTo) {
+          const data = eventId ? `eventId=${encodeURIComponent(eventId)}` : undefined;
+          xrm.Navigation.navigateTo(
+            {
+              pageType: "webresource",
+              webresourceName: "sprk_smarttodo",
+              ...(data ? { data } : {}),
+            },
+            {
+              target: 2,
+              width: { value: 85, unit: "%" },
+              height: { value: 85, unit: "%" },
+            }
+          );
+        }
+      } catch (e) {
+        console.warn("[SmartToDo] Could not open SmartTodo Code Page:", e);
+      }
+    },
+    []
+  );
+
+  /** Card click handler — opens Code Page with the clicked item's ID. */
+  const handleCardClick = React.useCallback(
+    (eventId: string) => {
+      if (!disableSidePane) {
+        handleOpenSmartTodo(eventId);
+      }
+    },
+    [disableSidePane, handleOpenSmartTodo]
+  );
+
+  /** "Show more" handler — opens Code Page without a specific item selected. */
+  const handleShowMore = React.useCallback(() => {
+    if (onShowMore) {
+      onShowMore();
+    } else {
+      handleOpenSmartTodo();
+    }
+  }, [onShowMore, handleOpenSmartTodo]);
+
+  // -------------------------------------------------------------------------
   // renderCard for KanbanBoard
   // -------------------------------------------------------------------------
 
@@ -819,21 +627,16 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     (item: IEvent, _index: number, columnId: string) => {
       // Get column accent colour from the columns array
       const col = columns.find((c) => c.id === columnId);
-      const cardClickHandler = disableSidePane
-        ? undefined
-        : useDialogForDetail
-          ? handleCardClickInline
-          : handleCardClick;
       return (
         <KanbanCard
           event={item}
           onPinToggle={handlePinToggle}
-          onClick={cardClickHandler}
+          onClick={!disableSidePane ? handleCardClick : undefined}
           accentColor={col?.accentColor}
         />
       );
     },
-    [columns, handlePinToggle, handleCardClick, handleCardClickInline, disableSidePane, useDialogForDetail]
+    [columns, handlePinToggle, disableSidePane, handleCardClick]
   );
 
   const getItemId = React.useCallback(
@@ -855,7 +658,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
   return (
     <div
-      ref={rootRef}
       className={embedded ? styles.embeddedRoot : styles.card}
       role="region"
       aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? "" : "s"}`}
@@ -932,50 +734,14 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         </div>
       )}
 
-      {/* ── Main content area (Kanban board + optional inline detail panel) ── */}
+      {/* ── Main content area (Kanban board) ── */}
       {!isLoading && !prefsLoading && !error && (
         <>
           {/* Empty state */}
           {isEmpty && <TodoEmptyState />}
 
-          {/* Kanban board — with optional inline detail panel */}
-          {!isEmpty && useDialogForDetail && inlineDetailEventId ? (
-            <div className={styles.splitContainer}>
-              <div className={styles.splitKanban}>
-                <div className={styles.boardContainer}>
-                  <KanbanBoard<IEvent>
-                    columns={columns}
-                    onDragEnd={handleDragEnd}
-                    renderCard={renderCard}
-                    getItemId={getItemId}
-                    ariaLabel="Smart To Do Kanban board"
-                    collapsedColumns={collapsedColumns}
-                    onToggleCollapse={handleToggleCollapse}
-                  />
-                </div>
-              </div>
-              <div className={styles.inlineDetailPanel}>
-                <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--colorNeutralStroke2)" }}>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    onClick={handleCloseInlineDetail}
-                    aria-label="Close detail panel"
-                  >
-                    Close
-                  </Button>
-                </div>
-                {inlineDetailUrl && (
-                  <iframe
-                    key={inlineDetailEventId}
-                    src={inlineDetailUrl}
-                    className={styles.inlineDetailIframe}
-                    title="To Do Detail"
-                  />
-                )}
-              </div>
-            </div>
-          ) : !isEmpty ? (
+          {/* Kanban board */}
+          {!isEmpty && (
             <div className={styles.boardContainer}>
               <KanbanBoard<IEvent>
                 columns={columns}
@@ -987,13 +753,13 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
                 onToggleCollapse={handleToggleCollapse}
               />
             </div>
-          ) : null}
+          )}
 
-          {/* Show more button for workspace preview mode */}
-          {onShowMore && (
+          {/* Show more / Open full view button for workspace preview mode */}
+          {(onShowMore || disableSidePane) && (
             <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
-              <Button appearance="subtle" size="small" onClick={onShowMore}>
-                Show more
+              <Button appearance="subtle" size="small" onClick={handleShowMore}>
+                {disableSidePane ? "Open full view" : "Show more"}
               </Button>
             </div>
           )}

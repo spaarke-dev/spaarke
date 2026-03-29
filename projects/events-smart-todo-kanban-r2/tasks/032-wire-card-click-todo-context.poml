@@ -2,7 +2,7 @@
   <metadata>
     <title>Wire card click to TodoContext selection</title>
     <phase>3</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>code-page, react</tags>
     <estimate>2h</estimate>
     <rigor-hint>FULL</rigor-hint>

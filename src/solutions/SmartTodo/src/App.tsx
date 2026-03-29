@@ -5,8 +5,8 @@
  * 3-level cascade (localStorage > URL flags > navbar DOM), and listens
  * for theme changes to stay in sync with the Spaarke theme system.
  *
- * The inner content is a placeholder that will be replaced in task 030
- * with the full Kanban board layout.
+ * Renders SmartTodoApp which provides the two-panel Kanban + Detail layout
+ * wrapped in TodoProvider for shared state management.
  */
 
 import * as React from "react";
@@ -15,6 +15,7 @@ import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
 } from "@spaarke/ui-components";
+import { SmartTodoApp } from "./SmartTodoApp";
 
 export function App() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
@@ -26,7 +27,7 @@ export function App() {
 
   return (
     <FluentProvider theme={theme}>
-      <div style={{ padding: 16 }}>SmartTodo App</div>
+      <SmartTodoApp />
     </FluentProvider>
   );
 }

@@ -2,7 +2,7 @@
   <metadata>
     <title>Create Deploy-SmartTodo.ps1 script</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>deployment, script</tags>
     <estimate>1h</estimate>
     <rigor-hint>MINIMAL</rigor-hint>

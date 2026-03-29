@@ -2,7 +2,7 @@
   <metadata>
     <title>Panel state localStorage persistence verification</title>
     <phase>4</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>code-page, testing</tags>
     <estimate>1h</estimate>
     <rigor-hint>STANDARD</rigor-hint>

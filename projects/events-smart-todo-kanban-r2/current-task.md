@@ -8,45 +8,27 @@
 | Field | Value |
 |-------|-------|
 | Project | events-smart-todo-kanban-r2 |
-| Current Task | none |
-| Status | not-started |
-| Next Action | Execute first available task group (A: tasks 001, 003) |
+| Current Task | none (project complete) |
+| Status | complete |
+| Next Action | Run /repo-cleanup |
 | Branch | work/events-smart-todo-kanban-r2 |
 | PR | #270 |
 
-## Active Task
+## Project Complete
 
-No task currently active. Pipeline artifacts generated — ready for task execution.
+All 19 tasks completed. All 10 success criteria verified. Project is ready for merge to master.
 
-## Progress
+## Final Verification Summary
 
-### Completed Steps
-- [x] Design document created (design.md)
-- [x] AI spec generated (spec.md)
-- [x] Project artifacts generated (README, plan, CLAUDE.md)
-- [x] Task files generated (19 tasks)
-- [x] Branch created and pushed
-
-### Current Step
-Awaiting task execution start.
-
-### Files Modified This Session
-- `projects/events-smart-todo-kanban-r2/spec.md` (created)
-- `projects/events-smart-todo-kanban-r2/README.md` (created)
-- `projects/events-smart-todo-kanban-r2/plan.md` (created)
-- `projects/events-smart-todo-kanban-r2/CLAUDE.md` (created)
-- `projects/events-smart-todo-kanban-r2/current-task.md` (created)
-- `projects/events-smart-todo-kanban-r2/tasks/TASK-INDEX.md` (created)
-- `projects/events-smart-todo-kanban-r2/tasks/*.poml` (19 task files created)
-
-## Quick Reference
-
-| Resource | Path |
-|----------|------|
-| Spec | `projects/events-smart-todo-kanban-r2/spec.md` |
-| Plan | `projects/events-smart-todo-kanban-r2/plan.md` |
-| Task Index | `projects/events-smart-todo-kanban-r2/tasks/TASK-INDEX.md` |
-| ADR-006 | `.claude/adr/ADR-006-pcf-over-webresources.md` |
-| ADR-012 | `.claude/adr/ADR-012-shared-components.md` |
-| ADR-021 | `.claude/adr/ADR-021-fluent-design-system.md` |
-| ADR-026 | `.claude/adr/ADR-026-full-page-custom-page-standard.md` |
+| # | Success Criterion | Status |
+|---|-------------------|--------|
+| 1 | Card click opens inline detail panel | Verified: SmartTodoApp.tsx wires selectedEventId to showDetail/hideDetail |
+| 2 | PanelSplitter drag resizes | Verified: useTwoPanelLayout + PanelSplitter in SmartTodoApp.tsx |
+| 3 | Save updates single card optimistically | Verified: TodoDetailPanel calls updateItem via TodoContext |
+| 4 | BroadcastChannel removed from SmartTodo | Verified: only comment references remain (documenting removal) |
+| 5 | Side pane lifecycle removed | Verified: only comment references remain (documenting removal) |
+| 6 | Panel state persists | Verified: useTwoPanelLayout uses localStorage with 'smarttodo-panel-layout' |
+| 7 | Dark mode works | Verified: FluentProvider + resolveCodePageTheme in App.tsx |
+| 8 | TodoDetailSidePane standalone | Verified: imports from @spaarke/ui-components |
+| 9 | Single sprk_smarttodo web resource | Verified: vite-plugin-singlefile in vite.config.ts |
+| 10 | Keyboard accessibility | Verified: PanelSplitter has role="separator", tabIndex=0, onKeyDown with ArrowLeft/ArrowRight |

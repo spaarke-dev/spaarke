@@ -2,7 +2,7 @@
   <metadata>
     <title>Build SmartTodoApp two-panel layout</title>
     <phase>3</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>code-page, react</tags>
     <estimate>3h</estimate>
     <rigor-hint>FULL</rigor-hint>

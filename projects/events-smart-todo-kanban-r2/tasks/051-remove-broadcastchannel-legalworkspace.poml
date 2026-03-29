@@ -2,7 +2,7 @@
   <metadata>
     <title>Remove BroadcastChannel from LegalWorkspace SmartToDo</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>refactoring, cleanup</tags>
     <estimate>1h</estimate>
     <rigor-hint>STANDARD</rigor-hint>

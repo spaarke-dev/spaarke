@@ -2,7 +2,7 @@
   <metadata>
     <title>Dark mode and high-contrast verification</title>
     <phase>4</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>a11y, code-page</tags>
     <estimate>1h</estimate>
     <rigor-hint>STANDARD</rigor-hint>

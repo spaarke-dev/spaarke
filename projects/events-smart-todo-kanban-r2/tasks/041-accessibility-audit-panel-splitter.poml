@@ -2,7 +2,7 @@
   <metadata>
     <title>Accessibility audit for PanelSplitter</title>
     <phase>4</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>a11y, shared-library</tags>
     <estimate>1h</estimate>
     <rigor-hint>STANDARD</rigor-hint>
