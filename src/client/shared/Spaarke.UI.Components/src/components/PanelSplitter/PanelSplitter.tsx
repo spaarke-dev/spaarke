@@ -16,6 +16,7 @@
  * @see ADR-012 - Shared component library
  */
 
+import * as React from 'react';
 import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
