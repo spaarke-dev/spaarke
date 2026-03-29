@@ -27,7 +27,7 @@
 | 013 | Migrate Latest Updates to SectionRegistration | FULL | 3h | 001 | ✅ |
 | 014 | Migrate My To Do List to SectionRegistration | FULL | 3h | 001, 010 | ✅ |
 | 015 | Migrate My Documents to SectionRegistration | FULL | 3h | 001 | ✅ |
-| 016 | Create aggregated SECTION_REGISTRY | STANDARD | 1h | 011-015 | 🔲 |
+| 016 | Create aggregated SECTION_REGISTRY | STANDARD | 1h | 011-015 | ✅ |
 
 ### Phase 3: Backend API (Group B — Parallel, after 003+004)
 
@@ -36,14 +36,14 @@
 | 020 | Create WorkspaceLayoutService | FULL | 6h | 003, 004 | ✅ |
 | 021 | Create workspace layout endpoints (8 endpoints) | FULL | 5h | 003, 020 | ✅ |
 | 022 | Create workspace authorization filter | FULL | 3h | 020 | ✅ |
-| 023 | Register workspace DI + wire endpoints | STANDARD | 2h | 020, 021, 022 | 🔲 |
+| 023 | Register workspace DI + wire endpoints | STANDARD | 2h | 020, 021, 022 | ✅ |
 
 ### Phase 4: Dynamic Config & Header (Group C — after Phase 1+2)
 
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
-| 030 | Build dynamic config builder | FULL | 6h | 001, 002, 016 | 🔲 |
-| 031 | Build WorkspaceHeader component | FULL | 5h | 001, 003 | 🔲 |
+| 030 | Build dynamic config builder | FULL | 6h | 001, 002, 016 | ✅ |
+| 031 | Build WorkspaceHeader component | FULL | 5h | 001, 003 | ✅ |
 | 032 | Integrate dynamic config in LegalWorkspace | FULL | 6h | 016, 020, 030, 031 | 🔲 |
 
 ### Phase 5: Layout Wizard Code Page (Group D — Serial chain)
@@ -51,7 +51,7 @@
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
 | 040 | Scaffold wizard Code Page project | FULL | 4h | — | ✅ |
-| 041 | Wizard Step 1: Template selection | FULL | 5h | 002, 040 | 🔲 |
+| 041 | Wizard Step 1: Template selection | FULL | 5h | 002, 040 | ✅ |
 | 042 | Wizard Step 2: Section selection | FULL | 5h | 041 | 🔲 |
 | 043 | Wizard Step 3: Arrange sections (DnD) | FULL | 8h | 042 | 🔲 |
 | 044 | Wizard API integration (save flow) | FULL | 5h | 021, 043 | 🔲 |

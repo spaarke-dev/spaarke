@@ -2,7 +2,7 @@
 <task id="WKSP-023" project="spaarke-workspace-user-configuration-r1">
   <metadata>
     <title>Register WorkspaceLayoutService DI and wire workspace endpoints in Program.cs</title>
-    <status>pending</status>
+    <status>completed</status>
     <phase>3</phase>
     <tags>bff-api</tags>
     <estimated-effort>2h</estimated-effort>

@@ -152,6 +152,7 @@ public static class EndpointMappingExtensions
         }
 
         app.MapWorkspaceEndpoints();
+        app.MapWorkspaceLayoutEndpoints();
         app.MapWorkspaceAiEndpoints();
         app.MapWorkspaceMatterEndpoints();
         app.MapWorkspaceProjectEndpoints();

@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 /// <remarks>
 /// Follows ADR-010: DI minimalism — concrete type registrations only, no unnecessary interfaces.
-/// Registration count: 8 (PortfolioService, PriorityScoringService, EffortScoringService, WorkspaceAiService, BriefingService, MatterPreFillService, TodoGenerationOptions, TodoGenerationService).
+/// Registration count: 9 (WorkspaceLayoutService, PortfolioService, PriorityScoringService, EffortScoringService, WorkspaceAiService, BriefingService, MatterPreFillService, TodoGenerationOptions, TodoGenerationService).
 /// MatterPreFillService now uses IPlaybookOrchestrationService (registered in AiModule) instead of IOpenAiClient.
 ///
 /// Prerequisites (must already be registered before calling AddWorkspaceServices):
@@ -37,6 +37,11 @@ public static class WorkspaceModule
         this IServiceCollection services,
         IConfiguration? configuration = null)
     {
+        // WorkspaceLayoutService: Scoped because it depends on per-request Dataverse query context.
+        // Handles CRUD for sprk_workspacelayout entity with user-scoped queries.
+        // Concrete registration per ADR-010 (no interface seam needed).
+        services.AddScoped<WorkspaceLayoutService>();
+
         // PortfolioService: Scoped because it accesses IDistributedCache per-request
         // and will eventually hold per-request Dataverse query context.
         // Concrete registration per ADR-010 (no interface seam needed).

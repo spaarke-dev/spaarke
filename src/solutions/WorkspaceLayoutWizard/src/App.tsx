@@ -27,6 +27,8 @@ import {
   Checkmark24Regular,
 } from "@fluentui/react-icons";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
+import { TemplateStep } from "./steps";
+import type { LayoutTemplateId } from "@spaarke/ui-components";
 import type { WizardMode } from "./main";
 
 /** Props passed from main.tsx based on URL data parameters */
@@ -102,7 +104,6 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
     padding: "24px",
     gap: "16px",
     overflow: "auto",
@@ -119,6 +120,8 @@ const useStyles = makeStyles({
 export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
   const [theme, setTheme] = React.useState(resolveTheme);
   const [currentStep, setCurrentStep] = React.useState(0);
+  const [selectedTemplateId, setSelectedTemplateId] =
+    React.useState<LayoutTemplateId | null>(null);
 
   React.useEffect(() => {
     const cleanup = setupThemeListener(() => {
@@ -130,6 +133,9 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
   const step = WIZARD_STEPS[currentStep];
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === WIZARD_STEPS.length - 1;
+
+  /** Next button is disabled on step 1 until a template is chosen. */
+  const isNextDisabled = currentStep === 0 && selectedTemplateId === null;
 
   const headerTitle =
     mode === "edit"
@@ -162,18 +168,30 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
           </div>
         </div>
 
-        {/* Step content placeholder */}
+        {/* Step content */}
         <div className={useStyles().content}>
-          <Text size={600} weight="semibold">
-            Step {currentStep + 1}: {step.title}
-          </Text>
-          <Text size={400} align="center">
-            {step.description}
-          </Text>
-          {mode === "edit" && layoutId && (
-            <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-              Editing layout: {layoutId}
-            </Text>
+          {currentStep === 0 ? (
+            <TemplateStep
+              selectedTemplateId={selectedTemplateId}
+              onSelect={setSelectedTemplateId}
+            />
+          ) : (
+            <>
+              <Text size={600} weight="semibold">
+                Step {currentStep + 1}: {step.title}
+              </Text>
+              <Text size={400} align="center">
+                {step.description}
+              </Text>
+              {mode === "edit" && layoutId && (
+                <Text
+                  size={200}
+                  style={{ color: tokens.colorNeutralForeground3 }}
+                >
+                  Editing layout: {layoutId}
+                </Text>
+              )}
+            </>
           )}
         </div>
 
@@ -200,6 +218,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
               appearance="primary"
               icon={<ArrowRight24Regular />}
               iconPosition="after"
+              disabled={isNextDisabled}
               onClick={() => setCurrentStep((s) => s + 1)}
             >
               Next
