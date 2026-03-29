@@ -27,8 +27,8 @@ import {
   Checkmark24Regular,
 } from "@fluentui/react-icons";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
-import { TemplateStep, SectionStep } from "./steps";
-import type { SectionCatalogItem } from "./steps";
+import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
+import type { SectionCatalogItem, SlotAssignments } from "./steps";
 import type { LayoutTemplateId } from "@spaarke/ui-components";
 import { getLayoutTemplate } from "@spaarke/ui-components";
 import type { WizardMode } from "./main";
@@ -182,6 +182,10 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
   const [selectedSectionIds, setSelectedSectionIds] = React.useState<
     Set<string>
   >(() => new Set(DEFAULT_SECTION_IDS));
+  const [workspaceName, setWorkspaceName] = React.useState("");
+  const [isDefault, setIsDefault] = React.useState(false);
+  const [sectionAssignments, setSectionAssignments] =
+    React.useState<SlotAssignments>(new Map());
 
   /** Derive slot count from the selected template. */
   const slotCount = React.useMemo(() => {
@@ -213,11 +217,40 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === WIZARD_STEPS.length - 1;
 
+  /** Derive the selected section catalog items in stable order. */
+  const selectedSections = React.useMemo(
+    () => SECTION_CATALOG.filter((s) => selectedSectionIds.has(s.id)),
+    [selectedSectionIds],
+  );
+
   /** Next button is disabled on step 0 until a template is chosen,
    *  and on step 1 until at least one section is selected. */
   const isNextDisabled =
     (currentStep === 0 && selectedTemplateId === null) ||
     (currentStep === 1 && selectedSectionIds.size === 0);
+
+  /** Save button is disabled when workspace name is empty. */
+  const isSaveDisabled = workspaceName.trim().length === 0;
+
+  /**
+   * Advance to the next step. When entering the Arrange step (step 2),
+   * auto-initialize slot assignments if they are empty.
+   */
+  const handleNext = React.useCallback(() => {
+    setCurrentStep((prev) => {
+      const next = prev + 1;
+      if (next === 2 && selectedTemplateId) {
+        // Auto-assign sections to slots if no assignments exist yet.
+        setSectionAssignments((prevAssignments) => {
+          if (prevAssignments.size === 0) {
+            return buildInitialAssignments(selectedTemplateId, selectedSections);
+          }
+          return prevAssignments;
+        });
+      }
+      return next;
+    });
+  }, [selectedTemplateId, selectedSections]);
 
   const headerTitle =
     mode === "edit"
@@ -264,24 +297,18 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
               slotCount={slotCount}
               onToggle={handleSectionToggle}
             />
-          ) : (
-            <>
-              <Text size={600} weight="semibold">
-                Step {currentStep + 1}: {step.title}
-              </Text>
-              <Text size={400} align="center">
-                {step.description}
-              </Text>
-              {mode === "edit" && layoutId && (
-                <Text
-                  size={200}
-                  style={{ color: tokens.colorNeutralForeground3 }}
-                >
-                  Editing layout: {layoutId}
-                </Text>
-              )}
-            </>
-          )}
+          ) : currentStep === 2 && selectedTemplateId ? (
+            <ArrangeStep
+              templateId={selectedTemplateId}
+              selectedSections={selectedSections}
+              sectionAssignments={sectionAssignments}
+              workspaceName={workspaceName}
+              isDefault={isDefault}
+              onAssignmentsChange={setSectionAssignments}
+              onNameChange={setWorkspaceName}
+              onDefaultChange={setIsDefault}
+            />
+          ) : null}
         </div>
 
         {/* Footer with navigation buttons */}
@@ -299,6 +326,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
               appearance="primary"
               icon={<Checkmark24Regular />}
               iconPosition="after"
+              disabled={isSaveDisabled}
             >
               Save Layout
             </Button>
@@ -308,7 +336,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
               icon={<ArrowRight24Regular />}
               iconPosition="after"
               disabled={isNextDisabled}
-              onClick={() => setCurrentStep((s) => s + 1)}
+              onClick={handleNext}
             >
               Next
             </Button>

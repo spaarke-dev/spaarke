@@ -7,3 +7,6 @@ export type { TemplateStepProps } from "./TemplateStep";
 
 export { SectionStep } from "./SectionStep";
 export type { SectionStepProps, SectionCatalogItem } from "./SectionStep";
+
+export { ArrangeStep, buildInitialAssignments } from "./ArrangeStep";
+export type { ArrangeStepProps, SlotAssignments } from "./ArrangeStep";

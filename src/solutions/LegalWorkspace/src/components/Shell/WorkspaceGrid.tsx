@@ -73,6 +73,8 @@ export interface IWorkspaceGridProps {
   webApi: IWebApi;
   /** GUID of the current user (context.userSettings.userId) */
   userId: string;
+  /** Optional workspace layout ID for deep-linking (from URL data parameter) */
+  initialWorkspaceId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +86,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   allocatedHeight: _allocatedHeight,
   webApi,
   userId,
+  initialWorkspaceId,
 }) => {
   // -------------------------------------------------------------------------
   // DataverseService for DocumentsTab
@@ -102,7 +105,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     isLoading: isLayoutsLoading,
     setActiveLayoutById,
     refetch: refetchLayouts,
-  } = useWorkspaceLayouts();
+  } = useWorkspaceLayouts(initialWorkspaceId);
 
   // -------------------------------------------------------------------------
   // Record counts for section badges

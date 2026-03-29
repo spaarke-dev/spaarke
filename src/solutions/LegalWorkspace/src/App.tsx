@@ -83,6 +83,7 @@ export const App: React.FC = () => {
   // Check for dialog mode (e.g. ?data=mode%3Dtodo)
   const dataParams = React.useMemo(() => parseDataParams(), []);
   const mode = dataParams.mode ?? "";
+  const workspaceId = dataParams.workspaceId ?? undefined;
 
   // Theme listener
   React.useEffect(() => {
@@ -136,6 +137,7 @@ export const App: React.FC = () => {
               allocatedHeight={0}
               webApi={webApi}
               userId={userId}
+              initialWorkspaceId={workspaceId}
             />
           </main>
           <footer className={styles.footer}>

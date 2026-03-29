@@ -14,6 +14,17 @@ import { authenticatedFetch } from "../services/bffAuthProvider";
 import { getBffBaseUrl } from "../config/runtimeConfig";
 import type { LayoutJson } from "../workspace/buildDynamicWorkspaceConfig";
 import { SYSTEM_DEFAULT_LAYOUT_JSON } from "../workspace/buildDynamicWorkspaceConfig";
+import {
+  getCachedActiveLayout,
+  getCachedLayoutsList,
+  setCachedActiveLayout,
+  setCachedLayoutsList,
+  invalidateLayoutCache,
+} from "../workspace/layoutCache";
+
+// Re-export invalidateLayoutCache so consumers (e.g., wizard save handlers) can
+// clear stale data without importing from layoutCache directly.
+export { invalidateLayoutCache } from "../workspace/layoutCache";
 
 // ---------------------------------------------------------------------------
 // Types (mirror BFF WorkspaceLayoutDto shape)
@@ -81,7 +92,9 @@ function parseLayoutJson(sectionsJson: string): LayoutJson {
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
+export function useWorkspaceLayouts(
+  initialWorkspaceId?: string,
+): UseWorkspaceLayoutsResult {
   const [layouts, setLayouts] = useState<WorkspaceLayoutDto[]>([]);
   const [activeLayout, setActiveLayout] = useState<WorkspaceLayoutDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -103,7 +116,22 @@ export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
     let cancelled = false;
 
     async function fetchLayouts() {
-      setIsLoading(true);
+      // -----------------------------------------------------------------
+      // Cache-first: if sessionStorage has layout data, use it for instant
+      // render and then continue to revalidate from the API in the background.
+      // -----------------------------------------------------------------
+      const cachedList = getCachedLayoutsList();
+      const cachedActive = getCachedActiveLayout();
+      const hasCachedData = cachedList && cachedList.length > 0 && cachedActive;
+
+      if (hasCachedData && !cancelled && mountedRef.current) {
+        setLayouts(cachedList);
+        setActiveLayout(cachedActive);
+        setIsLoading(false);
+        // Continue to fetch from API below to revalidate
+      } else {
+        setIsLoading(true);
+      }
       setError(null);
 
       let bffBaseUrl: string;
@@ -122,9 +150,10 @@ export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
 
       try {
         // Fetch default layout and all layouts in parallel
+        const apiBase = bffBaseUrl.replace(/\/$/, '');
         const [defaultRes, listRes] = await Promise.all([
-          authenticatedFetch(`${bffBaseUrl.replace(/\/$/, '')}/api/workspace/layouts/default`),
-          authenticatedFetch(`${bffBaseUrl.replace(/\/$/, '')}/api/workspace/layouts`),
+          authenticatedFetch(`${apiBase}/api/workspace/layouts/default`),
+          authenticatedFetch(`${apiBase}/api/workspace/layouts`),
         ]);
 
         if (cancelled || !mountedRef.current) return;
@@ -158,17 +187,64 @@ export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
           setLayouts([SYSTEM_DEFAULT_LAYOUT]);
         }
 
-        if (defaultLayout) {
-          setActiveLayout(defaultLayout);
-        } else if (allLayouts.length > 0) {
-          // Pick the first default layout, or the first system layout
-          const fallback =
-            allLayouts.find((l) => l.isDefault) ??
-            allLayouts.find((l) => l.isSystem) ??
-            allLayouts[0];
-          setActiveLayout(fallback);
-        } else {
-          setActiveLayout(SYSTEM_DEFAULT_LAYOUT);
+        // -----------------------------------------------------------------------
+        // Deep-link: if initialWorkspaceId was provided, try to use that layout
+        // instead of the default. Falls back silently on 404 or error.
+        // -----------------------------------------------------------------------
+
+        let resolvedActive: WorkspaceLayoutDto | null = null;
+
+        if (initialWorkspaceId) {
+          // Check if the deep-linked layout is already in the fetched list
+          const fromList = allLayouts.find((l) => l.id === initialWorkspaceId);
+          if (fromList) {
+            resolvedActive = fromList;
+          } else {
+            // Fetch by ID from the BFF
+            try {
+              const deepLinkRes = await authenticatedFetch(
+                `${apiBase}/api/workspace/layouts/${initialWorkspaceId}`,
+              );
+              if (cancelled || !mountedRef.current) return;
+
+              if (deepLinkRes.ok) {
+                resolvedActive = await deepLinkRes.json();
+              } else {
+                console.warn(
+                  `[useWorkspaceLayouts] Deep-linked layout ${initialWorkspaceId} not found (${deepLinkRes.status}), falling back to default`,
+                );
+              }
+            } catch (deepLinkErr) {
+              console.warn(
+                "[useWorkspaceLayouts] Failed to fetch deep-linked layout, falling back to default:",
+                deepLinkErr,
+              );
+            }
+          }
+        }
+
+        // If deep-link didn't resolve, fall back to normal default selection
+        if (!resolvedActive) {
+          if (defaultLayout) {
+            resolvedActive = defaultLayout;
+          } else if (allLayouts.length > 0) {
+            // Pick the first default layout, or the first system layout
+            resolvedActive =
+              allLayouts.find((l) => l.isDefault) ??
+              allLayouts.find((l) => l.isSystem) ??
+              allLayouts[0];
+          } else {
+            resolvedActive = SYSTEM_DEFAULT_LAYOUT;
+          }
+        }
+
+        if (!cancelled && mountedRef.current) {
+          setActiveLayout(resolvedActive);
+
+          // Update sessionStorage cache for instant render on next navigation
+          setCachedActiveLayout(resolvedActive);
+          const listToCache = allLayouts.length > 0 ? allLayouts : [SYSTEM_DEFAULT_LAYOUT];
+          setCachedLayoutsList(listToCache);
         }
 
         setIsLoading(false);
@@ -188,7 +264,7 @@ export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
     fetchLayouts();
 
     return () => { cancelled = true; };
-  }, [fetchKey]);
+  }, [fetchKey, initialWorkspaceId]);
 
   // -------------------------------------------------------------------------
   // Switch active layout
@@ -200,6 +276,7 @@ export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
       const found = layouts.find((l) => l.id === layoutId);
       if (found) {
         setActiveLayout(found);
+        setCachedActiveLayout(found);
         return;
       }
 
@@ -214,6 +291,7 @@ export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
             const layout: WorkspaceLayoutDto = await res.json();
             if (mountedRef.current) {
               setActiveLayout(layout);
+              setCachedActiveLayout(layout);
             }
           } else {
             console.warn(
@@ -233,6 +311,9 @@ export function useWorkspaceLayouts(): UseWorkspaceLayoutsResult {
   // -------------------------------------------------------------------------
 
   const refetch = useCallback(() => {
+    // Invalidate cache so the next fetch gets fresh data from the API.
+    // This is called when the wizard dialog closes after a save.
+    invalidateLayoutCache();
     setFetchKey((k) => k + 1);
   }, []);
 
