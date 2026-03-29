@@ -57,7 +57,6 @@ export type {
   SectionFactoryContext,
   SectionRegistration,
   NavigateTarget,
-  DialogOptions,
 } from "./types";
 
 // Layout templates (workspace personalization)

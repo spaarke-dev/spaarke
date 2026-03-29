@@ -192,17 +192,12 @@ export type NavigateTarget =
   | { type: "record"; entity: string; id: string }
   | { type: "url"; url: string };
 
-/** Options for opening a Code Page wizard dialog via Xrm.Navigation.navigateTo. */
-export interface DialogOptions {
-  /** Dialog width — value + unit (e.g., { value: 85, unit: "%" }). */
-  width?: { value: number; unit: "%" | "px" };
-  /** Dialog height — value + unit. */
-  height?: { value: number; unit: "%" | "px" };
-}
-
 /**
  * Standard context passed to every section factory.
  * Sections must work with ONLY these dependencies — no bespoke parent wiring.
+ *
+ * Note: DialogOptions is imported from the shared serviceInterfaces —
+ * use the existing type rather than defining a duplicate.
  */
 export interface SectionFactoryContext {
   /** Xrm.WebApi for Dataverse queries. */
@@ -219,7 +214,7 @@ export interface SectionFactoryContext {
   onOpenWizard: (
     webResourceName: string,
     data?: string,
-    options?: DialogOptions,
+    options?: { width?: number | { value: number; unit: "%" | "px" }; height?: number | { value: number; unit: "%" | "px" } },
   ) => void;
   /**
    * Register a badge count updater. The workspace header shows this
