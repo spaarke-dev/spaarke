@@ -52,6 +52,12 @@ export type {
   MetricTrend,
   MetricBadgeVariant,
   SectionType,
+  // Section Registry types (workspace personalization)
+  SectionCategory,
+  SectionFactoryContext,
+  SectionRegistration,
+  NavigateTarget,
+  DialogOptions,
 } from "./types";
 
 // Style hooks (optional, for advanced consumers)

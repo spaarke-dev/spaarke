@@ -178,3 +178,83 @@ export interface WorkspaceConfig {
   /** All section definitions referenced by rows or rendered in order (single-column). */
   sections: SectionConfig[];
 }
+
+// ---------------------------------------------------------------------------
+// Section Registry types — used by dynamic workspace configuration
+// ---------------------------------------------------------------------------
+
+/** Category for grouping sections in the layout wizard Step 2 checklist. */
+export type SectionCategory = "overview" | "data" | "ai" | "productivity";
+
+/** Navigation target for sections that need to open Dataverse views or records. */
+export type NavigateTarget =
+  | { type: "view"; entity: string; viewId?: string }
+  | { type: "record"; entity: string; id: string }
+  | { type: "url"; url: string };
+
+/** Options for opening a Code Page wizard dialog via Xrm.Navigation.navigateTo. */
+export interface DialogOptions {
+  /** Dialog width — value + unit (e.g., { value: 85, unit: "%" }). */
+  width?: { value: number; unit: "%" | "px" };
+  /** Dialog height — value + unit. */
+  height?: { value: number; unit: "%" | "px" };
+}
+
+/**
+ * Standard context passed to every section factory.
+ * Sections must work with ONLY these dependencies — no bespoke parent wiring.
+ */
+export interface SectionFactoryContext {
+  /** Xrm.WebApi for Dataverse queries. */
+  webApi: unknown;
+  /** Current user's systemuserid GUID. */
+  userId: string;
+  /** DataverseService for document/entity operations. */
+  service: unknown;
+  /** BFF API base URL (environment variable, BYOK-safe). */
+  bffBaseUrl: string;
+  /** Navigate to a Dataverse URL, view, or record. */
+  onNavigate: (target: NavigateTarget) => void;
+  /** Open a Code Page wizard dialog. */
+  onOpenWizard: (
+    webResourceName: string,
+    data?: string,
+    options?: DialogOptions,
+  ) => void;
+  /**
+   * Register a badge count updater. The workspace header shows this
+   * count on the section's tab. Call with updated count whenever data changes.
+   */
+  onBadgeCountChange: (count: number) => void;
+  /**
+   * Register a refetch function. The workspace calls this when the user
+   * clicks a global refresh or when another section triggers a cross-refresh.
+   */
+  onRefetchReady: (refetch: () => void) => void;
+}
+
+/**
+ * What the Section Registry knows about each section (metadata + factory).
+ * This is the ONLY interface a section author needs to implement.
+ */
+export interface SectionRegistration {
+  /** Unique section identifier (stored in Dataverse layout JSON). */
+  id: string;
+  /** Display name shown in wizard Step 2 checklist. */
+  label: string;
+  /** One-line description shown in wizard Step 2. */
+  description: string;
+  /** Fluent icon shown in wizard and section header. */
+  icon: FluentIcon;
+  /** Category for grouping in wizard Step 2. */
+  category: SectionCategory;
+  /** Suggested default height (e.g., "560px"). Undefined = auto. */
+  defaultHeight?: string;
+  /** Thumbnail preview for wizard Step 3 (optional static image or icon). */
+  previewIcon?: FluentIcon;
+  /**
+   * Factory function that produces a SectionConfig for WorkspaceShell.
+   * Receives a standardized context — no bespoke props.
+   */
+  factory: (context: SectionFactoryContext) => SectionConfig;
+}

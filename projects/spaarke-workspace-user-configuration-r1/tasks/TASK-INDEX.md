@@ -12,7 +12,7 @@
 
 | # | Task | Rigor | Effort | Depends | Status |
 |---|------|-------|--------|---------|--------|
-| 001 | Define SectionRegistration + SectionFactoryContext types | FULL | 3h | — | 🔲 |
+| 001 | Define SectionRegistration + SectionFactoryContext types | FULL | 3h | — | ✅ |
 | 002 | Define 6 layout template configurations | STANDARD | 2h | 001 | 🔲 |
 | 003 | Define BFF API C# record DTOs | STANDARD | 2h | — | 🔲 |
 | 004 | Define sprk_workspacelayout entity schema | MINIMAL | 1h | — | 🔲 |

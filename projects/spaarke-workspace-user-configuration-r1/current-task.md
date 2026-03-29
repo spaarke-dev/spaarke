@@ -10,16 +10,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Execute first task via `task-execute` |
+| **Task** | 001 - Define SectionRegistration + SectionFactoryContext interfaces |
+| **Step** | 8 of 8: Complete |
+| **Status** | completed |
+| **Next Action** | Proceed to parallel tasks: 002, 003, 004 |
 
 ### Files Modified This Session
-- (none yet)
+- `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts` - Modified - Added SectionRegistration, SectionFactoryContext, SectionCategory, NavigateTarget, DialogOptions
+- `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/index.ts` - Modified - Added barrel exports for new types
 
 ### Critical Context
-Project initialized. Spec validated, artifacts generated, tasks created. Ready to begin Phase 1 task execution.
+Task 001 is the foundation — defines SectionRegistration, SectionFactoryContext, and SectionCategory types in shared library. All Phase 2 section migrations depend on these types. Follow design.md interfaces exactly.
 
 ---
 
@@ -27,12 +28,12 @@ Project initialized. Spec validated, artifacts generated, tasks created. Ready t
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 001 |
+| **Task File** | tasks/001-define-section-registry-types.poml |
+| **Title** | Define SectionRegistration + SectionFactoryContext interfaces |
+| **Phase** | 1: Foundation & Types |
+| **Status** | in-progress |
+| **Started** | 2026-03-29 |
 
 ---
 
