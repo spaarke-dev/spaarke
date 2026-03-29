@@ -44,7 +44,7 @@
 |---|------|-------|--------|---------|--------|
 | 030 | Build dynamic config builder | FULL | 6h | 001, 002, 016 | ✅ |
 | 031 | Build WorkspaceHeader component | FULL | 5h | 001, 003 | ✅ |
-| 032 | Integrate dynamic config in LegalWorkspace | FULL | 6h | 016, 020, 030, 031 | 🔲 |
+| 032 | Integrate dynamic config in LegalWorkspace | FULL | 6h | 016, 020, 030, 031 | ✅ |
 
 ### Phase 5: Layout Wizard Code Page (Group D — Serial chain)
 
@@ -52,7 +52,7 @@
 |---|------|-------|--------|---------|--------|
 | 040 | Scaffold wizard Code Page project | FULL | 4h | — | ✅ |
 | 041 | Wizard Step 1: Template selection | FULL | 5h | 002, 040 | ✅ |
-| 042 | Wizard Step 2: Section selection | FULL | 5h | 041 | 🔲 |
+| 042 | Wizard Step 2: Section selection | FULL | 5h | 041 | ✅ |
 | 043 | Wizard Step 3: Arrange sections (DnD) | FULL | 8h | 042 | 🔲 |
 | 044 | Wizard API integration (save flow) | FULL | 5h | 021, 043 | 🔲 |
 

@@ -1,12 +1,18 @@
 import * as React from "react";
 import { tokens, Spinner } from "@fluentui/react-components";
 import { WorkspaceShell } from "@spaarke/ui-components";
+import type { SectionFactoryContext, NavigateTarget, DialogOptions } from "@spaarke/ui-components";
 import { useDataverseService } from "../../hooks/useDataverseService";
+import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
 import { navigateToEntityList } from "../../utils/navigation";
 import {
   createPlaybookHandlers,
 } from "../GetStarted/ActionCardHandlers";
 import { buildWorkspaceConfig } from "../../workspaceConfig";
+import { buildDynamicWorkspaceConfig } from "../../workspace/buildDynamicWorkspaceConfig";
+import { SECTION_REGISTRY } from "../../sectionRegistry";
+import { WorkspaceHeader } from "../WorkspaceHeader";
+import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 import type { IWebApi } from "../../types/xrm";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
 
@@ -84,6 +90,19 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // -------------------------------------------------------------------------
 
   const service = useDataverseService(webApi);
+
+  // -------------------------------------------------------------------------
+  // Dynamic workspace layouts (BFF API)
+  // -------------------------------------------------------------------------
+
+  const {
+    layouts: workspaceLayouts,
+    activeLayout,
+    activeLayoutJson,
+    isLoading: isLayoutsLoading,
+    setActiveLayoutById,
+    refetch: refetchLayouts,
+  } = useWorkspaceLayouts();
 
   // -------------------------------------------------------------------------
   // Record counts for section badges
@@ -467,12 +486,99 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, []);
 
   // -------------------------------------------------------------------------
-  // Build declarative WorkspaceConfig and delegate layout to WorkspaceShell
+  // SectionFactoryContext — standard context for dynamic section factories
   // -------------------------------------------------------------------------
 
-  const workspaceConfig = React.useMemo(
-    () =>
-      buildWorkspaceConfig({
+  const handleNavigate = React.useCallback((target: NavigateTarget) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any =
+      (window as any)?.Xrm ??
+      (window.parent as any)?.Xrm ??
+      (window.top as any)?.Xrm;
+
+    if (target.type === "view" && target.viewId) {
+      navigateToEntityList(target.entity, target.viewId);
+    } else if (target.type === "record" && xrm?.Navigation?.openForm) {
+      xrm.Navigation.openForm({
+        entityName: target.entity,
+        entityId: target.id,
+      });
+    } else if (target.type === "url" && xrm?.Navigation?.openUrl) {
+      xrm.Navigation.openUrl(target.url);
+    }
+  }, []);
+
+  const handleOpenWizardGeneric = React.useCallback(
+    async (webResourceName: string, data?: string, options?: DialogOptions) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm: any =
+          (window as any)?.Xrm ??
+          (window.parent as any)?.Xrm ??
+          (window.top as any)?.Xrm;
+        if (!xrm?.Navigation?.navigateTo) return;
+
+        const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
+        const fullData = data ? `${data}&${bffParam}` : bffParam;
+
+        await xrm.Navigation.navigateTo(
+          {
+            pageType: "webresource",
+            webresourceName: webResourceName,
+            data: fullData,
+          },
+          {
+            target: 2,
+            width: options?.width ?? { value: 60, unit: "%" },
+            height: options?.height ?? { value: 70, unit: "%" },
+          },
+        );
+      } catch {
+        // User cancelled or dialog error — ignore
+      }
+    },
+    [],
+  );
+
+  const factoryContext = React.useMemo<SectionFactoryContext>(() => {
+    let bffBaseUrl = "";
+    try {
+      bffBaseUrl = getBffBaseUrl();
+    } catch {
+      // Not initialized yet — sections that need BFF will handle gracefully
+    }
+
+    return {
+      webApi,
+      userId,
+      service,
+      bffBaseUrl,
+      onNavigate: handleNavigate,
+      onOpenWizard: handleOpenWizardGeneric,
+      onBadgeCountChange: (/* count — handled per-section via factory */) => {},
+      onRefetchReady: (/* refetch — handled per-section via factory */) => {},
+    };
+  }, [webApi, userId, service, handleNavigate, handleOpenWizardGeneric]);
+
+  // -------------------------------------------------------------------------
+  // Build dynamic WorkspaceConfig from active layout + SECTION_REGISTRY
+  // Falls back to old buildWorkspaceConfig on error for graceful degradation
+  // -------------------------------------------------------------------------
+
+  const workspaceConfig = React.useMemo(() => {
+    try {
+      return buildDynamicWorkspaceConfig(
+        activeLayoutJson,
+        SECTION_REGISTRY,
+        factoryContext,
+      );
+    } catch (err) {
+      console.warn(
+        "[WorkspaceGrid] Dynamic config build failed, falling back to static config:",
+        err,
+      );
+      // Fallback: use the old static buildWorkspaceConfig
+      return buildWorkspaceConfig({
         webApi,
         userId,
         service,
@@ -496,41 +602,139 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         onAddDocument: handleAddDocument,
         onOpenDocumentsDialog: handleOpenDocumentsDialog,
         cardClickHandlers,
-      }),
-    // Re-build config whenever badge counts or handlers change so that
-    // badge counts in section titles stay reactive.
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      webApi,
-      userId,
-      service,
-      feedCount,
-      todoCount,
-      docCount,
-      handleTodoRefetch,
-      handleDocRefetch,
-      handleTodoRefetchReady,
-      handleFeedRefetchReady,
-      handleDocRefetchReady,
-      handleExpandClick,
-      handleDashboardOpen,
-      handleOpenAllUpdates,
-      handleOpenEventWizard,
-      handleOpenTodoWizard,
-      handleOpenTodoDialog,
-      handleAddDocument,
-      handleOpenDocumentsDialog,
-      cardClickHandlers,
-    ]
-  );
+  }, [
+    activeLayoutJson,
+    factoryContext,
+    webApi,
+    userId,
+    service,
+    feedCount,
+    todoCount,
+    docCount,
+  ]);
 
   // -------------------------------------------------------------------------
-  // Layout — WorkspaceShell renders the full 3-row grid declaratively
+  // WorkspaceHeader layout summaries (map BFF DTOs to header props)
+  // -------------------------------------------------------------------------
+
+  const headerLayouts = React.useMemo<WorkspaceLayoutSummary[]>(
+    () =>
+      workspaceLayouts.map((l) => ({
+        id: l.id,
+        name: l.name,
+        isSystem: l.isSystem,
+      })),
+    [workspaceLayouts],
+  );
+
+  const headerActiveLayout = React.useMemo<WorkspaceLayoutSummary>(
+    () =>
+      activeLayout
+        ? { id: activeLayout.id, name: activeLayout.name, isSystem: activeLayout.isSystem }
+        : { id: "system-default", name: "Corporate Workspace", isSystem: true },
+    [activeLayout],
+  );
+
+  const handleLayoutChange = React.useCallback(
+    (layoutId: string) => {
+      setActiveLayoutById(layoutId);
+    },
+    [setActiveLayoutById],
+  );
+
+  const handleEditLayout = React.useCallback(() => {
+    if (!activeLayout) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm: any =
+        (window as any)?.Xrm ??
+        (window.parent as any)?.Xrm ??
+        (window.top as any)?.Xrm;
+      if (!xrm?.Navigation?.navigateTo) return;
+
+      const mode = activeLayout.isSystem ? "saveAs" : "edit";
+      xrm.Navigation.navigateTo(
+        {
+          pageType: "webresource",
+          webresourceName: "sprk_workspacelayoutwizard",
+          data: `mode=${mode}&layoutId=${activeLayout.id}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
+        },
+        {
+          target: 2,
+          width: { value: 80, unit: "%" },
+          height: { value: 80, unit: "%" },
+          title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
+        },
+      ).then(() => {
+        // Wizard closed — refetch layouts in case changes were saved
+        refetchLayouts();
+      }).catch(() => { /* user cancelled */ });
+    } catch {
+      // Navigation not available
+    }
+  }, [activeLayout, refetchLayouts]);
+
+  const handleCreateLayout = React.useCallback(() => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm: any =
+        (window as any)?.Xrm ??
+        (window.parent as any)?.Xrm ??
+        (window.top as any)?.Xrm;
+      if (!xrm?.Navigation?.navigateTo) return;
+
+      xrm.Navigation.navigateTo(
+        {
+          pageType: "webresource",
+          webresourceName: "sprk_workspacelayoutwizard",
+          data: `mode=create&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
+        },
+        {
+          target: 2,
+          width: { value: 80, unit: "%" },
+          height: { value: 80, unit: "%" },
+          title: "Create New Workspace",
+        },
+      ).then(() => {
+        refetchLayouts();
+      }).catch(() => { /* user cancelled */ });
+    } catch {
+      // Navigation not available
+    }
+  }, [refetchLayouts]);
+
+  // -------------------------------------------------------------------------
+  // Layout — WorkspaceHeader + WorkspaceShell renders the full grid
   // -------------------------------------------------------------------------
 
   return (
     <>
-      <WorkspaceShell config={workspaceConfig} />
+      <WorkspaceHeader
+        activeLayout={headerActiveLayout}
+        layouts={headerLayouts}
+        onLayoutChange={handleLayoutChange}
+        onEditClick={handleEditLayout}
+        onCreateClick={handleCreateLayout}
+      />
+
+      {isLayoutsLoading ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: "1 1 auto",
+            minHeight: "200px",
+          }}
+        >
+          <Spinner size="large" label="Loading workspace..." labelPosition="below" />
+        </div>
+      ) : (
+        <WorkspaceShell config={workspaceConfig} />
+      )}
 
       {/* GetStarted expand dialog — shows all 7 action cards in a grid */}
       {isExpandOpen && (

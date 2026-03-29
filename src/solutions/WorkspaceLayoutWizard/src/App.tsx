@@ -27,9 +27,18 @@ import {
   Checkmark24Regular,
 } from "@fluentui/react-icons";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
-import { TemplateStep } from "./steps";
+import { TemplateStep, SectionStep } from "./steps";
+import type { SectionCatalogItem } from "./steps";
 import type { LayoutTemplateId } from "@spaarke/ui-components";
+import { getLayoutTemplate } from "@spaarke/ui-components";
 import type { WizardMode } from "./main";
+import {
+  RocketRegular,
+  DataBarVerticalRegular,
+  ClockRegular,
+  CheckmarkCircleRegular,
+  DocumentRegular,
+} from "@fluentui/react-icons";
 
 /** Props passed from main.tsx based on URL data parameters */
 interface AppProps {
@@ -61,6 +70,54 @@ const WIZARD_STEPS: WizardStep[] = [
     description: "Preview the final layout and save your configuration.",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Section catalog — inline constant matching the 5 registered sections.
+// In a production build this would be fetched from GET /api/workspace/sections.
+// ---------------------------------------------------------------------------
+
+const SECTION_CATALOG: SectionCatalogItem[] = [
+  {
+    id: "get-started",
+    label: "Get Started",
+    description: "Quick-action cards for common workflows",
+    category: "overview",
+    icon: RocketRegular,
+  },
+  {
+    id: "quick-summary",
+    label: "Quick Summary",
+    description: "Key metrics at a glance",
+    category: "overview",
+    icon: DataBarVerticalRegular,
+  },
+  {
+    id: "latest-updates",
+    label: "Latest Updates",
+    description: "Recent activity feed with flagging",
+    category: "data",
+    icon: ClockRegular,
+    defaultHeight: "325px",
+  },
+  {
+    id: "todo",
+    label: "My To Do List",
+    description: "Embedded smart to-do list with flag sync",
+    category: "productivity",
+    icon: CheckmarkCircleRegular,
+    defaultHeight: "560px",
+  },
+  {
+    id: "documents",
+    label: "My Documents",
+    description: "Recent documents with quick actions",
+    category: "data",
+    icon: DocumentRegular,
+  },
+];
+
+/** Default section IDs — all 5 sections selected by default. */
+const DEFAULT_SECTION_IDS = new Set(SECTION_CATALOG.map((s) => s.id));
 
 const useStyles = makeStyles({
   root: {
@@ -122,6 +179,28 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
   const [currentStep, setCurrentStep] = React.useState(0);
   const [selectedTemplateId, setSelectedTemplateId] =
     React.useState<LayoutTemplateId | null>(null);
+  const [selectedSectionIds, setSelectedSectionIds] = React.useState<
+    Set<string>
+  >(() => new Set(DEFAULT_SECTION_IDS));
+
+  /** Derive slot count from the selected template. */
+  const slotCount = React.useMemo(() => {
+    if (!selectedTemplateId) return 0;
+    return getLayoutTemplate(selectedTemplateId)?.slotCount ?? 0;
+  }, [selectedTemplateId]);
+
+  /** Toggle a section in the selection set (immutable update). */
+  const handleSectionToggle = React.useCallback((sectionId: string) => {
+    setSelectedSectionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
+  }, []);
 
   React.useEffect(() => {
     const cleanup = setupThemeListener(() => {
@@ -134,8 +213,11 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === WIZARD_STEPS.length - 1;
 
-  /** Next button is disabled on step 1 until a template is chosen. */
-  const isNextDisabled = currentStep === 0 && selectedTemplateId === null;
+  /** Next button is disabled on step 0 until a template is chosen,
+   *  and on step 1 until at least one section is selected. */
+  const isNextDisabled =
+    (currentStep === 0 && selectedTemplateId === null) ||
+    (currentStep === 1 && selectedSectionIds.size === 0);
 
   const headerTitle =
     mode === "edit"
@@ -174,6 +256,13 @@ export const App: React.FC<AppProps> = ({ mode, layoutId }) => {
             <TemplateStep
               selectedTemplateId={selectedTemplateId}
               onSelect={setSelectedTemplateId}
+            />
+          ) : currentStep === 1 ? (
+            <SectionStep
+              sections={SECTION_CATALOG}
+              selectedIds={selectedSectionIds}
+              slotCount={slotCount}
+              onToggle={handleSectionToggle}
             />
           ) : (
             <>
