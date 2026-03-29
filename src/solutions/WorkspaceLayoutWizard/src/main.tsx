@@ -15,6 +15,7 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare const Xrm: any;
@@ -46,11 +47,24 @@ function getXrm(): any | null {
 /** Wizard mode determines the wizard behavior */
 type WizardMode = "create" | "edit" | "saveAs";
 
+/** Parsed data parameters from the URL / Xrm.Page.data */
+interface DataParams {
+  mode: WizardMode;
+  layoutId: string | null;
+  /** Template ID from the source layout (saveAs mode) */
+  layoutTemplateId: string | null;
+  /** JSON-encoded sections from the source layout (saveAs mode) */
+  sectionsJson: string | null;
+  /** Display name of the source layout (saveAs mode) */
+  sourceName: string | null;
+}
+
 /**
  * Parse the URL data parameter passed via Xrm.Navigation.navigateTo.
  * Expected format: "mode=create" or "mode=edit&layoutId=<guid>"
+ * SaveAs format: "mode=saveAs&layoutId=<guid>&layoutTemplateId=<id>&sectionsJson=<json>&name=<name>"
  */
-function parseDataParams(): { mode: WizardMode; layoutId: string | null } {
+function parseDataParams(): DataParams {
   let dataString = "";
 
   // Try Xrm context first (Dataverse runtime)
@@ -74,21 +88,75 @@ function parseDataParams(): { mode: WizardMode; layoutId: string | null } {
   const mode: WizardMode =
     modeParam === "edit" || modeParam === "saveAs" ? modeParam : "create";
   const layoutId = parsed.get("layoutId") || null;
+  const layoutTemplateId = parsed.get("layoutTemplateId") || null;
+  const sectionsJson = parsed.get("sectionsJson") || null;
+  const sourceName = parsed.get("name") || null;
 
-  return { mode, layoutId };
+  return { mode, layoutId, layoutTemplateId, sectionsJson, sourceName };
+}
+
+/**
+ * Root wrapper that initializes auth before rendering the wizard.
+ * Follows the same pattern as CreateEventWizard/main.tsx.
+ */
+function Root() {
+  const dataParams = React.useMemo(() => parseDataParams(), []);
+  const [isAuthReady, setIsAuthReady] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function initialize(): Promise<void> {
+      try {
+        const config = await resolveRuntimeConfig();
+        await initAuth({
+          clientId: config.msalClientId,
+          bffBaseUrl: config.bffBaseUrl,
+          bffApiScope: config.bffOAuthScope,
+          tenantId: config.tenantId || undefined,
+          proactiveRefresh: true,
+        });
+        if (!cancelled) {
+          setIsAuthReady(true);
+        }
+      } catch (err) {
+        console.error("[WorkspaceLayoutWizard] Failed to initialize auth:", err);
+        // Still render the wizard — save will fail with an auth error if needed
+        if (!cancelled) setIsAuthReady(true);
+      }
+    }
+    void initialize();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!isAuthReady) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+        <span>Initializing...</span>
+      </div>
+    );
+  }
+
+  return (
+    <App
+      mode={dataParams.mode}
+      layoutId={dataParams.layoutId}
+      layoutTemplateId={dataParams.layoutTemplateId}
+      sectionsJson={dataParams.sectionsJson}
+      sourceName={dataParams.sourceName}
+      authenticatedFetch={authenticatedFetch}
+    />
+  );
 }
 
 // Mount React application to #root element
 const rootElement = document.getElementById("root");
 
 if (rootElement) {
-  const { mode, layoutId } = parseDataParams();
-
   // React 19 createRoot API
   const root = createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <App mode={mode} layoutId={layoutId} />
+      <Root />
     </React.StrictMode>
   );
 } else {

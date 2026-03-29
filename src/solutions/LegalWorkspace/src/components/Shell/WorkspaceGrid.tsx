@@ -15,6 +15,11 @@ import { WorkspaceHeader } from "../WorkspaceHeader";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 import type { IWebApi } from "../../types/xrm";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
+import {
+  WorkspaceSkeleton,
+  PersonalizeBanner,
+  FetchErrorBar,
+} from "../WorkspaceLoadingStates";
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded dialog components (bundle-size optimization — Task 033)
@@ -103,6 +108,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     activeLayout,
     activeLayoutJson,
     isLoading: isLayoutsLoading,
+    status: layoutStatus,
+    error: layoutError,
     setActiveLayoutById,
     refetch: refetchLayouts,
   } = useWorkspaceLayouts(initialWorkspaceId);
@@ -659,11 +666,21 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       if (!xrm?.Navigation?.navigateTo) return;
 
       const mode = activeLayout.isSystem ? "saveAs" : "edit";
+
+      // For saveAs mode, pass the system layout data so the wizard can pre-populate
+      // all three steps (template, sections, name) from the source layout.
+      let dataParams = `mode=${mode}&layoutId=${activeLayout.id}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
+      if (mode === "saveAs") {
+        dataParams += `&layoutTemplateId=${encodeURIComponent(activeLayout.layoutTemplateId)}`;
+        dataParams += `&sectionsJson=${encodeURIComponent(activeLayout.sectionsJson)}`;
+        dataParams += `&name=${encodeURIComponent(activeLayout.name)}`;
+      }
+
       xrm.Navigation.navigateTo(
         {
           pageType: "webresource",
           webresourceName: "sprk_workspacelayoutwizard",
-          data: `mode=${mode}&layoutId=${activeLayout.id}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
+          data: dataParams,
         },
         {
           target: 2,
@@ -723,21 +740,27 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         onCreateClick={handleCreateLayout}
       />
 
-      {isLayoutsLoading ? (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flex: "1 1 auto",
-            minHeight: "200px",
-          }}
-        >
-          <Spinner size="large" label="Loading workspace..." labelPosition="below" />
-        </div>
-      ) : (
-        <WorkspaceShell config={workspaceConfig} />
+      {/* ----- Loading state: skeleton grid while fetching layouts ----- */}
+      {layoutStatus === "loading" && <WorkspaceSkeleton />}
+
+      {/* ----- Error state: fallback layout + warning bar ----- */}
+      {layoutStatus === "error" && (
+        <>
+          <FetchErrorBar />
+          <WorkspaceShell config={workspaceConfig} />
+        </>
       )}
+
+      {/* ----- First visit: system default + personalize banner ----- */}
+      {layoutStatus === "first-visit" && (
+        <>
+          <PersonalizeBanner />
+          <WorkspaceShell config={workspaceConfig} />
+        </>
+      )}
+
+      {/* ----- Loaded: normal workspace rendering ----- */}
+      {layoutStatus === "loaded" && <WorkspaceShell config={workspaceConfig} />}
 
       {/* GetStarted expand dialog — shows all 7 action cards in a grid */}
       {isExpandOpen && (

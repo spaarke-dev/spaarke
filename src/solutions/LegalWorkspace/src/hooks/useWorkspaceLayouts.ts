@@ -41,6 +41,18 @@ export interface WorkspaceLayoutDto {
   isSystem: boolean;
 }
 
+/**
+ * Workspace loading status — determines which UI state to render.
+ *
+ * - "loading":     Initial fetch in progress (no cached data available).
+ * - "loaded":      Layouts fetched successfully (or served from cache).
+ * - "error":       Fetch failed; workspace renders fallback layout.
+ * - "first-visit": Fetch succeeded but user has zero user-created layouts
+ *                  (only system layouts). System default renders immediately
+ *                  with a "Personalize your workspace" banner.
+ */
+export type WorkspaceLoadingStatus = "loading" | "loaded" | "error" | "first-visit";
+
 export interface UseWorkspaceLayoutsResult {
   /** All available layouts (system + user). Empty array while loading. */
   layouts: WorkspaceLayoutDto[];
@@ -50,6 +62,8 @@ export interface UseWorkspaceLayoutsResult {
   activeLayoutJson: LayoutJson;
   /** True while the initial fetch is in progress. */
   isLoading: boolean;
+  /** Computed status for rendering loading states: "loading" | "loaded" | "error" | "first-visit". */
+  status: WorkspaceLoadingStatus;
   /** Error message if layout fetch failed (workspace still renders with fallback). */
   error: string | null;
   /** Switch to a different layout by ID. Fetches layout details if needed. */
@@ -325,11 +339,25 @@ export function useWorkspaceLayouts(
     ? parseLayoutJson(activeLayout.sectionsJson)
     : SYSTEM_DEFAULT_LAYOUT_JSON;
 
+  // -------------------------------------------------------------------------
+  // Derived: computed loading status for rendering loading states
+  // -------------------------------------------------------------------------
+
+  const status: WorkspaceLoadingStatus = (() => {
+    if (isLoading) return "loading";
+    if (error) return "error";
+    // First visit: user has zero user-created layouts (only system layouts exist)
+    const hasUserLayouts = layouts.some((l) => !l.isSystem);
+    if (!hasUserLayouts) return "first-visit";
+    return "loaded";
+  })();
+
   return {
     layouts,
     activeLayout,
     activeLayoutJson,
     isLoading,
+    status,
     error,
     setActiveLayoutById,
     refetch,

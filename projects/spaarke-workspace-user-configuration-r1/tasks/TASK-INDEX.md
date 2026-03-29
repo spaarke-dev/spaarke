@@ -54,7 +54,7 @@
 | 041 | Wizard Step 1: Template selection | FULL | 5h | 002, 040 | ✅ |
 | 042 | Wizard Step 2: Section selection | FULL | 5h | 041 | ✅ |
 | 043 | Wizard Step 3: Arrange sections (DnD) | FULL | 8h | 042 | ✅ |
-| 044 | Wizard API integration (save flow) | FULL | 5h | 021, 043 | 🔲  |
+| 044 | Wizard API integration (save flow) | FULL | 5h | 021, 043 | ✅ |
 
 ### Phase 6: Integration & Polish (Group E — Parallel, after Phase 4)
 
@@ -62,8 +62,8 @@
 |---|------|-------|--------|---------|--------|
 | 050 | URL deep-linking (workspaceId parameter) | STANDARD | 3h | 032 | ✅ |
 | 051 | sessionStorage caching | STANDARD | 3h | 032 | ✅ |
-| 052 | Loading states (skeleton, banner, fallback) | FULL | 5h | 032, 051 | 🔲 |
-| 053 | System workspace Save As flow | STANDARD | 3h | 031, 044 | 🔲 |
+| 052 | Loading states (skeleton, banner, fallback) | FULL | 5h | 032, 051 | ✅ |
+| 053 | System workspace Save As flow | STANDARD | 3h | 031, 044 | ✅ |
 
 ### Phase 7: Testing, Deployment & Wrap-up (Group F)
 
