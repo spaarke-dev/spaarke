@@ -33,7 +33,7 @@ export const THEME_CHANGE_EVENT = 'spaarke-theme-change';
  * Must match the sprk_preferencetype option set value configured in Dataverse.
  * Used by syncThemeFromDataverse() and persistThemeToDataverse().
  */
-export const PREFERENCE_TYPE_THEME = 100000001;
+export const PREFERENCE_TYPE_THEME = 100000003;
 
 export type ThemePreference = 'light' | 'dark' | 'auto';
 

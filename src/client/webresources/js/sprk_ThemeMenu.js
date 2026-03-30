@@ -246,7 +246,7 @@ Spaarke.Theme = Spaarke.Theme || {};
     // Dataverse Theme Persistence (async, non-blocking)
     // =========================================================================
 
-    var PREFERENCE_TYPE_THEME = 100000001;
+    var PREFERENCE_TYPE_THEME = 100000003;
 
     /**
      * Persist theme preference to Dataverse for cross-device sync.
