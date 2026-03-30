@@ -59,6 +59,19 @@ Load when:
 - ❌ **MUST NOT** cache authorization decisions (cache data only)
 - ❌ **MUST NOT** reuse UAC snapshots across requests/jobs
 
+### @spaarke/auth Shared Library (Code Pages)
+
+- ✅ **MUST** use `@spaarke/auth` (`resolveRuntimeConfig`, `initAuth`, `authenticatedFetch`) for all new Code Pages that call BFF endpoints
+- ✅ **MUST** call `resolveRuntimeConfig()` + `setRuntimeConfig()` before rendering the React app
+- ✅ **MUST** import `authenticatedFetch` from `authInit.ts` (workspace) or `@spaarke/auth` (standalone wizards)
+- ✅ **MUST** use lazy functions (not module-level constants) for any value derived from runtime config
+- ❌ **MUST NOT** use module-level `const X = getMsalClientId()` or `const X = getBffBaseUrl()` — these throw before bootstrap
+- ❌ **MUST NOT** import `authenticatedFetch` from legacy `bffAuthProvider.ts` in new code
+- ❌ **MUST NOT** add `@spaarke/auth` bootstrap to Code Pages that only use `Xrm.WebApi` (unnecessary overhead)
+- ❌ **MUST NOT** create new `msalConfig.ts` files with module-level MSAL configuration constants
+
+> See: `.claude/patterns/auth/spaarke-auth-initialization.md` and `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md`
+
 ---
 
 ## Quick Reference Patterns

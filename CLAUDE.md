@@ -987,6 +987,16 @@ Xrm.Navigation.navigateTo(
     { pageType: "webresource", webresourceName: "sprk_mypagename", data: `documentId=${id}` },
     { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } }
 );
+
+// ✅ DO: Use @spaarke/auth bootstrap for Code Pages calling BFF API
+// Bootstrap: resolveRuntimeConfig() → setRuntimeConfig() → ensureAuthInitialized() → render
+// See .claude/patterns/auth/spaarke-auth-initialization.md
+
+// ✅ DO: Use lazy functions for runtime config values
+export function getMsalConfig(): Configuration { return { clientId: getMsalClientId() }; }
+
+// ❌ DON'T: Use module-level constants that call runtime config getters
+const CLIENT_ID = getMsalClientId(); // WRONG — throws before bootstrap
 ```
 
 ### Dataverse Plugins

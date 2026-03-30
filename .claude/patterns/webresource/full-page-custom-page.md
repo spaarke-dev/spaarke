@@ -235,6 +235,34 @@ if (rootElement) {
 
 ---
 
+### Auth Bootstrap (BFF-Calling Code Pages Only)
+
+Code Pages that call BFF API endpoints **MUST** initialize `@spaarke/auth` before rendering.
+Code Pages that only use `Xrm.WebApi` do **NOT** need this — see `xrm-webapi-vs-bff-auth.md`.
+
+```typescript
+// main.tsx — replace simple createRoot with async bootstrap
+import { resolveRuntimeConfig } from "@spaarke/auth";
+import { setRuntimeConfig } from "./config/runtimeConfig";
+import { ensureAuthInitialized } from "./services/authInit";
+
+async function bootstrap(): Promise<void> {
+  const config = await resolveRuntimeConfig();
+  setRuntimeConfig(config);
+  await ensureAuthInitialized();
+
+  const root = createRoot(document.getElementById("root")!);
+  root.render(<App />);
+}
+bootstrap();
+```
+
+**CRITICAL**: Never use module-level constants that call `getMsalClientId()` or `getBffBaseUrl()`. These execute during Vite bundle evaluation before bootstrap runs, causing `"Runtime config not initialized"` errors.
+
+See: `.claude/patterns/auth/spaarke-auth-initialization.md`
+
+---
+
 ### src/App.tsx (Skeleton)
 
 ```typescript

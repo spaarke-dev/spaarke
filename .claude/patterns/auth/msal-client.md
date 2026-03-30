@@ -4,6 +4,14 @@
 > **Last Validated**: 2026-03-09
 > **Source ADRs**: ADR-006
 
+> **⚠️ Migration Notice**: This pattern documents the **legacy** MSAL singleton approach.
+> For new Code Pages, use the `@spaarke/auth` shared library instead.
+> See: `.claude/patterns/auth/spaarke-auth-initialization.md`
+>
+> The legacy `bffAuthProvider.ts` and module-level `msalConfig` pattern are retained
+> for backward compatibility but **should NOT be used in new code**.
+> See: `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md` for when auth is needed.
+
 ---
 
 ## Canonical Implementations
