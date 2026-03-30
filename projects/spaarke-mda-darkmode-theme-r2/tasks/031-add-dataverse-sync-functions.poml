@@ -1,0 +1,54 @@
+<task id="031" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Add Dataverse theme sync functions to themeStorage</title>
+    <phase>4</phase>
+    <tags>shared-library, dataverse, theme</tags>
+    <estimate>2h</estimate>
+    <dependencies>001,030</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Add syncThemeFromDataverse() and persistThemeToDataverse() functions to the unified themeStorage.ts module.</goal>
+    <context>
+      These functions enable cross-device theme persistence:
+      - syncThemeFromDataverse: reads user preference from Dataverse, updates localStorage if different
+      - persistThemeToDataverse: writes current theme to Dataverse after user changes it
+
+      Follow the existing pattern in DataverseService.getUserPreference/setUserPreference.
+      Functions are optional — they require webApi and userId, which are only available in Xrm contexts.
+    </context>
+    <constraints>
+      - Functions accept IWebApi interface (not concrete Xrm.WebApi) for testability
+      - Async operations — never block UI rendering
+      - Graceful failure — if Dataverse unavailable, silently fall back to localStorage
+      - Use preference type 100000001 (ThemePreference)
+      - Store theme as plain string ("dark", "light", "auto") in sprk_preferencevalue
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useUserPreferences.ts</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read DataverseService getUserPreference/setUserPreference pattern</step>
+    <step>Add syncThemeFromDataverse(webApi, userId) to themeStorage.ts</step>
+    <step>Add persistThemeToDataverse(webApi, userId, theme) to themeStorage.ts</step>
+    <step>Add THEME_PREFERENCE_TYPE constant (100000001)</step>
+    <step>Handle create vs update (check if record exists first)</step>
+    <step>Add unit tests with mocked webApi</step>
+  </steps>
+  <outputs>
+    <output>Modified themeStorage.ts with 2 new functions</output>
+    <output>Updated themeStorage.test.ts with Dataverse sync tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>syncThemeFromDataverse reads from Dataverse and updates localStorage</criterion>
+    <criterion>persistThemeToDataverse writes to Dataverse</criterion>
+    <criterion>Both functions silently no-op on failure</criterion>
+    <criterion>Unit tests pass with mocked webApi</criterion>
+  </acceptance-criteria>
+</task>

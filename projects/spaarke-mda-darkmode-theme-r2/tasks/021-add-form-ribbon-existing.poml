@@ -1,0 +1,39 @@
+<task id="021" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Add Form ribbon location to existing entities</title>
+    <phase>3</phase>
+    <tags>ribbon, dataverse</tags>
+    <estimate>1h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Add Form CustomAction location for sprk_project, sprk_invoice, sprk_event (currently have HomepageGrid only).</goal>
+    <context>These 3 entities have theme flyout on the HomepageGrid (list view) but NOT on entity forms. Add the Form location so users see the theme menu when viewing individual records.</context>
+    <constraints>
+      - Add Mscrm.Form.sprk_{entity}.MainTab.Actions.Controls._children location
+      - Keep existing HomepageGrid CustomAction unchanged
+      - Follow same command definition pattern
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>infrastructure/dataverse/ribbon/ThemeMenuRibbons/Other/Customizations.xml</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>For sprk_project: add Form CustomAction alongside existing HomepageGrid</step>
+    <step>For sprk_invoice: add Form CustomAction</step>
+    <step>For sprk_event: add Form CustomAction</step>
+    <step>Verify XML well-formed</step>
+  </steps>
+  <outputs>
+    <output>Modified Customizations.xml with Form locations for 3 entities</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>3 entities have both HomepageGrid and Form CustomActions</criterion>
+    <criterion>XML is well-formed</criterion>
+  </acceptance-criteria>
+</task>

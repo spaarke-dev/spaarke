@@ -1,0 +1,43 @@
+<task id="020" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Add theme flyout ribbon to missing entities</title>
+    <phase>3</phase>
+    <tags>ribbon, dataverse, deploy</tags>
+    <estimate>2h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Add theme flyout CustomAction ribbon XML for 6 missing entities: sprk_workassignment, sprk_analysisplaybook, sprk_analysisoutput, sprk_communication, sprk_eventtodo, sprk_eventtype.</goal>
+    <context>The theme flyout is currently deployed to sprk_matter, sprk_document, sprk_project, sprk_invoice, sprk_event. Use the existing per-entity pattern from ThemeMenuRibbons/Other/Customizations.xml as template. Each entity needs HomepageGrid and Form locations.</context>
+    <constraints>
+      - Follow exact XML pattern from existing entities (Project/Invoice/Event in Customizations.xml)
+      - Include BOTH HomepageGrid AND Form CustomAction locations
+      - Use sprk_ThemeMenu.js for all command definitions
+      - Include Alt attribute on FlyoutAnchor and Button elements (per ribbon-edit skill)
+      - Use label "Auto (follows app)" NOT "Auto (follows system)"
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>infrastructure/dataverse/ribbon/ThemeMenuRibbons/Other/Customizations.xml</file>
+      <file>infrastructure/dataverse/ribbon/sprk_ThemeMenuRibbon.xml</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing ThemeMenuRibbons/Other/Customizations.xml as template</step>
+    <step>For each of 6 new entities, add Entity block with HomepageGrid + Form CustomActions</step>
+    <step>Use "Auto (follows app)" label text</step>
+    <step>Update solution.xml if needed to include new entity references</step>
+  </steps>
+  <outputs>
+    <output>Modified infrastructure/dataverse/ribbon/ThemeMenuRibbons/Other/Customizations.xml</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>6 new entity blocks added with HomepageGrid + Form CustomActions</criterion>
+    <criterion>All use "Auto (follows app)" label</criterion>
+    <criterion>XML is well-formed</criterion>
+  </acceptance-criteria>
+</task>

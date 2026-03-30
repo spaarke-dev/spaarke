@@ -1,0 +1,40 @@
+<task id="022" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Update Auto label to "follows app"</title>
+    <phase>3</phase>
+    <tags>ribbon, label</tags>
+    <estimate>30m</estimate>
+    <dependencies>020,021</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Change "Auto (follows system)" to "Auto (follows app)" in ALL ribbon XML files and the sprk_ThemeMenuRibbon.xml template.</goal>
+    <context>The Auto option should clarify it follows the Power Platform app theme, not the OS. Update all label text, tooltip text, and LocLabel values.</context>
+    <constraints>
+      - Search ALL ribbon XML files for "follows system" and replace with "follows app"
+      - Include the master template sprk_ThemeMenuRibbon.xml
+      - Include Matter and Document ribbon solutions if they have the theme flyout
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>infrastructure/dataverse/ribbon/sprk_ThemeMenuRibbon.xml</file>
+      <file>infrastructure/dataverse/ribbon/ThemeMenuRibbons/Other/Customizations.xml</file>
+      <file>infrastructure/dataverse/ribbon/MatterRibbons/Entities/sprk_Matter/RibbonDiff.xml</file>
+      <file>infrastructure/dataverse/ribbon/DocumentRibbons/Entities/sprk_Document/RibbonDiff.xml</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Search all ribbon XML files for "follows system"</step>
+    <step>Replace with "follows app" in all locations</step>
+    <step>Verify XML well-formed</step>
+  </steps>
+  <outputs>
+    <output>Modified all ribbon XML files with "follows app" label</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No ribbon XML contains "follows system"</criterion>
+    <criterion>All Auto labels say "Auto (follows app)"</criterion>
+  </acceptance-criteria>
+</task>

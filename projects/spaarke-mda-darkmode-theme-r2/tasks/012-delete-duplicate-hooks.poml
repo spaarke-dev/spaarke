@@ -1,0 +1,47 @@
+<task id="012" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Delete duplicate useThemeDetection hooks</title>
+    <phase>2</phase>
+    <tags>code-page, theme, cleanup</tags>
+    <estimate>1h</estimate>
+    <dependencies>001,002</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>A</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Delete useThemeDetection.ts from AnalysisWorkspace and PlaybookBuilder code pages. Replace with shared utility import. Also replace SemanticSearch self-contained ThemeProvider.</goal>
+    <context>AnalysisWorkspace and PlaybookBuilder have identical ~120-line useThemeDetection.ts hooks that duplicate theme logic AND consult OS prefers-color-scheme. SemanticSearch has a self-contained ThemeProvider.ts. All should import from shared library.</context>
+    <constraints>
+      - Delete useThemeDetection.ts from both code pages
+      - Update their index.tsx to use resolveCodePageTheme + setupCodePageThemeListener from @spaarke/ui-components
+      - Replace SemanticSearch ThemeProvider with shared import
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useThemeDetection.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/hooks/useThemeDetection.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/index.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/index.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/providers/ThemeProvider.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Delete AnalysisWorkspace/src/hooks/useThemeDetection.ts</step>
+    <step>Update AnalysisWorkspace/src/index.tsx to import from @spaarke/ui-components</step>
+    <step>Delete PlaybookBuilder/src/hooks/useThemeDetection.ts</step>
+    <step>Update PlaybookBuilder/src/index.tsx to import from @spaarke/ui-components</step>
+    <step>Replace SemanticSearch ThemeProvider.ts with thin wrapper importing from shared lib</step>
+    <step>Verify all three code pages build</step>
+  </steps>
+  <outputs>
+    <output>Deleted 2 useThemeDetection.ts files</output>
+    <output>Modified 3 index.tsx/ThemeProvider.ts files</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No useThemeDetection.ts files exist in code-pages/</criterion>
+    <criterion>No prefers-color-scheme references in code-pages/</criterion>
+    <criterion>All 3 code pages build</criterion>
+  </acceptance-criteria>
+</task>

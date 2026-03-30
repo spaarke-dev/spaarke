@@ -1,0 +1,41 @@
+<task id="019" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Verify remaining PCF controls use standard theme key</title>
+    <phase>2</phase>
+    <tags>pcf, theme, verification</tags>
+    <estimate>30m</estimate>
+    <dependencies>001</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Audit AssociationResolver, UpdateRelatedButton, DrillThroughWorkspace, and ScopeConfigEditor PCF controls to verify they use the standard 'spaarke-theme' localStorage key and don't have OS preference fallback.</goal>
+    <context>These PCF controls reference the theme key but weren't identified as having full inline implementations. Verify they follow the standard pattern.</context>
+    <constraints>
+      - Read-only verification — only modify if issues found
+      - Check for 'spaarke-theme' key usage (correct) vs any variant
+      - Check for any prefers-color-scheme references
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/AssociationResolver/index.ts</file>
+      <file>src/client/pcf/UpdateRelatedButton/index.ts</file>
+      <file>src/client/pcf/DrillThroughWorkspace/control/index.ts</file>
+      <file>src/client/pcf/ScopeConfigEditor/ScopeConfigEditor/index.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read each PCF control's index.ts</step>
+    <step>Verify localStorage key is 'spaarke-theme'</step>
+    <step>Check for prefers-color-scheme references — fix if found</step>
+    <step>Report findings</step>
+  </steps>
+  <outputs>
+    <output>Verification report (possibly modified files if issues found)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All 4 PCF controls use standard 'spaarke-theme' key</criterion>
+    <criterion>No prefers-color-scheme in any of the 4 controls</criterion>
+  </acceptance-criteria>
+</task>

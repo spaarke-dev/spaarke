@@ -1,0 +1,44 @@
+<task id="003" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Update theme utility unit tests</title>
+    <phase>1</phase>
+    <tags>testing, shared-library</tags>
+    <estimate>2h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Update themeStorage.test.ts to remove OS fallback expectations and add tests for Code Page functions.</goal>
+    <context>Tests currently assert that getEffectiveDarkMode() falls back to system preference (lines 168-178). This behavior is being removed. Add tests for new Code Page functions (resolveCodePageTheme, setupCodePageThemeListener).</context>
+    <constraints>
+      - Remove test cases that expect OS preference fallback
+      - Add test: no preference → returns light theme (not OS dark)
+      - Add tests for resolveCodePageTheme()
+      - Add tests for setupCodePageThemeListener()
+      - All tests must pass
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/__tests__/themeStorage.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing test file</step>
+    <step>Remove/update tests that assert OS preference fallback</step>
+    <step>Add test: getEffectiveDarkMode() with no signals returns false (light)</step>
+    <step>Add test group for resolveCodePageTheme()</step>
+    <step>Add test group for setupCodePageThemeListener()</step>
+    <step>Run tests to verify all pass</step>
+  </steps>
+  <outputs>
+    <output>Modified src/client/shared/Spaarke.UI.Components/src/utils/__tests__/themeStorage.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+    <criterion>No test asserts OS preference fallback</criterion>
+    <criterion>Code Page functions have test coverage</criterion>
+  </acceptance-criteria>
+</task>

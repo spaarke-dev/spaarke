@@ -1,0 +1,38 @@
+<task id="030" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Add ThemePreference to sprk_preferencetype option set</title>
+    <phase>4</phase>
+    <tags>dataverse, schema</tags>
+    <estimate>30m</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Add option value 100000001 = "ThemePreference" to the sprk_preferencetype choice field on sprk_userpreference entity in Dataverse.</goal>
+    <context>The sprk_userpreference entity already exists with sprk_preferencetype choice field. Currently has one value: 100000000 = TodoKanbanThresholds. Adding a second value for theme persistence.</context>
+    <constraints>
+      - Use PAC CLI or Dataverse Web API to add the option set value
+      - Value: 100000001, Label: "Theme Preference"
+      - Do NOT modify existing option values
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/hooks/useUserPreferences.ts</file>
+      <file>src/solutions/LegalWorkspace/src/services/DataverseService.ts</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Verify current option set values on sprk_preferencetype</step>
+    <step>Add option value 100000001 = "Theme Preference"</step>
+    <step>Verify the value is available in Dataverse</step>
+  </steps>
+  <outputs>
+    <output>sprk_preferencetype option set updated with ThemePreference value</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Option value 100000001 exists on sprk_preferencetype</criterion>
+    <criterion>Existing TodoKanbanThresholds (100000000) unchanged</criterion>
+  </acceptance-criteria>
+</task>

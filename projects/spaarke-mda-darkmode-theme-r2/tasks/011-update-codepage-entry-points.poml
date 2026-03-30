@@ -1,0 +1,40 @@
+<task id="011" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Update Code Page App.tsx/main.tsx entry points</title>
+    <phase>2</phase>
+    <tags>code-page, theme, migration</tags>
+    <estimate>1.5h</estimate>
+    <dependencies>001,002</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>A</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Update 11 Code Page entry points (App.tsx/main.tsx) that directly import resolveCodePageTheme or setupCodePageThemeListener to use the unified themeStorage module.</goal>
+    <context>These files import directly from codePageTheme or @spaarke/ui-components (which re-exported codePageTheme). After consolidation, the same function names exist but come from themeStorage.</context>
+    <constraints>
+      - Update import paths — function names unchanged
+      - Verify each solution builds
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/TodoDetailSidePane/src/App.tsx</file>
+      <file>src/solutions/SummarizeFilesWizard/src/main.tsx</file>
+      <file>src/solutions/PlaybookLibrary/src/main.tsx</file>
+      <file>src/solutions/CreateMatterWizard/src/main.tsx</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>List all App.tsx/main.tsx files importing resolveCodePageTheme</step>
+    <step>Update each import to use @spaarke/ui-components barrel (which now re-exports from themeStorage)</step>
+    <step>Verify each solution compiles</step>
+  </steps>
+  <outputs>
+    <output>Modified 11 App.tsx/main.tsx files</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No imports reference codePageTheme directly</criterion>
+    <criterion>All 11 solutions build</criterion>
+  </acceptance-criteria>
+</task>

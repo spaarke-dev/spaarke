@@ -1,0 +1,46 @@
+<task id="032" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Wire Dataverse sync into theme consumers</title>
+    <phase>4</phase>
+    <tags>integration, theme, dataverse</tags>
+    <estimate>1.5h</estimate>
+    <dependencies>031</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Wire syncThemeFromDataverse() into Code Page/PCF init flows, and persistThemeToDataverse() into sprk_ThemeMenu.js setTheme().</goal>
+    <context>
+      On page load: Code Pages and PCF controls that have Xrm.WebApi access should call syncThemeFromDataverse() after rendering (async, non-blocking).
+      On theme change: sprk_ThemeMenu.js should call persistThemeToDataverse() after setting localStorage.
+    </context>
+    <constraints>
+      - Sync is async — never delay initial render
+      - Only call in contexts where webApi and userId are available
+      - sprk_ThemeMenu.js must stay minimal per ADR-006 — use Xrm.WebApi directly for the persist call
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/webresources/js/sprk_ThemeMenu.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+      <file>src/solutions/LegalWorkspace/src/App.tsx</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Add persistThemeToDataverse call to sprk_ThemeMenu.js setTheme()</step>
+    <step>Add syncThemeFromDataverse call to LegalWorkspace App.tsx useEffect (async, after render)</step>
+    <step>Evaluate adding sync to other Code Page init flows (or document as future enhancement)</step>
+    <step>Verify theme change persists to Dataverse</step>
+    <step>Verify cross-device sync works on next page load</step>
+  </steps>
+  <outputs>
+    <output>Modified sprk_ThemeMenu.js</output>
+    <output>Modified LegalWorkspace App.tsx (and possibly other entry points)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Theme change creates/updates sprk_userpreference record</criterion>
+    <criterion>Page load reads Dataverse preference (async)</criterion>
+    <criterion>No flash-of-wrong-theme on initial render</criterion>
+  </acceptance-criteria>
+</task>

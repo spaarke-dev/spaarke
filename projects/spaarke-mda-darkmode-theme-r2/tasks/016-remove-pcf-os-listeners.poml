@@ -1,0 +1,43 @@
+<task id="016" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Remove OS listeners from PCF ThemeServices</title>
+    <phase>2</phase>
+    <tags>pcf, theme, cleanup</tags>
+    <estimate>1h</estimate>
+    <dependencies>001,002</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>B</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Remove prefers-color-scheme listeners from UniversalDatasetGrid, SemanticSearchControl, and RelatedDocumentCount ThemeProvider/ThemeService files.</goal>
+    <context>These PCF controls have ThemeProvider or ThemeService files that listen to OS preference changes. After the shared library is updated (task 001), the setupThemeListener no longer includes OS listener. But these controls may have local listeners too.</context>
+    <constraints>
+      - Remove any local window.matchMedia('(prefers-color-scheme: dark)') listeners
+      - Ensure they use setupThemeListener from shared library (which no longer includes OS listener)
+      - Also check ScopeConfigEditor for prefers-color-scheme CSS media query
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalDatasetGrid/control/providers/ThemeProvider.ts</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/ThemeService.ts</file>
+      <file>src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/services/ThemeService.ts</file>
+      <file>src/client/pcf/ScopeConfigEditor/ScopeConfigEditor/components/ScopeEditorShell.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read each ThemeProvider/ThemeService file</step>
+    <step>Remove any local prefers-color-scheme listeners</step>
+    <step>Ensure they delegate to shared setupThemeListener()</step>
+    <step>Check ScopeConfigEditor for CSS prefers-color-scheme and remove</step>
+    <step>Verify each PCF builds</step>
+  </steps>
+  <outputs>
+    <output>Modified up to 4 PCF control files</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No prefers-color-scheme references in any PCF control</criterion>
+    <criterion>All PCF controls build</criterion>
+  </acceptance-criteria>
+</task>

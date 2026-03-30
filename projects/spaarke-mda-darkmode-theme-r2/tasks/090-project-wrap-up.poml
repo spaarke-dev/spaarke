@@ -1,0 +1,35 @@
+<task id="090" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>5</phase>
+    <tags>documentation, cleanup</tags>
+    <estimate>30m</estimate>
+    <dependencies>042</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Complete project wrap-up: update README status, create lessons-learned, archive project.</goal>
+    <context>All tasks complete, changes deployed. Finalize project documentation.</context>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-mda-darkmode-theme-r2/README.md</file>
+      <file>projects/spaarke-mda-darkmode-theme-r2/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Update README.md status to Complete</step>
+    <step>Update all task statuses in TASK-INDEX.md to ✅</step>
+    <step>Create notes/lessons-learned/lessons-learned.md</step>
+    <step>Reset current-task.md to "none"</step>
+  </steps>
+  <outputs>
+    <output>Updated README.md, TASK-INDEX.md</output>
+    <output>Created lessons-learned.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>README shows Complete status</criterion>
+    <criterion>All tasks marked ✅ in TASK-INDEX.md</criterion>
+    <criterion>Lessons learned documented</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,38 @@
+<task id="002" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Update shared library barrel exports</title>
+    <phase>1</phase>
+    <tags>shared-library, exports</tags>
+    <estimate>30m</estimate>
+    <dependencies>001</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Update the shared library barrel export (index.ts) to remove codePageTheme export and ensure all unified themeStorage functions are exported.</goal>
+    <context>After task 001, codePageTheme.ts is deleted. The barrel export in utils/index.ts needs to remove `export * from './codePageTheme'` and ensure themeStorage exports include the new Code Page functions.</context>
+    <constraints>
+      - Remove export * from './codePageTheme'
+      - Evaluate if themeDetection export should be removed
+      - Ensure resolveCodePageTheme and setupCodePageThemeListener are accessible via @spaarke/ui-components
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/index.ts</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read utils/index.ts</step>
+    <step>Remove export * from './codePageTheme'</step>
+    <step>Remove export * from './themeDetection' if file was deleted in task 001</step>
+    <step>Verify themeStorage exports are included</step>
+  </steps>
+  <outputs>
+    <output>Modified src/client/shared/Spaarke.UI.Components/src/utils/index.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No import errors when consuming @spaarke/ui-components theme functions</criterion>
+    <criterion>resolveCodePageTheme importable from @spaarke/ui-components</criterion>
+  </acceptance-criteria>
+</task>

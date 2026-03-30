@@ -1,0 +1,38 @@
+<task id="018" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Remove OS listener from sprk_ThemeMenu.js</title>
+    <phase>2</phase>
+    <tags>webresource, theme</tags>
+    <estimate>30m</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Remove the prefers-color-scheme media query listener from sprk_ThemeMenu.js (lines 96-107).</goal>
+    <context>The web resource currently listens to OS preference changes and auto-updates. Per ADR-021, theme should only change when user explicitly selects via menu.</context>
+    <constraints>
+      - Remove window.matchMedia listener block
+      - Keep all other functionality (setTheme, init, initLogo, updateLogo, isSelected, isEnabled)
+      - ADR-006: keep JS minimal (invocation only)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/webresources/js/sprk_ThemeMenu.js</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read sprk_ThemeMenu.js</step>
+    <step>Identify and remove prefers-color-scheme listener (lines 96-107)</step>
+    <step>Verify remaining functions still work</step>
+  </steps>
+  <outputs>
+    <output>Modified src/client/webresources/js/sprk_ThemeMenu.js</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No prefers-color-scheme reference in sprk_ThemeMenu.js</criterion>
+    <criterion>setTheme, init, initLogo functions still work</criterion>
+  </acceptance-criteria>
+</task>

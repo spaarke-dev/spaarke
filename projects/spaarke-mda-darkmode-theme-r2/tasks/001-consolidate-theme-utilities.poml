@@ -1,0 +1,58 @@
+<task id="001" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Consolidate theme utilities into single module</title>
+    <phase>1</phase>
+    <tags>shared-library, theme, refactor</tags>
+    <estimate>3h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Merge codePageTheme.ts into themeStorage.ts creating a single authoritative theme utility module. Remove OS prefers-color-scheme fallback. Export Code Page functions from the unified module.</goal>
+    <context>
+      Two separate theme utility files exist with different fallback behavior:
+      - themeStorage.ts (PCF): falls back to OS prefers-color-scheme (violates ADR-021)
+      - codePageTheme.ts (Code Pages): correctly ignores OS preference
+
+      Consolidate into themeStorage.ts because it has the richer API (PCF context support).
+      Also evaluate themeDetection.ts for deprecation.
+    </context>
+    <constraints>
+      - MUST NOT consult OS prefers-color-scheme in any fallback
+      - MUST export resolveCodePageTheme() and setupCodePageThemeListener() from themeStorage.ts
+      - MUST keep all existing PCF functions (getEffectiveDarkMode, resolveThemeWithUserPreference, setupThemeListener)
+      - MUST delete getSystemThemePreference() function
+      - MUST remove window.matchMedia('(prefers-color-scheme: dark)') listener
+      - Unified priority chain: localStorage → PCF context → navbar → light default
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/codePageTheme.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeDetection.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read themeStorage.ts and codePageTheme.ts fully to understand both APIs</step>
+    <step>Add resolveCodePageTheme() and setupCodePageThemeListener() functions to themeStorage.ts (copy logic from codePageTheme.ts)</step>
+    <step>Remove getSystemThemePreference() function from themeStorage.ts</step>
+    <step>Update getEffectiveDarkMode() to fall back to light (not OS preference)</step>
+    <step>Remove window.matchMedia listener from setupThemeListener()</step>
+    <step>Delete codePageTheme.ts</step>
+    <step>Evaluate themeDetection.ts — if fully superseded, delete it too</step>
+    <step>Verify themeStorage.ts compiles without errors</step>
+  </steps>
+  <outputs>
+    <output>Modified src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</output>
+    <output>Deleted src/client/shared/Spaarke.UI.Components/src/utils/codePageTheme.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>themeStorage.ts exports all functions from both former modules</criterion>
+    <criterion>No prefers-color-scheme references in themeStorage.ts</criterion>
+    <criterion>getEffectiveDarkMode() returns false (light) when no preference, no context, no navbar</criterion>
+  </acceptance-criteria>
+</task>

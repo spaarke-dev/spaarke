@@ -1,0 +1,48 @@
+<task id="040" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Create theme consistency protocol document</title>
+    <phase>5</phase>
+    <tags>documentation, constraints</tags>
+    <estimate>1h</estimate>
+    <dependencies>001</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>E</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Create a mandatory theme protocol document in .claude/patterns/ or .claude/constraints/ that defines the rules all new Spaarke components must follow for theme resolution.</goal>
+    <context>This project consolidates theme utilities and removes OS preference fallback. The protocol document ensures future components follow the same standard.</context>
+    <constraints>
+      - Include MUST/MUST NOT rules
+      - Include code examples for PCF and Code Page patterns
+      - Reference ADR-021 and ADR-012
+      - Document the unified priority chain
+      - Document the Office Add-in exception
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create .claude/constraints/theme-consistency.md (or .claude/patterns/theme-consistency.md)</step>
+    <step>Include MUST/MUST NOT rules from design.md</step>
+    <step>Include PCF code pattern with deep import example</step>
+    <step>Include Code Page code pattern</step>
+    <step>Document unified priority chain</step>
+    <step>Document Office Add-in exception</step>
+    <step>Update .claude/patterns/pcf/theme-management.md to reference the new protocol</step>
+  </steps>
+  <outputs>
+    <output>Created .claude/constraints/theme-consistency.md</output>
+    <output>Updated .claude/patterns/pcf/theme-management.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Protocol document exists with MUST/MUST NOT rules</criterion>
+    <criterion>PCF and Code Page patterns included</criterion>
+    <criterion>References ADR-021 and ADR-012</criterion>
+  </acceptance-criteria>
+</task>

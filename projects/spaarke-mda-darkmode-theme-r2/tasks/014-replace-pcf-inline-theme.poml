@@ -1,0 +1,48 @@
+<task id="014" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Replace inlined theme code in PCF controls</title>
+    <phase>2</phase>
+    <tags>pcf, theme, cleanup</tags>
+    <estimate>2h</estimate>
+    <dependencies>001,002</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>B</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Remove ~470 lines of inlined theme utilities from 3 PCF controls and replace with imports from @spaarke/ui-components.</goal>
+    <context>
+      UniversalQuickCreate (index.ts lines 37-195, ~160 lines) and EmailProcessingMonitor (index.ts lines 23-95, ~70 lines) have inline theme code marked "GitHub #234 — Import when published." VisualHost has a full ~240 line ThemeProvider.ts reimplementation. The shared library is published — clean these up now.
+    </context>
+    <constraints>
+      - PCF controls MUST use deep imports: @spaarke/ui-components/dist/utils/themeStorage (not barrel)
+      - MUST use React 16 APIs (ADR-022)
+      - Remove ALL inline theme functions, replace with shared imports
+      - MUST NOT introduce prefers-color-scheme
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalQuickCreate/control/index.ts</file>
+      <file>src/client/pcf/EmailProcessingMonitor/control/index.ts</file>
+      <file>src/client/pcf/VisualHost/control/providers/ThemeProvider.ts</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read UniversalQuickCreate/control/index.ts — identify inline theme code block</step>
+    <step>Replace with import from @spaarke/ui-components (deep import for PCF)</step>
+    <step>Repeat for EmailProcessingMonitor</step>
+    <step>Replace VisualHost ThemeProvider.ts with thin wrapper importing from shared lib</step>
+    <step>Verify all 3 PCF controls build (npm run build)</step>
+  </steps>
+  <outputs>
+    <output>Modified 3 PCF control files (~470 lines removed)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No inline getUserThemePreference or getEffectiveDarkMode in PCF files</criterion>
+    <criterion>All 3 PCF controls build successfully</criterion>
+    <criterion>No prefers-color-scheme in any PCF control</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,41 @@
+<task id="041" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Integration testing — verify theme consistency</title>
+    <phase>5</phase>
+    <tags>testing, verification</tags>
+    <estimate>2h</estimate>
+    <dependencies>010,011,012,014,016,017,018,019</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>E</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Verify all surfaces render consistent theme across the full test matrix.</goal>
+    <context>After all code changes, run the verification matrix from the design document.</context>
+    <constraints>
+      - Test all 4 scenarios: Auto+OS dark, Dark explicit, Light explicit, cross-tab sync
+      - Test PCF controls alongside Code Pages on the same page
+      - Verify grep shows no prefers-color-scheme in production code
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-mda-darkmode-theme-r2/spec.md</file>
+      <file>projects/spaarke-mda-darkmode-theme-r2/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Run grep -r "prefers-color-scheme" src/ — verify zero hits in production files</step>
+    <step>Run grep -r "spaarke-workspace-theme" src/ — verify zero hits</step>
+    <step>Run grep -r "codePageTheme" src/ — verify zero hits</step>
+    <step>Run shared library unit tests</step>
+    <step>Document test results</step>
+  </steps>
+  <outputs>
+    <output>Test results report in notes/</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All grep checks return zero production hits</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>Test matrix documented</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,41 @@
+<task id="010" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Update Code Page ThemeProvider wrappers</title>
+    <phase>2</phase>
+    <tags>code-page, theme, migration</tags>
+    <estimate>1h</estimate>
+    <dependencies>001,002</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>A</parallel-group>
+  </metadata>
+  <prompt>
+    <goal>Update 6 Code Page ThemeProvider.ts wrapper files to import from unified themeStorage instead of deleted codePageTheme.</goal>
+    <context>These are thin wrappers that re-export shared library functions. After task 001, codePageTheme.ts is deleted. Update imports to point to themeStorage.</context>
+    <constraints>
+      - Update import paths only — do not change function signatures
+      - All 6 files follow the same pattern
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>src/solutions/LegalWorkspace/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/EventsPage/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/CalendarSidePane/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/EventDetailSidePane/src/providers/ThemeProvider.ts</file>
+      <file>src/solutions/SpeAdminApp/src/providers/ThemeProvider.ts</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read each ThemeProvider.ts to understand current imports</step>
+    <step>Update imports from codePageTheme to themeStorage (or @spaarke/ui-components barrel)</step>
+    <step>Verify each file compiles</step>
+  </steps>
+  <outputs>
+    <output>Modified 6 ThemeProvider.ts files</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>No imports reference codePageTheme</criterion>
+    <criterion>All 6 solutions build without errors</criterion>
+  </acceptance-criteria>
+</task>

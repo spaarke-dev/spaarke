@@ -1,0 +1,43 @@
+<task id="042" project="spaarke-mda-darkmode-theme-r2">
+  <metadata>
+    <title>Deploy to dev environment</title>
+    <phase>5</phase>
+    <tags>deploy, dataverse</tags>
+    <estimate>1h</estimate>
+    <dependencies>041</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Deploy all changes to the dev environment: ribbon solutions, web resources, PCF controls, Code Page web resources.</goal>
+    <context>After integration testing passes, deploy to Dataverse dev environment.</context>
+    <constraints>
+      - Deploy ribbon solution (ThemeMenuRibbons) with new entities
+      - Deploy updated sprk_ThemeMenu.js web resource
+      - Deploy updated PCF controls that were modified
+      - Deploy updated Code Page web resources
+      - Follow dataverse-deploy skill procedures
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Build modified PCF controls</step>
+    <step>Build modified Code Page solutions</step>
+    <step>Import ribbon solution to Dataverse</step>
+    <step>Upload updated web resources</step>
+    <step>Publish customizations</step>
+    <step>Verify in dev environment</step>
+  </steps>
+  <outputs>
+    <output>All changes deployed to dev</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Theme flyout visible on all entities</criterion>
+    <criterion>Theme changes render consistently across all surfaces</criterion>
+  </acceptance-criteria>
+</task>
