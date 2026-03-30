@@ -86,13 +86,20 @@ function SmartTodoLayout(): React.ReactElement {
 
   // Wire selectedEventId to panel visibility:
   // open when an item is selected, close when deselected.
+  // Use refs to avoid infinite loop — showDetail/hideDetail change refs
+  // when isDetailVisible changes, which would re-trigger this effect.
+  const showDetailRef = React.useRef(showDetail);
+  const hideDetailRef = React.useRef(hideDetail);
+  showDetailRef.current = showDetail;
+  hideDetailRef.current = hideDetail;
+
   React.useEffect(() => {
     if (selectedEventId !== null) {
-      showDetail();
+      showDetailRef.current();
     } else {
-      hideDetail();
+      hideDetailRef.current();
     }
-  }, [selectedEventId, showDetail, hideDetail]);
+  }, [selectedEventId]);
 
   return (
     <div ref={containerRef} className={styles.container}>
