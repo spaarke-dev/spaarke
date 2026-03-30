@@ -5,11 +5,23 @@ import {
   Title3,
   Button,
   CounterBadge,
+  Dropdown,
+  Option,
+  OptionGroup,
+  Divider,
+  Tooltip,
 } from "@fluentui/react-components";
-import { AlertRegular } from "@fluentui/react-icons";
+import type { OptionOnSelectData } from "@fluentui/react-components";
+import {
+  AlertRegular,
+  SettingsRegular,
+  AddRegular,
+  LockClosedRegular,
+} from "@fluentui/react-icons";
 import { ThemeToggle } from "./ThemeToggle";
 import { NotificationPanel } from "../NotificationPanel/NotificationPanel";
 import { useNotifications } from "../../hooks/useNotifications";
+import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 
 const useStyles = makeStyles({
   header: {
@@ -34,6 +46,26 @@ const useStyles = makeStyles({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  dropdown: {
+    minWidth: "200px",
+    maxWidth: "320px",
+  },
+  optionContent: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+  },
+  lockIcon: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+  },
+  newWorkspaceOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorBrandForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
   actions: {
     display: "flex",
     alignItems: "center",
@@ -54,7 +86,28 @@ const useStyles = makeStyles({
   },
 });
 
-export const PageHeader: React.FC = () => {
+const NEW_WORKSPACE_VALUE = "__new_workspace__";
+
+export interface IPageHeaderProps {
+  /** The currently active workspace layout. */
+  activeLayout?: WorkspaceLayoutSummary;
+  /** All available layouts (system + user). */
+  layouts?: WorkspaceLayoutSummary[];
+  /** Called when the user selects a different layout from the dropdown. */
+  onLayoutChange?: (layoutId: string) => void;
+  /** Called when the user clicks the settings gear button. */
+  onEditClick?: () => void;
+  /** Called when the user selects "+ New Workspace" from the dropdown. */
+  onCreateClick?: () => void;
+}
+
+export const PageHeader: React.FC<IPageHeaderProps> = ({
+  activeLayout,
+  layouts,
+  onLayoutChange,
+  onEditClick,
+  onCreateClick,
+}) => {
   const styles = useStyles();
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] =
     React.useState<boolean>(false);
@@ -68,6 +121,30 @@ export const PageHeader: React.FC = () => {
     refresh,
   } = useNotifications();
 
+  const systemLayouts = React.useMemo(
+    () => (layouts ?? []).filter((l) => l.isSystem),
+    [layouts],
+  );
+  const userLayouts = React.useMemo(
+    () => (layouts ?? []).filter((l) => !l.isSystem),
+    [layouts],
+  );
+
+  const handleOptionSelect = React.useCallback(
+    (_event: unknown, data: OptionOnSelectData) => {
+      const value = data.optionValue;
+      if (!value) return;
+      if (value === NEW_WORKSPACE_VALUE) {
+        onCreateClick?.();
+        return;
+      }
+      if (value !== activeLayout?.id) {
+        onLayoutChange?.(value);
+      }
+    },
+    [activeLayout?.id, onLayoutChange, onCreateClick],
+  );
+
   const handleNotificationClick = React.useCallback(() => {
     setIsNotificationPanelOpen((prev) => !prev);
   }, []);
@@ -76,12 +153,69 @@ export const PageHeader: React.FC = () => {
     setIsNotificationPanelOpen(false);
   }, []);
 
+  const settingsTooltip = activeLayout?.isSystem
+    ? "Save As new workspace"
+    : "Edit workspace";
+
   return (
     <>
       <header className={styles.header} role="banner">
-        <Title3 className={styles.title}>Legal Operations Workspace</Title3>
+        {/* Workspace name as dropdown selector */}
+        {activeLayout ? (
+          <Dropdown
+            className={styles.dropdown}
+            value={activeLayout.name}
+            selectedOptions={[activeLayout.id]}
+            onOptionSelect={handleOptionSelect}
+            aria-label="Select workspace layout"
+            appearance="underline"
+          >
+            {systemLayouts.length > 0 && (
+              <OptionGroup label="System">
+                {systemLayouts.map((layout) => (
+                  <Option key={layout.id} value={layout.id} text={layout.name}>
+                    <span className={styles.optionContent}>
+                      <LockClosedRegular className={styles.lockIcon} fontSize={16} />
+                      {layout.name}
+                    </span>
+                  </Option>
+                ))}
+              </OptionGroup>
+            )}
+            {systemLayouts.length > 0 && userLayouts.length > 0 && <Divider />}
+            {userLayouts.length > 0 && (
+              <OptionGroup label="My Workspaces">
+                {userLayouts.map((layout) => (
+                  <Option key={layout.id} value={layout.id} text={layout.name}>
+                    {layout.name}
+                  </Option>
+                ))}
+              </OptionGroup>
+            )}
+            <Divider />
+            <Option value={NEW_WORKSPACE_VALUE} text="New Workspace">
+              <span className={styles.newWorkspaceOption}>
+                <AddRegular fontSize={16} />
+                New Workspace
+              </span>
+            </Option>
+          </Dropdown>
+        ) : (
+          <Title3 className={styles.title}>Legal Operations Workspace</Title3>
+        )}
 
         <div className={styles.actions}>
+          {/* Gear button — workspace layout settings */}
+          {activeLayout && onEditClick && (
+            <Tooltip content={settingsTooltip} relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<SettingsRegular />}
+                onClick={onEditClick}
+                aria-label={settingsTooltip}
+              />
+            </Tooltip>
+          )}
           <div className={styles.notificationWrapper}>
             <Button
               appearance="subtle"

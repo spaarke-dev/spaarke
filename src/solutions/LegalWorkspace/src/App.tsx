@@ -9,6 +9,7 @@ import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { getWebApi, getUserId } from "./services/xrmProvider";
 import { PageHeader } from "./components/Shell/PageHeader";
 import { WorkspaceGrid } from "./components/Shell/WorkspaceGrid";
+import type { WorkspaceHeaderState } from "./components/Shell/WorkspaceGrid";
 import { SmartToDo } from "./components/SmartToDo/SmartToDo";
 import { FeedTodoSyncProvider } from "./contexts/FeedTodoSyncContext";
 import type { IWebApi } from "./types/xrm";
@@ -93,6 +94,9 @@ export const App: React.FC = () => {
     return cleanup;
   }, []);
 
+  // Workspace header state — pushed up from WorkspaceGrid via onHeaderReady
+  const [headerState, setHeaderState] = React.useState<WorkspaceHeaderState | null>(null);
+
   const buildDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
@@ -130,7 +134,13 @@ export const App: React.FC = () => {
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <FeedTodoSyncProvider webApi={webApi}>
         <div className={styles.root}>
-          <PageHeader />
+          <PageHeader
+            activeLayout={headerState?.activeLayout}
+            layouts={headerState?.layouts}
+            onLayoutChange={headerState?.onLayoutChange}
+            onEditClick={headerState?.onEditClick}
+            onCreateClick={headerState?.onCreateClick}
+          />
           <main className={styles.content}>
             <WorkspaceGrid
               allocatedWidth={0}
@@ -138,6 +148,7 @@ export const App: React.FC = () => {
               webApi={webApi}
               userId={userId}
               initialWorkspaceId={workspaceId}
+              onHeaderReady={setHeaderState}
             />
           </main>
           <footer className={styles.footer}>

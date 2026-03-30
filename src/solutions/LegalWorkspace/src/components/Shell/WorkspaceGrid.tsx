@@ -71,6 +71,15 @@ const DialogLoadingFallback: React.FC = () => (
   </div>
 );
 
+/** Workspace header state passed up to the PageHeader via onHeaderReady. */
+export interface WorkspaceHeaderState {
+  activeLayout: WorkspaceLayoutSummary;
+  layouts: WorkspaceLayoutSummary[];
+  onLayoutChange: (layoutId: string) => void;
+  onEditClick: () => void;
+  onCreateClick: () => void;
+}
+
 export interface IWorkspaceGridProps {
   allocatedWidth: number;
   allocatedHeight: number;
@@ -80,6 +89,8 @@ export interface IWorkspaceGridProps {
   userId: string;
   /** Optional workspace layout ID for deep-linking (from URL data parameter) */
   initialWorkspaceId?: string;
+  /** Called when workspace header data is ready — parent renders it in PageHeader toolbar. */
+  onHeaderReady?: (state: WorkspaceHeaderState) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +102,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   allocatedHeight: _allocatedHeight,
   webApi,
   userId,
+  onHeaderReady,
   initialWorkspaceId,
 }) => {
   // -------------------------------------------------------------------------
@@ -731,19 +743,25 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, [refetchLayouts]);
 
   // -------------------------------------------------------------------------
-  // Layout — WorkspaceHeader + WorkspaceShell renders the full grid
+  // Push header state to parent (PageHeader renders the dropdown + gear)
+  // -------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    onHeaderReady?.({
+      activeLayout: headerActiveLayout,
+      layouts: headerLayouts,
+      onLayoutChange: handleLayoutChange,
+      onEditClick: handleEditLayout,
+      onCreateClick: handleCreateLayout,
+    });
+  }, [headerActiveLayout, headerLayouts, handleLayoutChange, handleEditLayout, handleCreateLayout, onHeaderReady]);
+
+  // -------------------------------------------------------------------------
+  // Layout — WorkspaceShell renders the full grid
   // -------------------------------------------------------------------------
 
   return (
     <>
-      <WorkspaceHeader
-        activeLayout={headerActiveLayout}
-        layouts={headerLayouts}
-        onLayoutChange={handleLayoutChange}
-        onEditClick={handleEditLayout}
-        onCreateClick={handleCreateLayout}
-      />
-
       {/* ----- Loading state: skeleton grid while fetching layouts ----- */}
       {layoutStatus === "loading" && <WorkspaceSkeleton />}
 
