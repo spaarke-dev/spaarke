@@ -497,7 +497,7 @@ export const TODO_SELECT_FIELDS: string[] = [
  * Sort: priorityscore desc, then duedate asc (most urgent first).
  */
 export function buildTodoItemsQuery(userId: string): string {
-  const filter = `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus ne 100000002`;
+  const filter = `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus eq 100000000`;
   return buildQuery({
     select: TODO_SELECT_FIELDS,
     filter,

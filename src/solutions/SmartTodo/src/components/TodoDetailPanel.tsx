@@ -251,22 +251,34 @@ export function TodoDetailPanel(): React.ReactElement {
         });
       }
 
-      // Persist to Dataverse
-      const result = await deactivateTodoExtension(todoId);
-      if (!result.success) {
+      // Persist to Dataverse: update sprk_event.sprk_todostatus AND deactivate sprk_eventtodo
+      const [eventResult, extResult] = await Promise.all([
+        selectedEventId
+          ? saveTodoFields(selectedEventId, {
+              sprk_todostatus: 100000001, // Completed
+            } as any)
+          : Promise.resolve({ success: true }),
+        deactivateTodoExtension(todoId),
+      ]);
+
+      if (!extResult.success || !eventResult.success) {
         // Rollback on failure
         setTodoExt(previousExt);
         if (selectedEventId && previousItem) {
           updateItem(selectedEventId, previousItem);
         }
         console.error(
-          "[TodoDetailPanel] Deactivate todo extension failed, reverted:",
-          result.error,
+          "[TodoDetailPanel] Complete failed, reverted:",
+          extResult.error || eventResult.error,
         );
+      } else if (selectedEventId) {
+        // Success — remove item from Kanban (it's no longer Open)
+        handleRemove(selectedEventId);
+        selectItem(null);
       }
-      return result;
+      return extResult;
     },
-    [selectedEventId, updateItem, todoExt, items],
+    [selectedEventId, updateItem, handleRemove, selectItem, todoExt, items],
   );
 
   // ---------------------------------------------------------------------------
