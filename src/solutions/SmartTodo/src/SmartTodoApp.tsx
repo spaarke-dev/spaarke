@@ -46,8 +46,10 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
   detailPanel: {
-    overflow: "auto",
+    overflow: "hidden",
     minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
   },
   /** Smooth collapse/expand animation for panel toggle transitions.
    *  Applied only when NOT dragging to avoid janky animation during resize. */

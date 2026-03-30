@@ -78,7 +78,8 @@ const useStyles = makeStyles({
   },
   body: {
     flex: "1 1 0",
-    overflow: "hidden",
+    overflow: "auto",
+    minHeight: 0,
   },
   emptyState: {
     display: "flex",
