@@ -6,7 +6,12 @@ import {
   Text,
 } from "@fluentui/react-components";
 import { useTheme } from "./hooks/useTheme";
-import { syncThemeFromDataverse } from "@spaarke/ui-components";
+import {
+  syncThemeFromDataverse,
+  persistThemeToDataverse,
+  getUserThemePreference,
+  THEME_CHANGE_EVENT,
+} from "@spaarke/ui-components";
 import { PageHeader } from "./components/Shell/PageHeader";
 import { WorkspaceGrid } from "./components/Shell/WorkspaceGrid";
 import { FeedTodoSyncProvider } from "./contexts/FeedTodoSyncContext";
@@ -63,12 +68,24 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
   const { theme } = useTheme();
   const styles = useStyles();
 
+  const cleanUserId = userId?.replace(/[{}]/g, '') ?? '';
+
   // Cross-device theme sync: async read from Dataverse on mount (non-blocking)
   React.useEffect(() => {
-    if (webApi && userId) {
-      syncThemeFromDataverse(webApi, userId.replace(/[{}]/g, ''));
+    if (webApi && cleanUserId) {
+      syncThemeFromDataverse(webApi, cleanUserId);
     }
-  }, [webApi, userId]);
+  }, [webApi, cleanUserId]);
+
+  // Persist theme changes to Dataverse (triggered by ThemeToggle or ribbon menu)
+  React.useEffect(() => {
+    if (!webApi || !cleanUserId) return;
+    const handler = () => {
+      persistThemeToDataverse(webApi, cleanUserId, getUserThemePreference());
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, handler);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, handler);
+  }, [webApi, cleanUserId]);
   const buildDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
