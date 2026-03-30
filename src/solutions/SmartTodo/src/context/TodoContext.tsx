@@ -107,9 +107,14 @@ export function TodoProvider({
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Sync items when initialItems changes (e.g. after hook wiring in task 022)
+  // Sync items when initialItems prop changes (referential identity).
+  // Skip the default empty array to avoid infinite re-render loops.
+  const initialItemsRef = React.useRef(initialItems);
   React.useEffect(() => {
-    setItems(initialItems);
+    if (initialItems !== initialItemsRef.current && initialItems.length > 0) {
+      initialItemsRef.current = initialItems;
+      setItems(initialItems);
+    }
   }, [initialItems]);
 
   // ── Selection state ──────────────────────────────────────────────────────
