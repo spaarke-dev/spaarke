@@ -91,7 +91,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-reports
@@ -101,7 +101,7 @@ jobs:
           retention-days: 7
 
       - name: Upload test results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results
@@ -186,7 +186,7 @@ jobs:
           echo '{"job": "sonarcloud-analysis", "status": "${{ job.status }}"}' > sonarcloud-status.json
 
       - name: Upload SonarCloud status
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sonarcloud-status
@@ -234,7 +234,7 @@ jobs:
             > ai-review-results.json 2>&1 || true
 
       - name: Upload AI review results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ai-review-results
@@ -323,7 +323,7 @@ jobs:
           done
 
       - name: Upload audit results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: dependency-audit-results
