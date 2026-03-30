@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { authenticatedFetch } from "../services/bffAuthProvider";
+import { authenticatedFetch } from "../services/authInit";
 import { getBffBaseUrl } from "../config/runtimeConfig";
 import type { LayoutJson } from "../workspace/buildDynamicWorkspaceConfig";
 import { SYSTEM_DEFAULT_LAYOUT_JSON } from "../workspace/buildDynamicWorkspaceConfig";

@@ -4,7 +4,10 @@
  *
  * IMPORTANT: Configuration is lazy (function, not module-level const) because
  * this module may be imported during Vite bundle evaluation before
- * setRuntimeConfig() runs in the main.tsx async bootstrap.
+ * setRuntimeConfig() runs in the async main.tsx bootstrap.
+ *
+ * The preferred auth path is @spaarke/auth via authInit.ts. This module is
+ * only used by the legacy bffAuthProvider.ts (retained for fallback).
  *
  * Environment portability:
  *   - Redirect URI: auto-detected from window.location.origin
@@ -19,7 +22,9 @@ import { getMsalClientId } from './runtimeConfig';
 const REDIRECT_URI = window.location.origin;
 
 /**
- * Returns MSAL config. Must be called AFTER setRuntimeConfig() in bootstrap.
+ * Returns MSAL config lazily. Must be called AFTER setRuntimeConfig() in bootstrap.
+ * Replaces the former module-level `const msalConfig` which threw during bundle
+ * evaluation when imported before runtime config was initialized.
  */
 export function getMsalConfig(): Configuration {
   return {
@@ -57,9 +62,9 @@ export function getMsalConfig(): Configuration {
 }
 
 /**
- * @deprecated Use getMsalConfig() instead.
- * Lazy proxy kept for backward compatibility — defers getMsalClientId() until
- * property access (after bootstrap), avoiding the module-level throw.
+ * Legacy export — consumed by bffAuthProvider.ts which calls
+ * `new PublicClientApplication(msalConfig)` lazily inside ensureMsalInitialized().
+ * The Proxy defers getMsalClientId() until property access (after bootstrap).
  */
 export const msalConfig: Configuration = new Proxy({} as Configuration, {
   get(_target, prop) {
