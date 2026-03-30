@@ -1,15 +1,15 @@
 # Event To Do — Solution Architecture
 
-> **Version**: 1.0
-> **Date**: March 1, 2026
-> **Project**: Smart To Do Kanban & Todo Detail Side Pane
+> **Version**: 2.0
+> **Date**: March 30, 2026
+> **Project**: Smart To Do Kanban R2 — Unified Code Page with Inline Detail Panel
 > **Status**: Implementation Complete
 
 ---
 
 ## Overview
 
-The Event To Do system provides Kanban-style task management within the Corporate Legal Workspace. Users can flag events as to-do items, organize them across priority-based columns, and manage detailed task information through a side pane editor.
+The Event To Do system provides Kanban-style task management within the Corporate Legal Workspace and as a standalone Code Page. Users can flag events as to-do items, organize them across priority-based columns, and manage detailed task information through an inline resizable detail panel.
 
 ### Key Capabilities
 
@@ -18,10 +18,22 @@ The Event To Do system provides Kanban-style task management within the Corporat
 | **Three-Column Kanban** | Drag-and-drop board with Today, Tomorrow, Future columns |
 | **Score-Based Auto-Assignment** | To Do Score formula auto-assigns items to columns by priority, effort, and urgency |
 | **Pinning** | Lock items in a specific column, overriding score-based assignment |
-| **Detail Side Pane** | Full read/write editor for event fields and to-do notes |
+| **Inline Detail Panel** | Resizable right panel for editing event fields and to-do notes (R2) |
+| **Optimistic Updates** | Save in detail panel updates Kanban card immediately — no full refetch |
 | **Feed ↔ Kanban Sync** | Flag events from the Updates Feed; Kanban reflects changes instantly |
-| **BroadcastChannel Sync** | Side pane edits propagate to Kanban board in real time |
 | **Completion Workflow** | Yellow "Complete" → Green "Completed" with Dataverse state change |
+
+### Architecture Evolution (R1 → R2)
+
+| Concern | R1 (Two Iframes) | R2 (Unified Code Page) |
+|---------|-------------------|------------------------|
+| Detail rendering | Separate iframe via `Xrm.App.sidePanes` (400px fixed) | Inline React panel, same tree (resizable) |
+| Communication | BroadcastChannel JSON messages | Direct React state/callbacks via TodoContext |
+| Auth | Two MSAL sessions | One shared auth |
+| Theme | Two independent detections | One FluentProvider |
+| Save propagation | `TODO_SAVED` → full refetch of all items | `updateItem(id, fields)` → update single item in state |
+| Panel lifecycle | 6-layer navigation detection for auto-close | React unmount (component lifecycle) |
+| Deployment | Two web resources | One web resource (`sprk_smarttodo`) |
 
 ---
 
@@ -40,26 +52,39 @@ The Event To Do system provides Kanban-style task management within the Corporat
                        Xrm.WebApi          Xrm.WebApi +
                               │            direct REST API
                               │                   │
-         ┌────────────────────┼───────────────────┼─────────────────┐
-         │                    │                   │                 │
-    ┌────▼──────┐      ┌──────▼───────────────────▼──────┐         │
-    │ Updates   │      │   TodoDetailSidePane (iframe)   │         │
-    │ Feed      │      │                                  │         │
-    │ Block 3   │      │  App.tsx → TodoDetail.tsx        │         │
-    └────┬──────┘      │  todoService.ts                  │         │
-         │             └──────────────┬───────────────────┘         │
-    FeedTodoSync               BroadcastChannel                    │
-    Context                    "TODO_SAVED"                        │
-         │                            │                            │
-    ┌────▼────────────────────────────▼──────┐                     │
-    │       Smart To Do Kanban Board          │                     │
-    │       Block 4                           │                     │
-    │                                         │                     │
-    │  ┌──────────┬────────────┬──────────┐  │                     │
-    │  │  Today   │  Tomorrow  │  Future  │  │                     │
-    │  │ score≥60 │  score≥30  │ score<30 │  │                     │
-    │  └──────────┴────────────┴──────────┘  │                     │
-    └─────────────────────────────────────────┘                     │
+    ┌─────────────────────────┼───────────────────┼──────────────────────┐
+    │  SmartTodo Code Page    │                   │  (sprk_smarttodo)    │
+    │  React 19 unified tree  │                   │                     │
+    │                         │                   │                     │
+    │  ┌──────────────────────▼──────┐  ┌────────▼─────────────────┐  │
+    │  │   Kanban Board (left)       │  │  TodoDetailPanel (right) │  │
+    │  │                             │  │                          │  │
+    │  │  ┌────────┬────────┬─────┐  │  │  TodoDetail component    │  │
+    │  │  │ Today  │Tomorrow│Futur│  │  │  (from @spaarke/         │  │
+    │  │  │ ≥60   │ ≥30   │ <30 │  │  │   ui-components)         │  │
+    │  │  └────────┴────────┴─────┘  │  │                          │  │
+    │  └─────────────────────────────┘  └──────────────────────────┘  │
+    │                    │        PanelSplitter        │               │
+    │                    └───────(draggable)───────────┘               │
+    │                                                                  │
+    │  TodoContext (shared state: items, selectedEventId, updateItem)  │
+    └──────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────────────────────────────────┐
+    │  LegalWorkspace (Corporate Workspace)             │
+    │                                                   │
+    │  ┌────────────┐     ┌──────────────────────────┐ │
+    │  │ Updates    │     │ SmartToDo (glance mode)  │ │
+    │  │ Feed       │     │ embedded=true             │ │
+    │  │ Block 3   │     │ "Open full view" button   │ │
+    │  └─────┬──────┘     └───────────┬──────────────┘ │
+    │        │                        │                 │
+    │   FeedTodoSync           Xrm.Navigation          │
+    │   Context                .navigateTo(             │
+    │        │                  sprk_smarttodo)          │
+    └────────┼────────────────────────┼─────────────────┘
+             │                        │
+             └──────── sync ──────────┘
 ```
 
 ---
@@ -76,17 +101,17 @@ The system stores data across **two Dataverse entities** — `sprk_event` and `s
 
 3. **Optional participation** — Not every event is a to-do. The `sprk_todoflag` boolean on `sprk_event` opts an event into the to-do system. The `sprk_eventtodo` extension record is only created when to-do-specific data needs to be stored.
 
-4. **Query efficiency** — The Kanban board queries only `sprk_event` fields (no notes, no completion dates). The side pane loads both entities in parallel. This keeps the Kanban query fast and the detail view complete.
+4. **Query efficiency** — The Kanban board queries only `sprk_event` fields (no notes, no completion dates). The detail panel loads both entities in parallel. This keeps the Kanban query fast and the detail view complete.
 
 ### sprk_event — Core Event Record
 
-The primary entity. Stores all fields used by the Kanban board and the side pane detail sections (Description, Details, To Do Score).
+The primary entity. Stores all fields used by the Kanban board and the detail panel sections (Description, Details, To Do Score).
 
 | Field | Type | Purpose |
 |-------|------|---------|
 | `sprk_eventid` | GUID | Primary key |
-| `sprk_eventname` | Text | Display name shown on Kanban card and side pane header |
-| `sprk_description` | Multiline text | Detailed description (editable in side pane) |
+| `sprk_eventname` | Text | Display name shown on Kanban card and detail panel header |
+| `sprk_description` | Multiline text | Detailed description (editable in detail panel) |
 | `sprk_duedate` | DateTime | Due date (drives urgency component of To Do Score) |
 | `sprk_priorityscore` | Int (0–100) | User-set priority weight (50% of score) |
 | `sprk_effortscore` | Int (0–100) | User-set effort weight (20% of score, inverted) |
@@ -105,12 +130,12 @@ The primary entity. Stores all fields used by the Kanban board and the side pane
 
 ### sprk_eventtodo — To Do Extension Record
 
-Companion entity linked via `_sprk_event_value` lookup. Optional — may not exist for every event. Stores the to-do-specific workflow data.
+Companion entity linked via `_sprk_regardingevent_value` lookup (relationship: `sprk_eventtodo_RegardingEvent_n1`). Optional — may not exist for every event. Stores the to-do-specific workflow data.
 
 | Field | Type | Purpose |
 |-------|------|---------|
 | `sprk_eventtodoid` | GUID | Primary key |
-| `_sprk_event_value` | Lookup → sprk_event | Parent event reference |
+| `_sprk_regardingevent_value` | Lookup → sprk_event | Parent event reference |
 | `sprk_todonotes` | Multiline text | User notes specific to the to-do workflow |
 | `sprk_completed` | Boolean | Completion flag |
 | `sprk_completeddate` | DateTime | When marked complete |
@@ -131,7 +156,7 @@ _sprk_assignedto_value, sprk_duedate, sprk_todocolumn, sprk_todopinned,
 createdon, modifiedon
 ```
 
-**Side pane** queries 14 fields from `sprk_event`:
+**Detail panel** queries 14 fields from `sprk_event`:
 
 ```
 sprk_eventid, sprk_eventname, sprk_description, sprk_duedate,
@@ -140,7 +165,7 @@ sprk_todopinned, _sprk_assignedto_value, _sprk_eventtype_ref_value,
 sprk_regardingrecordid, sprk_regardingrecordname, _sprk_regardingrecordtype_value
 ```
 
-**Side pane** queries 6 fields from `sprk_eventtodo`:
+**Detail panel** queries 6 fields from `sprk_eventtodo`:
 
 ```
 sprk_eventtodoid, sprk_todonotes, sprk_completed,
@@ -149,11 +174,110 @@ sprk_completeddate, statecode, statuscode
 
 ---
 
-## UI Surface 1: Smart To Do Kanban Board
+## UI Surface 1: Smart To Do Code Page (`sprk_smarttodo`)
 
-Lives in the LegalWorkspace as **Block 4** of the Activity section. Three-column drag-and-drop board that auto-assigns items based on a computed score.
+A standalone Vite single-file HTML Code Page (React 19) that provides the full Kanban board with inline detail panel. Deployed as `sprk_smarttodo` web resource.
 
-### To Do Score Formula
+### Two-Panel Layout
+
+| Panel | Content | Width | Behavior |
+|-------|---------|-------|----------|
+| **Left (primary)** | Kanban board (Today / Tomorrow / Future columns) | Fills remaining space | Always visible |
+| **PanelSplitter** | Draggable divider | 4px | ARIA role="separator", keyboard accessible |
+| **Right (detail)** | TodoDetailPanel → TodoDetail component | Default 400px, resizable | Collapses when no item selected |
+
+Panel state (width + visibility) persists to `localStorage` under key `smarttodo-panel-layout`.
+
+### Component Architecture
+
+```
+SmartTodoApp.tsx
+  └── TodoProvider (shared state context)
+       ├── SmartToDo.tsx (Kanban container)
+       │   ├── KanbanHeader (title, AddTodoBar, recalculate, settings)
+       │   ├── KanbanBoard (three-column drag-and-drop via @hello-pangea/dnd)
+       │   │   └── KanbanCard × N (score circle, name, due date, pin icon)
+       │   └── DismissedSection (collapsible)
+       │
+       ├── PanelSplitter (from @spaarke/ui-components)
+       │
+       └── TodoDetailPanel.tsx (detail wrapper)
+            ├── Header (event name + close button)
+            ├── Loading/error states
+            └── TodoDetail (from @spaarke/ui-components)
+                 ├── Description textarea
+                 ├── Details (Record Type, Record link, Due Date, Assigned To)
+                 ├── To Do Notes textarea
+                 ├── To Do Score (Priority slider, Effort slider, live score)
+                 └── Sticky footer (Remove, Save, Complete)
+```
+
+### Shared State: TodoContext
+
+TodoContext provides shared state between the Kanban board and detail panel, replacing the old BroadcastChannel communication:
+
+```typescript
+interface TodoContextValue {
+  items: IEvent[];                    // Active to-do items
+  dismissedItems: IEvent[];           // Dismissed items
+  selectedEventId: string | null;     // Currently selected card (null = panel closed)
+  selectItem(id: string | null): void; // Toggle selection (clicking same ID deselects)
+  updateItem(id: string, partial): void; // Optimistic single-item merge
+  handleStatusToggle(id: string): void;  // Open ↔ Completed
+  handleDismiss(id: string): void;
+  handleRestore(id: string): void;
+  handleRemove(id: string): void;
+  refetch(): void;
+}
+```
+
+### Component Modes
+
+The SmartToDo component supports multiple rendering contexts:
+
+| Mode | Props | Where Used | Card Click | Detail Panel |
+|------|-------|------------|------------|--------------|
+| **Standalone (R2)** | `embedded=false` | SmartTodo Code Page | Opens inline detail panel | Inline (same tree) |
+| **Workspace glance** | `embedded=true, disableSidePane=true` | LegalWorkspace section | "Open full view" button | None (compact) |
+
+### Entry Points
+
+| Context | How Opened | Detail |
+|---------|-----------|--------|
+| **From LegalWorkspace** | Card click or "Open full view" → `Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: "sprk_smarttodo" })` | Opens as 85% dialog |
+| **Direct URL** | `https://{org}.crm.dynamics.com/WebResources/sprk_smarttodo` | Full page |
+
+---
+
+## UI Surface 2: Todo Detail Side Pane (Standalone)
+
+The `TodoDetailSidePane` (`sprk_tododetailsidepane`) remains available as a standalone Code Page for non-Kanban contexts (e.g., EventsPage list view). In R2, it was refactored to consume the shared `TodoDetail` component from `@spaarke/ui-components` instead of maintaining a local copy.
+
+### R2 Changes to TodoDetailSidePane
+
+| Aspect | Before (R1) | After (R2) |
+|--------|-------------|------------|
+| TodoDetail component | Local copy (1032 lines) | Imported from `@spaarke/ui-components` |
+| Type definitions | Local `TodoRecord.ts` | Imported from `@spaarke/ui-components` |
+| BroadcastChannel | Still present | Still present (needed for standalone operation) |
+| Xrm access | Direct internal calls | Wrapped as callback props (`onSearchContacts`, `onOpenRegardingRecord`) |
+
+---
+
+## UI Surface 3: LegalWorkspace Integration
+
+The LegalWorkspace renders SmartToDo in **glance mode** as Block 4 of the Activity section. In R2, the BroadcastChannel and side pane lifecycle management were removed (~150 lines).
+
+| Feature | Before (R1) | After (R2) |
+|---------|-------------|------------|
+| Card click | Opens `Xrm.App.sidePanes` iframe | Opens SmartTodo Code Page via `navigateTo` |
+| Detail editing | TodoDetailSidePane in 400px fixed iframe | Full SmartTodo Code Page with inline panel |
+| BroadcastChannel | Listener for `TODO_SAVED` → full refetch | Removed |
+| Navigation detection | 6-layer auto-close hack (URL polling, hashchange, popstate, IntersectionObserver, mousedown, beforeunload) | Removed (React unmount handles cleanup) |
+
+---
+
+## To Do Score Formula
 
 ```
 Score = Priority (50%) + Inverted Effort (20%) + Due Date Urgency (30%)
@@ -177,7 +301,7 @@ Score = Priority (50%) + Inverted Effort (20%) + Due Date Urgency (30%)
 
 Final score: `Math.max(0, Math.min(100, Math.round(raw)))`
 
-Both the Kanban board (`todoScoreUtils.ts`) and the side pane (`TodoDetail.tsx`) compute this formula identically, using `Math.ceil` for day differences and `Math.round` for the final score.
+Both the Kanban board (`todoScoreUtils.ts`) and the detail panel (`TodoDetail.tsx`) compute this formula identically, using `Math.ceil` for day differences and `Math.round` for the final score.
 
 ### Column Assignment
 
@@ -203,157 +327,32 @@ Pinned items (`sprk_todopinned = true`) stay in their assigned column (`sprk_tod
 | Reorder within column | None (UI-only) | Local ordering, no persistence |
 | Toggle pin | `sprk_todopinned` | Unpinned → recalculates column from score |
 
-### Data Loading
-
-```
-Component Mount
-  → useTodoItems hook
-    → DataverseService.getActiveTodos(userId)
-      → OData: GET sprk_events
-          ?$filter=_ownerid_value eq {userId}
-                   AND sprk_todoflag eq true
-                   AND sprk_todostatus ne 100000002
-          &$select={22 fields}
-          &$orderby=sprk_priorityscore desc, sprk_duedate asc
-    → Returns IEvent[] array
-
-  → useUserPreferences hook
-    → Fetches sprk_userpreference (preferenceType = 100000000)
-    → Parses JSON thresholds
-
-  → useKanbanColumns hook
-    → Partitions items into Today/Tomorrow/Future arrays
-    → Respects pinned items
-```
-
----
-
-## UI Surface 2: Todo Detail Side Pane
-
-A standalone Vite single-file HTML application (`tododetailsidepane.html`) loaded inside an `Xrm.App.sidePanes` iframe. Opens when a user clicks a Kanban card.
-
-### Component Tree
-
-```
-main.tsx
-  └── App.tsx (root)
-       ├── Resolves theme (localStorage → navbar detection → light default)
-       ├── Parses eventId from URL params
-       ├── Loads sprk_event and sprk_eventtodo in parallel
-       ├── Manages save/deactivate/remove handlers
-       └── Renders TodoDetail.tsx
-            ├── Description textarea (auto-expanding, 8-line default)
-            ├── Details section
-            │   ├── Record Type badge
-            │   ├── Record link (opens in new tab via Xrm.Navigation)
-            │   ├── Due Date picker
-            │   └── Assigned To combobox (searches contact table)
-            ├── To Do Notes textarea (auto-expanding, 8-line default)
-            ├── To Do Score section
-            │   ├── "To Do Score" title + info popover + score circle
-            │   ├── Priority slider (0–100)
-            │   └── Effort slider (0–100)
-            └── Sticky footer
-                ├── Remove button (red, left-aligned)
-                ├── Save button (primary blue)
-                └── Complete / Completed button (yellow → green)
-```
-
-### Dual-Entity Loading
-
-The side pane loads both entities in parallel on mount:
-
-```typescript
-Promise.all([
-  loadTodoRecord(eventId),        // GET sprk_event(id)?$select=14 fields
-  loadTodoExtension(eventId),     // GET sprk_eventtodos?$filter=_sprk_event_value eq {id}&$top=1
-])
-```
-
-The extension is optional. If no `sprk_eventtodo` record exists, the side pane still displays all `sprk_event` fields — the To Do Notes section and Complete button are just unavailable.
-
-### Save Routing
-
-The side pane tracks dirty state separately for each entity and routes saves to the correct target:
-
-| Changed Field(s) | Saved To | API Method |
-|-------------------|----------|------------|
-| Description, Due Date, Priority, Effort, Assigned To | `sprk_event` | `Xrm.WebApi.updateRecord` |
-| To Do Notes | `sprk_eventtodo` | `Xrm.WebApi.updateRecord` |
-| Complete action (data fields) | `sprk_eventtodo` | `Xrm.WebApi.updateRecord` |
-| Complete action (state change) | `sprk_eventtodo` | Direct REST API `fetch` |
-
-### Assigned To Lookup
-
-The Assigned To field uses a `Combobox` with debounced search (300ms) against the standard Dataverse `contact` table:
-
-```
-OData: GET contacts
-  ?$select=contactid,fullname
-  &$filter=contains(fullname,'{query}')
-  &$top=10
-  &$orderby=fullname asc
-```
-
-On save, the selected contact is written as an OData entity bind:
-
-```json
-{ "sprk_AssignedTo@odata.bind": "/contacts({contactId})" }
-```
-
-### Completion Workflow
-
-The Complete button has two visual states:
-
-| `sprk_eventtodo` State | Button |
-|------------------------|--------|
-| Active / Open (`statecode = 0`) | **Yellow** "Complete" button (clickable) |
-| Inactive / Completed (`statecode = 1`) | **Green** "Completed" button (disabled) |
-
-When clicked, the completion is a **two-step process**:
-
-```
-Step 1: Save data fields (Xrm.WebApi.updateRecord)
-  → sprk_completed = true
-  → sprk_completeddate = {current ISO timestamp}
-  → sprk_todonotes = {if dirty}
-
-Step 2: Deactivate record (direct REST API fetch)
-  → PATCH /api/data/v9.2/sprk_eventtodos({id})
-  → Body: { "statecode": 1, "statuscode": 2 }
-```
-
-**Why two steps?** `Xrm.WebApi.updateRecord` silently ignores `statecode`/`statuscode` fields in some Dataverse environments — the promise resolves successfully but the record state does not change. The direct REST API `fetch` call bypasses this limitation and reliably persists the state change.
-
-**Why not one call?** Data fields and state changes must be in separate PATCH requests because Dataverse may reject a PATCH that mixes data field updates with `statecode`/`statuscode` changes, depending on the entity configuration.
-
 ---
 
 ## Cross-Component Communication
 
-### BroadcastChannel: Side Pane ↔ Kanban
+### TodoContext: Kanban ↔ Detail Panel (R2)
 
-The side pane runs in an iframe, separate from the Kanban board. They communicate via `BroadcastChannel("spaarke-todo-detail-channel")`:
-
-| Event | Sender | Receiver | Trigger |
-|-------|--------|----------|---------|
-| `TODO_SAVED` | Side pane | Kanban board | After any successful save |
-| `TODO_CLOSED` | Side pane | Kanban board | When side pane closes |
+In the unified SmartTodo Code Page, the Kanban board and detail panel share state via `TodoContext` (React Context):
 
 ```
-Side pane saves fields
-  → sendTodoSaved(eventId)
-  → BroadcastChannel emits TODO_SAVED { eventId }
-  → Kanban board receives message
-  → Refetches the specific event record
-  → Updates card display (score recalculated, column may change)
+Card click
+  → selectItem(eventId)
+  → TodoContext updates selectedEventId
+  → SmartTodoApp useEffect triggers showDetail()
+  → TodoDetailPanel loads entity data
+  → User edits and saves
+  → TodoDetailPanel calls updateItem(eventId, fields) — optimistic merge
+  → Kanban card re-renders immediately (single React render cycle)
+  → Dataverse write in background
+  → If failure: rollback to previous state
 ```
 
-This provides real-time sync — adjusting Priority in the side pane and clicking Save immediately updates the Kanban card's score and may move it to a different column.
+No BroadcastChannel, no JSON serialization, no iframe boundary. Direct React state/callbacks.
 
 ### FeedTodoSyncContext: Updates Feed ↔ Kanban
 
-The Updates Feed (Block 3) and Smart To Do Kanban (Block 4) share state via `FeedTodoSyncContext` (React Context + useReducer):
+The Updates Feed (Block 3) and Smart To Do Kanban (Block 4) share state via `FeedTodoSyncContext` (React Context + useReducer) when both are rendered in the LegalWorkspace:
 
 ```
 State shape:
@@ -379,8 +378,6 @@ State shape:
    → On failure: WRITE_FAILURE (rollback flag, surface error)
 ```
 
-The 300ms debounce prevents write spam on rapid toggles while keeping perceived latency under 1 second.
-
 ---
 
 ## Complete Data Flows
@@ -391,35 +388,37 @@ The 300ms debounce prevents write spam on rapid toggles while keeping perceived 
 1. SmartToDo mounts → useTodoItems hook fires
 2. DataverseService.getActiveTodos(userId) → OData query
 3. Returns IEvent[] (22 fields per record)
-4. initFlags(events) → FeedTodoSyncContext bulk-initializes flag Map
-5. useUserPreferences → fetches thresholds from sprk_userpreference
-6. useKanbanColumns → partitions items into Today/Tomorrow/Future
-7. KanbanBoard renders three columns with KanbanCard components
+4. useUserPreferences → fetches thresholds from sprk_userpreference
+5. useKanbanColumns → partitions items into Today/Tomorrow/Future
+6. KanbanBoard renders three columns with KanbanCard components
 ```
 
-### Flow 2: Click Kanban Card → Side Pane Opens
+### Flow 2: Click Kanban Card → Detail Panel Opens (R2)
 
 ```
-1. KanbanCard onClick → opens Xrm.App.sidePanes web resource
-   URL: sprk_tododetailsidepane?data=eventId={sprk_eventid}
-2. parseParams() extracts eventId
-3. App.tsx loads both entities in parallel:
+1. KanbanCard onClick → selectItem(eventId) via TodoContext
+2. selectedEventId changes → SmartTodoApp useEffect → showDetail()
+3. PanelSplitter + TodoDetailPanel become visible (150ms CSS transition)
+4. TodoDetailPanel loads both entities in parallel:
    - loadTodoRecord(eventId) → GET sprk_event
-   - loadTodoExtension(eventId) → GET sprk_eventtodo (filter by event lookup)
-4. TodoDetail renders with both records
-5. Score computed live from current slider values
+   - loadTodoExtension(eventId) → GET sprk_eventtodos?$filter=_sprk_regardingevent_value eq {id}
+5. TodoDetail renders with both records
+6. Score computed live from current slider values
+7. KanbanCard shows selected highlight (tokens.colorNeutralBackground1Selected)
 ```
 
-### Flow 3: Edit and Save in Side Pane
+### Flow 3: Edit and Save in Detail Panel (R2)
 
 ```
 1. User modifies fields (description, due date, notes, etc.)
 2. Dirty detection tracks sprk_event fields and sprk_eventtodo fields separately
 3. User clicks Save:
-   a. If event fields dirty → saveTodoFields(eventId, updates)
-   b. If notes dirty → saveTodoExtensionFields(todoId, { sprk_todonotes })
-4. On success → sendTodoSaved(eventId) via BroadcastChannel
-5. Kanban receives TODO_SAVED → refetches event → updates card
+   a. Capture previous item state for rollback
+   b. updateItem(eventId, fields) → optimistic Kanban card update (immediate)
+   c. If event fields dirty → saveTodoFields(eventId, updates) to Dataverse
+   d. If notes dirty → saveTodoExtensionFields(todoId, { sprk_todonotes }) to Dataverse
+   e. If Dataverse save fails → rollback to previous state
+4. Kanban card reflects changes within one React render cycle (no full refetch)
 ```
 
 ### Flow 4: Mark as Complete
@@ -436,9 +435,9 @@ The 300ms debounce prevents write spam on rapid toggles while keeping perceived 
       - PATCH sprk_eventtodos({id})
       - { statecode: 1, statuscode: 2 }
 3. On success:
-   - Local state updates → button switches to green "Completed" (disabled)
-   - sendTodoSaved(eventId) → Kanban updates
-4. Side pane stays open showing completed state
+   - Optimistic update → Kanban card shows Completed status
+   - Button switches to green "Completed" (disabled)
+4. Detail panel stays open showing completed state
 ```
 
 ### Flow 5: Flag Event in Updates Feed
@@ -474,58 +473,98 @@ The 300ms debounce prevents write spam on rapid toggles while keeping perceived 
 
 ## File Map
 
-### TodoDetailSidePane Solution
+### SmartTodo Code Page (R2 — Primary Surface)
+
+```
+src/solutions/SmartTodo/
+├── package.json                      React 19, Vite + singlefile, @spaarke/ui-components
+├── vite.config.ts                    Aliases for shared lib deep imports
+├── tsconfig.json                     Strict, bundler resolution
+├── index.html                        CSS reset for Dataverse iframe
+├── src/
+│   ├── main.tsx                      Entry point (createRoot, React.StrictMode)
+│   ├── App.tsx                       FluentProvider + resolveCodePageTheme
+│   ├── SmartTodoApp.tsx              Two-panel layout (Kanban + PanelSplitter + Detail)
+│   ├── context/
+│   │   └── TodoContext.tsx           Shared state (items, selection, optimistic updates)
+│   ├── components/
+│   │   ├── SmartToDo.tsx             Kanban container (header, board, dismissed)
+│   │   ├── KanbanCard.tsx            Card with score circle, selected highlight
+│   │   ├── KanbanHeader.tsx          Title, AddTodoBar, settings
+│   │   ├── DismissedSection.tsx      Collapsible dismissed items
+│   │   ├── TodoDetailPanel.tsx       Detail wrapper (entity loading, save callbacks)
+│   │   ├── ThresholdSettings.tsx     Column threshold config
+│   │   └── shared/KanbanBoard.tsx    Drag-and-drop board
+│   ├── hooks/
+│   │   ├── useTodoItems.ts           Data loading
+│   │   ├── useKanbanColumns.ts       Column assignment, drag-drop, pin toggle
+│   │   └── useUserPreferences.ts     Threshold settings
+│   ├── services/
+│   │   ├── DataverseService.ts       Kanban CRUD operations
+│   │   ├── todoDetailService.ts      Detail panel entity load/save
+│   │   └── xrmProvider.ts            Xrm frame-walk for Code Page context
+│   ├── types/
+│   │   ├── entities.ts               IEvent interface
+│   │   └── enums.ts                  TodoColumn, status constants
+│   └── utils/
+│       ├── todoScoreUtils.ts         Score formula
+│       └── xrmAccess.ts              getClientUrl, setRecordState
+└── dist/
+    └── smarttodo.html                Deployable single-file HTML (sprk_smarttodo)
+```
+
+### Shared Library Components (extracted in R2)
+
+```
+src/client/shared/Spaarke.UI.Components/src/
+├── components/
+│   ├── PanelSplitter/                Draggable, keyboard-accessible panel divider
+│   │   ├── PanelSplitter.tsx         ARIA role="separator", Fluent v9 tokens
+│   │   └── index.ts
+│   └── TodoDetail/                   Context-agnostic to-do detail editor
+│       ├── TodoDetail.tsx            Description, details, notes, score, footer
+│       ├── types.ts                  ITodoRecord, ITodoExtension, field update types
+│       └── index.ts
+└── hooks/
+    └── useTwoPanelLayout.ts          Two-panel resize hook (localStorage persistence)
+```
+
+### TodoDetailSidePane (Standalone — Refactored in R2)
 
 ```
 src/solutions/TodoDetailSidePane/src/
 ├── main.tsx                           Entry point (createRoot)
-├── App.tsx                            Root component — loads both entities, manages handlers
-├── components/
-│   └── TodoDetail.tsx                 Full edit UI — description, details, notes, score, footer
+├── App.tsx                            Root — imports TodoDetail from @spaarke/ui-components
 ├── services/
-│   └── todoService.ts                Dataverse I/O — load, save, deactivate, contact search
-├── types/
-│   └── TodoRecord.ts                 ITodoRecord, ITodoExtension, OData select constants
+│   └── todoService.ts                Dataverse I/O (types from @spaarke/ui-components)
 └── utils/
-    ├── broadcastChannel.ts           BroadcastChannel messaging (TODO_SAVED, TODO_CLOSED)
+    ├── broadcastChannel.ts           BroadcastChannel messaging (standalone contexts)
     ├── parseParams.ts                URL parameter extraction (eventId)
-    └── xrmAccess.ts                  Xrm context access, getClientUrl, setRecordState
+    └── xrmAccess.ts                  Xrm context access, setRecordState
 ```
 
-### LegalWorkspace Kanban Components
+### LegalWorkspace Kanban (Glance Mode)
 
 ```
-src/solutions/LegalWorkspace/src/
-├── components/SmartToDo/
-│   ├── SmartToDo.tsx                  Kanban container (header, board, dismissed section)
-│   ├── KanbanBoard.tsx                Three-column drag-and-drop layout
-│   ├── KanbanCard.tsx                 Individual to-do card (score circle, name, badges)
-│   ├── KanbanHeader.tsx               Title bar, add button, settings gear
-│   └── DismissedSection.tsx           Collapsible section for dismissed items
-├── hooks/
-│   ├── useTodoItems.ts                Data loading + feed sync subscription
-│   ├── useKanbanColumns.ts            Column assignment, drag-drop, pin toggle
-│   └── useUserPreferences.ts          Threshold settings (sprk_userpreference)
-├── utils/
-│   └── todoScoreUtils.ts             Score formula (matches TodoDetail.tsx exactly)
-├── services/
-│   ├── DataverseService.ts            getActiveTodos, updateEventColumn, updateEventPinned
-│   └── queryHelpers.ts                TODO_SELECT_FIELDS, buildTodoFilter, buildTodoQuery
-└── types/
-    └── entities.ts                    IEvent interface with all 22+ fields
+src/solutions/LegalWorkspace/src/components/SmartToDo/
+├── SmartToDo.tsx                     Kanban container (glance mode, no BroadcastChannel)
+├── KanbanBoard.tsx                   Three-column layout
+├── KanbanCard.tsx                    Card component
+├── KanbanHeader.tsx                  Title, "Open full view" button
+└── DismissedSection.tsx              Dismissed items
 ```
 
 ---
 
 ## Technical Decisions
 
-### Why a Side Pane (Not a Dialog or Form)?
+### Why an Inline Panel (Not a Side Pane)? (R2)
 
-Side panes (`Xrm.App.sidePanes`) stay open alongside the Kanban board, allowing users to edit a to-do while still seeing their board. Dialogs would obscure the board. Standard entity forms would navigate away from the workspace entirely.
+The `Xrm.App.sidePanes` approach (R1) required two separate iframe applications communicating via BroadcastChannel, with duplicate auth, duplicate theme detection, and a complex 6-layer navigation detection hack. The inline panel (R2) shares the same React tree, enabling direct state/callbacks, one auth session, one theme provider, and standard React unmount lifecycle.
 
-### Why BroadcastChannel (Not React Context)?
+### Why a Separate Code Page (Not Embedded in LegalWorkspace)?
 
-The side pane runs inside an iframe (separate JavaScript context) from the Kanban board. React Context cannot cross iframe boundaries. `BroadcastChannel` is the standard web API for cross-context communication within the same origin.
+The SmartTodo Code Page is independently deployable and reusable from multiple contexts. The LegalWorkspace shows a compact glance view and opens the full Code Page as a dialog when the user needs the detail panel.
 
 ### Why Direct REST API for State Changes?
 
@@ -533,35 +572,42 @@ The side pane runs inside an iframe (separate JavaScript context) from the Kanba
 
 ### Why Compute Score on Both Sides?
 
-The Kanban board computes the score for column assignment; the side pane computes it for the live score preview. Both implementations use the identical formula to avoid drift. The side pane score updates in real time as the user adjusts the Priority and Effort sliders.
+The Kanban board computes the score for column assignment; the detail panel computes it for the live score preview. Both implementations use the identical formula to avoid drift. The detail panel score updates in real time as the user adjusts the Priority and Effort sliders.
 
 ### Why Optimistic Updates Everywhere?
 
 Every mutation (save, drag, flag toggle, pin toggle) updates local state immediately and persists asynchronously. Failed writes trigger rollback. This keeps the UI responsive — the user never waits for a network round-trip to see their action reflected.
+
+### Why Extract TodoDetail to Shared Library?
+
+The TodoDetail component is consumed by both the SmartTodo Code Page (inline panel) and the standalone TodoDetailSidePane. Extracting to `@spaarke/ui-components` eliminates duplication. The component accepts callback props (`onSearchContacts`, `onOpenRegardingRecord`, `onSaveEventFields`, etc.) to stay context-agnostic per ADR-012.
 
 ---
 
 ## Dataverse Entity Relationships
 
 ```
-┌──────────────────┐          ┌──────────────────────┐
-│   sprk_event     │ 1 ←── 0..1│   sprk_eventtodo   │
-│                  │          │                      │
-│  sprk_eventid    │          │  sprk_eventtodoid    │
-│  sprk_eventname  │          │  _sprk_event_value ──┤──→ sprk_event
-│  sprk_description│          │  sprk_todonotes      │
-│  sprk_duedate    │          │  sprk_completed      │
-│  sprk_priority   │          │  sprk_completeddate  │
-│  sprk_effortscore│          │  statecode           │
-│  sprk_todoflag   │          │  statuscode          │
-│  sprk_todostatus │          └──────────────────────┘
-│  sprk_todocolumn │
+┌──────────────────┐              ┌──────────────────────┐
+│   sprk_event     │ 1 ←── 0..1  │   sprk_eventtodo     │
+│                  │              │                      │
+│  sprk_eventid    │              │  sprk_eventtodoid    │
+│  sprk_eventname  │              │  _sprk_regarding     │
+│  sprk_description│              │   event_value ───────┤──→ sprk_event
+│  sprk_duedate    │              │  sprk_todonotes      │
+│  sprk_priority   │              │  sprk_completed      │
+│  sprk_effortscore│              │  sprk_completeddate  │
+│  sprk_todoflag   │              │  statecode           │
+│  sprk_todostatus │              │  statuscode          │
+│  sprk_todocolumn │              └──────────────────────┘
 │  sprk_todopinned │
 │  _sprk_assigned  │──→ contact
 │  _sprk_eventtype │──→ sprk_eventtype
 │  _sprk_regarding │──→ sprk_matter / sprk_project
 │  sprk_todosource │
 └──────────────────┘
+
+Relationship: sprk_eventtodo_RegardingEvent_n1
+  sprk_eventtodo._sprk_regardingevent_value → sprk_event.sprk_eventid
 
 ┌──────────────────────┐
 │ sprk_userpreference  │
@@ -573,12 +619,22 @@ Every mutation (save, drag, flag toggle, pin toggle) updates local state immedia
 
 ---
 
+## Deployment
+
+| Artifact | Web Resource | Build | Deploy Script |
+|----------|-------------|-------|---------------|
+| SmartTodo Code Page | `sprk_smarttodo` | `cd src/solutions/SmartTodo && npm run build` → `dist/smarttodo.html` | `scripts/Deploy-SmartTodo.ps1` |
+| TodoDetailSidePane | `sprk_tododetailsidepane` | `cd src/solutions/TodoDetailSidePane && npm run build` → `dist/tododetailsidepane.html` | Manual upload or deploy script |
+
+---
+
 ## Theme Resolution
 
-The side pane iframe cannot inherit the parent page's Fluent theme directly. Theme is resolved via a three-step fallback:
+All SmartTodo surfaces use the shared theme detection from `@spaarke/ui-components`:
 
 1. **localStorage** — Check `spaarke-theme` key (shared across all Spaarke web resources)
-2. **Navbar detection** — Inspect Power Apps navbar background color (works when same-origin)
-3. **Default** — Light theme (safe default; OS dark mode is intentionally not used as a fallback because it could conflict with Power Apps light mode)
+2. **URL parameter** — `?theme=dark` override
+3. **Navbar detection** — Inspect Power Apps navbar background color (works when same-origin)
+4. **System preference** — `prefers-color-scheme` media query
 
-All UI uses Fluent UI v9 semantic tokens per ADR-021, ensuring correct appearance in both themes.
+All UI uses Fluent UI v9 semantic tokens per ADR-021, ensuring correct appearance in light, dark, and high-contrast modes. A reactive listener (`setupCodePageThemeListener`) updates the theme dynamically on cross-tab changes.
