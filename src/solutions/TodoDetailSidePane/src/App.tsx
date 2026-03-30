@@ -248,7 +248,7 @@ export function App() {
   );
 
   return (
-    <FluentProvider theme={theme}>
+    <FluentProvider theme={theme} style={{ height: "100%" }}>
       <div className={styles.root}>
         {/* Header with event name */}
         <div className={styles.header}>
