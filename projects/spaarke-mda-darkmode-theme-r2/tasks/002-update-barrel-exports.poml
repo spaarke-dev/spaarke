@@ -6,6 +6,7 @@
     <estimate>30m</estimate>
     <dependencies>001</dependencies>
     <parallel-safe>false</parallel-safe>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Update the shared library barrel export (index.ts) to remove codePageTheme export and ensure all unified themeStorage functions are exported.</goal>

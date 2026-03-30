@@ -7,7 +7,7 @@
           <Menu Id="sprk.ThemeMenu.Matter.Menu">
             <MenuSection Id="sprk.ThemeMenu.Matter.MenuSection" Title="Color Theme" Sequence="10">
               <Controls Id="sprk.ThemeMenu.Matter.Controls">
-                <Button Id="sprk.ThemeMenu.Matter.Auto" Command="sprk.ThemeMenu.Matter.SetAuto" LabelText="Auto (follows system)" Image16by16="$webresource:sprk_ThemeAuto16.svg" ToolTipTitle="Auto" ToolTipDescription="Uses your operating system's theme preference" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Matter.Auto" Command="sprk.ThemeMenu.Matter.SetAuto" LabelText="Auto (follows app)" Image16by16="$webresource:sprk_ThemeAuto16.svg" ToolTipTitle="Auto" ToolTipDescription="Uses your operating system's theme preference" Sequence="10" />
                 <Button Id="sprk.ThemeMenu.Matter.Light" Command="sprk.ThemeMenu.Matter.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" ToolTipTitle="Light" ToolTipDescription="Light background with dark text" Sequence="20" />
                 <Button Id="sprk.ThemeMenu.Matter.Dark" Command="sprk.ThemeMenu.Matter.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" ToolTipTitle="Dark" ToolTipDescription="Dark background with light text" Sequence="30" />
               </Controls>

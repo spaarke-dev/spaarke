@@ -7,6 +7,7 @@
     <dependencies>none</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>C</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Remove the prefers-color-scheme media query listener from sprk_ThemeMenu.js (lines 96-107).</goal>

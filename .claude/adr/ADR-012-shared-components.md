@@ -122,8 +122,10 @@ Consumers call the factory in their `main.tsx` and pass the result as props — 
 
 | Utility | Description |
 |---------|-------------|
-| `resolveCodePageTheme()` | 4-level cascade: localStorage → URL param → navbar DOM → system preference |
-| `setupCodePageThemeListener(callback)` | Reactive theme change listener (cross-tab + system) |
+| `resolveCodePageTheme()` | 3-level cascade: localStorage → URL param → navbar DOM → light default (no OS fallback) |
+| `setupCodePageThemeListener(callback)` | Reactive theme change listener (cross-tab + custom event, no OS listener) |
+| `syncThemeFromDataverse(webApi, userId)` | Async cross-device theme sync from Dataverse |
+| `persistThemeToDataverse(webApi, userId, theme)` | Async theme persistence to Dataverse |
 | `parseDataParams()` | Parse Xrm.Navigation.navigateTo data envelope + raw URL params |
 
 ### UI Components (16 groups)

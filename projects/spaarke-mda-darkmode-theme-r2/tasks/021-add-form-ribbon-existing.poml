@@ -7,6 +7,7 @@
     <dependencies>none</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>D</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Add Form CustomAction location for sprk_project, sprk_invoice, sprk_event (currently have HomepageGrid only).</goal>

@@ -3,8 +3,8 @@
  *
  * Thin wrapper over shared @spaarke/ui-components theme utilities.
  * All theme resolution logic lives in:
- *   - codePageTheme.ts  → resolveCodePageTheme(), setupCodePageThemeListener()
- *   - themeStorage.ts   → getUserThemePreference(), getEffectiveDarkMode()
+ *   - themeStorage.ts   → resolveCodePageTheme(), setupCodePageThemeListener(),
+ *                         getUserThemePreference(), getEffectiveDarkMode()
  *
  * Theme priority (per ADR-021):
  * 1. localStorage ('spaarke-theme') user preference

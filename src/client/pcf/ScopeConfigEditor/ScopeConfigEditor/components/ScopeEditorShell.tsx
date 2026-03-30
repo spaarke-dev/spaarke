@@ -10,6 +10,10 @@
 
 import * as React from 'react';
 import { FluentProvider, webLightTheme, webDarkTheme, Theme, makeStyles, tokens } from '@fluentui/react-components';
+import {
+  getEffectiveDarkMode,
+  setupThemeListener,
+} from '@spaarke/ui-components/dist/utils/themeStorage';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -39,33 +43,6 @@ const useStyles = makeStyles({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: detect dark mode from URL
-// ─────────────────────────────────────────────────────────────────────────────
-
-function detectDarkMode(): boolean {
-  try {
-    const href = window.location.href;
-    if (href.includes('themeOption%3Ddarkmode') || href.includes('themeOption=darkmode')) {
-      return true;
-    }
-    try {
-      const parentHref = window.parent?.location?.href;
-      if (parentHref?.includes('themeOption%3Ddarkmode') || parentHref?.includes('themeOption=darkmode')) {
-        return true;
-      }
-    } catch {
-      // Cross-origin blocked
-    }
-  } catch {
-    // Error accessing location
-  }
-
-  // Light mode unless Dataverse explicitly sets dark mode via URL param.
-  // Do NOT respect OS prefers-color-scheme — control is embedded in Dataverse form.
-  return false;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -76,7 +53,7 @@ const ShellContent: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 
 export const ScopeEditorShell: React.FC<IScopeEditorShellProps> = ({ isDark, children }) => {
   const [theme, setTheme] = React.useState<Theme>(() => {
-    const dark = isDark !== undefined ? isDark : detectDarkMode();
+    const dark = isDark !== undefined ? isDark : getEffectiveDarkMode();
     return dark ? webDarkTheme : webLightTheme;
   });
 
@@ -87,18 +64,15 @@ export const ScopeEditorShell: React.FC<IScopeEditorShellProps> = ({ isDark, chi
     }
   }, [isDark]);
 
-  // Listen for system theme changes when isDark is uncontrolled
+  // Listen for theme changes when isDark is uncontrolled
+  // Uses shared library listener (no OS prefers-color-scheme per ADR-021)
   React.useEffect(() => {
     if (isDark !== undefined) return;
 
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => {
-      setTheme(e.matches ? webDarkTheme : webLightTheme);
-    };
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    const cleanup = setupThemeListener((isDarkNow: boolean) => {
+      setTheme(isDarkNow ? webDarkTheme : webLightTheme);
+    });
+    return cleanup;
   }, [isDark]);
 
   return (

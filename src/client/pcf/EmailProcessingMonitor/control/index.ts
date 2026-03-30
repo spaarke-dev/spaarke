@@ -18,83 +18,10 @@ import * as ReactDOM from 'react-dom';
 import { initializeAuth } from './authInit';
 import { EmailProcessingDashboard } from './EmailProcessingDashboard';
 import { MonitorState } from './types';
-
-// ============================================================================
-// Theme Storage Utilities (from Spaarke.UI.Components)
-// TRACKED: GitHub #234 - Import from @spaarke/ui-components when published
-// See: ADR-012, projects/mda-darkmode-theme/spec.md Section 3.4
-// ============================================================================
-
-const THEME_STORAGE_KEY = 'spaarke-theme';
-const THEME_CHANGE_EVENT = 'spaarke-theme-change';
-
-type ThemePreference = 'light' | 'dark' | 'auto';
-
-function getUserThemePreference(): ThemePreference {
-  const stored = localStorage.getItem(THEME_STORAGE_KEY);
-  if (stored === 'light' || stored === 'dark' || stored === 'auto') {
-    return stored;
-  }
-  return 'auto';
-}
-
-function getEffectiveDarkMode(context?: any): boolean {
-  const preference = getUserThemePreference();
-
-  // Explicit user choice
-  if (preference === 'dark') return true;
-  if (preference === 'light') return false;
-
-  // Auto mode: check Power Platform context first
-  if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
-    return context.fluentDesignLanguage.isDarkTheme;
-  }
-
-  // Fallback for Custom Pages: check navbar background color
-  const navbar = document.querySelector("[data-id='navbar-container']");
-  if (navbar) {
-    const bg = getComputedStyle(navbar).backgroundColor;
-    if (bg === 'rgb(10, 10, 10)') return true;
-    if (bg === 'rgb(240, 240, 240)') return false;
-  }
-
-  // Final fallback to system preference
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-}
-
-type ThemeChangeHandler = (isDark: boolean) => void;
-
-function setupThemeListener(onChange: ThemeChangeHandler, context?: any): () => void {
-  const handleStorageChange = (event: StorageEvent) => {
-    if (event.key === THEME_STORAGE_KEY) {
-      onChange(getEffectiveDarkMode(context));
-    }
-  };
-
-  const handleThemeEvent = () => {
-    onChange(getEffectiveDarkMode(context));
-  };
-
-  const handleSystemChange = (event: MediaQueryListEvent) => {
-    if (getUserThemePreference() === 'auto') {
-      onChange(event.matches);
-    }
-  };
-
-  window.addEventListener('storage', handleStorageChange);
-  window.addEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-
-  const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
-  mediaQuery?.addEventListener('change', handleSystemChange);
-
-  return () => {
-    window.removeEventListener('storage', handleStorageChange);
-    window.removeEventListener(THEME_CHANGE_EVENT, handleThemeEvent);
-    mediaQuery?.removeEventListener('change', handleSystemChange);
-  };
-}
-
-// ============================================================================
+import {
+  getEffectiveDarkMode,
+  setupThemeListener,
+} from '@spaarke/ui-components/dist/utils/themeStorage';
 
 export class EmailProcessingMonitor implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   // PCF container element

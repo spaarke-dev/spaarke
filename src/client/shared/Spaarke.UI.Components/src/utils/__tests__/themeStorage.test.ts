@@ -1,7 +1,9 @@
 /**
  * themeStorage Utility Unit Tests
  *
- * @see projects/mda-darkmode-theme/spec.md Section 3.4
+ * Covers all PCF and Code Page theme functions from the unified module.
+ *
+ * @see ADR-021 - No OS prefers-color-scheme fallback
  */
 
 import {
@@ -13,6 +15,10 @@ import {
   getEffectiveDarkMode,
   resolveThemeWithUserPreference,
   setupThemeListener,
+  detectDarkModeFromUrl,
+  detectDarkModeFromNavbar,
+  resolveCodePageTheme,
+  setupCodePageThemeListener,
 } from '../themeStorage';
 import { webLightTheme, webDarkTheme } from '@fluentui/react-components';
 
@@ -35,19 +41,10 @@ const localStorageMock = (() => {
 
 Object.defineProperty(window, 'localStorage', { value: localStorageMock });
 
-// Mock matchMedia
-const mockMatchMedia = jest.fn();
-Object.defineProperty(window, 'matchMedia', { value: mockMatchMedia });
-
 describe('themeStorage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorageMock.clear();
-    mockMatchMedia.mockReturnValue({
-      matches: false,
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
-    });
   });
 
   describe('constants', () => {
@@ -128,6 +125,103 @@ describe('themeStorage', () => {
     });
   });
 
+  describe('detectDarkModeFromUrl', () => {
+    let locationSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      locationSpy = jest.spyOn(window, 'location', 'get');
+    });
+
+    afterEach(() => {
+      locationSpy.mockRestore();
+    });
+
+    it('should return true for flags=themeOption=dark', () => {
+      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Ddark' });
+      expect(detectDarkModeFromUrl()).toBe(true);
+    });
+
+    it('should return false for flags=themeOption=light', () => {
+      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Dlight' });
+      expect(detectDarkModeFromUrl()).toBe(false);
+    });
+
+    it('should return true for direct theme=dark param', () => {
+      locationSpy.mockReturnValue({ search: '?theme=dark' });
+      expect(detectDarkModeFromUrl()).toBe(true);
+    });
+
+    it('should return false for direct theme=light param', () => {
+      locationSpy.mockReturnValue({ search: '?theme=light' });
+      expect(detectDarkModeFromUrl()).toBe(false);
+    });
+
+    it('should return null when no theme param', () => {
+      locationSpy.mockReturnValue({ search: '?other=value' });
+      expect(detectDarkModeFromUrl()).toBeNull();
+    });
+
+    it('should return null for empty search', () => {
+      locationSpy.mockReturnValue({ search: '' });
+      expect(detectDarkModeFromUrl()).toBeNull();
+    });
+  });
+
+  describe('detectDarkModeFromNavbar', () => {
+    let querySelectorSpy: jest.SpyInstance;
+    let getComputedStyleSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      querySelectorSpy = jest.spyOn(document, 'querySelector');
+      getComputedStyleSpy = jest.spyOn(window, 'getComputedStyle');
+    });
+
+    afterEach(() => {
+      querySelectorSpy.mockRestore();
+      getComputedStyleSpy.mockRestore();
+    });
+
+    it('should return true for dark navbar color', () => {
+      const mockNavbar = document.createElement('div');
+      querySelectorSpy.mockReturnValue(mockNavbar);
+      getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(10, 10, 10)' });
+
+      expect(detectDarkModeFromNavbar()).toBe(true);
+    });
+
+    it('should return false for light navbar color', () => {
+      const mockNavbar = document.createElement('div');
+      querySelectorSpy.mockReturnValue(mockNavbar);
+      getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(240, 240, 240)' });
+
+      expect(detectDarkModeFromNavbar()).toBe(false);
+    });
+
+    it('should use luminance fallback for custom navbar colors', () => {
+      const mockNavbar = document.createElement('div');
+      querySelectorSpy.mockReturnValue(mockNavbar);
+      // Low luminance (dark): 0.299*30 + 0.587*30 + 0.114*30 = 30 < 128
+      getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(30, 30, 30)' });
+
+      expect(detectDarkModeFromNavbar()).toBe(true);
+    });
+
+    it('should detect light from high luminance custom color', () => {
+      const mockNavbar = document.createElement('div');
+      querySelectorSpy.mockReturnValue(mockNavbar);
+      // High luminance (light): 0.299*200 + 0.587*200 + 0.114*200 = 200 > 128
+      getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(200, 200, 200)' });
+
+      expect(detectDarkModeFromNavbar()).toBe(false);
+    });
+
+    it('should return null when navbar not found', () => {
+      querySelectorSpy.mockReturnValue(null);
+
+      expect(detectDarkModeFromNavbar()).toBeNull();
+    });
+  });
+
   describe('getEffectiveDarkMode', () => {
     it('should return true when preference is "dark"', () => {
       localStorageMock.getItem.mockReturnValue('dark');
@@ -165,28 +259,27 @@ describe('themeStorage', () => {
       expect(result).toBe(false);
     });
 
-    it('should fall back to system preference when context unavailable', () => {
+    it('should default to light (false) when no preference and no context', () => {
       localStorageMock.getItem.mockReturnValue('auto');
-      mockMatchMedia.mockReturnValue({
-        matches: true,
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
-      });
-
-      const result = getEffectiveDarkMode();
-      expect(result).toBe(true);
-    });
-
-    it('should fall back to light when system prefers light', () => {
-      localStorageMock.getItem.mockReturnValue('auto');
-      mockMatchMedia.mockReturnValue({
-        matches: false,
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
-      });
+      // No context, no navbar → should default to false (light)
+      jest.spyOn(document, 'querySelector').mockReturnValue(null);
 
       const result = getEffectiveDarkMode();
       expect(result).toBe(false);
+
+      (document.querySelector as jest.Mock).mockRestore();
+    });
+
+    it('should NOT consult OS prefers-color-scheme (ADR-021)', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+      // Even with no context and no navbar, should NOT check OS preference
+      jest.spyOn(document, 'querySelector').mockReturnValue(null);
+
+      const result = getEffectiveDarkMode();
+      // Must return false (light default), NOT follow OS dark preference
+      expect(result).toBe(false);
+
+      (document.querySelector as jest.Mock).mockRestore();
     });
 
     it('should prioritize localStorage over context', () => {
@@ -239,34 +332,25 @@ describe('themeStorage', () => {
         expect(result).toBe(false);
       });
 
-      it('should fall back to system when navbar has different color', () => {
+      it('should use luminance for custom navbar colors', () => {
         localStorageMock.getItem.mockReturnValue('auto');
         const mockNavbar = document.createElement('div');
         querySelectorSpy.mockReturnValue(mockNavbar);
+        // Low luminance → dark
         getComputedStyleSpy.mockReturnValue({
-          backgroundColor: 'rgb(100, 100, 100)',
-        });
-        mockMatchMedia.mockReturnValue({
-          matches: true,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          backgroundColor: 'rgb(30, 30, 30)',
         });
 
         const result = getEffectiveDarkMode();
-        expect(result).toBe(true); // Falls back to system preference
+        expect(result).toBe(true);
       });
 
-      it('should fall back to system when navbar not found', () => {
+      it('should default to light when navbar not found', () => {
         localStorageMock.getItem.mockReturnValue('auto');
         querySelectorSpy.mockReturnValue(null);
-        mockMatchMedia.mockReturnValue({
-          matches: false,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
-        });
 
         const result = getEffectiveDarkMode();
-        expect(result).toBe(false);
+        expect(result).toBe(false); // Default light, NOT OS preference
       });
     });
   });
@@ -297,22 +381,79 @@ describe('themeStorage', () => {
     });
   });
 
+  describe('resolveCodePageTheme', () => {
+    let locationSpy: jest.SpyInstance;
+    let querySelectorSpy: jest.SpyInstance;
+    let getComputedStyleSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      locationSpy = jest.spyOn(window, 'location', 'get');
+      querySelectorSpy = jest.spyOn(document, 'querySelector');
+      getComputedStyleSpy = jest.spyOn(window, 'getComputedStyle');
+      // Default: no URL params, no navbar
+      locationSpy.mockReturnValue({ search: '' });
+      querySelectorSpy.mockReturnValue(null);
+    });
+
+    afterEach(() => {
+      locationSpy.mockRestore();
+      querySelectorSpy.mockRestore();
+      getComputedStyleSpy.mockRestore();
+    });
+
+    it('should return webDarkTheme when localStorage is "dark"', () => {
+      localStorageMock.getItem.mockReturnValue('dark');
+      expect(resolveCodePageTheme()).toBe(webDarkTheme);
+    });
+
+    it('should return webLightTheme when localStorage is "light"', () => {
+      localStorageMock.getItem.mockReturnValue('light');
+      expect(resolveCodePageTheme()).toBe(webLightTheme);
+    });
+
+    it('should use URL flags when preference is "auto"', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Ddark' });
+
+      expect(resolveCodePageTheme()).toBe(webDarkTheme);
+    });
+
+    it('should use navbar detection when no preference and no URL', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+      const mockNavbar = document.createElement('div');
+      querySelectorSpy.mockReturnValue(mockNavbar);
+      getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(10, 10, 10)' });
+
+      expect(resolveCodePageTheme()).toBe(webDarkTheme);
+    });
+
+    it('should default to light when no signals', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+
+      expect(resolveCodePageTheme()).toBe(webLightTheme);
+    });
+
+    it('should NOT consult OS prefers-color-scheme (ADR-021)', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+      // No signals → must return light, not OS dark
+      expect(resolveCodePageTheme()).toBe(webLightTheme);
+    });
+
+    it('should prioritize localStorage over URL flags', () => {
+      localStorageMock.getItem.mockReturnValue('light');
+      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Ddark' });
+
+      expect(resolveCodePageTheme()).toBe(webLightTheme);
+    });
+  });
+
   describe('setupThemeListener', () => {
     let addEventListenerSpy: jest.SpyInstance;
     let removeEventListenerSpy: jest.SpyInstance;
-    let mockMediaQueryAddListener: jest.Mock;
-    let mockMediaQueryRemoveListener: jest.Mock;
 
     beforeEach(() => {
       addEventListenerSpy = jest.spyOn(window, 'addEventListener');
       removeEventListenerSpy = jest.spyOn(window, 'removeEventListener');
-      mockMediaQueryAddListener = jest.fn();
-      mockMediaQueryRemoveListener = jest.fn();
-      mockMatchMedia.mockReturnValue({
-        matches: false,
-        addEventListener: mockMediaQueryAddListener,
-        removeEventListener: mockMediaQueryRemoveListener,
-      });
     });
 
     afterEach(() => {
@@ -334,11 +475,13 @@ describe('themeStorage', () => {
       expect(addEventListenerSpy).toHaveBeenCalledWith(THEME_CHANGE_EVENT, expect.any(Function));
     });
 
-    it('should add system preference change listener', () => {
+    it('should NOT add system preference listener (ADR-021)', () => {
       const onChange = jest.fn();
       setupThemeListener(onChange);
 
-      expect(mockMediaQueryAddListener).toHaveBeenCalledWith('change', expect.any(Function));
+      // Only storage and theme-change events — no matchMedia listener
+      const eventNames = addEventListenerSpy.mock.calls.map((call: any[]) => call[0]);
+      expect(eventNames).not.toContain('change');
     });
 
     it('should return cleanup function', () => {
@@ -356,7 +499,6 @@ describe('themeStorage', () => {
 
       expect(removeEventListenerSpy).toHaveBeenCalledWith('storage', expect.any(Function));
       expect(removeEventListenerSpy).toHaveBeenCalledWith(THEME_CHANGE_EVENT, expect.any(Function));
-      expect(mockMediaQueryRemoveListener).toHaveBeenCalledWith('change', expect.any(Function));
     });
 
     it('should call onChange when storage event fires for theme key', () => {
@@ -364,10 +506,8 @@ describe('themeStorage', () => {
       localStorageMock.getItem.mockReturnValue('dark');
       setupThemeListener(onChange);
 
-      // Get the storage handler that was registered
-      const storageHandler = addEventListenerSpy.mock.calls.find(call => call[0] === 'storage')?.[1];
+      const storageHandler = addEventListenerSpy.mock.calls.find((call: any[]) => call[0] === 'storage')?.[1];
 
-      // Simulate storage event
       storageHandler({ key: THEME_STORAGE_KEY } as StorageEvent);
 
       expect(onChange).toHaveBeenCalledWith(true); // dark mode
@@ -377,7 +517,7 @@ describe('themeStorage', () => {
       const onChange = jest.fn();
       setupThemeListener(onChange);
 
-      const storageHandler = addEventListenerSpy.mock.calls.find(call => call[0] === 'storage')?.[1];
+      const storageHandler = addEventListenerSpy.mock.calls.find((call: any[]) => call[0] === 'storage')?.[1];
 
       storageHandler({ key: 'other-key' } as StorageEvent);
 
@@ -389,35 +529,82 @@ describe('themeStorage', () => {
       localStorageMock.getItem.mockReturnValue('light');
       setupThemeListener(onChange);
 
-      const themeHandler = addEventListenerSpy.mock.calls.find(call => call[0] === THEME_CHANGE_EVENT)?.[1];
+      const themeHandler = addEventListenerSpy.mock.calls.find((call: any[]) => call[0] === THEME_CHANGE_EVENT)?.[1];
 
       themeHandler();
 
       expect(onChange).toHaveBeenCalledWith(false); // light mode
     });
+  });
 
-    it('should call onChange when system preference changes in auto mode', () => {
-      const onChange = jest.fn();
-      localStorageMock.getItem.mockReturnValue('auto');
-      setupThemeListener(onChange);
+  describe('setupCodePageThemeListener', () => {
+    let addEventListenerSpy: jest.SpyInstance;
+    let removeEventListenerSpy: jest.SpyInstance;
+    let locationSpy: jest.SpyInstance;
 
-      const systemHandler = mockMediaQueryAddListener.mock.calls[0]?.[1];
-
-      systemHandler({ matches: true } as MediaQueryListEvent);
-
-      expect(onChange).toHaveBeenCalledWith(true);
+    beforeEach(() => {
+      addEventListenerSpy = jest.spyOn(window, 'addEventListener');
+      removeEventListenerSpy = jest.spyOn(window, 'removeEventListener');
+      locationSpy = jest.spyOn(window, 'location', 'get');
+      locationSpy.mockReturnValue({ search: '' });
+      jest.spyOn(document, 'querySelector').mockReturnValue(null);
     });
 
-    it('should not call onChange when system changes but not in auto mode', () => {
+    afterEach(() => {
+      addEventListenerSpy.mockRestore();
+      removeEventListenerSpy.mockRestore();
+      locationSpy.mockRestore();
+      (document.querySelector as jest.Mock).mockRestore();
+    });
+
+    it('should add storage and theme change listeners', () => {
+      const onChange = jest.fn();
+      setupCodePageThemeListener(onChange);
+
+      expect(addEventListenerSpy).toHaveBeenCalledWith('storage', expect.any(Function));
+      expect(addEventListenerSpy).toHaveBeenCalledWith(THEME_CHANGE_EVENT, expect.any(Function));
+    });
+
+    it('should return cleanup function that removes listeners', () => {
+      const onChange = jest.fn();
+      const cleanup = setupCodePageThemeListener(onChange);
+
+      cleanup();
+
+      expect(removeEventListenerSpy).toHaveBeenCalledWith('storage', expect.any(Function));
+      expect(removeEventListenerSpy).toHaveBeenCalledWith(THEME_CHANGE_EVENT, expect.any(Function));
+    });
+
+    it('should call onChange with resolved Theme on storage event', () => {
+      const onChange = jest.fn();
+      localStorageMock.getItem.mockReturnValue('dark');
+      setupCodePageThemeListener(onChange);
+
+      const storageHandler = addEventListenerSpy.mock.calls.find((call: any[]) => call[0] === 'storage')?.[1];
+
+      storageHandler({ key: THEME_STORAGE_KEY } as StorageEvent);
+
+      expect(onChange).toHaveBeenCalledWith(webDarkTheme);
+    });
+
+    it('should call onChange with resolved Theme on theme event', () => {
       const onChange = jest.fn();
       localStorageMock.getItem.mockReturnValue('light');
-      setupThemeListener(onChange);
+      setupCodePageThemeListener(onChange);
 
-      const systemHandler = mockMediaQueryAddListener.mock.calls[0]?.[1];
+      const themeHandler = addEventListenerSpy.mock.calls.find((call: any[]) => call[0] === THEME_CHANGE_EVENT)?.[1];
 
-      systemHandler({ matches: true } as MediaQueryListEvent);
+      themeHandler();
 
-      expect(onChange).not.toHaveBeenCalled();
+      expect(onChange).toHaveBeenCalledWith(webLightTheme);
+    });
+
+    it('should NOT add system preference listener (ADR-021)', () => {
+      const onChange = jest.fn();
+      setupCodePageThemeListener(onChange);
+
+      const eventNames = addEventListenerSpy.mock.calls.map((call: any[]) => call[0]);
+      expect(eventNames).toEqual(['storage', THEME_CHANGE_EVENT]);
     });
   });
 });

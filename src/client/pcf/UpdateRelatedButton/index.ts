@@ -12,7 +12,8 @@
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
+import { FluentProvider } from '@fluentui/react-components';
+import { resolveThemeWithUserPreference } from '@spaarke/ui-components';
 import { UpdateRelatedButtonApp, IUpdateRelatedButtonAppProps } from './UpdateRelatedButtonApp';
 
 export class UpdateRelatedButton implements ComponentFramework.StandardControl<IInputs, IOutputs> {
@@ -43,7 +44,7 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<I
   }
 
   private renderControl(): void {
-    const theme = this.resolveTheme();
+    const theme = resolveThemeWithUserPreference(this.context);
 
     const props: IUpdateRelatedButtonAppProps = {
       buttonLabel: this.context.parameters.buttonLabel?.raw || 'Update Related Records',
@@ -64,49 +65,6 @@ export class UpdateRelatedButton implements ComponentFramework.StandardControl<I
       ),
       this.container
     );
-  }
-
-  /**
-   * Resolve theme following ADR-021 theme management pattern
-   * Priority: localStorage > URL flag > PCF context > navbar detection > system preference
-   */
-  private resolveTheme(): Theme {
-    // 1. Check localStorage override
-    const storedTheme = localStorage.getItem('spaarke-theme');
-    if (storedTheme === 'dark') return webDarkTheme;
-    if (storedTheme === 'light') return webLightTheme;
-
-    // 2. Check URL flag
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlTheme = urlParams.get('theme');
-    if (urlTheme === 'dark') return webDarkTheme;
-    if (urlTheme === 'light') return webLightTheme;
-
-    // 3. Try to detect from D365 navbar (common dark mode indicator)
-    const navbar = document.querySelector('[data-id="navbar"]');
-    if (navbar) {
-      const bgColor = window.getComputedStyle(navbar).backgroundColor;
-      if (bgColor && this.isDarkColor(bgColor)) {
-        return webDarkTheme;
-      }
-    }
-
-    // 4. Fallback to system preference
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return webDarkTheme;
-    }
-
-    return webLightTheme;
-  }
-
-  private isDarkColor(color: string): boolean {
-    const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    if (match) {
-      const [, r, g, b] = match.map(Number);
-      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-      return luminance < 0.5;
-    }
-    return false;
   }
 
   private handleUpdateComplete(success: boolean, message: string): void {

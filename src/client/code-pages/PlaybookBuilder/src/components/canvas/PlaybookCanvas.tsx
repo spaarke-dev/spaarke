@@ -14,12 +14,12 @@
  * ADR-021: All colors use Fluent design tokens (dark mode support).
  */
 
-import React, { useCallback, useRef, type DragEvent } from 'react';
+import React, { useCallback, useRef, useState, useEffect, type DragEvent } from 'react';
 import { ReactFlow, Background, Controls, MiniMap, useReactFlow, BackgroundVariant, type Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { makeStyles, tokens } from '@fluentui/react-components';
+import { getEffectiveDarkMode, setupCodePageThemeListener } from '@spaarke/ui-components';
 import { useCanvasStore } from '../../stores/canvasStore';
-import { useThemeDetection } from '../../hooks/useThemeDetection';
 import { nodeTypes } from '../nodes';
 import { edgeTypes } from '../edges';
 import type { PlaybookNodeType, PlaybookNodeData } from '../../types/canvas';
@@ -42,7 +42,11 @@ const useStyles = makeStyles({
 export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
   const styles = useStyles();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const { isDark } = useThemeDetection();
+  const [isDark, setIsDark] = useState(getEffectiveDarkMode);
+
+  useEffect(() => {
+    return setupCodePageThemeListener(() => setIsDark(getEffectiveDarkMode()));
+  }, []);
 
   // v12: useReactFlow() hook provides screenToFlowPosition, fitView, etc.
   const { screenToFlowPosition } = useReactFlow();

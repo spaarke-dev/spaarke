@@ -6,6 +6,7 @@
     <estimate>1.5h</estimate>
     <dependencies>031</dependencies>
     <parallel-safe>false</parallel-safe>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Wire syncThemeFromDataverse() into Code Page/PCF init flows, and persistThemeToDataverse() into sprk_ThemeMenu.js setTheme().</goal>

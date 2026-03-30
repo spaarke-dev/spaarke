@@ -7,6 +7,7 @@
     <dependencies>001,002</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>C</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Fix LegalWorkspace useTheme.ts hook to use standard 'spaarke-theme' localStorage key instead of 'spaarke-workspace-theme', and remove OS prefers-color-scheme fallback.</goal>

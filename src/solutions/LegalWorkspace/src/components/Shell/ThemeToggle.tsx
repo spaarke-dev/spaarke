@@ -7,7 +7,6 @@ import {
 import {
   WeatherSunnyRegular,
   WeatherMoonRegular,
-  AccessibilityRegular,
 } from "@fluentui/react-icons";
 import { useTheme, ThemeMode } from "../../hooks/useTheme";
 
@@ -19,22 +18,18 @@ const useStyles = makeStyles({
 
 const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
   light: "dark",
-  dark: "high-contrast",
-  "high-contrast": "light",
+  dark: "light",
 };
 
 const MODE_LABELS: Record<ThemeMode, string> = {
   light: "Light theme",
   dark: "Dark theme",
-  "high-contrast": "High contrast theme",
 };
 
 function ThemeIcon({ mode }: { mode: ThemeMode }): React.ReactElement {
   switch (mode) {
     case "dark":
       return <WeatherMoonRegular />;
-    case "high-contrast":
-      return <AccessibilityRegular />;
     case "light":
     default:
       return <WeatherSunnyRegular />;

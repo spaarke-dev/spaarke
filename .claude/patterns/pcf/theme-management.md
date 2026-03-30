@@ -41,10 +41,8 @@ function resolveTheme(context?: ComponentFramework.Context<IInputs>): Theme {
     const navbarDark = detectDarkModeFromNavbar();
     if (navbarDark !== null) return navbarDark ? webDarkTheme : webLightTheme;
 
-    // 5. System preference
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? webDarkTheme
-        : webLightTheme;
+    // 5. Default: light (OS prefers-color-scheme is intentionally NOT consulted — ADR-021)
+    return webLightTheme;
 }
 ```
 
@@ -79,14 +77,16 @@ function setupThemeListener(
     const handleThemeChange = () => callback(getEffectiveDarkMode(context));
     window.addEventListener('spaarke-theme-change', handleThemeChange);
 
-    // System preference changes
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    mediaQuery.addEventListener('change', handleThemeChange);
+    // Cross-tab localStorage changes
+    const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === THEME_STORAGE_KEY) handleThemeChange();
+    };
+    window.addEventListener('storage', handleStorageChange);
 
     // Return cleanup function
     return () => {
         window.removeEventListener('spaarke-theme-change', handleThemeChange);
-        mediaQuery.removeEventListener('change', handleThemeChange);
+        window.removeEventListener('storage', handleStorageChange);
     };
 }
 ```
@@ -163,6 +163,7 @@ const THEME_CHANGE_EVENT = 'spaarke-theme-change';
 
 ## Related Patterns
 
+- [Theme Consistency Constraints](../../constraints/theme-consistency.md) - **Mandatory** theme rules for all surfaces
 - [Control Initialization](control-initialization.md) - FluentProvider wrapper
 - [PCF Constraints](../../constraints/pcf.md) - Theme requirements
 

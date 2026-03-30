@@ -7,6 +7,7 @@
     <dependencies>010,011,012,014,016,017,018,019</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>E</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Verify all surfaces render consistent theme across the full test matrix.</goal>

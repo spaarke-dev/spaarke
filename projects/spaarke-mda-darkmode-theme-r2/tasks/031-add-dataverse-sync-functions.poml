@@ -6,6 +6,7 @@
     <estimate>2h</estimate>
     <dependencies>001,030</dependencies>
     <parallel-safe>false</parallel-safe>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Add syncThemeFromDataverse() and persistThemeToDataverse() functions to the unified themeStorage.ts module.</goal>

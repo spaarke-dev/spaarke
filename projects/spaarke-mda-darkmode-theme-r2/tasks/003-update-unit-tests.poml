@@ -6,6 +6,7 @@
     <estimate>2h</estimate>
     <dependencies>001</dependencies>
     <parallel-safe>false</parallel-safe>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Update themeStorage.test.ts to remove OS fallback expectations and add tests for Code Page functions.</goal>

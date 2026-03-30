@@ -18,6 +18,7 @@ import {
 } from '@fluentui/react-components';
 import { DocumentFlowchart24Regular, Filter20Regular } from '@fluentui/react-icons';
 import { IInputs } from './generated/ManifestTypes';
+import { getEffectiveDarkMode, resolveThemeWithUserPreference } from '@spaarke/ui-components/dist/utils/themeStorage';
 import { DocumentGraph } from './components/DocumentGraph';
 import { useVisualizationApi, formatVisualizationError } from './hooks/useVisualizationApi';
 import type { DocumentNode } from './types/graph';
@@ -130,32 +131,14 @@ const useStyles = makeStyles({
  * Resolve theme based on context and system preferences (ADR-021)
  */
 function resolveTheme(context?: ComponentFramework.Context<IInputs>) {
-  // Check PCF context for dark mode
-  if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
-    return context.fluentDesignLanguage.isDarkTheme ? webDarkTheme : webLightTheme;
-  }
-
-  // Fallback to system preference
-  if (typeof window !== 'undefined') {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? webDarkTheme : webLightTheme;
-  }
-
-  return webLightTheme;
+  return resolveThemeWithUserPreference(context);
 }
 
 /**
  * Check if dark mode is enabled
  */
 function isDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
-  if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
-    return context.fluentDesignLanguage.isDarkTheme;
-  }
-
-  if (typeof window !== 'undefined') {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  }
-
-  return false;
+  return getEffectiveDarkMode(context);
 }
 
 /**

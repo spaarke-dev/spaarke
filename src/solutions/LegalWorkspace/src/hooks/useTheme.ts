@@ -1,44 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
+import { Theme } from "@fluentui/react-components";
 import {
-  webLightTheme,
-  webDarkTheme,
-  teamsHighContrastTheme,
-  Theme,
-} from "@fluentui/react-components";
+  getUserThemePreference,
+  setUserThemePreference,
+  resolveCodePageTheme,
+  setupCodePageThemeListener,
+  ThemePreference,
+} from "@spaarke/ui-components";
 
-export type ThemeMode = "light" | "dark" | "high-contrast";
+/**
+ * ThemeMode exposed to consumers.
+ * Maps to ThemePreference from shared library ('auto' treated as 'light' for display).
+ */
+export type ThemeMode = "light" | "dark";
 
-const STORAGE_KEY = "spaarke-workspace-theme";
-
-function getInitialThemeMode(): ThemeMode {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "high-contrast") {
-      return stored;
-    }
-  } catch {
-    // localStorage may be unavailable in some iframe contexts
-  }
-
-  // No stored preference — detect from system
-  try {
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
-    return prefersDark.matches ? "dark" : "light";
-  } catch {
-    return "light";
-  }
-}
-
-function resolveTheme(mode: ThemeMode): Theme {
-  switch (mode) {
-    case "dark":
-      return webDarkTheme;
-    case "high-contrast":
-      return teamsHighContrastTheme;
-    case "light":
-    default:
-      return webLightTheme;
-  }
+function preferenceToMode(pref: ThemePreference): ThemeMode {
+  return pref === "dark" ? "dark" : "light";
 }
 
 export interface IUseThemeResult {
@@ -47,62 +24,41 @@ export interface IUseThemeResult {
   setThemeMode: (mode: ThemeMode) => void;
 }
 
+/**
+ * React hook for theme management in Code Pages.
+ *
+ * Delegates to shared @spaarke/ui-components theme utilities:
+ * - getUserThemePreference() / setUserThemePreference() for localStorage (`spaarke-theme` key)
+ * - resolveCodePageTheme() for Fluent UI v9 theme resolution
+ * - setupCodePageThemeListener() for cross-tab and same-tab change events
+ *
+ * OS `prefers-color-scheme` is intentionally NOT consulted — ADR-021 requires
+ * the Spaarke theme system (not the OS) to control all UI surfaces.
+ */
 export function useTheme(): IUseThemeResult {
-  const [themeMode, setThemeModeState] = useState<ThemeMode>(
-    getInitialThemeMode
+  const [theme, setTheme] = useState<Theme>(resolveCodePageTheme);
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() =>
+    preferenceToMode(getUserThemePreference())
   );
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
+    setUserThemePreference(mode);
     setThemeModeState(mode);
-    try {
-      localStorage.setItem(STORAGE_KEY, mode);
-    } catch {
-      // Ignore storage errors
-    }
+    // resolveCodePageTheme will pick up the new localStorage value
+    setTheme(resolveCodePageTheme());
   }, []);
 
-  // Listen for OS-level preference changes and update only when user has not
-  // explicitly overridden (i.e. nothing stored in localStorage)
+  // Listen for theme changes from other tabs or same-tab theme menu
   useEffect(() => {
-    let mediaQuery: MediaQueryList | null = null;
-
-    try {
-      mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    } catch {
-      return;
-    }
-
-    const handler = (e: MediaQueryListEvent) => {
-      try {
-        const hasStoredPreference = localStorage.getItem(STORAGE_KEY) !== null;
-        if (!hasStoredPreference) {
-          setThemeModeState(e.matches ? "dark" : "light");
-        }
-      } catch {
-        // Ignore errors
-      }
-    };
-
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener("change", handler);
-    } else {
-      // Fallback for older browsers
-      mediaQuery.addListener(handler);
-    }
-
-    return () => {
-      if (mediaQuery) {
-        if (mediaQuery.removeEventListener) {
-          mediaQuery.removeEventListener("change", handler);
-        } else {
-          mediaQuery.removeListener(handler);
-        }
-      }
-    };
+    const cleanup = setupCodePageThemeListener((newTheme: Theme) => {
+      setTheme(newTheme);
+      setThemeModeState(preferenceToMode(getUserThemePreference()));
+    });
+    return cleanup;
   }, []);
 
   return {
-    theme: resolveTheme(themeMode),
+    theme,
     themeMode,
     setThemeMode,
   };

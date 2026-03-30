@@ -153,7 +153,7 @@
       <Titles><Title languagecode="1033" description="Color Theme" /></Titles>
     </LocLabel>
     <LocLabel Id="sprk.ThemeMenu.Auto">
-      <Titles><Title languagecode="1033" description="Auto (follows system)" /></Titles>
+      <Titles><Title languagecode="1033" description="Auto (follows app)" /></Titles>
     </LocLabel>
     <LocLabel Id="sprk.ThemeMenu.AutoDesc">
       <Titles><Title languagecode="1033" description="Uses your operating system's theme preference" /></Titles>

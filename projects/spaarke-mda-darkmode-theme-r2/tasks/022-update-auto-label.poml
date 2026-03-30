@@ -7,6 +7,7 @@
     <dependencies>020,021</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>D</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Change "Auto (follows system)" to "Auto (follows app)" in ALL ribbon XML files and the sprk_ThemeMenuRibbon.xml template.</goal>

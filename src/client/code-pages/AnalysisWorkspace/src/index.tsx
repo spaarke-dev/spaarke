@@ -42,13 +42,13 @@
  * @see ADR-021 - Fluent UI v9 design system (React 19 createRoot for Code Pages)
  */
 
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FluentProvider } from '@fluentui/react-components';
 import { resolveRuntimeConfig } from '@spaarke/auth';
+import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components';
 import { App } from './App';
 import { AuthProvider } from './context/AuthContext';
-import { useThemeDetection } from './hooks/useThemeDetection';
 
 // ---------------------------------------------------------------------------
 // Parse URL parameters (multi-source resolution)
@@ -208,14 +208,18 @@ const tenantId = resolveTenantId();
 
 /**
  * ThemeRoot wraps the application in a FluentProvider with dynamic theme
- * detection. Uses the useThemeDetection hook to resolve the current theme
- * from the 4-level priority chain and re-renders on OS/user preference changes.
+ * detection. Uses resolveCodePageTheme + setupCodePageThemeListener from
+ * @spaarke/ui-components (themeStorage) and re-renders on theme changes.
  *
  * Also syncs the document body background color with the resolved theme to
  * prevent a white flash when the page loads in dark mode.
  */
 function ThemeRoot(): JSX.Element {
-  const { theme } = useThemeDetection(appParams);
+  const [theme, setTheme] = useState(resolveCodePageTheme);
+
+  useEffect(() => {
+    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
+  }, []);
 
   // Sync body background with resolved theme to prevent white flash in dark mode.
   // Uses the theme object's actual colorNeutralBackground1 value (a resolved hex/rgb string),

@@ -19,39 +19,10 @@
 
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
-import { FluentProvider, Theme, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { FluentProvider, Theme, webLightTheme } from '@fluentui/react-components';
+import { resolveThemeWithUserPreference } from '@spaarke/ui-components';
 import { ScopeConfigEditorApp } from './components/ScopeConfigEditorApp';
 import { getApiBaseUrl } from '../../shared/utils/environmentVariables';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Theme Utilities
-// ─────────────────────────────────────────────────────────────────────────────
-
-function resolveTheme(context: ComponentFramework.Context<IInputs>): Theme {
-  // Check URL for Dataverse dark mode flag
-  try {
-    const href = window.location.href;
-    if (href.includes('themeOption%3Ddarkmode') || href.includes('themeOption=darkmode')) {
-      return webDarkTheme;
-    }
-    // Try parent frame (PCF runs in iframe)
-    try {
-      const parentHref = window.parent?.location?.href;
-      if (parentHref?.includes('themeOption%3Ddarkmode') || parentHref?.includes('themeOption=darkmode')) {
-        return webDarkTheme;
-      }
-    } catch {
-      // Cross-origin blocked — ignore
-    }
-  } catch {
-    // Error reading location — ignore
-  }
-
-  // Light mode unless Dataverse explicitly sets dark mode via URL param.
-  // Do NOT respect system prefers-color-scheme — the control is embedded in a
-  // Dataverse form whose theme is determined by the Dataverse themeOption, not the OS.
-  return webLightTheme;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PCF Control Class (virtual / ReactControl)
@@ -87,10 +58,10 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
     this._context = context;
 
     // Resolve initial theme
-    this._theme = resolveTheme(context);
+    this._theme = resolveThemeWithUserPreference(context);
 
-    // No system theme listener — theme is determined solely by Dataverse
-    // URL param (themeOption=darkmode), not OS preference.
+    // Theme is resolved by shared resolveThemeWithUserPreference() which checks
+    // localStorage, PCF context, and navbar — OS prefers-color-scheme is NOT consulted (ADR-021).
 
     // Resolve BFF API base URL from Dataverse environment variable at runtime.
     // Falls back to the PCF input property apiBaseUrl if the env var query fails.
@@ -103,7 +74,7 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
    */
   public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
     this._context = context;
-    this._theme = resolveTheme(context);
+    this._theme = resolveThemeWithUserPreference(context);
 
     const fieldValue = context.parameters.fieldValue?.raw ?? '';
 

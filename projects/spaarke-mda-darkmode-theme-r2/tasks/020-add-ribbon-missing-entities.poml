@@ -7,6 +7,7 @@
     <dependencies>none</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>D</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Add theme flyout CustomAction ribbon XML for 6 missing entities: sprk_workassignment, sprk_analysisplaybook, sprk_analysisoutput, sprk_communication, sprk_eventtodo, sprk_eventtype.</goal>

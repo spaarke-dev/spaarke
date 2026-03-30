@@ -18,99 +18,13 @@
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { FluentProvider, webLightTheme, webDarkTheme, teamsHighContrastTheme, Theme } from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, Theme } from '@fluentui/react-components';
+import {
+  resolveThemeWithUserPreference,
+  setupThemeListener,
+} from '@spaarke/ui-components';
 import { DrillThroughWorkspaceApp } from './components/DrillThroughWorkspaceApp';
 import { logger } from './utils/logger';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Theme Utilities
-// ─────────────────────────────────────────────────────────────────────────────
-
-const STORAGE_KEY = 'spaarke-theme';
-type ThemePreference = 'auto' | 'light' | 'dark';
-type ThemeMode = 'light' | 'dark' | 'high-contrast';
-
-function getUserThemePreference(): ThemePreference {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark' || stored === 'auto') {
-      return stored;
-    }
-    try {
-      const parentStored = window.parent?.localStorage?.getItem(STORAGE_KEY);
-      if (parentStored === 'light' || parentStored === 'dark' || parentStored === 'auto') {
-        return parentStored;
-      }
-    } catch {
-      /* Cross-origin blocked */
-    }
-  } catch {
-    /* localStorage not available */
-  }
-  return 'auto';
-}
-
-function isHighContrast(): boolean {
-  if (window.matchMedia) {
-    const forcedColors = window.matchMedia('(forced-colors: active)');
-    if (forcedColors.matches) return true;
-    const msHighContrast = window.matchMedia('(-ms-high-contrast: active)');
-    if (msHighContrast.matches) return true;
-  }
-  if (document.body.classList.contains('high-contrast') || document.body.classList.contains('ms-highContrast')) {
-    return true;
-  }
-  return false;
-}
-
-function detectDarkModeFromUrl(): boolean | null {
-  try {
-    if (
-      window.location.href.includes('themeOption%3Ddarkmode') ||
-      window.location.href.includes('themeOption=darkmode')
-    ) {
-      return true;
-    }
-    try {
-      const parentUrl = window.parent?.location?.href;
-      if (parentUrl?.includes('themeOption%3Ddarkmode') || parentUrl?.includes('themeOption=darkmode')) {
-        return true;
-      }
-    } catch {
-      /* Cross-origin blocked */
-    }
-  } catch {
-    /* Error */
-  }
-  return null;
-}
-
-function getThemeMode(): ThemeMode {
-  if (isHighContrast()) return 'high-contrast';
-
-  const preference = getUserThemePreference();
-  if (preference === 'dark') return 'dark';
-  if (preference === 'light') return 'light';
-
-  // Auto mode - check URL flag first
-  const urlDarkMode = detectDarkModeFromUrl();
-  if (urlDarkMode !== null) {
-    return urlDarkMode ? 'dark' : 'light';
-  }
-
-  // Fallback to system preference
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
-  return 'light';
-}
-
-function getResolvedTheme(): Theme {
-  const mode = getThemeMode();
-  if (mode === 'high-contrast') return teamsHighContrastTheme;
-  if (mode === 'dark') return webDarkTheme;
-  return webLightTheme;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PCF Control Class
@@ -128,8 +42,7 @@ export class DrillThroughWorkspace implements ComponentFramework.StandardControl
 
   // Theme state
   private _currentTheme: Theme = webLightTheme;
-  private _themeMediaQuery: MediaQueryList | null = null;
-  private _forcedColorsQuery: MediaQueryList | null = null;
+  private _cleanupThemeListener?: () => void;
 
   constructor() {
     logger.info('DrillThroughWorkspace', 'Constructor called');
@@ -156,8 +69,8 @@ export class DrillThroughWorkspace implements ComponentFramework.StandardControl
     this._container.style.boxSizing = 'border-box';
     this._container.style.overflow = 'hidden';
 
-    // Set up theme
-    this._currentTheme = getResolvedTheme();
+    // Set up theme using shared library (no OS prefers-color-scheme — ADR-021)
+    this._currentTheme = resolveThemeWithUserPreference(context);
     this.setupThemeListeners();
 
     // Set up escape key handler for closing
@@ -182,7 +95,7 @@ export class DrillThroughWorkspace implements ComponentFramework.StandardControl
 
   public destroy(): void {
     logger.info('DrillThroughWorkspace', 'destroy() called');
-    this.cleanupThemeListeners();
+    this._cleanupThemeListener?.();
     this.cleanupKeyboardHandler();
     if (this._isRendered) {
       ReactDOM.unmountComponentAtNode(this._container);
@@ -316,32 +229,11 @@ export class DrillThroughWorkspace implements ComponentFramework.StandardControl
   }
 
   private setupThemeListeners(): void {
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      // Listen for dark mode changes
-      this._themeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      this._themeMediaQuery.addEventListener('change', this.handleThemeChange.bind(this));
-
-      // Listen for high-contrast changes
-      this._forcedColorsQuery = window.matchMedia('(forced-colors: active)');
-      this._forcedColorsQuery.addEventListener('change', this.handleThemeChange.bind(this));
-    }
-
-    // Listen for custom theme change events
-    window.addEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
-  }
-
-  private cleanupThemeListeners(): void {
-    if (this._themeMediaQuery) {
-      this._themeMediaQuery.removeEventListener('change', this.handleThemeChange.bind(this));
-    }
-    if (this._forcedColorsQuery) {
-      this._forcedColorsQuery.removeEventListener('change', this.handleThemeChange.bind(this));
-    }
-    window.removeEventListener('spaarke-theme-change', this.handleThemeChange.bind(this));
-  }
-
-  private handleThemeChange(): void {
-    this._currentTheme = getResolvedTheme();
-    this.renderComponent();
+    // Use shared library listener — listens for localStorage + custom events.
+    // OS prefers-color-scheme is intentionally NOT listened to (ADR-021).
+    this._cleanupThemeListener = setupThemeListener((isDark: boolean) => {
+      this._currentTheme = resolveThemeWithUserPreference(this._context);
+      this.renderComponent();
+    }, this._context);
   }
 }

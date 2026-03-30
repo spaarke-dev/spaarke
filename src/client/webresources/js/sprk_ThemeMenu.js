@@ -42,6 +42,9 @@ Spaarke.Theme = Spaarke.Theme || {};
             detail: { theme: theme }
         }));
 
+        // Persist to Dataverse for cross-device sync (async, non-blocking)
+        persistToDataverse(theme);
+
         // Apply MDA dark mode via URL flag
         // Use top.location to navigate main window (web resources run in iframe context)
         var topWindow = window.top || window;
@@ -91,20 +94,6 @@ Spaarke.Theme = Spaarke.Theme || {};
         Spaarke.Theme.init();
         return true;
     };
-
-    // Listen for system preference changes (for auto mode)
-    if (window.matchMedia) {
-        window.matchMedia('(prefers-color-scheme: dark)')
-            .addEventListener('change', function(e) {
-                var stored = localStorage.getItem(STORAGE_KEY) || 'auto';
-                if (stored === 'auto') {
-                    console.log('[Spaarke.Theme] System preference changed, dark mode:', e.matches);
-                    window.dispatchEvent(new CustomEvent('spaarke-theme-change', {
-                        detail: { theme: 'auto', effectiveDark: e.matches }
-                    }));
-                }
-            });
-    }
 
     /**
      * Auto-initialize: Check localStorage and redirect if needed
@@ -252,6 +241,61 @@ Spaarke.Theme = Spaarke.Theme || {};
         // Start trying after a short delay to let DOM render
         setTimeout(tryUpdateLogo, 300);
     };
+
+    // =========================================================================
+    // Dataverse Theme Persistence (async, non-blocking)
+    // =========================================================================
+
+    var PREFERENCE_TYPE_THEME = 100000001;
+
+    /**
+     * Persist theme preference to Dataverse for cross-device sync.
+     * Uses Xrm.WebApi directly (plain JS web resource cannot import shared lib).
+     * Silently no-ops if Xrm.WebApi or user context unavailable.
+     * @param {string} theme - Theme value to persist
+     */
+    function persistToDataverse(theme) {
+        try {
+            var xrm = (window.top && window.top.Xrm) || window.Xrm;
+            if (!xrm || !xrm.WebApi || !xrm.Utility) return;
+
+            var userId = xrm.Utility.getGlobalContext().userSettings.userId;
+            // Strip braces from GUID
+            userId = userId.replace(/[{}]/g, '');
+
+            var select = 'sprk_userpreferenceid';
+            var filter = '_sprk_user_value eq ' + userId + ' and sprk_preferencetype eq ' + PREFERENCE_TYPE_THEME;
+            var query = '?$select=' + select + '&$filter=' + filter + '&$top=1';
+
+            xrm.WebApi.retrieveMultipleRecords('sprk_userpreference', query, 1).then(
+                function(result) {
+                    if (result.entities.length > 0) {
+                        // Update existing
+                        var id = result.entities[0].sprk_userpreferenceid;
+                        xrm.WebApi.updateRecord('sprk_userpreference', id, {
+                            sprk_preferencevalue: theme
+                        }).then(
+                            function() { console.log('[Spaarke.Theme] Persisted to Dataverse'); },
+                            function(err) { console.warn('[Spaarke.Theme] Dataverse update failed:', err.message); }
+                        );
+                    } else {
+                        // Create new
+                        xrm.WebApi.createRecord('sprk_userpreference', {
+                            sprk_preferencetype: PREFERENCE_TYPE_THEME,
+                            sprk_preferencevalue: theme,
+                            'sprk_User@odata.bind': '/systemusers(' + userId + ')'
+                        }).then(
+                            function() { console.log('[Spaarke.Theme] Created preference in Dataverse'); },
+                            function(err) { console.warn('[Spaarke.Theme] Dataverse create failed:', err.message); }
+                        );
+                    }
+                },
+                function(err) { console.warn('[Spaarke.Theme] Dataverse query failed:', err.message); }
+            );
+        } catch (e) {
+            // Dataverse unavailable — localStorage still has the preference
+        }
+    }
 
     console.log('[Spaarke.Theme] Theme menu handler loaded');
 

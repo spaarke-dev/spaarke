@@ -295,7 +295,7 @@ Every Code Page wrapper's `main.tsx` follows this structure:
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/codePageTheme";
+import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
@@ -555,12 +555,12 @@ Key functions:
 
 #### Code Page Theme Resolution
 
-Code Pages do NOT use the ribbon-based mechanism. Instead, they resolve theme via `resolveCodePageTheme()` from `@spaarke/ui-components/utils/codePageTheme`, which uses a 4-level cascade:
+Code Pages do NOT use the ribbon-based mechanism. Instead, they resolve theme via `resolveCodePageTheme()` from `@spaarke/ui-components` (unified `themeStorage.ts` module), which uses a 3-level cascade:
 
 1. **localStorage** (`spaarke-theme` key) -- user's explicit preference
 2. **URL flags** (`flags` param with `themeOption=dark|light`)
 3. **Navbar DOM** -- reads Dataverse navbar background-color luminance
-4. **System preference** (`prefers-color-scheme` media query)
+4. **Default: light** -- OS `prefers-color-scheme` is intentionally NOT consulted (ADR-021)
 
 Code Pages also listen for theme changes via `setupCodePageThemeListener()` to react to cross-tab localStorage changes and system preference changes.
 

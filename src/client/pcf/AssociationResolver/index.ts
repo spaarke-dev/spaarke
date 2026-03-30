@@ -21,7 +21,8 @@
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom'; // React 16 - NOT react-dom/client
-import { FluentProvider, webLightTheme, webDarkTheme, Theme } from '@fluentui/react-components';
+import { FluentProvider } from '@fluentui/react-components';
+import { resolveThemeWithUserPreference } from '@spaarke/ui-components';
 import { AssociationResolverApp } from './AssociationResolverApp';
 import { getApiBaseUrl } from '../shared/utils/environmentVariables';
 
@@ -35,34 +36,6 @@ interface RecordTypeReference {
   id: string;
   name: string;
   entityLogicalName?: string;
-}
-
-/**
- * Resolve theme based on PCF context and user preference
- */
-function resolveTheme(context?: ComponentFramework.Context<IInputs>): Theme {
-  // Check PCF context for dark mode
-  if (context?.fluentDesignLanguage?.isDarkTheme) {
-    return webDarkTheme;
-  }
-
-  // Check localStorage user preference
-  const stored = localStorage.getItem('spaarke-theme');
-  if (stored === 'dark') return webDarkTheme;
-  if (stored === 'light') return webLightTheme;
-
-  // Check URL flag
-  const url = window.location.href;
-  if (url.includes('themeOption%3Ddarkmode') || url.includes('themeOption=darkmode')) {
-    return webDarkTheme;
-  }
-
-  // Check system preference
-  if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
-    return webDarkTheme;
-  }
-
-  return webLightTheme;
 }
 
 /**
@@ -201,7 +174,7 @@ export class AssociationResolver implements ComponentFramework.StandardControl<I
   private renderComponent(): void {
     if (!this.container) return;
 
-    const theme = resolveTheme(this.context);
+    const theme = resolveThemeWithUserPreference(this.context);
     const regardingRecordType = this.getRecordTypeReference();
     const apiBaseUrl = this._resolvedApiBaseUrl || this.context.parameters.apiBaseUrl?.raw || '';
 

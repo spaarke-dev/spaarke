@@ -17,7 +17,8 @@
  */
 
 import { createRoot } from 'react-dom/client';
-import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
+import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components';
 import { resolveRuntimeConfig } from '@spaarke/auth';
 import { App } from './App';
 import { initializeAuth, getAuthProvider } from './services/authInit';
@@ -45,12 +46,9 @@ if (!params.get('documentId')) {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-// Check for explicit theme parameter from caller (e.g. PCF control passes theme=light/dark),
-// then fall back to OS-level dark mode preference
-const themeParam = params.get('theme');
-const isDark = themeParam
-  ? themeParam === 'dark'
-  : (window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
+// Resolve theme using shared utility (localStorage → URL → navbar → light default)
+// OS prefers-color-scheme is intentionally NOT consulted (ADR-021)
+let currentTheme = resolveCodePageTheme();
 
 const container = document.getElementById('root');
 if (!container) throw new Error('[DocumentRelationshipViewer] Root container #root not found in DOM.');
@@ -93,8 +91,8 @@ async function bootstrap(): Promise<void> {
 
   // 4. Render with runtime-resolved BFF URL
   root.render(
-    <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
-      <App params={params} isDark={isDark} apiBaseUrl={runtimeConfig.bffBaseUrl} />
+    <FluentProvider theme={currentTheme}>
+      <App params={params} isDark={currentTheme === webDarkTheme} apiBaseUrl={runtimeConfig.bffBaseUrl} />
     </FluentProvider>
   );
 }

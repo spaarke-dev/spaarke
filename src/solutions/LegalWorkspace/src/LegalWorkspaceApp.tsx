@@ -6,6 +6,7 @@ import {
   Text,
 } from "@fluentui/react-components";
 import { useTheme } from "./hooks/useTheme";
+import { syncThemeFromDataverse } from "@spaarke/ui-components";
 import { PageHeader } from "./components/Shell/PageHeader";
 import { WorkspaceGrid } from "./components/Shell/WorkspaceGrid";
 import { FeedTodoSyncProvider } from "./contexts/FeedTodoSyncContext";
@@ -61,6 +62,13 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
 }) => {
   const { theme } = useTheme();
   const styles = useStyles();
+
+  // Cross-device theme sync: async read from Dataverse on mount (non-blocking)
+  React.useEffect(() => {
+    if (webApi && userId) {
+      syncThemeFromDataverse(webApi, userId.replace(/[{}]/g, ''));
+    }
+  }, [webApi, userId]);
   const buildDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",

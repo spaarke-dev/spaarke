@@ -4,9 +4,9 @@
 
 | Status | Count |
 |--------|-------|
-| Completed | 0 |
+| Completed | 20 |
 | In Progress | 0 |
-| Pending | 21 |
+| Pending | 1 (042 — ribbon deploy blocked by missing entity) |
 
 ---
 
@@ -16,47 +16,47 @@
 
 | ID | Task | Status | Dependencies | Est |
 |----|------|--------|-------------|-----|
-| 001 | Consolidate theme utilities into single module | 🔲 | none | 3h |
-| 002 | Update shared library barrel exports | 🔲 | 001 | 30m |
-| 003 | Update theme utility unit tests | 🔲 | 001 | 2h |
+| 001 | Consolidate theme utilities into single module | ✅ | none | 3h |
+| 002 | Update shared library barrel exports | ✅ | 001 | 30m |
+| 003 | Update theme utility unit tests | ✅ | 001 | 2h |
 
 ### Phase 2: Migrate Consumers (Parallel Groups A, B, C)
 
 | ID | Task | Status | Dependencies | Group | Est |
 |----|------|--------|-------------|-------|-----|
-| 010 | Update 6 Code Page ThemeProvider wrappers | 🔲 | 001, 002 | **A** | 1h |
-| 011 | Update 11 Code Page App.tsx/main.tsx entry points | 🔲 | 001, 002 | **A** | 1.5h |
-| 012 | Delete duplicate useThemeDetection hooks + SemanticSearch | 🔲 | 001, 002 | **A** | 1h |
-| 014 | Replace inlined theme code in 3 PCF controls (~470 lines) | 🔲 | 001, 002 | **B** | 2h |
-| 016 | Remove OS listeners from PCF ThemeServices | 🔲 | 001, 002 | **B** | 1h |
-| 017 | Fix LegalWorkspace useTheme hook storage key | 🔲 | 001, 002 | **C** | 1h |
-| 018 | Remove OS listener from sprk_ThemeMenu.js | 🔲 | none | **C** | 30m |
-| 019 | Verify remaining PCF controls use standard key | 🔲 | 001 | **C** | 30m |
+| 010 | Update 6 Code Page ThemeProvider wrappers | ✅ | 001, 002 | **A** | 1h |
+| 011 | Update 11 Code Page App.tsx/main.tsx entry points | ✅ | 001, 002 | **A** | 1.5h |
+| 012 | Delete duplicate useThemeDetection hooks + SemanticSearch | ✅ | 001, 002 | **A** | 1h |
+| 014 | Replace inlined theme code in 3 PCF controls (~470 lines) | ✅ | 001, 002 | **B** | 2h |
+| 016 | Remove OS listeners from PCF ThemeServices | ✅ | 001, 002 | **B** | 1h |
+| 017 | Fix LegalWorkspace useTheme hook storage key | ✅ | 001, 002 | **C** | 1h |
+| 018 | Remove OS listener from sprk_ThemeMenu.js | ✅ | none | **C** | 30m |
+| 019 | Verify remaining PCF controls use standard key | ✅ | 001 | **C** | 30m |
 
 ### Phase 3: Ribbon Deployment (Parallel Group D — independent)
 
 | ID | Task | Status | Dependencies | Group | Est |
 |----|------|--------|-------------|-------|-----|
-| 020 | Add theme flyout ribbon to 6 missing entities | 🔲 | none | **D** | 2h |
-| 021 | Add Form ribbon location to 3 existing entities | 🔲 | none | **D** | 1h |
-| 022 | Update Auto label to "follows app" | 🔲 | 020, 021 | **D** | 30m |
+| 020 | Add theme flyout ribbon to 6 missing entities | ✅ | none | **D** | 2h |
+| 021 | Add Form ribbon location to 3 existing entities | ✅ | none | **D** | 1h |
+| 022 | Update Auto label to "follows app" | ✅ | 020, 021 | **D** | 30m |
 
 ### Phase 4: Dataverse Persistence (Serial)
 
 | ID | Task | Status | Dependencies | Est |
 |----|------|--------|-------------|-----|
-| 030 | Add ThemePreference to sprk_preferencetype option set | 🔲 | none | 30m |
-| 031 | Add Dataverse theme sync functions to themeStorage | 🔲 | 001, 030 | 2h |
-| 032 | Wire Dataverse sync into theme consumers | 🔲 | 031 | 1.5h |
+| 030 | Add ThemePreference to sprk_preferencetype option set | ✅ | none | 30m |
+| 031 | Add Dataverse theme sync functions to themeStorage | ✅ | 001, 030 | 2h |
+| 032 | Wire Dataverse sync into theme consumers | ✅ | 031 | 1.5h |
 
 ### Phase 5: Protocol & Wrap-up
 
 | ID | Task | Status | Dependencies | Group | Est |
 |----|------|--------|-------------|-------|-----|
-| 040 | Create theme consistency protocol document | 🔲 | 001 | **E** | 1h |
-| 041 | Integration testing — verify all surfaces | 🔲 | Phase 2 complete | **E** | 2h |
-| 042 | Deploy to dev environment | 🔲 | 041 | — | 1h |
-| 090 | Project wrap-up | 🔲 | 042 | — | 30m |
+| 040 | Create theme consistency protocol document | ✅ | 001 | **E** | 1h |
+| 041 | Integration testing — verify all surfaces | ✅ | Phase 2 complete | **E** | 2h |
+| 042 | Deploy to dev environment | ⚠️ | 041 | — | 1h |
+| 090 | Project wrap-up | ✅ | 042 | — | 30m |
 
 ---
 

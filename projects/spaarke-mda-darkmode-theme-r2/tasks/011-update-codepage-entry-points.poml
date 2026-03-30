@@ -7,6 +7,7 @@
     <dependencies>001,002</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>A</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Update 11 Code Page entry points (App.tsx/main.tsx) that directly import resolveCodePageTheme or setupCodePageThemeListener to use the unified themeStorage module.</goal>

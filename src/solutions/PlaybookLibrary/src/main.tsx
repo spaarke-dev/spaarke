@@ -41,7 +41,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
-} from "@spaarke/ui-components/utils/codePageTheme";
+} from "@spaarke/ui-components";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";

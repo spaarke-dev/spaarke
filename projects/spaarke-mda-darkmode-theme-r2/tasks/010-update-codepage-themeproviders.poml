@@ -7,6 +7,7 @@
     <dependencies>001,002</dependencies>
     <parallel-safe>true</parallel-safe>
     <parallel-group>A</parallel-group>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Update 6 Code Page ThemeProvider.ts wrapper files to import from unified themeStorage instead of deleted codePageTheme.</goal>

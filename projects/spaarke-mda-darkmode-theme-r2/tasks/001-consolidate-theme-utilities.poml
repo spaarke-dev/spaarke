@@ -6,6 +6,7 @@
     <estimate>3h</estimate>
     <dependencies>none</dependencies>
     <parallel-safe>false</parallel-safe>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Merge codePageTheme.ts into themeStorage.ts creating a single authoritative theme utility module. Remove OS prefers-color-scheme fallback. Export Code Page functions from the unified module.</goal>

@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Adds Theme Menu ribbon button to entity grids for dark mode persistence" languagecode="1033" />
     </Descriptions>
-    <Version>1.0.0.0</Version>
+    <Version>2.0.0.0</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>spaarke</UniqueName>
@@ -54,9 +54,15 @@
       </Addresses>
     </Publisher>
     <RootComponents>
-      <RootComponent type="1" schemaName="sprk_Project" behavior="2" />
-      <RootComponent type="1" schemaName="sprk_Invoice" behavior="2" />
-      <RootComponent type="1" schemaName="sprk_Event" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_project" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_invoice" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_event" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_workassignment" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_analysisplaybook" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_analysisoutput" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_communication" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_eventtodo" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_eventtype" behavior="2" />
     </RootComponents>
     <MissingDependencies />
   </SolutionManifest>

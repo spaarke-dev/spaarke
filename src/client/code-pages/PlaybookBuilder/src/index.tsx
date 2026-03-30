@@ -24,12 +24,12 @@
  * @see ADR-022 - React 19 for Code Pages (exempt from PCF React 16)
  */
 
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FluentProvider } from '@fluentui/react-components';
 import { resolveRuntimeConfig } from '@spaarke/auth';
+import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components';
 import { App } from './App';
-import { useThemeDetection } from './hooks/useThemeDetection';
 
 // ---------------------------------------------------------------------------
 // Parse URL parameters
@@ -72,7 +72,11 @@ const playbookId = resolvePlaybookId();
 // ---------------------------------------------------------------------------
 
 function ThemeRoot({ apiBaseUrl }: { apiBaseUrl: string }): JSX.Element {
-  const { theme } = useThemeDetection(appParams);
+  const [theme, setTheme] = useState(resolveCodePageTheme);
+
+  useEffect(() => {
+    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
+  }, []);
 
   useEffect(() => {
     const bgColor = (theme as Record<string, string>).colorNeutralBackground1;

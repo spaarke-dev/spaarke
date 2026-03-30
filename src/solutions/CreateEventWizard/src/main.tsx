@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/codePageTheme";
+import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";

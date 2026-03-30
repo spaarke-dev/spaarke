@@ -1,49 +1,32 @@
 /**
  * Theme Provider for Visual Host PCF
  *
+ * Thin wrapper around @spaarke/ui-components themeStorage utilities.
  * Detects and applies Fluent UI v9 themes based on Power Apps theme.
  * Supports light, dark, and high-contrast modes per ADR-021.
  *
- * Theme priority (per established pattern in UniversalDatasetGrid):
+ * Theme priority (per established pattern):
  * 1. localStorage ('spaarke-theme') user preference
  * 2. Power Apps context (fluentDesignLanguage.isDarkTheme)
  * 3. DOM navbar color fallback
- * 4. System preference (prefers-color-scheme)
+ *
+ * OS prefers-color-scheme is intentionally NOT consulted (ADR-021).
  */
 
 import { webLightTheme, webDarkTheme, teamsHighContrastTheme, Theme } from '@fluentui/react-components';
 import { IInputs } from '../generated/ManifestTypes';
 import { logger } from '../utils/logger';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Theme Storage Constants
-// Matches UniversalDatasetGrid and shared components pattern
-// ─────────────────────────────────────────────────────────────────────────────
-
-const STORAGE_KEY = 'spaarke-theme';
-const THEME_CHANGE_EVENT = 'spaarke-theme-change';
-
-type ThemePreference = 'auto' | 'light' | 'dark';
+import {
+  getUserThemePreference,
+  getEffectiveDarkMode as sharedGetEffectiveDarkMode,
+  setupThemeListener as sharedSetupThemeListener,
+  type ThemeChangeHandler,
+} from '@spaarke/ui-components/dist/utils/themeStorage';
 
 /**
  * Theme mode enumeration
  */
 export type ThemeMode = 'light' | 'dark' | 'high-contrast';
-
-/**
- * Get the user's theme preference from localStorage
- */
-export function getUserThemePreference(): ThemePreference {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'light' || stored === 'dark' || stored === 'auto') {
-      return stored;
-    }
-  } catch {
-    // localStorage not available (SSR, private browsing, etc.)
-  }
-  return 'auto';
-}
 
 /**
  * Detect if high-contrast mode is active
@@ -72,84 +55,17 @@ export function isHighContrast(): boolean {
 }
 
 /**
- * Detect dark mode from DOM navbar color (Power Apps fallback)
- */
-function detectDarkModeFromNavbar(): boolean | null {
-  try {
-    const navbar = document.querySelector('[data-id="navbar-container"]');
-    if (navbar) {
-      const bgColor = window.getComputedStyle(navbar).backgroundColor;
-      // rgb(10, 10, 10) = dark, rgb(240, 240, 240) = light
-      if (bgColor === 'rgb(10, 10, 10)') {
-        logger.debug('ThemeProvider', 'Navbar detected: dark mode');
-        return true;
-      }
-      if (bgColor === 'rgb(240, 240, 240)') {
-        logger.debug('ThemeProvider', 'Navbar detected: light mode');
-        return false;
-      }
-    }
-  } catch {
-    // DOM access failed
-  }
-  return null;
-}
-
-/**
- * Get system theme preference
- */
-function getSystemThemePreference(): boolean {
-  try {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Get effective dark mode state considering all sources
  *
- * Priority:
- * 1. localStorage user preference (if not 'auto')
- * 2. Power Apps context (fluentDesignLanguage.isDarkTheme)
- * 3. DOM navbar color fallback
- * 4. System preference
+ * Delegates to shared library. OS prefers-color-scheme is NOT consulted (ADR-021).
  *
  * @param context - PCF context (optional)
  * @returns boolean - true if dark mode should be active
  */
 export function getEffectiveDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
-  const preference = getUserThemePreference();
-
-  // 1. User explicit choice overrides everything
-  if (preference === 'dark') {
-    logger.debug('ThemeProvider', 'Using localStorage preference: dark');
-    return true;
-  }
-  if (preference === 'light') {
-    logger.debug('ThemeProvider', 'Using localStorage preference: light');
-    return false;
-  }
-
-  // 2. Check Power Apps context
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contextAny = context as any;
-  if (contextAny?.fluentDesignLanguage?.isDarkTheme !== undefined) {
-    const isDark = contextAny.fluentDesignLanguage.isDarkTheme;
-    logger.debug('ThemeProvider', `Using Power Apps context: ${isDark ? 'dark' : 'light'}`);
-    return isDark;
-  }
-
-  // 3. Check DOM navbar color
-  const navbarDark = detectDarkModeFromNavbar();
-  if (navbarDark !== null) {
-    return navbarDark;
-  }
-
-  // 4. Fall back to system preference
-  const systemDark = getSystemThemePreference();
-  logger.debug('ThemeProvider', `Using system preference: ${systemDark ? 'dark' : 'light'}`);
-  return systemDark;
+  const isDark = sharedGetEffectiveDarkMode(context);
+  logger.debug('ThemeProvider', `Effective dark mode: ${isDark}`);
+  return isDark;
 }
 
 /**
@@ -195,45 +111,42 @@ export function resolveTheme(context?: ComponentFramework.Context<IInputs>): The
 
 /**
  * Set up a listener for theme changes
- * Listens for localStorage changes, system preference, and high-contrast mode
+ * Listens for localStorage changes and custom theme events.
+ * OS prefers-color-scheme changes are NOT listened to (ADR-021).
+ *
  * Returns a cleanup function
  */
 export function setupThemeListener(
   onThemeChange: (themeMode: ThemeMode) => void,
   context?: ComponentFramework.Context<IInputs>
 ): () => void {
-  // Handle custom theme change event (from ribbon menu)
-  const handleThemeChange = () => {
+  // Use shared library listener (no OS prefers-color-scheme)
+  const cleanupShared = sharedSetupThemeListener((isDark: boolean) => {
     const newMode = getThemeMode(context);
-    logger.info('ThemeProvider', `Theme changed via event: ${newMode}`);
+    logger.info('ThemeProvider', `Theme changed: ${newMode}`);
+    onThemeChange(newMode);
+  }, context);
+
+  // Also listen for high-contrast mode changes
+  let forcedColorsQuery: MediaQueryList | null = null;
+  const handleHighContrastChange = () => {
+    const newMode = getThemeMode(context);
+    logger.info('ThemeProvider', `High-contrast changed: ${newMode}`);
     onThemeChange(newMode);
   };
 
-  // Handle system preference change
-  const handleSystemChange = () => {
-    // Only respond if user preference is 'auto'
-    if (getUserThemePreference() === 'auto') {
-      const newMode = getThemeMode(context);
-      logger.info('ThemeProvider', `Theme changed via system: ${newMode}`);
-      onThemeChange(newMode);
-    }
-  };
+  try {
+    forcedColorsQuery = window.matchMedia('(forced-colors: active)');
+    forcedColorsQuery.addEventListener('change', handleHighContrastChange);
+  } catch {
+    // matchMedia not available
+  }
 
-  // Listen for custom event
-  window.addEventListener(THEME_CHANGE_EVENT, handleThemeChange);
-
-  // Listen for system preference changes
-  const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-  darkModeQuery.addEventListener('change', handleSystemChange);
-
-  // Listen for high-contrast mode changes
-  const forcedColorsQuery = window.matchMedia('(forced-colors: active)');
-  forcedColorsQuery.addEventListener('change', handleThemeChange);
-
-  // Return cleanup function
+  // Return combined cleanup function
   return () => {
-    window.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange);
-    darkModeQuery.removeEventListener('change', handleSystemChange);
-    forcedColorsQuery.removeEventListener('change', handleThemeChange);
+    cleanupShared();
+    if (forcedColorsQuery) {
+      forcedColorsQuery.removeEventListener('change', handleHighContrastChange);
+    }
   };
 }

@@ -6,6 +6,7 @@
     <estimate>30m</estimate>
     <dependencies>none</dependencies>
     <parallel-safe>true</parallel-safe>
+    <status>completed</status>
   </metadata>
   <prompt>
     <goal>Add option value 100000001 = "ThemePreference" to the sprk_preferencetype choice field on sprk_userpreference entity in Dataverse.</goal>
