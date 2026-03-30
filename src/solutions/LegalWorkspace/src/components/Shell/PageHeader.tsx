@@ -49,6 +49,9 @@ const useStyles = makeStyles({
   dropdown: {
     minWidth: "200px",
     maxWidth: "320px",
+    fontSize: "20px",
+    fontFamily: tokens.fontFamilyBase,
+    color: tokens.colorNeutralForeground1,
   },
   optionContent: {
     display: "flex",
