@@ -4,6 +4,9 @@
  * Standalone wizard dialog for creating, editing, or cloning workspace section layouts.
  * Opened via Xrm.Navigation.navigateTo as a webresource dialog.
  *
+ * Uses the shared WizardShell component (ADR-012) in embedded mode for the
+ * sidebar stepper, footer navigation, and finish/error/success flow.
+ *
  * Wizard Steps:
  *   Step 1: Choose Layout - Select template or start blank
  *   Step 2: Configure Sections - Add/remove/reorder sections
@@ -11,37 +14,31 @@
  *
  * @see ADR-026 - Full-Page Custom Page Standard
  * @see ADR-021 - Fluent UI v9 Design System
+ * @see ADR-012 - Shared component library (WizardShell)
  */
 
 import * as React from "react";
+import { FluentProvider } from "@fluentui/react-components";
+import { tokens, Text, Button } from "@fluentui/react-components";
 import {
-  FluentProvider,
-  makeStyles,
-  Text,
-  Button,
-  Spinner,
-  MessageBar,
-  MessageBarBody,
-  tokens,
-} from "@fluentui/react-components";
-import {
-  ArrowLeft24Regular,
-  ArrowRight24Regular,
-  Checkmark24Regular,
-} from "@fluentui/react-icons";
-import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
-import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
-import type { SectionCatalogItem, SlotAssignments } from "./steps";
-import type { LayoutTemplateId } from "@spaarke/ui-components";
-import { getLayoutTemplate } from "@spaarke/ui-components";
-import type { WizardMode } from "./main";
-import {
+  CheckmarkCircle24Regular,
+  CheckmarkCircleRegular,
   RocketRegular,
   DataBarVerticalRegular,
   ClockRegular,
-  CheckmarkCircleRegular,
   DocumentRegular,
 } from "@fluentui/react-icons";
+import { WizardShell, getLayoutTemplate } from "@spaarke/ui-components";
+import type {
+  IWizardStepConfig,
+  IWizardShellHandle,
+  IWizardSuccessConfig,
+  LayoutTemplateId,
+} from "@spaarke/ui-components";
+import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
+import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
+import type { SectionCatalogItem, SlotAssignments } from "./steps";
+import type { WizardMode } from "./main";
 
 /** Parsed LayoutJson row — mirrors the BFF LayoutJsonRow shape for sectionsJson parsing. */
 interface LayoutJsonRow {
@@ -68,31 +65,6 @@ interface AppProps {
   /** Authenticated fetch function from @spaarke/auth for BFF API calls. */
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
-
-/** Wizard step definition */
-interface WizardStep {
-  key: string;
-  title: string;
-  description: string;
-}
-
-const WIZARD_STEPS: WizardStep[] = [
-  {
-    key: "choose-layout",
-    title: "Choose Layout",
-    description: "Select a layout template or start from a blank canvas.",
-  },
-  {
-    key: "configure-sections",
-    title: "Configure Sections",
-    description: "Add, remove, and reorder sections in your workspace layout.",
-  },
-  {
-    key: "review-save",
-    title: "Review & Save",
-    description: "Preview the final layout and save your configuration.",
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Section catalog — inline constant matching the 5 registered sections.
@@ -142,60 +114,17 @@ const SECTION_CATALOG: SectionCatalogItem[] = [
 /** Default section IDs — all 5 sections selected by default. */
 const DEFAULT_SECTION_IDS = new Set(SECTION_CATALOG.map((s) => s.id));
 
-const useStyles = makeStyles({
-  root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    padding: "16px 24px",
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    gap: "16px",
-  },
-  stepIndicator: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  },
-  stepDot: {
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
-    backgroundColor: tokens.colorNeutralStroke1,
-  },
-  stepDotActive: {
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
-    backgroundColor: tokens.colorBrandBackground,
-  },
-  stepDotCompleted: {
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
-    backgroundColor: tokens.colorBrandBackground,
-  },
-  content: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    padding: "24px",
-    gap: "16px",
-    overflow: "auto",
-  },
-  footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "16px 24px",
-    borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
-  },
-});
+// ---------------------------------------------------------------------------
+// Step IDs (stable string keys for WizardShell)
+// ---------------------------------------------------------------------------
+
+const STEP_CHOOSE_LAYOUT = "choose-layout";
+const STEP_CONFIGURE_SECTIONS = "configure-sections";
+const STEP_REVIEW_SAVE = "review-save";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /**
  * Parse sectionsJson from the source layout into:
@@ -248,6 +177,10 @@ function buildSectionsJson(
   return JSON.stringify({ schemaVersion: 1, rows } satisfies LayoutJson);
 }
 
+// ---------------------------------------------------------------------------
+// App Component
+// ---------------------------------------------------------------------------
+
 export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch }) => {
   // ---------------------------------------------------------------------------
   // SaveAs pre-population: parse source layout data once at mount time
@@ -264,7 +197,6 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   }, [mode, layoutTemplateId, sectionsJson, sourceName]);
 
   const [theme, setTheme] = React.useState(resolveTheme);
-  const [currentStep, setCurrentStep] = React.useState(0);
   const [selectedTemplateId, setSelectedTemplateId] =
     React.useState<LayoutTemplateId | null>(saveAsData?.templateId ?? null);
   const [selectedSectionIds, setSelectedSectionIds] = React.useState<
@@ -274,8 +206,8 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   const [isDefault, setIsDefault] = React.useState(false);
   const [sectionAssignments, setSectionAssignments] =
     React.useState<SlotAssignments>(saveAsData?.assignments ?? new Map());
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [saveError, setSaveError] = React.useState<string | null>(null);
+
+  const wizardRef = React.useRef<IWizardShellHandle>(null);
 
   /** Derive slot count from the selected template. */
   const slotCount = React.useMemo(() => {
@@ -303,55 +235,38 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
     return cleanup;
   }, []);
 
-  const step = WIZARD_STEPS[currentStep];
-  const isFirstStep = currentStep === 0;
-  const isLastStep = currentStep === WIZARD_STEPS.length - 1;
-
   /** Derive the selected section catalog items in stable order. */
   const selectedSections = React.useMemo(
     () => SECTION_CATALOG.filter((s) => selectedSectionIds.has(s.id)),
     [selectedSectionIds],
   );
 
-  /** Next button is disabled on step 0 until a template is chosen,
-   *  and on step 1 until at least one section is selected. */
-  const isNextDisabled =
-    (currentStep === 0 && selectedTemplateId === null) ||
-    (currentStep === 1 && selectedSectionIds.size === 0);
-
-  /** Save button is disabled when workspace name is empty. */
-  const isSaveDisabled = workspaceName.trim().length === 0;
-
   /**
-   * Advance to the next step. When entering the Arrange step (step 2),
-   * auto-initialize slot assignments if they are empty.
+   * Auto-initialize slot assignments when entering the Review & Save step.
+   * Watches the wizard shell state to detect when we arrive at step index 2
+   * with an empty assignments map, then populates default assignments.
    */
-  const handleNext = React.useCallback(() => {
-    setCurrentStep((prev) => {
-      const next = prev + 1;
-      if (next === 2 && selectedTemplateId) {
-        // Auto-assign sections to slots if no assignments exist yet.
-        setSectionAssignments((prevAssignments) => {
-          if (prevAssignments.size === 0) {
-            return buildInitialAssignments(selectedTemplateId, selectedSections);
-          }
-          return prevAssignments;
-        });
-      }
-      return next;
-    });
-  }, [selectedTemplateId, selectedSections]);
+  const prevStepRef = React.useRef<number>(-1);
+  React.useEffect(() => {
+    const currentIndex = wizardRef.current?.state.currentStepIndex ?? -1;
+    const wasOnDifferentStep = prevStepRef.current !== currentIndex;
+    prevStepRef.current = currentIndex;
 
-  /**
-   * Save the wizard state to the BFF API.
-   * - Create / SaveAs -> POST /api/workspace/layouts
-   * - Edit -> PUT /api/workspace/layouts/{layoutId}
-   */
-  const handleSave = React.useCallback(async () => {
-    if (!selectedTemplateId) return;
+    if (wasOnDifferentStep && currentIndex === 2 && selectedTemplateId && sectionAssignments.size === 0) {
+      setSectionAssignments(buildInitialAssignments(selectedTemplateId, selectedSections));
+    }
+  });
 
-    setIsSaving(true);
-    setSaveError(null);
+  // ---------------------------------------------------------------------------
+  // onFinish: Save the wizard state to the BFF API.
+  // - Create / SaveAs -> POST /api/workspace/layouts
+  // - Edit -> PUT /api/workspace/layouts/{layoutId}
+  // ---------------------------------------------------------------------------
+
+  const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
+    if (!selectedTemplateId) {
+      throw new Error("No layout template selected.");
+    }
 
     const body = {
       name: workspaceName.trim(),
@@ -377,77 +292,89 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       const savedLayout = await response.json();
       const savedId = savedLayout?.id ?? savedLayout?.Id ?? layoutId;
 
-      // Close dialog and return result to parent
+      // Set dialog result for parent to read
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__dialogResult = { confirmed: true, layoutId: savedId };
-      window.close();
+
+      // Return success config — WizardShell displays the success screen
+      return {
+        icon: (
+          <CheckmarkCircle24Regular
+            style={{ fontSize: "48px", color: tokens.colorStatusSuccessForeground1 }}
+          />
+        ),
+        title: "Workspace Saved",
+        body: (
+          <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+            Your workspace layout <strong>{workspaceName.trim()}</strong> has been saved successfully.
+          </Text>
+        ),
+        actions: (
+          <Button appearance="primary" onClick={() => window.close()}>
+            Close
+          </Button>
+        ),
+      };
     } catch (err: unknown) {
       // Handle typed errors from authenticatedFetch (ApiError with status)
       const apiErr = err as { status?: number; message?: string };
       if (apiErr.status === 409) {
-        setSaveError("Maximum 10 workspaces reached. Please delete an existing workspace before creating a new one.");
+        throw new Error("Maximum 10 workspaces reached. Please delete an existing workspace before creating a new one.");
       } else if (apiErr.status === 400) {
-        setSaveError(apiErr.message ?? "Validation error. Please check your inputs and try again.");
+        throw new Error(apiErr.message ?? "Validation error. Please check your inputs and try again.");
       } else if (apiErr.status === 403) {
-        setSaveError("This layout cannot be modified.");
+        throw new Error("This layout cannot be modified.");
       } else if (apiErr.status === 404) {
-        setSaveError("The layout was not found. It may have been deleted.");
+        throw new Error("The layout was not found. It may have been deleted.");
       } else {
-        setSaveError(
-          apiErr.message ?? "Failed to save workspace layout. Please try again."
-        );
+        throw new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
       }
-    } finally {
-      setIsSaving(false);
     }
   }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, authenticatedFetch]);
 
-  const headerTitle =
+  // ---------------------------------------------------------------------------
+  // WizardShell step configurations
+  // ---------------------------------------------------------------------------
+
+  const wizardTitle =
     mode === "edit"
       ? "Edit Workspace Layout"
       : mode === "saveAs"
         ? "Save Layout As..."
         : "Create Workspace Layout";
 
-  return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
-      <div className={useStyles().root}>
-        {/* Header with step indicator */}
-        <div className={useStyles().header}>
-          <Text weight="semibold" size={500}>
-            {headerTitle}
-          </Text>
-          <div className={useStyles().stepIndicator}>
-            {WIZARD_STEPS.map((s, i) => (
-              <div
-                key={s.key}
-                className={
-                  i === currentStep
-                    ? useStyles().stepDotActive
-                    : i < currentStep
-                      ? useStyles().stepDotCompleted
-                      : useStyles().stepDot
-                }
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Step content */}
-        <div className={useStyles().content}>
-          {currentStep === 0 ? (
-            <TemplateStep
-              selectedTemplateId={selectedTemplateId}
-              onSelect={setSelectedTemplateId}
-            />
-          ) : currentStep === 1 ? (
-            <SectionStep
-              sections={SECTION_CATALOG}
-              selectedIds={selectedSectionIds}
-              slotCount={slotCount}
-              onToggle={handleSectionToggle}
-            />
-          ) : currentStep === 2 && selectedTemplateId ? (
+  const steps: IWizardStepConfig[] = React.useMemo(
+    () => [
+      {
+        id: STEP_CHOOSE_LAYOUT,
+        label: "Choose Layout",
+        canAdvance: () => selectedTemplateId !== null,
+        renderContent: () => (
+          <TemplateStep
+            selectedTemplateId={selectedTemplateId}
+            onSelect={setSelectedTemplateId}
+          />
+        ),
+      },
+      {
+        id: STEP_CONFIGURE_SECTIONS,
+        label: "Configure Sections",
+        canAdvance: () => selectedSectionIds.size > 0,
+        renderContent: () => (
+          <SectionStep
+            sections={SECTION_CATALOG}
+            selectedIds={selectedSectionIds}
+            slotCount={slotCount}
+            onToggle={handleSectionToggle}
+          />
+        ),
+      },
+      {
+        id: STEP_REVIEW_SAVE,
+        label: "Review & Save",
+        canAdvance: () => workspaceName.trim().length > 0,
+        renderContent: () =>
+          selectedTemplateId ? (
             <ArrangeStep
               templateId={selectedTemplateId}
               selectedSections={selectedSections}
@@ -458,51 +385,39 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
               onNameChange={setWorkspaceName}
               onDefaultChange={setIsDefault}
             />
-          ) : null}
-        </div>
+          ) : null,
+      },
+    ],
+    [
+      selectedTemplateId,
+      selectedSectionIds,
+      slotCount,
+      handleSectionToggle,
+      selectedSections,
+      sectionAssignments,
+      workspaceName,
+      isDefault,
+    ],
+  );
 
-        {/* Inline error display for save failures */}
-        {saveError && (
-          <div style={{ padding: "0 24px" }}>
-            <MessageBar intent="error">
-              <MessageBarBody>{saveError}</MessageBarBody>
-            </MessageBar>
-          </div>
-        )}
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
-        {/* Footer with navigation buttons */}
-        <div className={useStyles().footer}>
-          <Button
-            appearance="subtle"
-            icon={<ArrowLeft24Regular />}
-            disabled={isFirstStep}
-            onClick={() => setCurrentStep((s) => s - 1)}
-          >
-            Back
-          </Button>
-          {isLastStep ? (
-            <Button
-              appearance="primary"
-              icon={isSaving ? <Spinner size="tiny" /> : <Checkmark24Regular />}
-              iconPosition="after"
-              disabled={isSaveDisabled || isSaving}
-              onClick={handleSave}
-            >
-              {isSaving ? "Saving..." : "Save Layout"}
-            </Button>
-          ) : (
-            <Button
-              appearance="primary"
-              icon={<ArrowRight24Regular />}
-              iconPosition="after"
-              disabled={isNextDisabled}
-              onClick={handleNext}
-            >
-              Next
-            </Button>
-          )}
-        </div>
-      </div>
+  return (
+    <FluentProvider theme={theme} style={{ height: "100%" }}>
+      <WizardShell
+        ref={wizardRef}
+        open={true}
+        embedded={true}
+        title={wizardTitle}
+        ariaLabel={wizardTitle}
+        steps={steps}
+        onClose={() => window.close()}
+        onFinish={handleFinish}
+        finishLabel="Save Layout"
+        finishingLabel="Saving..."
+      />
     </FluentProvider>
   );
 };
