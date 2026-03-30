@@ -410,10 +410,26 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         ref={wizardRef}
         open={true}
         embedded={true}
-        title={wizardTitle}
         ariaLabel={wizardTitle}
         steps={steps}
-        onClose={() => window.close()}
+        onClose={() => {
+          // Close the navigateTo dialog — try parent Xrm first, then window.close
+          try {
+            const xrm =
+              (window as any).Xrm ??
+              (window.parent as any)?.Xrm ??
+              (window.top as any)?.Xrm;
+            if (xrm?.Navigation?.navigateTo) {
+              // Set cancelled result and close
+              (window as any).__dialogResult = { confirmed: false };
+              window.close();
+            } else {
+              window.close();
+            }
+          } catch {
+            window.close();
+          }
+        }}
         onFinish={handleFinish}
         finishLabel="Save Layout"
         finishingLabel="Saving..."
