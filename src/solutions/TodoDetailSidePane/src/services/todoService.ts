@@ -81,7 +81,7 @@ export async function loadTodoExtension(
   }
 
   try {
-    const filter = `_sprk_event_value eq ${eventId}`;
+    const filter = `_sprk_regardingevent_value eq ${eventId}`;
     const result = await webApi.retrieveMultipleRecords(
       "sprk_eventtodo",
       `?$select=${TODO_EXTENSION_SELECT}&$filter=${filter}&$top=1`
