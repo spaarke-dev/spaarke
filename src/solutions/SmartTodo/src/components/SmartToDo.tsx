@@ -124,8 +124,8 @@ const useStyles = makeStyles({
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     overflow: "hidden",
-    flex: "1 1 0",
-    minHeight: "400px",
+    height: "100%",
+    boxSizing: "border-box",
   },
   /** Borderless, height-flexible root for use inside a tabbed container. */
   embeddedRoot: {

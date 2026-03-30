@@ -42,8 +42,9 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
   primaryPanel: {
-    overflow: "auto",
+    overflow: "hidden",
     minWidth: 0,
+    height: "100%",
   },
   detailPanel: {
     overflow: "hidden",

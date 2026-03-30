@@ -111,7 +111,8 @@ const useStyles = makeStyles({
   },
   cardList: {
     flex: "1 1 0",
-    overflowY: "hidden",
+    overflowY: "auto",
+    minHeight: 0,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
