@@ -2,7 +2,6 @@ import * as React from "react";
 import {
   makeStyles,
   tokens,
-  Title3,
   Button,
   CounterBadge,
   Dropdown,
@@ -163,53 +162,50 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
   return (
     <>
       <header className={styles.header} role="banner">
-        {/* Workspace name as dropdown selector */}
-        {activeLayout ? (
-          <Dropdown
-            className={styles.dropdown}
-            value={activeLayout.name}
-            selectedOptions={[activeLayout.id]}
-            onOptionSelect={handleOptionSelect}
-            aria-label="Select workspace layout"
-            appearance="underline"
-          >
-            {systemLayouts.length > 0 && (
-              <OptionGroup label="System">
-                {systemLayouts.map((layout) => (
-                  <Option key={layout.id} value={layout.id} text={layout.name}>
-                    <span className={styles.optionContent}>
-                      <LockClosedRegular className={styles.lockIcon} fontSize={16} />
-                      {layout.name}
-                    </span>
-                  </Option>
-                ))}
-              </OptionGroup>
-            )}
-            {systemLayouts.length > 0 && userLayouts.length > 0 && <Divider />}
-            {userLayouts.length > 0 && (
-              <OptionGroup label="My Workspaces">
-                {userLayouts.map((layout) => (
-                  <Option key={layout.id} value={layout.id} text={layout.name}>
+        {/* Workspace name as dropdown selector — always rendered, no flash */}
+        <Dropdown
+          className={styles.dropdown}
+          value={activeLayout?.name ?? "Corporate Workspace"}
+          selectedOptions={activeLayout ? [activeLayout.id] : []}
+          onOptionSelect={handleOptionSelect}
+          aria-label="Select workspace layout"
+          appearance="underline"
+          disabled={!activeLayout}
+        >
+          {systemLayouts.length > 0 && (
+            <OptionGroup label="System">
+              {systemLayouts.map((layout) => (
+                <Option key={layout.id} value={layout.id} text={layout.name}>
+                  <span className={styles.optionContent}>
+                    <LockClosedRegular className={styles.lockIcon} fontSize={16} />
                     {layout.name}
-                  </Option>
-                ))}
-              </OptionGroup>
-            )}
-            <Divider />
-            <Option value={NEW_WORKSPACE_VALUE} text="New Workspace">
-              <span className={styles.newWorkspaceOption}>
-                <AddRegular fontSize={16} />
-                New Workspace
-              </span>
-            </Option>
-          </Dropdown>
-        ) : (
-          <Title3 className={styles.title}>Legal Operations Workspace</Title3>
-        )}
+                  </span>
+                </Option>
+              ))}
+            </OptionGroup>
+          )}
+          {systemLayouts.length > 0 && userLayouts.length > 0 && <Divider />}
+          {userLayouts.length > 0 && (
+            <OptionGroup label="My Workspaces">
+              {userLayouts.map((layout) => (
+                <Option key={layout.id} value={layout.id} text={layout.name}>
+                  {layout.name}
+                </Option>
+              ))}
+            </OptionGroup>
+          )}
+          <Divider />
+          <Option value={NEW_WORKSPACE_VALUE} text="New Workspace">
+            <span className={styles.newWorkspaceOption}>
+              <AddRegular fontSize={16} />
+              New Workspace
+            </span>
+          </Option>
+        </Dropdown>
 
         <div className={styles.actions}>
           {/* Gear button — workspace layout settings */}
-          {activeLayout && onEditClick && (
+          {onEditClick && (
             <Tooltip content={settingsTooltip} relationship="label">
               <Button
                 appearance="subtle"
