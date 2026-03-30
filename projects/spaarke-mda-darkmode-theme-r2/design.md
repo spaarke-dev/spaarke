@@ -172,6 +172,135 @@ This produces mixed themes on the same page.
 | `src/solutions/LegalWorkspace/src/components/RecordCards/DocumentCard.tsx` | Uses `getEffectiveDarkMode` — verify import source |
 | `src/client/external-spa/src/App.tsx` | Verify theme import |
 
+### L. Theme Menu Ribbon Deployment (expand to all entities)
+
+**Current state**: Theme flyout is deployed to 5 entities across 2 solutions:
+
+| Entity | Ribbon Solution | Location |
+|--------|----------------|----------|
+| `sprk_matter` | MatterRibbons | HomepageGrid + Form ✅ |
+| `sprk_document` | DocumentRibbons | HomepageGrid + Form ✅ |
+| `sprk_project` | ThemeMenuRibbons | HomepageGrid only ✅ |
+| `sprk_invoice` | ThemeMenuRibbons | HomepageGrid only ✅ |
+| `sprk_event` | ThemeMenuRibbons | HomepageGrid only ✅ |
+
+**Missing entities** — need theme flyout added:
+
+| Entity | Surfaces | Action |
+|--------|----------|--------|
+| `sprk_workassignment` | Form + HomepageGrid | Add to ThemeMenuRibbons |
+| `sprk_analysisplaybook` | HomepageGrid | Add to ThemeMenuRibbons |
+| `sprk_analysisoutput` | Form + HomepageGrid | Add to ThemeMenuRibbons |
+| `sprk_communication` | Form + HomepageGrid | Add to ThemeMenuRibbons |
+| `sprk_eventtodo` | Form | Add to ThemeMenuRibbons |
+| `sprk_eventtype` | HomepageGrid | Add to ThemeMenuRibbons |
+
+**Also ensure HomepageGrid + Form locations for existing entities**:
+
+| Entity | Current Location | Add |
+|--------|-----------------|-----|
+| `sprk_project` | HomepageGrid only | Add Form location |
+| `sprk_invoice` | HomepageGrid only | Add Form location |
+| `sprk_event` | HomepageGrid only | Add Form location |
+
+**Ribbon XML pattern** (same for all entities — replace `{Entity}` and `{entity}`):
+```xml
+<CustomAction Id="sprk.ThemeMenu.{Entity}.CustomAction"
+  Location="Mscrm.HomepageGrid.sprk_{entity}.MainTab.Actions.Controls._children"
+  Sequence="900">
+  <!-- FlyoutAnchor with Auto/Light/Dark buttons -->
+</CustomAction>
+<CustomAction Id="sprk.ThemeMenu.{Entity}.Form.CustomAction"
+  Location="Mscrm.Form.sprk_{entity}.MainTab.Actions.Controls._children"
+  Sequence="900">
+  <!-- Same FlyoutAnchor -->
+</CustomAction>
+```
+
+**Web resource file**: `sprk_ThemeMenu.js` — no changes to the JS (already entity-agnostic). Only ribbon XML additions.
+
+**Label update**: Change "Auto (follows system)" to "Auto (follows app)" to clarify that Auto follows the Power Platform app theme, not the OS.
+
+---
+
+## Dataverse Theme Persistence
+
+### Hybrid Approach: localStorage (fast) + Dataverse (cross-device)
+
+**Problem**: Theme preference is currently stored in `localStorage` only — per-browser, per-device. A user who sets dark mode on their laptop sees light mode on their desktop.
+
+**Solution**: Use `sprk_userpreference` (existing entity) as the cross-device source of truth, with localStorage as a fast cache to prevent flash-of-wrong-theme.
+
+### Data Storage
+
+**Entity**: `sprk_userpreference` (already exists)
+
+**New preference type**: Add `100000001 = ThemePreference` to the `sprk_preferencetype` choice field option set.
+
+**Value format**: Plain string — `"dark"`, `"light"`, or `"auto"`
+
+```
+sprk_userpreference record:
+  _sprk_user_value  = {current user GUID}
+  sprk_preferencetype = 100000001  (ThemePreference)
+  sprk_preferencevalue = "dark"
+```
+
+### Sync Flow
+
+**On page load:**
+```
+1. Read localStorage 'spaarke-theme'
+   → Render immediately with cached value (no flash)
+
+2. Async: GET sprk_userpreference
+   ?$filter=_sprk_user_value eq {userId}
+     AND sprk_preferencetype eq 100000001
+   &$top=1
+
+3. If Dataverse value differs from localStorage:
+   → Update localStorage
+   → Dispatch 'spaarke-theme-change' event
+   → UI re-renders with Dataverse value
+
+4. If no Dataverse record exists:
+   → Create one with current localStorage value (or 'auto' default)
+```
+
+**When user changes theme (ribbon menu or workspace header):**
+```
+1. Update localStorage → immediate UI update
+2. Dispatch 'spaarke-theme-change' → same-tab listeners update
+3. Async: PATCH sprk_userpreference → persist to Dataverse
+4. Cross-tab: storage event syncs other tabs (same device)
+5. Cross-device: next page load on other device reads Dataverse
+```
+
+### Implementation Location
+
+Add to unified `themeStorage.ts`:
+
+```typescript
+// New exports
+export function syncThemeFromDataverse(webApi: IWebApi, userId: string): Promise<void>;
+export function persistThemeToDataverse(webApi: IWebApi, userId: string, theme: ThemePreference): Promise<void>;
+```
+
+These functions are **optional** — they require `webApi` and `userId` which are only available in contexts with Xrm access (forms, Code Pages, PCF). If called without these, they silently no-op.
+
+**Callers**:
+- `sprk_ThemeMenu.js` — on `setTheme()`, call `persistThemeToDataverse()` via Xrm.WebApi
+- Code Page `App.tsx` / PCF `init()` — call `syncThemeFromDataverse()` on mount
+- Shared library `setupThemeListener()` — optionally accepts webApi/userId for auto-sync
+
+### Existing Pattern Reuse
+
+The `DataverseService.ts` already has:
+- `getUserPreference(userId, preferenceType)` — line 545
+- `setUserPreference(userId, preferenceType, value, existingId?)` — line 579
+
+Same pattern, new preference type value.
+
 ---
 
 ## Shared Component Library Theme Protocol
@@ -319,13 +448,15 @@ The tracking comment "GitHub #234 — Import from @spaarke/ui-components when pu
 - Update unit tests
 - Update barrel exports
 - Create shared component library theme protocol (constraint/pattern doc)
+- **Dataverse persistence**: Add `ThemePreference` (100000001) to `sprk_preferencetype` option set; hybrid localStorage + Dataverse sync for cross-device theme persistence
+- **Ribbon deployment**: Deploy theme flyout to all remaining entities (6 new entities); add Form locations to 3 existing entities that only have HomepageGrid
+- **Label update**: Change "Auto (follows system)" → "Auto (follows app)" in all ribbon labels
 
 ### Out of Scope
 - New theme options (high contrast, custom branded themes)
 - SharePoint preview iframe theming
 - MDA app shell theming
 - Dialog chrome dark mode
-- Theme menu UX changes
 - Office Add-in theme changes (intentional exception)
 
 ---
@@ -342,6 +473,10 @@ The tracking comment "GitHub #234 — Import from @spaarke/ui-components when pu
 8. [ ] Single localStorage key (`spaarke-theme`) across all MDA surfaces
 9. [ ] Unit tests pass with updated expectations
 10. [ ] Theme protocol documented in `.claude/patterns/` or `.claude/constraints/`
+11. [ ] Theme preference persists to Dataverse (`sprk_userpreference` with type 100000001)
+12. [ ] User sets dark mode on Device A → logs into Device B → dark mode loads
+13. [ ] Theme flyout appears on ALL Spaarke entity forms AND HomepageGrid views
+14. [ ] "Auto (follows app)" label on all ribbon menu items (not "follows system")
 
 ---
 
