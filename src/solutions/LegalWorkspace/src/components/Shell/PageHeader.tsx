@@ -48,9 +48,13 @@ const useStyles = makeStyles({
   dropdown: {
     minWidth: "200px",
     maxWidth: "320px",
-    fontSize: "20px",
-    fontFamily: tokens.fontFamilyBase,
-    color: tokens.colorNeutralForeground1,
+    // Override Fluent Dropdown's internal button font to match Power Apps view selector
+    "& button": {
+      fontSize: "20px",
+      fontFamily: tokens.fontFamilyBase,
+      color: tokens.colorNeutralForeground1,
+      fontWeight: tokens.fontWeightSemibold,
+    },
   },
   optionContent: {
     display: "flex",
