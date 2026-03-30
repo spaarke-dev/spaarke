@@ -51,8 +51,8 @@ try {
 }
 Write-Host '      Build complete' -ForegroundColor Green
 
-# Read and base64-encode dist/index.html
-$filePath = Join-Path $projectDir 'dist\index.html'
+# Read and base64-encode dist/smarttodo.html
+$filePath = Join-Path $projectDir 'dist\smarttodo.html'
 if (-not (Test-Path $filePath)) {
     Write-Host "Build file not found: $filePath" -ForegroundColor Red
     exit 1
