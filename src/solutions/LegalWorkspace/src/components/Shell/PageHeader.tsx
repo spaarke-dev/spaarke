@@ -48,12 +48,13 @@ const useStyles = makeStyles({
   dropdown: {
     minWidth: "200px",
     maxWidth: "320px",
-    // Override Fluent Dropdown's internal button font to match Power Apps view selector
+    // Override Fluent Dropdown's internal button to match Power Apps view selector
     "& button": {
       fontSize: "20px",
       fontFamily: tokens.fontFamilyBase,
       color: tokens.colorNeutralForeground1,
       fontWeight: tokens.fontWeightSemibold,
+      borderBottomColor: "transparent",
     },
   },
   optionContent: {
@@ -173,7 +174,7 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
           selectedOptions={activeLayout ? [activeLayout.id] : []}
           onOptionSelect={handleOptionSelect}
           aria-label="Select workspace layout"
-          appearance="underline"
+          appearance="filled-lighter"
           disabled={!activeLayout}
         >
           {systemLayouts.length > 0 && (
