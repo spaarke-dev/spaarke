@@ -96,10 +96,10 @@ The BFF API is organized into 7 functional domains, each with its own endpoint g
 | **Office Add-ins** | `/api/office/*` | ~10 | IOfficeService, JobStatusService | Graph API, Service Bus |
 | **Email / Communication** | `/api/emails`, `/api/communications` | ~10 | EmailService, CommunicationService | Graph API (Mail), Service Bus |
 | **Finance Intelligence** | `/api/finance/*` | ~6 | FinanceService, InvoiceExtractionJobHandler, ScorecardCalculatorService | Document Intelligence, AI Search |
-| **Workspace / Portfolio** | `/api/workspace/*` | ~10 | PortfolioService, BriefingService, PriorityScoringService | Azure OpenAI (optional), Dataverse |
+| **Workspace / Portfolio** | `/api/workspace/*` | ~18 | PortfolioService, BriefingService, PriorityScoringService, WorkspaceLayoutService, SectionRegistry | Azure OpenAI (optional), Dataverse |
 | **Admin / System** | `/api/admin/*`, `/api/resilience` | ~8 | BuilderScopeAdmin, RecordMatchingAdmin | AI Search, Dataverse |
 
-**Total**: 120+ endpoints, 99+ DI registrations, 13+ background job handlers.
+**Total**: 128+ endpoints, 99+ DI registrations, 13+ background job handlers.
 
 ---
 
@@ -228,9 +228,9 @@ Invoice classification, field extraction, and financial aggregation.
 
 ### 6. Workspace / Portfolio
 
-Portfolio analytics, priority scoring, briefing generation, and to-do management.
+Portfolio analytics, priority scoring, briefing generation, to-do management, and user-configurable workspace layouts.
 
-**Endpoints**:
+**Endpoints — Portfolio & Analytics**:
 ```
 /api/workspace/portfolio                  Aggregated portfolio metrics
 /api/workspace/health                     Health indicators (at-risk matters, overdue events)
@@ -240,7 +240,29 @@ Portfolio analytics, priority scoring, briefing generation, and to-do management
 /api/workspace/ai/tools                   Workspace AI tools
 ```
 
-**Caching**: Redis with 5-10 minute TTL per user.
+**Endpoints — Workspace Layout Management**:
+```
+GET    /api/workspace/layouts             List user's layouts (system + user-created)
+GET    /api/workspace/layouts/default     Get user's default/active layout
+GET    /api/workspace/layouts/{id}        Get specific layout by ID
+POST   /api/workspace/layouts             Create new layout (max 10 per user enforced)
+PUT    /api/workspace/layouts/{id}        Update layout (user-created only; system layouts immutable)
+DELETE /api/workspace/layouts/{id}        Delete layout (user-created only)
+GET    /api/workspace/sections            List available sections from section registry
+GET    /api/workspace/templates           List layout templates for new layout creation
+```
+
+**Workspace Configuration System**:
+
+Users can customize their workspace layout — which sections appear, their order, and sizing. The system combines a server-side **Section Registry** with per-user stored layouts:
+
+- **Section Registry** — Each workspace section registers via `SectionRegistration` (id, label, default width, capabilities). `SectionFactoryContext` provides runtime props for rendering. The registry serves as the source of truth for available sections (`GET /api/workspace/sections`).
+- **Dynamic Config Builder** — Merges the user's stored layout JSON (`sprk_workspacelayout` record) with the current section registry to produce a `WorkspaceConfig`. Handles registry additions/removals gracefully (new sections appear with defaults; removed sections are pruned).
+- **WorkspaceHeader Dropdown** — Client-side layout switcher in the workspace header. Users select from their saved layouts or the system default.
+- **Layout Wizard Code Page** (`sprk_workspacelayoutwizard`) — A React 18 Code Page dialog for creating and editing layouts. Opened via `Xrm.Navigation.navigateTo` (webresource target).
+- **Dataverse Entity**: `sprk_workspacelayout` — Stores per-user layout configurations (section list, ordering, sizing, default flag). System-provided layouts are read-only.
+
+**Caching**: Redis with 5-10 minute TTL per user. Layout data cached per-user with 15 minute TTL.
 
 ### 7. Background Processing
 
@@ -364,6 +386,16 @@ sprk_tools              Memo        JSON tool configuration
 sprk_ispublic           Boolean     Available to all users
 ```
 
+**sprk_workspacelayout** (workspace layout configurations)
+```
+sprk_workspacelayoutid  GUID        Primary key
+sprk_name               Text        Layout display name
+sprk_layoutjson         Memo        JSON section configuration (order, sizing, visibility)
+sprk_issystem           Boolean     System-provided layout (read-only, not deletable)
+sprk_isdefault          Boolean     User's active/default layout
+sprk_ownerid            Lookup      → systemuser (owning user)
+```
+
 ### Relationship Pattern
 
 ```
@@ -463,7 +495,7 @@ All background work uses a standard schema. Handlers must be idempotent (at-leas
 
 ### Current State
 
-The BFF has grown from its original SPE gateway role to a 7-domain platform. This was **by design** — ADR-001 and ADR-013 explicitly mandate extending the BFF rather than creating separate services. However, the scale (120+ endpoints, 99+ DI registrations, 1,881-line Program.cs) has exceeded the original "minimal composition" intent.
+The BFF has grown from its original SPE gateway role to a 7-domain platform. This was **by design** — ADR-001 and ADR-013 explicitly mandate extending the BFF rather than creating separate services. However, the scale (128+ endpoints, 99+ DI registrations, 1,881-line Program.cs) has exceeded the original "minimal composition" intent.
 
 ### Known Risks
 

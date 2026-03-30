@@ -3,7 +3,7 @@
 > **Version**: 2.0.0
 > **Location**: `src/client/shared/Spaarke.UI.Components/`
 > **ADR**: [ADR-012](../adr/ADR-012-shared-component-library.md)
-> **Last Updated**: 2026-03-19
+> **Last Updated**: 2026-03-30
 
 ---
 
@@ -128,6 +128,16 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | **CreateRecordWizard** | Record-creation boilerplate (file upload + create + next steps) wrapping WizardShell | Code Pages |
 | **PlaybookLibraryShell** | Playbook browsing, selection, and execution shell | Code Pages, SPA |
 | **SidePaneShell** | Reusable slide-in side panel layout | Code Pages |
+| **WorkspaceShell** | Declarative responsive workspace layout container; renders rows of sections from a `WorkspaceConfig` object | Code Pages, SPA |
+| **SectionPanel** | Titled bordered section card with optional toolbar, badge count, and collapsible body | Code Pages, SPA |
+| **ActionCard** / **ActionCardRow** | Square action cards (icon + label) arranged in a wrapping row — "Get Started" pattern | Code Pages, SPA |
+| **MetricCard** / **MetricCardRow** | Square metric cards (value + trend + badge) arranged in a wrapping row — "Quick Summary" pattern | Code Pages, SPA |
+
+### Workspace Header Component (`src/solutions/LegalWorkspace/`)
+
+| Component | Description | Consumers |
+|-----------|-------------|-----------|
+| **WorkspaceHeader** | Workspace layout dropdown switcher with settings gear and "New Layout" button; lists system and user layouts | Code Pages, SPA |
 
 ### Domain Wizard Components (`src/components/`)
 
@@ -436,6 +446,85 @@ Import in your consumer project. Remember: PCF uses deep imports, Code Pages use
 
 ---
 
+## Section Registry Pattern
+
+The Section Registry is the extension point for adding workspace sections to any `WorkspaceShell`-based workspace. It decouples section metadata and rendering from the workspace layout logic.
+
+### Key Interfaces (exported from `@spaarke/ui-components`)
+
+**`SectionRegistration`** — the only interface a section author needs to implement:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Unique section identifier (stored in Dataverse layout JSON) |
+| `label` | `string` | Display name shown in the layout wizard checklist |
+| `description` | `string` | One-line description shown in the wizard |
+| `icon` | `FluentIcon` | Fluent icon for wizard and section header |
+| `category` | `SectionCategory` | Grouping category: `"overview"` \| `"data"` \| `"ai"` \| `"productivity"` |
+| `defaultHeight` | `string?` | Suggested default height (e.g., `"560px"`); `undefined` = auto |
+| `factory` | `(ctx: SectionFactoryContext) => SectionConfig` | Produces the runtime section config for WorkspaceShell |
+
+**`SectionFactoryContext`** — standard context passed to every section factory:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `webApi` | `unknown` | Xrm.WebApi for Dataverse queries |
+| `userId` | `string` | Current user's systemuserid GUID |
+| `service` | `unknown` | DataverseService for document/entity operations |
+| `bffBaseUrl` | `string` | BFF API base URL |
+| `onNavigate` | `(target: NavigateTarget) => void` | Navigate to a Dataverse view, record, or URL |
+| `onOpenWizard` | `(webResourceName, data?, options?) => void` | Open a Code Page wizard dialog |
+| `onBadgeCountChange` | `(count: number) => void` | Push badge count updates to the workspace header |
+| `onRefetchReady` | `(refetch: () => void) => void` | Register a refetch callback for cross-section refresh |
+
+### `SECTION_REGISTRY` Array
+
+Each workspace solution (e.g., `src/solutions/LegalWorkspace/src/sectionRegistry.ts`) maintains a `SECTION_REGISTRY` array — the single source of truth for available sections in that workspace. It is a `readonly SectionRegistration[]` that lists all registered sections in default display order.
+
+Helper utilities are provided alongside the registry:
+
+- `getSectionById(id)` — look up a registration by ID
+- `getSectionsByCategory(category)` — filter registrations by category
+
+### How to Add a New Section
+
+1. **Create a registration file** — `src/solutions/{Workspace}/src/sections/{name}.registration.ts`
+
+```typescript
+import type { SectionRegistration } from "@spaarke/ui-components";
+import { CalendarRegular } from "@fluentui/react-icons";
+
+export const myNewSectionRegistration: SectionRegistration = {
+  id: "my-new-section",
+  label: "My New Section",
+  description: "Displays upcoming calendar events.",
+  icon: CalendarRegular,
+  category: "productivity",
+  defaultHeight: "400px",
+  factory: (ctx) => ({
+    id: "my-new-section",
+    type: "content",
+    title: "My New Section",
+    renderContent: () => <MyComponent webApi={ctx.webApi} userId={ctx.userId} />,
+  }),
+};
+```
+
+2. **Register it** — import and add to the `SECTION_REGISTRY` array in `sectionRegistry.ts`:
+
+```typescript
+import { myNewSectionRegistration } from "./sections/myNewSection.registration";
+
+export const SECTION_REGISTRY: readonly SectionRegistration[] = [
+  // ... existing registrations ...
+  myNewSectionRegistration,
+] as const;
+```
+
+The workspace layout wizard automatically picks up the new section from the registry. No other wiring is required.
+
+---
+
 ## Versioning
 
 | Version | Date | Key Changes |
@@ -443,6 +532,7 @@ Import in your consumer project. Remember: PCF uses deep imports, Code Pages use
 | 1.0.0 | Oct 2025 | Initial: DataGrid, SprkButton, themes, formatters |
 | 2.0.0 | Feb 2026 | Fluent v9 selective imports, WizardShell, SidePaneShell, RichTextEditor, SprkChat, DiffCompareView, LookupField, SendEmailDialog, AiSummaryPopover, FindSimilarDialog |
 | 2.1.0 | Mar 2026 | CreateRecordWizard, PlaybookLibraryShell, domain wizards (Matter, Project, Event, Todo, WorkAssignment, SummarizeFiles), IDataService/IUploadService/INavigationService interfaces, Xrm/BFF/Mock adapters |
+| 2.2.0 | Mar 2026 | WorkspaceShell, SectionPanel, ActionCard/ActionCardRow, MetricCard/MetricCardRow, SectionRegistration/SectionFactoryContext types, Section Registry pattern for workspace personalization |
 
 **Packaged tarballs**: `spaarke-ui-components-1.0.0.tgz`, `spaarke-ui-components-2.0.0.tgz`
 
@@ -475,4 +565,4 @@ Import in your consumer project. Remember: PCF uses deep imports, Code Pages use
 
 ---
 
-*Last updated: 2026-03-19*
+*Last updated: 2026-03-30*

@@ -20,6 +20,7 @@
 10. [Dark Mode Theme Persistence](#dark-mode-theme-persistence)
 11. [Entity Ribbon Customizations](#entity-ribbon-customizations)
 12. [Maintenance Procedures](#maintenance-procedures)
+13. [WorkspaceShell Architecture](#workspaceshell-architecture)
 
 ---
 
@@ -736,6 +737,72 @@ Invoke-RestMethod -Uri "$env:DATAVERSE_URL/api/data/v9.2/webresourceset(sprk_The
 1. **Application-level enforcement** - Investigate using App Module ribbon or Client API `Xrm.Navigation` hooks for more universal enforcement
 2. **Server-side preference** - Store theme preference in Dataverse user settings for cross-browser persistence
 3. **ThemeEnforcer PCF** - A PCF control exists at `src/client/pcf/ThemeEnforcer/` that could be embedded in sitemap for alternative enforcement (currently not used)
+
+---
+
+## WorkspaceShell Architecture
+
+WorkspaceShell is a **full-page declarative layout container** for workspace dashboards. Unlike WizardShell and SidePaneShell (which are imperative dialog containers), WorkspaceShell consumes a `WorkspaceConfig` object and renders a responsive multi-row grid of section panels. It lives in `@spaarke/ui-components` alongside the dialog shells but serves a fundamentally different purpose.
+
+### Component Hierarchy
+
+```
+WorkspaceHeader (dropdown layout switcher + settings gear)
+└── WorkspaceShell (layout container)
+    ├── Row 1: SectionPanel[] (CSS grid columns, e.g., "1fr 1fr")
+    ├── Row 2: SectionPanel[]
+    └── Row N: SectionPanel[]
+        └── SectionPanel
+            ├── Header (title + badge count + collapse toggle)
+            ├── Toolbar (optional: refresh, add, open buttons)
+            └── Content (action-cards | metric-cards | content renderProp)
+```
+
+- **WorkspaceHeader** (`src/components/WorkspaceHeader/`) — dropdown switcher listing system and user layouts, settings button, and "+ New Workspace" action. Pure presentational; parent supplies data and callbacks.
+- **WorkspaceShell** (`@spaarke/ui-components/components/WorkspaceShell/`) — reads `WorkspaceConfig` and renders rows as CSS grid containers. Supports `"rows"` (multi-column) and `"single-column"` layout modes. Multi-column rows collapse to single column at viewport width ≤767px.
+- **SectionPanel** (`@spaarke/ui-components/components/WorkspaceShell/SectionPanel`) — bordered card with title bar, optional badge, optional toolbar, and collapsible content area. Three content types: `action-cards` (ActionCardRow), `metric-cards` (MetricCardRow), and `content` (consumer-supplied renderProp).
+
+### Section Registry Pattern
+
+Sections self-register via `SectionRegistration` objects. Each registration declares an `id`, `label`, `category`, `icon`, and a `factory(context)` function that produces a `SectionConfig` at render time.
+
+```
+sections/
+├── getStarted.registration.ts      → "get-started" (action-cards)
+├── quickSummary.registration.ts    → "quick-summary" (metric-cards)
+├── latestUpdates.registration.ts   → "latest-updates" (content)
+├── todo.registration.ts            → "todo" (content)
+└── documents.registration.ts       → "documents" (content)
+
+sectionRegistry.ts → SECTION_REGISTRY (aggregated array of all registrations)
+```
+
+Adding a new section requires two steps: create a `{name}.registration.ts` file, then import it into `sectionRegistry.ts`.
+
+### Data Flow
+
+```
+BFF GET /api/workspace/layouts/default → LayoutJson (persisted in sprk_sectionsjson)
++ SECTION_REGISTRY (code-side, all available section factories)
+→ buildDynamicWorkspaceConfig(layoutJson, registry, context) → WorkspaceConfig
+→ <WorkspaceShell config={config} />
+```
+
+The `LayoutJson` describes row structure (IDs, CSS grid columns, section assignments). The registry describes how to construct each section. `buildDynamicWorkspaceConfig()` reconciles the two: it validates the schema version, resolves each section ID against the registry, calls the factory function, handles unknown sections gracefully (warns and skips), and manages row overflow when more sections exist than column slots.
+
+A system default layout (`SYSTEM_DEFAULT_LAYOUT_JSON`) is used as fallback when no user configuration exists or the schema version is unsupported.
+
+### Key Distinction from Dialog Shells
+
+| Aspect | WorkspaceShell | WizardShell / SidePaneShell |
+|--------|---------------|----------------------------|
+| **Purpose** | Full-page workspace dashboard layout | Modal dialog / side panel container |
+| **API style** | Declarative config object (`WorkspaceConfig`) | Imperative props (steps, onFinish, open/close) |
+| **Content model** | N sections in M rows, each with typed content | Sequential steps or single panel body |
+| **Lifecycle** | Always mounted as page content | Opened/closed by user action |
+| **User configuration** | Layout JSON stored in Dataverse, switchable via WorkspaceHeader | Not user-configurable |
+
+WorkspaceShell and dialog shells coexist in the same shared library (`@spaarke/ui-components`) but address different UX patterns. Workspace sections may themselves open dialog shells (e.g., the To Do section's "Add" button opens `sprk_createtodowizard` via `navigateTo`).
 
 ---
 

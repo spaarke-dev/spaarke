@@ -799,6 +799,7 @@ The user is already authenticated in Dataverse via Azure AD. The browser holds a
 **MSAL Configuration**: `src/client/code-pages/AnalysisWorkspace/src/config/msalConfig.ts`
 
 ```typescript
+// AnalysisWorkspace (module-level const — original pattern)
 export const msalConfig: Configuration = {
     auth: {
         clientId: CLIENT_ID,  // 170c98e1-d486-4355-bcbe-170454e0207c (DSM-SPE Dev 2)
@@ -812,11 +813,20 @@ export const msalConfig: Configuration = {
     },
 };
 
+// LegalWorkspace (lazy pattern — prevents bundle evaluation errors)
+// msalConfig.ts now exports a getMsalConfig() function + Proxy shim instead of
+// a module-level const. This avoids errors when getMsalClientId() or
+// window.location.origin are unavailable at module parse time.
+export function getMsalConfig(): Configuration { /* ... */ }
+export const msalConfig = new Proxy({} as Configuration, {
+    get: (_, prop) => getMsalConfig()[prop as keyof Configuration],
+});
+
 export const BFF_API_SCOPE =
     "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation";
 ```
 
-> **Authority best practice**: Use `https://login.microsoftonline.com/organizations` for Code Pages to ensure environment portability (works across Dataverse environments without code changes). Avoid `common` (allows personal Microsoft accounts). Older code pages (SemanticSearch, DocumentRelationshipViewer) currently hardcode the tenant ID (`https://login.microsoftonline.com/{tenantId}/v2.0`) -- this is a known tech debt item that will be resolved when migrating to the planned `@spaarke/auth` shared package.
+> **Authority best practice**: Use `https://login.microsoftonline.com/organizations` for Code Pages to ensure environment portability (works across Dataverse environments without code changes). Avoid `common` (allows personal Microsoft accounts). Older code pages (SemanticSearch, DocumentRelationshipViewer) currently hardcode the tenant ID (`https://login.microsoftonline.com/{tenantId}/v2.0`) -- this is a known tech debt item. LegalWorkspace has already migrated to `@spaarke/auth` (see `authInit.ts`); remaining code pages should follow the same pattern.
 
 **Auth Service**: `src/client/code-pages/AnalysisWorkspace/src/services/authService.ts`
 
@@ -869,22 +879,22 @@ async function acquireToken(): Promise<TokenCache> {
 
 | Code Page | Client ID | Authority | Primary Strategy | Bridge Support | Auth Lines |
 |-----------|-----------|-----------|-----------------|----------------|------------|
-| LegalWorkspace | `170c98e1` | `organizations` | Bridge → MSAL ssoSilent | Yes | 268 |
+| LegalWorkspace | `170c98e1` | `organizations` | Bridge → MSAL ssoSilent (via `@spaarke/auth` / `authInit.ts`) | Yes | 268 |
 | AnalysisWorkspace | `170c98e1` | `organizations` | Xrm platform → MSAL ssoSilent | Yes | 532 |
 | PlaybookBuilder | `170c98e1` | `organizations` | Xrm platform → MSAL ssoSilent | Yes | 331 |
 | SprkChatPane | `170c98e1` | `organizations` | Xrm platform → MSAL ssoSilent | Yes | 353 |
 | SemanticSearch | `170c98e1` | **Hardcoded tenant** | MSAL acquireTokenSilent → popup | No | 235 |
 | DocumentRelationshipViewer | `170c98e1` | **Hardcoded tenant** | MSAL acquireTokenSilent → popup | No | 213 |
 
-> **Note**: SemanticSearch and DocumentRelationshipViewer have known tech debt: hardcoded authority and no bridge support. To be resolved in `@spaarke/auth` shared package.
+> **Note**: SemanticSearch and DocumentRelationshipViewer have known tech debt: hardcoded authority and no bridge support. LegalWorkspace has completed its migration to `@spaarke/auth`; remaining code pages should follow suit.
 
 ### Reference Implementation
 
 The MSAL ssoSilent pattern originates from:
-- **LegalWorkspace**: `src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts`
+- **LegalWorkspace**: `src/solutions/LegalWorkspace/src/services/authInit.ts` (imports from `@spaarke/auth`; primary auth path). The former `bffAuthProvider.ts` is retained for backward compatibility but is **legacy** — new code should not depend on it.
 - **AnalysisWorkspace**: `src/client/code-pages/AnalysisWorkspace/src/services/authService.ts`
 
-Both share identical MSAL config (CLIENT_ID, BFF_API_SCOPE, authority). A future shared package (`@spaarke/auth`) should consolidate this.
+The `@spaarke/auth` consolidation is **complete for LegalWorkspace** (via `authInit.ts`). The `useWorkspaceLayouts` hook imports `authenticatedFetch` from `authInit.ts`, not `bffAuthProvider.ts`. Remaining code pages (AnalysisWorkspace, PlaybookBuilder, SprkChatPane) still use their own `authService.ts` and should migrate to `@spaarke/auth` next.
 
 ### App Registration Requirements
 
@@ -975,7 +985,7 @@ Child (iframe code page)
 
 ### Current Implementations
 
-- **LegalWorkspace** (`bffAuthProvider.ts`): Reads bridge as 2nd priority (after in-memory cache)
+- **LegalWorkspace** (`authInit.ts` via `@spaarke/auth`; `bffAuthProvider.ts` retained as legacy): Reads bridge as 2nd priority (after in-memory cache)
 - **AnalysisWorkspace** (`authService.ts`): Reads bridge as part of Xrm platform strategies
 - **PlaybookBuilder** (`authService.ts`): Same as AnalysisWorkspace
 - **SprkChatPane** (`authService.ts`): Same as AnalysisWorkspace
@@ -984,7 +994,7 @@ Child (iframe code page)
 
 - SemanticSearch: Does NOT check parent bridge (always does full MSAL init)
 - DocumentRelationshipViewer: Does NOT check parent bridge
-- These will be fixed when migrating to `@spaarke/auth`
+- These should be fixed by migrating to `@spaarke/auth` (as LegalWorkspace has already done)
 
 ---
 
