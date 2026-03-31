@@ -198,6 +198,45 @@ export function resolveThemeWithUserPreference(context?: any): Theme {
 }
 
 // ============================================================================
+// MDA Dark Mode URL Flag
+// ============================================================================
+
+const MDA_DARK_MODE_FLAG = 'flags=themeOption%3Ddarkmode';
+
+/**
+ * Apply theme to the full MDA application by manipulating the dark mode URL flag
+ * and reloading the page.
+ *
+ * This triggers a full page navigation so the MDA shell (header, nav, form chrome)
+ * switches between light and dark mode. The reload also causes all embedded surfaces
+ * (PCF controls, Code Pages) to re-initialize with the new theme from localStorage.
+ *
+ * Call this AFTER setUserThemePreference() has updated localStorage.
+ *
+ * @param theme - The theme preference that was just set
+ */
+export function applyMdaTheme(theme: ThemePreference): void {
+  try {
+    const topWindow = window.top || window;
+    const currentUrl = topWindow.location.href;
+    const hasDarkFlag = currentUrl.indexOf(MDA_DARK_MODE_FLAG) !== -1;
+
+    if (theme === 'dark' && !hasDarkFlag) {
+      const separator = currentUrl.indexOf('?') !== -1 ? '&' : '?';
+      topWindow.location.href = currentUrl + separator + MDA_DARK_MODE_FLAG;
+    } else if ((theme === 'light' || theme === 'auto') && hasDarkFlag) {
+      topWindow.location.href = currentUrl
+        .replace('&' + MDA_DARK_MODE_FLAG, '')
+        .replace('?' + MDA_DARK_MODE_FLAG + '&', '?')
+        .replace('?' + MDA_DARK_MODE_FLAG, '');
+    }
+    // If flag already matches theme, no reload needed
+  } catch {
+    // Cross-origin or top window not accessible — React re-render is still applied
+  }
+}
+
+// ============================================================================
 // Code Page Theme Resolution
 // ============================================================================
 

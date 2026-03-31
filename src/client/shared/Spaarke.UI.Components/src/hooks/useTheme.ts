@@ -5,6 +5,7 @@ import {
   setUserThemePreference,
   resolveCodePageTheme,
   setupCodePageThemeListener,
+  applyMdaTheme,
   ThemePreference,
 } from "../utils/themeStorage";
 
@@ -42,6 +43,10 @@ export function useTheme(): IUseThemeResult {
 
   const setDarkLightMode = useCallback((mode: DarkLightMode) => {
     setUserThemePreference(mode);
+    // Apply to MDA shell — triggers full page reload with dark mode URL flag.
+    // After reload, all surfaces re-initialize from localStorage.
+    applyMdaTheme(mode);
+    // If applyMdaTheme didn't reload (flag already matched), update React state
     setDarkLightModeState(mode);
     setTheme(resolveCodePageTheme());
   }, []);
