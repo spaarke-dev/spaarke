@@ -3,7 +3,7 @@
   <metadata>
     <title>Create notification playbooks 1-3 (tasks overdue, tasks due soon, new documents)</title>
     <phase>3: Notification Playbooks</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>054</blocks>

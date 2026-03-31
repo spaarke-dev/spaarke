@@ -20,6 +20,7 @@ export { DeliverToIndexNode } from './DeliverToIndexNode';
 export { UpdateRecordNode } from './UpdateRecordNode';
 export { CreateTaskNode } from './CreateTaskNode';
 export { SendEmailNode } from './SendEmailNode';
+export { CreateNotificationNode } from './CreateNotificationNode';
 export { WaitNode } from './WaitNode';
 
 // Import components for registry
@@ -32,6 +33,7 @@ import { DeliverToIndexNode } from './DeliverToIndexNode';
 import { UpdateRecordNode } from './UpdateRecordNode';
 import { CreateTaskNode } from './CreateTaskNode';
 import { SendEmailNode } from './SendEmailNode';
+import { CreateNotificationNode } from './CreateNotificationNode';
 import { WaitNode } from './WaitNode';
 
 /**
@@ -51,5 +53,6 @@ export const nodeTypes: NodeTypes = {
   updateRecord: UpdateRecordNode,
   createTask: CreateTaskNode,
   sendEmail: SendEmailNode,
+  createNotification: CreateNotificationNode,
   wait: WaitNode,
 };

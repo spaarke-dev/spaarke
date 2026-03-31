@@ -1,0 +1,128 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "id": "NP-004",
+    "name": "New Emails on Matters",
+    "description": "Notifies users when new emails have been received on their assigned matters since the last check. Queries email activity records linked to matters where the user is a team member, filtered by the configurable timeWindow parameter.",
+    "sprk_playbooktype": 2,
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "channel": "new-emails",
+    "capabilities": [],
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "configJson": {
+      "schedule": {
+        "frequency": "daily",
+        "time": "06:00"
+      },
+      "parameters": {
+        "timeWindow": {
+          "type": "duration",
+          "default": "24h",
+          "options": ["12h", "24h", "48h", "7d"],
+          "label": "Time window",
+          "description": "How far back to look for new emails"
+        }
+      },
+      "scope": "user-matters",
+      "scopeDescription": "All matters where the current user is a team member"
+    }
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "name": "Start",
+      "nodeType": "Start",
+      "description": "Scope: user's assigned matters",
+      "positionX": 50,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "scope": "user-matters",
+        "resolveUserId": true
+      }
+    },
+    {
+      "id": "query-emails",
+      "name": "Query New Emails",
+      "nodeType": "Query",
+      "description": "Retrieve email activities linked to user's matters received within the configured time window",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["start"],
+      "configJson": {
+        "entityName": "email",
+        "queryType": "odata",
+        "query": "$filter=regardingobjectid_sprk_matter/any(m: m/sprk_matterId ne null) and createdon ge {{sinceTimestamp}} and directioncode eq false&$select=subject,sender,createdon,_regardingobjectid_value&$orderby=createdon desc&$top=50",
+        "parameters": {
+          "sinceTimestamp": "{{timeWindow}}"
+        },
+        "outputVariable": "newEmails",
+        "expandRelated": {
+          "regardingobjectid_sprk_matter": ["sprk_name", "sprk_matterid"]
+        }
+      }
+    },
+    {
+      "id": "check-results",
+      "name": "Has New Emails?",
+      "nodeType": "Condition",
+      "actionType": 30,
+      "description": "Check if any new emails were found",
+      "positionX": 500,
+      "positionY": 200,
+      "dependsOn": ["query-emails"],
+      "configJson": {
+        "expression": "{{newEmails.count}} > 0",
+        "trueTarget": "create-notification",
+        "falseTarget": null
+      }
+    },
+    {
+      "id": "create-notification",
+      "name": "Create Notification",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "description": "Create an appnotification for each new email received on user's matters",
+      "positionX": 750,
+      "positionY": 200,
+      "dependsOn": ["check-results"],
+      "configJson": {
+        "mode": "perItem",
+        "itemsSource": "{{newEmails.items}}",
+        "notification": {
+          "title": "New email on {{item.regardingMatterName}}",
+          "body": "From {{item.sender}}: {{item.subject}}",
+          "category": "new-emails",
+          "priority": "Normal",
+          "iconType": 100000005,
+          "actionUrl": "/main.aspx?etn=email&id={{item.activityid}}&pagetype=entityrecord",
+          "regardingEntityType": "email",
+          "regardingEntityId": "{{item.activityid}}",
+          "customData": {
+            "channel": "new-emails",
+            "matterId": "{{item.regardingMatterId}}",
+            "matterName": "{{item.regardingMatterName}}",
+            "sender": "{{item.sender}}",
+            "subject": "{{item.subject}}",
+            "receivedOn": "{{item.createdon}}"
+          }
+        },
+        "deduplication": {
+          "enabled": true,
+          "key": "new-emails:{{userId}}:{{item.activityid}}"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "source": "start", "target": "query-emails" },
+    { "source": "query-emails", "target": "check-results" },
+    { "source": "check-results", "target": "create-notification" }
+  ]
+}

@@ -1,9 +1,13 @@
+using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -214,6 +218,8 @@ public static class AnalysisEndpoints
         AnalysisExecuteRequest request,
         IAnalysisOrchestrationService orchestrationService,
         IOptions<AnalysisOptions> options,
+        NotificationService notificationService,
+        IGenericEntityService entityService,
         HttpContext context,
         ILogger<AnalysisOrchestrationService> logger)
     {
@@ -262,6 +268,16 @@ public static class AnalysisEndpoints
             await response.Body.FlushAsync(cancellationToken);
 
             logger.LogInformation("Analysis execution completed for TraceId={TraceId}", context.TraceIdentifier);
+
+            // Fire-and-forget: notify requesting user that analysis is complete.
+            // Must not block the SSE response per project constraint.
+            _ = SendAnalysisCompleteNotificationAsync(
+                context.User,
+                request,
+                notificationService,
+                entityService,
+                logger,
+                context.TraceIdentifier);
         }
         catch (OperationCanceledException)
         {
@@ -487,6 +503,105 @@ public static class AnalysisEndpoints
             analysisId, result.ChatMessagesRestored);
 
         return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// Sends an in-app notification after AI analysis completes successfully.
+    /// Runs as fire-and-forget so the SSE response is not blocked.
+    /// </summary>
+    private static async Task SendAnalysisCompleteNotificationAsync(
+        ClaimsPrincipal user,
+        AnalysisExecuteRequest request,
+        NotificationService notificationService,
+        IGenericEntityService entityService,
+        ILogger logger,
+        string traceIdentifier)
+    {
+        try
+        {
+            var dataverseUserId = await ResolveDataverseUserIdAsync(user, entityService, logger);
+            if (!dataverseUserId.HasValue)
+            {
+                logger.LogWarning(
+                    "Cannot send analysis-complete notification — unable to resolve Dataverse user, TraceId={TraceId}",
+                    traceIdentifier);
+                return;
+            }
+
+            var documentId = request.DocumentIds.FirstOrDefault();
+            var actionUrl = documentId != Guid.Empty
+                ? $"/main.aspx?pagetype=webresource&webresourceName=sprk_analysisworkspace&data=documentId={documentId}"
+                : null;
+
+            var aiMetadata = new Dictionary<string, object?>
+            {
+                ["analysisType"] = "document-analysis",
+                ["documentCount"] = request.DocumentIds.Length,
+                ["actionId"] = request.ActionId?.ToString(),
+                ["confidence"] = "ai-generated"
+            };
+
+            await notificationService.CreateNotificationAsync(
+                userId: dataverseUserId.Value,
+                title: "AI analysis complete",
+                body: $"Analysis results are ready for your document ({request.DocumentIds.Length} document(s) analyzed).",
+                category: "analysis",
+                actionUrl: actionUrl,
+                regardingId: documentId != Guid.Empty ? documentId : null,
+                aiMetadata: aiMetadata);
+
+            logger.LogDebug(
+                "Sent analysis-complete notification to user {UserId}, TraceId={TraceId}",
+                dataverseUserId.Value, traceIdentifier);
+        }
+        catch (Exception ex)
+        {
+            // Log but never throw — notification failure must not affect the caller.
+            logger.LogError(
+                ex,
+                "Failed to send analysis-complete notification, TraceId={TraceId} — {ErrorMessage}",
+                traceIdentifier, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the Dataverse systemuserid from the Azure AD OID in the user's claims.
+    /// Dataverse systemuserid != Azure AD oid; they are linked via azureactivedirectoryobjectid.
+    /// </summary>
+    private static async Task<Guid?> ResolveDataverseUserIdAsync(
+        ClaimsPrincipal user,
+        IGenericEntityService entityService,
+        ILogger logger)
+    {
+        var oidClaim = user.FindFirst("oid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        if (string.IsNullOrEmpty(oidClaim) || !Guid.TryParse(oidClaim, out var azureAdOid))
+        {
+            logger.LogWarning("No valid Azure AD OID found in user claims for notification lookup");
+            return null;
+        }
+
+        var query = new QueryExpression("systemuser")
+        {
+            ColumnSet = new ColumnSet("systemuserid"),
+            Criteria =
+            {
+                Conditions =
+                {
+                    new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdOid)
+                }
+            }
+        };
+
+        var result = await entityService.RetrieveMultipleAsync(query, CancellationToken.None);
+        if (result.Entities.Count == 0)
+        {
+            logger.LogWarning("No Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdOid);
+            return null;
+        }
+
+        return result.Entities[0].Id;
     }
 
     /// <summary>

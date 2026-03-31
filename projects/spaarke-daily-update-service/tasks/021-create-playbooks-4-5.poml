@@ -3,7 +3,7 @@
   <metadata>
     <title>Create notification playbooks 4-5 (new emails, new events)</title>
     <phase>3: Notification Playbooks</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>054</blocks>

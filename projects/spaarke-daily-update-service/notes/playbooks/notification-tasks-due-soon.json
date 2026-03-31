@@ -1,0 +1,122 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "id": "NP-002",
+    "name": "Tasks Due Soon",
+    "description": "Identifies tasks approaching their due date within a configurable window (dueWithinDays) and creates notifications. Users configure the lookahead window via preferences.",
+    "sprk_playbooktype": 2,
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "sprk_configjson": {
+      "schedule": {
+        "frequency": "daily",
+        "time": "06:00"
+      },
+      "category": "tasks-due",
+      "channelLabel": "Upcoming Tasks",
+      "channelIcon": "clock",
+      "parameters": {
+        "dueWithinDays": {
+          "type": "integer",
+          "default": 3,
+          "options": [1, 2, 3, 5, 7],
+          "label": "Due within",
+          "unit": "days"
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    }
+  },
+  "nodes": [
+    {
+      "name": "Start",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "start",
+      "outputVariable": "start",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "scope": "user-matters",
+        "description": "Scoped to the current user's matters"
+      }
+    },
+    {
+      "name": "Query Tasks Due Soon",
+      "nodeType": "Workflow",
+      "actionType": 22,
+      "canvasType": "updateRecord",
+      "outputVariable": "dueSoonQuery",
+      "positionX": 350,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 22,
+        "queryMode": true,
+        "entityLogicalName": "task",
+        "fetchXml": "<fetch top='50'><entity name='task'><attribute name='subject'/><attribute name='scheduledend'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='ownerid' operator='eq-userid'/><condition attribute='statecode' operator='eq' value='0'/><condition attribute='scheduledend' operator='on-or-after' value='{{todayUtc}}'/><condition attribute='scheduledend' operator='on-or-before' value='{{todayPlusDueWithinDays}}'/></filter><order attribute='scheduledend' descending='false'/></entity></fetch>",
+        "templateParameters": {
+          "dueWithinDays": "{{userPreferences.dueWithinDays ?? 3}}"
+        },
+        "description": "Query open tasks owned by current user where scheduledend is between today and today + dueWithinDays"
+      }
+    },
+    {
+      "name": "Check Results",
+      "nodeType": "Control",
+      "actionType": 30,
+      "canvasType": "condition",
+      "outputVariable": "hasDueSoon",
+      "positionX": 600,
+      "positionY": 200,
+      "dependsOn": ["Query Tasks Due Soon"],
+      "configJson": {
+        "__actionType": 30,
+        "conditionJson": "{{dueSoonQuery.output.count}} > 0",
+        "description": "Check if any tasks are due within the configured window"
+      }
+    },
+    {
+      "name": "Create Notification",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "canvasType": "createNotification",
+      "outputVariable": "notification",
+      "positionX": 900,
+      "positionY": 150,
+      "dependsOn": ["Check Results"],
+      "configJson": {
+        "__actionType": 50,
+        "title": "{{dueSoonQuery.output.count}} task(s) due in the next {{dueWithinDays}} day(s)",
+        "body": "{{#each dueSoonQuery.output.items}}{{subject}} is due {{scheduledend}} ({{regardingName}}).\n{{/each}}",
+        "category": "tasks-due",
+        "priority": 200000000,
+        "actionUrl": "/main.aspx?pagetype=entitylist&etn=task&viewid=00000000-0000-0000-0000-000000000000&viewtype=1039",
+        "recipientId": "{{run.userId}}",
+        "regardingType": "task",
+        "iterateItems": true,
+        "itemNotification": {
+          "title": "Due soon: {{item.subject}}",
+          "body": "{{item.subject}} is due {{item.scheduledend}} ({{item.regardingName}})",
+          "category": "tasks-due",
+          "priority": 200000000,
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=task&id={{item.activityid}}",
+          "recipientId": "{{run.userId}}",
+          "regardingId": "{{item.activityid}}",
+          "regardingType": "task"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "source": "Start", "target": "Query Tasks Due Soon" },
+    { "source": "Query Tasks Due Soon", "target": "Check Results" },
+    { "source": "Check Results", "target": "Create Notification", "condition": "true" }
+  ]
+}

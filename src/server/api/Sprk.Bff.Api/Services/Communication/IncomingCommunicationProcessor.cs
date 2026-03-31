@@ -34,6 +34,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly GraphMessageToEmlConverter _emlConverter;
     private readonly SpeFileStore _speFileStore;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly NotificationService _notificationService;
     private readonly CommunicationOptions _options;
     private readonly IConfiguration _configuration;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
@@ -56,6 +57,7 @@ public sealed class IncomingCommunicationProcessor
         GraphMessageToEmlConverter emlConverter,
         SpeFileStore speFileStore,
         JobSubmissionService jobSubmissionService,
+        NotificationService notificationService,
         IOptions<CommunicationOptions> options,
         IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger)
@@ -69,6 +71,7 @@ public sealed class IncomingCommunicationProcessor
         _emlConverter = emlConverter;
         _speFileStore = speFileStore;
         _jobSubmissionService = jobSubmissionService;
+        _notificationService = notificationService;
         _options = options.Value;
         _configuration = configuration;
         _logger = logger;
@@ -313,6 +316,23 @@ public sealed class IncomingCommunicationProcessor
                 "Failed to mark message as read (non-fatal) | Mailbox: {Mailbox}, " +
                 "GraphMessageId: {GraphMessageId}",
                 mailboxEmail, graphMessageId);
+        }
+
+        // ── Step 8: Inline notification (non-fatal) ────────────────────────────
+        // Notify the matter owner when a new email is received for their matter.
+        // Requires a resolved regarding matter with an owning user.
+        try
+        {
+            await SendEmailReceivedNotificationAsync(communicationId, message, ct);
+        }
+        catch (Exception ex)
+        {
+            // Notification failure is non-fatal
+            _logger.LogWarning(
+                ex,
+                "Email-received notification failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                "GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
         }
 
         _logger.LogInformation(
@@ -754,6 +774,63 @@ public sealed class IncomingCommunicationProcessor
                 "Failed to enqueue RAG indexing for inbound document {DocumentId} (non-fatal) | CommunicationId: {CommunicationId}",
                 documentId, communicationId);
         }
+    }
+
+    /// <summary>
+    /// Sends an in-app notification to the matter owner when a new email is received.
+    /// Retrieves the communication record to find the resolved regarding matter,
+    /// then queries the matter for its owning user.
+    /// </summary>
+    private async Task SendEmailReceivedNotificationAsync(
+        Guid communicationId, Message message, CancellationToken ct)
+    {
+        // Retrieve the communication record to check if a matter was resolved
+        var commRecord = await _genericEntityService.RetrieveAsync(
+            "sprk_communication", communicationId,
+            ["sprk_regardingmatter"], ct);
+
+        var matterRef = commRecord.GetAttributeValue<EntityReference>("sprk_regardingmatter");
+        if (matterRef is null)
+        {
+            _logger.LogDebug(
+                "No regarding matter on communication {CommunicationId}; skipping email-received notification",
+                communicationId);
+            return;
+        }
+
+        // Retrieve the matter to get the owning user
+        var matterRecord = await _genericEntityService.RetrieveAsync(
+            "sprk_matter", matterRef.Id,
+            ["ownerid", "sprk_mattername"], ct);
+
+        var ownerRef = matterRecord.GetAttributeValue<EntityReference>("ownerid");
+        if (ownerRef is null || ownerRef.LogicalName != "systemuser")
+        {
+            _logger.LogDebug(
+                "Matter {MatterId} has no systemuser owner; skipping email-received notification",
+                matterRef.Id);
+            return;
+        }
+
+        var sender = message.From?.EmailAddress?.Address ?? "unknown sender";
+        var subject = message.Subject ?? "(No Subject)";
+        var matterName = matterRecord.GetAttributeValue<string>("sprk_mattername") ?? "a matter";
+
+        var title = $"New email received for {matterName}";
+        var body = $"From: {sender}\nSubject: {subject}";
+
+        await _notificationService.CreateNotificationAsync(
+            userId: ownerRef.Id,
+            title: title,
+            body: body,
+            category: "email",
+            regardingId: communicationId,
+            cancellationToken: ct);
+
+        _logger.LogInformation(
+            "Email-received notification sent | CommunicationId: {CommunicationId}, " +
+            "MatterId: {MatterId}, UserId: {UserId}",
+            communicationId, matterRef.Id, ownerRef.Id);
     }
 
     /// <summary>

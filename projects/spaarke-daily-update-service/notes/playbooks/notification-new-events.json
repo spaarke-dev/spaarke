@@ -1,0 +1,133 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "id": "NP-005",
+    "name": "New Events on Matters/Projects",
+    "description": "Notifies users when new calendar events (appointments, meetings) have been created or updated on their assigned matters or projects since the last check. Queries appointment activity records linked to matters and projects where the user is a team member, filtered by the configurable timeWindow parameter.",
+    "sprk_playbooktype": 2,
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "channel": "new-events",
+    "capabilities": [],
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "configJson": {
+      "schedule": {
+        "frequency": "daily",
+        "time": "06:00"
+      },
+      "parameters": {
+        "timeWindow": {
+          "type": "duration",
+          "default": "24h",
+          "options": ["12h", "24h", "48h", "7d"],
+          "label": "Time window",
+          "description": "How far back to look for new or updated events"
+        }
+      },
+      "scope": "user-matters-and-projects",
+      "scopeDescription": "All matters and projects where the current user is a team member"
+    }
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "name": "Start",
+      "nodeType": "Start",
+      "description": "Scope: user's assigned matters and projects",
+      "positionX": 50,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "scope": "user-matters-and-projects",
+        "resolveUserId": true
+      }
+    },
+    {
+      "id": "query-events",
+      "name": "Query New Events",
+      "nodeType": "Query",
+      "description": "Retrieve appointment/event activities linked to user's matters or projects that were created or modified within the configured time window",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["start"],
+      "configJson": {
+        "entityName": "appointment",
+        "queryType": "odata",
+        "query": "$filter=(regardingobjectid_sprk_matter/any(m: m/sprk_matterId ne null) or regardingobjectid_sprk_project/any(p: p/sprk_projectId ne null)) and (createdon ge {{sinceTimestamp}} or modifiedon ge {{sinceTimestamp}})&$select=subject,scheduledstart,scheduledend,location,createdon,modifiedon,_regardingobjectid_value,_organizer_value&$orderby=scheduledstart asc&$top=50",
+        "parameters": {
+          "sinceTimestamp": "{{timeWindow}}"
+        },
+        "outputVariable": "newEvents",
+        "expandRelated": {
+          "regardingobjectid_sprk_matter": ["sprk_name", "sprk_matterid"],
+          "regardingobjectid_sprk_project": ["sprk_name", "sprk_projectid"]
+        }
+      }
+    },
+    {
+      "id": "check-results",
+      "name": "Has New Events?",
+      "nodeType": "Condition",
+      "actionType": 30,
+      "description": "Check if any new or updated events were found",
+      "positionX": 500,
+      "positionY": 200,
+      "dependsOn": ["query-events"],
+      "configJson": {
+        "expression": "{{newEvents.count}} > 0",
+        "trueTarget": "create-notification",
+        "falseTarget": null
+      }
+    },
+    {
+      "id": "create-notification",
+      "name": "Create Notification",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "description": "Create an appnotification for each new or updated event on user's matters/projects",
+      "positionX": 750,
+      "positionY": 200,
+      "dependsOn": ["check-results"],
+      "configJson": {
+        "mode": "perItem",
+        "itemsSource": "{{newEvents.items}}",
+        "notification": {
+          "title": "New event on {{item.regardingName}}",
+          "body": "{{item.subject}} — {{item.scheduledStartFormatted}}{{#if item.location}} at {{item.location}}{{/if}}",
+          "category": "new-events",
+          "priority": "Normal",
+          "iconType": 100000004,
+          "actionUrl": "/main.aspx?etn=appointment&id={{item.activityid}}&pagetype=entityrecord",
+          "regardingEntityType": "appointment",
+          "regardingEntityId": "{{item.activityid}}",
+          "customData": {
+            "channel": "new-events",
+            "matterId": "{{item.regardingMatterId}}",
+            "matterName": "{{item.regardingMatterName}}",
+            "projectId": "{{item.regardingProjectId}}",
+            "projectName": "{{item.regardingProjectName}}",
+            "subject": "{{item.subject}}",
+            "scheduledStart": "{{item.scheduledstart}}",
+            "scheduledEnd": "{{item.scheduledend}}",
+            "location": "{{item.location}}",
+            "organizer": "{{item.organizer}}"
+          }
+        },
+        "deduplication": {
+          "enabled": true,
+          "key": "new-events:{{userId}}:{{item.activityid}}:{{item.modifiedon}}"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "source": "start", "target": "query-events" },
+    { "source": "query-events", "target": "check-results" },
+    { "source": "check-results", "target": "create-notification" }
+  ]
+}

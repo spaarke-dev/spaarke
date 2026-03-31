@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Daily Digest auto-popup to LegalWorkspace</title>
     <phase>6: Integration, Cleanup &amp; Polish</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>050, 030</dependencies>
     <blocks>none</blocks>

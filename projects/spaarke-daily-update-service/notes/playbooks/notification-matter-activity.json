@@ -1,0 +1,57 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "name": "Matter/Project Activity Summary",
+    "description": "Notifies users of recent activity on their matters and projects since last check, including document changes, task updates, communications, and status transitions.",
+    "isPublic": true,
+    "sprk_playbooktype": 2,
+    "capabilities": ["notify"],
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "sprk_configjson": {
+      "schedule": {
+        "cronExpression": "0 8 * * 1-5",
+        "timezone": "America/Chicago",
+        "description": "Weekdays at 8:00 AM Central"
+      },
+      "parameters": {
+        "timeWindow": {
+          "type": "string",
+          "default": "24h",
+          "options": ["12h", "24h", "48h", "7d"],
+          "description": "How far back to look for matter activity"
+        }
+      },
+      "channel": "matter-activity",
+      "channelLabel": "Matter/Project Activity"
+    }
+  },
+  "nodes": [
+    {
+      "name": "Query Matter Activity",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "canvasType": "createNotification",
+      "outputVariable": "matterActivityNotification",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "__actionType": 50,
+        "title": "Activity on {{matter.name}}",
+        "body": "There has been new activity on {{matter.name}} in the last {{run.parameters.timeWindow}}: {{activitySummary}}",
+        "category": "matter-activity",
+        "priority": 100000000,
+        "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={{matter.id}}",
+        "regardingId": "{{matter.id}}",
+        "regardingType": "sprk_matter",
+        "recipientId": "{{run.userId}}"
+      }
+    }
+  ],
+  "edges": []
+}

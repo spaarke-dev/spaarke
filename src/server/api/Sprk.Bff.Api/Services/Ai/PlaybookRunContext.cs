@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -111,6 +112,18 @@ public class PlaybookRunContext
     /// Tenant ID for multi-tenant isolation.
     /// </summary>
     public string TenantId { get; }
+
+    /// <summary>
+    /// The Dataverse systemuserid of the user this playbook run targets.
+    /// Null for document-only playbooks that don't target a specific user.
+    /// </summary>
+    public Guid? UserId { get; init; }
+
+    /// <summary>
+    /// User-specific preferences for notification delivery (e.g., quiet hours, channel opt-outs).
+    /// Populated from the user's sprk_userpreferences record. Null when not applicable.
+    /// </summary>
+    public Dictionary<string, JsonElement>? UserPreferences { get; init; }
 
     /// <summary>
     /// When the run started.
