@@ -298,6 +298,9 @@ if (-not $definition.nodes -or $definition.nodes.Count -eq 0) {
 $playbookName = $definition.playbook.name
 $playbookDescription = if ($definition.playbook.description) { $definition.playbook.description } else { '' }
 $playbookIsPublic = if ($null -ne $definition.playbook.isPublic) { $definition.playbook.isPublic } else { $true }
+$playbookType = if ($null -ne $definition.playbook.sprk_playbooktype) { $definition.playbook.sprk_playbooktype } elseif ($null -ne $definition.playbook.playbookType) { $definition.playbook.playbookType } else { $null }
+$playbookIsSystem = if ($null -ne $definition.playbook.isSystemPlaybook) { $definition.playbook.isSystemPlaybook } else { $false }
+$playbookConfigJson = if ($definition.playbook.sprk_configjson) { $definition.playbook.sprk_configjson | ConvertTo-Json -Depth 10 -Compress } elseif ($definition.playbook.configJson) { $definition.playbook.configJson | ConvertTo-Json -Depth 10 -Compress } else { $null }
 $nodeCount = $definition.nodes.Count
 
 Write-Host "  Playbook: $playbookName" -ForegroundColor White
@@ -549,6 +552,9 @@ if ($DryRun) {
         sprk_description = $playbookDescription
         sprk_ispublic    = $playbookIsPublic
     }
+    if ($null -ne $playbookType) { $playbookBody['sprk_playbooktype'] = $playbookType }
+    if ($playbookIsSystem) { $playbookBody['sprk_issystemplaybook'] = $true }
+    if ($playbookConfigJson) { $playbookBody['sprk_configjson'] = $playbookConfigJson }
 
     try {
         $playbookId = Invoke-DataversePost -Endpoint 'sprk_analysisplaybooks' -Body $playbookBody -Headers $headers
