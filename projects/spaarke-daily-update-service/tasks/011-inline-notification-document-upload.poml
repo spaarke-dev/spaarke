@@ -3,7 +3,7 @@
   <metadata>
     <title>Add inline notification to SdapEndpoints (document upload)</title>
     <phase>2: Scheduler &amp; Inline Notifications</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>015</blocks>

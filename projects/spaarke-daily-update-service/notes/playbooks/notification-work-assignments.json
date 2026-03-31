@@ -1,0 +1,57 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "name": "New Work Assignments",
+    "description": "Notifies users when new tasks, action items, or work items are assigned to them since the last check.",
+    "isPublic": true,
+    "sprk_playbooktype": 2,
+    "capabilities": ["notify"],
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "sprk_configjson": {
+      "schedule": {
+        "cronExpression": "0 */2 * * 1-5",
+        "timezone": "America/Chicago",
+        "description": "Every 2 hours on weekdays"
+      },
+      "parameters": {
+        "timeWindow": {
+          "type": "string",
+          "default": "24h",
+          "options": ["12h", "24h", "48h", "7d"],
+          "description": "How far back to look for new assignments"
+        }
+      },
+      "channel": "work-assignments",
+      "channelLabel": "New Work Assignments"
+    }
+  },
+  "nodes": [
+    {
+      "name": "Notify New Assignment",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "canvasType": "createNotification",
+      "outputVariable": "workAssignmentNotification",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "__actionType": 50,
+        "title": "New assignment: {{task.subject}}",
+        "body": "You have been assigned \"{{task.subject}}\" on {{task.matterName}}. Due: {{task.dueDate}}.",
+        "category": "work-assignment",
+        "priority": 200000000,
+        "actionUrl": "/main.aspx?pagetype=entityrecord&etn=task&id={{task.id}}",
+        "regardingId": "{{task.id}}",
+        "regardingType": "task",
+        "recipientId": "{{run.userId}}"
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,8 +1,8 @@
 # Task Index — Spaarke Daily Update Service
 
 > **Total Tasks**: 27
-> **Status**: 🔲 0/27 complete
-> **Last Updated**: 2026-03-30
+> **Status**: 15/27 complete
+> **Last Updated**: 2026-03-31
 
 ---
 
@@ -10,33 +10,33 @@
 
 | ID | Title | Phase | Status | Dependencies | Rigor | Parallel |
 |----|-------|-------|--------|--------------|-------|----------|
-| 001 | Extend ActionType enum and PlaybookRunContext | 1 | 🔲 | none | FULL | — |
-| 002 | Implement CreateNotificationNodeExecutor | 1 | 🔲 | 001 | FULL | Group A |
-| 003 | Implement NotificationService singleton | 1 | 🔲 | 001 | FULL | Group A |
-| 004 | Register executor and service in DI | 1 | 🔲 | 002, 003 | STANDARD | — |
-| 005 | Unit tests for executor and notification service | 1 | 🔲 | 004 | STANDARD | — |
-| 010 | Implement PlaybookSchedulerService BackgroundService | 2 | 🔲 | 004 | FULL | — |
-| 011 | Add inline notification to SdapEndpoints (document upload) | 2 | 🔲 | 010 | FULL | Group B |
-| 012 | Add inline notification to AiToolEndpoints (analysis complete) | 2 | 🔲 | 010 | FULL | Group B |
-| 013 | Add inline notification to IncomingCommunicationProcessor (email) | 2 | 🔲 | 010 | FULL | Group B |
-| 014 | Add inline notification for work assignment creation | 2 | 🔲 | 010 | FULL | Group B |
+| 001 | Extend ActionType enum and PlaybookRunContext | 1 | ✅ | none | FULL | — |
+| 002 | Implement CreateNotificationNodeExecutor | 1 | ✅ | 001 | FULL | Group A |
+| 003 | Implement NotificationService singleton | 1 | ✅ | 001 | FULL | Group A |
+| 004 | Register executor and service in DI | 1 | ✅ | 002, 003 | STANDARD | — |
+| 005 | Unit tests for executor and notification service | 1 | ✅ | 004 | STANDARD | — |
+| 010 | Implement PlaybookSchedulerService BackgroundService | 2 | ✅ | 004 | FULL | — |
+| 011 | Add inline notification to SdapEndpoints (document upload) | 2 | ✅ | 010 | FULL | Group B |
+| 012 | Add inline notification to AiToolEndpoints (analysis complete) | 2 | ✅ | 010 | FULL | Group B |
+| 013 | Add inline notification to IncomingCommunicationProcessor (email) | 2 | ✅ | 010 | FULL | Group B |
+| 014 | Add inline notification for work assignment creation | 2 | ✅ | 010 | FULL | Group B |
 | 015 | Unit tests for scheduler and inline notifications | 2 | 🔲 | 011-014 | STANDARD | — |
-| 020 | Create playbooks 1-3 (tasks overdue, due soon, new docs) | 3 | 🔲 | 004 | STANDARD | Group C |
-| 021 | Create playbooks 4-5 (new emails, new events) | 3 | 🔲 | 004 | STANDARD | Group C |
-| 022 | Create playbooks 6-7 (matter activity, work assignments) | 3 | 🔲 | 004 | STANDARD | Group C |
-| 030 | Scaffold DailyBriefing Code Page | 4 | 🔲 | none | FULL | — |
-| 031 | Implement notification data service | 4 | 🔲 | 030 | FULL | — |
-| 032 | Build channel category components | 4 | 🔲 | 031 | FULL | Group D |
-| 033 | Build narrative TL;DR renderer | 4 | 🔲 | 031 | FULL | Group D |
-| 034 | Build empty state and mark-read actions | 4 | 🔲 | 031 | FULL | Group D |
-| 035 | Build preferences panel | 4 | 🔲 | 031 | FULL | — |
-| 036 | Implement AI briefing summary endpoint | 4 | 🔲 | 004 | FULL | Group E |
-| 037 | Integrate AI briefing into Daily Digest UI | 4 | 🔲 | 036, 031 | FULL | — |
-| 040 | Add createNotification node to PlaybookBuilder | 5 | 🔲 | 001 | FULL | Group F |
-| 041 | Add notification node config panel | 5 | 🔲 | 040 | FULL | — |
-| 050 | Remove mock NotificationPanel from LegalWorkspace | 6 | 🔲 | none | FULL | — |
-| 051 | Add Daily Digest auto-popup to LegalWorkspace | 6 | 🔲 | 050, 030 | FULL | Group G |
-| 052 | Configure App Service WEBSITE_ALWAYS_ON | 6 | 🔲 | none | MINIMAL | Group G |
+| 020 | Create playbooks 1-3 (tasks overdue, due soon, new docs) | 3 | ✅ | 004 | STANDARD | Group C |
+| 021 | Create playbooks 4-5 (new emails, new events) | 3 | ✅ | 004 | STANDARD | Group C |
+| 022 | Create playbooks 6-7 (matter activity, work assignments) | 3 | ✅ | 004 | STANDARD | Group C |
+| 030 | Scaffold DailyBriefing Code Page | 4 | ✅ | none | FULL | — |
+| 031 | Implement notification data service | 4 | ✅ | 030 | FULL | — |
+| 032 | Build channel category components | 4 | ✅ | 031 | FULL | Group D |
+| 033 | Build narrative TL;DR renderer | 4 | ✅ | 031 | FULL | Group D |
+| 034 | Build empty state and mark-read actions | 4 | ✅ | 031 | FULL | Group D |
+| 035 | Build preferences panel | 4 | ✅ | 031 | FULL | — |
+| 036 | Implement AI briefing summary endpoint | 4 | ✅ | 004 | FULL | Group E |
+| 037 | Integrate AI briefing into Daily Digest UI | 4 | ✅ | 036, 031 | FULL | — |
+| 040 | Add createNotification node to PlaybookBuilder | 5 | ✅ | 001 | FULL | Group F |
+| 041 | Add notification node config panel | 5 | ✅ | 040 | FULL | — |
+| 050 | Remove mock NotificationPanel from LegalWorkspace | 6 | ✅ | none | FULL | — |
+| 051 | Add Daily Digest auto-popup to LegalWorkspace | 6 | ✅ | 050, 030 | FULL | Group G |
+| 052 | Configure App Service WEBSITE_ALWAYS_ON | 6 | ✅ | none | MINIMAL | Group G |
 | 053 | Dark mode testing and token audit | 6 | 🔲 | 032-035, 037 | STANDARD | — |
 | 054 | Deploy notification playbooks to Dataverse | 6 | 🔲 | 020-022 | STANDARD | Group H |
 | 055 | Deploy Daily Digest Code Page to Dataverse | 6 | 🔲 | 030, 037 | STANDARD | Group H |

@@ -434,6 +434,15 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
       if (data.taskDueDate) config.dueDate = data.taskDueDate;
       break;
 
+    case 'createNotification':
+      // Create Notification: title, body, priority, iconType, ownerId
+      if (data.notificationTitle) config.title = data.notificationTitle;
+      if (data.notificationBody) config.body = data.notificationBody;
+      if (data.notificationPriority) config.priority = data.notificationPriority;
+      if (data.notificationIconType) config.iconType = data.notificationIconType;
+      if (data.notificationOwnerId) config.ownerId = data.notificationOwnerId;
+      break;
+
     case 'wait':
       // Wait: wait type, duration, datetime
       if (data.waitType) config.waitType = data.waitType;

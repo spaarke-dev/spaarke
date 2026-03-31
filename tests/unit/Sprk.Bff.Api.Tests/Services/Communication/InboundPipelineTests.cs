@@ -16,6 +16,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
@@ -518,6 +519,7 @@ public class InboundPipelineTests
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore — not used when ArchiveContainerId is null
             CreateMockJobSubmissionService(),
+            new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Options.Create(options),
             CreateConfiguration(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
@@ -824,6 +826,7 @@ public class InboundPipelineTests
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore intentionally null — upload throws but is caught (non-fatal)
             CreateMockJobSubmissionService(),
+            new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Options.Create(options),
             CreateConfiguration(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());

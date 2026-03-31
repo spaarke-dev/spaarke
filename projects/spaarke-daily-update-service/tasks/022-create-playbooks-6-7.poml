@@ -3,7 +3,7 @@
   <metadata>
     <title>Create notification playbooks 6-7 (matter activity, work assignments)</title>
     <phase>3: Notification Playbooks</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>054</blocks>

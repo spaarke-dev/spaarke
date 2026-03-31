@@ -153,6 +153,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
                 return tokens.colorPaletteGreenBackground3;
               case 'createTask':
               case 'sendEmail':
+              case 'createNotification':
                 return tokens.colorPaletteBerryBackground2;
               case 'wait':
                 return tokens.colorPaletteMagentaBackground2;

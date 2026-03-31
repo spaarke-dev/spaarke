@@ -3,7 +3,7 @@
   <metadata>
     <title>Extend ActionType enum and PlaybookRunContext</title>
     <phase>1: Foundation — Node Executor &amp; Notification Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 003, 004</blocks>
@@ -88,6 +88,8 @@
 
   <notes>
     These are small, surgical changes but they are the foundation for everything else. Keep changes minimal — no refactoring of existing code.
+
+    Completed 2026-03-31: Added CreateNotification = 50 to ActionType enum and UserId (Guid?) + UserPreferences (Dictionary&lt;string, JsonElement&gt;?) to PlaybookRunContext as init-only properties. Build passes. Used nullable + init pattern for backward compatibility.
   </notes>
 
   <execution>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Build preferences panel (channel toggles, parameter dropdowns)</title>
     <phase>4: Daily Digest Code Page</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>031</dependencies>
     <blocks>053</blocks>

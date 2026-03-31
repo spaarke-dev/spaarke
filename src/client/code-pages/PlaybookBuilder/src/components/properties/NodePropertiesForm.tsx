@@ -47,6 +47,7 @@ import { CreateTaskForm } from './CreateTaskForm';
 import { AiCompletionForm } from './AiCompletionForm';
 import { WaitForm } from './WaitForm';
 import { UpdateRecordForm } from './UpdateRecordForm';
+import { CreateNotificationForm } from './CreateNotificationForm';
 import { NodeValidationBadge } from './NodeValidationBadge';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
@@ -114,6 +115,7 @@ const NODE_TYPE_LABELS: Record<string, string> = {
   updateRecord: 'Update Record',
   createTask: 'Create Task',
   sendEmail: 'Send Email',
+  createNotification: 'Create Notification',
   wait: 'Wait',
 };
 
@@ -138,6 +140,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({ node }: Nod
     'updateRecord',
     'sendEmail',
     'createTask',
+    'createNotification',
     'aiCompletion',
     'wait',
   ].includes(nodeType);
@@ -299,6 +302,13 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({ node }: Nod
               )}
               {nodeType === 'createTask' && (
                 <CreateTaskForm
+                  nodeId={node.id}
+                  configJson={node.data.configJson ?? '{}'}
+                  onConfigChange={handleConfigChange}
+                />
+              )}
+              {nodeType === 'createNotification' && (
+                <CreateNotificationForm
                   nodeId={node.id}
                   configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}

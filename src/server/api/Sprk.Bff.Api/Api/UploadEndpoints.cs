@@ -1,8 +1,10 @@
+using System.Security.Claims;
 using Microsoft.Graph;
 using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Validation;
+using Sprk.Bff.Api.Services;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -20,6 +22,7 @@ public static class UploadEndpoints
             string path,
             HttpRequest req,
             SpeFileStore speFileStore,
+            NotificationService notificationService,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct) =>
@@ -49,6 +52,35 @@ public static class UploadEndpoints
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await speFileStore.UploadSmallAsync(containerId, path, req.Body, ct);
+
+                // Fire-and-forget: create notification for the uploading user (must not block response)
+                var userOid = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                    ?? context.User.FindFirst("oid")?.Value;
+
+                if (!string.IsNullOrEmpty(userOid) && Guid.TryParse(userOid, out var azureAdOid))
+                {
+                    var fileName = Path.GetFileName(path);
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var systemUserId = await notificationService.ResolveSystemUserIdAsync(azureAdOid);
+                            if (systemUserId.HasValue)
+                            {
+                                await notificationService.CreateNotificationAsync(
+                                    userId: systemUserId.Value,
+                                    title: "New document uploaded",
+                                    body: $"{fileName} was uploaded to the document library.",
+                                    category: "documents",
+                                    actionUrl: $"/api/containers/{containerId}/files/{path}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Failed to create upload notification for file {Path} in container {ContainerId}", path, containerId);
+                        }
+                    });
+                }
 
                 return TypedResults.Ok(item);
             }

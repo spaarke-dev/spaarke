@@ -99,6 +99,7 @@ public static class EndpointMappingExtensions
         app.MapOfficeEndpoints();
         app.MapFieldMappingEndpoints();
         app.MapEventEndpoints();
+        app.MapWorkAssignmentEndpoints();
         app.MapScorecardCalculatorEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
@@ -157,6 +158,8 @@ public static class EndpointMappingExtensions
         app.MapWorkspaceMatterEndpoints();
         app.MapWorkspaceProjectEndpoints();
         app.MapWorkspaceFileEndpoints();
+
+        app.MapDailyBriefingEndpoints();
 
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();

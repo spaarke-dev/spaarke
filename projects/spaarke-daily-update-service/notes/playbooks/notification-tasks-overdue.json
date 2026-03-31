@@ -1,0 +1,111 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "id": "NP-001",
+    "name": "Tasks Overdue",
+    "description": "Identifies tasks past their due date on user's matters and creates notifications for each overdue item. Runs on schedule via PlaybookSchedulerService.",
+    "sprk_playbooktype": 2,
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "sprk_configjson": {
+      "schedule": {
+        "frequency": "daily",
+        "time": "06:00"
+      },
+      "category": "tasks-overdue",
+      "channelLabel": "Overdue Tasks",
+      "channelIcon": "warning",
+      "parameters": {}
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    }
+  },
+  "nodes": [
+    {
+      "name": "Start",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "start",
+      "outputVariable": "start",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "scope": "user-matters",
+        "description": "Scoped to the current user's matters (matters where user is a team member)"
+      }
+    },
+    {
+      "name": "Query Overdue Tasks",
+      "nodeType": "Workflow",
+      "actionType": 22,
+      "canvasType": "updateRecord",
+      "outputVariable": "overdueQuery",
+      "positionX": 350,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 22,
+        "queryMode": true,
+        "entityLogicalName": "task",
+        "fetchXml": "<fetch top='50'><entity name='task'><attribute name='subject'/><attribute name='scheduledend'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='ownerid' operator='eq-userid'/><condition attribute='statecode' operator='eq' value='0'/><condition attribute='scheduledend' operator='lt' value='{{todayUtc}}'/></filter><order attribute='scheduledend' descending='false'/></entity></fetch>",
+        "description": "Query open tasks owned by current user where scheduledend < today (overdue)"
+      }
+    },
+    {
+      "name": "Check Results",
+      "nodeType": "Control",
+      "actionType": 30,
+      "canvasType": "condition",
+      "outputVariable": "hasOverdue",
+      "positionX": 600,
+      "positionY": 200,
+      "dependsOn": ["Query Overdue Tasks"],
+      "configJson": {
+        "__actionType": 30,
+        "conditionJson": "{{overdueQuery.output.count}} > 0",
+        "description": "Check if any overdue tasks were found"
+      }
+    },
+    {
+      "name": "Create Notification",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "canvasType": "createNotification",
+      "outputVariable": "notification",
+      "positionX": 900,
+      "positionY": 150,
+      "dependsOn": ["Check Results"],
+      "configJson": {
+        "__actionType": 50,
+        "title": "You have {{overdueQuery.output.count}} overdue task(s)",
+        "body": "{{#each overdueQuery.output.items}}{{subject}} is {{daysOverdue}} day(s) overdue ({{regardingName}}).\n{{/each}}",
+        "category": "tasks-overdue",
+        "priority": 300000000,
+        "actionUrl": "/main.aspx?pagetype=entitylist&etn=task&viewid=00000000-0000-0000-0000-000000000000&viewtype=1039",
+        "recipientId": "{{run.userId}}",
+        "regardingType": "task",
+        "iterateItems": true,
+        "itemNotification": {
+          "title": "Overdue: {{item.subject}}",
+          "body": "{{item.subject}} is past due (was due {{item.scheduledend}})",
+          "category": "tasks-overdue",
+          "priority": 300000000,
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=task&id={{item.activityid}}",
+          "recipientId": "{{run.userId}}",
+          "regardingId": "{{item.activityid}}",
+          "regardingType": "task"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "source": "Start", "target": "Query Overdue Tasks" },
+    { "source": "Query Overdue Tasks", "target": "Check Results" },
+    { "source": "Check Results", "target": "Create Notification", "condition": "true" }
+  ]
+}

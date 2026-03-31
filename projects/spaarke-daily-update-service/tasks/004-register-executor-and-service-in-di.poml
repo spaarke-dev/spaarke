@@ -3,7 +3,7 @@
   <metadata>
     <title>Register executor and service in DI</title>
     <phase>1: Foundation — Node Executor &amp; Notification Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>002, 003</dependencies>
     <blocks>005, 010</blocks>

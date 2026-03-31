@@ -84,7 +84,7 @@ const useStyles = makeStyles({
  *   aiAnalysis/aiCompletion=#0078D4 -> colorBrandBackground (blue)
  *   condition=#FFB900             -> colorPaletteYellowBackground3 (yellow)
  *   deliverOutput=#107C10         -> colorPaletteGreenBackground3 (green)
- *   createTask/sendEmail=#8764B8  -> colorPaletteBerryBackground2 (purple)
+ *   createTask/sendEmail/createNotification=#8764B8 -> colorPaletteBerryBackground2 (purple)
  *   wait=#E3008C                  -> colorPaletteMagentaBackground2 (magenta)
  *   start                        -> colorNeutralForeground2 (neutral)
  */
@@ -122,6 +122,10 @@ export const nodeColorSchemes: Record<PlaybookNodeType, { background: string; ic
     iconColor: tokens.colorNeutralForegroundOnBrand,
   },
   sendEmail: {
+    background: tokens.colorPaletteBerryBackground2,
+    iconColor: tokens.colorNeutralForegroundOnBrand,
+  },
+  createNotification: {
     background: tokens.colorPaletteBerryBackground2,
     iconColor: tokens.colorNeutralForegroundOnBrand,
   },

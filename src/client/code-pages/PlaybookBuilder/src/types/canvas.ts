@@ -24,6 +24,7 @@ export type PlaybookNodeType =
   | 'updateRecord'
   | 'createTask'
   | 'sendEmail'
+  | 'createNotification'
   | 'wait';
 
 /**

@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement NotificationService singleton</title>
     <phase>1: Foundation — Node Executor &amp; Notification Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>004, 005, 011, 012, 013, 014</blocks>
