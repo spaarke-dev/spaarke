@@ -57,7 +57,7 @@ There is no single view that answers: "What do I need to know right now?"
    - **Deterministic**: A document was added to your matter, a task is due tomorrow
    - **Probabilistic (AI)**: A document similar to yours was uploaded, a matter similar to yours was created
 6. **Non-intrusive** — auto-popup on workspace load (if enabled) or manual trigger
-7. **AI-enhanced narrative** — optional LLM-generated briefing summary
+7. **AI-enhanced narrative** — LLM-generated briefing summary (R1)
 8. **Future-proof** — same playbook architecture supports workflow rules (event-driven record creation) when ready
 
 ---
@@ -66,14 +66,22 @@ There is no single view that answers: "What do I need to know right now?"
 
 ### Foundation: Playbook Engine + `appnotification`
 
+**Playbook type field**: `sprk_playbooktype` (OptionSet, already exists on `sprk_analysisplaybook`):
+- AIAnalysis (0) — existing analysis playbooks
+- Workflow (1) — future event-driven workflow rules
+- **Notification (2)** — notification playbooks (this project)
+- Rules (3) — future deterministic rule evaluation
+- Hybrid (4) — future mixed-mode playbooks
+
 ```
                     Playbook Definition (shared JSON schema)
                     sprk_analysisplaybook entity (shared storage)
+                    sprk_playbooktype field distinguishes modes
                     Playbook Library / Builder UI (shared management)
                               │
               ┌───────────────┼───────────────┐
               │               │               │
-         mode: analysis  mode: notification  mode: workflow (future)
+    type: AIAnalysis(0)  type: Notification(2) type: Workflow(1)
               │               │               │
      PlaybookOrchest-   PlaybookScheduler   EventTrigger
      rationService      Service (new)       Service (future)
@@ -548,7 +556,6 @@ Each notification playbook maps to a user-facing "channel" with on/off toggle an
 | Work Assignments | Time window | 12h, 24h, 48h, 7 days | 24h |
 | AI Similar Documents | Min. confidence | 60%, 75%, 85%, 95% | 75% |
 | AI Similar Matters | Min. confidence | 60%, 75%, 85%, 95% | 75% |
-| Budget Burn Rate | Alert threshold | 70%, 80%, 90% | 80% |
 
 ### Preference Storage
 
@@ -568,13 +575,40 @@ Uses existing `sprk_userpreference` entity:
     "project-activity": { "enabled": true, "timeWindow": "24h" },
     "assignments": { "enabled": true, "timeWindow": "24h" },
     "similar-documents": { "enabled": true, "minConfidence": 0.75 },
-    "similar-matters": { "enabled": true, "minConfidence": 0.75 },
-    "budget-burn-rate": { "enabled": true, "threshold": 0.80 }
+    "similar-matters": { "enabled": true, "minConfidence": 0.75 }
   }
 }
 ```
 
 Parameters are injected into playbook execution as template parameters (`{{dueWithinDays}}`, `{{timeWindow}}`, `{{minConfidence}}`).
+
+### Design Decisions (Resolved)
+
+**1. Playbook Type Discrimination**: Uses existing `sprk_playbooktype` field (OptionSet) on `sprk_analysisplaybook`. Notification playbooks use value `Notification (2)`. Playbook Library and scheduler filter by this field.
+
+**2. Schedule Configuration**: Stored in `sprk_configjson` on the playbook record as JSON: `{ "schedule": { "frequency": "daily", "time": "06:00" } }`. No schema changes needed — consistent with how other playbook config is stored.
+
+**3. Subscription Model**: **Opt-out**. All notification playbooks with `sprk_playbooktype = Notification (2)` run for all users by default. User preferences in `sprk_userpreference` store only overrides — disabled channels and parameter customizations. New playbooks automatically reach all users without requiring subscription.
+
+**4. Notification Deduplication**: Idempotency check inside `CreateNotificationNodeExecutor`. Before creating an `appnotification`, the executor queries: "Does an unread notification already exist for this user + regarding record + category?" If yes, skip creation. This prevents duplicate "Task X is due tomorrow" notifications when the scheduler runs hourly.
+
+```csharp
+// In CreateNotificationNodeExecutor.ExecuteAsync:
+var existing = await dataverseService.QueryAsync("appnotifications",
+    $"$filter=_ownerid_value eq '{userId}' " +
+    $"and isread eq false " +
+    $"and contains(data, '{regardingEntityId}') " +
+    $"and contains(data, '{category}')&$top=1");
+
+if (existing.Count > 0)
+{
+    return new NodeOutput { Text = "Notification already exists, skipped" };
+}
+```
+
+**5. Existing NotificationPanel**: **Remove entirely**. The mock `NotificationPanel` component in LegalWorkspace (with 8 hardcoded items) will be removed. The MDA native bell icon handles real-time notifications. The Daily Briefing Code Page handles the digest view. No third notification surface needed.
+
+**6. AI Briefing**: **Included in R1**. One BFF endpoint + one prompt. Low effort (~2-4 hours), high value. Data is already structured — LLM reformats into contextual narrative.
 
 ---
 
@@ -827,24 +861,31 @@ Each of these is a **playbook definition** deployed to `sprk_analysisplaybook` w
 - `createNotification` canvas type in PlaybookBuilder palette
 - `PlaybookSchedulerService` (BackgroundService) — scheduled playbook execution
 - `PlaybookRunContext` extension (`UserId`, `UserPreferences`)
-- `mode` field on `sprk_analysisplaybook` (analysis vs notification)
+- Uses existing `sprk_playbooktype` field (Notification = 2) to distinguish playbook types
 - `NotificationService` — shared BFF service for inline notification creation
 - Inline notification generation in existing BFF endpoints (document upload, analysis complete, email received, assignment created)
-- 8 deterministic notification playbooks deployed (tasks due, overdue, new docs, emails, events, activity, assignments)
+- Notification deduplication (idempotency check in `CreateNotificationNodeExecutor`)
+- 7 deterministic notification playbooks deployed:
+  1. Tasks overdue
+  2. Tasks due soon (configurable window: 1-7 days)
+  3. New documents on user's matters
+  4. New emails related to user's matters
+  5. New events on user's matters/projects
+  6. Matter/project activity (status changes, modifications)
+  7. New work assignments for user
 - `sprk_dailyupdate` Code Page (React 19, Vite single-file)
-- User-customizable channel preferences with per-playbook parameters
-- Template-based narrative format (Level 1)
+- AI briefing summary — `POST /api/ai/daily-briefing/summarize` endpoint + prompt
+- User-customizable channel preferences (opt-out model — all playbooks active by default, users override)
+- Template-based narrative format (Level 1) + AI narrative (Level 2)
 - Clear/dismiss items (mark read, mark all read)
 - Auto-popup on workspace launch (configurable, once per session)
+- Remove mock NotificationPanel from LegalWorkspace (replace with MDA native bell)
 - Dark mode support
 
-### In Scope (R1 — Optional, Low Effort)
-- AI briefing summary (Level 2) — one BFF endpoint + prompt
-
 ### In Scope (R2)
-- AI similarity playbooks (similar documents, similar matters)
-- Budget burn rate, invoice anomaly, aging matters playbooks
-- Playbook Library UI filter by mode (Analysis / Notification)
+- AI semantic similarity playbooks (similar documents, similar matters) — architecture supports this via AI nodes in notification playbooks
+- Financial intelligence playbooks (budget burn rate, invoice anomaly, aging matters)
+- Playbook Library UI filter by `sprk_playbooktype` (Analysis / Notification)
 - Real-time SignalR for instant notification delivery
 - Badge count on workspace nav
 
@@ -893,7 +934,7 @@ Each of these is a **playbook definition** deployed to `sprk_analysisplaybook` w
 2. [ ] `createNotification` node available in PlaybookBuilder canvas palette
 3. [ ] `PlaybookSchedulerService` runs notification-mode playbooks on daily schedule
 4. [ ] BFF creates `appnotification` records inline for document uploads, analysis completions, emails, assignments
-5. [ ] 8 deterministic notification playbooks deployed and generating notifications
+5. [ ] 7 deterministic notification playbooks deployed and generating notifications
 6. [ ] Notifications appear in MDA native bell icon (free, no custom UI needed)
 7. [ ] Daily Briefing dialog opens on workspace launch (if user has auto-popup enabled)
 8. [ ] Dialog shows narrative TL;DR grouped by subscribed channels
@@ -901,11 +942,14 @@ Each of these is a **playbook definition** deployed to `sprk_analysisplaybook` w
 10. [ ] Users can configure channel toggles and parameters (due window, time window, confidence)
 11. [ ] Users can mark items read / mark all read / dismiss
 12. [ ] Preferences persist to Dataverse (cross-device)
-13. [ ] AI briefing summary generates contextual, prioritized narrative (if enabled)
+13. [ ] AI briefing summary generates contextual, prioritized narrative
 14. [ ] AI similarity playbooks surface related documents/matters with confidence scores (R2)
 15. [ ] Empty state displays when no new activity
 16. [ ] Dark mode renders correctly
 17. [ ] New notification playbooks can be deployed without code changes
+18. [ ] Mock NotificationPanel removed from LegalWorkspace
+19. [ ] Duplicate notifications are prevented (idempotency check)
+20. [ ] Opt-out model works — new playbooks auto-apply to all users
 
 ---
 
