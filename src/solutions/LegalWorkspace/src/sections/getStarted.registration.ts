@@ -38,6 +38,7 @@ export const getStartedRegistration: SectionRegistration = {
   description: "Quick-action cards for common workflows",
   icon: RocketRegular,
   category: "overview",
+  defaultHeight: "200px",
 
   factory: (ctx: SectionFactoryContext): ActionCardSectionConfig => {
     // Map ACTION_CARD_CONFIGS to the shared ActionCardConfig shape
@@ -86,7 +87,7 @@ export const getStartedRegistration: SectionRegistration = {
       onCardClick,
       toolbar,
       maxVisible: 4,
-      style: { minHeight: "auto" },
+      style: { minHeight: "200px" },
     };
   },
 };

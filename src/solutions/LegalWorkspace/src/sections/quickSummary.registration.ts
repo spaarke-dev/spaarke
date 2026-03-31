@@ -51,6 +51,7 @@ export const quickSummaryRegistration: SectionRegistration = {
   description: "Key metrics at a glance",
   icon: DataBarVerticalRegular,
   category: "overview",
+  defaultHeight: "180px",
 
   factory(context: SectionFactoryContext): ContentSectionConfig {
     const toolbar = React.createElement(
@@ -82,7 +83,7 @@ export const quickSummaryRegistration: SectionRegistration = {
       type: "content",
       title: "Quick Summary",
       toolbar,
-      style: { minHeight: "auto" },
+      style: { minHeight: "180px" },
       renderContent: () =>
         React.createElement(
           "div",

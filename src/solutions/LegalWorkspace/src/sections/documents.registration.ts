@@ -53,6 +53,7 @@ export const documentsRegistration: SectionRegistration = {
   description: "Recent documents with quick actions",
   icon: DocumentRegular,
   category: "data",
+  defaultHeight: "300px",
 
   factory(context: SectionFactoryContext): ContentSectionConfig {
     // Refetch handle — captured by the refresh button's onClick closure
