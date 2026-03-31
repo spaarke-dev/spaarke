@@ -41,7 +41,7 @@ export const latestUpdatesRegistration: SectionRegistration = {
       id: "latest-updates",
       type: "content",
       title: "Latest Updates",
-      style: { minHeight: "325px" },
+      style: {},
       renderContent: () =>
         React.createElement(ActivityFeed, {
           embedded: true,

@@ -87,7 +87,7 @@ export const getStartedRegistration: SectionRegistration = {
       onCardClick,
       toolbar,
       maxVisible: 4,
-      style: { minHeight: "200px" },
+      style: {},
     };
   },
 };

@@ -122,7 +122,7 @@ export const todoRegistration: SectionRegistration = {
       type: "content",
       title: "My To Do List",
       toolbar,
-      style: { minHeight: "560px" },
+      style: {},
       renderContent: () =>
         React.createElement(SmartToDo, {
           embedded: true,

@@ -147,6 +147,15 @@ export function buildDynamicWorkspaceConfig(
 
       // Call the factory to produce the SectionConfig
       const sectionConfig = registration.factory(context);
+
+      // Apply defaultHeight from registration if factory didn't set minHeight
+      if (registration.defaultHeight && !sectionConfig.style?.minHeight) {
+        sectionConfig.style = {
+          ...sectionConfig.style,
+          minHeight: registration.defaultHeight,
+        };
+      }
+
       allSections.push(sectionConfig);
       resolvedSectionIds.push(sectionConfig.id);
     }

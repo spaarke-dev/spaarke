@@ -114,7 +114,7 @@ export const documentsRegistration: SectionRegistration = {
       type: "content",
       title: "My Documents",
       toolbar,
-      style: { minHeight: "300px", overflow: "visible" },
+      style: { overflow: "visible" },
       renderContent: () =>
         React.createElement(
           "div",

@@ -83,7 +83,7 @@ export const quickSummaryRegistration: SectionRegistration = {
       type: "content",
       title: "Quick Summary",
       toolbar,
-      style: { minHeight: "180px" },
+      style: {},
       renderContent: () =>
         React.createElement(
           "div",
