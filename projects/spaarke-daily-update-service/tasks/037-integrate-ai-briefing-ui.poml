@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Integrate AI briefing into Daily Digest UI</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>036, 031</dependencies>
+    <blocks>053</blocks>
+    <tags>frontend, react, fluent-ui, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend implementation (.tsx) with AI integration</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Integrate the AI briefing summary into the Daily Digest Code Page. Fetch from POST /api/ai/daily-briefing/summarize, render at top of digest with priority action items. Show loading state and graceful fallback if AI is unavailable.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>AI briefing renders at top of digest with 3-4 sentence narrative and priority action items. Graceful fallback when AI unavailable.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST label AI-generated content clearly</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens for styling</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AiBriefing.tsx component</step>
+    <step order="2">Fetch summary from BFF endpoint via authenticated call</step>
+    <step order="3">Render briefing text and priority action items</step>
+    <step order="4">Add loading skeleton state</step>
+    <step order="5">Add fallback when AI unavailable (show template-based summary only)</step>
+    <step order="6">Label AI content with "AI Insight" indicator</step>
+    <step order="7">Wire into App.tsx above channel cards</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/components/AiBriefing.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AI briefing renders at top of digest</criterion>
+    <criterion testable="true">Graceful fallback when AI unavailable</criterion>
+    <criterion testable="true">AI content labeled with indicator</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

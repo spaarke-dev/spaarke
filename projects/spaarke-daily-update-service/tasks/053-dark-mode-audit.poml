@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Dark mode testing and token audit</title>
+    <phase>6: Integration, Cleanup &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>032, 033, 034, 035, 037</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, fluent-ui, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing/audit task with constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Audit all Daily Digest components for dark mode compliance per ADR-021. Verify all colors use Fluent v9 semantic tokens, no hard-coded colors, and dark/high-contrast themes render correctly.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent v9 theming.</role>
+
+  <goal>All Daily Digest components pass dark mode audit — no hard-coded colors, all using semantic tokens.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use semantic tokens, no hard-coded colors, dark mode required</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep all .tsx files for hard-coded color values (hex, rgb, named colors)</step>
+    <step order="2">Replace any hard-coded colors with Fluent v9 tokens</step>
+    <step order="3">Verify FluentProvider theme switching works</step>
+    <step order="4">Check icons use currentColor</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/ (modified if needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No hard-coded colors in any .tsx file</criterion>
+    <criterion testable="true">All colors use Fluent v9 semantic tokens</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Open Daily Digest dialog</step>
+        <step>Verify background colors adapt</step>
+        <step>Verify text colors adapt</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

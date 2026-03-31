@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Unit tests for executor and notification service</title>
+    <phase>1: Foundation — Node Executor &amp; Notification Service</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write unit tests for CreateNotificationNodeExecutor and NotificationService. Test notification creation, idempotency check (duplicate skip), error handling, and edge cases.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and mocking patterns.
+  </role>
+
+  <goal>
+    Unit tests cover: executor creates notification, executor skips duplicate, service creates appnotification, error handling. All tests pass.
+  </goal>
+
+  <context>
+    <background>Phase 1 foundation needs test coverage before proceeding to scheduler and inline notifications.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must test idempotency check</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing test patterns in tests/unit/</step>
+    <step order="2">Create CreateNotificationNodeExecutorTests.cs</step>
+    <step order="3">Test: ExecuteAsync creates appnotification when no duplicate exists</step>
+    <step order="4">Test: ExecuteAsync skips creation when duplicate unread notification exists</step>
+    <step order="5">Create NotificationServiceTests.cs</step>
+    <step order="6">Test: CreateNotificationAsync creates appnotification with correct fields</step>
+    <step order="7">Test: Error handling when Dataverse API fails</step>
+    <step order="8">Run dotnet test to verify all tests pass</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/NotificationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass</criterion>
+    <criterion testable="true">Idempotency check is tested (both create and skip paths)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files.</protocol>
+  </execution>
+</task>

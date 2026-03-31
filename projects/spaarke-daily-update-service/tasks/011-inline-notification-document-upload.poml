@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Add inline notification to SdapEndpoints (document upload)</title>
+    <phase>2: Scheduler &amp; Inline Notifications</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing API endpoint code (.cs)</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add inline notification creation to SdapEndpoints after successful document upload. Call NotificationService.CreateNotificationAsync with document details for all users with access to the container/matter.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF API endpoints.</role>
+
+  <goal>After successful document upload, a notification is created via NotificationService with document title, matter context, and action URL to the document.</goal>
+
+  <context>
+    <background>Users need to be notified when new documents are uploaded to their matters.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/SdapEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Notification creation must not block the upload response — fire and forget or post-response</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SdapEndpoints.cs to find the upload handler</step>
+    <step order="2">After successful upload, call NotificationService.CreateNotificationAsync</step>
+    <step order="3">Set category="documents", title="New document uploaded", actionUrl to document</step>
+    <step order="4">Run dotnet build</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SdapEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Notification created after document upload</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

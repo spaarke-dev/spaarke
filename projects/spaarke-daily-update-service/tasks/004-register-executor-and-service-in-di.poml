@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Register executor and service in DI</title>
+    <phase>1: Foundation — Node Executor &amp; Notification Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002, 003</dependencies>
+    <blocks>005, 010</blocks>
+    <tags>bff-api, config, di</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration/DI registration, constrained by ADR-010</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Register CreateNotificationNodeExecutor in NodeExecutorRegistry and NotificationService as singleton in DI. Follow feature module pattern per ADR-010 — keep DI registrations ≤15 non-framework lines.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core DI and feature module patterns.
+  </role>
+
+  <goal>
+    CreateNotificationNodeExecutor is registered in NodeExecutorRegistry for ActionType 50. NotificationService is registered as singleton. DI line count stays within ADR-010 limits.
+  </goal>
+
+  <context>
+    <background>
+      Both the executor and service need to be registered in the DI container following the existing feature module pattern.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI registrations ≤15 non-framework lines, use feature modules</constraint>
+    <constraint source="ADR-010">Register concretes, not interfaces</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read NodeExecutorRegistry.cs to understand executor registration pattern</step>
+    <step order="2">Register CreateNotificationNodeExecutor for ActionType.CreateNotification</step>
+    <step order="3">Register NotificationService as singleton in appropriate feature module</step>
+    <step order="4">Verify DI registration count stays within limit</step>
+    <step order="5">Run dotnet build to verify compilation</step>
+    <step order="6">Run dotnet test to verify existing tests still pass</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NodeExecutorRegistry maps ActionType.CreateNotification to CreateNotificationNodeExecutor</criterion>
+    <criterion testable="true">NotificationService registered as singleton</criterion>
+    <criterion testable="true">DI registration count ≤15 non-framework lines</criterion>
+    <criterion testable="true">dotnet build succeeds and all tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files.</protocol>
+  </execution>
+</task>

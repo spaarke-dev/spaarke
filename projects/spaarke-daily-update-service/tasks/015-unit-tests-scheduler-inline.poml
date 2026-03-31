@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Unit tests for scheduler and inline notifications</title>
+    <phase>2: Scheduler &amp; Inline Notifications</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011, 012, 013, 014</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write unit tests for PlaybookSchedulerService and verify inline notification integration points. Test scheduler queries playbooks, processes users in parallel, persists timestamps. Test inline notifications fire from each endpoint.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in xUnit testing.</role>
+
+  <goal>Unit tests cover scheduler lifecycle and inline notification creation from all 4 BFF operations.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/PlaybookSchedulerService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create PlaybookSchedulerServiceTests.cs</step>
+    <step order="2">Test: queries notification playbooks (sprk_playbooktype = 2)</step>
+    <step order="3">Test: skips playbook when not due based on schedule</step>
+    <step order="4">Test: processes users in parallel</step>
+    <step order="5">Test: persists last-run timestamp</step>
+    <step order="6">Verify inline notification integration points exist in endpoints</step>
+    <step order="7">Run dotnet test</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/PlaybookSchedulerServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass</criterion>
+    <criterion testable="true">Scheduler query, skip, parallel, timestamp tested</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

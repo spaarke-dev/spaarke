@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Deploy Daily Digest Code Page to Dataverse</title>
+    <phase>6: Integration, Cleanup &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030, 037</dependencies>
+    <blocks>061</blocks>
+    <tags>deploy, dataverse, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build and deploy the DailyBriefing Code Page as sprk_dailyupdate web resource to Dataverse dev environment.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>sprk_dailyupdate web resource deployed to Dataverse and accessible via Xrm.Navigation.navigateTo.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/webresource.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build DailyBriefing Code Page (npm run build)</step>
+    <step order="2">Deploy as sprk_dailyupdate web resource</step>
+    <step order="3">Verify accessible via Xrm.Navigation.navigateTo</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_dailyupdate web resource exists in Dataverse</criterion>
+    <criterion testable="true">Opens via Xrm.Navigation.navigateTo</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

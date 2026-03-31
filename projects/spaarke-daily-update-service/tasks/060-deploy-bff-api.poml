@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Deploy BFF API with scheduler and notification services</title>
+    <phase>7: Testing &amp; Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010, 036</dependencies>
+    <blocks>061, 062</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Deploy updated BFF API with PlaybookSchedulerService, NotificationService, CreateNotificationNodeExecutor, and DailyBriefingEndpoints to Azure App Service.</prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>BFF API deployed with all notification features. Health check passes. Scheduler starts running.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run dotnet build and dotnet test to verify</step>
+    <step order="2">Deploy to Azure App Service</step>
+    <step order="3">Verify health check at /healthz</step>
+    <step order="4">Verify scheduler logs show it starting</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF deployed and healthy</criterion>
+    <criterion testable="true">Scheduler logs confirm startup</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
