@@ -27,6 +27,7 @@ import {
   DataBarVerticalRegular,
   ClockRegular,
   DocumentRegular,
+  DeleteRegular,
 } from "@fluentui/react-icons";
 import { WizardShell, getLayoutTemplate } from "@spaarke/ui-components";
 import type {
@@ -421,26 +422,54 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         ariaLabel={wizardTitle}
         steps={steps}
         onClose={() => {
-          // Close the navigateTo dialog — try parent Xrm first, then window.close
+          (window as any).__dialogResult = { confirmed: false };
+          // Close the navigateTo dialog — try multiple approaches
           try {
+            // Approach 1: Xrm closeDialog (works in managed dialog frames)
             const xrm =
               (window as any).Xrm ??
               (window.parent as any)?.Xrm ??
               (window.top as any)?.Xrm;
-            if (xrm?.Navigation?.navigateTo) {
-              // Set cancelled result and close
-              (window as any).__dialogResult = { confirmed: false };
-              window.close();
-            } else {
-              window.close();
+            if (xrm?.Utility?.closeProgressIndicator) {
+              xrm.Utility.closeProgressIndicator();
             }
-          } catch {
-            window.close();
-          }
+          } catch { /* ignore */ }
+          // Approach 2: window.close (works in some dialog modes)
+          try { window.close(); } catch { /* ignore */ }
+          // Approach 3: history.back (fallback for iframe-based dialogs)
+          try { window.history.back(); } catch { /* ignore */ }
         }}
         onFinish={handleFinish}
         finishLabel="Save Layout"
         finishingLabel="Saving..."
+        footerLeftExtra={
+          mode === "edit" && layoutId ? (
+            <Button
+              appearance="subtle"
+              icon={<DeleteRegular />}
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+              onClick={async () => {
+                if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
+                try {
+                  const response = await authenticatedFetch(
+                    `/api/workspace/layouts/${layoutId}`,
+                    { method: "DELETE" },
+                  );
+                  if (response.ok) {
+                    (window as any).__dialogResult = { confirmed: true, deleted: true };
+                    window.close();
+                  } else {
+                    alert("Failed to delete workspace.");
+                  }
+                } catch {
+                  alert("Failed to delete workspace.");
+                }
+              }}
+            >
+              Delete
+            </Button>
+          ) : undefined
+        }
       />
     </FluentProvider>
   );

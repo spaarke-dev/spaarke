@@ -140,6 +140,7 @@ export const App: React.FC = () => {
             onLayoutChange={headerState?.onLayoutChange}
             onEditClick={headerState?.onEditClick}
             onCreateClick={headerState?.onCreateClick}
+            onDeleteClick={headerState?.onDeleteClick}
           />
           <main className={styles.content}>
             <WorkspaceGrid

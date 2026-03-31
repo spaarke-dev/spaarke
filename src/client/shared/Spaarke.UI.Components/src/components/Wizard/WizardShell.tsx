@@ -176,6 +176,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     onFinish,
     finishingLabel = 'Processing\u2026',
     finishLabel = 'Finish',
+    footerLeftExtra,
   } = props;
 
   const styles = useStyles();
@@ -405,6 +406,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
             <Button appearance="secondary" onClick={onClose} disabled={isFinishing}>
               Cancel
             </Button>
+            {footerLeftExtra}
           </div>
 
           <div className={styles.footerRight}>

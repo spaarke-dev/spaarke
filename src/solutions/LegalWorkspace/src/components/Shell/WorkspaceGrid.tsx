@@ -15,6 +15,7 @@ import { WorkspaceHeader } from "../WorkspaceHeader";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 import type { IWebApi } from "../../types/xrm";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
+import { useDailyDigestAutoPopup } from "../../hooks/useDailyDigestAutoPopup";
 import {
   WorkspaceSkeleton,
   PersonalizeBanner,
@@ -78,6 +79,7 @@ export interface WorkspaceHeaderState {
   onLayoutChange: (layoutId: string) => void;
   onEditClick: () => void;
   onCreateClick: () => void;
+  onDeleteClick: (layoutId: string) => void;
 }
 
 export interface IWorkspaceGridProps {
@@ -110,6 +112,14 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // -------------------------------------------------------------------------
 
   const service = useDataverseService(webApi);
+
+  // -------------------------------------------------------------------------
+  // Daily Digest auto-popup (Task 051)
+  // Opens sprk_dailyupdate Code Page on first workspace launch per session
+  // if the user has the autoPopup preference enabled.
+  // -------------------------------------------------------------------------
+
+  useDailyDigestAutoPopup({ webApi, userId });
 
   // -------------------------------------------------------------------------
   // Dynamic workspace layouts (BFF API)
@@ -742,6 +752,30 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     }
   }, [refetchLayouts]);
 
+  const handleDeleteLayout = React.useCallback(async (layoutId: string) => {
+    // Confirm before deleting
+    if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
+
+    try {
+      const bffBaseUrl = getBffBaseUrl();
+      const response = await authenticatedFetch(
+        `${bffBaseUrl.replace(/\/$/, "")}/api/workspace/layouts/${layoutId}`,
+        { method: "DELETE" },
+      );
+      if (response.ok) {
+        // If we just deleted the active layout, switch to default
+        if (activeLayout?.id === layoutId) {
+          setActiveLayoutById(undefined as unknown as string); // triggers default
+        }
+        refetchLayouts();
+      } else {
+        console.error("[WorkspaceGrid] Delete failed:", response.status);
+      }
+    } catch (err) {
+      console.error("[WorkspaceGrid] Delete failed:", err);
+    }
+  }, [activeLayout?.id, refetchLayouts, setActiveLayoutById]);
+
   // -------------------------------------------------------------------------
   // Push header state to parent (PageHeader renders the dropdown + gear)
   // -------------------------------------------------------------------------
@@ -753,8 +787,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       onLayoutChange: handleLayoutChange,
       onEditClick: handleEditLayout,
       onCreateClick: handleCreateLayout,
+      onDeleteClick: handleDeleteLayout,
     });
-  }, [headerActiveLayout, headerLayouts, handleLayoutChange, handleEditLayout, handleCreateLayout, onHeaderReady]);
+  }, [headerActiveLayout, headerLayouts, handleLayoutChange, handleEditLayout, handleCreateLayout, handleDeleteLayout, onHeaderReady]);
 
   // -------------------------------------------------------------------------
   // Layout — WorkspaceShell renders the full grid

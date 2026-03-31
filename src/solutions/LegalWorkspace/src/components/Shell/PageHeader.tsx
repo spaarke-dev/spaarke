@@ -3,7 +3,6 @@ import {
   makeStyles,
   tokens,
   Button,
-  CounterBadge,
   Dropdown,
   Option,
   OptionGroup,
@@ -12,14 +11,12 @@ import {
 } from "@fluentui/react-components";
 import type { OptionOnSelectData } from "@fluentui/react-components";
 import {
-  AlertRegular,
   SettingsRegular,
   AddRegular,
   LockClosedRegular,
+  DeleteRegular,
 } from "@fluentui/react-icons";
 import { ThemeToggle } from "@spaarke/ui-components";
-import { NotificationPanel } from "../NotificationPanel/NotificationPanel";
-import { useNotifications } from "../../hooks/useNotifications";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 
 const useStyles = makeStyles({
@@ -66,6 +63,19 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     flexShrink: 0,
   },
+  userOptionContent: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+  },
+  deleteButton: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+    ":hover": {
+      color: tokens.colorPaletteRedForeground1,
+    },
+  },
   newWorkspaceOption: {
     display: "flex",
     alignItems: "center",
@@ -78,18 +88,6 @@ const useStyles = makeStyles({
     alignItems: "center",
     gap: tokens.spacingHorizontalS,
     flex: "0 0 auto",
-  },
-  notificationWrapper: {
-    position: "relative",
-    display: "inline-flex",
-    alignItems: "center",
-  },
-  badge: {
-    position: "absolute",
-    top: "0px",
-    right: "0px",
-    transform: "translate(30%, -30%)",
-    pointerEvents: "none",
   },
 });
 
@@ -106,6 +104,8 @@ export interface IPageHeaderProps {
   onEditClick?: () => void;
   /** Called when the user selects "+ New Workspace" from the dropdown. */
   onCreateClick?: () => void;
+  /** Called when the user clicks the delete icon on a user workspace. */
+  onDeleteClick?: (layoutId: string) => void;
 }
 
 export const PageHeader: React.FC<IPageHeaderProps> = ({
@@ -114,19 +114,9 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
   onLayoutChange,
   onEditClick,
   onCreateClick,
+  onDeleteClick,
 }) => {
   const styles = useStyles();
-  const [isNotificationPanelOpen, setIsNotificationPanelOpen] =
-    React.useState<boolean>(false);
-
-  const {
-    notifications,
-    isLoading,
-    unreadCount,
-    markAsRead,
-    markAllAsRead,
-    refresh,
-  } = useNotifications();
 
   const systemLayouts = React.useMemo(
     () => (layouts ?? []).filter((l) => l.isSystem),
@@ -151,14 +141,6 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
     },
     [activeLayout?.id, onLayoutChange, onCreateClick],
   );
-
-  const handleNotificationClick = React.useCallback(() => {
-    setIsNotificationPanelOpen((prev) => !prev);
-  }, []);
-
-  const handleClosePanel = React.useCallback(() => {
-    setIsNotificationPanelOpen(false);
-  }, []);
 
   const settingsTooltip = activeLayout?.isSystem
     ? "Save As new workspace"
@@ -194,7 +176,23 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
             <OptionGroup label="My Workspaces">
               {userLayouts.map((layout) => (
                 <Option key={layout.id} value={layout.id} text={layout.name}>
-                  {layout.name}
+                  <span className={styles.userOptionContent}>
+                    {layout.name}
+                    {onDeleteClick && (
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DeleteRegular fontSize={16} />}
+                        className={styles.deleteButton}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onDeleteClick(layout.id);
+                        }}
+                        aria-label={`Delete ${layout.name}`}
+                      />
+                    )}
+                  </span>
                 </Option>
               ))}
             </OptionGroup>
@@ -220,54 +218,9 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
               />
             </Tooltip>
           )}
-          <div className={styles.notificationWrapper}>
-            <Button
-              appearance="subtle"
-              icon={<AlertRegular />}
-              onClick={handleNotificationClick}
-              aria-label={
-                unreadCount > 0
-                  ? `Notifications (${unreadCount} unread)`
-                  : "Notifications"
-              }
-              aria-expanded={isNotificationPanelOpen}
-              aria-controls="notification-panel"
-            />
-            {unreadCount > 0 && (
-              <CounterBadge
-                className={styles.badge}
-                count={unreadCount}
-                size="small"
-                color="danger"
-                appearance="filled"
-                aria-hidden="true"
-              />
-            )}
-            {/* Screen reader live region for notification count changes */}
-            <span
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              style={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}
-            >
-              {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}` : ""}
-            </span>
-          </div>
-
           <ThemeToggle />
         </div>
       </header>
-
-      {/* Notification panel drawer — rendered adjacent to header but portals to document.body */}
-      <NotificationPanel
-        isOpen={isNotificationPanelOpen}
-        onClose={handleClosePanel}
-        notifications={notifications}
-        isLoading={isLoading}
-        onMarkAsRead={markAsRead}
-        onMarkAllAsRead={markAllAsRead}
-        onRefresh={refresh}
-      />
     </>
   );
 };

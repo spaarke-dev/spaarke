@@ -14,6 +14,7 @@ import {
   LockClosedRegular,
   SettingsRegular,
   AddRegular,
+  DeleteRegular,
 } from "@fluentui/react-icons";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,8 @@ export interface IWorkspaceHeaderProps {
   onEditClick: () => void;
   /** Called when the user selects "+ New Workspace" from the dropdown. */
   onCreateClick: () => void;
+  /** Called when the user clicks the delete icon on a user workspace. */
+  onDeleteClick?: (layoutId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +75,19 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     flexShrink: 0,
   },
+  userOptionContent: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+  },
+  deleteButton: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+    ":hover": {
+      color: tokens.colorPaletteRedForeground1,
+    },
+  },
   newWorkspaceOption: {
     display: "flex",
     alignItems: "center",
@@ -99,6 +115,7 @@ export const WorkspaceHeader: React.FC<IWorkspaceHeaderProps> = ({
   onLayoutChange,
   onEditClick,
   onCreateClick,
+  onDeleteClick,
 }) => {
   const styles = useStyles();
 
@@ -164,7 +181,23 @@ export const WorkspaceHeader: React.FC<IWorkspaceHeaderProps> = ({
           <OptionGroup label="My Workspaces">
             {userLayouts.map((layout) => (
               <Option key={layout.id} value={layout.id} text={layout.name}>
-                {layout.name}
+                <span className={styles.userOptionContent}>
+                  {layout.name}
+                  {onDeleteClick && (
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      icon={<DeleteRegular fontSize={16} />}
+                      className={styles.deleteButton}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onDeleteClick(layout.id);
+                      }}
+                      aria-label={`Delete ${layout.name}`}
+                    />
+                  )}
+                </span>
               </Option>
             ))}
           </OptionGroup>

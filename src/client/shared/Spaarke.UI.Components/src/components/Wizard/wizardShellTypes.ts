@@ -268,4 +268,9 @@ export interface IWizardShellProps {
    * finish). Defaults to "Finish".
    */
   finishLabel?: string;
+  /**
+   * Extra content rendered in the footer's left side, after the Cancel button.
+   * Use for additional actions like "Delete" that apply to the whole wizard.
+   */
+  footerLeftExtra?: React.ReactNode;
 }
