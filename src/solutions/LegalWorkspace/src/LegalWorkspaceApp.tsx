@@ -5,8 +5,8 @@ import {
   tokens,
   Text,
 } from "@fluentui/react-components";
-import { useTheme } from "./hooks/useTheme";
 import {
+  useTheme,
   syncThemeFromDataverse,
   persistThemeToDataverse,
   getUserThemePreference,

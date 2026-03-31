@@ -8,7 +8,7 @@ import {
   WeatherSunnyRegular,
   WeatherMoonRegular,
 } from "@fluentui/react-icons";
-import { useTheme, ThemeMode } from "../../hooks/useTheme";
+import { useTheme, DarkLightMode } from "../../hooks/useTheme";
 
 const useStyles = makeStyles({
   toggleButton: {
@@ -16,17 +16,17 @@ const useStyles = makeStyles({
   },
 });
 
-const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
+const NEXT_MODE: Record<DarkLightMode, DarkLightMode> = {
   light: "dark",
   dark: "light",
 };
 
-const MODE_LABELS: Record<ThemeMode, string> = {
+const MODE_LABELS: Record<DarkLightMode, string> = {
   light: "Light theme",
   dark: "Dark theme",
 };
 
-function ThemeIcon({ mode }: { mode: ThemeMode }): React.ReactElement {
+function ThemeIcon({ mode }: { mode: DarkLightMode }): React.ReactElement {
   switch (mode) {
     case "dark":
       return <WeatherMoonRegular />;
@@ -36,13 +36,26 @@ function ThemeIcon({ mode }: { mode: ThemeMode }): React.ReactElement {
   }
 }
 
+/**
+ * Theme toggle button — sun/moon icon that cycles light ↔ dark.
+ *
+ * Uses the shared `useTheme` hook for state management.
+ * Writes to localStorage and dispatches theme change events
+ * so all surfaces (PCF controls, other Code Pages) stay in sync.
+ *
+ * @example
+ * ```tsx
+ * import { ThemeToggle } from "@spaarke/ui-components";
+ * <PageHeader><ThemeToggle /></PageHeader>
+ * ```
+ */
 export const ThemeToggle: React.FC = () => {
-  const { themeMode, setThemeMode } = useTheme();
+  const { themeMode, setDarkLightMode } = useTheme();
   const styles = useStyles();
 
   const handleClick = React.useCallback(() => {
-    setThemeMode(NEXT_MODE[themeMode]);
-  }, [themeMode, setThemeMode]);
+    setDarkLightMode(NEXT_MODE[themeMode]);
+  }, [themeMode, setDarkLightMode]);
 
   const currentLabel = MODE_LABELS[themeMode];
   const nextMode = NEXT_MODE[themeMode];

@@ -17,7 +17,7 @@ import {
   AddRegular,
   LockClosedRegular,
 } from "@fluentui/react-icons";
-import { ThemeToggle } from "./ThemeToggle";
+import { ThemeToggle } from "@spaarke/ui-components";
 import { NotificationPanel } from "../NotificationPanel/NotificationPanel";
 import { useNotifications } from "../../hooks/useNotifications";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";

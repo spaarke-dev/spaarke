@@ -105,3 +105,6 @@ export * from './PanelSplitter';
 
 // TodoDetail - Shared To Do Detail component (context-agnostic, ADR-012)
 export * from './TodoDetail';
+
+// ThemeToggle - Sun/moon toggle button for dark mode switching
+export * from './ThemeToggle';
