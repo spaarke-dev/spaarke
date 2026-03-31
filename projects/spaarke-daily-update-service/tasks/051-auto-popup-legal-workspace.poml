@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Add Daily Digest auto-popup to LegalWorkspace</title>
+    <phase>6: Integration, Cleanup &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050, 030</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing LegalWorkspace code (.tsx)</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add auto-popup logic to LegalWorkspace that opens sprk_dailyupdate Code Page via Xrm.Navigation.navigateTo on workspace launch. Check sprk_userpreference for autoPopup flag, track shown state in sessionStorage (once per session). Dialog: 60% width × 80% height.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Daily Digest dialog auto-opens on workspace launch (if preference enabled), once per session via sessionStorage.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find LegalWorkspace initialization/mount point</step>
+    <step order="2">Check sprk_userpreference for autoPopup setting</step>
+    <step order="3">Check sessionStorage for "dailyDigestShown" flag</step>
+    <step order="4">If enabled and not shown: open sprk_dailyupdate via Xrm.Navigation.navigateTo (60% × 80%)</step>
+    <step order="5">Set sessionStorage flag after opening</step>
+    <step order="6">Build to verify</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/ (modified — auto-popup hook added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dialog opens on workspace launch when autoPopup enabled</criterion>
+    <criterion testable="true">Only shows once per session (sessionStorage)</criterion>
+    <criterion testable="true">Dialog dimensions: 60% × 80%</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

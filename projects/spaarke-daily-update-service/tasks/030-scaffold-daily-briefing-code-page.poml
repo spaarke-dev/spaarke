@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Scaffold DailyBriefing Code Page (Vite + React 19 + Fluent v9)</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>031, 032, 033, 034, 035</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new Code Page project (.tsx files), frontend tag</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Scaffold the DailyBriefing Code Page as a new solution in src/solutions/DailyBriefing/ following the existing Code Page pattern. Use Vite + React 19 + Fluent v9. Set up the entry point with FluentProvider, theme detection, and URL parameter parsing.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React 19, Vite, Fluent UI v9, and Code Page architecture.</role>
+
+  <goal>DailyBriefing solution scaffolded with working Vite build, React 19 entry point, FluentProvider, theme detection, and basic App component shell.</goal>
+
+  <context>
+    <background>The Daily Digest is a Code Page dialog (per ADR-006) — a standalone React 19 app deployed as sprk_dailyupdate web resource.</background>
+    <relevant-files>
+      <file>src/solutions/CreateMatterWizard/</file>
+      <file>src/solutions/LegalWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">MUST use Code Page (React 19, Vite) — not PCF, not custom page</constraint>
+    <constraint source="ADR-021">MUST use Fluent UI v9 exclusively with semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-012">MUST use @spaarke/ui-components shared library</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Study existing Code Page structure (e.g., CreateMatterWizard or LegalWorkspace)</step>
+    <step order="2">Create src/solutions/DailyBriefing/ with Vite config, package.json, tsconfig</step>
+    <step order="3">Set up React 19, Fluent v9, @spaarke/ui-components as dependencies</step>
+    <step order="4">Create src/main.tsx entry point with FluentProvider, resolveCodePageTheme(), parseDataParams()</step>
+    <step order="5">Create src/App.tsx shell component</step>
+    <step order="6">Create index.html with root div</step>
+    <step order="7">Verify npm install and npm run build succeed</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/package.json</output>
+    <output type="code">src/solutions/DailyBriefing/vite.config.ts</output>
+    <output type="code">src/solutions/DailyBriefing/src/main.tsx</output>
+    <output type="code">src/solutions/DailyBriefing/src/App.tsx</output>
+    <output type="code">src/solutions/DailyBriefing/index.html</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Vite build succeeds</criterion>
+    <criterion testable="true">Entry point uses React 19 createRoot with FluentProvider</criterion>
+    <criterion testable="true">Theme detection from resolveCodePageTheme()</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

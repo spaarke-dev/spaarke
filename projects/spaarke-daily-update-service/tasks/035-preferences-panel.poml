@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Build preferences panel (channel toggles, parameter dropdowns)</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>053</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend implementation (.tsx), 6+ steps</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the preferences panel with Switch per channel (opt-out toggles), Dropdown per configurable parameter (due window: 1/2/3/5/7 days; time window: 12h/24h/48h/7d; AI confidence: 60/75/85/95%). Save to sprk_userpreference (type 100000002).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent v9 form components.</role>
+
+  <goal>Inline preferences panel with channel toggles and parameter dropdowns. Changes persist to Dataverse sprk_userpreference.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Opt-out model — all channels enabled by default</constraint>
+    <constraint source="ADR-021">Fluent v9 Switch, Dropdown components</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create PreferencesPanel.tsx with expandable settings section</step>
+    <step order="2">Add Switch per channel (tasks, documents, emails, events, activity, assignments, AI briefing)</step>
+    <step order="3">Add Dropdown for dueWithinDays, timeWindow, minConfidence parameters</step>
+    <step order="4">Implement save to sprk_userpreference via Xrm.WebApi</step>
+    <step order="5">Load existing preferences on mount</step>
+    <step order="6">Wire into App.tsx</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/components/PreferencesPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Switch per channel toggles opt-out</criterion>
+    <criterion testable="true">Dropdown per parameter with correct options</criterion>
+    <criterion testable="true">Preferences persist to sprk_userpreference</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

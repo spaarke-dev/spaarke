@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Extend ActionType enum and PlaybookRunContext</title>
+    <phase>1: Foundation — Node Executor &amp; Notification Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004</blocks>
+    <tags>bff-api, api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies core code files (.cs), foundation for all subsequent tasks</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add CreateNotification = 50 to the ActionType enum and extend PlaybookRunContext with UserId and UserPreferences fields. These are the foundational changes that all notification tasks depend on.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core and playbook engine internals. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    ActionType enum includes CreateNotification = 50. PlaybookRunContext has UserId (Guid) and UserPreferences (Dictionary&lt;string, JsonElement&gt;) properties. All existing tests still pass.
+  </goal>
+
+  <context>
+    <background>
+      The notification system requires a new ActionType for the CreateNotificationNodeExecutor and extended run context to carry user identity and preferences through playbook execution.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API patterns within single runtime</constraint>
+    <constraint source="ADR-010">Keep DI minimal — no new registrations for this task</constraint>
+    <constraint source="project">ActionType value MUST be 50 (per spec)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing ActionType enum" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs">
+        Follow the existing enum pattern — add CreateNotification = 50
+      </pattern>
+      <pattern name="PlaybookRunContext structure" location="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs">
+        Add UserId and UserPreferences as nullable properties to maintain backward compatibility
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read INodeExecutor.cs to understand existing ActionType enum values</step>
+    <step order="2">Add CreateNotification = 50 to ActionType enum</step>
+    <step order="3">Read PlaybookRunContext.cs to understand existing structure</step>
+    <step order="4">Add UserId (Guid?) and UserPreferences (Dictionary&lt;string, JsonElement&gt;?) properties to PlaybookRunContext</step>
+    <step order="5">Run dotnet build to verify compilation</step>
+    <step order="6">Run dotnet test to verify existing tests still pass</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ActionType enum contains CreateNotification = 50</criterion>
+    <criterion testable="true">PlaybookRunContext has UserId and UserPreferences properties</criterion>
+    <criterion testable="true">dotnet build succeeds with no errors</criterion>
+    <criterion testable="true">All existing unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    These are small, surgical changes but they are the foundation for everything else. Keep changes minimal — no refactoring of existing code.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Create notification playbooks 6-7 (matter activity, work assignments)</title>
+    <phase>3: Notification Playbooks</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>054</blocks>
+    <tags>ai, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates new playbook definition files</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create 2 notification playbook JSON definitions: (6) Matter/project activity summary, (7) New work assignments for user.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in playbook design.</role>
+
+  <goal>2 playbook JSON definitions ready for deployment. All 7 playbooks now complete.</goal>
+
+  <context>
+    <relevant-files>
+      <file>docs/guides/PLAYBOOK-DESIGN-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PLAYBOOK-DESIGN-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create matter-activity playbook (activity on user's matters/projects since last check)</step>
+    <step order="2">Create work-assignments playbook (new assignments for user since last check)</step>
+    <step order="3">Both: sprk_playbooktype=2, schedule in sprk_configjson, CreateNotification node</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-matter-activity.json</output>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-work-assignments.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">2 valid playbook JSON definitions created</criterion>
+    <criterion testable="true">Total of 7 notification playbooks complete across tasks 020-022</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

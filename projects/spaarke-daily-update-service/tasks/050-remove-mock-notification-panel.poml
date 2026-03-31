@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Remove mock NotificationPanel from LegalWorkspace</title>
+    <phase>6: Integration, Cleanup &amp; Polish</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>051</blocks>
+    <tags>frontend, react, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactoring existing code, removes components</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Remove the mock NotificationPanel component directory and useNotifications hook from LegalWorkspace entirely. Remove all imports and references. MDA native bell icon will serve as the notification UX.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>NotificationPanel/ directory and useNotifications.ts deleted. No references to either remain in LegalWorkspace. Build succeeds.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/NotificationPanel/</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/useNotifications.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/Shell/</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find all imports/references to NotificationPanel and useNotifications in LegalWorkspace</step>
+    <step order="2">Remove all references from Shell and other components</step>
+    <step order="3">Delete src/solutions/LegalWorkspace/src/components/NotificationPanel/ directory</step>
+    <step order="4">Delete src/solutions/LegalWorkspace/src/hooks/useNotifications.ts</step>
+    <step order="5">Verify no remaining references (grep for NotificationPanel and useNotifications)</step>
+    <step order="6">Build LegalWorkspace to verify</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Shell/ (modified — references removed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NotificationPanel directory deleted</criterion>
+    <criterion testable="true">useNotifications.ts deleted</criterion>
+    <criterion testable="true">No references remain (grep returns empty)</criterion>
+    <criterion testable="true">LegalWorkspace build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

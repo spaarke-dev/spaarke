@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Integration tests for scheduler to notification to digest flow</title>
+    <phase>7: Testing &amp; Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>060, 054, 055</dependencies>
+    <blocks>063</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the end-to-end flow: scheduler runs playbook → CreateNotificationNodeExecutor creates appnotification → Daily Digest queries and displays notifications.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Integration tests verify the full notification pipeline from scheduler to digest.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test for scheduler → playbook execution</step>
+    <step order="2">Verify appnotification records created</step>
+    <step order="3">Verify idempotency (run twice, no duplicates)</step>
+    <step order="4">Run tests</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/integration/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scheduler creates notifications via playbook execution</criterion>
+    <criterion testable="true">No duplicate notifications on repeated execution</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

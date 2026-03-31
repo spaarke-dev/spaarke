@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Implement PlaybookSchedulerService BackgroundService</title>
+    <phase>2: Scheduler &amp; Inline Notifications</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>011, 012, 013, 014, 015</blocks>
+    <tags>bff-api, api, backend, worker</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core BackgroundService implementation, 6+ steps, worker tag</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement PlaybookSchedulerService as a BackgroundService that queries sprk_analysisplaybook where sprk_playbooktype = Notification (2), reads schedule config from sprk_configjson, and executes playbooks via PlaybookOrchestrationService.ExecutePlaybookAsync(). Process users in parallel with MaxDegreeOfParallelism = 5. Persist last-run timestamps to survive App Service restarts.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core BackgroundService, parallel processing, and playbook engine.
+  </role>
+
+  <goal>
+    PlaybookSchedulerService.cs runs as hosted BackgroundService, queries notification playbooks, processes users in parallel (throttled), persists last-run timestamps, and survives restarts.
+  </goal>
+
+  <context>
+    <background>
+      The scheduler is the heartbeat of the notification system — it periodically runs notification-mode playbooks for all users, generating appnotification records based on playbook logic.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use BackgroundService — no Azure Functions</constraint>
+    <constraint source="ADR-010">Register as hosted service via feature module</constraint>
+    <constraint source="project">MaxDegreeOfParallelism = 5 for user processing</constraint>
+    <constraint source="project">MUST persist last-run timestamps</constraint>
+    <constraint source="project">MUST use opt-out model — all playbooks run for all users by default</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read PlaybookOrchestrationService.cs to understand ExecutePlaybookAsync signature</step>
+    <step order="2">Read PlaybookRunContext.cs to understand how to populate UserId and UserPreferences</step>
+    <step order="3">Create PlaybookSchedulerService.cs in Services/</step>
+    <step order="4">Implement ExecuteAsync loop with configurable interval (default: 1 hour)</step>
+    <step order="5">Query sprk_analysisplaybook where sprk_playbooktype = 2 (Notification)</step>
+    <step order="6">For each playbook, read sprk_configjson for schedule config</step>
+    <step order="7">Check last-run timestamp vs schedule — skip if not due</step>
+    <step order="8">Query active users, process in parallel with Parallel.ForEachAsync (MaxDegreeOfParallelism = 5)</step>
+    <step order="9">For each user: build PlaybookRunContext with UserId and UserPreferences, call ExecutePlaybookAsync</step>
+    <step order="10">Persist last-run timestamp after successful execution</step>
+    <step order="11">Register as hosted service in DI</step>
+    <step order="12">Run dotnet build to verify compilation</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/PlaybookSchedulerService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PlaybookSchedulerService extends BackgroundService</criterion>
+    <criterion testable="true">Queries notification playbooks (sprk_playbooktype = 2)</criterion>
+    <criterion testable="true">Processes users in parallel with MaxDegreeOfParallelism = 5</criterion>
+    <criterion testable="true">Persists last-run timestamps</criterion>
+    <criterion testable="true">Reads schedule config from sprk_configjson</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files.</protocol>
+  </execution>
+</task>
