@@ -20,7 +20,7 @@
 | 012 | Add inline notification to AiToolEndpoints (analysis complete) | 2 | ✅ | 010 | FULL | Group B |
 | 013 | Add inline notification to IncomingCommunicationProcessor (email) | 2 | ✅ | 010 | FULL | Group B |
 | 014 | Add inline notification for work assignment creation | 2 | ✅ | 010 | FULL | Group B |
-| 015 | Unit tests for scheduler and inline notifications | 2 | 🔲 | 011-014 | STANDARD | — |
+| 015 | Unit tests for scheduler and inline notifications | 2 | ✅ | 011-014 | STANDARD | — |
 | 020 | Create playbooks 1-3 (tasks overdue, due soon, new docs) | 3 | ✅ | 004 | STANDARD | Group C |
 | 021 | Create playbooks 4-5 (new emails, new events) | 3 | ✅ | 004 | STANDARD | Group C |
 | 022 | Create playbooks 6-7 (matter activity, work assignments) | 3 | ✅ | 004 | STANDARD | Group C |
