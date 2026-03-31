@@ -1,0 +1,49 @@
+<task id="020" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, guides, playbook</tags>
+    <phase>3</phase>
+    <estimate>2h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Consolidate 6 playbook guides into 2 files (JPS authoring + scope configuration)</goal>
+    <context>The docs/guides/ folder contains 6 overlapping playbook guides that create confusion about which file to consult. This task consolidates them into 2 focused guides: one for JPS authoring (schema, prompts, actions) and one for scope configuration (scope model, pre-fill, builder). After consolidation, the original 6 files should be deleted.</context>
+    <constraints>All unique content from the 6 source files must be preserved in the 2 consolidated files — no information loss. The consolidated files should be well-organized with clear section headers. Before deleting originals, grep for references in .claude/skills/, .claude/patterns/, and projects/*/tasks/ and update any that point to deleted files.</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Read all 6 source files:
+       - docs/guides/PLAYBOOK-DESIGN-GUIDE.md
+       - docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md
+       - docs/guides/PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md
+       - docs/guides/PLAYBOOK-BUILDER-GUIDE.md
+       - docs/guides/PLAYBOOK-PRE-FILL-INTEGRATION-GUIDE.md
+       - docs/guides/JPS-AUTHORING-GUIDE.md
+    2. Identify overlapping content and unique sections across all 6 files.
+    3. Create consolidated file 1: JPS authoring guide (covering JPS schema, prompt design, action definitions).
+    4. Create consolidated file 2: Scope configuration guide (covering scope model, pre-fill integration, builder usage).
+    5. Grep .claude/skills/, .claude/patterns/, and projects/*/tasks/ for references to any of the 6 original filenames.
+    6. Update all references to point to the appropriate consolidated file.
+    7. Delete the 6 original files.
+    8. Record before/after file counts and total line counts.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Created: 2 consolidated playbook guide files in docs/guides/
+    - Deleted: 6 original playbook guide files
+    - Updated: All references in .claude/skills/, .claude/patterns/, and projects/*/tasks/
+  </outputs>
+  <acceptance-criteria>
+    - All unique content from the 6 source files is preserved in the 2 consolidated files
+    - No broken references to deleted files remain in .claude/ or projects/
+    - The 2 consolidated files have clear section organization
+    - The 6 original files are deleted
+    - Total line count of 2 consolidated files is less than total of 6 originals (overlap removed)
+  </acceptance-criteria>
+</task>

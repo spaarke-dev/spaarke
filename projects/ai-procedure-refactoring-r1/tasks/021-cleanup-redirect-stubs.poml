@@ -1,0 +1,40 @@
+<task id="021" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, cleanup</tags>
+    <phase>3</phase>
+    <estimate>0.5h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Delete 3 redirect stub files in docs/standards/</goal>
+    <context>Three files in docs/standards/ are redirect stubs — each contains only ~3 lines pointing to another location. These stubs add clutter without providing value. They should be deleted after confirming no active references depend on them.</context>
+    <constraints>Before deleting each file, grep the entire repository for references to the filename. If any active references exist (not in deleted/archived files), update them to point to the redirect target before deleting the stub.</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Read the 3 redirect stub files to confirm they are stubs and identify their redirect targets:
+       - docs/standards/oauth-obo-anti-patterns.md
+       - docs/standards/oauth-obo-implementation.md
+       - docs/standards/dataverse-oauth-authentication.md
+    2. For each file, grep the entire repository for references to the filename.
+    3. If references exist, update them to point to the redirect target documented in the stub.
+    4. Delete all 3 stub files.
+    5. Verify no broken references remain.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Deleted: oauth-obo-anti-patterns.md, oauth-obo-implementation.md, dataverse-oauth-authentication.md
+    - Updated: Any references that pointed to deleted stubs
+  </outputs>
+  <acceptance-criteria>
+    - All 3 redirect stub files are deleted
+    - No broken references to deleted files remain anywhere in the repository
+    - Any updated references point to the correct redirect target
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,39 @@
+<task id="010" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, architecture, audit</tags>
+    <phase>2</phase>
+    <estimate>1h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Audit all 35 docs/architecture/ files and classify as keep/trim/delete</goal>
+    <context>Phase 2 begins the systematic trimming of docs/architecture/. Before any modifications, we need a complete audit that classifies every file so parallel trim tasks (011-015) can proceed with clear guidance. This audit produces the master classification table that all subsequent Phase 2 tasks reference.</context>
+    <constraints>Read only the first 50 lines of each file to classify efficiently. Do not modify any files — this is a read-only audit. Classification categories must be: Stable Decision (keep as-is), Implementation Description (trim to decisions-only), or Pure Implementation (delete entirely).</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Glob docs/architecture/*.md to get the full file list.
+    2. Read the first 50 lines of each file.
+    3. Classify each file into one of three categories:
+       - **Stable Decision**: Contains architectural decisions, constraints, or reference data that rarely changes. Keep as-is.
+       - **Implementation Description**: Contains a mix of decisions and implementation details. Trim to decisions-only.
+       - **Pure Implementation**: Contains only implementation details that duplicate code. Delete entirely.
+    4. For each file, note: filename, line count, category, rationale (1 sentence), and which trim task (011-015) owns it.
+    5. Write the classification table to notes/architecture-audit.md.
+    6. Include summary counts at the top: how many keep/trim/delete.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>notes/architecture-audit.md with classification table for all docs/architecture/ files</outputs>
+  <acceptance-criteria>
+    - Every file in docs/architecture/ is listed in the classification table
+    - Each file has a category (keep/trim/delete), rationale, and owning trim task
+    - Summary counts are included at the top
+    - No files were modified during the audit
+  </acceptance-criteria>
+</task>

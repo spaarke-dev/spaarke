@@ -1,0 +1,49 @@
+<task id="012" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, architecture, api</tags>
+    <phase>2</phase>
+    <estimate>1.5h</estimate>
+    <dependencies>010</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Trim BFF/API architecture docs to decisions-only</goal>
+    <context>The BFF and API architecture documents contain implementation details that are better captured in code and .claude/patterns/. This task trims each file to retain only architectural decisions, constraints, integration boundaries, and rationale — removing implementation walkthroughs, endpoint listings that duplicate code, and step-by-step configuration guides.</context>
+    <constraints>Preserve all decision/constraint content. Do not remove ADR references, integration boundary definitions, or security-related constraints. Only touch BFF/API-related docs listed in this task.</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Read notes/architecture-audit.md for classification guidance on BFF/API docs.
+    2. Read each target file fully:
+       - docs/architecture/sdap-bff-api-patterns.md (trim)
+       - docs/architecture/sdap-overview.md (trim)
+       - docs/architecture/sdap-component-interactions.md (trim)
+       - docs/architecture/sdap-document-processing-architecture.md (trim)
+    3. For each file, identify and remove:
+       - Implementation walkthroughs and code samples
+       - Endpoint listings that duplicate what is in code
+       - Step-by-step configuration or setup instructions
+    4. Preserve:
+       - Architectural decisions and rationale
+       - Integration boundaries and data flow decisions
+       - Security constraints and ADR references
+       - Component responsibility definitions
+    5. Record before/after line counts for each file.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Trimmed: sdap-bff-api-patterns.md, sdap-overview.md, sdap-component-interactions.md, sdap-document-processing-architecture.md
+    - Before/after line counts recorded
+  </outputs>
+  <acceptance-criteria>
+    - All decision/constraint content is preserved in trimmed files
+    - Each trimmed file is at least 30% shorter than the original
+    - No implementation walkthroughs or code samples remain
+    - ADR references and integration boundary definitions are intact
+  </acceptance-criteria>
+</task>

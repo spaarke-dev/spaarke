@@ -1,0 +1,50 @@
+<task id="005" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, patterns</tags>
+    <phase>1</phase>
+    <estimate>45m</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Convert .claude/patterns/pcf/ files from inline code examples to pointer format (max 25 lines each)</goal>
+    <context>
+      Part of AI Procedure Refactoring R1. The current pattern files contain 100-400 lines of inline code that duplicates actual source files and drifts over time. Convert each to a 15-25 line pointer file with: When (usage context), Read These Files (paths to actual source), Constraints (applicable ADRs), Key Rules (non-obvious rules not in code).
+
+      Files to convert (5 + INDEX).
+    </context>
+    <constraints>
+      - Each converted file MUST be max 25 lines
+      - Every "Read:" path MUST point to an existing file in the repo
+      - Preserve all ADR references
+      - Preserve all MUST/MUST NOT rules
+      - Do NOT create new files — only modify existing pattern files
+      - Do NOT modify the actual source code files being pointed to
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read each pattern file in .claude/patterns/pcf/</step>
+    <step>For each file, identify: the source code files it references or duplicates</step>
+    <step>Verify the source code files exist at the expected paths</step>
+    <step>Rewrite each pattern file in pointer format (When/Read/Constraints/Key Rules)</step>
+    <step>Verify each converted file is max 25 lines</step>
+    <step>Update the subdirectory INDEX.md to reflect new format</step>
+  </steps>
+  <tools>Read, Edit, Glob, Grep</tools>
+  <outputs>
+    <output>Converted pattern files in .claude/patterns/pcf/</output>
+    <output>Updated INDEX.md in subdirectory</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All pattern files in .claude/patterns/pcf/ are max 25 lines</criterion>
+    <criterion>All "Read:" paths resolve to existing files</criterion>
+    <criterion>All ADR references preserved</criterion>
+    <criterion>Subdirectory INDEX.md updated</criterion>
+  </acceptance-criteria>
+</task>

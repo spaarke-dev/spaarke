@@ -1,0 +1,47 @@
+<task id="011" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, architecture, ai</tags>
+    <phase>2</phase>
+    <estimate>2h</estimate>
+    <dependencies>010</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Trim AI architecture docs to decisions-only; DELETE ai-implementation-reference.md</goal>
+    <context>The AI architecture docs contain a mix of stable architectural decisions and implementation details that duplicate what is already in code or .claude/patterns/. This task trims each file to retain only decisions, constraints, and rationale while removing implementation walkthroughs, code samples, and step-by-step instructions. The file ai-implementation-reference.md is entirely implementation detail and should be deleted after confirming no critical references depend on it.</context>
+    <constraints>Preserve all decision/constraint content — never remove a "Decision:", "Constraint:", "Rule:", or "ADR-" reference. Before deleting ai-implementation-reference.md, grep for references in .claude/skills/ and projects/*/tasks/. If references exist, update them to point to the appropriate replacement (AI-ARCHITECTURE.md or a .claude/patterns/ file). Only touch AI-related docs listed in this task — other architecture docs belong to tasks 012-015.</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Read notes/architecture-audit.md for classification guidance on AI docs.
+    2. Read each target file fully:
+       - docs/architecture/AI-ARCHITECTURE.md (trim)
+       - docs/architecture/ai-implementation-reference.md (DELETE)
+       - docs/architecture/playbook-architecture.md (trim)
+       - docs/architecture/ai-document-summary-architecture.md (trim)
+       - docs/architecture/ai-semantic-relationship-graph.md (trim)
+    3. Grep .claude/skills/ and projects/*/tasks/ for references to ai-implementation-reference.md.
+    4. Update any references found to point to AI-ARCHITECTURE.md or appropriate .claude/patterns/ file.
+    5. Delete ai-implementation-reference.md.
+    6. For each remaining file, trim implementation sections (code walkthroughs, step-by-step guides, sample payloads) while preserving decision/constraint/rationale sections.
+    7. Record before/after line counts for each file.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Trimmed: AI-ARCHITECTURE.md, playbook-architecture.md, ai-document-summary-architecture.md, ai-semantic-relationship-graph.md
+    - Deleted: ai-implementation-reference.md
+    - Updated references in .claude/skills/ and projects/*/tasks/ if any existed
+  </outputs>
+  <acceptance-criteria>
+    - ai-implementation-reference.md is deleted
+    - No broken references to ai-implementation-reference.md remain in .claude/skills/ or projects/*/tasks/
+    - All decision/constraint content is preserved in trimmed files
+    - Each trimmed file is at least 30% shorter than the original
+    - No implementation walkthroughs or code samples remain in trimmed files
+  </acceptance-criteria>
+</task>

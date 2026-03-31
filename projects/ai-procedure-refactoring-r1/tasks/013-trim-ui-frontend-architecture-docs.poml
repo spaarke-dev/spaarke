@@ -1,0 +1,52 @@
+<task id="013" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, architecture, ui</tags>
+    <phase>2</phase>
+    <estimate>1.5h</estimate>
+    <dependencies>010</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Trim UI/frontend architecture docs to decisions-only</goal>
+    <context>The UI and frontend architecture documents contain implementation details (component hierarchies, prop definitions, CSS class lists) that duplicate what is in code. This task trims each file to retain only layout decisions, integration patterns, platform constraints, and architectural rationale.</context>
+    <constraints>Preserve all decision/constraint content, especially platform limitations (React 16 vs 18, Fluent UI v9 requirements, PCF field-binding rules). Do not remove ADR references or cross-component integration decisions. Only touch UI/frontend docs listed in this task.</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Read notes/architecture-audit.md for classification guidance on UI/frontend docs.
+    2. Read each target file fully:
+       - docs/architecture/ui-dialog-shell-architecture.md (trim)
+       - docs/architecture/universal-dataset-grid-architecture.md (trim)
+       - docs/architecture/SIDE-PANE-PLATFORM-ARCHITECTURE.md (trim)
+       - docs/architecture/sdap-pcf-patterns.md (trim)
+       - docs/architecture/sdap-workspace-integration-patterns.md (trim)
+       - docs/architecture/VISUALHOST-ARCHITECTURE.md (trim)
+    3. For each file, identify and remove:
+       - Component prop definitions and interface listings
+       - CSS class lists and styling implementation details
+       - Step-by-step rendering walkthroughs
+       - Code samples that duplicate source files
+    4. Preserve:
+       - Layout decisions and architectural rationale
+       - Platform constraints (React version, Fluent UI version, PCF limitations)
+       - Cross-component integration patterns and boundaries
+       - ADR references and design decisions
+    5. Record before/after line counts for each file.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Trimmed: ui-dialog-shell-architecture.md, universal-dataset-grid-architecture.md, SIDE-PANE-PLATFORM-ARCHITECTURE.md, sdap-pcf-patterns.md, sdap-workspace-integration-patterns.md, VISUALHOST-ARCHITECTURE.md
+    - Before/after line counts recorded
+  </outputs>
+  <acceptance-criteria>
+    - All decision/constraint content is preserved in trimmed files
+    - Each trimmed file is at least 30% shorter than the original
+    - Platform constraints (React versions, Fluent UI, PCF rules) are intact
+    - No component prop definitions or CSS implementation details remain
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,42 @@
+<task id="009" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, patterns</tags>
+    <phase>1</phase>
+    <estimate>30m</estimate>
+    <dependencies>001, 002, 003, 004, 005, 006, 007, 008</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Update .claude/patterns/INDEX.md to reflect new pointer format across all subdirectories</goal>
+    <context>
+      Part of AI Procedure Refactoring R1. Tasks 001-008 converted all pattern files from inline code examples to pointer format (max 25 lines each). This task updates the top-level INDEX.md to reflect the new structure, ensuring it accurately describes the pointer-based pattern files and their purposes.
+    </context>
+    <constraints>
+      - Do NOT modify any pattern files — only update INDEX.md
+      - Ensure all subdirectory entries are accurate after conversions
+      - Preserve the overall organization of the index
+      - Reflect the new pointer format in descriptions
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read current .claude/patterns/INDEX.md</step>
+    <step>Read each subdirectory INDEX.md to understand current state after conversions</step>
+    <step>Update the top-level INDEX.md to accurately describe all pointer-format pattern files</step>
+    <step>Verify all listed files and paths are correct</step>
+  </steps>
+  <tools>Read, Edit, Glob</tools>
+  <outputs>
+    <output>Updated .claude/patterns/INDEX.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>INDEX.md accurately lists all pattern subdirectories and files</criterion>
+    <criterion>Descriptions reflect pointer format (not inline code)</criterion>
+    <criterion>All file paths in INDEX.md resolve to existing files</criterion>
+  </acceptance-criteria>
+</task>

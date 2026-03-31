@@ -1,0 +1,50 @@
+<task id="090" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, wrap-up</tags>
+    <phase>5</phase>
+    <estimate>0.5h</estimate>
+    <dependencies>030</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Update README status to Complete, create lessons-learned.md, report final metrics (before/after line counts)</goal>
+    <context>All implementation phases are complete. This task wraps up the project by collecting final metrics, documenting lessons learned, and updating project status artifacts. The key metrics to report are before/after line counts for .claude/patterns/ (target ~1,500 lines) and docs/architecture/ (target ~5,000 lines).</context>
+    <constraints>Do not modify any source files — this is a reporting and status-update task only. Line count targets are guidelines, not hard requirements. Lessons learned should be honest and actionable.</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Count total lines in .claude/patterns/ (target ~1,500 lines).
+       Run: find .claude/patterns/ -name "*.md" -exec wc -l {} + | tail -1
+    2. Count total lines in docs/architecture/ (target ~5,000 lines).
+       Run: find docs/architecture/ -name "*.md" -exec wc -l {} + | tail -1
+    3. Count total lines in docs/guides/ for comparison.
+    4. Collect before/after metrics from task notes (notes/architecture-audit.md, individual task records).
+    5. Update projects/ai-procedure-refactoring-r1/README.md:
+       - Set status to "Complete"
+       - Add final metrics summary
+    6. Create notes/lessons-learned.md with:
+       - What worked well
+       - What was harder than expected
+       - Recommendations for future documentation maintenance
+       - Final metrics table (before/after for each area)
+    7. Update TASK-INDEX.md — set all completed tasks to final status.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Modified: README.md (status updated to Complete)
+    - Created: notes/lessons-learned.md
+    - Modified: TASK-INDEX.md (final statuses)
+  </outputs>
+  <acceptance-criteria>
+    - README.md shows project status as Complete
+    - notes/lessons-learned.md exists with metrics and recommendations
+    - Final line counts are reported for .claude/patterns/ and docs/architecture/
+    - TASK-INDEX.md reflects final task statuses
+    - No source files were modified
+  </acceptance-criteria>
+</task>

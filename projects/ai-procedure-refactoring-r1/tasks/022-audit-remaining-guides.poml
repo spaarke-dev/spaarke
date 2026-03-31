@@ -1,0 +1,46 @@
+<task id="022" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, guides, audit</tags>
+    <phase>3</phase>
+    <estimate>1.5h</estimate>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Audit remaining docs/guides/ for top 10 most drift-prone files, add TODO markers or trim implementation sections</goal>
+    <context>After the playbook guide consolidation (task 020), the remaining docs/guides/ files need auditing for drift — sections that describe implementation details which may have diverged from the actual code. This task identifies the top 10 most drift-prone files and either adds TODO markers for future attention or trims clearly outdated implementation sections.</context>
+    <constraints>Do not delete any files in this task — only trim sections or add TODO markers. Focus on the top 10 most drift-prone files rather than auditing everything. TODO markers should follow the format: &lt;!-- TODO(ai-procedure-refactoring): description --&gt;</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. List all remaining files in docs/guides/ (excluding any deleted by task 020).
+    2. Read the first 50 lines of each file to assess drift risk.
+    3. Rank files by drift risk based on:
+       - Amount of implementation detail (code samples, config snippets)
+       - Likelihood of code divergence (references to specific file paths, class names)
+       - Age indicators (dates, version numbers)
+    4. Select the top 10 most drift-prone files.
+    5. For each of the top 10:
+       - If implementation sections are clearly outdated, trim them
+       - If sections may be outdated but need verification, add TODO markers
+       - Record what was done and why
+    6. Write audit results to notes/guides-audit.md.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Modified: Up to 10 guide files (trimmed or TODO-marked)
+    - Created: notes/guides-audit.md with audit results and drift risk rankings
+  </outputs>
+  <acceptance-criteria>
+    - Top 10 most drift-prone files are identified and ranked
+    - Each of the top 10 has either been trimmed or has TODO markers added
+    - TODO markers follow the specified format
+    - No files were deleted
+    - Audit results are documented in notes/guides-audit.md
+  </acceptance-criteria>
+</task>

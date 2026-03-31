@@ -1,0 +1,52 @@
+<task id="030" project="ai-procedure-refactoring-r1">
+  <metadata>
+    <tags>documentation, refactoring, claude-md</tags>
+    <phase>4</phase>
+    <estimate>1.5h</estimate>
+    <dependencies>001, 002, 003, 010, 011, 012, 013, 014, 015, 020, 021, 022</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    <goal>Update root CLAUDE.md — replace Documentation section with Architecture Discovery section. Add system entry points table. Add "Read Code First, Docs Second" rule. Validate all pointer paths across .claude/patterns/. Validate no broken references in skills/tasks. Update .claude/skills/INDEX.md if needed.</goal>
+    <context>After Phases 1-3, the documentation landscape has changed significantly: architecture docs are trimmed, guides are consolidated, and patterns files are converted. The root CLAUDE.md must be updated to reflect this new reality. The Documentation section should be replaced with an Architecture Discovery section that teaches Claude how to find information efficiently — starting with code, then patterns, then docs as a last resort.</context>
+    <constraints>This task modifies the root CLAUDE.md which affects all future Claude Code sessions. Changes must be precise and validated. All pointer paths in .claude/patterns/ must be verified to point to existing files. All references in .claude/skills/ and projects/*/tasks/ to deleted docs must be updated. Do not remove any content from CLAUDE.md that is unrelated to the Documentation section.</constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r1/spec.md</file>
+      <file>projects/ai-procedure-refactoring-r1/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    1. Read current CLAUDE.md Documentation section (between "## Documentation" and next "##" header).
+    2. Draft new Architecture Discovery section with:
+       a. "Read Code First, Docs Second" principle
+       b. System entry points table (key files/directories for each subsystem)
+       c. Updated loading strategy reflecting trimmed/consolidated docs
+       d. Clear hierarchy: code > .claude/patterns/ > .claude/adr/ > docs/architecture/ > docs/guides/
+    3. Replace the Documentation section in CLAUDE.md with the new Architecture Discovery section.
+    4. Grep all .claude/patterns/*.md files for "Read:" or file path references, verify each path exists.
+    5. Fix any broken paths found in .claude/patterns/.
+    6. Grep .claude/skills/ for references to any files deleted in tasks 011, 020, 021.
+    7. Grep projects/*/tasks/ for references to any files deleted in tasks 011, 020, 021.
+    8. Fix any broken references found.
+    9. Read .claude/skills/INDEX.md and update if any skill references changed.
+    10. Verify CLAUDE.md is syntactically valid markdown.
+  </steps>
+  <tools>Read, Edit, Glob, Grep, Bash</tools>
+  <outputs>
+    - Modified: CLAUDE.md (Documentation section replaced with Architecture Discovery section)
+    - Fixed: Any broken paths in .claude/patterns/
+    - Fixed: Any broken references in .claude/skills/ and projects/*/tasks/
+    - Modified: .claude/skills/INDEX.md if references changed
+  </outputs>
+  <acceptance-criteria>
+    - CLAUDE.md has an Architecture Discovery section replacing the old Documentation section
+    - "Read Code First, Docs Second" rule is prominently stated
+    - System entry points table is present with key files for each subsystem
+    - All paths referenced in .claude/patterns/ point to existing files
+    - No broken references to deleted docs remain in .claude/skills/ or projects/*/tasks/
+    - .claude/skills/INDEX.md is up to date
+    - No unrelated CLAUDE.md content was modified
+  </acceptance-criteria>
+</task>
