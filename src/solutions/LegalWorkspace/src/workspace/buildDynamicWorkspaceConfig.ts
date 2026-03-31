@@ -210,7 +210,8 @@ export function buildDynamicWorkspaceConfig(
  * Handles common patterns: "1fr 1fr" → 2, "1fr 2fr" → 2, "1fr" → 1,
  * "repeat(3, 1fr)" → 3.
  */
-function countSlots(gridTemplateColumns: string): number {
+function countSlots(gridTemplateColumns: string | undefined): number {
+  if (!gridTemplateColumns) return 1;
   const trimmed = gridTemplateColumns.trim();
 
   // Handle repeat() notation: "repeat(3, 1fr)" → 3

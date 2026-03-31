@@ -43,6 +43,8 @@ import type { WizardMode } from "./main";
 /** Parsed LayoutJson row — mirrors the BFF LayoutJsonRow shape for sectionsJson parsing. */
 interface LayoutJsonRow {
   id: string;
+  columns: string;
+  columnsSmall?: string;
   sections: string[];
 }
 
@@ -171,7 +173,12 @@ function buildSectionsJson(
       const sectionId = assignments.get(`${row.id}:${col}`);
       sections.push(sectionId ?? "");
     }
-    return { id: row.id, sections };
+    return {
+      id: row.id,
+      columns: row.gridTemplateColumns,
+      columnsSmall: row.gridTemplateColumnsSmall,
+      sections,
+    };
   });
 
   return JSON.stringify({ schemaVersion: 1, rows } satisfies LayoutJson);
