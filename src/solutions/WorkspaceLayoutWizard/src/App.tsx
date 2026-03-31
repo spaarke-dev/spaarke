@@ -410,6 +410,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         ref={wizardRef}
         open={true}
         embedded={true}
+        hideTitle={true}
         ariaLabel={wizardTitle}
         steps={steps}
         onClose={() => {
