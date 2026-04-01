@@ -22,6 +22,23 @@ public static class AuthorizationModule
         services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
             .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
 
+        // Accept tokens from M365 Copilot API Plugin (uses a different audience URI
+        // issued via the Teams Developer Portal Entra SSO registration)
+        services.Configure<JwtBearerOptions>(
+            JwtBearerDefaults.AuthenticationScheme,
+            options =>
+            {
+                var copilotAudience = configuration["AgentToken:CopilotAudience"];
+                if (!string.IsNullOrEmpty(copilotAudience))
+                {
+                    options.TokenValidationParameters.ValidAudiences =
+                    [
+                        configuration["AzureAd:Audience"] ?? $"api://{configuration["AzureAd:ClientId"]}",
+                        copilotAudience
+                    ];
+                }
+            });
+
         // Register authorization handler (Scoped to match AuthorizationService dependency)
         services.AddScoped<IAuthorizationHandler, ResourceAccessHandler>();
 
