@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Build TldrSection, ActivityNotesSection, and NarrativeBullet components</title>
+    <phase>8: Narrative Redesign</phase>
+    <status>pending</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>100</dependencies>
+    <blocks>105</blocks>
+    <tags>frontend, react, typescript, fluent-ui, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core UI components for redesign</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Build five new components for the narrative briefing layout. 1) TldrSection.tsx: renders 5-7 sentence AI briefing with top action callout in a subtle card (colorNeutralBackground2, borderRadiusLarge). Shows "AI Insight" badge, generation timestamp, category/item counts. Loading skeleton state. Fallback to template narrative when AI unavailable. 2) ActivityNotesSection.tsx: renders all channel headings + bullets in a flat scrollable layout. Each channel is a ChannelHeading followed by NarrativeBullet items. spacingVerticalXXL between sections. 3) ChannelHeading.tsx: channel icon + label + item count badge. Simple heading with bottom border, no accordion. 4) NarrativeBullet.tsx: prose narrative text + clickable record hyperlink (opens entity in dialog via Xrm.Navigation.navigateTo target:2) + MicrosoftToDoIcon button + Dismiss (X) button. 5) CaughtUpFooter.tsx: "You're caught up on: {channel1}, {channel2}" for zero-item channels.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>All narrative UI components built with Fluent v9 tokens and proper spacing</goal>
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/components/</file>
+      <file>src/solutions/DailyBriefing/src/types/notifications.ts</file>
+    </relevant-files>
+  </context>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create TldrSection.tsx with AI Insight badge, top action, skeleton loading.</step>
+    <step order="2">Create ChannelHeading.tsx with icon, label, count.</step>
+    <step order="3">Create NarrativeBullet.tsx with narrative text, record link, To Do icon, Dismiss X.</step>
+    <step order="4">Create ActivityNotesSection.tsx composing ChannelHeading + NarrativeBullet per channel.</step>
+    <step order="5">Create CaughtUpFooter.tsx listing zero-item channels.</step>
+    <step order="6">Apply spacing tokens: spacingVerticalXXL between sections, spacingVerticalL between bullets, spacingVerticalM heading to bullet.</step>
+    <step order="7">Build to verify all components.</step>
+  </steps>
+  <outputs>
+    <output type="code">TldrSection.tsx in DailyBriefing/src/components/</output>
+    <output type="code">ChannelHeading.tsx in DailyBriefing/src/components/</output>
+    <output type="code">NarrativeBullet.tsx in DailyBriefing/src/components/</output>
+    <output type="code">ActivityNotesSection.tsx in DailyBriefing/src/components/</output>
+    <output type="code">CaughtUpFooter.tsx in DailyBriefing/src/components/</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All 5 components render correctly without errors.</criterion>
+    <criterion testable="true">Fluent v9 tokens used exclusively — no hard-coded colors or spacing.</criterion>
+    <criterion testable="true">Dark mode works correctly for all components.</criterion>
+    <criterion testable="true">Spacing matches spec: spacingVerticalXXL between sections, spacingVerticalL between bullets.</criterion>
+    <criterion testable="true">Record links open entity dialogs via Xrm.Navigation.navigateTo target:2.</criterion>
+    <criterion testable="true">Build succeeds with no errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
