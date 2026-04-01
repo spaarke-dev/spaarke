@@ -26,6 +26,14 @@ public static class ReportingModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        // Only register PBI services if config is present — prevents startup crash
+        // when PowerBi__TenantId/ClientId/ClientSecret are not configured.
+        var pbiSection = configuration.GetSection("PowerBi");
+        if (string.IsNullOrEmpty(pbiSection["TenantId"]))
+        {
+            return services;
+        }
+
         // 1 of 2 — ADR-010: holds MSAL ConfidentialClientApplication (stateful, thread-safe singleton).
         services.AddSingleton<ReportingEmbedService>();
 
