@@ -54,6 +54,13 @@ public static class ReportingModule
     /// <param name="app">The built <see cref="WebApplication"/>.</param>
     public static void MapReportingEndpoints(this WebApplication app)
     {
+        // Only map endpoints if PBI services were registered (config present).
+        // Mapping endpoints without the DI registration causes a startup crash because
+        // ASP.NET infers ReportingEmbedService as a body parameter on GET endpoints.
+        var pbiSection = app.Configuration.GetSection("PowerBi");
+        if (string.IsNullOrEmpty(pbiSection["TenantId"]))
+            return;
+
         app.MapReportingEndpointGroup();
     }
 }
