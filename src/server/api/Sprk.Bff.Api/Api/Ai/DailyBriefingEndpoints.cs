@@ -338,12 +338,14 @@ public static class DailyBriefingEndpoints
     internal static string BuildNarrateTldrPrompt(DailyBriefingNarrateRequest request)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("You are a concise executive assistant. Summarize the user's daily notifications into a prioritized briefing of 5-7 sentences.");
+        sb.AppendLine("You are a concise executive assistant writing a daily briefing for a legal professional.");
+        sb.AppendLine("Summarize the user's daily notifications into a prioritized briefing of 5-7 sentences.");
+        sb.AppendLine("IMPORTANT: Reference specific names, titles, matters, and entities from the data below. Do NOT write vague summaries like 'you have one overdue task'. Instead write 'The Acme Corp engagement letter review is 2 days overdue'.");
         sb.AppendLine("Focus on what requires immediate attention first, then provide context on volume and trends.");
-        sb.AppendLine("Do NOT use bullet points. Write in natural prose. Be specific about counts and categories.");
+        sb.AppendLine("Do NOT use bullet points. Write in natural prose.");
         sb.AppendLine("End with a sentence identifying the single most important action for today, starting with 'Your most important action today is...'");
         sb.AppendLine();
-        sb.AppendLine("=== Notification Summary ===");
+        sb.AppendLine("=== Notification Data ===");
 
         if (request.Categories.Length > 0)
         {
@@ -351,6 +353,7 @@ public static class DailyBriefingEndpoints
             sb.AppendLine("Categories:");
             foreach (var cat in request.Categories)
             {
+                if (string.Equals(cat.Name, "System", StringComparison.OrdinalIgnoreCase)) continue;
                 sb.AppendLine($"- {cat.Name}: {cat.Count} notification(s){(cat.UnreadCount > 0 ? $" ({cat.UnreadCount} unread)" : "")}");
             }
         }
@@ -358,10 +361,30 @@ public static class DailyBriefingEndpoints
         if (request.PriorityItems.Length > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("Top Priority Items:");
+            sb.AppendLine("Top Priority Items (reference these by name!):");
             foreach (var item in request.PriorityItems)
             {
                 sb.AppendLine($"- [{item.Category}] {item.Title}{(item.DueDate.HasValue ? $" (due {item.DueDate.Value:yyyy-MM-dd})" : "")}");
+            }
+        }
+
+        // Include per-channel item details so AI can reference specific names
+        if (request.Channels.Length > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Item Details (reference specific names and matters!):");
+            foreach (var channel in request.Channels)
+            {
+                if (string.Equals(channel.Category, "system", StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (var item in channel.Items)
+                {
+                    var parts = new List<string> { item.Title };
+                    if (!string.IsNullOrEmpty(item.RegardingName))
+                        parts.Add($"on {item.RegardingName}");
+                    if (item.Priority != "normal")
+                        parts.Add($"[{item.Priority}]");
+                    sb.AppendLine($"  - {string.Join(" ", parts)}");
+                }
             }
         }
 
@@ -372,7 +395,7 @@ public static class DailyBriefingEndpoints
         }
 
         sb.AppendLine();
-        sb.AppendLine("Write a 5-7 sentence briefing:");
+        sb.AppendLine("Write a 5-7 sentence briefing referencing specific names and entities:");
 
         return sb.ToString();
     }

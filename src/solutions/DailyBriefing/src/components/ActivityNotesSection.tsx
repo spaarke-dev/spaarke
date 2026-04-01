@@ -171,8 +171,13 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
     );
   }
 
+  // Filter out "system" category — not actionable for users
+  const filteredNarratives = channelNarratives.filter(
+    (cn) => cn.category !== "system"
+  );
+
   // No narratives
-  if (channelNarratives.length === 0) {
+  if (filteredNarratives.length === 0) {
     return null;
   }
 
@@ -186,7 +191,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
       >
         Activity Notes
       </Text>
-      {channelNarratives.map((channel) => (
+      {filteredNarratives.map((channel) => (
         <div key={channel.category} className={styles.channelSection}>
           <ChannelHeading
             icon={resolveChannelIcon(channel.category)}

@@ -40,7 +40,7 @@ const useStyles = makeStyles({
   },
   heading: {
     marginTop: "0",
-    marginBottom: tokens.spacingVerticalS,
+    marginBottom: tokens.spacingVerticalM,
   },
   aiBadge: {
     position: "absolute",
@@ -231,11 +231,11 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
       >
         AI Insight
       </Badge>
-      <Text size={300} className={styles.briefingText}>
+      <Text size={400} className={styles.briefingText}>
         {tldr.briefing}
       </Text>
       {tldr.topAction && (
-        <Text size={300} weight="semibold" className={styles.topAction}>
+        <Text size={400} weight="semibold" className={styles.topAction}>
           {tldr.topAction}
         </Text>
       )}

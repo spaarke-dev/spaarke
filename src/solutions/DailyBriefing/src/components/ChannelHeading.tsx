@@ -26,7 +26,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     paddingBottom: tokens.spacingVerticalS,
-    marginBottom: tokens.spacingVerticalM,
+    marginBottom: tokens.spacingVerticalL,
   },
   icon: {
     fontSize: "20px",

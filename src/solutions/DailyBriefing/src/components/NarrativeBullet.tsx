@@ -117,15 +117,20 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   const styles = useStyles();
 
   const handleLinkClick = () => {
+    if (!primaryEntityType || !primaryEntityId) return;
     const xrm =
       (window as any)?.Xrm ??
       (window.parent as any)?.Xrm ??
       (window.top as any)?.Xrm;
-    if (!xrm?.Navigation?.openForm) return;
-    xrm.Navigation.openForm({
-      entityName: primaryEntityType,
-      entityId: primaryEntityId,
-    });
+    if (!xrm?.Navigation?.navigateTo) return;
+    xrm.Navigation.navigateTo(
+      {
+        pageType: "entityrecord",
+        entityName: primaryEntityType,
+        entityId: primaryEntityId,
+      },
+      { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } }
+    ).catch(() => { /* user closed dialog */ });
   };
 
   const handleAddToTodo = () => {
@@ -145,25 +150,27 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
 
   return (
     <div className={styles.root}>
-      <Text size={300} className={styles.bullet}>
+      <Text size={400} className={styles.bullet}>
         &bull;
       </Text>
       <div className={styles.content}>
-        <Text size={300} className={styles.narrativeText}>
+        <Text size={400} className={styles.narrativeText}>
           {narrative}
         </Text>
-        <Text
-          size={200}
-          className={styles.entityLink}
-          onClick={handleLinkClick}
-          role="link"
-          tabIndex={0}
-          onKeyDown={(e: React.KeyboardEvent) => {
-            if (e.key === "Enter" || e.key === " ") handleLinkClick();
-          }}
-        >
-          {primaryEntityName} &#8599;
-        </Text>
+        {primaryEntityName && primaryEntityType && primaryEntityId && (
+          <Text
+            size={300}
+            className={styles.entityLink}
+            onClick={handleLinkClick}
+            role="link"
+            tabIndex={0}
+            onKeyDown={(e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") handleLinkClick();
+            }}
+          >
+            {primaryEntityName} &#8599;
+          </Text>
+        )}
       </div>
       <div className={styles.actions}>
         <Tooltip content={todoTooltip} relationship="label">
