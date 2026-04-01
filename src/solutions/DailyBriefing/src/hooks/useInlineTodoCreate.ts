@@ -38,19 +38,21 @@ export interface UseInlineTodoCreateResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Map notification priority string to Dataverse sprk_priority choice value. */
+/** Map notification priority string to Dataverse sprk_priority option set value.
+ * Values: 100000000=Low, 100000001=Normal, 100000002=High, 100000003=Urgent
+ * (per CreateTodo/formTypes.ts) */
 function mapPriorityToOptionSet(priority: NotificationPriority): number {
   switch (priority) {
     case "urgent":
-      return 3;
+      return 100000003;
     case "high":
-      return 2;
+      return 100000002;
     case "normal":
-      return 1;
+      return 100000001;
     case "low":
-      return 0;
+      return 100000000;
     default:
-      return 1; // default to normal
+      return 100000001; // default to normal
   }
 }
 
