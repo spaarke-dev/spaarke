@@ -24,7 +24,7 @@
 
 ## App Service Configuration
 
-<!-- TODO(ai-procedure-refactoring): App Service setting keys below (DocumentIntelligence__, ScheduledRagIndexing__, etc.) are derived from DocumentIntelligenceOptions bindings — verify all keys still match the current options class hierarchy if the configuration schema has been updated -->
+> **Authoritative source**: Options classes in `src/server/api/Sprk.Bff.Api/Configuration/`. Key prefixes are set by `SectionName` constants: `DocumentIntelligenceOptions.SectionName = "DocumentIntelligence"`, `ScheduledRagIndexingOptions.SectionName = "ScheduledRagIndexing"`. Verify these classes if the configuration schema changes.
 
 ### Required Settings
 
@@ -61,7 +61,6 @@ Configure these in Azure App Service > Configuration > Application Settings:
 | `ServiceBus__QueueName` | No | `sdap-jobs` | Queue name for job processing |
 
 **Resource Details (Dev Environment)**:
-<!-- TODO(ai-procedure-refactoring): Dev environment resource names (spe-api-dev-67e2xz, spe-infrastructure-westus2, spaarke-servicebus-dev) are authoritative in CLAUDE.md — this section should match; verify Key Vault URI still points to correct secret name -->
 - **Namespace**: `spaarke-servicebus-dev`
 - **Queue**: `sdap-jobs`
 - **Region**: West US 2

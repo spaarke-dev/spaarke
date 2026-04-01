@@ -113,7 +113,7 @@ az provider show --namespace Microsoft.Syntex --query "registrationState"
 
 ## 3. Azure Resource Creation
 
-<!-- TODO(ai-procedure-refactoring): Inline az CLI commands below use inline resource creation — verify these commands are still the canonical approach vs using the bicep scripts in infrastructure/bicep/ which may have superseded manual CLI steps -->
+> **Prefer Bicep scripts in `infrastructure/` for reproducible deployments.** The Bicep modules in `infrastructure/bicep/` cover all resources below (App Service, Key Vault, OpenAI, AI Search, Redis, Service Bus, etc.) and should be used for new environment provisioning. The CLI commands below are for reference only — useful for one-off fixes or when you need to understand what a Bicep module does.
 
 All resources follow the [naming convention v3](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). Each environment gets one resource group with all resources.
 
@@ -375,8 +375,6 @@ pac solution export --name SpaarkeFeatures --path ./exports/SpaarkeFeatures.zip 
 ```
 
 ### Fix Pipeline (REQUIRED before import)
-
-<!-- TODO(ai-procedure-refactoring): The fix pipeline sed commands below patch specific PCF control names (SpeDocumentViewer, sprk_LawFirmCaseManagement, etc.) and canvas app names (AnalysisBuilder, AnalysisWorkspace, PlaybookBuilderHost) — verify these are still the correct names to remove and that no new controls/apps have been added that require additional sed steps -->
 
 The exported solution contains issues that must be fixed before importing to a new environment:
 

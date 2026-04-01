@@ -58,7 +58,7 @@ The platform maintains several Azure AI Search indexes, each using the same embe
 
 ### Index Inventory
 
-<!-- TODO(ai-procedure-refactoring): Index inventory below may be stale — verify current index names, vector field names, and chunk sizes against the RagIndexingPipeline implementation and Azure AI Search resource; new indexes may have been added since 2026-03-05 -->
+> **Authoritative source**: Index names are defined as defaults in `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs` (`KnowledgeIndexName`, `DiscoveryIndexName`, `RagReferencesIndexName`) and overridable via appsettings. The invoice index name is a constant in `Services/Finance/InvoiceSearchService.cs`. If new indexes are added, update this table and the corresponding Options class.
 
 | Index Name | Purpose | Embedding Model | Dimensions | Vector Field(s) | Chunk Size | Estimated Scale |
 |------------|---------|----------------|------------|------------------|------------|-----------------|

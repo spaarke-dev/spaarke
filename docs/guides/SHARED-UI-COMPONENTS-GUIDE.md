@@ -55,8 +55,6 @@ import { AiSummaryPopover, FindSimilarDialog, WizardShell } from "@spaarke/ui-co
 
 **Build order matters**: Always build the shared library *before* building consumers (PCF, Code Pages). Consumer builds resolve imports from `dist/`.
 
-<!-- TODO(ai-procedure-refactoring): Known tsc error list (ViewSelector, PageChrome, RichTextEditor, SprkChat) may be stale — components may have been fixed or new ones added; verify against current build output -->
-
 **Pre-existing tsc errors**: The library has known tsc errors in ViewSelector, PageChrome, RichTextEditor, and SprkChat. These do not block emit (`noEmitOnError` is not set), so `dist/` is always produced.
 
 ---
@@ -120,7 +118,7 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 
 ## Component Inventory
 
-<!-- TODO(ai-procedure-refactoring): Component inventory tables below are a snapshot from 2026-03-30 — new components added to the shared library will not appear here; check src/client/shared/Spaarke.UI.Components/src/components/ for the authoritative list -->
+> **Authoritative component list**: For the current list of all components, check `src/client/shared/Spaarke.UI.Components/src/components/`. The tables below are a point-in-time snapshot and may not reflect recently added components.
 
 ### Shell & Wizard Components (`src/components/`)
 

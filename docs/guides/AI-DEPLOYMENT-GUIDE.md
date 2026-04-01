@@ -65,8 +65,6 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 - `RagIndexingJobHandler` for background processing
 - Idempotency with Redis-based locks
 
-<!-- TODO(ai-procedure-refactoring): PCF control versions (AnalysisBuilder v1.12.0, AnalysisWorkspace v1.0.29) are pinned here but advance with every deployment — verify current deployed versions from Dataverse solutions view or ControlManifest.Input.xml files before troubleshooting version mismatches -->
-
 ### Architecture Components
 
 | Component | Purpose | Version/Status |
@@ -77,8 +75,6 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 | Document Intelligence | Document parsing | westus2 |
 | AI Foundry | Prompt Flow orchestration | sprkspaarkedev-aif-hub |
 | Dataverse | Entity storage for Analysis records | sprk_analysis |
-| AnalysisBuilder PCF | Analysis configuration dialog | v1.12.0 |
-| AnalysisWorkspace PCF | Analysis workspace with chat | v1.0.29 |
 | Custom Pages | Power Apps hosts for PCF controls | Deployed |
 | KnowledgeDeploymentService | Multi-tenant RAG deployment routing | R3 (Active) |
 | FileIndexingService | Unified RAG file indexing pipeline | R3+RAG-R1 (Active) |
@@ -754,7 +750,7 @@ Without these, you'll see: `⚠ RAG services disabled (requires DocumentIntellig
 
 ## Complete App Service Configuration
 
-<!-- TODO(ai-procedure-refactoring): This entire section lists all App Service configuration keys for the dev environment — any new feature that adds config keys will not appear here; cross-check against appsettings.json and the configuration options classes in Sprk.Bff.Api before deploying to a new environment -->
+> **Note**: This section documents known configuration keys as of the last update. The authoritative source for all configuration keys is the Options classes in `src/server/api/Sprk.Bff.Api/Configuration/` and `src/server/api/Sprk.Bff.Api/Options/`. Cross-check those classes against `appsettings.json` before deploying to a new environment.
 
 **App Service Name**: `spe-api-dev-67e2xz`
 

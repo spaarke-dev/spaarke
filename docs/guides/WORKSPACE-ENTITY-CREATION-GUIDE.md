@@ -35,8 +35,6 @@ The Legal Workspace provides multi-step wizards for creating Dataverse entity re
 
 ### Key Components
 
-<!-- TODO(ai-procedure-refactoring): Component file paths below (EntityCreationService.ts, useAiPrefill.ts, etc.) are relative to the shared library source — verify these paths still exist if the library was restructured; also verify MatterService and ProjectService still exist as separate files vs consolidated -->
-
 #### Shared Library (`src/client/shared/Spaarke.UI.Components/`)
 
 | Component | Location | Purpose |
@@ -57,7 +55,7 @@ The Legal Workspace provides multi-step wizards for creating Dataverse entity re
 | **ProjectService** | `components/CreateProject/projectService.ts` | Project-specific orchestrator |
 | **xrmProvider.ts** | `services/xrmProvider.ts` | Frame-walk to find Xrm global, user ID, SPE container resolution |
 | **bffAuthProvider.ts** | `services/bffAuthProvider.ts` | OBO token acquisition for BFF API calls |
-| **bffConfig.ts** | `config/bffConfig.ts` | BFF base URL configuration |
+| **runtimeConfig.ts** | `config/runtimeConfig.ts` | BFF base URL and MSAL configuration |
 
 ---
 
