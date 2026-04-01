@@ -30,6 +30,9 @@ export const REPORTING_ACCESS_ROLE = "sprk_ReportingAccess";
 // BFF API endpoint paths (relative to BFF base URL)
 // ---------------------------------------------------------------------------
 
+/** BFF endpoint to check module status (module gate + auth check without a specific report) */
+export const REPORTING_STATUS_PATH = "/api/reporting/status";
+
 /** BFF endpoint to fetch the embed token for a given report */
 export const REPORTING_EMBED_TOKEN_PATH = "/api/reporting/embed-token";
 

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Workers.Office;
 
@@ -34,6 +35,9 @@ builder.Services.AddWorkersModule(builder.Configuration);
 
 // Office Add-in module
 builder.Services.AddOfficeModule();
+
+// Reporting module (Power BI Embedded — ReportingEmbedService + ReportingProfileManager)
+builder.Services.AddReportingModule(builder.Configuration);
 
 // Legal Operations Workspace module
 builder.Services.AddWorkspaceServices(builder.Configuration);

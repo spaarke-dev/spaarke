@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Client;
 using Microsoft.PowerBI.Api;
@@ -12,10 +14,12 @@ namespace Sprk.Bff.Api.Api.Reporting;
 ///
 /// Follows ADR-001 (Minimal API — registered in DI, thin facade),
 /// ADR-007 (no SDK types leak above this facade — all public methods return DTOs),
+/// ADR-009 (embed tokens cached in Redis with TTL matching token expiry, proactive refresh at 80% TTL),
 /// ADR-010 (counts as 1 of ≤2 DI registrations for the Reporting module).
 ///
 /// MSAL caches the SP access token in-process; no custom distributed cache is needed for the raw
-/// access token because embed tokens themselves are cached separately at the endpoint layer (ADR-009).
+/// access token. Embed tokens are cached in Redis with the key format
+/// <c>pbi:embed:{workspaceId}:{reportId}:{userId}</c> to reduce Power BI API round-trips.
 /// </summary>
 public sealed class ReportingEmbedService
 {
@@ -35,15 +39,37 @@ public sealed class ReportingEmbedService
     /// <summary>Maximum number of export status polls before throwing <see cref="TimeoutException"/>.</summary>
     private const int ExportMaxPolls = 30;
 
+    /// <summary>
+    /// Fraction of a token's remaining lifetime that must still be available for a cached token
+    /// to be considered fresh. Tokens with less than 20% of their original TTL remaining are
+    /// treated as near-expiry and regenerated proactively (ADR-009 proactive refresh rule).
+    /// </summary>
+    private const double FreshThresholdFraction = 0.20;
+
+    /// <summary>
+    /// The client should call <c>report.setAccessToken()</c> once 80% of the token's original
+    /// lifetime has elapsed — i.e. at 80% of total TTL from the issue time.
+    /// </summary>
+    private const double ClientRefreshFraction = 0.80;
+
+    /// <summary>JSON options used to serialize/deserialize <see cref="CachedEmbedEntry"/> to/from Redis.</summary>
+    private static readonly JsonSerializerOptions CacheJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private readonly PowerBiOptions _options;
+    private readonly IDistributedCache _cache;
     private readonly ILogger<ReportingEmbedService> _logger;
     private readonly IConfidentialClientApplication _cca;
 
     public ReportingEmbedService(
         IOptions<PowerBiOptions> options,
+        IDistributedCache cache,
         ILogger<ReportingEmbedService> logger)
     {
         _options = options.Value;
+        _cache = cache;
         _logger = logger;
 
         // Build MSAL ConfidentialClientApplication once; MSAL manages the in-process token cache.
@@ -59,8 +85,19 @@ public sealed class ReportingEmbedService
     // -----------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Generates a Power BI embed token for the specified report.
-    /// Optionally includes an <c>EffectiveIdentity</c> for Row-Level Security (RLS) enforcement.
+    /// Returns a Power BI embed configuration for the specified report.
+    ///
+    /// Implements a cache-aside pattern (ADR-009):
+    /// <list type="bullet">
+    ///   <item>Cache key: <c>pbi:embed:{workspaceId}:{reportId}:{userId}</c></item>
+    ///   <item>Cache HIT and token fresh (&gt;20% TTL remaining): return cached value immediately.</item>
+    ///   <item>Cache HIT but token near-expiry (&lt;20% TTL remaining): regenerate proactively.</item>
+    ///   <item>Cache MISS: generate token, cache with TTL matching token expiry, return result.</item>
+    /// </list>
+    ///
+    /// The returned <see cref="EmbedConfig.RefreshAfter"/> tells the client when to call
+    /// <c>report.setAccessToken()</c> — at 80% of the token's total lifetime — before the token
+    /// expires in the browser.
     /// </summary>
     /// <param name="workspaceId">Power BI workspace (group) GUID containing the report.</param>
     /// <param name="reportId">Report GUID to embed.</param>
@@ -77,7 +114,7 @@ public sealed class ReportingEmbedService
     ///   When supplied, the <c>X-PowerBI-Profile-Id</c> header is added to scope the call.
     /// </param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns><see cref="EmbedConfig"/> containing the embed token, URL, report ID, and expiry.</returns>
+    /// <returns><see cref="EmbedConfig"/> containing the embed token, URL, report ID, expiry, and refresh hint.</returns>
     public async Task<EmbedConfig> GetEmbedConfigAsync(
         Guid workspaceId,
         Guid reportId,
@@ -85,6 +122,91 @@ public sealed class ReportingEmbedService
         IList<string>? roles,
         Guid? profileId = null,
         CancellationToken ct = default)
+    {
+        var cacheKey = BuildEmbedCacheKey(workspaceId, reportId, username);
+
+        // --- Cache-aside: check Redis first ---
+        try
+        {
+            var cached = await _cache.GetStringAsync(cacheKey, ct);
+            if (cached != null)
+            {
+                var entry = JsonSerializer.Deserialize<CachedEmbedEntry>(cached, CacheJsonOptions);
+                if (entry != null)
+                {
+                    var remaining = entry.Expiry - DateTimeOffset.UtcNow;
+                    var totalTtl = entry.Expiry - entry.IssuedAt;
+
+                    // Token is considered fresh when more than 20% of its original lifetime remains.
+                    var isFresh = totalTtl.TotalSeconds > 0 &&
+                                  remaining.TotalSeconds / totalTtl.TotalSeconds > FreshThresholdFraction;
+
+                    if (isFresh)
+                    {
+                        _logger.LogDebug(
+                            "Embed token cache HIT for report {ReportId} (remaining TTL: {RemainingSeconds:F0}s)",
+                            reportId, remaining.TotalSeconds);
+                        return entry.ToEmbedConfig();
+                    }
+
+                    _logger.LogInformation(
+                        "Embed token for report {ReportId} is near expiry ({RemainingSeconds:F0}s remaining, " +
+                        "threshold {ThresholdPct}%) — regenerating proactively",
+                        reportId, remaining.TotalSeconds, (int)(FreshThresholdFraction * 100));
+                }
+            }
+            else
+            {
+                _logger.LogDebug("Embed token cache MISS for report {ReportId}", reportId);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Cache read failure must never block token generation (ADR-009: graceful degradation).
+            _logger.LogWarning(ex, "Redis read failed for embed cache key {CacheKey}; falling through to PBI API", cacheKey);
+        }
+
+        // --- Cache MISS or near-expiry: generate a fresh token from Power BI ---
+        var config = await GenerateFreshEmbedConfigAsync(workspaceId, reportId, username, roles, profileId, ct);
+
+        // --- Store fresh token in Redis ---
+        try
+        {
+            var ttl = config.Expiry - DateTimeOffset.UtcNow;
+            if (ttl > TimeSpan.Zero)
+            {
+                var entry = CachedEmbedEntry.FromEmbedConfig(config);
+                var json = JsonSerializer.Serialize(entry, CacheJsonOptions);
+                await _cache.SetStringAsync(cacheKey, json,
+                    new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl },
+                    ct);
+
+                _logger.LogDebug(
+                    "Cached embed token for report {ReportId} with TTL {TtlSeconds:F0}s",
+                    reportId, ttl.TotalSeconds);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Cache write failure must never surface to the caller (ADR-009: graceful degradation).
+            _logger.LogWarning(ex, "Redis write failed for embed cache key {CacheKey}; token will not be cached", cacheKey);
+        }
+
+        return config;
+    }
+
+    /// <summary>
+    /// Calls the Power BI REST API to generate a fresh embed token and constructs a full
+    /// <see cref="EmbedConfig"/> including the proactive refresh hint (<see cref="EmbedConfig.RefreshAfter"/>).
+    /// This method bypasses the cache entirely and is called on cache misses or near-expiry hits.
+    /// </summary>
+    private async Task<EmbedConfig> GenerateFreshEmbedConfigAsync(
+        Guid workspaceId,
+        Guid reportId,
+        string? username,
+        IList<string>? roles,
+        Guid? profileId,
+        CancellationToken ct)
     {
         _logger.LogInformation(
             "Generating embed token for report {ReportId} in workspace {WorkspaceId} (RLS user: {Username})",
@@ -119,15 +241,56 @@ public sealed class ReportingEmbedService
             throw;
         }
 
+        var issuedAt = DateTimeOffset.UtcNow;
+        var expiry = new DateTimeOffset(embedToken.Expiration, TimeSpan.Zero);
+        var totalTtl = expiry - issuedAt;
+
+        // Tell the client to refresh at 80% of the token lifetime to avoid browser-side expiry.
+        var refreshAfter = issuedAt + TimeSpan.FromSeconds(totalTtl.TotalSeconds * ClientRefreshFraction);
+
         _logger.LogInformation(
-            "Embed token generated for report {ReportId}, expires {Expiry}",
-            reportId, embedToken.Expiration);
+            "Embed token generated for report {ReportId}, expires {Expiry}, client refresh at {RefreshAfter}",
+            reportId, expiry, refreshAfter);
 
         return new EmbedConfig(
             Token: embedToken.Token!,
             EmbedUrl: report.EmbedUrl!,
             ReportId: reportId,
-            Expiry: new DateTimeOffset(embedToken.Expiration, TimeSpan.Zero));
+            Expiry: expiry,
+            RefreshAfter: refreshAfter);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Cache helpers
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds the Redis cache key for an embed token.
+    /// Format: <c>pbi:embed:{workspaceId}:{reportId}:{userId}</c>.
+    /// Uses "anonymous" when no username is provided (unauthenticated / no-RLS scenario).
+    /// </summary>
+    private static string BuildEmbedCacheKey(Guid workspaceId, Guid reportId, string? username) =>
+        $"pbi:embed:{workspaceId}:{reportId}:{username ?? "anonymous"}";
+
+    /// <summary>
+    /// Internal cache entry that stores the full embed config plus the token issue time so that
+    /// the proactive refresh fraction can be recomputed correctly on subsequent cache hits.
+    /// </summary>
+    private sealed record CachedEmbedEntry(
+        string Token,
+        string EmbedUrl,
+        Guid ReportId,
+        DateTimeOffset Expiry,
+        DateTimeOffset IssuedAt,
+        DateTimeOffset RefreshAfter)
+    {
+        public EmbedConfig ToEmbedConfig() =>
+            new(Token, EmbedUrl, ReportId, Expiry, RefreshAfter);
+
+        public static CachedEmbedEntry FromEmbedConfig(EmbedConfig config) =>
+            new(config.Token, config.EmbedUrl, config.ReportId, config.Expiry,
+                IssuedAt: DateTimeOffset.UtcNow,
+                RefreshAfter: config.RefreshAfter);
     }
 
     // -----------------------------------------------------------------------------------------

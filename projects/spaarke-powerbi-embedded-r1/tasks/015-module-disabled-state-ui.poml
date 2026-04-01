@@ -1,6 +1,7 @@
 <task id="015" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Module disabled state UI</title>
+    <status>complete</status>
     <phase>2</phase>
     <stream>frontend</stream>
     <tags>frontend</tags>

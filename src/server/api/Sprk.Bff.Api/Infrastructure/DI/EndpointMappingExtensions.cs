@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Office;
+using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -177,6 +178,9 @@ public static class EndpointMappingExtensions
         //   /api/v1/external/*        — Power Pages portal users (portal JWT auth)
         //   /api/v1/external-access/* — Internal management (Azure AD auth)
         app.MapExternalAccessEndpoints();
+
+        // Reporting module endpoints (/api/reporting/*) — Power BI Embedded (App Owns Data)
+        app.MapReportingEndpoints();
     }
 
     private static void MapSpaFallback(WebApplication app)

@@ -30,6 +30,7 @@ import {
 } from "@fluentui/react-components";
 import { DataTrendingRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
+import { ModuleGate } from "./components/ModuleGate";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent design tokens only, no hard-coded colors (ADR-021)
@@ -129,51 +130,53 @@ export const App: React.FC = () => {
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <div className={styles.root}>
-        {/* ---- Header ---- */}
-        <header className={styles.header}>
-          <div className={styles.headerLeft}>
-            <DataTrendingRegular fontSize={20} />
-            <Text size={500} className={styles.headerTitle}>
-              Reporting
-            </Text>
-          </div>
-
-          <div className={styles.headerActions}>
-            {/* Report selector dropdown — placeholder for task 011 */}
-            <div
-              className={styles.reportSelectorPlaceholder}
-              aria-label="Report selector (not yet implemented)"
-              role="combobox"
-              aria-expanded={false}
-              aria-haspopup="listbox"
-            >
-              <Text size={200} color="inherit">
-                Select a report...
+        <ModuleGate>
+          {/* ---- Header ---- */}
+          <header className={styles.header}>
+            <div className={styles.headerLeft}>
+              <DataTrendingRegular fontSize={20} />
+              <Text size={500} className={styles.headerTitle}>
+                Reporting
               </Text>
             </div>
 
-            {/* Refresh button — placeholder for task 012 */}
-            <Tooltip content="Refresh report" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<ArrowClockwiseRegular />}
-                aria-label="Refresh report"
-                disabled
-              />
-            </Tooltip>
-          </div>
-        </header>
+            <div className={styles.headerActions}>
+              {/* Report selector dropdown — placeholder for task 011 */}
+              <div
+                className={styles.reportSelectorPlaceholder}
+                aria-label="Report selector (not yet implemented)"
+                role="combobox"
+                aria-expanded={false}
+                aria-haspopup="listbox"
+              >
+                <Text size={200} color="inherit">
+                  Select a report...
+                </Text>
+              </div>
 
-        {/* ---- Main report area ---- */}
-        <main className={styles.main}>
-          {/* ReportViewer component placeholder — implemented in task 013 */}
-          <div className={styles.reportViewerPlaceholder} role="region" aria-label="Report area">
-            <Spinner size="large" label="Loading report..." labelPosition="below" />
-            <Text size={200}>
-              Select a report from the dropdown above to get started.
-            </Text>
-          </div>
-        </main>
+              {/* Refresh button — placeholder for task 012 */}
+              <Tooltip content="Refresh report" relationship="label">
+                <Button
+                  appearance="subtle"
+                  icon={<ArrowClockwiseRegular />}
+                  aria-label="Refresh report"
+                  disabled
+                />
+              </Tooltip>
+            </div>
+          </header>
+
+          {/* ---- Main report area ---- */}
+          <main className={styles.main}>
+            {/* ReportViewer component placeholder — implemented in task 013 */}
+            <div className={styles.reportViewerPlaceholder} role="region" aria-label="Report area">
+              <Spinner size="large" label="Loading report..." labelPosition="below" />
+              <Text size={200}>
+                Select a report from the dropdown above to get started.
+              </Text>
+            </div>
+          </main>
+        </ModuleGate>
       </div>
     </FluentProvider>
   );

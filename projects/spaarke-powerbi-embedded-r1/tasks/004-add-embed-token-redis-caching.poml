@@ -1,7 +1,7 @@
 <task id="PBI-004" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Add Redis caching layer for Power BI embed token generation</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>1</phase>
     <estimated-effort>2 hours</estimated-effort>
     <tags>bff-api, caching</tags>

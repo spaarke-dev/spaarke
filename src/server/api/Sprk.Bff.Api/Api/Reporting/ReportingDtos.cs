@@ -8,11 +8,17 @@ namespace Sprk.Bff.Api.Api.Reporting;
 /// <param name="EmbedUrl">The embed URL for the report (from the PBI REST API).</param>
 /// <param name="ReportId">The Power BI report GUID.</param>
 /// <param name="Expiry">UTC expiry of the embed token (typically ~1 hour from issue).</param>
+/// <param name="RefreshAfter">
+///   UTC time at which the client should proactively call <c>report.setAccessToken()</c> to
+///   refresh the embed token. Set to 80% of the token's remaining lifetime, so the refresh
+///   happens before expiry rather than at or after it.
+/// </param>
 public record EmbedConfig(
     string Token,
     string EmbedUrl,
     Guid ReportId,
-    DateTimeOffset Expiry);
+    DateTimeOffset Expiry,
+    DateTimeOffset RefreshAfter);
 
 /// <summary>
 /// Lightweight report descriptor returned by list/get operations.

@@ -1,7 +1,7 @@
 <task id="PBI-007" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create ReportingModule DI registration and wire into Program.cs</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>1</phase>
     <estimated-effort>2 hours</estimated-effort>
     <tags>bff-api, config</tags>
