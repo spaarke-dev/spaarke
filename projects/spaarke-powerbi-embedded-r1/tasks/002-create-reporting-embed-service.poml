@@ -1,7 +1,7 @@
 <task id="PBI-002" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create ReportingEmbedService with Power BI client and SP auth</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>1</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>bff-api, auth</tags>

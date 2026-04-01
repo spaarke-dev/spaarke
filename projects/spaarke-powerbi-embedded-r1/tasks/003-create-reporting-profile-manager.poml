@@ -1,7 +1,7 @@
 <task id="PBI-003" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create ReportingProfileManager for multi-tenant SP profile isolation</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>1</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>bff-api, auth</tags>
