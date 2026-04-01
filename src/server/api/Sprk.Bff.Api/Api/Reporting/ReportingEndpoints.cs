@@ -156,7 +156,7 @@ public static class ReportingEndpoints
     private static async Task<IResult> GetEmbedToken(
         [FromQuery] Guid? workspaceId,
         [FromQuery] Guid? reportId,
-        ReportingEmbedService embedService,
+        [FromServices] ReportingEmbedService embedService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -225,7 +225,7 @@ public static class ReportingEndpoints
     /// </summary>
     private static async Task<IResult> GetReports(
         [FromQuery] Guid? workspaceId,
-        ReportingEmbedService embedService,
+        [FromServices] ReportingEmbedService embedService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -275,7 +275,7 @@ public static class ReportingEndpoints
     private static async Task<IResult> GetReport(
         Guid reportId,
         [FromQuery] Guid? workspaceId,
-        ReportingEmbedService embedService,
+        [FromServices] ReportingEmbedService embedService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -324,7 +324,7 @@ public static class ReportingEndpoints
     /// </summary>
     private static async Task<IResult> CreateReport(
         CreateReportRequest request,
-        ReportingEmbedService embedService,
+        [FromServices] ReportingEmbedService embedService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -394,7 +394,7 @@ public static class ReportingEndpoints
     private static async Task<IResult> UpdateReport(
         Guid reportId,
         UpdateReportRequest request,
-        ReportingEmbedService embedService,
+        [FromServices] ReportingEmbedService embedService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -458,7 +458,7 @@ public static class ReportingEndpoints
     private static async Task<IResult> DeleteReport(
         Guid reportId,
         [FromQuery] Guid? workspaceId,
-        ReportingEmbedService embedService,
+        [FromServices] ReportingEmbedService embedService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -519,7 +519,7 @@ public static class ReportingEndpoints
     /// </summary>
     private static async Task<IResult> ExportReport(
         ReportingExportRequest request,
-        ReportingEmbedService embedService,
+        [FromServices] ReportingEmbedService embedService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
