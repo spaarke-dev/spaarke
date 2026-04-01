@@ -1,7 +1,7 @@
 <task id="PBI-008" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Unit tests for Reporting BFF services, filter, and endpoints</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>1</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>testing, unit-test</tags>

@@ -10,16 +10,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
+| **Task** | 013 - Token auto-refresh hook (80% TTL) |
 | **Step** | — |
-| **Status** | none |
-| **Next Action** | Execute task 001 to begin Phase 1 implementation |
+| **Status** | not-started |
+| **Next Action** | Begin task 013 |
 
 ### Files Modified This Session
-- None yet
+- src/solutions/Reporting/src/types/index.ts (new — ReportCatalogItem, ReportDropdownProps types)
+- src/solutions/Reporting/src/components/ReportDropdown.tsx (new — Fluent v9 grouped dropdown + container)
+- src/solutions/Reporting/src/services/reportingApi.ts (updated — ReportCatalogItem now from types/index.ts)
+- src/solutions/Reporting/src/hooks/useReportCatalog.ts (updated — imports ReportCatalogItem from types/index.ts)
 
 ### Critical Context
-Project initialized. All artifacts generated, task files created. Ready to begin task 001.
+Task 012 complete. ReportDropdown uses Fluent v9 Dropdown/OptionGroup, groups by category, auto-selects from URL ?reportId= or first report. ReportDropdownContainer uses useReportCatalog hook. Build passes.
 
 ---
 

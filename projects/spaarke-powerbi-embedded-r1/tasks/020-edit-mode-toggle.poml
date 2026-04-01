@@ -1,6 +1,7 @@
 <task id="020" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Edit mode toggle (view/edit switch)</title>
+    <status>complete</status>
     <phase>3</phase>
     <stream>frontend</stream>
     <tags>frontend, fluent-ui</tags>

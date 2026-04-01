@@ -11,6 +11,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <dependencies>010, 005</dependencies>
+    <status>completed</status>
   </metadata>
 
   <prompt>

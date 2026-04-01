@@ -34,7 +34,7 @@
 |---|------|--------|------|--------------|----------------|
 | 010 | Scaffold sprk_reporting Code Page | ✅ | `frontend`, `code-page` | none | B |
 | 011 | Power BI embed component (ReportViewer) | 🔲 | `frontend`, `fluent-ui` | 010, 005 | — |
-| 012 | Report catalog dropdown | 🔲 | `frontend`, `fluent-ui` | 010, 005 | — |
+| 012 | Report catalog dropdown | ✅ | `frontend`, `fluent-ui` | 010, 005 | — |
 | 013 | Token auto-refresh hook (80% TTL) | 🔲 | `frontend` | 011 | — |
 | 014 | Dark mode support (transparent PBI bg) | 🔲 | `frontend`, `fluent-ui` | 011 | C |
 | 015 | Module disabled state UI | 🔲 | `frontend` | 010, 006 | C |

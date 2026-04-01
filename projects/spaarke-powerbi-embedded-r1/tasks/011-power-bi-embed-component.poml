@@ -1,4 +1,4 @@
-<task id="011" project="spaarke-powerbi-embedded-r1">
+<task id="011" project="spaarke-powerbi-embedded-r1" status="complete">
   <metadata>
     <title>Power BI embed component (ReportViewer)</title>
     <phase>2</phase>
