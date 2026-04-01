@@ -1,0 +1,70 @@
+<task id="PBI-044" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>End-to-end smoke test checklist for Reporting module</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — end-to-end validation across full stack with explicit test scenarios and constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030, 031, 032, 033, 034, 035, 036, 040, 041, 042, 043</dependencies>
+  </metadata>
+
+  <prompt>
+    Create and execute an end-to-end smoke test checklist for the Reporting module covering report
+    rendering, report switching, token auto-refresh, edit mode, PDF export, dark mode, module
+    disabled state, and unauthorized user behavior.
+  </prompt>
+
+  <role>QA engineer with end-to-end testing experience for Power BI Embedded and Dataverse applications.</role>
+
+  <goal>
+    A documented smoke test checklist with pass/fail results for all critical user journeys in the
+    Reporting module, verifying the full stack from Code Page UI through BFF API to Power BI service.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST auto-refresh tokens at 80% TTL via report.setAccessToken()</constraint>
+    <constraint source="spec">MUST gate module via sprk_ReportingModuleEnabled environment variable</constraint>
+    <constraint source="spec">MUST enforce user access via sprk_ReportingAccess security role</constraint>
+    <constraint source="ADR-021">Dark mode must work — Fluent v9 design tokens, no hard-coded colors</constraint>
+    <constraint>All Phase 1-4 tasks must be complete before running E2E tests</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Test report rendering">Open Reporting page in MDA — verify report renders with data visible</step>
+    <step order="2" name="Test report switching">Switch reports via dropdown — verify new report loads and renders correctly</step>
+    <step order="3" name="Test token auto-refresh">Simulate near-expiry token scenario — verify report.setAccessToken() refreshes token without user interruption</step>
+    <step order="4" name="Test edit mode">Enter edit mode — add a visual — save changes — verify saved report persists</step>
+    <step order="5" name="Test PDF export">Trigger export to PDF — verify file downloads with correct content</step>
+    <step order="6" name="Test dark mode">Toggle dark mode — verify report container and surrounding UI adapt colors correctly</step>
+    <step order="7" name="Test module disabled">Set sprk_ReportingModuleEnabled to No — verify Reporting page shows disabled message, not an error</step>
+    <step order="8" name="Test unauthorized user">Access Reporting page as user without sprk_ReportingAccess role — verify access denied message shown</step>
+    <step order="9" name="Document results">Record pass/fail for each test with notes on any issues discovered</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">E2E smoke test results document with pass/fail per scenario</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Report renders with data on Reporting page</criterion>
+    <criterion testable="true">Report switching via dropdown works correctly</criterion>
+    <criterion testable="true">Token auto-refreshes at 80% TTL without user disruption</criterion>
+    <criterion testable="true">Edit mode allows adding visuals and saving</criterion>
+    <criterion testable="true">PDF export downloads correct file</criterion>
+    <criterion testable="true">Dark mode toggle adapts all UI colors correctly</criterion>
+    <criterion testable="true">Module disabled state shows appropriate disabled message</criterion>
+    <criterion testable="true">Unauthorized user sees access denied message</criterion>
+    <criterion testable="true">All smoke tests documented with pass/fail results</criterion>
+  </acceptance-criteria>
+</task>

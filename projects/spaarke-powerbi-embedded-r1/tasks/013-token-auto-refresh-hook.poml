@@ -1,0 +1,77 @@
+<task id="013" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Token auto-refresh hook (80% TTL)</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>frontend</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements critical token lifecycle management with timer-based refresh, fallback event handling, and error recovery. Security-sensitive auth code.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>011</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer implementing Power BI embed token lifecycle management.</role>
+    <goal>Create src/solutions/Reporting/src/hooks/usePowerBiEmbed.ts — a custom hook that fetches an embed token from the BFF on mount, sets a timer at 80% of the token TTL to proactively refresh via report.setAccessToken(newToken) without page reload, handles the tokenExpired event as a fallback (should never fire in normal operation), and provides error handling with retry UI.</goal>
+    <context>
+      Power BI embed tokens have a limited lifetime (typically 1 hour). The BFF endpoint returns the token along with its expiration time.
+      To avoid disruption, the hook must proactively refresh at 80% of the TTL — for example, if TTL is 60 minutes, refresh at 48 minutes.
+      The report.setAccessToken() method updates the token without reloading the report.
+      The tokenExpired event from the PBI SDK is a safety net — if it fires, the proactive refresh failed.
+    </context>
+    <constraints>
+      - MUST fetch embed token from BFF endpoint (GET /api/reporting/embed-token?reportId=xxx) using authenticated fetch
+      - MUST calculate refresh interval as 80% of token TTL
+      - MUST use report.setAccessToken(newToken) for seamless token refresh — no page reload
+      - MUST handle report.on('tokenExpired') as fallback safety net
+      - MUST clean up timers on unmount (useEffect cleanup)
+      - MUST handle fetch errors gracefully — show retry UI, not crash
+      - MUST return embed config, loading state, error state, and retry function
+      - MUST NOT store tokens in localStorage or sessionStorage
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/components/ReportViewer.tsx</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-009-redis-first-caching.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Define EmbedTokenResponse type (accessToken, tokenId, expiration) and hook return type (embedConfig, isLoading, error, retry)</step>
+    <step>Create src/solutions/Reporting/src/hooks/usePowerBiEmbed.ts custom hook</step>
+    <step>Implement initial token fetch from GET /api/reporting/embed-token?reportId=xxx using authenticated fetch</step>
+    <step>Build embed config object from token response (type: 'report', tokenType: Embed, accessToken, embedUrl, id, settings)</step>
+    <step>Calculate refresh interval: (expiration - now) * 0.8 and set setTimeout for proactive refresh</step>
+    <step>Implement refresh function: fetch new token from BFF, call report.setAccessToken(newToken), reset timer</step>
+    <step>Wire tokenExpired event handler as fallback — immediately attempt refresh</step>
+    <step>Add error handling: catch fetch failures, expose error state and retry function</step>
+    <step>Ensure cleanup: clear timers and event handlers on unmount via useEffect cleanup</step>
+    <step>Wire hook into App.tsx to provide embed config to ReportViewer</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/hooks/usePowerBiEmbed.ts</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (uses hook to provide embed config)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>usePowerBiEmbed hook created and fetches embed token from BFF</criterion>
+    <criterion>Proactive refresh timer set at 80% of token TTL</criterion>
+    <criterion>Token refresh uses report.setAccessToken() — no page reload</criterion>
+    <criterion>tokenExpired event handled as fallback safety net</criterion>
+    <criterion>Timers cleaned up on unmount</criterion>
+    <criterion>Error state and retry function exposed for UI</criterion>
+    <criterion>Build succeeds with no type errors</criterion>
+  </acceptance-criteria>
+</task>

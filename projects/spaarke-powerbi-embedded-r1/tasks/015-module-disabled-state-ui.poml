@@ -1,0 +1,72 @@
+<task id="015" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Module disabled state UI</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>frontend</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates informational UI states with explicit constraints. Straightforward component with BFF integration but limited scope.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>010, 006</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer implementing module gate and authorization UI states for the Reporting Code Page.</role>
+    <goal>Add UI states for when the Reporting module is disabled (sprk_ReportingModuleEnabled = false) or the user is unauthorized (no sprk_ReportingAccess role). Check module gate status from the BFF (or URL param for testing) and show appropriate informational pages instead of the report viewer.</goal>
+    <context>
+      The Reporting module is gated by an environment variable (sprk_ReportingModuleEnabled) and a security role (sprk_ReportingAccess).
+      The BFF endpoint (e.g., GET /api/reporting/status or the authorization filter response) indicates whether the module is enabled and whether the user has access.
+      When either gate fails, the Code Page should show a clear, branded message instead of the report viewer.
+    </context>
+    <constraints>
+      - MUST check module status from BFF (GET /api/reporting/status or embed-token error response)
+      - MUST show "Reporting module is not enabled" message when module is disabled
+      - MUST show "You don't have access to Reporting" message when user lacks security role
+      - MUST use Fluent v9 MessageBar or similar component for informational display
+      - MUST use Fluent design tokens — no hard-coded colors per ADR-021
+      - MUST support a URL parameter override for testing (e.g., ?moduleStatus=disabled)
+      - MUST NOT show report viewer or dropdown when module is disabled or user is unauthorized
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Define ModuleStatus type (enabled, disabled, unauthorized, loading, error)</step>
+    <step>Create src/solutions/Reporting/src/components/ModuleGate.tsx component that checks module status</step>
+    <step>Implement status check: call BFF on mount to verify module is enabled and user is authorized</step>
+    <step>Render disabled state: centered message with icon using Fluent v9 MessageBar — "Reporting module is not enabled for this environment"</step>
+    <step>Render unauthorized state: centered message — "You don't have access to Reporting. Contact your administrator."</step>
+    <step>Add URL parameter override support for testing (?moduleStatus=disabled or ?moduleStatus=unauthorized)</step>
+    <step>Wire ModuleGate into App.tsx as a wrapper — renders children (report viewer) only when enabled and authorized</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/components/ModuleGate.tsx</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (wraps content with ModuleGate)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ModuleGate component checks module status from BFF</criterion>
+    <criterion>Shows "module not enabled" message when disabled</criterion>
+    <criterion>Shows "no access" message when unauthorized</criterion>
+    <criterion>Uses Fluent v9 components with design tokens</criterion>
+    <criterion>URL parameter override works for testing</criterion>
+    <criterion>Report viewer hidden when module disabled or user unauthorized</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

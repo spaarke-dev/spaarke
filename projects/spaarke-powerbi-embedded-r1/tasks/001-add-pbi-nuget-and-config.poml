@@ -1,0 +1,71 @@
+<task id="PBI-001" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Add Microsoft.PowerBI.Api NuGet and PowerBiOptions configuration</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — adds NuGet dependency, new configuration class, and DI registration</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Add the Microsoft.PowerBI.Api NuGet package to Sprk.Bff.Api and create the PowerBiOptions
+    configuration class that binds to environment variables for Power BI Embedded service principal
+    authentication. Register the options in DI via IOptions pattern.
+  </prompt>
+
+  <role>Senior .NET developer with Power BI Embedded and Minimal API experience.</role>
+
+  <goal>
+    A strongly-typed PowerBiOptions class bound to PowerBi__* environment variables, registered in DI
+    via the IOptions pattern, providing TenantId, ClientId, ClientSecret, AuthorityUrl, Scope, and ApiUrl
+    configuration for downstream Power BI services.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns; no Azure Functions</constraint>
+    <constraint source="ADR-010">DI minimalism — options registration does not count toward the 15-registration cap</constraint>
+    <constraint source="security">ClientSecret must come from environment variable or Key Vault, never committed to source</constraint>
+    <constraint>PowerBi__Scope default: https://analysis.windows.net/.default</constraint>
+    <constraint>PowerBi__ApiUrl default: https://api.powerbi.com</constraint>
+    <constraint>PowerBi__AuthorityUrl default: https://login.microsoftonline.com/{TenantId}</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/auth/service-principal.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add NuGet package">Add Microsoft.PowerBI.Api NuGet package to src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</step>
+    <step order="2" name="Read existing config patterns">Read Program.cs and existing Options classes to understand the IOptions binding pattern used in this project</step>
+    <step order="3" name="Create PowerBiOptions class">Create src/server/api/Sprk.Bff.Api/Api/Reporting/PowerBiOptions.cs with properties: TenantId, ClientId, ClientSecret, AuthorityUrl, Scope, ApiUrl (all strings, with sensible defaults for AuthorityUrl, Scope, ApiUrl)</step>
+    <step order="4" name="Register options in DI">Add services.Configure&lt;PowerBiOptions&gt;(configuration.GetSection("PowerBi")) to the service registration, either inline in Program.cs or in a dedicated module registration method</step>
+    <step order="5" name="Validate configuration">Add validation to ensure TenantId, ClientId, and ClientSecret are provided at startup (use ValidateDataAnnotations or manual check)</step>
+    <step order="6" name="Build verification">Run dotnet build to confirm zero errors and the NuGet package resolves correctly</step>
+  </steps>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (modified — new NuGet reference)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/PowerBiOptions.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified — options registration)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Microsoft.PowerBI.Api NuGet package added to Sprk.Bff.Api.csproj</criterion>
+    <criterion testable="true">PowerBiOptions class exists with TenantId, ClientId, ClientSecret, AuthorityUrl, Scope, ApiUrl properties</criterion>
+    <criterion testable="true">Options bound to "PowerBi" configuration section in DI</criterion>
+    <criterion testable="true">Startup validation rejects missing TenantId, ClientId, or ClientSecret</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,80 @@
+<task id="021" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create new report flow</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>frontend, bff-api</tags>
+    <estimate>4h</estimate>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new report via PBI REST API integration, BFF endpoint interaction, Dataverse record creation, and opens report in edit mode. Cross-layer (frontend + BFF API) with 6+ steps.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>020, 005</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer implementing the "create new report" flow for the Reporting Code Page.</role>
+    <goal>Add a "New Report" button (visible only to Author/Admin users) that calls POST /api/reporting/reports to create a blank report bound to the customer's semantic model via Power BI REST API CreateReport with datasetId. The new report opens in edit mode and a sprk_report record is created in Dataverse via the BFF.</goal>
+    <context>
+      Authors and Admins can create new reports from scratch. The BFF endpoint POST /api/reporting/reports
+      creates a blank PBI report in the customer's workspace, bound to their semantic model (datasetId),
+      and creates a corresponding sprk_report record in Dataverse to track it in the catalog.
+      After creation, the Code Page should navigate to the new report in edit mode so the user can start designing.
+    </context>
+    <constraints>
+      - MUST add "New Report" button to toolbar — only visible for Author and Admin users
+      - MUST call POST /api/reporting/reports to create blank report via BFF
+      - MUST pass datasetId to BFF so the report is bound to the customer's semantic model
+      - MUST create sprk_report record in Dataverse (handled by BFF)
+      - MUST open newly created report in edit mode automatically
+      - MUST update report catalog dropdown to include the new report
+      - MUST show loading indicator during report creation
+      - MUST handle creation errors gracefully (show error message, no crash)
+      - MUST use Fluent v9 Button per ADR-021
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>src/solutions/Reporting/src/components/ModeToggle.tsx</file>
+      <file>src/solutions/Reporting/src/components/ReportDropdown.tsx</file>
+      <file>src/solutions/Reporting/src/hooks/usePowerBiEmbed.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Define CreateReportRequest type (name, datasetId) and CreateReportResponse type (reportId, embedUrl, name)</step>
+    <step>Create src/solutions/Reporting/src/components/NewReportButton.tsx with Fluent v9 Button</step>
+    <step>Implement click handler: call POST /api/reporting/reports with authenticated fetch</step>
+    <step>On success: update selected report in App state to the newly created report</step>
+    <step>Trigger ReportDropdown catalog refresh to include the new report</step>
+    <step>Switch to edit mode automatically after creation (reuse ModeToggle logic)</step>
+    <step>Add loading spinner during creation and error handling with Fluent MessageBar</step>
+    <step>Wire NewReportButton into App.tsx toolbar, with privilege check (Author/Admin only)</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/components/NewReportButton.tsx</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (wires in NewReportButton, adds catalog refresh)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>NewReportButton component created with Fluent v9 Button</criterion>
+    <criterion>Calls POST /api/reporting/reports to create blank report</criterion>
+    <criterion>New report opens in edit mode automatically</criterion>
+    <criterion>Report catalog dropdown refreshed to include new report</criterion>
+    <criterion>Only visible to Author and Admin users</criterion>
+    <criterion>Loading indicator shown during creation</criterion>
+    <criterion>Errors handled gracefully</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

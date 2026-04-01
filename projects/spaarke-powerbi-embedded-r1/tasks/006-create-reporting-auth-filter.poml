@@ -1,0 +1,76 @@
+<task id="PBI-006" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create ReportingAuthorizationFilter with module gate and role checks</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — security-critical authorization filter with multiple check layers</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create ReportingAuthorizationFilter.cs in Api/Reporting/ as an IEndpointFilter that enforces
+    three authorization checks: module enablement gate, security role verification, and privilege
+    level extraction for downstream endpoint logic.
+  </prompt>
+
+  <role>Senior .NET developer with endpoint filter authorization and Dataverse security role experience.</role>
+
+  <goal>
+    A ReportingAuthorizationFilter that gates all reporting endpoints behind module enablement,
+    verifies the user has the sprk_ReportingAccess security role, and extracts the user's privilege
+    level (Viewer/Author/Admin) for use by individual endpoint handlers.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization; no global middleware</constraint>
+    <constraint source="ADR-001">Minimal API patterns</constraint>
+    <constraint>Module gate: read sprk_ReportingModuleEnabled from configuration/environment; return 404 if false</constraint>
+    <constraint>Security role check: verify user has sprk_ReportingAccess role in claims; return 403 if missing</constraint>
+    <constraint>Privilege level extraction: determine Viewer/Author/Admin from claims and set in HttpContext.Items for downstream use</constraint>
+    <constraint>Filter must follow the pattern from .claude/patterns/api/endpoint-filters.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/PowerBiOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read endpoint filter pattern">Read .claude/patterns/api/endpoint-filters.md to understand the IEndpointFilter implementation pattern</step>
+    <step order="2" name="Read existing filters">Read any existing IEndpointFilter implementations in the BFF API to follow established patterns</step>
+    <step order="3" name="Create ReportingAuthorizationFilter">Create src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingAuthorizationFilter.cs implementing IEndpointFilter:
+      - InvokeAsync checks in order: module gate → role check → privilege extraction
+      - Module gate: read IConfiguration for "Reporting:ModuleEnabled" (or env var sprk_ReportingModuleEnabled); return 404 NotFound if disabled
+      - Role check: inspect user claims for sprk_ReportingAccess role; return 403 Forbidden if missing
+      - Privilege extraction: determine ReportingPrivilegeLevel (Viewer/Author/Admin) from role claims; store in HttpContext.Items["ReportingPrivilegeLevel"]
+      - Call next(context) if all checks pass</step>
+    <step order="4" name="Create privilege enum">Create ReportingPrivilegeLevel enum (Viewer, Author, Admin) in Api/Reporting/</step>
+    <step order="5" name="Add error responses">Return ProblemDetails for 404 (module disabled) and 403 (unauthorized) with descriptive error messages</step>
+    <step order="6" name="Build verification">Run dotnet build to confirm zero errors</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingAuthorizationFilter.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingPrivilegeLevel.cs (new — enum)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Filter returns 404 when sprk_ReportingModuleEnabled is false or missing</criterion>
+    <criterion testable="true">Filter returns 403 when user lacks sprk_ReportingAccess role</criterion>
+    <criterion testable="true">Filter extracts Viewer/Author/Admin privilege level from claims</criterion>
+    <criterion testable="true">Privilege level stored in HttpContext.Items for downstream endpoint access</criterion>
+    <criterion testable="true">Filter follows IEndpointFilter pattern from codebase conventions</criterion>
+    <criterion testable="true">Error responses use ProblemDetails format</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,86 @@
+<task id="PBI-005" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create ReportingEndpoints with embed token, report CRUD, and export</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — multiple API endpoints with authorization filter, request/response models</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>002, 003, 004</dependencies>
+  </metadata>
+
+  <prompt>
+    Create ReportingEndpoints.cs in Api/Reporting/ following the MapGroup Minimal API pattern.
+    Define endpoints for embed token retrieval, report listing, server-side export, report creation,
+    update, and deletion. Apply RequireAuthorization and ReportingAuthorizationFilter to the group.
+  </prompt>
+
+  <role>Senior .NET developer with Minimal API endpoint design and Power BI Embedded experience.</role>
+
+  <goal>
+    A complete set of Reporting API endpoints at /api/reporting with proper authorization,
+    input validation, and structured responses following the existing MapGroup pattern from
+    ScorecardCalculatorEndpoints.cs.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API with MapGroup pattern; no controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization; no global middleware</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for all error responses with errorCode</constraint>
+    <constraint>Follow MapGroup pattern from ScorecardCalculatorEndpoints.cs</constraint>
+    <constraint>All endpoints require authentication (RequireAuthorization on group)</constraint>
+    <constraint>ReportingAuthorizationFilter applied to group for module-gate and role checks</constraint>
+    <constraint>DELETE /reports/{reportId} requires Admin privilege level</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ScorecardCalculatorEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingDtos.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read MapGroup reference">Read ScorecardCalculatorEndpoints.cs to understand the MapGroup pattern, endpoint registration, and filter application</step>
+    <step order="2" name="Read endpoint filter pattern">Read .claude/patterns/api/endpoint-filters.md to understand how filters are applied to groups</step>
+    <step order="3" name="Create ReportingEndpoints">Create src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEndpoints.cs with static MapReportingEndpoints extension method:
+      - MapGroup("/api/reporting") with RequireAuthorization() and AddEndpointFilter&lt;ReportingAuthorizationFilter&gt;()
+      - GET /embed-token?workspaceId={guid}&amp;reportId={guid} — returns embed config (token, embedUrl, reportId)
+      - GET /reports?workspaceId={guid} — returns report list from PBI + sprk_report catalog
+      - POST /export — triggers server-side export (PDF/PPTX) with format and pages parameters
+      - POST /reports — creates new report entry (for authoring scenarios)
+      - PUT /reports/{reportId} — updates report catalog entry
+      - DELETE /reports/{reportId} — deletes report (Admin only)</step>
+    <step order="4" name="Create request models">Define request/response models for export, create, and update operations</step>
+    <step order="5" name="Add input validation">Validate required query parameters (workspaceId, reportId) and request bodies</step>
+    <step order="6" name="Add ProblemDetails error handling">Return ProblemDetails with appropriate status codes and errorCode fields for all error paths</step>
+    <step order="7" name="Build verification">Run dotnet build to confirm zero errors</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEndpoints.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingDtos.cs (modified — add request/response models)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/reporting/embed-token returns embed config with token, embedUrl, and reportId</criterion>
+    <criterion testable="true">GET /api/reporting/reports returns report list for given workspaceId</criterion>
+    <criterion testable="true">POST /api/reporting/export accepts format (PDF/PPTX) and triggers export</criterion>
+    <criterion testable="true">POST /api/reporting/reports creates a new report catalog entry</criterion>
+    <criterion testable="true">PUT /api/reporting/reports/{reportId} updates an existing report entry</criterion>
+    <criterion testable="true">DELETE /api/reporting/reports/{reportId} requires Admin privilege level</criterion>
+    <criterion testable="true">All endpoints require authentication via RequireAuthorization</criterion>
+    <criterion testable="true">ReportingAuthorizationFilter applied to the group</criterion>
+    <criterion testable="true">Error responses use ProblemDetails with errorCode</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

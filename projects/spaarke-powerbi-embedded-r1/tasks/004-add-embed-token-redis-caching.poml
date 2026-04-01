@@ -1,0 +1,73 @@
+<task id="PBI-004" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Add Redis caching layer for Power BI embed token generation</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, caching</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — distributed cache integration with TTL management and cache-aside pattern</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>002</dependencies>
+  </metadata>
+
+  <prompt>
+    Add a Redis caching layer to embed token generation in ReportingEmbedService. Use IDistributedCache
+    per ADR-009 with a GetOrCreateAsync pattern. Cache key includes workspace, report, and user identity.
+    TTL matches Power BI token expiry with proactive refresh at 80% of lifetime.
+  </prompt>
+
+  <role>Senior .NET developer with Redis distributed caching and Power BI Embedded experience.</role>
+
+  <goal>
+    Embed tokens are cached in Redis with structured cache keys, appropriate TTLs matching PBI token
+    expiry, and proactive refresh at 80% of token lifetime to avoid expired-token errors.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching — use IDistributedCache; no hybrid L1 unless profiling proves need</constraint>
+    <constraint source="ADR-014">Tenant-scoped cache keys; no content logging</constraint>
+    <constraint>Cache key format: "pbi:embed:{workspaceId}:{reportId}:{userId}"</constraint>
+    <constraint>Default TTL: match PBI embed token expiry (typically 1 hour)</constraint>
+    <constraint>Proactive refresh: regenerate token when remaining lifetime &lt; 20% of total TTL</constraint>
+    <constraint>Cache miss must fall through to ReportingEmbedService.GetEmbedTokenAsync transparently</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-014-tenant-scoping.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingDtos.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read caching pattern">Read .claude/patterns/caching/distributed-cache.md to understand the GetOrCreateAsync pattern used in this codebase</step>
+    <step order="2" name="Read existing cache usage">Read any existing IDistributedCache usage in the BFF API to follow established patterns</step>
+    <step order="3" name="Add caching to ReportingEmbedService">Modify ReportingEmbedService to accept IDistributedCache in constructor. Wrap GetEmbedTokenAsync with cache-aside logic:
+      - Build cache key: "pbi:embed:{workspaceId}:{reportId}:{userId}"
+      - Check cache for existing token
+      - If cached and remaining lifetime &gt; 20%, return cached
+      - If cached but near expiry (&lt; 20% remaining), regenerate and cache
+      - If not cached, generate token, cache with TTL matching token expiry, return</step>
+    <step order="4" name="Serialize embed token">Use System.Text.Json to serialize/deserialize EmbedTokenResult for Redis storage</step>
+    <step order="5" name="Add token expiry tracking">Store token expiry timestamp alongside the cached value to enable proactive refresh calculation</step>
+    <step order="6" name="Build verification">Run dotnet build to confirm zero errors</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs (modified — add caching)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Embed tokens are cached in Redis with key format "pbi:embed:{workspaceId}:{reportId}:{userId}"</criterion>
+    <criterion testable="true">Cache hit returns token without calling Power BI API</criterion>
+    <criterion testable="true">Cache miss calls Power BI API, caches result, and returns token</criterion>
+    <criterion testable="true">Tokens near expiry (&lt; 20% remaining lifetime) trigger proactive regeneration</criterion>
+    <criterion testable="true">Cache TTL matches Power BI embed token expiry</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

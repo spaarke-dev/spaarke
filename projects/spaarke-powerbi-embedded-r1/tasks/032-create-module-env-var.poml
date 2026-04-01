@@ -1,0 +1,59 @@
+<task id="PBI-032" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Define sprk_ReportingModuleEnabled environment variable in Dataverse</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>dataverse, solution</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Simple configuration — single environment variable definition with documentation</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Define the sprk_ReportingModuleEnabled environment variable in Dataverse as a Boolean (Yes/No)
+    with a default value of No. Document how administrators can toggle this variable per environment
+    to enable or disable the Reporting module.
+  </prompt>
+
+  <role>Dataverse solution architect familiar with environment variable configuration.</role>
+
+  <goal>
+    A sprk_ReportingModuleEnabled environment variable defined in the Dataverse solution with
+    Boolean type, default No, and clear documentation for per-environment toggling.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST gate module via sprk_ReportingModuleEnabled environment variable</constraint>
+    <constraint>Type: Boolean (Yes/No)</constraint>
+    <constraint>Default value: No (module disabled by default)</constraint>
+    <constraint>Must be includable in Dataverse solution for deployment across environments</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Define environment variable">Define sprk_ReportingModuleEnabled as a Boolean environment variable with display name "Reporting Module Enabled", default value No</step>
+    <step order="2" name="Document toggle process">Document how to toggle the variable per-environment via Dataverse admin center or solution configuration</step>
+    <step order="3" name="Document integration">Note how the BFF API reads this variable to gate the /api/reporting/* endpoints</step>
+  </steps>
+
+  <outputs>
+    <output type="schema">sprk_ReportingModuleEnabled environment variable definition</output>
+    <output type="docs">Per-environment toggle documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_ReportingModuleEnabled defined as Boolean type with default No</criterion>
+    <criterion testable="true">Environment variable is includable in Dataverse solution</criterion>
+    <criterion testable="true">Documentation explains how to toggle per environment</criterion>
+  </acceptance-criteria>
+</task>

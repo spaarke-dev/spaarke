@@ -1,0 +1,99 @@
+<task id="PBI-008" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Unit tests for Reporting BFF services, filter, and endpoints</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — constrained scope with known patterns, no architectural decisions</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>005, 007</dependencies>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for all Phase 1 Reporting BFF components: ReportingEmbedService,
+    ReportingProfileManager, ReportingAuthorizationFilter, and ReportingEndpoints. Mock external
+    dependencies (Power BI client, Redis cache, HttpContext) and verify all success and error paths.
+  </prompt>
+
+  <role>Senior .NET developer with unit testing, mocking (Moq/NSubstitute), and Minimal API testing experience.</role>
+
+  <goal>
+    A complete unit test suite covering embed token generation, profile management, authorization
+    filter logic, Redis cache behavior, and endpoint handler responses — with all tests passing.
+  </goal>
+
+  <constraints>
+    <constraint>Mock Power BI API client — no real Power BI calls in tests</constraint>
+    <constraint>Mock IDistributedCache for cache hit/miss/expiry scenarios</constraint>
+    <constraint>Mock HttpContext and claims for authorization filter tests</constraint>
+    <constraint>Follow existing test naming convention: {ClassName}.Tests.cs</constraint>
+    <constraint>Use the same test framework and assertion library as existing tests in the repo</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingDtos.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingModule.cs</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing test patterns">Read existing test files in the tests/ directory to understand the test framework, assertion library, mocking patterns, and naming conventions used</step>
+    <step order="2" name="Create ReportingEmbedService tests">Create ReportingEmbedService.Tests.cs:
+      - Test GetEmbedTokenAsync returns valid embed token (mock PBI client)
+      - Test GetReportsAsync returns report list
+      - Test GetReportAsync returns single report
+      - Test MSAL authentication failure propagates appropriate error
+      - Test PowerBIClient creation with valid token credentials</step>
+    <step order="3" name="Create cache tests">Add cache-specific tests:
+      - Test cache hit returns cached token without PBI API call
+      - Test cache miss calls PBI API and stores result
+      - Test near-expiry token triggers proactive refresh
+      - Test cache key format matches "pbi:embed:{workspaceId}:{reportId}:{userId}"</step>
+    <step order="4" name="Create ReportingProfileManager tests">Create ReportingProfileManager.Tests.cs:
+      - Test GetOrCreateProfileAsync returns existing profile
+      - Test GetOrCreateProfileAsync creates new profile when none exists
+      - Test GetProfileIdAsync returns correct Guid
+      - Test in-memory cache prevents duplicate API calls
+      - Test profile display name follows "sprk-{customerId}" convention</step>
+    <step order="5" name="Create ReportingAuthorizationFilter tests">Create ReportingAuthorizationFilter.Tests.cs:
+      - Test module disabled returns 404
+      - Test missing sprk_ReportingAccess role returns 403
+      - Test Viewer privilege level extracted correctly
+      - Test Author privilege level extracted correctly
+      - Test Admin privilege level extracted correctly
+      - Test all checks pass — next filter invoked</step>
+    <step order="6" name="Create endpoint handler tests">Create ReportingEndpoints.Tests.cs:
+      - Test GET /embed-token returns embed config
+      - Test GET /reports returns report list
+      - Test POST /export validates format parameter
+      - Test DELETE /reports/{id} rejects non-Admin users
+      - Test missing query parameters return 400 BadRequest</step>
+    <step order="7" name="Run tests">Run dotnet test to confirm all tests pass</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/Reporting/ReportingEmbedService.Tests.cs (new)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/Reporting/ReportingProfileManager.Tests.cs (new)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/Reporting/ReportingAuthorizationFilter.Tests.cs (new)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/Reporting/ReportingEndpoints.Tests.cs (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ReportingEmbedService tests cover token generation, report listing, and auth failure paths</criterion>
+    <criterion testable="true">Cache tests verify hit, miss, and proactive refresh scenarios</criterion>
+    <criterion testable="true">ReportingProfileManager tests cover create, retrieve, and caching behavior</criterion>
+    <criterion testable="true">ReportingAuthorizationFilter tests cover module-disabled (404), unauthorized (403), and all privilege levels</criterion>
+    <criterion testable="true">Endpoint tests cover success and validation-failure paths</criterion>
+    <criterion testable="true">All unit tests pass with dotnet test</criterion>
+    <criterion testable="true">No real external API calls in tests — all dependencies mocked</criterion>
+  </acceptance-criteria>
+</task>

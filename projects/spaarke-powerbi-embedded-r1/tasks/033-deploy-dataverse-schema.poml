@@ -1,0 +1,69 @@
+<task id="PBI-033" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Deploy sprk_report entity, security role, and environment variable to Dataverse</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps — uses dataverse-deploy skill and requires validation of deployed artifacts</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030, 031, 032</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy the sprk_report entity, sprk_ReportingAccess security role, and sprk_ReportingModuleEnabled
+    environment variable to the Dataverse dev environment. Use pac solution import or pac solution push.
+    Verify all artifacts are correctly deployed with expected attributes, privileges, and configuration.
+  </prompt>
+
+  <role>Dataverse deployment specialist with pac CLI and solution management experience.</role>
+
+  <goal>
+    All three Dataverse artifacts (entity, security role, environment variable) deployed to the dev
+    environment and verified to be correctly configured with all attributes, privileges, and defaults.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Deploy to dev environment: https://spaarkedev1.crm.dynamics.com</constraint>
+    <constraint>Use dataverse-deploy skill for deployment procedure</constraint>
+    <constraint>Verify entity has all attributes with correct types</constraint>
+    <constraint>Verify security role has correct privilege tiers</constraint>
+    <constraint>Verify environment variable is accessible and defaults to No</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load deploy skill">Load the dataverse-deploy skill for deployment procedures</step>
+    <step order="2" name="Verify artifacts ready">Confirm entity definition (task 030), security role (task 031), and environment variable (task 032) are complete and ready for deployment</step>
+    <step order="3" name="Package solution">Package all three artifacts into the Dataverse solution</step>
+    <step order="4" name="Deploy to dev">Deploy solution to dev environment using pac solution import or pac solution push</step>
+    <step order="5" name="Verify entity">Verify sprk_report entity created with all attributes: sprk_name, sprk_reportid, sprk_workspaceid, sprk_category, sprk_embedurl, sprk_datasetid, sprk_iscustom, sprk_description, sprk_ownerid</step>
+    <step order="6" name="Verify security role">Verify sprk_ReportingAccess security role has correct Read, Write, Create, Delete privileges per tier</step>
+    <step order="7" name="Verify env var">Verify sprk_ReportingModuleEnabled environment variable is accessible and defaults to No</step>
+    <step order="8" name="Document deployment">Record deployment results and any environment-specific notes</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">sprk_report entity deployed to Dataverse dev environment</output>
+    <output type="deploy">sprk_ReportingAccess security role deployed</output>
+    <output type="deploy">sprk_ReportingModuleEnabled environment variable deployed</output>
+    <output type="docs">Deployment verification results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_report entity exists in dev environment with all 9 attributes</criterion>
+    <criterion testable="true">sprk_category OptionSet has Financial=1, Operational=2, Compliance=3, Documents=4, Custom=5</criterion>
+    <criterion testable="true">sprk_ReportingAccess security role deployed with Viewer, Author, Admin privilege tiers</criterion>
+    <criterion testable="true">sprk_ReportingModuleEnabled environment variable accessible and defaults to No</criterion>
+    <criterion testable="true">Solution import completed without errors</criterion>
+  </acceptance-criteria>
+</task>

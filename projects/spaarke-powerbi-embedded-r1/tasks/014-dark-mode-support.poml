@@ -1,0 +1,69 @@
+<task id="014" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Dark mode support (transparent PBI background)</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>frontend, fluent-ui</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UI styling task with explicit ADR-021 constraints. No new services or complex logic — configures existing components and validates theme behavior.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>011</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer ensuring dark mode compliance for the Reporting Code Page.</role>
+    <goal>Configure the Power BI embed with BackgroundType.Transparent so the PBI report background adapts to the surrounding Fluent v9 theme. Ensure all surrounding UI uses Fluent design tokens. Verify that toggling dark mode updates the PBI background seamlessly with no hard-coded colors.</goal>
+    <context>
+      ADR-021 mandates dark mode support and prohibits hard-coded colors.
+      Power BI Embedded supports BackgroundType.Transparent which makes the report background transparent,
+      allowing the page's background color (controlled by Fluent theme tokens) to show through.
+      The Code Page's FluentProvider already handles theme switching — this task ensures the PBI embed cooperates.
+    </context>
+    <constraints>
+      - MUST set PBI embed BackgroundType.Transparent in embed settings
+      - MUST use Fluent v9 theme tokens for all surrounding UI — no hard-coded colors per ADR-021
+      - MUST support dark mode toggle: PBI background adapts when theme changes
+      - MUST verify header, toolbar, and report container all use design tokens
+      - MUST NOT use hard-coded hex/rgb values anywhere in the Reporting Code Page
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/components/ReportViewer.tsx</file>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>src/solutions/Reporting/src/main.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Verify ReportViewer embed settings include BackgroundType.Transparent (should be set in task 011)</step>
+    <step>Audit all .tsx files in src/solutions/Reporting/src/ for hard-coded color values — replace with Fluent design tokens</step>
+    <step>Ensure App.tsx container backgrounds use tokens.colorNeutralBackground1 or similar tokens</step>
+    <step>Ensure header/toolbar areas use appropriate Fluent surface tokens</step>
+    <step>Verify FluentProvider in main.tsx detects system theme preference and passes correct theme (webLightTheme/webDarkTheme)</step>
+    <step>Test: visually confirm dark mode toggle changes surrounding UI and PBI background adapts</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>Modified files: any .tsx files with hard-coded colors replaced by Fluent tokens</output>
+    <output>Verified: BackgroundType.Transparent set in ReportViewer</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PBI embed uses BackgroundType.Transparent</criterion>
+    <criterion>No hard-coded color values in any Reporting Code Page .tsx file</criterion>
+    <criterion>All UI surfaces use Fluent v9 design tokens</criterion>
+    <criterion>Dark mode toggle correctly changes surrounding UI and PBI background</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,74 @@
+<task id="PBI-003" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create ReportingProfileManager for multi-tenant SP profile isolation</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — service principal profile management with Power BI REST API integration</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create ReportingProfileManager.cs in Api/Reporting/ that manages Power BI service principal
+    profiles for multi-tenant workspace isolation. Each customer gets a dedicated SP profile so
+    that workspace-level permissions are scoped per tenant.
+  </prompt>
+
+  <role>Senior .NET developer with Power BI Embedded multi-tenancy and service principal profile experience.</role>
+
+  <goal>
+    A ReportingProfileManager that creates, retrieves, and caches service principal profiles
+    per customer, ensuring multi-tenant isolation when accessing Power BI workspaces.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns; no Azure Functions</constraint>
+    <constraint source="ADR-010">DI minimalism — ReportingProfileManager counts as 1 registration</constraint>
+    <constraint>Use Power BI REST API /profiles endpoint for profile CRUD</constraint>
+    <constraint>Profile display name convention: "sprk-{customerId}" for traceability</constraint>
+    <constraint>GetOrCreateProfileAsync must be idempotent — return existing profile if already created</constraint>
+    <constraint>Must handle Power BI API rate limits gracefully (retry with backoff)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/auth/service-principal.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/PowerBiOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read Power BI profile API docs">Understand the Power BI REST API /profiles endpoint for creating and listing service principal profiles</step>
+    <step order="2" name="Read existing service patterns">Read existing services to understand DI registration and error handling patterns</step>
+    <step order="3" name="Create ReportingProfileManager">Create src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs with:
+      - Constructor accepting IOptions&lt;PowerBiOptions&gt; and ILogger
+      - GetOrCreateProfileAsync(string customerId) — returns ServicePrincipalProfile DTO
+      - GetProfileIdAsync(string customerId) — returns Guid profile ID
+      - Private method to list existing profiles and find by display name
+      - Private method to create new profile via POST /profiles</step>
+    <step order="4" name="Add in-memory profile cache">Cache profile lookups in a ConcurrentDictionary to avoid repeated API calls for the same customer</step>
+    <step order="5" name="Add retry logic">Implement simple retry with exponential backoff for Power BI API 429 (rate limit) responses</step>
+    <step order="6" name="Build verification">Run dotnet build to confirm zero errors</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GetOrCreateProfileAsync returns existing profile if one exists for customerId</criterion>
+    <criterion testable="true">GetOrCreateProfileAsync creates new profile with "sprk-{customerId}" display name if none exists</criterion>
+    <criterion testable="true">GetProfileIdAsync returns the Guid profile ID for a customer</criterion>
+    <criterion testable="true">Profile lookups are cached in-memory to avoid redundant API calls</criterion>
+    <criterion testable="true">Rate limit (429) responses trigger retry with backoff</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

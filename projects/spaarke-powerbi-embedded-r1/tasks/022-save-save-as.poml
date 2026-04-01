@@ -1,0 +1,75 @@
+<task id="022" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Save / Save As with catalog update</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>frontend, bff-api</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements save and save-as flows with PBI SDK events, BFF record updates, and Dataverse catalog synchronization. Modifies .tsx files with cross-layer concerns.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer implementing save and save-as functionality for Power BI report authoring.</role>
+    <goal>Handle report.save() for existing reports and report.saveAs({name, targetWorkspaceId}) for new copies. On save, update the sprk_report record (modified date, name if changed) via the BFF. On saveAs, create a new sprk_report record with is_custom=true. Show save confirmation using Fluent v9 Toast.</goal>
+    <context>
+      When a user edits a report in edit mode, they need to save their changes.
+      Power BI Embedded provides report.save() for in-place save and report.saveAs() for creating a copy.
+      The BFF must be notified of saves to keep the sprk_report Dataverse records in sync.
+      Save: updates existing record. SaveAs: creates a new record marked as custom (is_custom=true).
+    </context>
+    <constraints>
+      - MUST handle report.save() event for existing reports
+      - MUST handle report.saveAs({name, targetWorkspaceId}) for creating copies
+      - MUST call BFF to update sprk_report record on save (PATCH /api/reporting/reports/{id})
+      - MUST call BFF to create new sprk_report record on saveAs (POST /api/reporting/reports) with is_custom=true
+      - MUST show save confirmation toast using Fluent v9 Toast/Toaster
+      - MUST update report catalog dropdown on saveAs (new entry added)
+      - MUST handle save errors gracefully — show error toast
+      - MUST use Fluent v9 components per ADR-021
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/components/ReportViewer.tsx</file>
+      <file>src/solutions/Reporting/src/components/ModeToggle.tsx</file>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Add Fluent v9 Toaster setup to App.tsx root (useToastController)</step>
+    <step>Create src/solutions/Reporting/src/components/ReportToolbar.tsx with Save and Save As buttons</step>
+    <step>Implement Save handler: call report.save(), then PATCH /api/reporting/reports/{id} to update modified date and name</step>
+    <step>Implement Save As handler: prompt for new name (Fluent Dialog), call report.saveAs({name, targetWorkspaceId}), then POST /api/reporting/reports with is_custom=true</step>
+    <step>Show success toast on save completion using Fluent v9 Toast</step>
+    <step>Show error toast on save failure</step>
+    <step>Refresh report catalog dropdown on saveAs to include the new copy</step>
+    <step>Wire ReportToolbar into App.tsx — visible only in edit mode for Author/Admin users</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/components/ReportToolbar.tsx</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (Toaster setup, toolbar wiring)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Save button calls report.save() and updates sprk_report record via BFF</criterion>
+    <criterion>Save As prompts for name, calls report.saveAs(), creates new sprk_report with is_custom=true</criterion>
+    <criterion>Success and error toasts shown using Fluent v9 Toast</criterion>
+    <criterion>Report catalog refreshed on saveAs</criterion>
+    <criterion>Toolbar visible only in edit mode for Author/Admin</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,73 @@
+<task id="PBI-034" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>PLACEHOLDER: Create standard .pbix report templates (human task)</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>docs, manual</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Human task placeholder — requires Power BI Desktop which is not available to AI agent</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    PLACEHOLDER: This task requires Power BI Desktop and must be completed by a human. Create 5
+    standard product report .pbix files: Matter Pipeline, Financial Summary, Document Activity,
+    Task Overview, and Compliance Dashboard. Each report connects to Dataverse via Import mode,
+    includes a BU RLS role with DAX USERNAME() filter, and uses the standard Spaarke color palette.
+    Store completed reports in reports/v1.0.0/ folder.
+  </prompt>
+
+  <role>Power BI report designer with Import mode, RLS, and Dataverse connectivity experience.</role>
+
+  <goal>
+    Five standard .pbix report templates stored in reports/v1.0.0/, each with Dataverse Import mode
+    connectivity, BU RLS role using DAX USERNAME() filter, and Spaarke color palette applied.
+    A reports/CHANGELOG.md tracks version history.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST use Import mode (not DirectQuery or Direct Lake)</constraint>
+    <constraint source="spec">MUST enforce BU RLS via EffectiveIdentity in embed tokens</constraint>
+    <constraint>Each .pbix must include a BU RLS role with DAX filter on USERNAME()</constraint>
+    <constraint>Use standard Spaarke color palette for consistent branding</constraint>
+    <constraint>This task requires Power BI Desktop — cannot be completed by AI agent</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create Matter Pipeline report">In Power BI Desktop, create matter-pipeline.pbix connecting to Dataverse via Import mode with BU RLS role</step>
+    <step order="2" name="Create Financial Summary report">Create financial-summary.pbix with financial KPIs, charts, and BU RLS role</step>
+    <step order="3" name="Create Document Activity report">Create document-activity.pbix tracking document operations with BU RLS role</step>
+    <step order="4" name="Create Task Overview report">Create task-overview.pbix showing task status and metrics with BU RLS role</step>
+    <step order="5" name="Create Compliance Dashboard">Create compliance-dashboard.pbix with compliance metrics and BU RLS role</step>
+    <step order="6" name="Apply Spaarke palette">Apply standard Spaarke color palette to all 5 reports</step>
+    <step order="7" name="Store in version folder">Copy all .pbix files to reports/v1.0.0/</step>
+    <step order="8" name="Create CHANGELOG">Create reports/CHANGELOG.md with v1.0.0 entry documenting all 5 reports</step>
+  </steps>
+
+  <outputs>
+    <output type="report">reports/v1.0.0/matter-pipeline.pbix</output>
+    <output type="report">reports/v1.0.0/financial-summary.pbix</output>
+    <output type="report">reports/v1.0.0/document-activity.pbix</output>
+    <output type="report">reports/v1.0.0/task-overview.pbix</output>
+    <output type="report">reports/v1.0.0/compliance-dashboard.pbix</output>
+    <output type="docs">reports/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">5 .pbix files exist in reports/v1.0.0/</criterion>
+    <criterion testable="true">Each report connects to Dataverse via Import mode</criterion>
+    <criterion testable="true">Each report includes a BU RLS role with DAX USERNAME() filter</criterion>
+    <criterion testable="true">All reports use Spaarke color palette</criterion>
+    <criterion testable="true">reports/CHANGELOG.md exists with v1.0.0 entry</criterion>
+  </acceptance-criteria>
+</task>

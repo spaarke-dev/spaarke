@@ -1,0 +1,70 @@
+<task id="PBI-090" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Project wrap-up: finalize, review, and close Power BI Embedded Reporting R1</title>
+    <status>not-started</status>
+    <phase>wrap-up</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>docs, cleanup</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation and cleanup task — status updates, reviews, and final commit with no new code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>all</dependencies>
+  </metadata>
+
+  <prompt>
+    Finalize the Power BI Embedded Reporting R1 project. Update README.md status to Complete,
+    update all task statuses in TASK-INDEX.md, create lessons-learned notes, run code review
+    and ADR compliance checks, run repo cleanup, and make the final commit.
+  </prompt>
+
+  <role>Project lead closing out a completed development project.</role>
+
+  <goal>
+    Project fully closed: all documentation updated, quality gates passed, lessons captured,
+    repository clean, and final commit made with the message
+    "feat(reporting): complete Power BI Embedded Reporting R1".
+  </goal>
+
+  <constraints>
+    <constraint>All prior tasks must be completed before wrap-up</constraint>
+    <constraint>Final commit message: "feat(reporting): complete Power BI Embedded Reporting R1"</constraint>
+    <constraint>Must pass /code-review and /adr-check quality gates</constraint>
+    <constraint>Must run /repo-cleanup to validate repository structure</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Update README status">Update projects/spaarke-powerbi-embedded-r1/README.md status to Complete</step>
+    <step order="2" name="Update TASK-INDEX">Update all task statuses in TASK-INDEX.md to reflect completion</step>
+    <step order="3" name="Create lessons learned">Create projects/spaarke-powerbi-embedded-r1/notes/lessons-learned.md documenting key decisions, challenges, and recommendations for future projects</step>
+    <step order="4" name="Run code review">Run /code-review on all changes made during the project</step>
+    <step order="5" name="Run ADR check">Run /adr-check to validate all code complies with applicable ADRs</step>
+    <step order="6" name="Run repo cleanup">Run /repo-cleanup to validate repository structure and clean ephemeral files</step>
+    <step order="7" name="Final commit">Create final commit with message "feat(reporting): complete Power BI Embedded Reporting R1"</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-powerbi-embedded-r1/README.md (modified — status Complete)</output>
+    <output type="docs">projects/spaarke-powerbi-embedded-r1/tasks/TASK-INDEX.md (modified — all tasks marked complete)</output>
+    <output type="docs">projects/spaarke-powerbi-embedded-r1/notes/lessons-learned.md (new)</output>
+    <output type="commit">Final commit: "feat(reporting): complete Power BI Embedded Reporting R1"</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md shows project status as Complete</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked as complete</criterion>
+    <criterion testable="true">lessons-learned.md exists in notes/ folder</criterion>
+    <criterion testable="true">/code-review passes with no critical issues</criterion>
+    <criterion testable="true">/adr-check passes with no violations</criterion>
+    <criterion testable="true">/repo-cleanup reports clean structure</criterion>
+    <criterion testable="true">Final commit exists with message "feat(reporting): complete Power BI Embedded Reporting R1"</criterion>
+  </acceptance-criteria>
+</task>

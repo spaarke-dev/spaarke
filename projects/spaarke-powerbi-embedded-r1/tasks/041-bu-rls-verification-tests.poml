@@ -1,0 +1,65 @@
+<task id="PBI-041" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create integration tests verifying BU RLS enforcement</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — integration tests with explicit constraints and multiple test scenarios</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>005, 033</dependencies>
+  </metadata>
+
+  <prompt>
+    Create integration tests that verify Business Unit Row-Level Security (BU RLS) is correctly
+    enforced when generating embed tokens. Test that users in different BUs only see their own
+    data, admin users see all data, and EffectiveIdentity includes the correct username and roles.
+  </prompt>
+
+  <role>Senior .NET test engineer with Power BI Embedded RLS and integration testing experience.</role>
+
+  <goal>
+    A comprehensive integration test suite verifying BU RLS enforcement across user scenarios:
+    BU-scoped users see only their data, admins see all data, and EffectiveIdentity is correctly
+    constructed with username and roles.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST enforce BU RLS via EffectiveIdentity in embed tokens</constraint>
+    <constraint source="spec">EffectiveIdentity must include correct username and RLS roles</constraint>
+    <constraint>Test isolation: each test should set up its own context and not depend on test execution order</constraint>
+    <constraint>Use the project's existing test patterns and frameworks</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review test patterns">Read existing integration tests to understand test setup, assertion, and naming patterns</step>
+    <step order="2" name="Create test class">Create BuRlsVerificationTests class in the appropriate test project</step>
+    <step order="3" name="Test BU-1 user isolation">Test: User A in BU-1 requests embed token — EffectiveIdentity contains BU-1 username and correct roles, only BU-1 data accessible</step>
+    <step order="4" name="Test BU-2 user isolation">Test: User B in BU-2 requests embed token — EffectiveIdentity contains BU-2 username and correct roles, only BU-2 data accessible</step>
+    <step order="5" name="Test admin access">Test: Admin user requests embed token — EffectiveIdentity grants access to all BU data</step>
+    <step order="6" name="Test EffectiveIdentity construction">Test: EffectiveIdentity includes correct username from authenticated user and correct RLS role names</step>
+    <step order="7" name="Run tests">Execute tests and verify all pass</step>
+  </steps>
+
+  <outputs>
+    <output type="test">Integration test class for BU RLS verification (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test verifies User A in BU-1 sees only BU-1 data</criterion>
+    <criterion testable="true">Test verifies User B in BU-2 sees only BU-2 data</criterion>
+    <criterion testable="true">Test verifies Admin user sees all BU data</criterion>
+    <criterion testable="true">Test verifies EffectiveIdentity includes correct username and roles</criterion>
+    <criterion testable="true">All tests pass when executed</criterion>
+  </acceptance-criteria>
+</task>

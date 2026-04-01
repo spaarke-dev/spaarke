@@ -1,0 +1,64 @@
+<task id="PBI-042" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Test Reporting module across all 3 deployment models</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — integration tests across multiple deployment configurations with explicit constraints</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>016, 033</dependencies>
+  </metadata>
+
+  <prompt>
+    Test the Reporting module across all three supported deployment models: multi-customer
+    (shared capacity with SP profiles and workspace-per-customer), dedicated (dedicated capacity
+    with single SP and dedicated workspace), and customer tenant (customer's own PBI tenant with
+    customer's app registration). Document test results and model-specific configuration.
+  </prompt>
+
+  <role>Senior QA engineer with Power BI Embedded multi-tenant deployment and integration testing experience.</role>
+
+  <goal>
+    Verified test results confirming the Reporting module works correctly across all three deployment
+    models, with documented configuration differences and any model-specific requirements.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST use service principal profiles for multi-tenant isolation</constraint>
+    <constraint source="spec">MUST use environment variables for all PBI config (BYOK-compatible)</constraint>
+    <constraint source="spec">MUST NOT hardcode workspace IDs, capacity IDs, or tenant IDs</constraint>
+    <constraint>All three deployment models must be testable via environment variable configuration changes only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Test multi-customer model">Configure and test multi-customer deployment: shared F-SKU capacity, SP profiles per customer, workspace-per-customer isolation. Verify reports embed correctly and RLS enforced.</step>
+    <step order="2" name="Test dedicated model">Configure and test dedicated deployment: dedicated capacity, single service principal, dedicated workspace. Verify reports embed correctly.</step>
+    <step order="3" name="Test customer tenant model">Configure and test customer tenant deployment: customer's own PBI tenant, customer's app registration, customer-managed capacity. Verify reports embed correctly.</step>
+    <step order="4" name="Document configuration differences">Document environment variable and configuration differences between each model</step>
+    <step order="5" name="Document test results">Record pass/fail results for each model with screenshots or evidence where applicable</step>
+    <step order="6" name="Document model-specific notes">Note any model-specific configuration requirements, limitations, or caveats discovered during testing</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Test results document covering all 3 deployment models</output>
+    <output type="docs">Model-specific configuration guide</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Multi-customer model tested: shared capacity, SP profiles, workspace-per-customer isolation verified</criterion>
+    <criterion testable="true">Dedicated model tested: dedicated capacity, single SP, dedicated workspace verified</criterion>
+    <criterion testable="true">Customer tenant model tested: customer PBI tenant, customer app registration verified</criterion>
+    <criterion testable="true">Configuration differences documented for each model</criterion>
+    <criterion testable="true">Test results recorded with pass/fail status per model</criterion>
+  </acceptance-criteria>
+</task>

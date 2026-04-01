@@ -1,0 +1,76 @@
+<task id="011" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Power BI embed component (ReportViewer)</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>frontend, fluent-ui</tags>
+    <estimate>4h</estimate>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>First powerbi-client-react integration in codebase — creates ReportViewer component with embed config, event handling, and report reference management. Modifies .tsx files.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>010, 005</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer integrating Power BI Embedded into a React 19 Code Page.</role>
+    <goal>Create src/solutions/Reporting/src/components/ReportViewer.tsx using PowerBIEmbed from powerbi-client-react. The component accepts embed configuration (type, id, embedUrl, accessToken, tokenType, settings), handles lifecycle events (loaded, error, rendered), and exposes the report reference for token refresh and mode switching.</goal>
+    <context>
+      This is the core embedding component that renders a Power BI report inside the Reporting Code Page.
+      It uses the powerbi-client-react SDK (v2.0.2) which provides a PowerBIEmbed React component.
+      The report reference (Report object from powerbi-client) must be exposed so that other components can call setAccessToken() for token refresh and switchMode() for view/edit toggling.
+      The embed settings should default to transparent background, hidden filter pane in view mode, and visible nav pane.
+    </context>
+    <constraints>
+      - MUST use PowerBIEmbed from powerbi-client-react 2.0.2
+      - MUST accept embedConfig props: type, id, embedUrl, accessToken, tokenType, settings
+      - MUST configure default settings: BackgroundType.Transparent, filter pane hidden (view mode), nav pane visible
+      - MUST handle report.on('loaded'), report.on('error'), report.on('rendered') events
+      - MUST expose report reference via callback prop or ref for token refresh and mode switching
+      - MUST use Fluent design tokens for any container styling per ADR-021
+      - MUST NOT hard-code colors or dimensions
+      - MUST fill available container height (flex: 1 or similar)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+      <adr>.claude/adr/ADR-012-shared-components.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read powerbi-client-react documentation and types to understand PowerBIEmbed component API and Report object interface</step>
+    <step>Define ReportViewerProps interface with embedConfig, onLoaded callback, onError callback, onRendered callback, and onReportReady callback (receives Report reference)</step>
+    <step>Create src/solutions/Reporting/src/components/ReportViewer.tsx with PowerBIEmbed component</step>
+    <step>Configure default embed settings: BackgroundType.Transparent, layoutType responsive, filter pane hidden, nav pane visible</step>
+    <step>Wire event handlers: report.on('loaded') → onLoaded, report.on('error') → onError, report.on('rendered') → onRendered</step>
+    <step>Expose report reference via onReportReady callback when embed is initialized, for external token refresh and mode switching</step>
+    <step>Style container to fill available height using Fluent makeStyles</step>
+    <step>Wire ReportViewer into App.tsx report area (with placeholder embed config for now)</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/components/ReportViewer.tsx</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (wires in ReportViewer)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ReportViewer.tsx created using PowerBIEmbed from powerbi-client-react</criterion>
+    <criterion>Component accepts typed embedConfig props (type, id, embedUrl, accessToken, tokenType, settings)</criterion>
+    <criterion>Default settings include transparent background, hidden filter pane, visible nav pane</criterion>
+    <criterion>Event handlers wired for loaded, error, and rendered events</criterion>
+    <criterion>Report reference exposed via callback for external token refresh and mode switching</criterion>
+    <criterion>Container fills available height using Fluent design tokens</criterion>
+    <criterion>Build succeeds with no type errors</criterion>
+  </acceptance-criteria>
+</task>

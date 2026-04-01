@@ -1,0 +1,80 @@
+<task id="PBI-007" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create ReportingModule DI registration and wire into Program.cs</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — DI registration module and Program.cs wiring with ADR-010 compliance</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>002, 003, 006</dependencies>
+  </metadata>
+
+  <prompt>
+    Create ReportingModule.cs with an AddReportingModule extension method that registers all
+    Reporting services in DI. Wire the module into Program.cs with both service registration
+    and endpoint mapping. Verify compliance with ADR-010 DI minimalism (at most 2 non-framework
+    registrations for this module).
+  </prompt>
+
+  <role>Senior .NET developer with Minimal API module registration and dependency injection experience.</role>
+
+  <goal>
+    A clean ReportingModule that registers ReportingEmbedService and ReportingProfileManager as
+    singletons, maps ReportingEndpoints, and is wired into Program.cs with two lines:
+    builder.Services.AddReportingModule(builder.Configuration) and app.MapReportingEndpoints().
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — verify module adds at most 2 non-framework registrations (ReportingEmbedService + ReportingProfileManager)</constraint>
+    <constraint source="ADR-001">Minimal API patterns for endpoint mapping</constraint>
+    <constraint>Follow existing module registration pattern from .claude/patterns/api/service-registration.md</constraint>
+    <constraint>ReportingEmbedService registered as singleton (holds MSAL ConfidentialClientApplication)</constraint>
+    <constraint>ReportingProfileManager registered as singleton (holds in-memory profile cache)</constraint>
+    <constraint>PowerBiOptions already registered in task 001; do not duplicate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingProfileManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingAuthorizationFilter.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing module patterns">Read Program.cs and .claude/patterns/api/service-registration.md to understand how existing modules register services and map endpoints</step>
+    <step order="2" name="Audit DI registrations">Count current non-framework DI registrations in Program.cs to ensure adding 2 more stays within the ADR-010 cap of 15</step>
+    <step order="3" name="Create ReportingModule">Create src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingModule.cs with:
+      - AddReportingModule(this IServiceCollection services, IConfiguration configuration) extension method
+      - Register ReportingEmbedService as singleton
+      - Register ReportingProfileManager as singleton
+      - Confirm PowerBiOptions is already registered (do not re-register)</step>
+    <step order="4" name="Wire into Program.cs">Add to Program.cs:
+      - builder.Services.AddReportingModule(builder.Configuration) in the service registration section
+      - app.MapReportingEndpoints() in the endpoint mapping section</step>
+    <step order="5" name="Verify DI count">Document the total non-framework DI registration count after adding the Reporting module</step>
+    <step order="6" name="Build verification">Run dotnet build to confirm zero errors and the full application starts correctly</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingModule.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified — AddReportingModule + MapReportingEndpoints)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AddReportingModule extension method registers ReportingEmbedService as singleton</criterion>
+    <criterion testable="true">AddReportingModule extension method registers ReportingProfileManager as singleton</criterion>
+    <criterion testable="true">Module adds exactly 2 non-framework DI registrations</criterion>
+    <criterion testable="true">Total non-framework DI registrations remain at or below 15 (ADR-010)</criterion>
+    <criterion testable="true">Program.cs calls AddReportingModule and MapReportingEndpoints</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

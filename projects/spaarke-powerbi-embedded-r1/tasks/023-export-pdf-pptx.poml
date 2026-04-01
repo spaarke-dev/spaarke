@@ -1,0 +1,77 @@
+<task id="023" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Export to PDF/PPTX</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>frontend, bff-api</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements export flow with BFF API polling, file download handling, and progress indicator. Cross-layer (frontend + BFF API) with async polling pattern.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>005</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer implementing report export functionality for the Reporting Code Page.</role>
+    <goal>Add an Export button to the toolbar (visible to all roles) that calls POST /api/reporting/export with the selected format (PDF or PPTX). The BFF calls the Power BI REST API ExportToFile, polls for export completion, then returns the file for download. Show a progress indicator during the export process.</goal>
+    <context>
+      Power BI REST API ExportToFile is an async operation — you POST to start the export, then poll GET until it completes.
+      The BFF handles the polling and returns the completed file.
+      The frontend calls POST /api/reporting/export with reportId and format, then polls for status or waits for the BFF to return the file.
+      Export is available to all users (Viewer, Author, Admin).
+    </context>
+    <constraints>
+      - MUST add Export button to toolbar — visible to all roles (Viewer, Author, Admin)
+      - MUST support PDF and PPTX export formats via dropdown or menu
+      - MUST call POST /api/reporting/export with {reportId, format} using authenticated fetch
+      - MUST show progress indicator (Fluent v9 Spinner or ProgressBar) during export
+      - MUST trigger browser file download when export completes
+      - MUST handle export errors gracefully (show error message)
+      - MUST handle long-running exports (PBI exports can take 30+ seconds)
+      - MUST use Fluent v9 components per ADR-021 — Menu, MenuItem, Button, Spinner
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>src/solutions/Reporting/src/hooks/usePowerBiEmbed.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Define ExportFormat type ("PDF" | "PPTX") and ExportStatus type (pending, running, completed, failed)</step>
+    <step>Create src/solutions/Reporting/src/components/ExportButton.tsx with Fluent v9 SplitButton or MenuButton</step>
+    <step>Implement export menu with PDF and PPTX options using Fluent v9 Menu + MenuItem</step>
+    <step>Implement export handler: POST /api/reporting/export with {reportId, format} using authenticated fetch</step>
+    <step>Implement polling: GET /api/reporting/export/{exportId}/status until completed or failed</step>
+    <step>On completion: trigger browser download of the exported file via blob URL</step>
+    <step>Show Fluent v9 Spinner or ProgressBar during export with status text</step>
+    <step>Handle errors: show error toast or inline error message</step>
+    <step>Wire ExportButton into App.tsx toolbar</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/components/ExportButton.tsx</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (wires in ExportButton)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ExportButton component created with PDF and PPTX options</criterion>
+    <criterion>Calls POST /api/reporting/export to initiate export</criterion>
+    <criterion>Polls for export completion and triggers browser file download</criterion>
+    <criterion>Progress indicator shown during export</criterion>
+    <criterion>Visible to all roles (Viewer, Author, Admin)</criterion>
+    <criterion>Errors handled gracefully</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>
