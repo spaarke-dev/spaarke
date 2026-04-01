@@ -15,6 +15,7 @@ import { WorkspaceHeader } from "../WorkspaceHeader";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 import type { IWebApi } from "../../types/xrm";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
+import { authenticatedFetch } from "../../services/authInit";
 import { useDailyDigestAutoPopup } from "../../hooks/useDailyDigestAutoPopup";
 import {
   WorkspaceSkeleton,
