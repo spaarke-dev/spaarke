@@ -1,7 +1,7 @@
 # Task Index — Spaarke Daily Update Service
 
 > **Total Tasks**: 34
-> **Status**: 22/34 complete
+> **Status**: 25/34 complete
 > **Last Updated**: 2026-04-01
 
 ---
@@ -38,9 +38,9 @@
 | 051 | Add Daily Digest auto-popup to LegalWorkspace | 6 | ✅ | 050, 030 | FULL | Group G |
 | 052 | Configure App Service WEBSITE_ALWAYS_ON | 6 | ✅ | none | MINIMAL | Group G |
 | 053 | Dark mode testing and token audit | 6 | 🔲 | 032-035, 037 | STANDARD | — |
-| 054 | Deploy notification playbooks to Dataverse | 6 | 🔲 | 020-022 | STANDARD | Group H |
-| 055 | Deploy Daily Digest Code Page to Dataverse | 6 | 🔲 | 030, 037 | STANDARD | Group H |
-| 060 | Deploy BFF API | 7 | 🔲 | 010, 036 | STANDARD | — |
+| 054 | Deploy notification playbooks to Dataverse | 6 | ✅ | 020-022 | STANDARD | Group H |
+| 055 | Deploy Daily Digest Code Page to Dataverse | 6 | ✅ | 030, 037 | STANDARD | Group H |
+| 060 | Deploy BFF API | 7 | ✅ | 010, 036 | STANDARD | — |
 | 061 | Integration tests — scheduler flow | 7 | 🔲 | 060, 054, 055 | STANDARD | Group I |
 | 062 | Integration tests — inline notifications | 7 | 🔲 | 060 | STANDARD | Group I |
 | 063 | End-to-end verification | 7 | 🔲 | 061, 062 | STANDARD | — |
