@@ -296,8 +296,6 @@ FileNotFoundException: Could not load file or assembly
 2. Verify with `dotnet list package --include-transitive | grep -i kiota`
 3. Build and test locally before deploying
 
-See [sdap-troubleshooting.md](../../../../docs/architecture/sdap-troubleshooting.md#issue-6-kiota-assembly-binding-error) for full troubleshooting details.
-
 ---
 
 *Refer to root `CLAUDE.md` for repository-wide standards.*

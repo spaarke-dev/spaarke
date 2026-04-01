@@ -58,6 +58,8 @@ The platform maintains several Azure AI Search indexes, each using the same embe
 
 ### Index Inventory
 
+> **Authoritative source**: Index names are defined as defaults in `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs` (`KnowledgeIndexName`, `DiscoveryIndexName`, `RagReferencesIndexName`) and overridable via appsettings. The invoice index name is a constant in `Services/Finance/InvoiceSearchService.cs`. If new indexes are added, update this table and the corresponding Options class.
+
 | Index Name | Purpose | Embedding Model | Dimensions | Vector Field(s) | Chunk Size | Estimated Scale |
 |------------|---------|----------------|------------|------------------|------------|-----------------|
 | `spaarke-knowledge-index-v2` | Customer document knowledge (shared tenant) | text-embedding-3-large | 3072 | `contentVector3072`, `documentVector3072` | 512 tokens (2048 chars) | 554+ documents, thousands of chunks |
@@ -403,7 +405,7 @@ After completing migration:
 | [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) | Full RAG system architecture including hybrid search pipeline |
 | [RAG-CONFIGURATION.md](RAG-CONFIGURATION.md) | Configuration reference for all RAG settings |
 | [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) | Troubleshooting guide for RAG issues |
-| [ai-implementation-reference.md](../architecture/ai-implementation-reference.md) | Overall AI architecture and tool framework |
+| [AI-ARCHITECTURE.md](../architecture/AI-ARCHITECTURE.md) | Overall AI architecture and tool framework |
 | [auth-AI-azure-resources.md](../architecture/auth-AI-azure-resources.md) | Azure OpenAI resource details and endpoints |
 
 ### Key Source Files

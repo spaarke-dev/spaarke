@@ -10,16 +10,6 @@
 
 The Spaarke repository contains the **Spaarke Legal Operations Intelligence Platform**—an enterprise solution for legal departments integrating document management (SDAP), AI-powered document analysis, workflow automation, and operational intelligence built on Microsoft Dataverse and SharePoint Embedded (SPE).
 
-### Platform Components
-
-| Component | Description | Status |
-|-----------|-------------|--------|
-| **SDAP** (SharePoint Document Access Platform) | Document storage, retrieval, and management via SPE | Production |
-| **Email-to-Document Automation** | Automatic email archival to .eml documents with webhooks | Phase 2 Complete |
-| **AI Document Intelligence** | AI-powered summarization, metadata extraction, and analysis | In Development |
-| **Legal Workflow Automation** | Matter management, deadline tracking, task automation | Planned |
-| **Operational Analytics** | Dashboards, reporting, and insights | Planned |
-
 ### High-Level Architecture Diagram
 
 ```

@@ -29,12 +29,8 @@ This directory contains practical guides for implementing features, configuring 
 - [AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md](AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md)
 - [AI-STREAMING-SSE-IMPLEMENTATION.md](AI-STREAMING-SSE-IMPLEMENTATION.md)
 - [AI-TOOL-FRAMEWORK-GUIDE.md](AI-TOOL-FRAMEWORK-GUIDE.md)
-- **[PLAYBOOK-BUILDER-GUIDE.md](PLAYBOOK-BUILDER-GUIDE.md)** - End-user builder UI guide — node types, AI assistant commands, test modes
-- **[PLAYBOOK-DESIGN-GUIDE.md](PLAYBOOK-DESIGN-GUIDE.md)** - Architect playbook design workflow — scope selection, model optimization, output nodes (DeliverOutput, DeliverToIndex)
-- **[PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md](PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md)** - Full JPS schema reference with patterns and deployment
-- **[PLAYBOOK-PRE-FILL-INTEGRATION-GUIDE.md](PLAYBOOK-PRE-FILL-INTEGRATION-GUIDE.md)** - AI pre-fill playbook wiring — BFF endpoints, $choices resolution, useAiPrefill hook, wizard integration
-- **[PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md](PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md)** - Dataverse admin guide for creating Tools, Skills, Knowledge, and Actions
-- [JPS-AUTHORING-GUIDE.md](JPS-AUTHORING-GUIDE.md) - JSON Prompt Schema authoring reference
+- **[JPS-AUTHORING-GUIDE.md](JPS-AUTHORING-GUIDE.md)** - JPS schema reference, playbook design with Claude Code, scope catalog, model selection, migration guide
+- **[SCOPE-CONFIGURATION-GUIDE.md](SCOPE-CONFIGURATION-GUIDE.md)** - Dataverse admin guide: creating Tools, Skills, Knowledge, Actions; Playbook Builder UI; pre-fill integration
 - [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) - RAG pipeline architecture and knowledge-augmented execution
 
 ### Email Automation
@@ -80,10 +76,10 @@ This directory contains practical guides for implementing features, configuring 
 - Shared UI components → Load SHARED-UI-COMPONENTS-GUIDE.md
 - Creating PCF control → Load HOW-TO-CREATE-NEW-PCF-CONTROL.md, PCF-CONTROL-DEVELOPMENT.md
 - Adding document support → Load HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md
-- **Creating AI playbook scopes → Load PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md**
-- **Designing AI playbooks → Load PLAYBOOK-DESIGN-GUIDE.md** (or use `/jps-playbook-design` skill)
-- **Builder UI usage → Load PLAYBOOK-BUILDER-GUIDE.md**
-- **JPS prompt schema → Load PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md**
+- **Creating AI playbook scopes → Load SCOPE-CONFIGURATION-GUIDE.md**
+- **Designing AI playbooks → Load JPS-AUTHORING-GUIDE.md** (or use `/jps-playbook-design` skill)
+- **Builder UI usage → Load SCOPE-CONFIGURATION-GUIDE.md**
+- **JPS prompt schema → Load JPS-AUTHORING-GUIDE.md**
 - AI integration → Load AI-TOOL-FRAMEWORK-GUIDE.md, AI-STREAMING-SSE-IMPLEMENTATION.md
 - Dataverse work → Load DATAVERSE-*.md guides
 - Email automation → Load EMAIL-TO-DOCUMENT-ARCHITECTURE.md

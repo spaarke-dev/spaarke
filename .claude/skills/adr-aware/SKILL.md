@@ -65,7 +65,7 @@ BEFORE writing any code:
         - These are 100-150 line concise versions
         - Focus on constraints, not full rationale
 
-     c. LOAD .claude/patterns/{domain}/*.md for code examples
+     c. LOAD .claude/patterns/{domain}/*.md for implementation pointers (When to use, canonical files to read, constraints, key rules)
         - API patterns → .claude/patterns/api/
         - Auth patterns → .claude/patterns/auth/
         - PCF patterns → .claude/patterns/pcf/

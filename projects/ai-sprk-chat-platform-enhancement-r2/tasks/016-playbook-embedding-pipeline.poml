@@ -85,7 +85,6 @@
       <file>src/server/api/Sprk.Bff.Api/Services/Ai/Indexing/</file>
       <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
       <file>docs/architecture/AI-ARCHITECTURE.md</file>
-      <file>docs/architecture/ai-implementation-reference.md</file>
       <file>.claude/patterns/api/endpoint-definition.md</file>
       <file>.claude/adr/ADR-001-minimal-api.md</file>
       <file>.claude/adr/ADR-014-ai-caching.md</file>

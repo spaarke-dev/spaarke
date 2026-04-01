@@ -49,7 +49,7 @@ When creating a new Architecture Decision Record:
 □ 2. CREATE concise ADR (AI-optimized version)
    Location: .claude/adr/ADR-{NNN}-{slug}.md
    Target: 100-150 lines
-   Focus: MUST/MUST NOT rules, code examples
+   Focus: MUST/MUST NOT rules, key rules
    Remove: Historical context, alternatives considered (keep in full version)
 
 □ 3. UPDATE ADR indexes
@@ -76,7 +76,7 @@ When creating a new Architecture Decision Record:
 
 □ 6. CREATE pattern file (if ADR introduces code patterns)
    Location: .claude/patterns/{domain}/{pattern-name}.md
-   Content: Copy-paste-ready code examples
+   Content: Pointer format � When/Read/Constraints/Key Rules (~25 lines, no inline code)
 
 □ 7. UPDATE pattern INDEX
    Location: .claude/patterns/{domain}/INDEX.md
@@ -155,7 +155,7 @@ When adding a code pattern:
    Content:
    - Brief description
    - When to use
-   - Code example (copy-paste ready)
+   - Read: pointers to canonical source files
    - ADR references
    - Related patterns
 
@@ -326,7 +326,7 @@ Step 4: Add rules to .claude/constraints/api.md:
         - "MUST implement rate limiting on public endpoints"
         - "MUST use sliding window algorithm"
 Step 5: Update .claude/constraints/INDEX.md (update api.md line count)
-Step 6: Create .claude/patterns/api/rate-limiting.md with code example
+Step 6: Create .claude/patterns/api/rate-limiting.md in pointer format (When/Read/Constraints/Key Rules)
 Step 7: Add to .claude/patterns/api/INDEX.md
 Step 8: Update skill mappings:
         - adr-aware: Add "Rate Limiting" → ADR-023 to Rule 1

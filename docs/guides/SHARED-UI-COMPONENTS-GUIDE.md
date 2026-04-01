@@ -118,6 +118,8 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 
 ## Component Inventory
 
+> **Authoritative component list**: For the current list of all components, check `src/client/shared/Spaarke.UI.Components/src/components/`. The tables below are a point-in-time snapshot and may not reflect recently added components.
+
 ### Shell & Wizard Components (`src/components/`)
 
 | Component | Description | Consumers |

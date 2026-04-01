@@ -10,46 +10,46 @@
 
 | # | Task | Status | Group | Dependencies |
 |---|------|--------|-------|-------------|
-| 001 | Convert `.claude/patterns/api/` (7 files) | 🔲 | A | none |
-| 002 | Convert `.claude/patterns/auth/` (12 files) | 🔲 | A | none |
-| 003 | Convert `.claude/patterns/caching/` (3 files) | 🔲 | A | none |
-| 004 | Convert `.claude/patterns/dataverse/` (5 files) | 🔲 | A | none |
-| 005 | Convert `.claude/patterns/pcf/` (5 files) | 🔲 | A | none |
-| 006 | Convert `.claude/patterns/ai/` (3 files) | 🔲 | A | none |
-| 007 | Convert `.claude/patterns/testing/` (3 files) | 🔲 | A | none |
-| 008 | Convert `.claude/patterns/webresource/` + `ui/` (5 files) | 🔲 | A | none |
-| 009 | Update `.claude/patterns/INDEX.md` | 🔲 | B | 001-008 |
+| 001 | Convert `.claude/patterns/api/` (7 files) | ✅ | A | none |
+| 002 | Convert `.claude/patterns/auth/` (12 files) | ✅ | A | none |
+| 003 | Convert `.claude/patterns/caching/` (3 files) | ✅ | A | none |
+| 004 | Convert `.claude/patterns/dataverse/` (5 files) | ✅ | A | none |
+| 005 | Convert `.claude/patterns/pcf/` (5 files) | ✅ | A | none |
+| 006 | Convert `.claude/patterns/ai/` (3 files) | ✅ | A | none |
+| 007 | Convert `.claude/patterns/testing/` (3 files) | ✅ | A | none |
+| 008 | Convert `.claude/patterns/webresource/` + `ui/` (5 files) | ✅ | A | none |
+| 009 | Update `.claude/patterns/INDEX.md` | ✅ | B | 001-008 |
 
 ### Phase 2: Split Architecture Docs
 
 | # | Task | Status | Group | Dependencies |
 |---|------|--------|-------|-------------|
-| 010 | Audit all 35 architecture files — classify keep/trim/delete | 🔲 | C | none |
-| 011 | Trim AI architecture docs (5 files, DELETE ai-implementation-reference) | 🔲 | D | 010 |
-| 012 | Trim BFF/API architecture docs (4 files) | 🔲 | D | 010 |
-| 013 | Trim UI/frontend architecture docs (6 files) | 🔲 | D | 010 |
-| 014 | Trim infrastructure architecture docs (7 files) | 🔲 | D | 010 |
-| 015 | Trim reference/stable architecture docs (8 files) | 🔲 | D | 010 |
+| 010 | Audit all 35 architecture files — classify keep/trim/delete | ✅ | C | none |
+| 011 | Trim AI architecture docs (5 files, DELETE ai-implementation-reference) | ✅ | D | 010 |
+| 012 | Trim BFF/API architecture docs (4 files) | ✅ | D | 010 |
+| 013 | Trim UI/frontend architecture docs (6 files) | ✅ | D | 010 |
+| 014 | Trim infrastructure architecture docs (7 files) | ✅ | D | 010 |
+| 015 | Trim reference/stable architecture docs (8 files) | ✅ | D | 010 |
 
 ### Phase 3: Consolidate Guides
 
 | # | Task | Status | Group | Dependencies |
 |---|------|--------|-------|-------------|
-| 020 | Consolidate 6 playbook guides into 2 | 🔲 | E | none |
-| 021 | Clean up 3 redirect stubs in docs/standards/ | 🔲 | E | none |
-| 022 | Audit remaining guides for drift | 🔲 | E | none |
+| 020 | Consolidate 6 playbook guides into 2 | ✅ | E | none |
+| 021 | Clean up 3 redirect stubs in docs/standards/ | ✅ | E | none |
+| 022 | Audit remaining guides for drift | ✅ | E | none |
 
 ### Phase 4: Update CLAUDE.md & Validate
 
 | # | Task | Status | Group | Dependencies |
 |---|------|--------|-------|-------------|
-| 030 | Update CLAUDE.md + validate all pointers + fix broken refs | 🔲 | F | all prior |
+| 030 | Update CLAUDE.md + validate all pointers + fix broken refs | ✅ | F | all prior |
 
 ### Phase 5: Wrap-Up
 
 | # | Task | Status | Group | Dependencies |
 |---|------|--------|-------|-------------|
-| 090 | Project wrap-up — README status, lessons-learned, metrics | 🔲 | G | 030 |
+| 090 | Project wrap-up — README status, lessons-learned, metrics | ✅ | G | 030 |
 
 ## Parallel Execution Groups
 

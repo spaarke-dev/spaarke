@@ -7,7 +7,7 @@
 > **Related Files**:
 > - `src/server/api/Sprk.Bff.Api/Services/Ai/ModelSelector.cs` — ModelSelector service and OperationType enum
 > - `projects/ai-spaarke-platform-enhancments-r3/notes/azure-openai-model-inventory.md` — Deployed model inventory
-> - `docs/architecture/ai-implementation-reference.md` — Overall AI architecture
+> - `docs/architecture/AI-ARCHITECTURE.md` — Overall AI architecture
 
 ---
 
@@ -51,12 +51,13 @@ The `OperationType` enum (defined in `ModelSelector.cs`) categorizes every AI ca
 |----------------|---------------|-----------|
 | `IntentClassification` | `gpt-4o-mini` | User intent from natural language is a structured classification task. Fast and cheap model is sufficient; structured output format eliminates need for reasoning depth. |
 | `EntityResolution` | `gpt-4o-mini` | Resolving playbook entities (nodes, scopes) from user input is pattern-matching work. Low complexity; gpt-4o-mini handles this reliably at minimal cost. |
+| `PlanGeneration` | `o1-mini` | Generating multi-step execution plans involves complex conditional reasoning across many possible node sequences. The reasoning model (o1-mini) is purpose-built for this. |
+| `ScopeGeneration` | `gpt-4o` | Generating Action prompts, Skill fragments, and other scope content requires high-quality long-form text generation. The capable model (gpt-4o) produces significantly better output here. |
 | `Validation` | `gpt-4o-mini` | Pre-execution canvas state checks produce simple boolean-style outputs. Speed and cost matter; reasoning quality does not add value here. |
 | `Explanation` | `gpt-4o-mini` | User-facing explanations of operations or decisions are short, conversational outputs. gpt-4o-mini generates acceptable quality at low latency. |
-| `ToolHandlerModel` | `gpt-4o-mini` | Built-in tool handlers (document summary, clause analysis, entity extraction) perform focused extraction and classification. Fast model covers these well. |
-| `ScopeGeneration` | `gpt-4o` | Generating Action prompts, Skill fragments, and other scope content requires high-quality long-form text generation. The capable model (gpt-4o) produces significantly better output here. |
-| `PlanGeneration` | `o1-mini` | Generating multi-step execution plans involves complex conditional reasoning across many possible node sequences. The reasoning model (o1-mini) is purpose-built for this. |
 | _(unknown type)_ | `gpt-4o` | The default fallback for any unrecognized operation type is the quality model, erring on the side of capability over cost. |
+
+> **Note**: `ToolHandlerModel` is a `ModelSelectorOptions` configuration property (appsettings key `ModelSelector:ToolHandlerModel`, default `gpt-4o-mini`) but is **not** an `OperationType` enum member. It controls the model used by built-in tool handlers (document summary, clause analysis, entity extraction) and is applied directly by those handlers, not routed through the `ModelSelector.SelectModel` method.
 
 ### Cost and Latency Profile Summary
 
@@ -236,7 +237,7 @@ If o1-mini is unavailable in westus2, use this configuration workaround instead:
 
 ## Related Documentation
 
-- [AI Implementation Reference](../architecture/ai-implementation-reference.md) — Overall AI system design and tool framework
+- [AI Architecture](../architecture/AI-ARCHITECTURE.md) — Overall AI system design and tool framework
 - [AI Deployment Guide](./AI-DEPLOYMENT-GUIDE.md) — Deploying Azure OpenAI models and configuring the BFF API
-- [Playbook Scope Configuration Guide](./PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md) — Creating Action, Skill, and Knowledge scopes for playbooks
+- [Scope Configuration Guide](./SCOPE-CONFIGURATION-GUIDE.md) — Creating Action, Skill, and Knowledge scopes for playbooks
 - [RAG Architecture](./RAG-ARCHITECTURE.md) — Embedding model usage and retrieval-augmented generation

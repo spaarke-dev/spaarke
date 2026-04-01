@@ -123,8 +123,8 @@ Extend the existing Playbook execution engine with a `CreateNotification` node e
 
 ### Architecture Reference Documents
 - `docs/architecture/playbook-architecture.md` — Playbook engine, node executors, execution flow
-- `docs/guides/PLAYBOOK-DESIGN-GUIDE.md` — Playbook design, scope selection, deployment
-- `docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md` — JPS prompt schema for AI nodes
+- `docs/guides/JPS-AUTHORING-GUIDE.md` — JPS authoring, prompt schema, playbook design
+- `docs/guides/SCOPE-CONFIGURATION-GUIDE.md` — Scope configuration, pre-fill, builder
 - `docs/architecture/ai-document-summary-architecture.md` — Document creation flows (notification trigger points)
 
 ## Success Criteria

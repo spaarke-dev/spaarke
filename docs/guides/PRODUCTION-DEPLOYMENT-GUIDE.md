@@ -107,7 +107,7 @@ gh --version          # GitHub CLI 2.40+
 
 ### Required Azure Quotas
 
-**[DECISION]** Before deploying, verify quotas. If quotas are insufficient, request increases (1-3 business days).
+**[DECISION]** Before deploying, verify quotas. If quotas are insufficient, request increases (1-3 business days). Azure OpenAI regional availability changes frequently — confirm westus3 capacity for GPT-4o before starting provisioning.
 
 | Resource | Required | Region | Notes |
 |----------|----------|--------|-------|

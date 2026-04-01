@@ -89,7 +89,7 @@ grep -rn "^\s*//.*{" --include="*.cs"
 
 ## ADR Quick Checks
 
-Note: For full ADR validation (including ADR-013+), use `/adr-check` which loads `.claude/skills/adr-check/references/adr-validation-rules.md` and the ADR index in `docs/reference/adr/README-ADRs.md`.
+Note: For full ADR validation (including ADR-013+), use `/adr-check` which loads `.claude/skills/adr-check/references/adr-validation-rules.md` and the ADR index in `docs/adr/README-ADRs.md`.
 
 ### ADR-001: No Azure Functions
 ```

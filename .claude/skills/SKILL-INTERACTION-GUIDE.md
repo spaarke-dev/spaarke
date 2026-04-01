@@ -156,11 +156,11 @@ Step B3: Comprehensive Resource Discovery (project-pipeline Step 2)
   📜 Load FULL ADRs (not just constraints)
      - Complete ADR content with decision rationale
   📚 Search .claude/skills/ for applicable skills
-  📖 Search docs/ai-knowledge/ for guides and patterns
-  💻 Find existing code examples
+  📖 Search docs/guides/ for procedures; .claude/patterns/ for implementation pointers
+  💻 Find canonical implementations in codebase
   ⚠️  SCOPE: Comprehensive (for task creation and implementation)
-       ✅ Full ADR content, patterns, code examples
-  ✅ Output: "Discovered X ADRs, Y skills, Z guides, N code examples"
+       ✅ Full ADR content, pattern pointers, codebase implementations
+  ✅ Output: "Discovered X ADRs, Y skills, Z guides, N pattern pointers"
 
 Step B4: Generate Artifacts (project-pipeline Step 2 continued)
   🔧 CALLS: project-setup (AI Internal)
@@ -237,7 +237,7 @@ Step C2: Project Wrap-up (Final Task)
 
 **Resource Discovery Distinction**:
 - **Preliminary (design-to-spec)**: ADR constraints only for spec enrichment
-- **Comprehensive (project-pipeline)**: Full ADRs, patterns, code examples for implementation
+- **Comprehensive (project-pipeline)**: Full ADRs, pattern pointers to canonical implementations
 
 ---
 
@@ -273,8 +273,8 @@ Step 4: Load Knowledge Files (task-execute)
   Example from task file:
   <knowledge>
     <files>
-      docs/reference/adr/ADR-001-minimal-api-and-workers.md
-      docs/ai-knowledge/guides/SPAARKE-ARCHITECTURE.md
+      docs/adr/ADR-001-minimal-api-and-workers.md
+      docs/architecture/sdap-overview.md
       src/server/api/CLAUDE.md
     </files>
   </knowledge>
@@ -437,7 +437,7 @@ design-to-spec (Tier 1 - Component, Developer-Facing)
   └─→ Handoff to project-pipeline (User confirms 'y')
         │
         └─→ project-pipeline Step 2: Comprehensive resource discovery
-              └─→ Returns: Full ADRs, patterns, code examples
+              └─→ Returns: Full ADRs, pattern pointers, canonical file references
 ```
 
 **Rules**:
@@ -751,7 +751,7 @@ START: I have a project to work on
   │           │
   │           └─ Option B: Write AI spec directly
   │               - Create: projects/{name}/spec.md
-  │               - Use template: docs/ai-knowledge/templates/spec.template.md
+  │               - Use template: .claude/templates/ (use inline spec structure from this skill)
   │               - Then: /project-pipeline projects/{name}
   │
   └─ Is this just a small task (no full project)?
@@ -1059,7 +1059,7 @@ worktree-setup (Developer-Facing - Parallel Sessions)
 | Skill | Discovery Type | Scope | Purpose |
 |-------|---------------|-------|---------|
 | **design-to-spec** | Preliminary | ADR constraints only | Enrich spec.md with architecture boundaries |
-| **project-pipeline** | Comprehensive | Full ADRs, patterns, code examples | Support task creation and implementation |
+| **project-pipeline** | Comprehensive | Full ADRs, pattern pointers, canonical implementations | Support task creation and implementation |
 
 **Key Distinction**:
 - Preliminary = "What are the rules?" (constraints for spec)
