@@ -36,7 +36,7 @@
 | 011 | Power BI embed component (ReportViewer) | 🔲 | `frontend`, `fluent-ui` | 010, 005 | — |
 | 012 | Report catalog dropdown | ✅ | `frontend`, `fluent-ui` | 010, 005 | — |
 | 013 | Token auto-refresh hook (80% TTL) | 🔲 | `frontend` | 011 | — |
-| 014 | Dark mode support (transparent PBI bg) | 🔲 | `frontend`, `fluent-ui` | 011 | C |
+| 014 | Dark mode support (transparent PBI bg) | ✅ | `frontend`, `fluent-ui` | 011 | C |
 | 015 | Module disabled state UI | 🔲 | `frontend` | 010, 006 | C |
 | 016 | Deploy Code Page to Dataverse | 🔲 | `deploy`, `dataverse` | 011, 012 | — |
 
@@ -45,8 +45,8 @@
 | # | Task | Status | Tags | Dependencies | Parallel Group |
 |---|------|--------|------|--------------|----------------|
 | 020 | Edit mode toggle (view/edit switch) | 🔲 | `frontend`, `fluent-ui` | 011 | — |
-| 021 | Create new report flow | 🔲 | `frontend`, `bff-api` | 020, 005 | — |
-| 022 | Save / Save As with catalog update | 🔲 | `frontend`, `bff-api` | 020 | D |
+| 021 | Create new report flow | ✅ | `frontend`, `bff-api` | 020, 005 | — |
+| 022 | Save / Save As with catalog update | ✅ | `frontend`, `bff-api` | 020 | D |
 | 023 | Export to PDF/PPTX | 🔲 | `frontend`, `bff-api` | 005 | D |
 | 024 | Role-based UI controls (Viewer/Author/Admin) | 🔲 | `frontend`, `auth` | 006, 020 | — |
 

@@ -226,6 +226,18 @@ export const ReportDropdown: React.FC<ReportDropdownProps> = ({
 export interface ReportDropdownContainerProps {
   /** Called when the selected report changes (from auto-selection or user pick). */
   onReportSelect: (report: ReportCatalogItem) => void;
+  /**
+   * Increment this value to trigger a catalog refetch from outside the component.
+   * Useful after creating or saving-as a report to immediately reflect the new entry.
+   * Defaults to 0 (no external refetch triggered).
+   */
+  externalRefetchKey?: number;
+  /**
+   * When provided, the container will programmatically select this report ID
+   * after the next catalog refetch (e.g. after creating a new report).
+   * The matching catalog entry is found and onReportSelect is called.
+   */
+  selectAfterRefetch?: string | null;
 }
 
 /**
@@ -234,16 +246,46 @@ export interface ReportDropdownContainerProps {
  *   - Auto-selects first report or ?reportId= URL param after catalog loads
  *   - Manages loading / error state
  *   - Renders <ReportDropdown> with resolved props
+ *   - Supports external refetch via externalRefetchKey and post-refetch selection
  */
 export const ReportDropdownContainer: React.FC<ReportDropdownContainerProps> = ({
   onReportSelect,
+  externalRefetchKey = 0,
+  selectAfterRefetch = null,
 }) => {
-  const { reports, loading, error } = useReportCatalog();
+  const { reports, loading, error, refetch } = useReportCatalog();
   const [selectedReportId, setSelectedReportId] = React.useState<string | null>(null);
 
-  // Auto-select when catalog first loads (or when selection hasn't been set yet)
+  // Track which externalRefetchKey value has been processed to avoid duplicate refetches
+  const lastProcessedRefetchKey = React.useRef(0);
+
+  // Trigger catalog refetch when the parent increments externalRefetchKey
   React.useEffect(() => {
-    if (loading || reports.length === 0 || selectedReportId !== null) {
+    if (externalRefetchKey > 0 && externalRefetchKey !== lastProcessedRefetchKey.current) {
+      lastProcessedRefetchKey.current = externalRefetchKey;
+      refetch();
+    }
+  }, [externalRefetchKey, refetch]);
+
+  // Auto-select when catalog first loads (or when selection hasn't been set yet)
+  // Also handles selectAfterRefetch: select a specific report after a refetch
+  React.useEffect(() => {
+    if (loading || reports.length === 0) {
+      return;
+    }
+
+    // After a refetch, select the newly created/saved report if requested
+    if (selectAfterRefetch) {
+      const target = reports.find((r) => r.id === selectAfterRefetch);
+      if (target) {
+        setSelectedReportId(target.id);
+        onReportSelect(target);
+        return;
+      }
+    }
+
+    // Initial auto-selection (only fire when nothing is yet selected)
+    if (selectedReportId !== null) {
       return;
     }
 
@@ -256,7 +298,7 @@ export const ReportDropdownContainer: React.FC<ReportDropdownContainerProps> = (
     onReportSelect(targetReport);
     // onReportSelect intentionally not in deps — only fire once on first load
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, reports, selectedReportId]);
+  }, [loading, reports, selectedReportId, selectAfterRefetch]);
 
   const handleSelect = React.useCallback(
     (reportId: string) => {

@@ -5,6 +5,7 @@
     <stream>frontend</stream>
     <tags>frontend, bff-api</tags>
     <estimate>4h</estimate>
+    <status>complete</status>
     <rigor>FULL</rigor>
     <rigor-hint>FULL</rigor-hint>
     <rigor-reason>Creates new report via PBI REST API integration, BFF endpoint interaction, Dataverse record creation, and opens report in edit mode. Cross-layer (frontend + BFF API) with 6+ steps.</rigor-reason>

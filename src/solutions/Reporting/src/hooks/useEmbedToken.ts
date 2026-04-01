@@ -90,13 +90,15 @@ export function useEmbedToken({
       if (cancelled) return;
 
       if (result.ok) {
-        const { token, embedUrl, reportId: pbiReportId, expiration } = result.data;
+        const { token, embedUrl, reportId: pbiReportId, expiration, refreshAfter, workspaceId } = result.data;
 
         setEmbedConfig({
           id: pbiReportId,
           embedUrl,
           accessToken: token,
           expiry: expiration,
+          refreshAfter,
+          workspaceId,
         });
         setError(null);
       } else {

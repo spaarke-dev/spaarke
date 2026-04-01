@@ -1,4 +1,4 @@
-<task id="014" project="spaarke-powerbi-embedded-r1">
+<task id="014" project="spaarke-powerbi-embedded-r1" status="complete">
   <metadata>
     <title>Dark mode support (transparent PBI background)</title>
     <phase>2</phase>

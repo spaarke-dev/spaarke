@@ -46,6 +46,11 @@ export interface ReportEmbedConfig {
   tokenType?: models.TokenType;
   /** Optional view mode override */
   viewMode?: models.ViewMode;
+  /**
+   * Power BI workspace (group) ID — returned by the BFF alongside the embed token.
+   * Required for Save As operations (targetWorkspaceId).
+   */
+  workspaceId?: string;
 }
 
 export interface ReportViewerProps {

@@ -5,6 +5,7 @@
     <stream>frontend</stream>
     <tags>frontend, bff-api</tags>
     <estimate>3h</estimate>
+    <status>complete</status>
     <rigor>FULL</rigor>
     <rigor-hint>FULL</rigor-hint>
     <rigor-reason>Implements save and save-as flows with PBI SDK events, BFF record updates, and Dataverse catalog synchronization. Modifies .tsx files with cross-layer concerns.</rigor-reason>

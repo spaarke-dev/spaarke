@@ -1,10 +1,11 @@
-<task id="024" project="spaarke-powerbi-embedded-r1">
+<task id="024" project="spaarke-powerbi-embedded-r1" status="complete">
   <metadata>
     <title>Role-based UI controls (Viewer/Author/Admin)</title>
     <phase>3</phase>
     <stream>frontend</stream>
     <tags>frontend, auth</tags>
     <estimate>3h</estimate>
+    <status>complete</status>
     <rigor>FULL</rigor>
     <rigor-hint>FULL</rigor-hint>
     <rigor-reason>Implements role-based access control across UI with privilege fetching, conditional rendering, and delete flow with BFF integration. Security-sensitive auth code.</rigor-reason>

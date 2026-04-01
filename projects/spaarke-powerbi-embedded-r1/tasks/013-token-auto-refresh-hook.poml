@@ -1,4 +1,4 @@
-<task id="013" project="spaarke-powerbi-embedded-r1">
+<task id="013" project="spaarke-powerbi-embedded-r1" status="complete">
   <metadata>
     <title>Token auto-refresh hook (80% TTL)</title>
     <phase>2</phase>

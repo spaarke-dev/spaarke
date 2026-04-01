@@ -25,7 +25,15 @@ import { createRoot } from "react-dom/client";
 import { resolveRuntimeConfig } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
+import { initBodyTheme, SURFACE_BG, SURFACE_FG, SURFACE_FG3 } from "./styles/globalStyles";
 import { App } from "./App";
+
+// Apply the correct body background immediately — before any async work —
+// so the initial paint matches the active Fluent v9 theme (light or dark).
+// This prevents the white-body FOUC in dark mode when the page first loads.
+// The returned cleanup function removes the theme-change listener on page unload.
+const cleanupBodyTheme = initBodyTheme();
+window.addEventListener("unload", cleanupBodyTheme, { once: true });
 
 async function bootstrap(): Promise<void> {
   // 1. Resolve runtime config from Dataverse Environment Variables
@@ -61,14 +69,24 @@ async function bootstrap(): Promise<void> {
 bootstrap().catch((err) => {
   console.error("[Reporting] Bootstrap failed:", err);
 
-  // Show a user-friendly error in the DOM
+  // Show a user-friendly error in the DOM.
+  // Body background is already set by initBodyTheme() above, so the error
+  // page matches the active theme. Use SURFACE_* token values directly since
+  // FluentProvider has not mounted and CSS custom properties are not available.
   const rootElement = document.getElementById("root");
   if (rootElement) {
+    // Detect whether dark mode is active to pick the right token values
+    const isDark =
+      document.body.style.backgroundColor === SURFACE_BG.dark;
+    const bgColor = isDark ? SURFACE_BG.dark : SURFACE_BG.light;
+    const fgColor = isDark ? SURFACE_FG.dark : SURFACE_FG.light;
+    const subtleFg = isDark ? SURFACE_FG3.dark : SURFACE_FG3.light;
+
     rootElement.innerHTML = `
-      <div style="padding: 40px; text-align: center; font-family: 'Segoe UI', sans-serif;">
-        <h2>Configuration Error</h2>
-        <p>Unable to load Reporting configuration from Dataverse environment variables.</p>
-        <p style="color: var(--colorNeutralForeground3); font-size: 12px;">${err instanceof Error ? err.message : String(err)}</p>
+      <div style="padding: 40px; text-align: center; background-color: ${bgColor}; color: ${fgColor}; height: 100%; box-sizing: border-box; font-family: 'Segoe UI', Segoe UI, system-ui, sans-serif;">
+        <h2 style="margin-bottom: 12px;">Configuration Error</h2>
+        <p style="margin-bottom: 8px;">Unable to load Reporting configuration from Dataverse environment variables.</p>
+        <p style="color: ${subtleFg}; font-size: 12px;">${err instanceof Error ? err.message : String(err)}</p>
       </div>
     `;
   }

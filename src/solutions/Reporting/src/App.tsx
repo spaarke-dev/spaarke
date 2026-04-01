@@ -7,15 +7,26 @@
  *
  * Layout:
  *   ┌─────────────────────────────────────────┐
- *   │  Header: title | [report selector ▾]    │
+ *   │  Header: title | [toolbar controls]     │
  *   ├─────────────────────────────────────────┤
  *   │                                         │
  *   │         ReportViewer (embed)            │
  *   │                                         │
  *   └─────────────────────────────────────────┘
  *
+ * Privilege matrix enforced by ReportingToolbar:
+ *
+ *   Control               | Viewer | Author | Admin
+ *   ──────────────────────|--------|--------|──────
+ *   Report dropdown       |   ✓   |   ✓   |   ✓
+ *   Refresh button        |   ✓   |   ✓   |   ✓
+ *   Export button         |   ✓   |   ✓   |   ✓
+ *   Mode toggle (edit)    |   ✗   |   ✓   |   ✓
+ *   Delete Report button  |   ✗   |   ✗   |   ✓
+ *
  * @see ADR-021 - Fluent UI v9 only; no hard-coded colors; dark mode required
  * @see ADR-006 - Code Page pattern for full-page surfaces
+ * @see ADR-008 - BFF endpoint filters for auth; privilege enforced server-side
  */
 
 import * as React from "react";
@@ -25,23 +36,22 @@ import {
   tokens,
   Text,
   Spinner,
-  Button,
-  Tooltip,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
-  Divider,
+  Toaster,
 } from "@fluentui/react-components";
-import { DataTrendingRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
+import { DataTrendingRegular } from "@fluentui/react-icons";
 import { Report } from "powerbi-client";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { ModuleGate } from "./components/ModuleGate";
-import { ReportDropdownContainer } from "./components/ReportDropdown";
 import { ReportViewer } from "./components/ReportViewer";
-import { ModeToggle } from "./components/ModeToggle";
-import { ExportButton } from "./components/ExportButton";
+import { ReportingToolbar } from "./components/ReportingToolbar";
+import { REPORTING_TOASTER_ID } from "./components/SaveControls";
 import { useEmbedToken } from "./hooks/useEmbedToken";
-import { useReportingPrivilege, canEditReports } from "./hooks/useReportingPrivilege";
+import { useTokenRefresh } from "./hooks/useTokenRefresh";
+import { useReportingPrivilege } from "./hooks/useReportingPrivilege";
+import { useReportCatalog } from "./hooks/useReportCatalog";
 import type { ReportCatalogItem } from "./types";
 import type { ReportMode } from "./types";
 
@@ -76,15 +86,6 @@ const useStyles = makeStyles({
   headerTitle: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-  },
-  headerActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalXS,
-  },
-  toolbarDivider: {
-    height: "20px",
-    alignSelf: "center",
   },
   main: {
     flex: 1,
@@ -127,14 +128,32 @@ const useStyles = makeStyles({
  * enabled and the user has the sprk_ReportingAccess security role.
  *
  * Owns:
- *   - selectedReport state (updated by ReportDropdownContainer)
+ *   - report catalog state (via useReportCatalog — allows deletion to remove entries)
+ *   - selectedReport state (updated by ReportDropdown or post-delete resolution)
  *   - useEmbedToken (fetches embed token when a report is selected)
  *   - reportRef (stored Report reference for token refresh / mode switch)
+ *   - privilege (fetched from BFF, passed to ReportingToolbar for role-gating)
  */
 const ReportingShell: React.FC = () => {
   const styles = useStyles();
 
-  // Selected report from the dropdown (set by ReportDropdownContainer)
+  // ---- Catalog state -------------------------------------------------------
+  // Owned here (not inside ReportDropdownContainer) so the shell can
+  // optimistically remove a deleted report without a full refetch.
+
+  const { reports: fetchedReports, loading: catalogLoading, refetch } = useReportCatalog();
+  const [reports, setReports] = React.useState<ReportCatalogItem[]>([]);
+
+  // Sync local reports copy when the catalog fetch settles
+  React.useEffect(() => {
+    if (!catalogLoading) {
+      setReports(fetchedReports);
+    }
+  }, [fetchedReports, catalogLoading]);
+
+  // ---- Report selection state ----------------------------------------------
+
+  // Selected report from the dropdown (set by ReportDropdown or post-delete)
   const [selectedReport, setSelectedReport] = React.useState<ReportCatalogItem | null>(null);
 
   // Current view/edit mode — starts in view mode
@@ -154,11 +173,30 @@ const ReportingShell: React.FC = () => {
   // Stored Report reference — available after getEmbeddedComponent fires
   const reportRef = React.useRef<Report | null>(null);
 
+  // Background token refresh error state — surfaced as a non-blocking warning
+  const [refreshError, setRefreshError] = React.useState<string | null>(null);
+
+  const handleRefreshError = React.useCallback((error: Error) => {
+    console.error("[App] Proactive token refresh failed:", error);
+    setRefreshError(
+      "The report session could not be renewed automatically. Please refresh the page."
+    );
+  }, []);
+
+  // Proactive token refresh at 80% TTL — silently calls report.setAccessToken()
+  const { isRefreshing } = useTokenRefresh({
+    reportRef,
+    embedConfig,
+    reportId: selectedReport?.id ?? null,
+    onRefreshError: handleRefreshError,
+  });
+
   // ---- Handlers ------------------------------------------------------------
 
   const handleReportSelect = React.useCallback((report: ReportCatalogItem) => {
     reportRef.current = null; // Clear stale reference when report changes
     setReportMode("view"); // Reset to view mode when switching reports
+    setRefreshError(null); // Clear any stale refresh errors from the previous report
     setSelectedReport(report);
   }, []);
 
@@ -176,6 +214,59 @@ const ReportingShell: React.FC = () => {
     refreshToken();
   }, [refreshToken]);
 
+  /**
+   * Called by DeleteReportButton after a successful deletion.
+   * Removes the deleted report from the local catalog and selects the next one.
+   */
+  const handleReportDeleted = React.useCallback(
+    (nextReport: ReportCatalogItem | null) => {
+      if (selectedReport) {
+        setReports((prev) => prev.filter((r) => r.id !== selectedReport.id));
+      }
+      reportRef.current = null;
+      setReportMode("view");
+      setRefreshError(null);
+      setSelectedReport(nextReport);
+    },
+    [selectedReport]
+  );
+
+  /**
+   * Called by NewReportButton after a blank report is successfully created.
+   * Optimistically adds the new item to the catalog and selects it in edit mode.
+   * Also triggers a background refetch to ensure the catalog is fully in sync.
+   */
+  const handleReportCreated = React.useCallback(
+    (newReport: ReportCatalogItem) => {
+      // Add to catalog immediately so it appears in the dropdown right away
+      setReports((prev) => [...prev, newReport]);
+      // Select the new report and switch to edit mode
+      reportRef.current = null;
+      setReportMode("edit");
+      setRefreshError(null);
+      setSelectedReport(newReport);
+      // Background sync: refetch the full catalog from the BFF
+      refetch();
+    },
+    [refetch]
+  );
+
+  /**
+   * Called by SaveControls after a Save As succeeds.
+   * Adds the new copy to the catalog and selects it in edit mode.
+   */
+  const handleSaveAsComplete = React.useCallback(
+    (newReport: ReportCatalogItem) => {
+      setReports((prev) => [...prev, newReport]);
+      reportRef.current = null;
+      setReportMode("edit");
+      setRefreshError(null);
+      setSelectedReport(newReport);
+      refetch();
+    },
+    [refetch]
+  );
+
   // ---- Render --------------------------------------------------------------
 
   return (
@@ -189,42 +280,22 @@ const ReportingShell: React.FC = () => {
           </Text>
         </div>
 
-        <div className={styles.headerActions}>
-          {/* Report selector dropdown — managed by ReportDropdownContainer */}
-          <ReportDropdownContainer onReportSelect={handleReportSelect} />
-
-          {/* Refresh button — re-fetches embed token */}
-          <Tooltip content="Refresh report" relationship="label">
-            <Button
-              appearance="subtle"
-              icon={<ArrowClockwiseRegular />}
-              aria-label="Refresh report"
-              disabled={!selectedReport || tokenLoading}
-              onClick={handleRefresh}
-            />
-          </Tooltip>
-
-          {/* Export button — visible to all roles (task 023) */}
-          <Divider vertical className={styles.toolbarDivider} />
-          <ExportButton
-            reportId={selectedReport?.id ?? null}
-            disabled={!selectedReport || tokenLoading}
-          />
-
-          {/* Mode toggle — only visible to Author and Admin (task 020) */}
-          {canEditReports(privilege) && (
-            <>
-              <Divider vertical className={styles.toolbarDivider} />
-              <ModeToggle
-                mode={reportMode}
-                onModeChange={setReportMode}
-                report={reportRef.current}
-                reportId={selectedReport?.id ?? null}
-                disabled={!selectedReport || tokenLoading}
-              />
-            </>
-          )}
-        </div>
+        {/* Privilege-gated toolbar — all role logic lives in ReportingToolbar */}
+        <ReportingToolbar
+          privilege={privilege}
+          reportMode={reportMode}
+          selectedReport={selectedReport}
+          reports={reports}
+          reportRef={reportRef}
+          tokenLoading={tokenLoading || isRefreshing}
+          workspaceId={embedConfig?.workspaceId ?? null}
+          onReportSelect={handleReportSelect}
+          onModeChange={setReportMode}
+          onRefresh={handleRefresh}
+          onReportDeleted={handleReportDeleted}
+          onReportCreated={handleReportCreated}
+          onSaveAsComplete={handleSaveAsComplete}
+        />
       </header>
 
       {/* ---- Main report area ---- */}
@@ -241,6 +312,16 @@ const ReportingShell: React.FC = () => {
               </MessageBar>
             </div>
           </div>
+        )}
+
+        {/* Background token refresh error — non-blocking warning, report still visible */}
+        {refreshError && !tokenError && (
+          <MessageBar intent="warning" layout="multiline">
+            <MessageBarBody>
+              <MessageBarTitle>Session renewal failed</MessageBarTitle>
+              {refreshError}
+            </MessageBarBody>
+          </MessageBar>
         )}
 
         {/* Token loading state */}
@@ -263,6 +344,9 @@ const ReportingShell: React.FC = () => {
           />
         )}
       </main>
+
+      {/* Toaster — used by SaveControls for success/error notifications */}
+      <Toaster toasterId={REPORTING_TOASTER_ID} position="bottom-end" />
     </>
   );
 };

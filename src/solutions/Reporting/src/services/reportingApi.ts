@@ -35,6 +35,11 @@ const REPORTING_EXPORT_PATH = "/api/reporting/export";
 export interface EmbedTokenResponse {
   token: string;
   expiration: string; // ISO-8601 date string
+  /**
+   * ISO-8601 timestamp at which the client should proactively refresh the
+   * token via report.setAccessToken(). Set by the BFF at 80% of token TTL.
+   */
+  refreshAfter: string;
   embedUrl: string;
   reportId: string;
   workspaceId: string;
@@ -183,11 +188,160 @@ export async function getExportStatus(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Report management — create, update, save-as
+// ---------------------------------------------------------------------------
+
 /**
- * Placeholder stubs for report management operations.
- * Implemented in later tasks (022, 024) — defined here for completeness
- * so consumers can import from a single service module.
+ * Request body for POST /api/reporting/reports — create a blank report.
+ * The BFF creates the report in the PBI workspace using CreateReport with
+ * the provided datasetId, then creates a sprk_report Dataverse record.
  */
+export interface CreateReportRequest {
+  /** Display name for the new report. */
+  name: string;
+  /**
+   * Power BI dataset (semantic model) ID to bind the new report to.
+   * Must belong to the customer's PBI workspace.
+   */
+  datasetId: string;
+}
+
+/**
+ * Response from POST /api/reporting/reports — new catalog entry.
+ */
+export interface CreateReportResponse {
+  /** sprk_report Dataverse record ID for the new report. */
+  reportId: string;
+  /** Power BI embed URL for the new report. */
+  embedUrl: string;
+  /** Display name as confirmed by the BFF. */
+  name: string;
+}
+
+/**
+ * Create a blank Power BI report bound to the customer's semantic model.
+ *
+ * Calls POST /api/reporting/reports. The BFF:
+ *  1. Calls PBI CreateReport with the given datasetId
+ *  2. Creates a sprk_report Dataverse record to track the report in the catalog
+ *
+ * @param request  Name and datasetId for the new report
+ */
+export async function createReport(
+  request: CreateReportRequest
+): Promise<ApiResult<CreateReportResponse>> {
+  try {
+    const url = `${getBffBaseUrl()}${REPORTING_CATALOG_PATH}`;
+    const response = await authenticatedFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { ok: false, error: body || response.statusText, status: response.status };
+    }
+
+    const data = (await response.json()) as CreateReportResponse;
+    return { ok: true, data };
+  } catch (err) {
+    console.error("[reportingApi] createReport failed", err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+/**
+ * Request body for PATCH /api/reporting/reports/{id} — update report metadata.
+ * Used after a save operation to sync the modified date (and optional name change)
+ * in the sprk_report Dataverse record.
+ */
+export interface UpdateReportRequest {
+  /** Optional new display name (when the user renamed the report on save). */
+  name?: string;
+}
+
+/**
+ * Update an existing sprk_report Dataverse record after an in-place save.
+ *
+ * Calls PATCH /api/reporting/reports/{id} to update the modified date
+ * (and optionally the name) on the sprk_report catalog entry.
+ *
+ * @param reportId  The sprk_report Dataverse record GUID
+ * @param request   Fields to update
+ */
+export async function updateReport(
+  reportId: string,
+  request: UpdateReportRequest
+): Promise<ApiResult<void>> {
+  try {
+    const url = `${getBffBaseUrl()}${REPORTING_CATALOG_PATH}/${encodeURIComponent(reportId)}`;
+    const response = await authenticatedFetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { ok: false, error: body || response.statusText, status: response.status };
+    }
+
+    return { ok: true, data: undefined };
+  } catch (err) {
+    console.error("[reportingApi] updateReport failed", err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+/**
+ * Request body for POST /api/reporting/reports (save-as variant).
+ * Creates a copy of an existing report with a new name, marked as custom.
+ */
+export interface SaveAsReportRequest {
+  /** New display name for the copied report. */
+  name: string;
+  /** Source report's Power BI report ID (used by the BFF to call SaveAs). */
+  sourceReportId: string;
+  /** Power BI workspace ID where the copy should be saved. */
+  targetWorkspaceId: string;
+  /** Always true for SaveAs — flags the record as user-created. */
+  isCustom: boolean;
+}
+
+/**
+ * Create a copy of an existing report (Save As).
+ *
+ * Calls POST /api/reporting/reports with isCustom=true. The BFF calls
+ * report.saveAs() in PBI, then creates a new sprk_report Dataverse record
+ * with is_custom=true.
+ *
+ * @param request  SaveAs parameters including new name and source report info
+ */
+export async function saveAsReport(
+  request: SaveAsReportRequest
+): Promise<ApiResult<CreateReportResponse>> {
+  try {
+    const url = `${getBffBaseUrl()}${REPORTING_CATALOG_PATH}`;
+    const response = await authenticatedFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { ok: false, error: body || response.statusText, status: response.status };
+    }
+
+    const data = (await response.json()) as CreateReportResponse;
+    return { ok: true, data };
+  } catch (err) {
+    console.error("[reportingApi] saveAsReport failed", err);
+    return { ok: false, error: String(err) };
+  }
+}
 
 export async function fetchUserPrivilege(): Promise<ApiResult<{ privilege: UserPrivilege }>> {
   try {
@@ -203,6 +357,29 @@ export async function fetchUserPrivilege(): Promise<ApiResult<{ privilege: UserP
     return { ok: true, data };
   } catch (err) {
     console.error("[reportingApi] fetchUserPrivilege failed", err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+/**
+ * Delete a report via DELETE /api/reporting/reports/{reportId}.
+ * Admin-only operation — the BFF enforces this via ReportingAuthorizationFilter.
+ *
+ * @param reportId  The sprk_report record GUID to delete
+ */
+export async function deleteReport(reportId: string): Promise<ApiResult<void>> {
+  try {
+    const url = `${getBffBaseUrl()}/api/reporting/reports/${encodeURIComponent(reportId)}`;
+    const response = await authenticatedFetch(url, { method: "DELETE" });
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { ok: false, error: body || response.statusText, status: response.status };
+    }
+
+    return { ok: true, data: undefined };
+  } catch (err) {
+    console.error("[reportingApi] deleteReport failed", err);
     return { ok: false, error: String(err) };
   }
 }
