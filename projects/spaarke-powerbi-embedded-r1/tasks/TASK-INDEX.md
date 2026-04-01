@@ -32,7 +32,7 @@
 
 | # | Task | Status | Tags | Dependencies | Parallel Group |
 |---|------|--------|------|--------------|----------------|
-| 010 | Scaffold sprk_reporting Code Page | 🔲 | `frontend`, `code-page` | none | B |
+| 010 | Scaffold sprk_reporting Code Page | ✅ | `frontend`, `code-page` | none | B |
 | 011 | Power BI embed component (ReportViewer) | 🔲 | `frontend`, `fluent-ui` | 010, 005 | — |
 | 012 | Report catalog dropdown | 🔲 | `frontend`, `fluent-ui` | 010, 005 | — |
 | 013 | Token auto-refresh hook (80% TTL) | 🔲 | `frontend` | 011 | — |

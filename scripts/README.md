@@ -2,7 +2,7 @@
 
 **Purpose:** Utility scripts for SDAP development, deployment, and operations.
 
-**Last Updated:** March 14, 2026
+**Last Updated:** March 31, 2026
 
 ---
 
@@ -412,6 +412,64 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ---
 
 ## Active Development Scripts
+
+### Reporting Module Scripts
+
+#### `Deploy-ReportingReports.ps1`
+**Purpose:** Deploy Power BI report templates (.pbix) to a customer PBI workspace — imports files via PBI REST API, rebinds datasets to the customer's Dataverse instance, configures scheduled refresh, and creates/updates `sprk_report` records in Dataverse.
+**Usage:** 🟡 Occasional - Deploy or update standard product reports per customer
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), service principal with PBI workspace Member/Admin role
+**Owner:** Reporting Team
+**Last Used:** March 2026 (Task 035 — initial implementation)
+
+**Required Environment Variables:**
+- `PBI_TENANT_ID` — Entra ID tenant ID
+- `PBI_CLIENT_ID` — Service principal app (client) ID
+- `PBI_CLIENT_SECRET` — Service principal client secret
+- `PBI_WORKSPACE_ID` — Target PBI workspace ID (overridable via `-WorkspaceId`)
+- `PBI_DATAVERSE_DATASOURCE_URL` — Dataverse OData endpoint for dataset rebinding
+- `DATAVERSE_URL` — Dataverse org URL for catalog sync
+
+**When to Use:**
+- After building or updating `.pbix` templates in `reports/`
+- During customer onboarding (provision workspace → deploy reports)
+- After a new standard product report is added to the `reports/` folder
+- Deploying a new report version to existing customer workspaces
+
+**Command:**
+```powershell
+# Dry run — preview what would be deployed
+.\Deploy-ReportingReports.ps1 -WhatIf
+
+# Deploy standard product reports (reads PBI_WORKSPACE_ID from env)
+.\Deploy-ReportingReports.ps1
+
+# Deploy specific version folder
+.\Deploy-ReportingReports.ps1 -ReportFolder "reports/v1.2.0"
+
+# Deploy to a specific workspace
+.\Deploy-ReportingReports.ps1 -WorkspaceId "00000000-0000-0000-0000-000000000000"
+
+# Deploy to staging environment
+.\Deploy-ReportingReports.ps1 -Environment staging -DataverseOrg "https://myorg-stg.crm.dynamics.com"
+```
+
+**Deployment Steps:**
+1. Validates prerequisites (env vars, .pbix files, Azure CLI)
+2. Acquires PBI REST API token via service principal client credentials flow
+3. Acquires Dataverse token via Azure CLI
+4. For each `.pbix` file: imports to PBI workspace, rebinds dataset to Dataverse, sets refresh schedule
+5. Creates or updates `sprk_report` records in Dataverse (catalog sync)
+6. Outputs deployment summary table
+
+**Notes:**
+- Report category is inferred from the report filename (Financial, Documents, Operational, Compliance, Custom)
+- Scheduled refresh defaults to Mon–Fri at 06:00, 12:00, and 18:00 UTC; set `PBI_REFRESH_ENABLED=false` to skip
+- Dataset rebind uses `Default.SetAllConnections`; if the dataset uses embedded credentials the warning is non-fatal
+- Idempotent: existing `sprk_report` records (matched by PBI report ID) are updated, not duplicated
+
+---
 
 ### PCF & Custom Page Deployment
 
@@ -892,3 +950,4 @@ Most scripts require:
 ## Change Log
 
 - **2025-12-02:** Initial script registry created. Removed 21 scripts (deprecated, bash, docs). Established maintenance process.
+- **2026-03-31:** Added Deploy-ReportingReports.ps1 — Power BI report template deployment for the Reporting module (Task 035).

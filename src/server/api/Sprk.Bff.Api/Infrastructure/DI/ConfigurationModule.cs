@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Models;
@@ -60,6 +61,13 @@ public static class ConfigurationModule
         services
             .AddOptions<ModelSelectorOptions>()
             .Bind(configuration.GetSection(ModelSelectorOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Power BI Embedded Reporting options (PBI-001) — gated on sprk_ReportingModuleEnabled
+        services
+            .AddOptions<PowerBiOptions>()
+            .Bind(configuration.GetSection(PowerBiOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
 

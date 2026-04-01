@@ -1,7 +1,7 @@
 <task id="PBI-036" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create reports/ folder structure with versioning and Git configuration</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>4</phase>
     <estimated-effort>1 hour</estimated-effort>
     <tags>docs, config</tags>

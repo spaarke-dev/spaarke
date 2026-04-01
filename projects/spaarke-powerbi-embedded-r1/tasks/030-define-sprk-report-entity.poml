@@ -1,7 +1,7 @@
 <task id="PBI-030" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Define sprk_report entity schema for Dataverse</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>4</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>dataverse, solution</tags>

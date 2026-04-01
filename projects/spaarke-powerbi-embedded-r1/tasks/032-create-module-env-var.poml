@@ -1,7 +1,7 @@
 <task id="PBI-032" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Define sprk_ReportingModuleEnabled environment variable in Dataverse</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>4</phase>
     <estimated-effort>1 hour</estimated-effort>
     <tags>dataverse, solution</tags>

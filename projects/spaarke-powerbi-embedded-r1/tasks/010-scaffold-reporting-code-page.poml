@@ -1,10 +1,11 @@
-<task id="010" project="spaarke-powerbi-embedded-r1">
+<task id="010" project="spaarke-powerbi-embedded-r1" status="complete">
   <metadata>
     <title>Scaffold sprk_reporting Code Page</title>
     <phase>2</phase>
     <stream>frontend</stream>
     <tags>frontend, code-page</tags>
     <estimate>3h</estimate>
+    <status>complete</status>
     <rigor>FULL</rigor>
     <rigor-hint>FULL</rigor-hint>
     <rigor-reason>Creates new Code Page project from scratch — multiple config files, build pipeline, auth bootstrap, and React shell. Modifies .ts/.tsx files with 6+ steps.</rigor-reason>

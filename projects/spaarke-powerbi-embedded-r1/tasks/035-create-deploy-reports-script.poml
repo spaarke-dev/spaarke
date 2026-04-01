@@ -1,7 +1,7 @@
 <task id="PBI-035" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create Deploy-ReportingReports.ps1 deployment script</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>4</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>deploy, script</tags>
