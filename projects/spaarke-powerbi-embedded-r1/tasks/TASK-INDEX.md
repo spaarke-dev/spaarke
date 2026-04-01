@@ -57,8 +57,8 @@
 | 030 | Define sprk_report entity schema | 🔲 | `dataverse`, `solution` | none | E |
 | 031 | Create sprk_ReportingAccess security role | 🔲 | `dataverse`, `solution` | none | E |
 | 032 | Create sprk_ReportingModuleEnabled env var | 🔲 | `dataverse`, `solution` | none | E |
-| 033 | Deploy Dataverse schema | 🔲 | `deploy`, `dataverse` | 030, 031, 032 | — |
-| 034 | Standard .pbix report templates (placeholder) | 🔲 | `docs`, `manual` | none | — |
+| 033 | Deploy Dataverse schema | ✅ | `deploy`, `dataverse` | 030, 031, 032 | — |
+| 034 | Standard .pbix report templates (placeholder) | ✅ | `docs`, `manual` | none | — |
 | 035 | Create Deploy-ReportingReports.ps1 | 🔲 | `deploy`, `script` | none | E |
 | 036 | Report versioning setup (reports/ folder) | 🔲 | `docs`, `config` | none | E |
 

@@ -1,7 +1,7 @@
 <task id="PBI-043" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create integration tests for all /api/reporting/* endpoints</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>5</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>testing, integration-test</tags>

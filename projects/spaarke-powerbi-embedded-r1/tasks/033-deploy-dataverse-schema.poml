@@ -1,7 +1,7 @@
 <task id="PBI-033" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Deploy sprk_report entity, security role, and environment variable to Dataverse</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>4</phase>
     <estimated-effort>2 hours</estimated-effort>
     <tags>deploy, dataverse</tags>

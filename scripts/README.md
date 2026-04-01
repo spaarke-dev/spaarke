@@ -543,6 +543,46 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+#### `Deploy-ReportingCodePage.ps1`
+**Purpose:** Build the Reporting Code Page (`src/solutions/Reporting/`) and upload `dist/index.html` to Dataverse as the `sprk_reporting` web resource. Uses `vite-plugin-singlefile` so the output is a single fully self-contained HTML file — no separate asset inlining required.
+**Usage:** 🟢 Active - Deploy after Reporting Code Page changes
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Node.js + npm, Dataverse connection
+**Owner:** Reporting Team
+**Last Used:** March 2026 (Task 016 — initial implementation)
+
+**When to Use:**
+- After modifying the Reporting Code Page (`src/solutions/Reporting/src/`)
+- Initial setup of the `sprk_reporting` web resource in a new environment
+- Deploying updates to the embedded Power BI report viewer UI
+
+**Command:**
+```powershell
+# Deploy to default environment (reads DATAVERSE_URL from env)
+.\Deploy-ReportingCodePage.ps1
+
+# Deploy to a specific Dataverse org
+.\Deploy-ReportingCodePage.ps1 -DataverseUrl "https://myorg.crm.dynamics.com"
+
+# Preview without deploying
+.\Deploy-ReportingCodePage.ps1 -WhatIf
+```
+
+**Deployment Steps:**
+1. `npm install` in `src/solutions/Reporting/`
+2. `npm run build` — Vite + vite-plugin-singlefile produces `dist/index.html` (all JS/CSS inlined)
+3. Verifies `dist/index.html` exists and contains no external asset references
+4. Acquires Dataverse access token via Azure CLI
+5. Creates or updates `sprk_reporting` web resource via Dataverse Web API
+6. Publishes the web resource so changes are live
+
+**Notes:**
+- The Reporting Code Page uses `vite-plugin-singlefile`, making the dist output a single file — no manual JS inlining step needed (contrast with `Deploy-ExternalWorkspaceSpa.ps1`)
+- Idempotent: first run creates the web resource; subsequent runs update and republish it
+- Web resource accessible at: `{DataverseUrl}/WebResources/sprk_reporting`
+
+---
+
 ### PCF & Custom Page Deployment
 
 #### `Deploy-SpeAdminApp.ps1`
@@ -1024,3 +1064,4 @@ Most scripts require:
 - **2025-12-02:** Initial script registry created. Removed 21 scripts (deprecated, bash, docs). Established maintenance process.
 - **2026-03-31:** Added Deploy-ReportingReports.ps1 — Power BI report template deployment for the Reporting module (Task 035).
 - **2026-03-31:** Added Initialize-ReportingCustomer.ps1 — end-to-end customer onboarding for the Reporting module: PBI workspace, SP profile, report deployment, Dataverse module enablement (Task 040).
+- **2026-03-31:** Added Deploy-ReportingCodePage.ps1 — builds and deploys the Reporting Code Page (sprk_reporting web resource) to Dataverse using vite-plugin-singlefile single-file output (Task 016).

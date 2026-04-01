@@ -122,6 +122,19 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 // Record Matching
                 ["DocumentIntelligence:RecordMatchingEnabled"] = "true",
 
+                // PowerBi options (required by ReportingModule — PowerBiOptions ValidateDataAnnotations)
+                // These are test values; no real Power BI API calls are made in integration tests.
+                ["PowerBi:TenantId"]     = "test-powerbi-tenant-id",
+                ["PowerBi:ClientId"]     = "test-powerbi-client-id",
+                ["PowerBi:ClientSecret"] = "test-powerbi-client-secret",
+                ["PowerBi:ApiUrl"]       = "https://api.powerbi.com",
+                ["PowerBi:Scope"]        = "https://analysis.windows.net/.default",
+
+                // Reporting module gate — disabled by default so module-disabled tests pass.
+                // Individual tests that need a 200 from /api/reporting/* override this via
+                // WithWebHostBuilder / ConfigureTestServices on a per-test WebApplicationFactory.
+                ["Reporting:ModuleEnabled"] = "false",
+
                 // AiSearchResilienceOptions defaults (ValidateDataAnnotations)
                 ["AiSearchResilience:MaxRetryAttempts"] = "3",
                 ["AiSearchResilience:CircuitBreakerFailureThreshold"] = "5",
@@ -249,6 +262,64 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
     {
         return CreateAuthenticatedClient();
     }
+
+    /// <summary>
+    /// Creates an authenticated HttpClient with the Reporting module explicitly enabled and
+    /// the user pre-configured with the specified Dataverse security role claims.
+    ///
+    /// Use this in Reporting endpoint tests that need to verify 200/403 privilege behavior.
+    /// </summary>
+    /// <param name="roles">
+    ///   Dataverse security role names to inject into the test user's claims.
+    ///   Always include "sprk_ReportingAccess" for basic access; add "sprk_ReportingAdmin"
+    ///   for admin-level operations.
+    /// </param>
+    public HttpClient CreateReportingClient(params string[] roles)
+    {
+        var factory = this.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                // Register the role set as a singleton so the auth handler can resolve it.
+                services.AddSingleton(new ReportingTestRoleSet(roles));
+
+                // Override the authentication scheme to include the requested roles.
+                services.AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = ReportingRoleFakeAuthHandler.SchemeName;
+                    options.DefaultChallengeScheme = ReportingRoleFakeAuthHandler.SchemeName;
+                })
+                .AddScheme<AuthenticationSchemeOptions, ReportingRoleFakeAuthHandler>(
+                    ReportingRoleFakeAuthHandler.SchemeName, _ => { });
+
+                services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(options =>
+                {
+                    options.DefaultAuthenticateScheme = ReportingRoleFakeAuthHandler.SchemeName;
+                    options.DefaultChallengeScheme = ReportingRoleFakeAuthHandler.SchemeName;
+                });
+            });
+
+            builder.ConfigureAppConfiguration(config =>
+            {
+                // Enable the Reporting module for these tests.
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Reporting:ModuleEnabled"] = "true"
+                });
+            });
+        });
+
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue(
+                "Bearer", IntegrationTestConstants.TestBearerToken);
+
+        return client;
+    }
 }
 
 /// <summary>
@@ -289,6 +360,79 @@ internal sealed class IntegrationTestFakeAuthHandler : AuthenticationHandler<Aut
             new Claim(ClaimTypes.Name, "Integration Test User"),
             new Claim("name", "Integration Test User"),
         };
+
+        var identity = new ClaimsIdentity(claims, SchemeName);
+        var principal = new ClaimsPrincipal(identity);
+        var ticket = new AuthenticationTicket(principal, SchemeName);
+
+        return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
+}
+
+/// <summary>
+/// Carries the Dataverse security role names that <see cref="ReportingRoleFakeAuthHandler"/>
+/// should inject into the test user's claims. Registered as a singleton by
+/// <see cref="IntegrationTestFixture.CreateReportingClient"/> so the handler can resolve it from DI.
+/// </summary>
+internal sealed class ReportingTestRoleSet
+{
+    public string[] Roles { get; }
+
+    public ReportingTestRoleSet(string[] roles)
+    {
+        Roles = roles;
+    }
+}
+
+/// <summary>
+/// Fake authentication handler for Reporting endpoint tests.
+/// Injects the Dataverse security role claims provided via <see cref="ReportingTestRoleSet"/>
+/// into the test user identity so that <see cref="ReportingAuthorizationFilter"/> correctly
+/// resolves privilege levels without making real Entra ID token calls.
+///
+/// Used exclusively by <see cref="IntegrationTestFixture.CreateReportingClient"/>.
+/// </summary>
+internal sealed class ReportingRoleFakeAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+{
+    public const string SchemeName = "ReportingFakeAuth";
+
+    private readonly ReportingTestRoleSet _roleSet;
+
+    public ReportingRoleFakeAuthHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder,
+        ReportingTestRoleSet roleSet)
+        : base(options, logger, encoder)
+    {
+        _roleSet = roleSet;
+    }
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        if (!Request.Headers.ContainsKey("Authorization"))
+            return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
+
+        var authHeader = Request.Headers.Authorization.ToString();
+        if (string.IsNullOrWhiteSpace(authHeader))
+            return Task.FromResult(AuthenticateResult.Fail("Empty Authorization header"));
+
+        var claims = new List<Claim>
+        {
+            new("oid", IntegrationTestConstants.TestUserId),
+            new(ClaimTypes.NameIdentifier, IntegrationTestConstants.TestUserId),
+            new(ClaimTypes.Name, "Reporting Test User"),
+            new("preferred_username", "reporting-test@contoso.com"),
+            new("businessunit", "bu-test"),
+        };
+
+        // Inject each requested role as both "roles" and ClaimTypes.Role so that
+        // ReportingAuthorizationFilter's IsInRole + HasClaim checks both succeed.
+        foreach (var role in _roleSet.Roles)
+        {
+            claims.Add(new Claim("roles", role));
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
 
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);

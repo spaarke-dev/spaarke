@@ -1,7 +1,7 @@
 <task id="PBI-041" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create integration tests verifying BU RLS enforcement</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>5</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>testing, integration-test</tags>

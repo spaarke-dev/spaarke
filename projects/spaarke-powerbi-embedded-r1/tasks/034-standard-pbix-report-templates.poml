@@ -1,7 +1,7 @@
 <task id="PBI-034" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>PLACEHOLDER: Create standard .pbix report templates (human task)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>4</phase>
     <estimated-effort>8 hours</estimated-effort>
     <tags>docs, manual</tags>

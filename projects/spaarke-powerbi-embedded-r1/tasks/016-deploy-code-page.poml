@@ -1,4 +1,4 @@
-<task id="016" project="spaarke-powerbi-embedded-r1">
+<task id="016" project="spaarke-powerbi-embedded-r1" status="completed">
   <metadata>
     <title>Deploy Code Page to Dataverse</title>
     <phase>2</phase>
