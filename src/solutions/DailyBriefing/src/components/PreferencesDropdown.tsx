@@ -9,14 +9,13 @@ import {
   Body1,
   Caption1,
   Subtitle2,
-  Divider,
   Button,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Divider,
 } from "@fluentui/react-components";
-import {
-  SettingsRegular,
-  ChevronDownRegular,
-  ChevronUpRegular,
-} from "@fluentui/react-icons";
+import { Settings20Regular } from "@fluentui/react-icons";
 import type {
   DailyDigestPreferences,
   NotificationCategory,
@@ -31,41 +30,17 @@ import { CHANNEL_REGISTRY } from "../types/notifications";
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  root: {
-    display: "flex",
-    flexDirection: "column",
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
-    overflow: "hidden",
-  },
-  headerButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    backgroundColor: "transparent",
-    border: "none",
-    cursor: "pointer",
-    color: tokens.colorNeutralForeground1,
-    "&:hover": {
-      backgroundColor: tokens.colorNeutralBackground2Hover,
-    },
-  },
-  headerLeft: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-  },
-  headerIcon: {
-    fontSize: "20px",
-    color: tokens.colorNeutralForeground2,
-  },
-  content: {
+  surface: {
     display: "flex",
     flexDirection: "column",
     gap: tokens.spacingVerticalM,
-    padding: `0 ${tokens.spacingHorizontalM} ${tokens.spacingVerticalM}`,
+    padding: tokens.spacingHorizontalM,
+    width: "280px",
+    maxHeight: "420px",
+    overflowY: "auto",
+  },
+  title: {
+    marginBottom: tokens.spacingVerticalXS,
   },
   section: {
     display: "flex",
@@ -73,8 +48,8 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
   },
   sectionTitle: {
-    color: tokens.colorNeutralForeground2,
-    marginBottom: tokens.spacingVerticalXS,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
   },
   channelRow: {
     display: "flex",
@@ -94,6 +69,12 @@ const useStyles = makeStyles({
   dropdown: {
     minWidth: "160px",
   },
+  autoPopupRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingLeft: tokens.spacingHorizontalS,
+  },
   saveIndicator: {
     color: tokens.colorNeutralForeground3,
     textAlign: "right" as const,
@@ -102,7 +83,7 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Dropdown option definitions
+// Dropdown option definitions (same as PreferencesPanel)
 // ---------------------------------------------------------------------------
 
 const DUE_WINDOW_OPTIONS: { value: DueWindowDays; label: string }[] = [
@@ -139,7 +120,7 @@ const TOGGLEABLE_CHANNELS = Object.values(CHANNEL_REGISTRY)
 // Props
 // ---------------------------------------------------------------------------
 
-export interface PreferencesPanelProps {
+export interface PreferencesDropdownProps {
   /** Current user preferences (loaded or defaults). */
   preferences: DailyDigestPreferences;
   /** Callback to save updated preferences. Receives partial update. */
@@ -151,22 +132,25 @@ export interface PreferencesPanelProps {
 // ---------------------------------------------------------------------------
 
 /**
- * PreferencesPanel — Expandable settings section for Daily Digest.
+ * PreferencesDropdown — Gear icon button that opens a Fluent Popover
+ * with Daily Digest preference controls.
+ *
+ * Replaces the collapsible PreferencesPanel with a compact dropdown
+ * triggered from the header area.
  *
  * Features:
  * - Switch per channel (opt-out toggles): enabled by default, user disables
  * - Dropdown per configurable parameter: dueWithinDays, timeWindow, minConfidence
+ * - Auto-open on workspace launch toggle
  * - Changes persist to sprk_userpreference via onUpdatePreferences callback
- * - Collapsible panel (starts collapsed)
  *
  * ADR-021: Fluent v9 components only, design tokens for theming, dark mode support.
  */
-export const PreferencesPanel: React.FC<PreferencesPanelProps> = ({
+export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({
   preferences,
   onUpdatePreferences,
 }) => {
   const styles = useStyles();
-  const [expanded, setExpanded] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
   // -----------------------------------------------------------------------
@@ -245,146 +229,165 @@ export const PreferencesPanel: React.FC<PreferencesPanelProps> = ({
   );
 
   // -----------------------------------------------------------------------
+  // Auto-popup toggle handler
+  // -----------------------------------------------------------------------
+
+  const handleAutoPopupToggle = React.useCallback(
+    async (_ev: unknown, data: { checked: boolean }) => {
+      setSaving(true);
+      try {
+        await onUpdatePreferences({ autoPopup: data.checked });
+      } finally {
+        setSaving(false);
+      }
+    },
+    [onUpdatePreferences]
+  );
+
+  // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
 
   return (
-    <div className={styles.root}>
-      {/* Collapsible header */}
-      <Button
-        appearance="transparent"
-        className={styles.headerButton}
-        onClick={() => setExpanded((prev) => !prev)}
-        aria-expanded={expanded}
-        aria-controls="preferences-content"
-      >
-        <span className={styles.headerLeft}>
-          <SettingsRegular className={styles.headerIcon} />
-          <Subtitle2>Preferences</Subtitle2>
-        </span>
-        {expanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
-      </Button>
+    <Popover positioning="below-end" trapFocus>
+      <PopoverTrigger disableButtonEnhancement>
+        <Button
+          appearance="subtle"
+          icon={<Settings20Regular />}
+          aria-label="Preferences"
+        />
+      </PopoverTrigger>
 
-      {/* Expandable content */}
-      {expanded && (
-        <div id="preferences-content" className={styles.content}>
-          {/* Channel toggles section */}
-          <div className={styles.section}>
-            <Caption1 className={styles.sectionTitle}>
-              Notification Channels
-            </Caption1>
-            {TOGGLEABLE_CHANNELS.map((channel) => {
-              const isEnabled = !preferences.disabledChannels.includes(
-                channel.category
-              );
-              return (
-                <div key={channel.category} className={styles.channelRow}>
-                  <Body1>{channel.label}</Body1>
-                  <Switch
-                    checked={isEnabled}
-                    onChange={(_ev, data) =>
-                      handleChannelToggle(channel.category, data.checked)
-                    }
-                    aria-label={`${channel.label} notifications`}
-                  />
-                </div>
-              );
-            })}
-          </div>
+      <PopoverSurface className={styles.surface}>
+        {/* Title */}
+        <Subtitle2 className={styles.title}>Preferences</Subtitle2>
 
-          <Divider />
-
-          {/* Parameter dropdowns section */}
-          <div className={styles.section}>
-            <Caption1 className={styles.sectionTitle}>
-              Display Parameters
-            </Caption1>
-
-            {/* Due window */}
-            <div className={styles.parameterRow}>
-              <Label htmlFor="pref-due-window" className={styles.parameterLabel}>
-                Due-soon window
-              </Label>
-              <Dropdown
-                id="pref-due-window"
-                className={styles.dropdown}
-                value={
-                  DUE_WINDOW_OPTIONS.find(
-                    (o) => o.value === preferences.dueWithinDays
-                  )?.label ?? ""
-                }
-                selectedOptions={[String(preferences.dueWithinDays)]}
-                onOptionSelect={handleDueWindowChange}
-                aria-label="Due-soon window"
-              >
-                {DUE_WINDOW_OPTIONS.map((opt) => (
-                  <Option key={opt.value} value={String(opt.value)}>
-                    {opt.label}
-                  </Option>
-                ))}
-              </Dropdown>
-            </div>
-
-            {/* Time window */}
-            <div className={styles.parameterRow}>
-              <Label htmlFor="pref-time-window" className={styles.parameterLabel}>
-                Recency window
-              </Label>
-              <Dropdown
-                id="pref-time-window"
-                className={styles.dropdown}
-                value={
-                  TIME_WINDOW_OPTIONS.find(
-                    (o) => o.value === preferences.timeWindow
-                  )?.label ?? ""
-                }
-                selectedOptions={[preferences.timeWindow]}
-                onOptionSelect={handleTimeWindowChange}
-                aria-label="Recency time window"
-              >
-                {TIME_WINDOW_OPTIONS.map((opt) => (
-                  <Option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </Option>
-                ))}
-              </Dropdown>
-            </div>
-
-            {/* AI confidence threshold */}
-            <div className={styles.parameterRow}>
-              <Label
-                htmlFor="pref-confidence"
-                className={styles.parameterLabel}
-              >
-                AI confidence threshold
-              </Label>
-              <Dropdown
-                id="pref-confidence"
-                className={styles.dropdown}
-                value={
-                  CONFIDENCE_OPTIONS.find(
-                    (o) => o.value === preferences.minConfidence
-                  )?.label ?? ""
-                }
-                selectedOptions={[String(preferences.minConfidence)]}
-                onOptionSelect={handleConfidenceChange}
-                aria-label="AI confidence threshold"
-              >
-                {CONFIDENCE_OPTIONS.map((opt) => (
-                  <Option key={opt.value} value={String(opt.value)}>
-                    {opt.label}
-                  </Option>
-                ))}
-              </Dropdown>
-            </div>
-          </div>
-
-          {/* Save indicator */}
-          {saving && (
-            <Caption1 className={styles.saveIndicator}>Saving...</Caption1>
-          )}
+        {/* Channel toggles section */}
+        <div className={styles.section}>
+          <Caption1 className={styles.sectionTitle}>Channels</Caption1>
+          {TOGGLEABLE_CHANNELS.map((channel) => {
+            const isEnabled = !preferences.disabledChannels.includes(
+              channel.category
+            );
+            return (
+              <div key={channel.category} className={styles.channelRow}>
+                <Body1>{channel.label}</Body1>
+                <Switch
+                  checked={isEnabled}
+                  onChange={(_ev, data) =>
+                    handleChannelToggle(channel.category, data.checked)
+                  }
+                  aria-label={`${channel.label} notifications`}
+                />
+              </div>
+            );
+          })}
         </div>
-      )}
-    </div>
+
+        <Divider />
+
+        {/* Parameter dropdowns section */}
+        <div className={styles.section}>
+          <Caption1 className={styles.sectionTitle}>
+            Display Parameters
+          </Caption1>
+
+          {/* Due window */}
+          <div className={styles.parameterRow}>
+            <Label htmlFor="pref-dd-due-window" className={styles.parameterLabel}>
+              Due-soon window
+            </Label>
+            <Dropdown
+              id="pref-dd-due-window"
+              className={styles.dropdown}
+              value={
+                DUE_WINDOW_OPTIONS.find(
+                  (o) => o.value === preferences.dueWithinDays
+                )?.label ?? ""
+              }
+              selectedOptions={[String(preferences.dueWithinDays)]}
+              onOptionSelect={handleDueWindowChange}
+              aria-label="Due-soon window"
+            >
+              {DUE_WINDOW_OPTIONS.map((opt) => (
+                <Option key={opt.value} value={String(opt.value)}>
+                  {opt.label}
+                </Option>
+              ))}
+            </Dropdown>
+          </div>
+
+          {/* Time window */}
+          <div className={styles.parameterRow}>
+            <Label htmlFor="pref-dd-time-window" className={styles.parameterLabel}>
+              Recency window
+            </Label>
+            <Dropdown
+              id="pref-dd-time-window"
+              className={styles.dropdown}
+              value={
+                TIME_WINDOW_OPTIONS.find(
+                  (o) => o.value === preferences.timeWindow
+                )?.label ?? ""
+              }
+              selectedOptions={[preferences.timeWindow]}
+              onOptionSelect={handleTimeWindowChange}
+              aria-label="Recency time window"
+            >
+              {TIME_WINDOW_OPTIONS.map((opt) => (
+                <Option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </Option>
+              ))}
+            </Dropdown>
+          </div>
+
+          {/* AI confidence threshold */}
+          <div className={styles.parameterRow}>
+            <Label
+              htmlFor="pref-dd-confidence"
+              className={styles.parameterLabel}
+            >
+              AI confidence threshold
+            </Label>
+            <Dropdown
+              id="pref-dd-confidence"
+              className={styles.dropdown}
+              value={
+                CONFIDENCE_OPTIONS.find(
+                  (o) => o.value === preferences.minConfidence
+                )?.label ?? ""
+              }
+              selectedOptions={[String(preferences.minConfidence)]}
+              onOptionSelect={handleConfidenceChange}
+              aria-label="AI confidence threshold"
+            >
+              {CONFIDENCE_OPTIONS.map((opt) => (
+                <Option key={opt.value} value={String(opt.value)}>
+                  {opt.label}
+                </Option>
+              ))}
+            </Dropdown>
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* Auto-popup toggle */}
+        <div className={styles.autoPopupRow}>
+          <Body1>Auto-open on launch</Body1>
+          <Switch
+            checked={preferences.autoPopup}
+            onChange={handleAutoPopupToggle}
+            aria-label="Auto-open digest on workspace launch"
+          />
+        </div>
+
+        {/* Save indicator */}
+        {saving && (
+          <Caption1 className={styles.saveIndicator}>Saving...</Caption1>
+        )}
+      </PopoverSurface>
+    </Popover>
   );
 };

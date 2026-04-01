@@ -1,8 +1,8 @@
 # Task Index — Spaarke Daily Update Service
 
-> **Total Tasks**: 27
-> **Status**: 15/27 complete
-> **Last Updated**: 2026-03-31
+> **Total Tasks**: 34
+> **Status**: 25/34 complete
+> **Last Updated**: 2026-04-01
 
 ---
 
@@ -38,13 +38,20 @@
 | 051 | Add Daily Digest auto-popup to LegalWorkspace | 6 | ✅ | 050, 030 | FULL | Group G |
 | 052 | Configure App Service WEBSITE_ALWAYS_ON | 6 | ✅ | none | MINIMAL | Group G |
 | 053 | Dark mode testing and token audit | 6 | 🔲 | 032-035, 037 | STANDARD | — |
-| 054 | Deploy notification playbooks to Dataverse | 6 | 🔲 | 020-022 | STANDARD | Group H |
-| 055 | Deploy Daily Digest Code Page to Dataverse | 6 | 🔲 | 030, 037 | STANDARD | Group H |
-| 060 | Deploy BFF API | 7 | 🔲 | 010, 036 | STANDARD | — |
+| 054 | Deploy notification playbooks to Dataverse | 6 | ✅ | 020-022 | STANDARD | Group H |
+| 055 | Deploy Daily Digest Code Page to Dataverse | 6 | ✅ | 030, 037 | STANDARD | Group H |
+| 060 | Deploy BFF API | 7 | ✅ | 010, 036 | STANDARD | — |
 | 061 | Integration tests — scheduler flow | 7 | 🔲 | 060, 054, 055 | STANDARD | Group I |
 | 062 | Integration tests — inline notifications | 7 | 🔲 | 060 | STANDARD | Group I |
 | 063 | End-to-end verification | 7 | 🔲 | 061, 062 | STANDARD | — |
-| 090 | Project wrap-up | — | 🔲 | 063 | FULL | — |
+| 090 | Project wrap-up | — | 🔲 | 063, 106 | FULL | — |
+| 100 | Add /narrate BFF endpoint with parallel AI calls | 8 | ✅ | 036 | FULL | — |
+| 101 | Create MicrosoftToDoIcon and useInlineTodoCreate hook | 8 | ✅ | none | FULL | Group J |
+| 102 | Build PreferencesDropdown with Fluent Popover | 8 | ✅ | none | FULL | Group J |
+| 103 | Build TldrSection, ActivityNotesSection, NarrativeBullet components | 8 | ✅ | 100 | FULL | Group K |
+| 104 | Update briefingService and create useBriefingNarration hook | 8 | ✅ | 100, 101 | FULL | Group K |
+| 105 | Wire new components into App.tsx and remove old components | 8 | ✅ | 101, 102, 103, 104 | FULL | — |
+| 106 | Build, deploy, and verify Daily Briefing redesign | 8 | ✅ | 105 | STANDARD | — |
 
 ---
 
@@ -63,6 +70,8 @@ Tasks in the same group can run simultaneously once prerequisites are met.
 | G | 051, 052 | 050 ✅ (051), none (052) | Separate files (LegalWorkspace vs Azure config) | ✅ Yes |
 | H | 054, 055 | 020-022 ✅ (054), 030+037 ✅ (055) | Separate deployments | ✅ Yes |
 | I | 061, 062 | 060 ✅ | Separate test files | ✅ Yes |
+| J | 100, 101, 102 | 036 ✅ (100), none (101, 102) | BFF endpoint vs frontend hooks vs frontend component | ✅ Yes |
+| K | 103, 104 | 100 ✅ (both), 101 ✅ (104) | Separate .tsx components vs service/hook | ✅ Yes |
 
 **How to Execute Parallel Groups:**
 1. Check all prerequisites are complete (✅ in Status)
@@ -111,9 +120,21 @@ Tasks in the same group can run simultaneously once prerequisites are met.
 - **060** — Deploy BFF API
 - **Group I**: 061, 062 (parallel — integration tests, after 060)
 
-### Wave 8 (Final)
+### Wave 8 (Final — Original)
 - **063** — E2E verification
-- **090** — Project wrap-up
+
+### Wave 9 (Phase 8 — Narrative Redesign, can start immediately)
+- **Group J**: 100, 101, 102 (parallel — BFF endpoint + frontend icon/hook + preferences)
+
+### Wave 10 (After Group J)
+- **Group K**: 103, 104 (parallel — narrative components + service/hook)
+
+### Wave 11 (After Group K)
+- **105** — Wire new components, remove old
+
+### Wave 12 (After 105)
+- **106** — Build, deploy, verify redesign
+- **090** — Project wrap-up (after 063 AND 106)
 
 ---
 
@@ -121,8 +142,8 @@ Tasks in the same group can run simultaneously once prerequisites are met.
 
 | Level | Count | Tasks |
 |-------|-------|-------|
-| FULL | 18 | 001-003, 010-014, 030-037, 040-041, 050-051, 090 |
-| STANDARD | 8 | 004-005, 015, 020-022, 053-055, 060-063 |
+| FULL | 24 | 001-003, 010-014, 030-037, 040-041, 050-051, 090, 100-105 |
+| STANDARD | 9 | 004-005, 015, 020-022, 053-055, 060-063, 106 |
 | MINIMAL | 1 | 052 |
 
 ---
@@ -131,6 +152,8 @@ Tasks in the same group can run simultaneously once prerequisites are met.
 
 ```
 001 → 002/003 → 004 → 010 → 011-014 → 015 → 060 → 061/062 → 063 → 090
+                                                                        ↑
+036 → 100 → 103/104 → 105 → 106 ───────────────────────────────────────┘
                            ↘ 020-022 → 054 ↗
 001 → 030 → 031 → 032-034 → 053 → 055 → 061
                   → 036 → 037 ↗

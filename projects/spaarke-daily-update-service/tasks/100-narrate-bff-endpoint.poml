@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Add /narrate BFF endpoint with parallel AI calls</title>
+    <phase>8: Narrative Redesign</phase>
+    <status>pending</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>103, 104, 105</blocks>
+    <tags>bff-api, ai, backend, csharp</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF endpoint with AI orchestration</rigor-reason>
+    <parallel-group></parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create POST /api/ai/daily-briefing/narrate endpoint in DailyBriefingEndpoints.cs. Accept DailyBriefingNarrateRequest with TL;DR input (same as summarize) plus ChannelNarrationInput[] with full item data. Internally fire TL;DR prompt + N channel narration prompts in parallel via Task.WhenAll. TL;DR prompt: expanded to 5-7 sentences + top action identification. Channel prompt: "Convert items into 1-4 narrative bullets, group related items, return structured JSON with entity references". Return DailyBriefingNarrateResponse with TldrResult (briefing, topAction, counts) and ChannelNarrationResult[] (category, NarrativeBullet[] with narrative, itemIds, primaryEntityType/Id/Name). Handle OpenAiCircuitBrokenException per-call — return null for failed channels. Keep existing /summarize endpoint for backward compatibility.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>New /narrate endpoint returns AI-narrated TL;DR and channel bullets in parallel</goal>
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+    </relevant-files>
+  </context>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Define request/response DTOs (DailyBriefingNarrateRequest, ChannelNarrationInput, ChannelItemDto, DailyBriefingNarrateResponse, TldrResult, ChannelNarrationResult, NarrativeBullet).</step>
+    <step order="2">Create TL;DR prompt (5-7 sentences, top action).</step>
+    <step order="3">Create channel narration prompt (batch items to 1-4 bullets with entity refs, JSON output).</step>
+    <step order="4">Implement endpoint handler: parse request, fire all prompts via Task.WhenAll, assemble response.</step>
+    <step order="5">Handle per-call circuit breaker exceptions.</step>
+    <step order="6">Register endpoint in EndpointMappingExtensions.</step>
+    <step order="7">Add rate limiting (ai-batch).</step>
+    <step order="8">Build to verify.</step>
+  </steps>
+  <outputs>
+    <output type="code">POST /api/ai/daily-briefing/narrate endpoint with parallel AI orchestration</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint accepts DailyBriefingNarrateRequest and returns DailyBriefingNarrateResponse with TldrResult and ChannelNarrationResult[].</criterion>
+    <criterion testable="true">Parallel execution confirmed via Task.WhenAll for TL;DR + N channel prompts.</criterion>
+    <criterion testable="true">Circuit breaker handled gracefully — failed channels return null without failing entire request.</criterion>
+    <criterion testable="true">Existing /summarize endpoint remains functional for backward compatibility.</criterion>
+    <criterion testable="true">Build succeeds with no errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

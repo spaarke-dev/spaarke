@@ -1,6 +1,10 @@
 import type { IRuntimeConfig } from "@spaarke/auth";
 
 let _config: IRuntimeConfig | null = null;
+let _resolveReady: (() => void) | null = null;
+const _readyPromise = new Promise<void>((resolve) => {
+  _resolveReady = resolve;
+});
 
 export function setRuntimeConfig(config: IRuntimeConfig): void {
   _config = config;
@@ -10,6 +14,12 @@ export function setRuntimeConfig(config: IRuntimeConfig): void {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__SPAARKE_MSAL_CLIENT_ID__ = config.msalClientId;
   }
+  _resolveReady?.();
+}
+
+/** Resolves once setRuntimeConfig() has been called. */
+export function waitForConfig(): Promise<void> {
+  return _readyPromise;
 }
 
 function getConfig(): IRuntimeConfig {

@@ -1,8 +1,8 @@
 /**
  * DigestHeader — Header bar for the Daily Briefing digest.
  *
- * Shows the title, unread count, and a "Mark All Read" batch action button.
- * The button only appears when there are unread notifications.
+ * Shows the title, unread count, refresh button, and a slot for
+ * the preferences dropdown.
  *
  * ADR-021: Uses Fluent v9 tokens for all styling; supports dark mode.
  */
@@ -18,7 +18,6 @@ import {
 } from "@fluentui/react-components";
 import {
   AlertRegular,
-  CheckmarkCircleRegular,
   ArrowClockwiseRegular,
 } from "@fluentui/react-icons";
 
@@ -32,6 +31,9 @@ const useStyles = makeStyles({
     alignItems: "center",
     gap: tokens.spacingHorizontalS,
     paddingBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
+    paddingTop: tokens.spacingVerticalM,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   icon: {
@@ -63,12 +65,10 @@ const useStyles = makeStyles({
 export interface DigestHeaderProps {
   /** Total number of unread notifications across all channels. */
   totalUnreadCount: number;
-  /** Called when the user clicks "Mark All Read". */
-  onMarkAllRead?: () => void;
   /** Called when the user clicks the refresh button. */
   onRefresh?: () => void;
-  /** Whether a mark-all-read operation is currently in progress. */
-  isMarkingAll?: boolean;
+  /** Slot for the preferences dropdown (rendered in the actions area). */
+  preferencesSlot?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,9 +77,8 @@ export interface DigestHeaderProps {
 
 export const DigestHeader: React.FC<DigestHeaderProps> = ({
   totalUnreadCount,
-  onMarkAllRead,
   onRefresh,
-  isMarkingAll = false,
+  preferencesSlot,
 }) => {
   const styles = useStyles();
 
@@ -95,20 +94,6 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
         )}
       </div>
       <div className={styles.actions}>
-        {totalUnreadCount > 0 && onMarkAllRead && (
-          <Tooltip content="Mark all notifications as read" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<CheckmarkCircleRegular />}
-              onClick={onMarkAllRead}
-              disabled={isMarkingAll}
-              aria-label="Mark all notifications as read"
-            >
-              Mark All Read
-            </Button>
-          </Tooltip>
-        )}
         {onRefresh && (
           <Tooltip content="Refresh notifications" relationship="label">
             <Button
@@ -120,6 +105,7 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
             />
           </Tooltip>
         )}
+        {preferencesSlot}
       </div>
     </div>
   );

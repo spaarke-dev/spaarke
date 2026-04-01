@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Update briefingService and create useBriefingNarration hook</title>
+    <phase>8: Narrative Redesign</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>100, 101</dependencies>
+    <blocks>105</blocks>
+    <tags>frontend, react, typescript, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Service layer connecting to new endpoint</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Update briefingService.ts to call the new /api/ai/daily-briefing/narrate endpoint instead of /summarize. Build the request from ChannelFetchResult[] — include full item data (id, title, body, priority, regardingName, regardingEntityType, regardingId, createdOn) per channel. Parse the NarrateResponse into TldrResult + ChannelNarrationResult[]. Create useBriefingNarration.ts hook that replaces useAiBriefing — returns { tldr, channelNarratives, isLoading, error }. Falls back to template-based generation when AI returns errors. Add Fluent Toaster provider and useToastController for toast notifications (used by inline To Do creation).</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>Frontend service and hook connected to /narrate endpoint with template fallback</goal>
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/services/briefingService.ts</file>
+      <file>src/solutions/DailyBriefing/src/hooks/useAiBriefing.ts</file>
+      <file>src/solutions/DailyBriefing/src/services/authInit.ts</file>
+    </relevant-files>
+  </context>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Define TypeScript interfaces for NarrateRequest/Response (mirror BFF DTOs).</step>
+    <step order="2">Update briefingService.ts: new fetchBriefingNarration() function calling /narrate.</step>
+    <step order="3">Build request from ChannelFetchResult[] with full item data.</step>
+    <step order="4">Handle errors: 503 returns unavailable, 401 returns unavailable, other returns error with template fallback.</step>
+    <step order="5">Create useBriefingNarration.ts hook replacing useAiBriefing.</step>
+    <step order="6">Implement template fallback: generate simple bullets from raw notification data when AI fails.</step>
+    <step order="7">Add Fluent Toaster to App component tree.</step>
+    <step order="8">Build to verify.</step>
+  </steps>
+  <outputs>
+    <output type="code">Updated briefingService.ts with fetchBriefingNarration()</output>
+    <output type="code">useBriefingNarration.ts hook in DailyBriefing/src/hooks/</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Service calls /api/ai/daily-briefing/narrate endpoint with correct request shape.</criterion>
+    <criterion testable="true">Hook returns tldr, channelNarratives, isLoading, and error.</criterion>
+    <criterion testable="true">Template fallback works when AI is unavailable (503, 401, or other errors).</criterion>
+    <criterion testable="true">Toaster provider mounted in App component tree.</criterion>
+    <criterion testable="true">Build succeeds with no errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

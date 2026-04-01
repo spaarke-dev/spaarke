@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="106" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Build, deploy, and verify Daily Briefing redesign</title>
+    <phase>8: Narrative Redesign</phase>
+    <status>pending</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>105</dependencies>
+    <blocks></blocks>
+    <tags>deploy, testing, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment and verification</rigor-reason>
+    <parallel-group></parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Build DailyBriefing from the work branch, deploy sprk_dailyupdate web resource to Dataverse dev environment, and verify all acceptance criteria. Build: npm run build in src/solutions/DailyBriefing/. Deploy: use scripts/Deploy-WizardCodePages.ps1 or direct PowerShell deployment to update sprk_dailyupdate. Verify: open Daily Briefing in dev environment, check TL;DR renders, Activity Notes show narrative bullets, record links open dialogs, To Do creates events (icon turns blue + toast), Dismiss marks read, Preferences gear opens popover, dark mode works, template fallback works (simulate by temporarily blocking AI).</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>Redesigned Daily Briefing deployed and verified in dev environment</goal>
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/</file>
+      <file>scripts/Deploy-WizardCodePages.ps1</file>
+    </relevant-files>
+  </context>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run npm run build in DailyBriefing.</step>
+    <step order="2">Verify bundle size reasonable (less than 2MB).</step>
+    <step order="3">Deploy via PowerShell script.</step>
+    <step order="4">Open in dev environment.</step>
+    <step order="5">Verify TL;DR section (5-7 sentences, AI badge, top action).</step>
+    <step order="6">Verify Activity Notes (channel headings, narrative bullets, spacing).</step>
+    <step order="7">Verify record links (click opens entity dialog).</step>
+    <step order="8">Verify To Do (click creates event, icon turns blue, toast notification).</step>
+    <step order="9">Verify Dismiss (click marks notification as read, bullet removed).</step>
+    <step order="10">Verify Preferences (gear opens popover, changes persist).</step>
+    <step order="11">Verify dark mode.</step>
+    <step order="12">Update TASK-INDEX.md.</step>
+  </steps>
+  <outputs>
+    <output type="code">Deployed sprk_dailyupdate web resource</output>
+    <output type="code">Verification results documented</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All success criteria from spec met.</criterion>
+    <criterion testable="true">Bundle deployed to dev environment successfully.</criterion>
+    <criterion testable="true">TL;DR renders with AI Insight badge and top action callout.</criterion>
+    <criterion testable="true">Activity Notes display narrative bullets with proper spacing.</criterion>
+    <criterion testable="true">Record links open entity dialogs.</criterion>
+    <criterion testable="true">To Do creates sprk_event and shows toast confirmation.</criterion>
+    <criterion testable="true">Dismiss marks notification as read.</criterion>
+    <criterion testable="true">Preferences popover opens and persists changes.</criterion>
+    <criterion testable="true">Dark mode renders correctly.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

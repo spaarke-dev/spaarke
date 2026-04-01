@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Create MicrosoftToDoIcon and useInlineTodoCreate hook</title>
+    <phase>8: Narrative Redesign</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>104</blocks>
+    <tags>frontend, react, typescript, shared</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New hook with Dataverse writes</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Copy MicrosoftToDoIcon.tsx from LegalWorkspace into DailyBriefing (src/solutions/DailyBriefing/src/icons/). Create useInlineTodoCreate hook that creates a sprk_event from notification data via Xrm.WebApi.createRecord. Fields: sprk_name=title, sprk_todoflag=true, sprk_todosource=100000001, sprk_description=body, sprk_priority mapped from notification priority. Returns { createTodo(item), isCreated(itemId), isPending(itemId), error }. Optimistic state: immediately mark as created, rollback on failure.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>Reusable To Do icon and inline quick-create hook for notification to event conversion</goal>
+  <context>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/icons/MicrosoftToDoIcon.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/contexts/FeedTodoSyncContext.tsx</file>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Copy MicrosoftToDoIcon.tsx to DailyBriefing/src/icons/.</step>
+    <step order="2">Create useInlineTodoCreate.ts hook with state management (Map of itemId to status).</step>
+    <step order="3">Implement createTodo function: optimistic update, Xrm.WebApi.createRecord, rollback on failure.</step>
+    <step order="4">Map notification priority to sprk_priority option set values.</step>
+    <step order="5">Add regarding entity binding if available.</step>
+    <step order="6">Export from hook file.</step>
+    <step order="7">Build to verify.</step>
+  </steps>
+  <outputs>
+    <output type="code">MicrosoftToDoIcon.tsx in DailyBriefing/src/icons/</output>
+    <output type="code">useInlineTodoCreate.ts hook in DailyBriefing/src/hooks/</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">MicrosoftToDoIcon renders with gray (default) and blue (created) states.</criterion>
+    <criterion testable="true">Hook creates sprk_event with correct fields (sprk_name, sprk_todoflag, sprk_todosource, sprk_description, sprk_priority).</criterion>
+    <criterion testable="true">Optimistic update works — icon turns blue immediately on click.</criterion>
+    <criterion testable="true">Rollback on failure — icon reverts to gray and error is reported.</criterion>
+    <criterion testable="true">Build succeeds with no errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

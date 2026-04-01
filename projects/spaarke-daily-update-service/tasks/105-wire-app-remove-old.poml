@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Wire new components into App.tsx and remove old components</title>
+    <phase>8: Narrative Redesign</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>101, 102, 103, 104</dependencies>
+    <blocks>106</blocks>
+    <tags>frontend, react, typescript, integration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration task, removes old code</rigor-reason>
+    <parallel-group></parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Replace the current App.tsx layout with the new narrative design. Remove: AiBriefing import/usage, NarrativeSummary import/usage, ChannelCard accordion pattern, PreferencesPanel at bottom. Add: TldrSection (top), ActivityNotesSection (middle), CaughtUpFooter (bottom). Update DigestHeader: remove Mark All Read button, add PreferencesDropdown gear icon (right side). Wire useBriefingNarration hook replacing useAiBriefing. Pass channelNarratives to ActivityNotesSection. Wire useInlineTodoCreate for To Do actions. Wire dismiss handler (mark appnotification as read). After wiring is complete, delete old component files: AiBriefing.tsx, NarrativeSummary.tsx, ChannelCard.tsx, NotificationItem.tsx, PreferencesPanel.tsx.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>App.tsx renders the narrative memo layout, old dashboard components removed</goal>
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/App.tsx</file>
+      <file>src/solutions/DailyBriefing/src/components/</file>
+    </relevant-files>
+  </context>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Update App.tsx imports: add new components, remove old.</step>
+    <step order="2">Replace useAiBriefing with useBriefingNarration.</step>
+    <step order="3">Update render: DigestHeader (with PreferencesDropdown) then TldrSection then ActivityNotesSection then CaughtUpFooter.</step>
+    <step order="4">Wire useInlineTodoCreate hook.</step>
+    <step order="5">Wire dismiss handler for notification mark-as-read.</step>
+    <step order="6">Wire record link navigation (Xrm.Navigation.navigateTo).</step>
+    <step order="7">Update DigestHeader: remove markAllRead, add gear icon.</step>
+    <step order="8">Delete old files: AiBriefing.tsx, NarrativeSummary.tsx, ChannelCard.tsx, NotificationItem.tsx, ChannelErrorState.tsx, PreferencesPanel.tsx.</step>
+    <step order="9">Build to verify.</step>
+    <step order="10">Update TASK-INDEX.md.</step>
+  </steps>
+  <outputs>
+    <output type="code">Updated App.tsx with narrative layout</output>
+    <output type="code">Updated DigestHeader with PreferencesDropdown</output>
+    <output type="code">Deleted old component files</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Briefing renders narrative layout: TldrSection at top, ActivityNotesSection in middle, CaughtUpFooter at bottom.</criterion>
+    <criterion testable="true">No accordion or card-based channel layout remains.</criterion>
+    <criterion testable="true">TL;DR section displays at top of briefing.</criterion>
+    <criterion testable="true">Activity Notes show narrative bullets grouped by channel.</criterion>
+    <criterion testable="true">Record links open entity dialogs via Xrm.Navigation.navigateTo.</criterion>
+    <criterion testable="true">To Do icon creates sprk_event records.</criterion>
+    <criterion testable="true">Dismiss button marks notification as read.</criterion>
+    <criterion testable="true">Gear icon opens preferences popover.</criterion>
+    <criterion testable="true">Old component files deleted (AiBriefing, NarrativeSummary, ChannelCard, NotificationItem, ChannelErrorState, PreferencesPanel).</criterion>
+    <criterion testable="true">Build succeeds with no errors.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

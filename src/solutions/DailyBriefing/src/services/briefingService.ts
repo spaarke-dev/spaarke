@@ -51,6 +51,66 @@ export type BriefingResult =
   | { status: "error"; message: string };
 
 // ---------------------------------------------------------------------------
+// Narration DTOs (mirror DailyBriefingNarrationEndpoints.cs)
+// ---------------------------------------------------------------------------
+
+interface NarrateRequest {
+  categories: NotificationCategoryDto[];
+  priorityItems: PriorityItemDto[];
+  totalNotificationCount: number;
+  channels: ChannelNarrationInput[];
+}
+
+interface ChannelNarrationInput {
+  category: string;
+  label: string;
+  items: ChannelItemDto[];
+}
+
+interface ChannelItemDto {
+  id: string;
+  title: string;
+  body: string;
+  priority: string;
+  regardingName: string;
+  regardingEntityType: string;
+  regardingId: string;
+  createdOn: string;
+}
+
+export interface NarrateResponse {
+  tldr: TldrResult;
+  channelNarratives: ChannelNarrationResult[];
+  generatedAtUtc: string;
+}
+
+export interface TldrResult {
+  briefing: string;
+  topAction: string;
+  categoryCount: number;
+  priorityItemCount: number;
+}
+
+export interface ChannelNarrationResult {
+  category: string;
+  bullets: NarrativeBulletResult[];
+}
+
+export interface NarrativeBulletResult {
+  narrative: string;
+  itemIds: string[];
+  primaryEntityType: string;
+  primaryEntityId: string;
+  primaryEntityName: string;
+}
+
+/** Result of a narration fetch attempt. */
+export type NarrationResult =
+  | { status: "success"; data: NarrateResponse }
+  | { status: "unavailable"; reason: string }
+  | { status: "error"; message: string };
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -150,6 +210,132 @@ export async function fetchAiBriefing(
     return {
       status: "error",
       message: error.message ?? "Failed to generate briefing.",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Narration helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the narration request from channel fetch results.
+ * Includes categories, priority items, AND full item data per channel.
+ */
+function buildNarrationRequest(channels: ChannelFetchResult[]): NarrateRequest {
+  const categories: NotificationCategoryDto[] = [];
+  const priorityItems: PriorityItemDto[] = [];
+  const channelInputs: ChannelNarrationInput[] = [];
+  let totalCount = 0;
+
+  for (const ch of channels) {
+    if (ch.status !== "success") continue;
+
+    const { meta, items, unreadCount } = ch.group;
+    categories.push({
+      name: meta.label,
+      count: items.length,
+      unreadCount,
+    });
+    totalCount += items.length;
+
+    // Collect high/urgent priority items (max 5 across all channels)
+    for (const item of items) {
+      if (
+        (item.priority === "high" || item.priority === "urgent") &&
+        priorityItems.length < 5
+      ) {
+        priorityItems.push({
+          category: meta.label,
+          title: item.title,
+          dueDate: null,
+        });
+      }
+    }
+
+    // Build channel input with full item data
+    channelInputs.push({
+      category: meta.category,
+      label: meta.label,
+      items: items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        priority: item.priority,
+        regardingName: item.regardingName,
+        regardingEntityType: item.regardingEntityType,
+        regardingId: item.regardingId,
+        createdOn: item.createdOn,
+      })),
+    });
+  }
+
+  return {
+    categories,
+    priorityItems,
+    totalNotificationCount: totalCount,
+    channels: channelInputs,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Narration
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch AI-generated narration (TL;DR + per-channel bullets) from the BFF.
+ *
+ * Returns a NarrationResult discriminated union:
+ *   - "success" — tldr, channel narratives, and metadata
+ *   - "unavailable" — AI service temporarily unavailable (503, rate limit)
+ *   - "error" — unexpected failure
+ *
+ * @param channels Channel fetch results from useNotificationData
+ */
+export async function fetchBriefingNarration(
+  channels: ChannelFetchResult[]
+): Promise<NarrationResult> {
+  const request = buildNarrationRequest(channels);
+
+  // Skip if no data to narrate
+  if (request.categories.length === 0 && request.channels.length === 0) {
+    return { status: "unavailable", reason: "No notification data to narrate." };
+  }
+
+  try {
+    const response = await authenticatedFetch("/api/ai/daily-briefing/narrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+
+    const data = (await response.json()) as NarrateResponse;
+    return { status: "success", data };
+  } catch (err: unknown) {
+    // authenticatedFetch throws ApiError for non-2xx responses
+    const error = err as { statusCode?: number; message?: string };
+
+    // 503 = AI service unavailable (circuit breaker open)
+    // 429 = rate limited
+    if (error.statusCode === 503 || error.statusCode === 429) {
+      return {
+        status: "unavailable",
+        reason: "AI narration service is temporarily unavailable.",
+      };
+    }
+
+    // 401 = auth issue (already retried by authenticatedFetch)
+    if (error.statusCode === 401) {
+      return {
+        status: "unavailable",
+        reason: "Authentication required for AI narration.",
+      };
+    }
+
+    console.error("[DailyBriefing] AI narration fetch failed:", err);
+    return {
+      status: "error",
+      message: error.message ?? "Failed to generate narration.",
     };
   }
 }
