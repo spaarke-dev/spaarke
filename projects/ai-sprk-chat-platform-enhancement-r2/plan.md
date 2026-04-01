@@ -47,7 +47,7 @@ R2 transforms SprkChat from a functional AI companion into a copilot-quality exp
 
 **Knowledge docs**:
 - `docs/architecture/AI-ARCHITECTURE.md` — AI framework architecture
-- `docs/architecture/ai-implementation-reference.md` — AI implementation patterns
+- `docs/architecture/playbook-architecture.md` — AI implementation patterns
 - `docs/architecture/playbook-architecture.md` — JPS schema and scope model
 - `docs/ai-knowledge/catalogs/scope-model-index.json` — scope catalog
 

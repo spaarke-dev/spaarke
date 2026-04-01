@@ -785,7 +785,7 @@ VERIFY all issues addressed before marking project complete
 
 ### Reference Files
 - Root `CLAUDE.md` - Coding standards and conventions
-- `docs/ai-knowledge/architecture/` - Architecture patterns
+- `docs/architecture/` - Architecture decisions and constraints
 - `.claude/skills/adr-check/references/` - ADR validation rules
 - `.claude/skills/code-review/references/review-checklist.md` - Review checklist with AI smell detection
 

@@ -113,6 +113,8 @@ az provider show --namespace Microsoft.Syntex --query "registrationState"
 
 ## 3. Azure Resource Creation
 
+> **Prefer Bicep scripts in `infrastructure/` for reproducible deployments.** The Bicep modules in `infrastructure/bicep/` cover all resources below (App Service, Key Vault, OpenAI, AI Search, Redis, Service Bus, etc.) and should be used for new environment provisioning. The CLI commands below are for reference only — useful for one-off fixes or when you need to understand what a Bicep module does.
+
 All resources follow the [naming convention v3](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). Each environment gets one resource group with all resources.
 
 ### Resource Group

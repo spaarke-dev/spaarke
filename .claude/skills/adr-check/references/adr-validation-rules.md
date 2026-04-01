@@ -500,5 +500,5 @@ Write-Host "=== Check Complete ==="
 
 The rules above include grep/pattern checks for ADR-001–ADR-012. For ADR-013+ (and any ADR not covered by a pattern), validate by reading the current ADR index and the relevant ADR document(s):
 
-- Source of truth: `docs/reference/adr/README-ADRs.md`
+- Source of truth: `docs/adr/README-ADRs.md`
 - Validate ADR-013–ADR-020 by checking the specific constraints and checklists inside each ADR.

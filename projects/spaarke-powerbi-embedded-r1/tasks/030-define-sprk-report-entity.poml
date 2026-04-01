@@ -1,0 +1,73 @@
+<task id="PBI-030" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Define sprk_report entity schema for Dataverse</title>
+    <status>complete</status>
+    <phase>4</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>dataverse, solution</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Entity definition — defines core Dataverse schema with multiple attribute types, option sets, and relationships</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Define the sprk_report entity schema for Dataverse to serve as the report catalog for the
+    Reporting module. This entity stores metadata about Power BI reports including workspace and
+    report GUIDs, category classification, embed URLs, and ownership. Create entity definition
+    files or document the schema for Dataverse solution import.
+  </prompt>
+
+  <role>Senior Dataverse solution architect with entity modeling and solution packaging experience.</role>
+
+  <goal>
+    A complete sprk_report entity definition with all required attributes, option set, default
+    values, and ownership configuration, ready for import into the Dataverse solution.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">Entity must store Power BI report catalog metadata for the Reporting module</constraint>
+    <constraint source="spec">MUST use environment variables for all PBI config — no hardcoded workspace or capacity IDs</constraint>
+    <constraint source="spec">MUST store report catalog in sprk_report Dataverse entity</constraint>
+    <constraint>sprk_iscustom defaults to false — standard product reports are not custom</constraint>
+    <constraint>sprk_category OptionSet values: Financial=1, Operational=2, Compliance=3, Documents=4, Custom=5</constraint>
+    <constraint>sprk_ownerid is a Lookup to systemuser for report ownership tracking</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review existing entity patterns">Read Dataverse entity operation patterns and existing entity definitions in the solution to understand naming conventions and schema standards</step>
+    <step order="2" name="Define entity metadata">Define sprk_report entity with display name "Report", plural "Reports", schema name sprk_report, and appropriate entity settings (ownership: user/team)</step>
+    <step order="3" name="Define primary name attribute">Create sprk_name (Primary Name) — single-line text, max length 200, required</step>
+    <step order="4" name="Define GUID attributes">Create sprk_reportid (PBI report GUID, single-line text or unique identifier) and sprk_workspaceid (PBI workspace GUID) and sprk_datasetid (PBI dataset GUID)</step>
+    <step order="5" name="Define category option set">Create sprk_category global or local OptionSet with values: Financial=1, Operational=2, Compliance=3, Documents=4, Custom=5</step>
+    <step order="6" name="Define remaining attributes">Create sprk_embedurl (URL type), sprk_iscustom (Boolean, default false), sprk_description (Multiline text, max 2000), sprk_ownerid (Lookup to systemuser)</step>
+    <step order="7" name="Document entity schema">Create a schema document or entity definition file that can be used for Dataverse solution import in task 033</step>
+    <step order="8" name="Verify schema completeness">Validate all attributes are defined with correct types, lengths, defaults, and required flags</step>
+  </steps>
+
+  <outputs>
+    <output type="schema">Entity definition for sprk_report with all attributes documented</output>
+    <output type="docs">Schema documentation with attribute types, lengths, defaults, and option set values</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_report entity defined with sprk_name as Primary Name attribute</criterion>
+    <criterion testable="true">sprk_reportid, sprk_workspaceid, and sprk_datasetid attributes defined for PBI GUIDs</criterion>
+    <criterion testable="true">sprk_category OptionSet defined with Financial=1, Operational=2, Compliance=3, Documents=4, Custom=5</criterion>
+    <criterion testable="true">sprk_embedurl defined as URL type</criterion>
+    <criterion testable="true">sprk_iscustom defined as Boolean with default false</criterion>
+    <criterion testable="true">sprk_description defined as Multiline text</criterion>
+    <criterion testable="true">sprk_ownerid defined as Lookup to systemuser</criterion>
+    <criterion testable="true">Schema document is complete and ready for solution import</criterion>
+  </acceptance-criteria>
+</task>

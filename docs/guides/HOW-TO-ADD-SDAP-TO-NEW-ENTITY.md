@@ -114,7 +114,7 @@ If the upload button is missing, check that ribbon customizations are published.
 
 Add your entity to the PCF control configuration file.
 
-**File:** `src/controls/UniversalQuickCreate/UniversalQuickCreate/config/EntityDocumentConfig.ts`
+**File:** `src/client/pcf/UniversalQuickCreate/control/config/EntityDocumentConfig.ts`
 
 **Add New Entity Entry:**
 ```typescript
@@ -160,8 +160,8 @@ Build the updated PCF control and deploy to Dataverse.
 
 **Command Line:**
 ```bash
-# Navigate to PCF project
-cd /c/code_files/spaarke/src/controls/UniversalQuickCreate
+# Navigate to the PCF project (relative to repo root)
+cd src/client/pcf/UniversalQuickCreate
 
 # Build the control
 npm run build
@@ -169,6 +169,8 @@ npm run build
 # Deploy to Dataverse (requires pac CLI authentication)
 pac pcf push --publisher-prefix sprk
 ```
+
+> **Note:** Use the `/dataverse-deploy` skill (`pcf-deploy`) for the full deployment procedure including solution packaging.
 
 **Verification:**
 - Build should complete with no errors

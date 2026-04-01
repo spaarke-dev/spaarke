@@ -1,0 +1,85 @@
+<task id="024" project="spaarke-powerbi-embedded-r1" status="complete">
+  <metadata>
+    <title>Role-based UI controls (Viewer/Author/Admin)</title>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>frontend, auth</tags>
+    <estimate>3h</estimate>
+    <status>complete</status>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements role-based access control across UI with privilege fetching, conditional rendering, and delete flow with BFF integration. Security-sensitive auth code.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>006, 020</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer implementing role-based UI controls for the Reporting Code Page.</role>
+    <goal>Fetch the user's reporting privilege level from the BFF (Viewer/Author/Admin) and conditionally render UI controls. Viewer: view mode only + export. Author: view + edit + create (New Report) + save/save-as. Admin: all Author capabilities + delete report. Delete shows a confirm dialog, calls DELETE /api/reporting/reports/{id}, and removes the report from the catalog.</goal>
+    <context>
+      The BFF provides the user's privilege level based on their Dataverse security role.
+      The Reporting Code Page must enforce these privileges in the UI by showing/hiding controls.
+      This is a UI-level enforcement — the BFF also enforces privileges server-side via the ReportingAuthorizationFilter.
+      The delete flow is Admin-only and requires confirmation before removing a report.
+    </context>
+    <constraints>
+      - MUST fetch user privilege from BFF (e.g., GET /api/reporting/user-privilege) on mount
+      - MUST enforce Viewer role: view mode only, export button visible, no edit/create/delete
+      - MUST enforce Author role: view + edit toggle + New Report + save/save-as visible
+      - MUST enforce Admin role: all Author capabilities + delete report button
+      - MUST show confirmation dialog before delete (Fluent v9 Dialog)
+      - MUST call DELETE /api/reporting/reports/{id} on confirmed delete
+      - MUST remove deleted report from catalog dropdown and select next report
+      - MUST handle privilege fetch errors gracefully (default to Viewer for safety)
+      - MUST use Fluent v9 components per ADR-021
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>src/solutions/Reporting/src/components/ModeToggle.tsx</file>
+      <file>src/solutions/Reporting/src/components/NewReportButton.tsx</file>
+      <file>src/solutions/Reporting/src/components/ReportToolbar.tsx</file>
+      <file>src/solutions/Reporting/src/components/ExportButton.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+      <adr>.claude/adr/ADR-008-endpoint-filters.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Create src/solutions/Reporting/src/hooks/useUserPrivilege.ts — fetch user privilege from GET /api/reporting/user-privilege, default to "Viewer" on error</step>
+    <step>Define UserPrivilege type: "Viewer" | "Author" | "Admin" and create privilege context or pass as prop</step>
+    <step>Update App.tsx to fetch privilege on mount and pass to child components</step>
+    <step>Conditionally render ModeToggle: visible only for Author and Admin</step>
+    <step>Conditionally render NewReportButton: visible only for Author and Admin</step>
+    <step>Conditionally render ReportToolbar (save/save-as): visible only for Author and Admin in edit mode</step>
+    <step>Create src/solutions/Reporting/src/components/DeleteReportButton.tsx — Admin only, with Fluent v9 Dialog for confirmation</step>
+    <step>Implement delete handler: confirm dialog → DELETE /api/reporting/reports/{id} → remove from catalog → select next report</step>
+    <step>Wire DeleteReportButton into toolbar — visible only for Admin</step>
+    <step>ExportButton remains visible for all roles (already wired)</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/hooks/useUserPrivilege.ts</output>
+    <output>New file: src/solutions/Reporting/src/components/DeleteReportButton.tsx</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (privilege-based conditional rendering)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>User privilege fetched from BFF on mount, defaults to Viewer on error</criterion>
+    <criterion>Viewer: sees view mode + export only</criterion>
+    <criterion>Author: sees view + edit toggle + New Report + save/save-as + export</criterion>
+    <criterion>Admin: sees all Author controls + delete button</criterion>
+    <criterion>Delete shows Fluent v9 confirmation dialog before proceeding</criterion>
+    <criterion>Delete calls BFF and removes report from catalog</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -192,9 +192,7 @@ await cca.AcquireTokenOnBehalfOf(...);
 
 ## Related Articles
 
-- [oauth-obo-implementation.md](oauth-obo-implementation.md) - Implementation patterns
-- [oauth-obo-anti-patterns.md](oauth-obo-anti-patterns.md) - Common mistakes
-- [sdap-troubleshooting.md](sdap-troubleshooting.md) - SDAP-specific errors
+- [oauth-obo-patterns.md](oauth-obo-patterns.md) - Implementation patterns and common mistakes
 
 ---
 

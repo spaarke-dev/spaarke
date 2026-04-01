@@ -343,8 +343,8 @@ When generating or reviewing code, automatically check:
 ## Resources
 
 - Root `CLAUDE.md` - Full coding standards reference
-- `docs/ai-knowledge/architecture/` - Pattern documentation
-- `docs/reference/adr/` - Decision rationale (if needed)
+- `docs/architecture/` - Architecture decisions and constraints
+- `docs/adr/` - Decision rationale (if needed)
 
 ## Related Skills
 

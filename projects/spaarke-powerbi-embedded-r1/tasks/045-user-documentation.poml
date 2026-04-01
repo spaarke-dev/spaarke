@@ -1,0 +1,62 @@
+<task id="PBI-045" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create user-facing and admin documentation for Reporting module</title>
+    <status>complete</status>
+    <phase>5</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task — creating user guides and admin documentation with no code changes</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030, 031, 032, 033, 034, 035, 036, 040, 041, 042, 043, 044</dependencies>
+  </metadata>
+
+  <prompt>
+    Create user-facing documentation (docs/guides/reporting-module.md) and admin documentation
+    (docs/guides/reporting-admin.md) for the Reporting module. The user guide covers viewing,
+    creating, editing, and exporting reports. The admin guide covers module configuration, security
+    roles, customer onboarding, capacity planning, and troubleshooting.
+  </prompt>
+
+  <role>Technical writer with experience documenting Power BI Embedded solutions for both end users and administrators.</role>
+
+  <goal>
+    Two comprehensive documentation files: a user-facing guide enabling end users to view, create,
+    edit, and export reports, and an admin guide enabling administrators to configure, onboard
+    customers, manage capacity, and troubleshoot the Reporting module.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST NOT use "Analysis" or "Analytics" in naming — use "Reporting" exclusively</constraint>
+    <constraint>User guide must be accessible to non-technical users</constraint>
+    <constraint>Admin guide must cover all deployment models and configuration options</constraint>
+    <constraint>All Phase 1-4 tasks must be complete to document accurate behavior</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create user guide">Create docs/guides/reporting-module.md with sections: Overview, Getting Started, Viewing Reports, Creating Reports, Editing Reports, Exporting Reports</step>
+    <step order="2" name="Create admin guide">Create docs/guides/reporting-admin.md with sections: Module Configuration, Security Roles, Customer Onboarding, Capacity Planning, Troubleshooting</step>
+    <step order="3" name="Review for accuracy">Verify documentation matches implemented behavior from Phase 1-4 tasks</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/guides/reporting-module.md (new — user-facing guide)</output>
+    <output type="docs">docs/guides/reporting-admin.md (new — admin guide)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">docs/guides/reporting-module.md exists with Overview, Getting Started, Viewing, Creating, Editing, Exporting sections</criterion>
+    <criterion testable="true">docs/guides/reporting-admin.md exists with Configuration, Security Roles, Onboarding, Capacity Planning, Troubleshooting sections</criterion>
+    <criterion testable="true">No use of "Analysis" or "Analytics" — only "Reporting" terminology</criterion>
+    <criterion testable="true">User guide is written for non-technical audience</criterion>
+    <criterion testable="true">Admin guide covers all 3 deployment models</criterion>
+  </acceptance-criteria>
+</task>

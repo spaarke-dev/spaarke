@@ -1,42 +1,89 @@
-# Power BI Embedded Reporting R1 — Project Context
+# CLAUDE.md — Power BI Embedded Reporting R1
 
-## Project Summary
-Reporting module using Power BI Embedded ("App Owns Data") with service principal profiles, Import mode, in-browser report authoring, and 4-layer security.
+> **Project**: spaarke-powerbi-embedded-r1
+> **Last Updated**: 2026-03-31
 
-## Module Naming
-- Use "Reporting" everywhere — NOT "Analytics" or "Analysis" (those are AI features)
-- Code Page: `sprk_reporting`
-- Endpoints: `/api/reporting/*`
-- Security role: `sprk_ReportingAccess`
-- Env var: `sprk_ReportingModuleEnabled`
+## Project Context
 
-## Key Rules
-- App Owns Data pattern only — never user auth for PBI
-- Service principal profiles for multi-tenant workspace isolation
-- Import mode with scheduled Dataverse refresh (not Lakehouse/Direct Lake in R1)
-- BU RLS via EffectiveIdentity in embed tokens
-- Redis-cached embed tokens with 80% TTL auto-refresh
-- .pbix templates versioned in source control (`reports/` folder)
-- All PBI config via environment variables (BYOK-compatible)
+This project adds a "Reporting" module to Spaarke — embedding Power BI reports into the MDA via a Code Page using App Owns Data with service principal profiles. The module uses Import mode with scheduled refresh, supports in-browser report authoring, and enforces 4-layer security (env var gate + security role + workspace isolation + BU RLS).
+
+**Module naming**: "Reporting" exclusively — NEVER use "Analytics" or "Analysis" (conflicts with AI features).
 
 ## Applicable ADRs
-- ADR-001: Minimal API for reporting endpoints
-- ADR-006: Code Page for standalone reporting page
-- ADR-008: Endpoint filters for authorization
-- ADR-009: Redis caching for embed tokens
-- ADR-010: DI minimalism (2 new registrations)
-- ADR-012: Shared components
-- ADR-021: Fluent v9, dark mode
-- ADR-026: Vite single-file build
 
-## New Dependencies (npm)
-- `powerbi-client-react` ^2.0.2 (React 18+ only)
-- `powerbi-client` ^2.23.0 (JS SDK)
+| ADR | Constraint | Applies To |
+|-----|-----------|------------|
+| ADR-001 | Minimal API, no Azure Functions | BFF endpoints |
+| ADR-006 | Code Page for full-page UI, not PCF | `sprk_reporting` page |
+| ADR-008 | Endpoint filters for auth, no global middleware | Reporting endpoints |
+| ADR-009 | Redis-first caching, no hybrid L1 | Embed token caching |
+| ADR-010 | ≤2 DI registrations for this module | ReportingEmbedService + ProfileManager |
+| ADR-012 | Shared components from `@spaarke/ui-components` | UI elements |
+| ADR-021 | Fluent v9 only, dark mode, design tokens | All UI |
+| ADR-026 | Vite + vite-plugin-singlefile build | Code Page build |
 
-## New Dependencies (NuGet)
-- `Microsoft.PowerBI.Api` (PBI REST API client)
+## Key Patterns
 
-## 🚨 MANDATORY: Task Execution Protocol
-When executing tasks in this project, Claude Code MUST invoke the `task-execute` skill.
-DO NOT read POML files directly and implement manually.
-See root CLAUDE.md for full protocol and trigger phrases.
+| Pattern | Path | Use |
+|---------|------|-----|
+| API endpoint definition | `.claude/patterns/api/endpoint-definition.md` | ReportingEndpoints.cs |
+| Endpoint filters | `.claude/patterns/api/endpoint-filters.md` | ReportingAuthorizationFilter.cs |
+| Service registration | `.claude/patterns/api/service-registration.md` | ReportingModule.cs |
+| Service principal auth | `.claude/patterns/auth/service-principal.md` | SP token acquisition |
+| OAuth scopes | `.claude/patterns/auth/oauth-scopes.md` | PBI scope: `https://analysis.windows.net/.default` |
+| Code Page auth bootstrap | `.claude/patterns/auth/spaarke-auth-initialization.md` | main.tsx bootstrap |
+| Distributed cache | `.claude/patterns/caching/distributed-cache.md` | Embed token Redis cache |
+| Full-page Code Page | `.claude/patterns/webresource/full-page-custom-page.md` | Code Page scaffold |
+
+## Reference Implementations
+
+| Component | Reference | Why |
+|-----------|-----------|-----|
+| Code Page scaffold | `src/solutions/EventsPage/` | Canonical Vite + React 19 + single-file |
+| Code Page with URL params | `src/solutions/PlaybookLibrary/` | URL parameter parsing |
+| BFF endpoint group | `src/server/api/Sprk.Bff.Api/Api/ScorecardCalculatorEndpoints.cs` | MapGroup pattern |
+| Web resource deploy | `scripts/Deploy-ExternalWorkspaceSpa.ps1` | Single-file deploy script |
+| DI module registration | `src/server/api/Sprk.Bff.Api/Program.cs` | `AddXxxModule()` pattern |
+
+## File Locations
+
+```
+src/solutions/Reporting/                    # Code Page (React 19 + Vite)
+src/server/api/Sprk.Bff.Api/Api/Reporting/  # BFF endpoints
+scripts/Deploy-ReportingReports.ps1         # Deployment pipeline
+reports/                                     # .pbix templates + CHANGELOG
+```
+
+## MUST Rules (from spec)
+
+- MUST use "App Owns Data" pattern (service principal, not user auth)
+- MUST use service principal profiles for multi-tenant isolation
+- MUST gate module via `sprk_ReportingModuleEnabled` environment variable
+- MUST enforce user access via `sprk_ReportingAccess` security role
+- MUST enforce BU RLS via EffectiveIdentity in embed tokens
+- MUST use Import mode (not DirectQuery or Direct Lake)
+- MUST cache embed tokens in Redis (ADR-009)
+- MUST auto-refresh tokens at 80% TTL via `report.setAccessToken()`
+- MUST use `powerbi-client-react` 2.0.2
+- MUST store report catalog in `sprk_report` Dataverse entity
+- MUST use environment variables for all PBI config (BYOK-compatible)
+- MUST NOT hardcode workspace IDs, capacity IDs, or tenant IDs
+- MUST NOT require end users to have Power BI licenses
+- MUST NOT use "Analysis" or "Analytics" in naming
+
+## External Dependencies
+
+- `Microsoft.PowerBI.Api` NuGet package
+- `powerbi-client-react` 2.0.2 npm package
+- F-SKU capacity (F2+ for dev)
+- Entra ID app registration with PBI API permissions
+
+---
+
+## Task Execution Protocol
+
+When executing tasks in this project, Claude Code MUST invoke the `task-execute` skill. DO NOT read POML files directly and implement manually. See root CLAUDE.md for the mandatory task execution protocol.
+
+---
+
+*Generated by project-pipeline skill*

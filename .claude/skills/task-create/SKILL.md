@@ -34,7 +34,7 @@ Transforms `plan.md` work breakdown structure (WBS) into individual, executable 
 EXTRACT project-name from provided path
 LOAD: projects/{project-name}/plan.md
 LOAD: projects/{project-name}/README.md  # For context
-LOAD: docs/ai-knowledge/templates/task-execution.template.md  # POML format
+LOAD: .claude/templates/task-execution.template.md  # POML format
 
 EXTRACT from plan.md:
   - WBS phases (Section 5)
@@ -81,19 +81,19 @@ When a task has these tags, ALWAYS include these knowledge files:
 
 | Tag | Constraints | Patterns | Additional Files |
 |-----|-------------|----------|------------------|
-| `pcf`, `react`, `fluent-ui`, `frontend`, `e2e-test` | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` | `src/client/pcf/CLAUDE.md`, `docs/guides/PCF-V9-PACKAGING.md`, `.claude/skills/ui-test/SKILL.md` |
+| `pcf`, `react`, `fluent-ui`, `frontend`, `e2e-test` | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` | `src/client/pcf/CLAUDE.md`, `docs/guides/PCF-DEPLOYMENT-GUIDE.md`, `.claude/skills/ui-test/SKILL.md` |
 | `bff-api`, `api`, `minimal-api`, `endpoints` | `.claude/constraints/api.md` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` | `src/server/api/CLAUDE.md` (if exists) |
 | `dataverse`, `solution`, `fields`, `plugin` | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/plugin-structure.md` | `.claude/skills/dataverse-deploy/SKILL.md` |
 | `auth`, `oauth`, `authorization` | `.claude/constraints/auth.md` | `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` | — |
 | `cache`, `redis`, `caching` | `.claude/constraints/data.md` | `.claude/patterns/caching/distributed-cache.md` | — |
 | `ai`, `azure-openai`, `document-intelligence` | `.claude/constraints/ai.md` | `.claude/patterns/ai/streaming-endpoints.md` | — |
-| `deploy` | — | — | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/guides/PCF-V9-PACKAGING.md` |
+| `deploy` | — | — | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/guides/PCF-DEPLOYMENT-GUIDE.md` |
 | `testing`, `unit-test`, `integration-test` | `.claude/constraints/testing.md` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` | — |
 | `worker`, `job`, `background` | `.claude/constraints/jobs.md` | — | — |
 
-**Critical: PCF tasks MUST reference PCF-V9-PACKAGING.md**
+**Critical: PCF tasks MUST reference PCF-DEPLOYMENT-GUIDE.md**
 
-The `PCF-V9-PACKAGING.md` guide contains **mandatory version bumping instructions**:
+The `PCF-DEPLOYMENT-GUIDE.md` guide contains **mandatory version bumping instructions**:
 - Version must be updated in 4 locations before deployment
 - Footer must show version number
 - Failure to follow this results in stale deployments
@@ -644,7 +644,7 @@ Recommended sections:
 ## Resources
 
 ### Templates (Auto-loaded)
-- `docs/ai-knowledge/templates/task-execution.template.md`
+- `.claude/templates/task-execution.template.md`
 
 ### Related Skills
 - **project-init**: Creates plan.md that this skill consumes

@@ -75,8 +75,6 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 | Document Intelligence | Document parsing | westus2 |
 | AI Foundry | Prompt Flow orchestration | sprkspaarkedev-aif-hub |
 | Dataverse | Entity storage for Analysis records | sprk_analysis |
-| AnalysisBuilder PCF | Analysis configuration dialog | v1.12.0 |
-| AnalysisWorkspace PCF | Analysis workspace with chat | v1.0.29 |
 | Custom Pages | Power Apps hosts for PCF controls | Deployed |
 | KnowledgeDeploymentService | Multi-tenant RAG deployment routing | R3 (Active) |
 | FileIndexingService | Unified RAG file indexing pipeline | R3+RAG-R1 (Active) |
@@ -751,6 +749,8 @@ Without these, you'll see: `⚠ RAG services disabled (requires DocumentIntellig
 ---
 
 ## Complete App Service Configuration
+
+> **Note**: This section documents known configuration keys as of the last update. The authoritative source for all configuration keys is the Options classes in `src/server/api/Sprk.Bff.Api/Configuration/` and `src/server/api/Sprk.Bff.Api/Options/`. Cross-check those classes against `appsettings.json` before deploying to a new environment.
 
 **App Service Name**: `spe-api-dev-67e2xz`
 

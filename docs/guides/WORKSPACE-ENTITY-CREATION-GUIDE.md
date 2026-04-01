@@ -55,7 +55,7 @@ The Legal Workspace provides multi-step wizards for creating Dataverse entity re
 | **ProjectService** | `components/CreateProject/projectService.ts` | Project-specific orchestrator |
 | **xrmProvider.ts** | `services/xrmProvider.ts` | Frame-walk to find Xrm global, user ID, SPE container resolution |
 | **bffAuthProvider.ts** | `services/bffAuthProvider.ts` | OBO token acquisition for BFF API calls |
-| **bffConfig.ts** | `config/bffConfig.ts` | BFF base URL configuration |
+| **runtimeConfig.ts** | `config/runtimeConfig.ts` | BFF base URL and MSAL configuration |
 
 ---
 

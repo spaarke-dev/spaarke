@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Models;
@@ -62,6 +63,14 @@ public static class ConfigurationModule
             .Bind(configuration.GetSection(ModelSelectorOptions.SectionName))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        // Power BI Embedded Reporting options (PBI-001) — gated on sprk_ReportingModuleEnabled
+        // Validation deferred to first use (no ValidateOnStart) so the app starts
+        // even without PBI config. Reporting endpoints fail gracefully at call time.
+        services
+            .AddOptions<PowerBiOptions>()
+            .Bind(configuration.GetSection(PowerBiOptions.SectionName))
+            .ValidateDataAnnotations();
 
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();

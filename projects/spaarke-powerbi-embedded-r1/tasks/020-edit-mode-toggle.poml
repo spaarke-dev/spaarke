@@ -1,0 +1,78 @@
+<task id="020" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Edit mode toggle (view/edit switch)</title>
+    <status>complete</status>
+    <phase>3</phase>
+    <stream>frontend</stream>
+    <tags>frontend, fluent-ui</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements view/edit mode switching with Power BI SDK calls, role-based visibility, and embed token permission management. Modifies .tsx files with 6+ steps.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>011</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer adding report authoring mode support to the Reporting Code Page.</role>
+    <goal>Add a view/edit mode toggle to the Code Page toolbar. View mode calls report.switchMode("view") for read-only with filter pane. Edit mode calls report.switchMode("edit") for full authoring toolbar. The toggle is only visible if the user has Author or Admin privilege. Edit mode requires an embed token generated with permissions.editing = true.</goal>
+    <context>
+      Power BI Embedded supports two modes: view (read-only, filter pane) and edit (full authoring toolbar with visuals, formatting, etc.).
+      Switching modes is done via report.switchMode("view") or report.switchMode("edit") on the Report object.
+      Edit mode requires the embed token to have editing permissions — the BFF must generate a token with allowEdit=true.
+      Only users with Author or Admin privilege should see the edit toggle.
+    </context>
+    <constraints>
+      - MUST add a toggle button/switch to the toolbar for view/edit mode
+      - MUST call report.switchMode("view") for view mode — read-only with filter pane
+      - MUST call report.switchMode("edit") for edit mode — full PBI authoring toolbar
+      - MUST only show toggle when user has Author or Admin privilege
+      - MUST request edit-mode embed token (permissions.editing = true) from BFF when entering edit mode
+      - MUST use Fluent v9 ToggleButton or similar component per ADR-021
+      - MUST use Fluent design tokens — no hard-coded colors per ADR-021
+      - MUST handle mode switch errors gracefully
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/components/ReportViewer.tsx</file>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>src/solutions/Reporting/src/hooks/usePowerBiEmbed.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Define ReportMode type: "view" | "edit" and UserPrivilege type: "Viewer" | "Author" | "Admin"</step>
+    <step>Create src/solutions/Reporting/src/components/ModeToggle.tsx with Fluent v9 ToggleButton</step>
+    <step>Implement mode switching: on toggle, call report.switchMode("view") or report.switchMode("edit") via report reference</step>
+    <step>Add privilege check: only render ModeToggle when user privilege is Author or Admin</step>
+    <step>Update usePowerBiEmbed hook to support requesting edit-mode tokens (allowEdit=true query param)</step>
+    <step>When switching to edit mode: request new embed token with editing permissions if current token lacks them</step>
+    <step>Wire ModeToggle into App.tsx toolbar area</step>
+    <step>Add error handling for mode switch failures</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/components/ModeToggle.tsx</output>
+    <output>Modified file: src/solutions/Reporting/src/hooks/usePowerBiEmbed.ts (edit token support)</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (wires in ModeToggle)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ModeToggle component created with Fluent v9 ToggleButton</criterion>
+    <criterion>View mode: report.switchMode("view") — read-only with filter pane</criterion>
+    <criterion>Edit mode: report.switchMode("edit") — full authoring toolbar</criterion>
+    <criterion>Toggle only visible for Author and Admin users</criterion>
+    <criterion>Edit mode requests embed token with editing permissions</criterion>
+    <criterion>Mode switch errors handled gracefully</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,68 @@
+<task id="PBI-031" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Define sprk_ReportingAccess security role with three privilege tiers</title>
+    <status>complete</status>
+    <phase>4</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Security role definition — structured configuration with explicit privilege tiers but no code implementation</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Define the sprk_ReportingAccess security role for the Reporting module with three privilege
+    tiers: Viewer (Read), Author (Read + Write + Create), and Admin (Read + Write + Create + Delete).
+    Document the role assignment process for administrators.
+  </prompt>
+
+  <role>Dataverse security administrator with experience in security role design and privilege modeling.</role>
+
+  <goal>
+    A fully defined sprk_ReportingAccess security role with three clearly documented privilege tiers
+    controlling access to sprk_report entity operations, along with an administrator guide for
+    role assignment.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST enforce user access via sprk_ReportingAccess security role</constraint>
+    <constraint source="spec">MUST NOT require end users to have Power BI licenses — access controlled via Dataverse role only</constraint>
+    <constraint>Viewer tier: Read privilege on sprk_report only</constraint>
+    <constraint>Author tier: Read + Write + Create privileges on sprk_report</constraint>
+    <constraint>Admin tier: Read + Write + Create + Delete privileges on sprk_report</constraint>
+    <constraint>Role must be includable in the Dataverse solution for deployment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review security role patterns">Read existing Dataverse security role definitions and patterns in the solution</step>
+    <step order="2" name="Define Viewer tier">Define Viewer privilege tier with Organization-level Read on sprk_report entity</step>
+    <step order="3" name="Define Author tier">Define Author privilege tier with Organization-level Read, Business Unit-level Write, and Business Unit-level Create on sprk_report entity</step>
+    <step order="4" name="Define Admin tier">Define Admin privilege tier with Organization-level Read, Organization-level Write, Organization-level Create, and Organization-level Delete on sprk_report entity</step>
+    <step order="5" name="Document role definition">Create security role definition document specifying all privileges per tier</step>
+    <step order="6" name="Document assignment process">Write administrator guide for assigning the appropriate tier to users or teams</step>
+  </steps>
+
+  <outputs>
+    <output type="schema">sprk_ReportingAccess security role definition with three privilege tiers</output>
+    <output type="docs">Role assignment guide for administrators</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_ReportingAccess security role defined with Viewer tier (Read on sprk_report)</criterion>
+    <criterion testable="true">Author tier includes Read + Write + Create on sprk_report</criterion>
+    <criterion testable="true">Admin tier includes Read + Write + Create + Delete on sprk_report</criterion>
+    <criterion testable="true">Role assignment process documented for administrators</criterion>
+    <criterion testable="true">Security role is packageable in Dataverse solution</criterion>
+  </acceptance-criteria>
+</task>

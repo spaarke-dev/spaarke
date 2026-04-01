@@ -2,7 +2,7 @@
 
 **Purpose:** Utility scripts for SDAP development, deployment, and operations.
 
-**Last Updated:** March 14, 2026
+**Last Updated:** March 31, 2026
 
 ---
 
@@ -412,6 +412,176 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ---
 
 ## Active Development Scripts
+
+### Reporting Module Scripts
+
+#### `Deploy-ReportingReports.ps1`
+**Purpose:** Deploy Power BI report templates (.pbix) to a customer PBI workspace — imports files via PBI REST API, rebinds datasets to the customer's Dataverse instance, configures scheduled refresh, and creates/updates `sprk_report` records in Dataverse.
+**Usage:** 🟡 Occasional - Deploy or update standard product reports per customer
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), service principal with PBI workspace Member/Admin role
+**Owner:** Reporting Team
+**Last Used:** March 2026 (Task 035 — initial implementation)
+
+**Required Environment Variables:**
+- `PBI_TENANT_ID` — Entra ID tenant ID
+- `PBI_CLIENT_ID` — Service principal app (client) ID
+- `PBI_CLIENT_SECRET` — Service principal client secret
+- `PBI_WORKSPACE_ID` — Target PBI workspace ID (overridable via `-WorkspaceId`)
+- `PBI_DATAVERSE_DATASOURCE_URL` — Dataverse OData endpoint for dataset rebinding
+- `DATAVERSE_URL` — Dataverse org URL for catalog sync
+
+**When to Use:**
+- After building or updating `.pbix` templates in `reports/`
+- During customer onboarding (provision workspace → deploy reports)
+- After a new standard product report is added to the `reports/` folder
+- Deploying a new report version to existing customer workspaces
+
+**Command:**
+```powershell
+# Dry run — preview what would be deployed
+.\Deploy-ReportingReports.ps1 -WhatIf
+
+# Deploy standard product reports (reads PBI_WORKSPACE_ID from env)
+.\Deploy-ReportingReports.ps1
+
+# Deploy specific version folder
+.\Deploy-ReportingReports.ps1 -ReportFolder "reports/v1.2.0"
+
+# Deploy to a specific workspace
+.\Deploy-ReportingReports.ps1 -WorkspaceId "00000000-0000-0000-0000-000000000000"
+
+# Deploy to staging environment
+.\Deploy-ReportingReports.ps1 -Environment staging -DataverseOrg "https://myorg-stg.crm.dynamics.com"
+```
+
+**Deployment Steps:**
+1. Validates prerequisites (env vars, .pbix files, Azure CLI)
+2. Acquires PBI REST API token via service principal client credentials flow
+3. Acquires Dataverse token via Azure CLI
+4. For each `.pbix` file: imports to PBI workspace, rebinds dataset to Dataverse, sets refresh schedule
+5. Creates or updates `sprk_report` records in Dataverse (catalog sync)
+6. Outputs deployment summary table
+
+**Notes:**
+- Report category is inferred from the report filename (Financial, Documents, Operational, Compliance, Custom)
+- Scheduled refresh defaults to Mon–Fri at 06:00, 12:00, and 18:00 UTC; set `PBI_REFRESH_ENABLED=false` to skip
+- Dataset rebind uses `Default.SetAllConnections`; if the dataset uses embedded credentials the warning is non-fatal
+- Idempotent: existing `sprk_report` records (matched by PBI report ID) are updated, not duplicated
+
+---
+
+#### `Initialize-ReportingCustomer.ps1`
+**Purpose:** End-to-end customer onboarding for the Reporting module — creates a Power BI workspace, creates a service principal profile, adds the SP profile as workspace Admin, deploys standard product reports, enables the `sprk_ReportingModuleEnabled` environment variable, and documents the manual security role assignment step.
+**Usage:** 🟡 Occasional - New customer onboarding or re-provisioning after partial failure
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), service principal with PBI tenant-level access, `Deploy-ReportingReports.ps1`
+**Owner:** Reporting Team
+**Last Used:** March 2026 (Task 040 — initial implementation)
+
+**Required Environment Variables:**
+- `PBI_TENANT_ID` — Entra ID tenant ID (overridable via `-TenantId`)
+- `PBI_CLIENT_ID` — Service principal app (client) ID
+- `PBI_CLIENT_SECRET` — Service principal client secret
+- `DATAVERSE_URL` — Dataverse org URL (overridable via `-DataverseOrg`)
+- `PBI_DATAVERSE_DATASOURCE_URL` — Dataverse OData endpoint for dataset rebinding
+
+**When to Use:**
+- Onboarding a new customer to the Spaarke Reporting module
+- Re-running after a partial failure (idempotent — skips already-created resources)
+- Setting up the Reporting module in a new Dataverse environment
+
+**Command:**
+```powershell
+# Dry run — preview all onboarding steps
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "contoso-legal" `
+    -CustomerName "Contoso Legal Services" `
+    -DataverseOrg "https://contoso.crm.dynamics.com" `
+    -WhatIf
+
+# Full onboarding — shared capacity (dev/test)
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "contoso-legal" `
+    -CustomerName "Contoso Legal Services" `
+    -DataverseOrg "https://contoso.crm.dynamics.com"
+
+# Full onboarding — dedicated F2 capacity (production)
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "fabrikam-corp" `
+    -CustomerName "Fabrikam Corporation" `
+    -DataverseOrg "https://fabrikam.crm.dynamics.com" `
+    -CapacityId "00000000-0000-0000-0000-000000000000"
+
+# Onboarding with user list for security role assignment guidance
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "woodgrove-legal" `
+    -CustomerName "Woodgrove Legal" `
+    -DataverseOrg "https://woodgrove.crm.dynamics.com" `
+    -SecurityRoleUsers @("alice@woodgrove.com", "bob@woodgrove.com")
+```
+
+**Onboarding Steps:**
+1. Validates prerequisites (env vars, Azure CLI, `Deploy-ReportingReports.ps1` present)
+2. Acquires PBI REST API token via service principal client credentials flow
+3. Creates workspace `"{CustomerName} - Reporting"` (or reuses if already exists)
+4. Assigns workspace to capacity if `-CapacityId` provided
+5. Creates SP profile `"sprk-{CustomerId}"` (or reuses if already exists)
+6. Adds SP profile as workspace Admin (skips if already assigned)
+7. Calls `Deploy-ReportingReports.ps1` to import `.pbix` files and sync Dataverse catalog
+8. Enables `sprk_ReportingModuleEnabled = Yes` in the customer's Dataverse environment
+9. Prints security role assignment commands (manual step)
+10. Outputs full onboarding summary (customer ID, workspace ID, profile ID, report count, Dataverse URL)
+
+**Notes:**
+- Idempotent: workspace lookup by exact name, profile lookup by exact display name — re-running after partial failure is safe
+- Security role assignment (`sprk_ReportingAccess`) is a documented manual step; script prints PAC CLI commands
+- Pass `-SecurityRoleUsers @("user@domain.com")` to pre-populate assignment commands in the output
+- `-CapacityId` is optional for dev/test; required for production (F-SKU F2+ recommended)
+- Workspace name pattern: `"{CustomerName} - Reporting"`; SP profile name pattern: `"sprk-{CustomerId}"`
+- `CustomerId` must be lowercase with hyphens only (validated by regex); used in profile name and logging
+
+---
+
+#### `Deploy-ReportingCodePage.ps1`
+**Purpose:** Build the Reporting Code Page (`src/solutions/Reporting/`) and upload `dist/index.html` to Dataverse as the `sprk_reporting` web resource. Uses `vite-plugin-singlefile` so the output is a single fully self-contained HTML file — no separate asset inlining required.
+**Usage:** 🟢 Active - Deploy after Reporting Code Page changes
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Node.js + npm, Dataverse connection
+**Owner:** Reporting Team
+**Last Used:** March 2026 (Task 016 — initial implementation)
+
+**When to Use:**
+- After modifying the Reporting Code Page (`src/solutions/Reporting/src/`)
+- Initial setup of the `sprk_reporting` web resource in a new environment
+- Deploying updates to the embedded Power BI report viewer UI
+
+**Command:**
+```powershell
+# Deploy to default environment (reads DATAVERSE_URL from env)
+.\Deploy-ReportingCodePage.ps1
+
+# Deploy to a specific Dataverse org
+.\Deploy-ReportingCodePage.ps1 -DataverseUrl "https://myorg.crm.dynamics.com"
+
+# Preview without deploying
+.\Deploy-ReportingCodePage.ps1 -WhatIf
+```
+
+**Deployment Steps:**
+1. `npm install` in `src/solutions/Reporting/`
+2. `npm run build` — Vite + vite-plugin-singlefile produces `dist/index.html` (all JS/CSS inlined)
+3. Verifies `dist/index.html` exists and contains no external asset references
+4. Acquires Dataverse access token via Azure CLI
+5. Creates or updates `sprk_reporting` web resource via Dataverse Web API
+6. Publishes the web resource so changes are live
+
+**Notes:**
+- The Reporting Code Page uses `vite-plugin-singlefile`, making the dist output a single file — no manual JS inlining step needed (contrast with `Deploy-ExternalWorkspaceSpa.ps1`)
+- Idempotent: first run creates the web resource; subsequent runs update and republish it
+- Web resource accessible at: `{DataverseUrl}/WebResources/sprk_reporting`
+
+---
 
 ### PCF & Custom Page Deployment
 
@@ -892,3 +1062,6 @@ Most scripts require:
 ## Change Log
 
 - **2025-12-02:** Initial script registry created. Removed 21 scripts (deprecated, bash, docs). Established maintenance process.
+- **2026-03-31:** Added Deploy-ReportingReports.ps1 — Power BI report template deployment for the Reporting module (Task 035).
+- **2026-03-31:** Added Initialize-ReportingCustomer.ps1 — end-to-end customer onboarding for the Reporting module: PBI workspace, SP profile, report deployment, Dataverse module enablement (Task 040).
+- **2026-03-31:** Added Deploy-ReportingCodePage.ps1 — builds and deploys the Reporting Code Page (sprk_reporting web resource) to Dataverse using vite-plugin-singlefile single-file output (Task 016).

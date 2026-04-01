@@ -24,6 +24,8 @@
 
 ## App Service Configuration
 
+> **Authoritative source**: Options classes in `src/server/api/Sprk.Bff.Api/Configuration/`. Key prefixes are set by `SectionName` constants: `DocumentIntelligenceOptions.SectionName = "DocumentIntelligence"`, `ScheduledRagIndexingOptions.SectionName = "ScheduledRagIndexing"`. Verify these classes if the configuration schema changes.
+
 ### Required Settings
 
 Configure these in Azure App Service > Configuration > Application Settings:

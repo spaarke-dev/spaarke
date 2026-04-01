@@ -1,0 +1,70 @@
+<task id="PBI-043" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create integration tests for all /api/reporting/* endpoints</title>
+    <status>complete</status>
+    <phase>5</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task — comprehensive endpoint integration tests with explicit constraints and multiple test scenarios</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>005, 033</dependencies>
+  </metadata>
+
+  <prompt>
+    Create integration tests for all /api/reporting/* BFF endpoints: embed-token (valid token,
+    caching, 404 when disabled, 403 when unauthorized), reports catalog (listing, grouping),
+    export (PDF/PPTX trigger and file return), and CRUD operations (create, update, delete
+    report catalog entries).
+  </prompt>
+
+  <role>Senior .NET test engineer with BFF API integration testing and Power BI Embedded experience.</role>
+
+  <goal>
+    A comprehensive integration test suite covering all /api/reporting/* endpoints with positive
+    and negative test cases for embed tokens, report catalog, export, and CRUD operations.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-008">Endpoint filters for auth — tests must verify filter behavior</constraint>
+    <constraint source="ADR-009">Redis-first caching — test embed token caching behavior</constraint>
+    <constraint source="spec">Module gated by sprk_ReportingModuleEnabled — test 404 when disabled</constraint>
+    <constraint source="spec">Access controlled by sprk_ReportingAccess role — test 403 when unauthorized</constraint>
+    <constraint>Use the project's existing test patterns and frameworks</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review test patterns">Read existing API integration tests to understand WebApplicationFactory setup, auth mocking, and assertion patterns</step>
+    <step order="2" name="Create embed token tests">Test embed-token endpoint: valid token returned with correct structure, cached on second call (verify Redis hit), 404 when module disabled, 403 when user lacks security role</step>
+    <step order="3" name="Create reports catalog tests">Test reports listing endpoint: catalog returned with expected reports, reports grouped by category correctly</step>
+    <step order="4" name="Create export tests">Test export endpoint: PDF export triggers and returns file bytes, PPTX export triggers and returns file bytes</step>
+    <step order="5" name="Create CRUD tests">Test report catalog CRUD: create new sprk_report entry, update existing entry, delete entry, verify validation on invalid input</step>
+    <step order="6" name="Run tests">Execute all tests and verify they pass</step>
+  </steps>
+
+  <outputs>
+    <output type="test">Integration test classes for /api/reporting/* endpoints (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Embed token test: valid token returned with embed URL and report ID</criterion>
+    <criterion testable="true">Embed token test: cached on second call (Redis cache hit)</criterion>
+    <criterion testable="true">Embed token test: 404 returned when sprk_ReportingModuleEnabled is No</criterion>
+    <criterion testable="true">Embed token test: 403 returned when user lacks sprk_ReportingAccess role</criterion>
+    <criterion testable="true">Reports catalog test: returns list grouped by category</criterion>
+    <criterion testable="true">Export test: PDF and PPTX export return file bytes</criterion>
+    <criterion testable="true">CRUD test: create, update, delete report catalog entries work correctly</criterion>
+    <criterion testable="true">All tests pass when executed</criterion>
+  </acceptance-criteria>
+</task>

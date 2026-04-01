@@ -14,18 +14,17 @@ This directory contains standards for authentication, data access patterns, and 
 
 ### Authentication & Security
 
-- [dataverse-oauth-authentication.md](dataverse-oauth-authentication.md) - OAuth patterns for Dataverse
-- [oauth-obo-anti-patterns.md](oauth-obo-anti-patterns.md) - Common OAuth mistakes to avoid
+- [../guides/DATAVERSE-AUTHENTICATION-GUIDE.md](../guides/DATAVERSE-AUTHENTICATION-GUIDE.md) - OAuth patterns for Dataverse
+- [oauth-obo-patterns.md](oauth-obo-patterns.md) - Common OAuth mistakes to avoid and correct patterns
 - [oauth-obo-errors.md](oauth-obo-errors.md) - OAuth error handling patterns
-- [oauth-obo-implementation.md](oauth-obo-implementation.md) - On-Behalf-Of flow implementation
 
 ## For AI Agents
 
 **Loading strategy**: Load relevant standards when implementing authentication or data access patterns.
 
 **When to reference**:
-- Implementing OAuth flows → Load oauth-obo-*.md files
-- Dataverse authentication → Load dataverse-oauth-authentication.md
+- Implementing OAuth flows → Load oauth-obo-patterns.md and oauth-obo-errors.md
+- Dataverse authentication → Load DATAVERSE-AUTHENTICATION-GUIDE.md
 - Code review → Check against anti-patterns
 
 ## Phase 3 TODO

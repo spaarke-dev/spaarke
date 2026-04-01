@@ -218,7 +218,7 @@ Prevents cross-tenant RAG index access.
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) - Auth flow implementation
 - [oauth-obo-errors.md](oauth-obo-errors.md) - OBO error codes
 - [auth-azure-resources.md](auth-azure-resources.md) - Infrastructure details
-- [ai-implementation-reference.md](ai-implementation-reference.md) - AI authorization filters
+- [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) - AI authorization filters (ADR-008)
 
 ---
 

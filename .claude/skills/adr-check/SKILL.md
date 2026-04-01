@@ -42,7 +42,7 @@ Determine what code to validate:
 
 ### Step 2: Load ADR Context
 
-1. Use the ADR index as the source of truth: `docs/reference/adr/README-ADRs.md`
+1. Use the ADR index as the source of truth: `docs/adr/README-ADRs.md`
 2. Use `references/adr-validation-rules.md` for grep/pattern-based checks (where available)
 
 Quick reference of key constraints:
@@ -58,7 +58,7 @@ Quick reference of key constraints:
 | ADR-010 | DI minimalism | Interfaces with single implementation |
 | ADR-021 | Fluent v9 design system | `@fluentui/react` (v8), hard-coded colors, missing FluentProvider |
 
-Note: This table is not exhaustive. Validate against the full ADR index in `docs/reference/adr/README-ADRs.md`.
+Note: This table is not exhaustive. Validate against the full ADR index in `docs/adr/README-ADRs.md`.
 
 ### Step 3: Run Validation Checks
 
@@ -82,10 +82,10 @@ For each violation:
 
 ## Conventions
 
-- Always check all ADRs in the current ADR index (`docs/reference/adr/README-ADRs.md`)
+- Always check all ADRs in the current ADR index (`docs/adr/README-ADRs.md`)
 - Report warnings for potential issues that need human judgment
 - Provide specific file paths and line numbers for violations
-- Reference ADR documents by full path: `/docs/reference/adr/ADR-XXX-*.md`
+- Reference ADR documents by full path: `/docs/adr/ADR-XXX-*.md`
 - Suggest running ArchTests after fixes: `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj`
 
 ---

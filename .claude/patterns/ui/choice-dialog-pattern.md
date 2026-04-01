@@ -1,61 +1,20 @@
-# Pattern: Choice Dialog (Rich Option Buttons)
+# Choice Dialog Pattern
 
-> **Component**: `ChoiceDialog` from `@spaarke/ui-components`
-> **Previously**: ADR-023 (demoted — UI pattern, not architectural decision)
+## When
+Use for dialogs presenting 2-4 mutually exclusive options where each needs an icon, title, and description. Do NOT use for simple yes/no confirmations (use `ConfirmDialog`) or 5+ options (use `Select`/`Combobox`).
 
----
+## Read These Files
+1. `src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/ChoiceDialog.tsx` — component implementation
+2. `src/client/shared/Spaarke.UI.Components/src/components/ChoiceDialog/index.ts` — exports: `ChoiceDialog`, `IChoiceDialogOption`
+3. `docs/adr/ADR-023-choice-dialog-pattern.md` — full design specs, accessibility requirements, alternatives analysis
 
-## When to Use
+## Constraints
+- **ADR-021**: Use semantic Fluent v9 color tokens (`colorBrandForeground1` for icons); no hard-coded colors
 
-Use for dialogs presenting **2-4 mutually exclusive options** where each option needs explanation.
-
-| Use Case | Example |
-|----------|---------|
-| Resume vs Start Fresh | "Resume previous session?" with history count |
-| Export Format | "Export as PDF, DOCX, or Email?" |
-| Destructive Actions | "Delete permanently or move to trash?" |
-| Mode Selection | "Create new or open existing?" |
-
-**Don't use** for simple yes/no confirmations — use standard `ConfirmDialog`.
-**Don't use** for 5+ options — use `Select` or `Combobox`.
-
----
-
-## Usage
-
-```tsx
-import { ChoiceDialog, IChoiceDialogOption } from "@spaarke/ui-components";
-import { HistoryRegular, DocumentAddRegular } from "@fluentui/react-icons";
-
-const options: IChoiceDialogOption[] = [
-    { id: "resume", icon: <HistoryRegular />, title: "Resume", description: "Continue where you left off" },
-    { id: "fresh", icon: <DocumentAddRegular />, title: "Start Fresh", description: "Begin new session" }
-];
-
-<ChoiceDialog
-    open={open}
-    title="Resume Session?"
-    message="This analysis has existing history."
-    options={options}
-    onSelect={(id) => handleSelection(id)}
-    onDismiss={() => setOpen(false)}
-/>
-```
-
----
-
-## Design Rules
-
+## Key Rules
+- Import: `import { ChoiceDialog, IChoiceDialogOption } from "@spaarke/ui-components"`
+- Each option requires: `id`, `icon` (24px Fluent icon), `title` (semibold), `description`
+- Stack options vertically — never horizontal
 - Use `Button appearance="outline"` for option buttons
-- Include icon (24px), title (semibold), and description for each option
-- Stack options vertically (not horizontal)
-- Provide Cancel in `DialogActions`
-- Use semantic color tokens (`colorBrandForeground1` for icons)
-- No more than 4 options
-- No auto-selection — force conscious choice
-
----
-
-## Full Documentation
-
-See [docs/adr/ADR-023-choice-dialog-pattern.md](../../../docs/adr/ADR-023-choice-dialog-pattern.md) for complete implementation details, accessibility considerations, and alternatives analysis.
+- Provide Cancel in `DialogActions`; no auto-selection — force conscious choice
+- Max 4 options per dialog

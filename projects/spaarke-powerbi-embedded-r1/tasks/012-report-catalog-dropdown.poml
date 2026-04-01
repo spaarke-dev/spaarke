@@ -1,0 +1,81 @@
+<task id="012" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Report catalog dropdown</title>
+    <phase>2</phase>
+    <stream>frontend</stream>
+    <tags>frontend, fluent-ui</tags>
+    <estimate>3h</estimate>
+    <rigor>FULL</rigor>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new component with BFF API integration, grouped dropdown UI, URL parameter handling, and state management. Modifies .tsx files.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>010, 005</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <role>Frontend engineer building a report selection dropdown for the Reporting Code Page.</role>
+    <goal>Create src/solutions/Reporting/src/components/ReportDropdown.tsx that fetches the report catalog from GET /api/reporting/reports, groups reports by category (Financial, Operational, Compliance, Documents, Custom), and uses a Fluent v9 Dropdown with optgroup-like grouping. The first report is auto-selected by default (or from URL parameter), and selecting a report updates the embedded report.</goal>
+    <context>
+      The BFF API endpoint GET /api/reporting/reports returns a list of reports with category, id, name, and embedUrl.
+      Reports are grouped by category for easier navigation.
+      The dropdown should support URL parameter-based pre-selection (e.g., ?reportId=xxx) for deep linking.
+      On selection change, the parent component should update the ReportViewer's embed config.
+    </context>
+    <constraints>
+      - MUST use Fluent v9 Dropdown from @fluentui/react-components per ADR-021
+      - MUST fetch report catalog from GET /api/reporting/reports using authenticated fetch
+      - MUST group reports by category: Financial, Operational, Compliance, Documents, Custom
+      - MUST auto-select first report by default, or from URL parameter reportId if present
+      - MUST call onReportSelect callback when user selects a different report
+      - MUST show loading state while fetching catalog
+      - MUST handle empty catalog gracefully (show message)
+      - MUST NOT hard-code report list — always fetch from BFF
+      - MUST use Fluent design tokens for styling per ADR-021
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/Reporting/src/App.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-021-fluent-design-system.md</adr>
+      <adr>.claude/adr/ADR-012-shared-components.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Define ReportCatalogItem type (id, name, category, embedUrl, datasetId) and ReportDropdownProps interface (onReportSelect callback, selectedReportId)</step>
+    <step>Create src/solutions/Reporting/src/components/ReportDropdown.tsx component</step>
+    <step>Implement catalog fetch from GET /api/reporting/reports using authenticated fetch on mount</step>
+    <step>Group fetched reports by category into a Map or object for rendering</step>
+    <step>Render Fluent v9 Dropdown with OptionGroup per category, Option per report</step>
+    <step>Implement auto-selection: check URL param reportId first, fall back to first report in catalog</step>
+    <step>Wire onReportSelect callback on selection change to update parent state</step>
+    <step>Add loading spinner state and empty catalog message</step>
+    <step>Wire ReportDropdown into App.tsx header area</step>
+    <step>Verify build succeeds: npm run build</step>
+  </steps>
+
+  <outputs>
+    <output>New file: src/solutions/Reporting/src/components/ReportDropdown.tsx</output>
+    <output>New file: src/solutions/Reporting/src/types/index.ts (shared types)</output>
+    <output>Modified file: src/solutions/Reporting/src/App.tsx (wires in ReportDropdown)</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ReportDropdown.tsx created with Fluent v9 Dropdown</criterion>
+    <criterion>Fetches report catalog from GET /api/reporting/reports</criterion>
+    <criterion>Reports grouped by category with OptionGroup rendering</criterion>
+    <criterion>Auto-selects first report or from URL parameter reportId</criterion>
+    <criterion>Calls onReportSelect callback on selection change</criterion>
+    <criterion>Shows loading state during fetch and handles empty catalog</criterion>
+    <criterion>Build succeeds with no type errors</criterion>
+  </acceptance-criteria>
+</task>

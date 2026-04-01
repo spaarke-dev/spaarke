@@ -769,44 +769,44 @@ Use these commands to explicitly invoke skills:
 
 ---
 
-## Documentation
+## Architecture Discovery
 
-### AI-Optimized Context (Load First)
+### Read Code First, Docs Second
 
-`.claude/` contains **concise, AI-optimized** content for efficient context loading:
+**Code is the source of truth for implementation.** When you need to understand how something works:
 
-```
-.claude/
-├── adr/                      # Concise ADRs (~100-150 lines each)
-├── constraints/              # MUST/MUST NOT rules by topic
-├── patterns/                 # Code patterns and examples
-├── protocols/                # AI behavior protocols
-├── skills/                   # Skill definitions and workflows
-└── templates/                # Project/task templates
-```
+1. **Read the code** — the actual `.cs`, `.ts`, `.tsx` files
+2. **Read `.claude/patterns/`** — 25-line pointer files that tell you WHICH code to read
+3. **Read `.claude/adr/`** — concise constraints and MUST/MUST NOT rules
+4. **Read `docs/architecture/`** — decisions and rationale only (implementation details removed)
+5. **Read `docs/guides/`** — operational procedures (deployment, configuration)
 
-### Full Reference Documentation (Load When Needed)
+**Never trust a doc over the code.** If a doc describes implementation and the code differs, the code wins.
 
-`docs/` contains **complete documentation** for deep dives:
+### System Entry Points
 
-```
-docs/
-├── adr/                      # Full ADRs with history and rationale
-├── architecture/             # System architecture docs
-├── guides/                   # How-to guides and procedures
-├── procedures/               # Process documentation
-├── standards/                # Coding and auth standards
-└── product-documentation/    # User-facing docs
-```
+| Subsystem | Start Here | What It Shows |
+|-----------|-----------|---------------|
+| BFF API | `src/server/api/Sprk.Bff.Api/Program.cs` | All endpoint registration, DI, middleware |
+| PCF Controls | `src/client/pcf/{Control}/control/index.ts` | Control lifecycle (init, updateView, destroy) |
+| Code Pages | `src/solutions/{Page}/src/main.tsx` | React 18 SPA entry with auth bootstrap |
+| Dataverse Plugins | `src/dataverse/plugins/.../BaseProxyPlugin.cs` | Plugin base class and lifecycle |
+| AI Pipeline | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` | AI tool orchestration |
+| Shared UI | `src/client/shared/Spaarke.UI.Components/src/index.ts` | Component library exports |
+| Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | OBO + app-only Graph auth |
+| Jobs | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` | Background job processing |
 
-### Loading Strategy
+### Context Layer Hierarchy
 
-| Need | Location | Action |
-|------|----------|--------|
-| Constraints, patterns | `.claude/` | ✅ Load by default |
-| Full rationale, history | `docs/` | ⚠️ Load when deep dive needed |
-| ADR constraints | `.claude/adr/ADR-XXX.md` | ✅ Use for implementation |
-| ADR full context | `docs/adr/ADR-XXX-*.md` | ⚠️ Use for architectural decisions |
+| Layer | Contains | When to Load |
+|-------|----------|-------------|
+| **Code** | Implementation (source of truth) | Always — read before implementing |
+| **`.claude/patterns/`** | 25-line pointer files → code entry points | Per-task — tells you what to read |
+| **`.claude/adr/`** | Concise ADR constraints (MUST/MUST NOT) | Per-task — rules to follow |
+| **`.claude/constraints/`** | Topic-based constraint summaries | Per-task — quick rule reference |
+| **`docs/architecture/`** | Decisions and rationale only | When you need "why" behind a decision |
+| **`docs/guides/`** | Operational procedures | When deploying, configuring, or troubleshooting |
+| **`docs/adr/`** | Full ADR history | Rarely — only for deep architectural context |
 
 ---
 
@@ -913,7 +913,7 @@ ADRs are in `.claude/adr/` (concise) and `docs/adr/` (full). The key constraints
 
 ## AI Architecture
 
-AI features are built using the **AI Tool Framework** - see `docs/architecture/AI-ARCHITECTURE.md` and `docs/architecture/ai-implementation-reference.md`.
+AI features are built using the **AI Tool Framework** - see `docs/architecture/AI-ARCHITECTURE.md` and `docs/architecture/playbook-architecture.md`.
 
 | Component | Purpose |
 |-----------|---------|

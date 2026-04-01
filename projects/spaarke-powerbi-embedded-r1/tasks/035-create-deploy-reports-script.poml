@@ -1,0 +1,74 @@
+<task id="PBI-035" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create Deploy-ReportingReports.ps1 deployment script</title>
+    <status>complete</status>
+    <phase>4</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>deploy, script</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — PowerShell script with PBI REST API integration, dataset rebinding, and Dataverse record management</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create scripts/Deploy-ReportingReports.ps1 that deploys Power BI report templates to a customer
+    workspace. The script imports .pbix files via PBI REST API, rebinds datasets to the customer's
+    Dataverse instance, sets refresh schedules, and creates or updates sprk_report records in Dataverse.
+    Follow existing Deploy-*.ps1 script patterns.
+  </prompt>
+
+  <role>Senior DevOps engineer with PowerShell scripting, Power BI REST API, and Dataverse integration experience.</role>
+
+  <goal>
+    A production-ready Deploy-ReportingReports.ps1 script that automates end-to-end report deployment:
+    importing .pbix to PBI workspace, rebinding datasets, configuring refresh schedules, and syncing
+    the report catalog in Dataverse.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST use environment variables for all PBI config (BYOK-compatible)</constraint>
+    <constraint source="spec">MUST NOT hardcode workspace IDs, capacity IDs, or tenant IDs</constraint>
+    <constraint>Follow existing Deploy-*.ps1 script patterns in the scripts/ folder</constraint>
+    <constraint>Parameters: -WorkspaceId, -DatasetId, -ReportFolder, -DataverseOrg</constraint>
+    <constraint>Use Power BI REST API for .pbix import and dataset operations</constraint>
+    <constraint>Create/update sprk_report records in Dataverse after successful import</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review existing deploy scripts">Read Deploy-ExternalWorkspaceSpa.ps1 and other Deploy-*.ps1 scripts to understand conventions (parameter blocks, error handling, logging patterns)</step>
+    <step order="2" name="Create script scaffold">Create scripts/Deploy-ReportingReports.ps1 with parameter block: -WorkspaceId [string], -DatasetId [string], -ReportFolder [string], -DataverseOrg [string]</step>
+    <step order="3" name="Implement PBI authentication">Add service principal authentication to Power BI REST API using client credentials flow</step>
+    <step order="4" name="Implement .pbix import">Add logic to enumerate .pbix files in -ReportFolder and import each to the target workspace via POST /groups/{workspaceId}/imports</step>
+    <step order="5" name="Implement dataset rebinding">After import, rebind each dataset to the customer's Dataverse instance via POST /groups/{workspaceId}/datasets/{datasetId}/Default.SetAllConnections or rebind API</step>
+    <step order="6" name="Implement refresh schedule">Configure scheduled refresh for each imported dataset via PATCH /groups/{workspaceId}/datasets/{datasetId}/refreshSchedule</step>
+    <step order="7" name="Implement Dataverse catalog sync">Create or update sprk_report records in Dataverse for each deployed report, populating sprk_reportid, sprk_workspaceid, sprk_datasetid, sprk_name, sprk_category</step>
+    <step order="8" name="Add error handling and logging">Add try/catch blocks, verbose logging, and validation for required parameters</step>
+    <step order="9" name="Test script syntax">Validate script parses without errors via powershell -File script.ps1 -? or similar</step>
+  </steps>
+
+  <outputs>
+    <output type="script">scripts/Deploy-ReportingReports.ps1 (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/Deploy-ReportingReports.ps1 exists with -WorkspaceId, -DatasetId, -ReportFolder, -DataverseOrg parameters</criterion>
+    <criterion testable="true">Script imports .pbix files to PBI workspace via REST API</criterion>
+    <criterion testable="true">Script rebinds datasets to customer Dataverse instance</criterion>
+    <criterion testable="true">Script sets refresh schedule for imported datasets</criterion>
+    <criterion testable="true">Script creates/updates sprk_report records in Dataverse</criterion>
+    <criterion testable="true">Script follows existing Deploy-*.ps1 conventions (parameter block, error handling, logging)</criterion>
+    <criterion testable="true">No hardcoded workspace IDs, capacity IDs, or tenant IDs</criterion>
+    <criterion testable="true">Script parses without syntax errors</criterion>
+  </acceptance-criteria>
+</task>

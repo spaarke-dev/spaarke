@@ -96,7 +96,7 @@ There is no single view that answers: "What do I need to know right now?"
 
 ### Existing Playbook Execution Engine (Reference)
 
-> **Source**: `docs/architecture/playbook-architecture.md`, `docs/guides/PLAYBOOK-DESIGN-GUIDE.md`, `docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md`
+> **Source**: `docs/architecture/playbook-architecture.md`, `docs/guides/JPS-AUTHORING-GUIDE.md`
 
 The engine already supports:
 
@@ -921,8 +921,8 @@ Each of these is a **playbook definition** deployed to `sprk_analysisplaybook` w
 
 ### Architecture Reference Documents
 - `docs/architecture/playbook-architecture.md` — Playbook engine internals, node executor framework, execution flow
-- `docs/guides/PLAYBOOK-DESIGN-GUIDE.md` — Playbook design patterns, scope selection, deployment
-- `docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md` — JPS prompt schema for AI nodes
+- `docs/guides/JPS-AUTHORING-GUIDE.md` — JPS authoring, prompt schema, playbook design
+- `docs/guides/SCOPE-CONFIGURATION-GUIDE.md` — Scope configuration, pre-fill, builder
 - `docs/architecture/ai-document-summary-architecture.md` — Document creation flows (notification trigger points)
 - `docs/architecture/AI-ARCHITECTURE.md` — AI platform overview
 

@@ -1,0 +1,70 @@
+<task id="016" project="spaarke-powerbi-embedded-r1" status="completed">
+  <metadata>
+    <title>Deploy Code Page to Dataverse</title>
+    <phase>2</phase>
+    <stream>deploy</stream>
+    <tags>deploy, dataverse</tags>
+    <estimate>2h</estimate>
+    <rigor>STANDARD</rigor>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task following established code-page-deploy skill pattern. Has explicit constraints and creates deployment script.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>011, 012</dependencies>
+  </metadata>
+
+  <prompt>
+    <role>DevOps engineer deploying a Vite single-file Code Page to Dataverse as a web resource.</role>
+    <goal>Build the Reporting Code Page (npm run build producing dist/index.html as a single file) and deploy it as Dataverse web resource sprk_reporting. Follow the code-page-deploy skill pattern and reference the existing Deploy-ExternalWorkspaceSpa.ps1 script.</goal>
+    <context>
+      The Reporting Code Page builds to a single index.html via vite-plugin-singlefile.
+      Dataverse web resources are deployed using PowerShell scripts that upload the file content.
+      The existing Deploy-ExternalWorkspaceSpa.ps1 is the reference pattern for single-file web resource deployment.
+      The web resource name in Dataverse will be sprk_reporting.
+    </context>
+    <constraints>
+      - MUST build Code Page first: npm run build in src/solutions/Reporting/
+      - MUST verify dist/index.html exists and is a single file (no external assets)
+      - MUST deploy as Dataverse web resource with name sprk_reporting
+      - MUST follow code-page-deploy skill pattern
+      - MUST reference Deploy-ExternalWorkspaceSpa.ps1 as deployment script template
+      - MUST create scripts/Deploy-Reporting.ps1 if it does not exist
+      - MUST NOT deploy if build fails
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+      <file>src/solutions/Reporting/vite.config.ts</file>
+      <file>src/solutions/Reporting/package.json</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <adrs>
+      <adr>.claude/adr/ADR-026-full-page-custom-page-standard.md</adr>
+    </adrs>
+  </knowledge>
+
+  <steps>
+    <step>Read Deploy-ExternalWorkspaceSpa.ps1 as reference for deployment script pattern</step>
+    <step>Read code-page-deploy skill for the two-step build pipeline procedure</step>
+    <step>Run npm run build in src/solutions/Reporting/ — verify dist/index.html is produced</step>
+    <step>Verify dist/index.html is a single file with no external CSS/JS references</step>
+    <step>Create scripts/Deploy-Reporting.ps1 following the Deploy-ExternalWorkspaceSpa.ps1 pattern, targeting web resource name sprk_reporting</step>
+    <step>Run the deployment script to upload sprk_reporting web resource to Dataverse</step>
+    <step>Verify deployment: confirm web resource exists in Dataverse</step>
+  </steps>
+
+  <outputs>
+    <output>New file: scripts/Deploy-Reporting.ps1</output>
+    <output>Deployed: sprk_reporting web resource in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>npm run build succeeds and produces dist/index.html</criterion>
+    <criterion>dist/index.html is a single file (no external asset references)</criterion>
+    <criterion>Deploy-Reporting.ps1 created following established script pattern</criterion>
+    <criterion>sprk_reporting web resource deployed to Dataverse</criterion>
+    <criterion>Web resource loads in browser without errors</criterion>
+  </acceptance-criteria>
+</task>

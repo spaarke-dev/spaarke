@@ -1,0 +1,79 @@
+<task id="PBI-002" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create ReportingEmbedService with Power BI client and SP auth</title>
+    <status>complete</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — core service with MSAL auth, Power BI API integration, and multiple methods</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create ReportingEmbedService.cs in Api/Reporting/ that authenticates to Power BI via MSAL
+    ConfidentialClientApplication using service principal credentials from PowerBiOptions. Provide
+    methods to get embed tokens, list reports, and get individual report details using the
+    Microsoft.PowerBI.Api PowerBIClient.
+  </prompt>
+
+  <role>Senior .NET developer with MSAL service principal authentication and Power BI Embedded API experience.</role>
+
+  <goal>
+    A ReportingEmbedService that authenticates via MSAL ConfidentialClientApplication, creates a
+    PowerBIClient, and exposes GetEmbedTokenAsync, GetReportsAsync, and GetReportAsync methods
+    for downstream endpoint handlers.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API patterns; service registered in DI</constraint>
+    <constraint source="ADR-007">No SDK types leak above facade — return DTOs, not Power BI SDK types directly</constraint>
+    <constraint source="ADR-010">DI minimalism — ReportingEmbedService counts as 1 registration</constraint>
+    <constraint>Service principal auth via MSAL ConfidentialClientApplication</constraint>
+    <constraint>Scope: https://analysis.windows.net/.default</constraint>
+    <constraint>PowerBIClient must be created with TokenCredentials from MSAL access token</constraint>
+    <constraint>GetEmbedTokenAsync must support effectiveIdentity parameter for RLS</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/auth/service-principal.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Reporting/PowerBiOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read PowerBiOptions">Read the PowerBiOptions class created in task 001 to understand available configuration</step>
+    <step order="2" name="Read existing service patterns">Read existing services (e.g., SpeFileStore or ScorecardCalculatorEndpoints) to understand the service registration and facade patterns</step>
+    <step order="3" name="Create ReportingEmbedService">Create src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs with:
+      - Constructor accepting IOptions&lt;PowerBiOptions&gt;
+      - Private method to acquire access token via MSAL ConfidentialClientApplication
+      - Private method to create PowerBIClient with TokenCredentials
+      - GetEmbedTokenAsync(Guid workspaceId, Guid reportId, EffectiveIdentity? effectiveIdentity) returning embed token DTO
+      - GetReportsAsync(Guid workspaceId) returning list of report DTOs
+      - GetReportAsync(Guid workspaceId, Guid reportId) returning single report DTO</step>
+    <step order="4" name="Create DTOs">Create response DTOs (EmbedTokenResult, ReportInfo) in Api/Reporting/ to avoid leaking Power BI SDK types</step>
+    <step order="5" name="Token caching">Leverage MSAL's built-in token cache for service principal tokens (no custom caching needed for the SP token itself)</step>
+    <step order="6" name="Build verification">Run dotnet build to confirm zero errors</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingEmbedService.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingDtos.cs (new — EmbedTokenResult, ReportInfo DTOs)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ReportingEmbedService authenticates via MSAL ConfidentialClientApplication with PowerBiOptions credentials</criterion>
+    <criterion testable="true">GetEmbedTokenAsync returns embed token, embed URL, and report ID</criterion>
+    <criterion testable="true">GetReportsAsync returns list of reports for a workspace</criterion>
+    <criterion testable="true">GetReportAsync returns a single report by ID</criterion>
+    <criterion testable="true">No Power BI SDK types exposed in public method signatures — only DTOs</criterion>
+    <criterion testable="true">dotnet build succeeds with 0 errors</criterion>
+  </acceptance-criteria>
+</task>

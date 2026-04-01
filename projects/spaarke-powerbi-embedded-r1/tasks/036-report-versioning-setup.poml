@@ -1,0 +1,61 @@
+<task id="PBI-036" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create reports/ folder structure with versioning and Git configuration</title>
+    <status>complete</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>docs, config</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Simple configuration — folder structure creation, .gitkeep, CHANGELOG template, and .gitattributes entry</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the reports/ folder structure for versioned Power BI report templates. Set up
+    reports/v1.0.0/ with a .gitkeep placeholder, create reports/CHANGELOG.md with a version
+    tracking format, add .gitattributes entries for .pbix binary files (LFS if needed), and
+    update .gitignore if necessary.
+  </prompt>
+
+  <role>Developer with Git configuration and repository structure experience.</role>
+
+  <goal>
+    A well-organized reports/ folder structure with version tracking, proper Git handling of
+    .pbix binary files, and a CHANGELOG template ready for report version documentation.
+  </goal>
+
+  <constraints>
+    <constraint>reports/v1.0.0/ must exist with .gitkeep until .pbix files are added</constraint>
+    <constraint>CHANGELOG.md must follow a clear version tracking format</constraint>
+    <constraint>.pbix files are binary and must be handled appropriately in Git (LFS or binary attribute)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create folder structure">Create reports/ and reports/v1.0.0/ directories</step>
+    <step order="2" name="Add .gitkeep">Add reports/v1.0.0/.gitkeep as placeholder until .pbix files are added</step>
+    <step order="3" name="Create CHANGELOG">Create reports/CHANGELOG.md with version tracking format (version, date, reports added/modified, notes)</step>
+    <step order="4" name="Configure .gitattributes">Add .gitattributes entry marking *.pbix as binary (and Git LFS if LFS is configured in the repo)</step>
+    <step order="5" name="Update .gitignore">Review and update .gitignore if any report-related temp files need to be excluded</step>
+  </steps>
+
+  <outputs>
+    <output type="config">reports/v1.0.0/.gitkeep (new)</output>
+    <output type="docs">reports/CHANGELOG.md (new)</output>
+    <output type="config">.gitattributes (modified — .pbix binary handling)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">reports/v1.0.0/ directory exists with .gitkeep</criterion>
+    <criterion testable="true">reports/CHANGELOG.md exists with version tracking format</criterion>
+    <criterion testable="true">.gitattributes contains entry for *.pbix files</criterion>
+  </acceptance-criteria>
+</task>

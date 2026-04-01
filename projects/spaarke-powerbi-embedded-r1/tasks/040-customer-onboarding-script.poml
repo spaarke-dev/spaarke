@@ -1,0 +1,79 @@
+<task id="PBI-040" project="spaarke-powerbi-embedded-r1">
+  <metadata>
+    <title>Create Initialize-ReportingCustomer.ps1 onboarding script</title>
+    <status>complete</status>
+    <phase>5</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>script, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation — orchestration script coordinating PBI workspace creation, SP profile setup, report deployment, and Dataverse configuration</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>035</dependencies>
+  </metadata>
+
+  <prompt>
+    Create scripts/Initialize-ReportingCustomer.ps1 that automates customer onboarding for the
+    Reporting module. The script creates a PBI workspace, creates a service principal profile,
+    adds the SP profile as workspace admin, deploys standard reports via Deploy-ReportingReports.ps1,
+    enables the environment variable, and assigns the security role to users.
+  </prompt>
+
+  <role>Senior DevOps engineer with Power BI administration, service principal management, and Dataverse configuration experience.</role>
+
+  <goal>
+    A production-ready Initialize-ReportingCustomer.ps1 script that fully automates customer
+    onboarding: workspace provisioning, SP profile creation, report deployment, module enablement,
+    and security role assignment — all in a single idempotent execution.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST use service principal profiles for multi-tenant isolation</constraint>
+    <constraint source="spec">MUST use environment variables for all PBI config (BYOK-compatible)</constraint>
+    <constraint source="spec">MUST NOT hardcode workspace IDs, capacity IDs, or tenant IDs</constraint>
+    <constraint>Parameters: -CustomerId, -CustomerName, -TenantId</constraint>
+    <constraint>Must call Deploy-ReportingReports.ps1 for report deployment (not duplicate logic)</constraint>
+    <constraint>Script should be idempotent — safe to re-run without duplicating resources</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+      <file>scripts/Deploy-ReportingReports.ps1</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/spec.md</file>
+      <file>projects/spaarke-powerbi-embedded-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Review existing scripts">Read Deploy-ReportingReports.ps1 and other deployment scripts for conventions and reuse opportunities</step>
+    <step order="2" name="Create script scaffold">Create scripts/Initialize-ReportingCustomer.ps1 with parameter block: -CustomerId [string], -CustomerName [string], -TenantId [string]</step>
+    <step order="3" name="Create PBI workspace">Implement workspace creation via PBI REST API: POST /groups with name pattern "{CustomerName} - Reporting"</step>
+    <step order="4" name="Create SP profile">Create service principal profile for the customer via PBI REST API: POST /profiles</step>
+    <step order="5" name="Add SP as workspace admin">Add the SP profile as workspace admin via POST /groups/{workspaceId}/users</step>
+    <step order="6" name="Deploy standard reports">Call Deploy-ReportingReports.ps1 with the new workspace ID and standard report folder</step>
+    <step order="7" name="Enable environment variable">Set sprk_ReportingModuleEnabled to Yes in the customer's Dataverse environment</step>
+    <step order="8" name="Assign security role">Assign sprk_ReportingAccess security role (Viewer tier) to specified users or teams</step>
+    <step order="9" name="Add idempotency checks">Add checks at each step to skip if resource already exists (workspace, profile, reports)</step>
+    <step order="10" name="Add error handling">Add comprehensive error handling, rollback guidance, and verbose logging</step>
+    <step order="11" name="Test script syntax">Validate script parses without errors</step>
+  </steps>
+
+  <outputs>
+    <output type="script">scripts/Initialize-ReportingCustomer.ps1 (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/Initialize-ReportingCustomer.ps1 exists with -CustomerId, -CustomerName, -TenantId parameters</criterion>
+    <criterion testable="true">Script creates PBI workspace for customer</criterion>
+    <criterion testable="true">Script creates service principal profile for customer</criterion>
+    <criterion testable="true">Script adds SP profile as workspace admin</criterion>
+    <criterion testable="true">Script calls Deploy-ReportingReports.ps1 for report deployment</criterion>
+    <criterion testable="true">Script enables sprk_ReportingModuleEnabled environment variable</criterion>
+    <criterion testable="true">Script assigns sprk_ReportingAccess security role to users</criterion>
+    <criterion testable="true">Script is idempotent — safe to re-run</criterion>
+    <criterion testable="true">No hardcoded workspace IDs, capacity IDs, or tenant IDs</criterion>
+    <criterion testable="true">Script parses without syntax errors</criterion>
+  </acceptance-criteria>
+</task>

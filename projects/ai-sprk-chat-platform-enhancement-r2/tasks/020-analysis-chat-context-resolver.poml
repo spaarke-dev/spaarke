@@ -91,7 +91,7 @@
       <file>.claude/patterns/dataverse/entity-operations.md</file>
       <file>.claude/patterns/caching/distributed-cache.md</file>
       <file>.claude/patterns/ai/analysis-scopes.md</file>
-      <file>docs/architecture/ai-implementation-reference.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
       <file>.claude/adr/ADR-009-redis-caching.md</file>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>
       <file>.claude/adr/ADR-014-ai-caching.md</file>
