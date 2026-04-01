@@ -245,7 +245,7 @@ az deployment sub create \
 
 ## Related Documentation
 
-- [ai-implementation-reference.md](../architecture/ai-implementation-reference.md) - AI feature architecture
+- [AI-ARCHITECTURE.md](../architecture/AI-ARCHITECTURE.md) - AI platform architecture
 - [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) - RAG-specific troubleshooting
 - [AI-DEPLOYMENT-GUIDE.md](AI-DEPLOYMENT-GUIDE.md) - Deployment procedures
 

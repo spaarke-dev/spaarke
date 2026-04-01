@@ -1,158 +1,19 @@
 # Mocking Patterns
 
-> **Domain**: Testing / Test Doubles
-> **Last Validated**: 2025-12-19
-> **Source ADRs**: ADR-022
+## When
+Setting up test doubles for unit or integration tests (Moq for interfaces, WireMock for HTTP, custom fakes for stateful behavior).
 
----
+## Read These Files
+1. `tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs` — Custom fake for Graph client
+2. `tests/unit/Sprk.Bff.Api.Tests/Integration/DataverseWebApiWireMockTests.cs` — WireMock request matching and stateful retry
+3. `tests/unit/Sprk.Bff.Api.Tests/AuthorizationTests.cs` — Moq setup, verification, and test data source
 
-## Canonical Implementations
+## Constraints
+- **ADR-022**: Moq 4.20.70 and WireMock.Net 1.5.45 are the approved mocking libraries
 
-| File | Purpose |
-|------|---------|
-| `tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs` | Custom fake |
-| `tests/unit/Sprk.Bff.Api.Tests/Integration/DataverseWebApiWireMockTests.cs` | HTTP mocking |
-| `tests/unit/Sprk.Bff.Api.Tests/AuthorizationTests.cs` | Test data source |
-
----
-
-## Moq Patterns
-
-### Basic Setup
-
-```csharp
-var mockService = new Mock<IMyService>();
-mockService.Setup(s => s.GetDataAsync(It.IsAny<string>()))
-    .ReturnsAsync(expectedData);
-
-var sut = new Consumer(mockService.Object);
-```
-
-### Strict Mocking
-
-```csharp
-var mockService = new Mock<IMyService>(MockBehavior.Strict);
-mockService.Setup(s => s.GetDataAsync("specific-id"))
-    .ReturnsAsync(expectedData);
-
-// Throws if unexpected method called
-```
-
-### Sequential Returns
-
-```csharp
-mockService.SetupSequence(s => s.GetDataAsync(It.IsAny<string>()))
-    .ReturnsAsync(firstResult)
-    .ReturnsAsync(secondResult)
-    .ThrowsAsync(new Exception("Third call fails"));
-```
-
-### Verification
-
-```csharp
-mockService.Verify(s => s.SaveAsync(It.IsAny<Data>()), Times.Once);
-mockService.Verify(s => s.DeleteAsync(It.IsAny<string>()), Times.Never);
-```
-
----
-
-## WireMock HTTP Mocking
-
-### Setup
-
-```csharp
-public class ApiIntegrationTests : IDisposable
-{
-    private readonly WireMockServer _mockServer;
-    private readonly HttpClient _httpClient;
-
-    public ApiIntegrationTests()
-    {
-        _mockServer = WireMockServer.Start();
-        _httpClient = new HttpClient { BaseAddress = new Uri(_mockServer.Urls[0]) };
-    }
-
-    public void Dispose()
-    {
-        _mockServer?.Stop();
-        _mockServer?.Dispose();
-    }
-}
-```
-
-### Request Matching
-
-```csharp
-[Fact]
-public async Task GetDocument_ReturnsOk()
-{
-    // Arrange
-    _mockServer
-        .Given(Request.Create()
-            .WithPath("/api/documents/123")
-            .UsingGet()
-            .WithHeader("Authorization", "Bearer *"))
-        .RespondWith(Response.Create()
-            .WithStatusCode(200)
-            .WithHeader("Content-Type", "application/json")
-            .WithBody(@"{ ""id"": ""123"", ""name"": ""Test"" }"));
-
-    // Act
-    var response = await _httpClient.GetAsync("/api/documents/123");
-
-    // Assert
-    response.StatusCode.Should().Be(HttpStatusCode.OK);
-}
-```
-
-### Stateful Scenarios (Retry Testing)
-
-```csharp
-_mockServer
-    .Given(Request.Create().WithPath("/api/data").UsingGet())
-    .InScenario("retry-scenario")
-    .WillSetStateTo("first-call")
-    .RespondWith(Response.Create().WithStatusCode(503));
-
-_mockServer
-    .Given(Request.Create().WithPath("/api/data").UsingGet())
-    .InScenario("retry-scenario")
-    .WhenStateIs("first-call")
-    .RespondWith(Response.Create().WithStatusCode(200).WithBody("success"));
-```
-
----
-
-## Custom Fakes
-
-### Test Logger
-
-```csharp
-public class TestLogger<T> : ILogger<T>
-{
-    public List<string> LogMessages { get; } = new();
-
-    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
-        Exception? exception, Func<TState, Exception?, string> formatter)
-    {
-        LogMessages.Add(formatter(state, exception));
-    }
-
-    public bool IsEnabled(LogLevel logLevel) => true;
-    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-}
-```
-
----
-
-## Key Points
-
-1. **Moq for interfaces** - Quick mock setup
-2. **WireMock for HTTP** - External API simulation
-3. **Custom fakes for complex** - When Moq insufficient
-4. **TestLogger for logging** - Capture log output
-5. **Strict mode sparingly** - Only when needed
-
----
-
-**Lines**: ~110
+## Key Rules
+- Prefer `MockBehavior.Strict` only when detecting unexpected calls is the test goal
+- Use `SetupSequence` for retry/multi-call flows
+- Always call `_mockServer.Stop()` and `.Dispose()` in `IDisposable.Dispose()`
+- Use `TestLogger<T>` (custom fake) to capture log output — do not mock `ILogger` with Moq
+- Verify call counts with `mockService.Verify(…, Times.Once)` after Act, not before

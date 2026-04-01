@@ -48,8 +48,7 @@ Ask the user:
 LOAD knowledge files:
   - docs/ai-knowledge/catalogs/scope-model-index.json (REQUIRED — scope catalog + model rules)
   - docs/architecture/playbook-architecture.md (playbook internals, node executors, execution engine)
-  - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference)
-  - docs/guides/PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md (patterns, deployment)
+  - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference, playbook design patterns, scope catalog, model selection)
 
 LOAD example JPS files for pattern matching:
   - projects/ai-json-prompt-schema-system/notes/jps-conversions/ (all available)

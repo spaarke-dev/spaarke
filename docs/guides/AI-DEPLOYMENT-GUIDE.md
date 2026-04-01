@@ -65,6 +65,8 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 - `RagIndexingJobHandler` for background processing
 - Idempotency with Redis-based locks
 
+<!-- TODO(ai-procedure-refactoring): PCF control versions (AnalysisBuilder v1.12.0, AnalysisWorkspace v1.0.29) are pinned here but advance with every deployment — verify current deployed versions from Dataverse solutions view or ControlManifest.Input.xml files before troubleshooting version mismatches -->
+
 ### Architecture Components
 
 | Component | Purpose | Version/Status |
@@ -751,6 +753,8 @@ Without these, you'll see: `⚠ RAG services disabled (requires DocumentIntellig
 ---
 
 ## Complete App Service Configuration
+
+<!-- TODO(ai-procedure-refactoring): This entire section lists all App Service configuration keys for the dev environment — any new feature that adds config keys will not appear here; cross-check against appsettings.json and the configuration options classes in Sprk.Bff.Api before deploying to a new environment -->
 
 **App Service Name**: `spe-api-dev-67e2xz`
 

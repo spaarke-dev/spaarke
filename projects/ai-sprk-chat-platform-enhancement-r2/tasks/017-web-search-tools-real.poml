@@ -65,7 +65,7 @@
     <file purpose="Existing mock WebSearchTools — class to replace while preserving interface">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</file>
     <file purpose="CitationContext model — existing model to populate">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/CitationContext.cs</file>
     <file purpose="Analysis scopes pattern — how scope search guidance flows to tools">../.claude/patterns/ai/analysis-scopes.md</file>
-    <file purpose="AI architecture reference — tool registration and ChatHostContext flow">docs/architecture/ai-implementation-reference.md</file>
+    <file purpose="AI architecture reference — tool registration and ChatHostContext flow">docs/architecture/AI-ARCHITECTURE.md</file>
   </inputs>
 
   <constraints>
@@ -84,7 +84,7 @@
       <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/CitationContext.cs</file>
       <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
       <file>.claude/patterns/ai/analysis-scopes.md</file>
-      <file>docs/architecture/ai-implementation-reference.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>
       <file>.claude/adr/ADR-015-ai-data-governance.md</file>
       <file>.claude/adr/ADR-016-ai-rate-limits.md</file>

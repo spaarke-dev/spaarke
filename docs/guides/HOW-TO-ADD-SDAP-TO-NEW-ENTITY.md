@@ -114,6 +114,8 @@ If the upload button is missing, check that ribbon customizations are published.
 
 Add your entity to the PCF control configuration file.
 
+<!-- TODO(ai-procedure-refactoring): Verify the EntityDocumentConfig.ts file path — the control may have been renamed or relocated from src/controls/UniversalQuickCreate/; confirm against actual codebase structure -->
+
 **File:** `src/controls/UniversalQuickCreate/UniversalQuickCreate/config/EntityDocumentConfig.ts`
 
 **Add New Entity Entry:**
@@ -157,6 +159,8 @@ Add your entity to the PCF control configuration file.
 ### Step 5: Build and Deploy PCF Control
 
 Build the updated PCF control and deploy to Dataverse.
+
+<!-- TODO(ai-procedure-refactoring): Build path cd /c/code_files/spaarke/src/controls/UniversalQuickCreate is a local absolute path — verify current project location using the pcf-deploy skill instead of this manual build step -->
 
 **Command Line:**
 ```bash

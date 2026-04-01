@@ -280,7 +280,7 @@ resource authFailureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 ## Related Articles
 
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) - Auth flow implementation
-- [oauth-obo-implementation.md](oauth-obo-implementation.md) - OBO caching patterns
+- [../standards/oauth-obo-patterns.md](../standards/oauth-obo-patterns.md) - OBO caching patterns
 - [auth-azure-resources.md](auth-azure-resources.md) - Infrastructure details
 
 ---

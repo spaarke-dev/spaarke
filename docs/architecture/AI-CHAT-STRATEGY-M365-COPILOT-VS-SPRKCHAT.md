@@ -77,43 +77,10 @@ SprkChat launches with:
 
 SprkChat provides AI interaction through two integrated surfaces:
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ Analysis Workspace                                            │
-│                                                               │
-│ ┌────────────────────────────────┐  ┌──────────────────────┐ │
-│ │ Analysis Output Editor          │  │ SprkChat Pane        │ │
-│ │                                 │  │                      │ │
-│ │ "The patent claims describe     │  │ Context:             │ │
-│ │  a novel method for processing  │  │  Entity: Patent      │ │
-│ │  semiconductor wafers using..." │  │  Type: Claims        │ │
-│ │       ▲                         │  │  Playbook: Patent    │ │
-│ │  ┌────┴──────────────┐         │  │   Claims Analysis    │ │
-│ │  │ ✨ Summarize       │         │  │                      │ │
-│ │  │ 📝 Simplify        │ Inline  │  │ [Chat history]       │ │
-│ │  │ ✓  Fact-check      │ AI Menu │  │                      │ │
-│ │  │ 📊 Compare to      │         │  │ User: Summarize the  │ │
-│ │  │    prior art       │         │  │ selected claims      │ │
-│ │  │ 💬 Ask SprkChat ───────────────►│                      │ │
-│ │  └───────────────────┘         │  │ SprkChat: The patent  │ │
-│ │                                 │  │ describes 3 primary  │ │
-│ │ Source Document Viewer          │  │ claims...            │ │
-│ │ ┌─────────────────────────────┐│  │                      │ │
-│ │ │ [PDF/Office iframe]         ││  │ [Insert ↩] [Copy]    │ │
-│ │ └─────────────────────────────┘│  └──────────────────────┘ │
-│ └────────────────────────────────┘                            │
-└──────────────────────────────────────────────────────────────┘
-```
+- **Side Pane Chat**: Persistent conversation with full context. Results can be inserted back into the editor.
+- **Inline AI Tools**: User highlights text in the editor → floating menu appears with context-specific actions. Actions execute via SprkChat's session and results flow into the chat history.
 
-**Side Pane Chat**: Persistent conversation with full context. Results can be inserted back into the editor.
-
-**Inline AI Tools**: User highlights text in the editor → floating menu appears with context-specific actions. Actions execute via SprkChat's session and results flow into the chat history.
-
-Both surfaces share:
-- Same BFF API connection and auth context
-- Same playbook and tool set
-- Same chat session (inline actions appear in chat history)
-- Same record context (analysis type, matter, document)
+Both surfaces share the same BFF API connection, auth context, playbook and tool set, chat session, and record context.
 
 ---
 
@@ -129,36 +96,11 @@ Both surfaces share:
 
 ### Extending via Copilot Studio (Pro-Code)
 
-Spaarke extends M365 Copilot through Copilot Studio using the **pro-code path** (VS Code extension, YAML files — no Power Automate, no Power Fx):
-
-| Approach | Low-Code? | Spaarke Compatible? |
-|----------|-----------|-------------------|
-| Visual designer (drag-and-drop) | Yes | For prototyping only |
-| **VS Code extension (YAML files)** | **No — pro-code** | **Yes — primary approach** |
-| Custom connectors (REST API) | No — configuration | Yes |
-| Power Automate flows | Yes (low-code) | **No — avoid** |
-
-Topics are **thin routing layers** that call BFF API endpoints via custom connectors. All intelligence stays in the BFF.
+Spaarke extends M365 Copilot through Copilot Studio using the **pro-code path** (VS Code extension, YAML files — no Power Automate, no Power Fx). Topics are **thin routing layers** that call BFF API endpoints via custom connectors. All intelligence stays in the BFF.
 
 ### Handoff: Copilot → SprkChat
 
-For workflows requiring interactive analysis, M365 Copilot can initiate and hand off:
-
-```
-User in M365 Copilot: "Analyze the financials for Matter 2024-001"
-  │
-  ▼
-Copilot Studio Topic: AnalyzeFinancials
-  │ → Recognizes interactive analysis needed
-  │ → Returns: Adaptive Card with "Open in Analysis Workspace" button
-  │ → Deep-link opens Analysis Workspace with matter context
-  │
-  ▼
-Analysis Workspace launches SprkChat companion with:
-  → Matter context pre-loaded
-  → Financial analysis playbook selected
-  → Relevant tools available
-```
+For workflows requiring interactive analysis, M365 Copilot can initiate and hand off to Analysis Workspace, which launches SprkChat with matter context and the appropriate playbook pre-selected.
 
 ---
 
@@ -189,48 +131,17 @@ Analysis Workspace launches SprkChat companion with:
                             ▼
               ┌───────────────────────┐
               │    Spaarke BFF API    │
-              │                       │
               │  Context Mapping      │
               │  Service              │
-              │    │                  │
-              │    ▼                  │
-              │  AI Tool Service     │
-              │    │                  │
-              │  ┌─┼──────────┐      │
-              │  ▼ ▼          ▼      │
-              │ Azure  Doc   AI      │
-              │ OpenAI Intel Search  │
+              │  AI Tool Service      │
+              │  Azure OpenAI         │
+              │  Doc Intel / AI Search│
               └───────────────────────┘
-```
-
-### SprkChat Launch Context
-
-```typescript
-interface SprkChatLaunchContext {
-  // Record context
-  entityType: string;              // e.g., 'sprk_analysisoutput'
-  entityId: string;                // Record GUID
-
-  // Analysis context (resolved from record)
-  analysisType?: string;           // e.g., 'patent-claims', 'financial-review'
-  matterType?: string;             // e.g., 'patent', 'trademark', 'litigation'
-  practiceArea?: string;           // e.g., 'ip', 'corporate'
-
-  // Source file context
-  sourceFileId?: string;           // SPE document ID
-  sourceContainerId?: string;      // SPE container ID
-
-  // Playbook (pre-resolved or let SprkChat resolve via context mapping)
-  playbookId?: string;
-
-  // Mode
-  mode: 'standalone' | 'workspace-companion';
-}
 ```
 
 ### Playbook-to-Context Mapping
 
-The existing `ChatContextMappingService` resolves record context into playbooks and tools:
+The `ChatContextMappingService` resolves record context into playbooks and tools:
 
 | Spaarke Concept | Copilot Studio Equivalent | SprkChat Role |
 |----------------|--------------------------|---------------|
@@ -244,8 +155,6 @@ The existing `ChatContextMappingService` resolves record context into playbooks 
 ## Deployment Model Changes
 
 ### What Changes from Global Side Pane
-
-SprkChat was previously deployed as a global side pane (always present via SidePaneManager). The contextual model changes this:
 
 | Aspect | Previous (Global) | New (Contextual) |
 |--------|-------------------|-------------------|
@@ -272,18 +181,6 @@ SprkChat was previously deployed as a global side pane (always present via SideP
 
 ---
 
-## ALM: Packaging and Deployment
-
-### Copilot Studio Artifacts
-
-Copilot Studio agents package into Dataverse solutions via `pac solution export/import`. Pro-code authoring via VS Code extension (YAML files, version-controlled).
-
-### SprkChat Artifacts
-
-SprkChat deploys as web resources (HTML Code Pages, JS scripts) — unchanged from current pipeline.
-
----
-
 ## Phased Implementation Roadmap
 
 ### Phase 1: SprkChat Contextual Companion (Current Focus)
@@ -294,7 +191,6 @@ SprkChat deploys as web resources (HTML Code Pages, JS scripts) — unchanged fr
 - [ ] Reposition SprkChat as contextual component (this design)
 - [ ] Extend launch context model (analysis type, matter, practice area)
 - [ ] Build inline AI tools for Analysis Workspace editor
-- [ ] Integration test: Analysis Workspace + SprkChat companion
 
 ### Phase 2: Copilot Studio Integration
 
@@ -307,14 +203,12 @@ SprkChat deploys as web resources (HTML Code Pages, JS scripts) — unchanged fr
 
 - [ ] Expand inline AI menu with practice-area-specific tools
 - [ ] Add "Insert to Editor" flow from SprkChat responses
-- [ ] Build diff review for inline AI suggestions
 - [ ] Context-specific knowledge sources (USPTO, case law databases)
 
 ### Phase 4: Additional Workspace Companions
 
-- [ ] Evaluate SprkChat companion for other workspaces (document review, contract analysis)
+- [ ] Evaluate SprkChat companion for other workspaces
 - [ ] Create reusable SprkChat launcher component for new workspaces
-- [ ] Standalone app strategy (non-model-driven-app scenarios)
 
 ---
 

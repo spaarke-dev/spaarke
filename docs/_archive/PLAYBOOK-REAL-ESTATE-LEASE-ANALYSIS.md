@@ -1,6 +1,6 @@
 # Playbook Configuration Guide: Real Estate Lease Agreement Analysis
 
-> **ARCHIVED**: March 2026 — Domain-specific example, not a general guide. For playbook design patterns, see `docs/guides/PLAYBOOK-DESIGN-GUIDE.md`.
+> **ARCHIVED**: March 2026 — Domain-specific example, not a general guide. For playbook design patterns, see `docs/guides/JPS-AUTHORING-GUIDE.md`.
 
 > **Version**: 1.0
 > **Last Updated**: January 15, 2026

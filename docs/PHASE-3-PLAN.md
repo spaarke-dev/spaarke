@@ -194,7 +194,7 @@ Create `CROSS-REFERENCE-MAP.md` in root to show all relationships:
 **Source Documents**:
 - ADR-002
 - Guides: DATAVERSE-*.md (3 files)
-- Architecture: sdap-overview.md, sdap-troubleshooting.md
+- Architecture: sdap-overview.md
 
 **Tasks**:
 - [ ] **3.5.1** Create `.claude/constraints/plugins.md` (150-200 lines)
@@ -258,7 +258,7 @@ Create `CROSS-REFERENCE-MAP.md` in root to show all relationships:
 **Source Documents**:
 - ADR-013
 - Guides: AI-*.md (4 files)
-- Architecture: SPAARKE-AI-STRATEGY.md
+- Architecture: AI-ARCHITECTURE.md
 
 **Tasks**:
 - [ ] **3.7.1** Review AI guides for consolidation opportunities
@@ -342,7 +342,7 @@ Create `CROSS-REFERENCE-MAP.md` in root to show all relationships:
 **Scope**: Repository structure, UX management, general architecture
 
 **Source Documents**:
-- Architecture: SPAARKE-REPOSITORY-ARCHITECTURE.md, ui-dialog-shell-architecture.md, SPAARKE-AI-STRATEGY.md
+- Architecture: SPAARKE-REPOSITORY-ARCHITECTURE.md, ui-dialog-shell-architecture.md
 
 **Tasks**:
 - [ ] **3.10.1** Review for accuracy and updates needed

@@ -35,6 +35,8 @@ The Legal Workspace provides multi-step wizards for creating Dataverse entity re
 
 ### Key Components
 
+<!-- TODO(ai-procedure-refactoring): Component file paths below (EntityCreationService.ts, useAiPrefill.ts, etc.) are relative to the shared library source — verify these paths still exist if the library was restructured; also verify MatterService and ProjectService still exist as separate files vs consolidated -->
+
 #### Shared Library (`src/client/shared/Spaarke.UI.Components/`)
 
 | Component | Location | Purpose |

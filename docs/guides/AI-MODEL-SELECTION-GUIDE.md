@@ -7,7 +7,9 @@
 > **Related Files**:
 > - `src/server/api/Sprk.Bff.Api/Services/Ai/ModelSelector.cs` — ModelSelector service and OperationType enum
 > - `projects/ai-spaarke-platform-enhancments-r3/notes/azure-openai-model-inventory.md` — Deployed model inventory
-> - `docs/architecture/ai-implementation-reference.md` — Overall AI architecture
+> - `docs/architecture/AI-ARCHITECTURE.md` — Overall AI architecture
+
+<!-- TODO(ai-procedure-refactoring): Verify ModelSelector.cs file path and OperationType enum members still match the source — the OperationType values and appsettings keys in this doc drift when new operation types are added to the codebase -->
 
 ---
 
@@ -24,6 +26,8 @@ This guide explains:
 ---
 
 ## Available Model Deployments
+
+<!-- TODO(ai-procedure-refactoring): Deployment status table below was accurate as of 2026-03-05 but changes frequently — verify gpt-4o and o1-mini deployment status before referencing in runbooks or playbook configuration -->
 
 The following models are deployed to Azure OpenAI resource `spaarke-openai-dev` (resource group: `spe-infrastructure-westus2`).
 
@@ -236,7 +240,7 @@ If o1-mini is unavailable in westus2, use this configuration workaround instead:
 
 ## Related Documentation
 
-- [AI Implementation Reference](../architecture/ai-implementation-reference.md) — Overall AI system design and tool framework
+- [AI Architecture](../architecture/AI-ARCHITECTURE.md) — Overall AI system design and tool framework
 - [AI Deployment Guide](./AI-DEPLOYMENT-GUIDE.md) — Deploying Azure OpenAI models and configuring the BFF API
-- [Playbook Scope Configuration Guide](./PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md) — Creating Action, Skill, and Knowledge scopes for playbooks
+- [Scope Configuration Guide](./SCOPE-CONFIGURATION-GUIDE.md) — Creating Action, Skill, and Knowledge scopes for playbooks
 - [RAG Architecture](./RAG-ARCHITECTURE.md) — Embedding model usage and retrieval-augmented generation

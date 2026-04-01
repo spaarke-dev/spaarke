@@ -94,6 +94,8 @@ httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("
 
 ### Implementation
 
+<!-- TODO(ai-procedure-refactoring): Verify class name DataverseServiceClientImpl and file path still match src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs — this inline code snapshot drifts when the implementation is refactored -->
+
 **File**: `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs`
 
 ```csharp
@@ -170,6 +172,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 ```
 
 ### Package Reference
+
+<!-- TODO(ai-procedure-refactoring): Verify package version 1.1.32 is still current — check Directory.Packages.props in the repository -->
 
 **File**: `src/server/shared/Spaarke.Dataverse/Spaarke.Dataverse.csproj`
 
@@ -808,6 +812,8 @@ If this guide doesn't resolve your issue:
 ---
 
 ## Appendix: Sprint 7A Implementation History
+
+<!-- TODO(ai-procedure-refactoring): This appendix is a historical narrative from October 2025. The implementation details (class names, config keys, error messages) may no longer match current code. Verify accuracy before referencing in new work. -->
 
 > This section preserves the historical narrative of the Sprint 7A authentication fix (October 2025) for reference. The prescriptive guidance above is the authoritative source for how to configure Dataverse authentication.
 

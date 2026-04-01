@@ -180,8 +180,8 @@ The App Service is configured with these environment variables:
 
 ## Related Documentation
 
-- [Infrastructure Packaging Strategy](../docs/reference/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md)
-- [AI Strategy](../docs/reference/architecture/SPAARKE-AI-STRATEGY.md)
+- [Infrastructure Packaging Strategy](../docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md)
+- [AI Architecture](../docs/architecture/AI-ARCHITECTURE.md)
 - [ADR-012: Infrastructure Packaging](../docs/reference/adr/ADR-012-infrastructure-packaging.md) (TODO)
 
 ## Troubleshooting

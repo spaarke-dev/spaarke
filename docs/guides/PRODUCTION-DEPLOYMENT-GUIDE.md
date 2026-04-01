@@ -72,6 +72,8 @@ When Claude Code is asked to "deploy to production" or "set up production enviro
 
 ### Required Tools
 
+<!-- TODO(ai-procedure-refactoring): Minimum version numbers (Azure CLI 2.60+, PowerShell 7.4+, GitHub CLI 2.40+) will become outdated — verify minimum versions are still valid before running a production deployment -->
+
 **[AI]** Claude Code verifies these automatically before any deployment step:
 
 ```powershell
@@ -106,6 +108,8 @@ gh --version          # GitHub CLI 2.40+
 | DNS Management | Record creation for `api.spaarke.com` | Varies by provider **[HUMAN]** |
 
 ### Required Azure Quotas
+
+<!-- TODO(ai-procedure-refactoring): TPM quota figures (GPT-4o 50K+, GPT-4o-mini 100K, embedding 100K) and region constraints (westus3 for OpenAI) reflect March 2026 availability — verify current Azure OpenAI quota availability and regional capacity before production deployment -->
 
 **[DECISION]** Before deploying, verify quotas. If quotas are insufficient, request increases (1-3 business days).
 
