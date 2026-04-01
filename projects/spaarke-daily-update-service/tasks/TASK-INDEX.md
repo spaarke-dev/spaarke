@@ -1,7 +1,7 @@
 # Task Index — Spaarke Daily Update Service
 
 > **Total Tasks**: 34
-> **Status**: 15/34 complete
+> **Status**: 22/34 complete
 > **Last Updated**: 2026-04-01
 
 ---
@@ -45,13 +45,13 @@
 | 062 | Integration tests — inline notifications | 7 | 🔲 | 060 | STANDARD | Group I |
 | 063 | End-to-end verification | 7 | 🔲 | 061, 062 | STANDARD | — |
 | 090 | Project wrap-up | — | 🔲 | 063, 106 | FULL | — |
-| 100 | Add /narrate BFF endpoint with parallel AI calls | 8 | 🔲 | 036 | FULL | — |
-| 101 | Create MicrosoftToDoIcon and useInlineTodoCreate hook | 8 | 🔲 | none | FULL | Group J |
-| 102 | Build PreferencesDropdown with Fluent Popover | 8 | 🔲 | none | FULL | Group J |
-| 103 | Build TldrSection, ActivityNotesSection, NarrativeBullet components | 8 | 🔲 | 100 | FULL | Group K |
-| 104 | Update briefingService and create useBriefingNarration hook | 8 | 🔲 | 100, 101 | FULL | Group K |
-| 105 | Wire new components into App.tsx and remove old components | 8 | 🔲 | 101, 102, 103, 104 | FULL | — |
-| 106 | Build, deploy, and verify Daily Briefing redesign | 8 | 🔲 | 105 | STANDARD | — |
+| 100 | Add /narrate BFF endpoint with parallel AI calls | 8 | ✅ | 036 | FULL | — |
+| 101 | Create MicrosoftToDoIcon and useInlineTodoCreate hook | 8 | ✅ | none | FULL | Group J |
+| 102 | Build PreferencesDropdown with Fluent Popover | 8 | ✅ | none | FULL | Group J |
+| 103 | Build TldrSection, ActivityNotesSection, NarrativeBullet components | 8 | ✅ | 100 | FULL | Group K |
+| 104 | Update briefingService and create useBriefingNarration hook | 8 | ✅ | 100, 101 | FULL | Group K |
+| 105 | Wire new components into App.tsx and remove old components | 8 | ✅ | 101, 102, 103, 104 | FULL | — |
+| 106 | Build, deploy, and verify Daily Briefing redesign | 8 | ✅ | 105 | STANDARD | — |
 
 ---
 
