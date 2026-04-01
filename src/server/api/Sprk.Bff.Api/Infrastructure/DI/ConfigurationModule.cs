@@ -65,11 +65,12 @@ public static class ConfigurationModule
             .ValidateOnStart();
 
         // Power BI Embedded Reporting options (PBI-001) — gated on sprk_ReportingModuleEnabled
+        // Validation deferred to first use (no ValidateOnStart) so the app starts
+        // even without PBI config. Reporting endpoints fail gracefully at call time.
         services
             .AddOptions<PowerBiOptions>()
             .Bind(configuration.GetSection(PowerBiOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+            .ValidateDataAnnotations();
 
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
