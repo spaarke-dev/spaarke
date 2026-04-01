@@ -47,27 +47,49 @@ export interface AppProps {
 export const App: React.FC<AppProps> = ({ params: _params }) => {
   const styles = useStyles();
 
-  // Resolve Xrm.WebApi — available when hosted in Dataverse Code Page
-  const webApi = React.useMemo<IWebApi | null>(() => {
+  // Resolve Xrm via frame-walking with polling for welcome screen timing.
+  // Xrm may not be available immediately when loaded as MDA welcome screen.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [xrm, setXrm] = React.useState<any>(() => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm;
-      return xrm?.WebApi ?? null;
+      const w = window as any;
+      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
     } catch {
       return null;
     }
-  }, []);
+  });
+
+  // Poll for Xrm if not available on mount (welcome screen / left nav timing)
+  React.useEffect(() => {
+    if (xrm?.WebApi) return; // Already available
+    let cancelled = false;
+    const interval = setInterval(() => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any;
+        const found = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
+        if (found?.WebApi && !cancelled) {
+          setXrm(found);
+          clearInterval(interval);
+        }
+      } catch { /* cross-origin */ }
+    }, 500);
+    // Stop polling after 30s
+    const timeout = setTimeout(() => { clearInterval(interval); }, 30000);
+    return () => { cancelled = true; clearInterval(interval); clearTimeout(timeout); };
+  }, [xrm]);
+
+  const webApi = React.useMemo<IWebApi | null>(() => xrm?.WebApi ?? null, [xrm]);
 
   // Resolve current user ID
   const userId = React.useMemo<string>(() => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm;
       return xrm?.Utility?.getGlobalContext()?.userSettings?.userId?.replace(/[{}]/g, "") ?? "";
     } catch {
       return "";
     }
-  }, []);
+  }, [xrm]);
 
   const { channels, totalUnreadCount, preferences, loadingState, actions } =
     useNotificationData({ webApi, userId });
@@ -86,10 +108,31 @@ export const App: React.FC<AppProps> = ({ params: _params }) => {
     }
   }, [actions]);
 
-  const handleNavigate = React.useCallback((actionUrl: string) => {
+  const handleNavigate = React.useCallback((actionUrl: string, regardingEntityType?: string, regardingId?: string) => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm;
+      // Open as Dataverse entity form dialog when we have entity info
+      if (xrm?.Navigation?.navigateTo && regardingEntityType && regardingId) {
+        xrm.Navigation.navigateTo(
+          { pageType: "entityrecord", entityName: regardingEntityType, entityId: regardingId },
+          { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } }
+        );
+        return;
+      }
+      // Fallback: open URL as dialog or new tab
+      if (xrm?.Navigation?.navigateTo && actionUrl.includes("pagetype=entityrecord")) {
+        // Parse entity record URL params
+        const params = new URLSearchParams(actionUrl.split("?")[1] ?? "");
+        const etn = params.get("etn");
+        const id = params.get("id");
+        if (etn && id) {
+          xrm.Navigation.navigateTo(
+            { pageType: "entityrecord", entityName: etn, entityId: id },
+            { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } }
+          );
+          return;
+        }
+      }
+      // Last resort: open in new tab
       if (xrm?.Navigation?.openUrl) {
         xrm.Navigation.openUrl(actionUrl);
       } else {
@@ -98,7 +141,7 @@ export const App: React.FC<AppProps> = ({ params: _params }) => {
     } catch {
       window.open(actionUrl, "_blank");
     }
-  }, []);
+  }, [xrm]);
 
   // Extract ChannelGroup[] from successful results for the narrative summary
   const successGroups: ChannelGroup[] = React.useMemo(

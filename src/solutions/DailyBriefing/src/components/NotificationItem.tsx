@@ -127,7 +127,7 @@ export interface NotificationItemProps {
   /** Called when the user marks this notification as read. */
   onMarkAsRead?: (notificationId: string) => void;
   /** Called when the user clicks the action link / item row. */
-  onNavigate?: (actionUrl: string) => void;
+  onNavigate?: (actionUrl: string, regardingEntityType?: string, regardingId?: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,13 +142,13 @@ export const NotificationItem: React.FC<NotificationItemProps> = ({
   const styles = useStyles();
 
   const handleClick = React.useCallback(() => {
-    if (item.actionUrl && onNavigate) {
-      onNavigate(item.actionUrl);
+    if (onNavigate && (item.actionUrl || item.regardingId)) {
+      onNavigate(item.actionUrl, item.regardingEntityType, item.regardingId);
     }
     if (!item.isRead && onMarkAsRead) {
       onMarkAsRead(item.id);
     }
-  }, [item.actionUrl, item.id, item.isRead, onMarkAsRead, onNavigate]);
+  }, [item.actionUrl, item.regardingEntityType, item.regardingId, item.id, item.isRead, onMarkAsRead, onNavigate]);
 
   const handleMarkRead = React.useCallback(
     (e: React.MouseEvent) => {

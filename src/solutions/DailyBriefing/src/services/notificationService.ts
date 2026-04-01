@@ -48,7 +48,7 @@ const NOTIFICATION_SELECT = [
   "title",
   "body",
   "data",
-  "isread",
+  "toasttype",
   "createdon",
 ].join(",");
 
@@ -77,16 +77,19 @@ function parseNotificationData(raw: unknown): {
 
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const customData = parsed["customData"] as Record<string, unknown> | undefined;
-    if (!customData) return null;
+
+    // Support both flat format (NotificationService) and nested customData format (playbooks)
+    const customData = (parsed["customData"] as Record<string, unknown>) ?? parsed;
 
     return {
-      category: (customData["category"] as NotificationCategory) ?? "system",
+      category: (customData["category"] as NotificationCategory) ??
+                (customData["channel"] as NotificationCategory) ?? "system",
       priority: (customData["priority"] as NotificationPriority) ?? "normal",
-      actionUrl: (customData["actionUrl"] as string) ?? "",
+      actionUrl: (customData["actionUrl"] as string) ?? (parsed["actionUrl"] as string) ?? "",
       regardingName: (customData["regardingName"] as string) ?? "",
-      regardingEntityType: (customData["regardingEntityType"] as string) ?? "",
-      regardingId: (customData["regardingId"] as string) ?? "",
+      regardingEntityType: (customData["regardingEntityType"] as string) ??
+                           (customData["regardingType"] as string) ?? "",
+      regardingId: (customData["regardingId"] as string) ?? (parsed["regardingId"] as string) ?? "",
       isAiGenerated: (customData["isAiGenerated"] as boolean) ?? false,
       aiConfidence: typeof customData["aiConfidence"] === "number"
         ? (customData["aiConfidence"] as number)
@@ -119,7 +122,7 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
     regardingName: customData?.regardingName ?? "",
     regardingEntityType: customData?.regardingEntityType ?? "",
     regardingId: customData?.regardingId ?? "",
-    isRead: (entity["isread"] as boolean) ?? false,
+    isRead: (entity["toasttype"] as number) === 200000000, // 200000000 = Dismissed (treated as "read")
     isAiGenerated: customData?.isAiGenerated ?? false,
     aiConfidence: customData?.aiConfidence,
     createdOn: (entity["createdon"] as string) ?? new Date().toISOString(),
@@ -151,7 +154,7 @@ export async function fetchNotifications(
   // Build OData query — appnotification is automatically scoped to the current user
   let filter = "";
   if (unreadOnly) {
-    filter = "&$filter=isread eq false";
+    filter = "&$filter=toasttype ne 200000000"; // Exclude dismissed notifications
   }
 
   const query =
@@ -283,7 +286,7 @@ export async function markNotificationRead(
 ): Promise<IResult<void>> {
   return tryCatch(async () => {
     await webApi.updateRecord("appnotification", notificationId, {
-      isread: true,
+      toasttype: 200000000, // Dismissed
     });
   }, "NOTIFICATION_MARK_READ_ERROR");
 }
