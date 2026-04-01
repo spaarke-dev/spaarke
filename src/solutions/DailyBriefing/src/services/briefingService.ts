@@ -11,7 +11,7 @@
  *   - Graceful fallback when AI is unavailable (503, circuit breaker)
  */
 
-import { authenticatedFetch } from "@spaarke/auth";
+import { authenticatedFetch } from "./authInit";
 import type { ChannelFetchResult } from "../types/notifications";
 
 // ---------------------------------------------------------------------------
