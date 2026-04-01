@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Build channel category components (grouped notification cards)</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>053</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend implementation (.tsx), fluent-ui tag</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the channel category card components for the Daily Digest. Each channel (tasks, documents, emails, events, activity, assignments) renders as a collapsible card with grouped notification items and action links. Use Fluent v9 Card, Accordion, and tokens.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React 19 and Fluent UI v9.</role>
+
+  <goal>ChannelCard component renders grouped notifications per category with item list, action links, and inline error state for failed channels.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 exclusively, semantic tokens, dark mode</constraint>
+    <constraint source="ADR-012">Use @spaarke/ui-components where applicable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ChannelCard.tsx — collapsible card per category</step>
+    <step order="2">Create NotificationItem.tsx — individual notification with title, body, action link</step>
+    <step order="3">Create ChannelErrorState.tsx — inline error when channel fetch fails</step>
+    <step order="4">Use Fluent v9 Accordion, Card, Button, Badge for layout</step>
+    <step order="5">Use semantic tokens for all colors/spacing</step>
+    <step order="6">Wire into App.tsx</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/components/ChannelCard.tsx</output>
+    <output type="code">src/solutions/DailyBriefing/src/components/NotificationItem.tsx</output>
+    <output type="code">src/solutions/DailyBriefing/src/components/ChannelErrorState.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Renders grouped notifications per channel</criterion>
+    <criterion testable="true">Uses Fluent v9 exclusively with semantic tokens</criterion>
+    <criterion testable="true">Handles channel error state inline</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

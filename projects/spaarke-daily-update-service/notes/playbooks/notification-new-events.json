@@ -1,0 +1,127 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "id": "NP-005",
+    "name": "New Events on Matters/Projects",
+    "description": "Notifies users when new calendar events (appointments, meetings) have been created or updated on their assigned matters or projects since the last check. Queries appointment activity records linked to matters and projects where the user is a team member, filtered by the configurable timeWindow parameter.",
+    "sprk_playbooktype": 2,
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "sprk_configjson": {
+      "schedule": {
+        "frequency": "daily",
+        "time": "06:00"
+      },
+      "category": "new-events",
+      "channelLabel": "New Events",
+      "channelIcon": "calendar",
+      "parameters": {
+        "timeWindow": {
+          "type": "duration",
+          "default": "24h",
+          "options": ["12h", "24h", "48h", "7d"],
+          "label": "Time window",
+          "description": "How far back to look for new or updated events"
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    }
+  },
+  "nodes": [
+    {
+      "name": "Start",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "start",
+      "outputVariable": "start",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "scope": "user-matters-and-projects",
+        "resolveUserId": true,
+        "description": "Scoped to the current user's assigned matters and projects"
+      }
+    },
+    {
+      "name": "Query New Events",
+      "nodeType": "Workflow",
+      "actionType": 22,
+      "canvasType": "updateRecord",
+      "outputVariable": "newEvents",
+      "positionX": 350,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 22,
+        "queryMode": true,
+        "entityLogicalName": "appointment",
+        "fetchXml": "<fetch top='50'><entity name='appointment'><attribute name='subject'/><attribute name='scheduledstart'/><attribute name='scheduledend'/><attribute name='location'/><attribute name='createdon'/><attribute name='modifiedon'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><filter type='or'><condition attribute='createdon' operator='ge' value='{{sinceTimestamp}}'/><condition attribute='modifiedon' operator='ge' value='{{sinceTimestamp}}'/></filter></filter><order attribute='scheduledstart' descending='false'/></entity></fetch>",
+        "parameters": {
+          "sinceTimestamp": "{{timeWindow}}"
+        },
+        "description": "Retrieve appointments linked to user's matters or projects that were created or modified within the configured time window"
+      }
+    },
+    {
+      "name": "Has New Events?",
+      "nodeType": "Control",
+      "actionType": 30,
+      "canvasType": "condition",
+      "outputVariable": "hasNewEvents",
+      "positionX": 600,
+      "positionY": 200,
+      "dependsOn": ["Query New Events"],
+      "configJson": {
+        "__actionType": 30,
+        "conditionJson": "{{newEvents.output.count}} > 0",
+        "description": "Check if any new or updated events were found"
+      }
+    },
+    {
+      "name": "Create Notification",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "canvasType": "createNotification",
+      "outputVariable": "notification",
+      "positionX": 900,
+      "positionY": 150,
+      "dependsOn": ["Has New Events?"],
+      "configJson": {
+        "__actionType": 50,
+        "title": "You have {{newEvents.output.count}} new event(s) on your matters",
+        "body": "{{#each newEvents.output.items}}{{subject}} — {{scheduledStartFormatted}}{{#if location}} at {{location}}{{/if}} ({{regardingName}})\n{{/each}}",
+        "category": "new-events",
+        "priority": 100000000,
+        "actionUrl": "/main.aspx?pagetype=entitylist&etn=appointment&viewtype=1039",
+        "recipientId": "{{run.userId}}",
+        "regardingType": "appointment",
+        "iterateItems": true,
+        "itemNotification": {
+          "title": "New event on {{item.regardingName}}",
+          "body": "{{item.subject}} — {{item.scheduledStartFormatted}}{{#if item.location}} at {{item.location}}{{/if}}",
+          "category": "new-events",
+          "priority": 100000000,
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=appointment&id={{item.activityid}}",
+          "recipientId": "{{run.userId}}",
+          "regardingId": "{{item.activityid}}",
+          "regardingType": "appointment"
+        },
+        "deduplication": {
+          "enabled": true,
+          "key": "new-events:{{run.userId}}:{{item.activityid}}:{{item.modifiedon}}"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "source": "Start", "target": "Query New Events" },
+    { "source": "Query New Events", "target": "Has New Events?" },
+    { "source": "Has New Events?", "target": "Create Notification", "condition": "true" }
+  ]
+}

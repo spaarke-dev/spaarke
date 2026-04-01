@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Implement CreateNotificationNodeExecutor</title>
+    <phase>1: Foundation — Node Executor &amp; Notification Service</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>004, 005, 010</blocks>
+    <tags>bff-api, api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core code implementation (.cs), implements INodeExecutor interface</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement CreateNotificationNodeExecutor following the existing CreateTaskNodeExecutor pattern. The executor creates appnotification records via Dataverse Web API with idempotency check — if unread notification exists for same user + regarding record + category, skip creation.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in playbook engine node executors and Dataverse Web API.
+  </role>
+
+  <goal>
+    CreateNotificationNodeExecutor.cs exists, implements INodeExecutor for ActionType.CreateNotification (50), creates appnotification records with title, body, category, priority, action URL, regarding record, and AI metadata. Idempotency check prevents duplicates.
+  </goal>
+
+  <context>
+    <background>
+      The playbook engine executes nodes by routing ActionType to INodeExecutor implementations. We need a new executor that creates Dataverse appnotification records.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeExecutionContext.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must be within BFF runtime</constraint>
+    <constraint source="ADR-010">Register as concrete, not interface</constraint>
+    <constraint source="project">MUST implement idempotency — query before create</constraint>
+    <constraint source="project">MUST use Dataverse Web API for appnotification creation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Node executor pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs">
+        Follow this exact pattern for implementing INodeExecutor
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read CreateTaskNodeExecutor.cs to understand the INodeExecutor pattern</step>
+    <step order="2">Read NodeExecutionContext.cs to understand context available during execution</step>
+    <step order="3">Create CreateNotificationNodeExecutor.cs in Services/Ai/Nodes/</step>
+    <step order="4">Implement ActionType property returning CreateNotification (50)</step>
+    <step order="5">Implement ExecuteAsync: extract title, body, category, priority, actionUrl, regardingId from node config</step>
+    <step order="6">Add idempotency check: query appnotification for unread + same user + same regarding + same category</step>
+    <step order="7">If no duplicate found, create appnotification via Dataverse Web API</step>
+    <step order="8">Return NodeOutput with success/skip status</step>
+    <step order="9">Run dotnet build to verify compilation</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateNotificationNodeExecutor implements INodeExecutor</criterion>
+    <criterion testable="true">ActionType returns CreateNotification (50)</criterion>
+    <criterion testable="true">Idempotency check queries for existing unread notification before creating</criterion>
+    <criterion testable="true">Creates appnotification with title, body, category, priority, actionUrl, regardingId</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files.</protocol>
+  </execution>
+</task>

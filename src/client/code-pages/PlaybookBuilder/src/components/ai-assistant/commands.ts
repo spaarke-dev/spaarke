@@ -73,6 +73,10 @@ export const NODE_TYPE_INFO: Record<PlaybookNodeType, { label: string; descripti
     label: 'Send Email',
     description: 'Send an email notification',
   },
+  createNotification: {
+    label: 'Create Notification',
+    description: 'Create an in-app notification for a user',
+  },
   wait: {
     label: 'Wait',
     description: 'Pause workflow for a duration',

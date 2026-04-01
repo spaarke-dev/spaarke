@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Build narrative TL;DR template renderer</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>053</blocks>
+    <tags>frontend, react, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements template rendering logic (.tsx)</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the Level 1 narrative TL;DR renderer that generates template-based summary sentences from notification data. Example: "You have 3 tasks overdue and 5 new documents across 2 matters." Renders at the top of the digest view.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React and template rendering.</role>
+
+  <goal>NarrativeSummary component generates human-readable TL;DR from notification counts per channel.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create NarrativeSummary.tsx component</step>
+    <step order="2">Build template strings per channel type (tasks, documents, emails, etc.)</step>
+    <step order="3">Aggregate notification counts and generate narrative</step>
+    <step order="4">Style with Fluent v9 Text and typography tokens</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/components/NarrativeSummary.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Generates human-readable narrative from notification data</criterion>
+    <criterion testable="true">Template per channel type</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

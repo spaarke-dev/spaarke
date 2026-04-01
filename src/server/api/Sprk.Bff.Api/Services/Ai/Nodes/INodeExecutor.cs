@@ -126,5 +126,8 @@ public enum ActionType
     DeliverOutput = 40,
 
     /// <summary>Queue document for RAG semantic indexing.</summary>
-    DeliverToIndex = 41
+    DeliverToIndex = 41,
+
+    /// <summary>Create an in-app notification via the Dataverse appnotification entity.</summary>
+    CreateNotification = 50
 }

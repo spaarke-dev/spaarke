@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Integration tests for inline notifications</title>
+    <phase>7: Testing &amp; Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>063</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write integration tests for inline notification creation from BFF endpoints: document upload, analysis complete, email received, work assignment created.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Integration tests verify notifications are created from all 4 BFF endpoint operations.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration tests for each inline notification trigger</step>
+    <step order="2">Verify appnotification created with correct fields</step>
+    <step order="3">Run tests</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/integration/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 inline notification triggers create appnotification records</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

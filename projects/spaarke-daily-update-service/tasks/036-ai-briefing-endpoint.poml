@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Implement AI briefing summary endpoint</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>037</blocks>
+    <tags>bff-api, api, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint + AI integration (.cs), bff-api and ai tags</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement POST /api/ai/daily-briefing/summarize BFF endpoint. Accepts structured notification data, returns 3-4 sentence prioritized briefing via Azure OpenAI. Follow Minimal API endpoint pattern with authorization filter.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal API and Azure OpenAI integration.</role>
+
+  <goal>Working BFF endpoint that accepts notification summary data and returns AI-generated briefing narrative.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">MUST extend BFF — no separate service</constraint>
+    <constraint source="ADR-001">MUST use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-008">MUST use endpoint filter for authorization</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DailyBriefingEndpoints.cs in Api/Ai/</step>
+    <step order="2">Define request DTO (notification counts per category, top priority items)</step>
+    <step order="3">Define response DTO (briefing text, priority action items)</step>
+    <step order="4">Implement MapDailyBriefingEndpoints extension method</step>
+    <step order="5">POST /api/ai/daily-briefing/summarize — call OpenAI with structured prompt</step>
+    <step order="6">Add authorization filter and rate limiting</step>
+    <step order="7">Register in Program.cs</step>
+    <step order="8">Run dotnet build</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/ai/daily-briefing/summarize endpoint exists</criterion>
+    <criterion testable="true">Returns AI-generated 3-4 sentence briefing</criterion>
+    <criterion testable="true">Uses endpoint filter for authorization</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

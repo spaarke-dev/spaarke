@@ -23,6 +23,7 @@ export enum PlaybookNodeType {
   UpdateRecord = 'updateRecord',
   CreateTask = 'createTask',
   SendEmail = 'sendEmail',
+  CreateNotification = 'createNotification',
   Wait = 'wait',
 }
 
@@ -81,6 +82,7 @@ export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = 
   [PlaybookNodeType.UpdateRecord]: DataverseNodeType.Workflow,
   [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
   [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
+  [PlaybookNodeType.CreateNotification]: DataverseNodeType.Workflow,
   [PlaybookNodeType.Wait]: DataverseNodeType.Control,
 };
 
@@ -110,6 +112,7 @@ export enum ActionType {
   Wait = 32,
   DeliverOutput = 40,
   DeliverToIndex = 41,
+  CreateNotification = 50,
 }
 
 /**
@@ -125,6 +128,7 @@ export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
   [PlaybookNodeType.UpdateRecord]: ActionType.UpdateRecord,
   [PlaybookNodeType.CreateTask]: ActionType.CreateTask,
   [PlaybookNodeType.SendEmail]: ActionType.SendEmail,
+  [PlaybookNodeType.CreateNotification]: ActionType.CreateNotification,
   [PlaybookNodeType.Wait]: ActionType.Wait,
 };
 
@@ -224,6 +228,13 @@ export interface PlaybookNodeData {
   temperature?: number;
   maxTokens?: number;
 
+  // Create Notification config
+  notificationTitle?: string;
+  notificationBody?: string;
+  notificationPriority?: 'informational' | 'warning' | 'critical';
+  notificationIconType?: string;
+  notificationOwnerId?: string;
+
   // Wait config
   waitType?: 'duration' | 'until' | 'condition';
   waitDurationHours?: number;
@@ -300,6 +311,13 @@ export const NODE_TYPE_INFO: NodeTypeInfo[] = [
     label: 'Send Email',
     description: 'Send an email with template variable support',
     icon: 'Mail',
+    category: 'action',
+  },
+  {
+    type: PlaybookNodeType.CreateNotification,
+    label: 'Create Notification',
+    description: 'Create an in-app notification for a user',
+    icon: 'Alert',
     category: 'action',
   },
   {

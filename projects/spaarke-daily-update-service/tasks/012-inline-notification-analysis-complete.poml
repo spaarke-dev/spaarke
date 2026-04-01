@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Add inline notification to AiToolEndpoints (analysis complete)</title>
+    <phase>2: Scheduler &amp; Inline Notifications</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, api, backend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing API endpoint code (.cs)</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add inline notification after AI analysis completion in AiToolEndpoints. Notify the requesting user that analysis results are ready with a link to the document.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF API and AI endpoints.</role>
+
+  <goal>After successful AI analysis, a notification is created for the requesting user with analysis type, document reference, and action URL.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Notification must not block analysis response</constraint>
+    <constraint source="project">MUST label AI-identified items with confidence badge</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AiToolEndpoints.cs to find analysis completion points</step>
+    <step order="2">Add NotificationService call after successful analysis</step>
+    <step order="3">Set category="analysis", include AI metadata in notification</step>
+    <step order="4">Run dotnet build</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Notification created after analysis completion</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

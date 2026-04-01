@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>063</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>code-review + adr-check + repo-cleanup required</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run final quality gates (code-review, adr-check), repository cleanup, update README status to Complete, document lessons learned.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Project complete: code reviewed, ADR compliant, repo clean, README updated, lessons documented.</goal>
+
+  <steps>
+    <step order="1">Run /code-review on all project code</step>
+    <step order="2">Run /adr-check on all project code</step>
+    <step order="3">Fix any critical issues</step>
+    <step order="4">Run /repo-cleanup projects/spaarke-daily-update-service</step>
+    <step order="5">Update README.md: Status = Complete, Progress = 100%</step>
+    <step order="6">Update plan.md: Status = Complete</step>
+    <step order="7">Create notes/lessons-learned.md if notable insights</step>
+    <step order="8">Verify all tasks marked ✅ in TASK-INDEX.md</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">No critical code-review issues remaining</criterion>
+    <criterion testable="true">ADR compliance verified</criterion>
+    <criterion testable="true">README status = Complete</criterion>
+    <criterion testable="true">All tasks marked ✅ in TASK-INDEX.md</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

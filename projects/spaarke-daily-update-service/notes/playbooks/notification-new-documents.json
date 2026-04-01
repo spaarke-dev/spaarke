@@ -1,0 +1,121 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "playbook": {
+    "id": "NP-003",
+    "name": "New Documents on Your Matters",
+    "description": "Identifies documents added to user's matters since the last check (configurable time window) and creates notifications for each new document.",
+    "sprk_playbooktype": 2,
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "sprk_configjson": {
+      "schedule": {
+        "frequency": "daily",
+        "time": "06:00"
+      },
+      "category": "new-documents",
+      "channelLabel": "New Documents",
+      "channelIcon": "document",
+      "parameters": {
+        "timeWindow": {
+          "type": "string",
+          "default": "24h",
+          "options": ["12h", "24h", "48h", "7d"],
+          "label": "From",
+          "description": "Look back window for new document detection"
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    }
+  },
+  "nodes": [
+    {
+      "name": "Start",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "start",
+      "outputVariable": "start",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "scope": "user-matters",
+        "description": "Scoped to the current user's matters (matters where user is a team member)"
+      }
+    },
+    {
+      "name": "Query New Documents",
+      "nodeType": "Workflow",
+      "actionType": 22,
+      "canvasType": "updateRecord",
+      "outputVariable": "newDocsQuery",
+      "positionX": 350,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 22,
+        "queryMode": true,
+        "entityLogicalName": "sprk_document",
+        "fetchXml": "<fetch top='50'><entity name='sprk_document'><attribute name='sprk_name'/><attribute name='sprk_filename'/><attribute name='createdon'/><attribute name='sprk_documentid'/><attribute name='sprk_matter'/><link-entity name='sprk_matter' from='sprk_matterid' to='sprk_matter' link-type='inner'><link-entity name='sprk_matterteammember' from='sprk_matter' to='sprk_matterid' link-type='inner'><filter type='and'><condition attribute='sprk_user' operator='eq-userid'/></filter></link-entity></link-entity><filter type='and'><condition attribute='createdon' operator='last-x-hours' value='{{timeWindowHours}}'/><condition attribute='createdby' operator='ne-userid'/></filter><order attribute='createdon' descending='true'/></entity></fetch>",
+        "templateParameters": {
+          "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
+        },
+        "description": "Query documents created on user's matters within the configured time window, excluding documents created by the user themselves"
+      }
+    },
+    {
+      "name": "Check Results",
+      "nodeType": "Control",
+      "actionType": 30,
+      "canvasType": "condition",
+      "outputVariable": "hasNewDocs",
+      "positionX": 600,
+      "positionY": 200,
+      "dependsOn": ["Query New Documents"],
+      "configJson": {
+        "__actionType": 30,
+        "conditionJson": "{{newDocsQuery.output.count}} > 0",
+        "description": "Check if any new documents were found on user's matters"
+      }
+    },
+    {
+      "name": "Create Notification",
+      "nodeType": "Workflow",
+      "actionType": 50,
+      "canvasType": "createNotification",
+      "outputVariable": "notification",
+      "positionX": 900,
+      "positionY": 150,
+      "dependsOn": ["Check Results"],
+      "configJson": {
+        "__actionType": 50,
+        "title": "{{newDocsQuery.output.count}} new document(s) on your matters",
+        "body": "{{#each newDocsQuery.output.items}}{{sprk_filename}} added to {{matterName}} ({{createdon}}).\n{{/each}}",
+        "category": "new-documents",
+        "priority": 200000000,
+        "recipientId": "{{run.userId}}",
+        "regardingType": "sprk_document",
+        "iterateItems": true,
+        "itemNotification": {
+          "title": "New document: {{item.sprk_filename}}",
+          "body": "{{item.sprk_filename}} was added to {{item.matterName}}",
+          "category": "new-documents",
+          "priority": 200000000,
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_document&id={{item.sprk_documentid}}",
+          "recipientId": "{{run.userId}}",
+          "regardingId": "{{item.sprk_documentid}}",
+          "regardingType": "sprk_document"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "source": "Start", "target": "Query New Documents" },
+    { "source": "Query New Documents", "target": "Check Results" },
+    { "source": "Check Results", "target": "Create Notification", "condition": "true" }
+  ]
+}

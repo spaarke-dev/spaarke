@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Create notification playbooks 1-3 (tasks overdue, tasks due soon, new documents)</title>
+    <phase>3: Notification Playbooks</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>054</blocks>
+    <tags>ai, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates new playbook definition files, has constraints</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create 3 notification playbook JSON definitions: (1) Tasks overdue, (2) Tasks due soon (configurable window), (3) New documents on user's matters. Each playbook uses sprk_playbooktype = Notification (2), schedule config in sprk_configjson, and CreateNotification node (ActionType 50).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in playbook design and JPS schema.</role>
+
+  <goal>3 playbook JSON definitions ready for deployment to Dataverse.</goal>
+
+  <context>
+    <relevant-files>
+      <file>docs/guides/PLAYBOOK-DESIGN-GUIDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PLAYBOOK-DESIGN-GUIDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing playbook definitions for format reference</step>
+    <step order="2">Create tasks-overdue playbook (query tasks where due date &lt; today)</step>
+    <step order="3">Create tasks-due-soon playbook (configurable dueWithinDays parameter)</step>
+    <step order="4">Create new-documents playbook (documents created since last check on user's matters)</step>
+    <step order="5">Each playbook: set sprk_playbooktype=2, schedule in sprk_configjson, CreateNotification node</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-overdue.json</output>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json</output>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 valid playbook JSON definitions created</criterion>
+    <criterion testable="true">All use sprk_playbooktype = 2 and CreateNotification node</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

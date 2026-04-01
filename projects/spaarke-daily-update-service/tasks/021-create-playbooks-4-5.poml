@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Create notification playbooks 4-5 (new emails, new events)</title>
+    <phase>3: Notification Playbooks</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>054</blocks>
+    <tags>ai, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates new playbook definition files</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create 2 notification playbook JSON definitions: (4) New emails related to user's matters, (5) New events on user's matters/projects.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in playbook design.</role>
+
+  <goal>2 playbook JSON definitions ready for deployment.</goal>
+
+  <context>
+    <relevant-files>
+      <file>docs/guides/PLAYBOOK-DESIGN-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PLAYBOOK-DESIGN-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create new-emails playbook (emails received since last check on user's matters)</step>
+    <step order="2">Create new-events playbook (events created/updated on user's matters/projects)</step>
+    <step order="3">Both: sprk_playbooktype=2, schedule in sprk_configjson, CreateNotification node</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json</output>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">2 valid playbook JSON definitions created</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

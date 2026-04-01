@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarke-daily-update-service">
+  <metadata>
+    <title>End-to-end verification against success criteria</title>
+    <phase>7: Testing &amp; Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>061, 062</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Final verification, testing tag</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify all 20 success criteria from spec.md against the deployed system. Check each criterion and document pass/fail status.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>All 20 success criteria verified. Any failures documented with remediation plan.</goal>
+
+  <context>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Review all 20 success criteria from spec.md</step>
+    <step order="2">Verify each criterion against deployed system</step>
+    <step order="3">Document pass/fail for each</step>
+    <step order="4">Fix any failing criteria</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 20 success criteria pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

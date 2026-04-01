@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Add configuration panel for createNotification node</title>
+    <phase>5: PlaybookBuilder Extension</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend implementation (.tsx)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the configuration side panel for the createNotification node in PlaybookBuilder. Fields: title (text), body (text/template), category (dropdown), priority (dropdown), action URL (text), regarding record field. Follow existing node config panel patterns.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PlaybookBuilder UI.</role>
+
+  <goal>Config panel for createNotification node with all fields. Changes save to node config data.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 form components</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Study existing node config panel patterns in PlaybookBuilder</step>
+    <step order="2">Create NotificationNodeConfig.tsx component</step>
+    <step order="3">Add fields: title, body, category, priority, actionUrl, regardingField</step>
+    <step order="4">Wire into PlaybookBuilder node selection handler</step>
+    <step order="5">Build to verify</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/config/NotificationNodeConfig.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Config panel renders for createNotification nodes</criterion>
+    <criterion testable="true">All fields present and save to node config</criterion>
+    <criterion testable="true">Build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

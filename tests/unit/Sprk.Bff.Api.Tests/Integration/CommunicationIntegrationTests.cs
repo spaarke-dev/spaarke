@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
+using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
@@ -1380,6 +1381,7 @@ public class CommunicationIntegrationTests
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped
             jobSubmissionService,
+            new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Options.Create(opts),
             config,
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());

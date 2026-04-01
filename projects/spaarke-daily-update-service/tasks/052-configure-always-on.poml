@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Configure App Service WEBSITE_ALWAYS_ON</title>
+    <phase>6: Integration, Cleanup &amp; Polish</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>azure, config</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Simple configuration update</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Ensure App Service has WEBSITE_ALWAYS_ON = true configured. This is required for the PlaybookSchedulerService BackgroundService to run continuously.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>WEBSITE_ALWAYS_ON = true confirmed on App Service configuration.</goal>
+
+  <context>
+    <relevant-files>
+      <file>infrastructure/</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check current App Service configuration for WEBSITE_ALWAYS_ON</step>
+    <step order="2">If not set, add to Bicep/infrastructure templates or configure via az CLI</step>
+    <step order="3">Document the configuration requirement</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">infrastructure/ (if Bicep update needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">WEBSITE_ALWAYS_ON = true on App Service</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

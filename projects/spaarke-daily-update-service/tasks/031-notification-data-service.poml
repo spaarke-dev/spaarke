@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Implement notification data service (Xrm.WebApi queries)</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032, 033, 034, 035</blocks>
+    <tags>frontend, react, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements data layer (.ts/.tsx), 6+ steps</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement the notification data service for the Daily Digest Code Page. Query appnotification via Xrm.WebApi.retrieveMultipleRecords, group by category (from customData.category), fetch user preferences from sprk_userpreference, and provide typed data to UI components.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Xrm.WebApi and TypeScript data services.</role>
+
+  <goal>Data service that queries notifications, groups by channel/category, respects user preferences, and provides typed data for UI rendering. Uses Promise.allSettled for parallel fetching.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST query via Xrm.WebApi.retrieveMultipleRecords</constraint>
+    <constraint source="project">MUST use Promise.allSettled — individual channel failure shows inline error</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define TypeScript types for notification data, channel groups, user preferences</step>
+    <step order="2">Create notificationService.ts with fetchNotifications()</step>
+    <step order="3">Query appnotification for current user, unread, sorted by createdon desc</step>
+    <step order="4">Group by category from customData JSON</step>
+    <step order="5">Create preferencesService.ts to fetch/save user preferences</step>
+    <step order="6">Use Promise.allSettled for parallel channel fetching</step>
+    <step order="7">Create custom hook useNotificationData() wrapping the services</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/services/notificationService.ts</output>
+    <output type="code">src/solutions/DailyBriefing/src/services/preferencesService.ts</output>
+    <output type="code">src/solutions/DailyBriefing/src/hooks/useNotificationData.ts</output>
+    <output type="code">src/solutions/DailyBriefing/src/types/notifications.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Queries appnotification via Xrm.WebApi</criterion>
+    <criterion testable="true">Groups notifications by category</criterion>
+    <criterion testable="true">Uses Promise.allSettled for parallel fetching</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

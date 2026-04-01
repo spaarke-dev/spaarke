@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Build empty state and mark-read actions</title>
+    <phase>4: Daily Digest Code Page</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>053</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend implementation (.tsx)</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the empty state ("You're all caught up!") and mark-read actions (per-item and "Mark All Read" batch). Both update appnotification.isread via Xrm.WebApi.updateRecord.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>Empty state renders when no unread notifications. Mark read and mark all read update Dataverse and refresh UI.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EmptyState.tsx with "You're all caught up!" and last-checked timestamp</step>
+    <step order="2">Add mark-read button to NotificationItem</step>
+    <step order="3">Add "Mark All Read" button to digest header</step>
+    <step order="4">Implement updateRecord calls for appnotification.isread</step>
+    <step order="5">Refresh notification data after mark-read actions</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/components/EmptyState.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Empty state renders when no unread notifications</criterion>
+    <criterion testable="true">Mark read updates appnotification.isread via Xrm.WebApi</criterion>
+    <criterion testable="true">Mark all read batch action works</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

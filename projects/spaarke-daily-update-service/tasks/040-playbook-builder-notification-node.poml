@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Add createNotification node type to PlaybookBuilder types and palette</title>
+    <phase>5: PlaybookBuilder Extension</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>041</blocks>
+    <tags>frontend, react, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing code (.ts/.tsx)</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add createNotification as a new canvas node type in the PlaybookBuilder. Update playbook.ts types to include ActionType 50 mapping, add the node to the palette with appropriate icon and category, and ensure it can be dragged onto the canvas.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in PlaybookBuilder canvas and TypeScript.</role>
+
+  <goal>createNotification node appears in PlaybookBuilder palette, can be dragged onto canvas, maps to NodeType.Workflow / ActionType.CreateNotification (50).</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/types/playbook.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read playbook.ts to understand existing ActionType mappings</step>
+    <step order="2">Read canvas.ts to understand node type definitions</step>
+    <step order="3">Add CreateNotification = 50 to the TypeScript ActionType enum</step>
+    <step order="4">Add createNotification canvas node type definition</step>
+    <step order="5">Add to node palette with Bell/Notification icon and Workflow category</step>
+    <step order="6">Build to verify</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/types/playbook.ts</output>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ActionType enum includes CreateNotification = 50</criterion>
+    <criterion testable="true">Node appears in palette with correct icon</criterion>
+    <criterion testable="true">Build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

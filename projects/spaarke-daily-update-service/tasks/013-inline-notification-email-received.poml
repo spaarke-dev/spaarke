@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-daily-update-service">
+  <metadata>
+    <title>Add inline notification to IncomingCommunicationProcessor (email)</title>
+    <phase>2: Scheduler &amp; Inline Notifications</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies existing processor code (.cs)</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add inline notification after email receipt in IncomingCommunicationProcessor. Notify relevant users when a new email related to their matters is received.
+  </prompt>
+
+  <role>SPAARKE platform developer.</role>
+
+  <goal>After email processing, a notification is created for users associated with the email's matter/project.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IncomingCommunicationProcessor.cs to find email processing completion point</step>
+    <step order="2">Add NotificationService call after successful email processing</step>
+    <step order="3">Set category="emails", include sender and subject in notification</step>
+    <step order="4">Run dotnet build</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Notification created after email processing</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

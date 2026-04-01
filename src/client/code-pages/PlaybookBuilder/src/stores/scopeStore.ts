@@ -37,6 +37,7 @@ type PlaybookNodeType =
   | 'deliverOutput'
   | 'createTask'
   | 'sendEmail'
+  | 'createNotification'
   | 'wait';
 
 const actionTypeCapabilities: Record<PlaybookNodeType, ActionTypeCapabilities> = {
@@ -68,6 +69,11 @@ const actionTypeCapabilities: Record<PlaybookNodeType, ActionTypeCapabilities> =
   sendEmail: {
     allowsSkills: false,
     allowsKnowledge: true,
+    allowsTools: false,
+  },
+  createNotification: {
+    allowsSkills: false,
+    allowsKnowledge: false,
     allowsTools: false,
   },
   wait: { allowsSkills: false, allowsKnowledge: false, allowsTools: false },
