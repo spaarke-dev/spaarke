@@ -1,6 +1,7 @@
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
+using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.ExternalAccess;
@@ -32,6 +33,39 @@ public static class EndpointMappingExtensions
     private static void MapHealthEndpoints(WebApplication app)
     {
         app.MapHealthChecks("/healthz").AllowAnonymous();
+
+        // DEBUG: Token inspection endpoint - logs token claims from Copilot
+        // TODO: Remove before production
+        app.MapGet("/debug/token", (HttpContext ctx) =>
+        {
+            var authHeader = ctx.Request.Headers.Authorization.ToString();
+            if (string.IsNullOrEmpty(authHeader))
+                return Results.Ok(new { error = "No Authorization header" });
+
+            try
+            {
+                var token = authHeader.Replace("Bearer ", "");
+                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                var jwt = handler.ReadJwtToken(token);
+                return Results.Ok(new
+                {
+                    audience = jwt.Audiences,
+                    issuer = jwt.Issuer,
+                    subject = jwt.Subject,
+                    appId = jwt.Claims.FirstOrDefault(c => c.Type == "appid")?.Value,
+                    azp = jwt.Claims.FirstOrDefault(c => c.Type == "azp")?.Value,
+                    scp = jwt.Claims.FirstOrDefault(c => c.Type == "scp")?.Value,
+                    oid = jwt.Claims.FirstOrDefault(c => c.Type == "oid")?.Value,
+                    tid = jwt.Claims.FirstOrDefault(c => c.Type == "tid")?.Value,
+                    validFrom = jwt.ValidFrom,
+                    validTo = jwt.ValidTo
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { error = ex.Message, headerLength = authHeader.Length });
+            }
+        }).AllowAnonymous().WithTags("Debug").ExcludeFromDescription();
         app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
         app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
@@ -173,6 +207,9 @@ public static class EndpointMappingExtensions
         // Registered separately because ContainerItemEndpoints maps absolute paths (not relative to the /api/spe group).
         // Inherits auth via RequireAuthorization() called inside MapContainerItemEndpoints. (SPE-017 through SPE-021)
         app.MapContainerItemEndpoints();
+
+        // M365 Copilot Agent gateway endpoints (/api/agent/*)
+        app.MapAgentEndpoints();
 
         // External access endpoints:
         //   /api/v1/external/*        — Power Pages portal users (portal JWT auth)

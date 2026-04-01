@@ -1,0 +1,77 @@
+<task id="MCI-028" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>User Documentation</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>documentation, user-guide</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-023</dependencies>
+  </metadata>
+
+  <prompt>
+    Write end-user and admin documentation for the Spaarke AI Copilot integration.
+    The user guide covers how to use Spaarke AI capabilities within Microsoft 365 Copilot
+    (search documents, run playbooks, query matters, draft emails, handoff to full app).
+    The admin guide covers configuration, deployment, playbook visibility management,
+    and troubleshooting.
+  </prompt>
+
+  <role>Technical writer with expertise in Microsoft 365, Copilot extensibility, and enterprise SaaS documentation.</role>
+
+  <goal>
+    Complete, clear documentation that enables end users to use Spaarke AI in Copilot
+    productively and administrators to deploy, configure, and troubleshoot the integration.
+  </goal>
+
+  <constraints>
+    - Write for a non-technical audience (end users) in the user guide
+    - Write for IT administrators in the admin guide
+    - Include screenshots placeholders ([Screenshot: description]) for key workflows
+    - Document all eight use cases (UC-M1 through UC-M8) with step-by-step instructions
+    - Include troubleshooting section with common issues and solutions
+    - Follow existing documentation style in docs/guides/
+    - Reference Adaptive Card interactions and handoff behavior accurately
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>projects/ai-m365-copilot-integration/README.md</file>
+      <file>docs/guides/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md for all use cases (UC-M1 through UC-M8) and feature requirements.</step>
+    <step order="2">Review existing documentation in docs/guides/ for style and format conventions.</step>
+    <step order="3">Write M365-COPILOT-USER-GUIDE.md: introduction, getting started, use case walkthroughs (search docs, run playbooks, query matters, draft emails, handoff), tips and best practices.</step>
+    <step order="4">Add screenshot placeholders for each key interaction in the user guide.</step>
+    <step order="5">Write M365-COPILOT-ADMIN-GUIDE.md: prerequisites, deployment steps, agent configuration, playbook visibility management, security role mapping, monitoring and telemetry.</step>
+    <step order="6">Add troubleshooting section to admin guide: common errors, auth issues, configuration problems, escalation paths.</step>
+    <step order="7">Cross-reference between guides (user guide links to admin guide for setup, admin guide links to user guide for feature descriptions).</step>
+    <step order="8">Review both guides for accuracy against implemented features and API surface.</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>docs/guides/M365-COPILOT-USER-GUIDE.md</output>
+    <output>docs/guides/M365-COPILOT-ADMIN-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>User guide covers all eight use cases (UC-M1 through UC-M8) with step-by-step instructions.</criterion>
+    <criterion>User guide is written for non-technical end users with clear, jargon-free language.</criterion>
+    <criterion>Admin guide covers deployment, configuration, playbook visibility, and role management.</criterion>
+    <criterion>Troubleshooting section addresses at least five common issues with resolution steps.</criterion>
+    <criterion>Screenshot placeholders are present for all key workflow steps.</criterion>
+    <criterion>Both guides follow existing documentation style conventions in docs/guides/.</criterion>
+    <criterion>Cross-references between user and admin guides are correct.</criterion>
+  </acceptance-criteria>
+</task>

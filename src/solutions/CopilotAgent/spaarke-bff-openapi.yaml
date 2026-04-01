@@ -1,0 +1,1261 @@
+openapi: 3.0.3
+info:
+  title: Spaarke BFF API
+  description: >
+    Spaarke Backend-for-Frontend API for legal document management, AI-powered analysis,
+    matter tracking, and playbook execution. Used by M365 Copilot Declarative Agent
+    to provide Spaarke AI capabilities through the Copilot side pane.
+  version: 1.0.0
+servers:
+  - url: https://spe-api-dev-67e2xz.azurewebsites.net
+    description: Development environment
+
+paths:
+  # ─── AI Chat ───
+  /api/ai/chat/sessions:
+    post:
+      operationId: createChatSession
+      summary: Create a new AI chat session
+      description: Creates a new chat session for conversational AI interaction. Optionally accepts host context for entity-scoped chat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: Chat session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+
+  /api/ai/chat/sessions/{sessionId}/messages:
+    post:
+      operationId: sendChatMessage
+      summary: Send a message in a chat session
+      description: Sends a user message and receives an AI response. Returns structured response suitable for Adaptive Card rendering.
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatMessageRequest'
+      responses:
+        '200':
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessageResponse'
+
+  /api/ai/chat/sessions/{sessionId}/history:
+    get:
+      operationId: getChatHistory
+      summary: Get chat session message history
+      description: Retrieves the full message history for a chat session.
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Message history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatMessage'
+
+  /api/ai/chat/playbooks:
+    get:
+      operationId: listChatPlaybooks
+      summary: List available playbooks for chat
+      description: Returns playbooks available for the current user context. Use this to discover what analysis capabilities are available.
+      responses:
+        '200':
+          description: Available playbooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlaybookSummary'
+
+  /api/ai/chat/context-mappings:
+    get:
+      operationId: getChatContextMappings
+      summary: Get playbook context mappings
+      description: Resolves which playbooks are available for a given document type. Use after identifying a document to present relevant analysis options.
+      parameters:
+        - name: documentType
+          in: query
+          schema:
+            type: string
+          description: Document type to resolve playbooks for
+      responses:
+        '200':
+          description: Context mappings with available playbooks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextMappings'
+
+  # ─── AI Search ───
+  /api/ai/search:
+    post:
+      operationId: semanticSearch
+      summary: Search documents using semantic/hybrid search
+      description: >
+        Performs hybrid semantic search combining vector similarity and keyword matching.
+        Use this when a user asks to find documents by description, topic, or content.
+        All results are filtered by the user's authorization — only documents the user
+        is permitted to see are returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+
+  /api/ai/search/records:
+    post:
+      operationId: searchRecords
+      summary: Search Dataverse records
+      description: Performs hybrid search across Dataverse entities (matters, projects, events, documents). Use when searching for entities by name or description.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordSearchRequest'
+      responses:
+        '200':
+          description: Record search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordSearchResults'
+
+  # ─── AI Playbooks ───
+  /api/ai/playbooks:
+    get:
+      operationId: listPlaybooks
+      summary: List user's playbooks
+      description: Returns all playbooks accessible to the current user. Includes both personal and shared playbooks.
+      responses:
+        '200':
+          description: List of playbooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Playbook'
+
+  /api/ai/playbooks/public:
+    get:
+      operationId: listPublicPlaybooks
+      summary: List public playbooks
+      description: Returns all publicly available playbooks. Use when a user asks "What analysis tools are available?"
+      responses:
+        '200':
+          description: Public playbooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Playbook'
+
+  /api/ai/playbooks/{id}:
+    get:
+      operationId: getPlaybook
+      summary: Get playbook details
+      description: Returns detailed information about a specific playbook including its description, nodes, and configuration.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Playbook details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playbook'
+
+  /api/ai/playbooks/{id}/execute:
+    post:
+      operationId: executePlaybook
+      summary: Execute a playbook
+      description: >
+        Starts playbook execution against a document or set of documents. For quick playbooks,
+        results are returned directly. For long-running playbooks, a run ID is returned
+        that can be polled for status.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaybookExecuteRequest'
+      responses:
+        '200':
+          description: Execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookRunResult'
+
+  /api/ai/playbooks/runs/{runId}:
+    get:
+      operationId: getPlaybookRunStatus
+      summary: Get playbook run status
+      description: Returns the current status and progress of a playbook execution. Poll this endpoint for long-running playbooks.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookRunStatus'
+
+  /api/ai/playbooks/runs/{runId}/detail:
+    get:
+      operationId: getPlaybookRunDetail
+      summary: Get detailed playbook run results
+      description: Returns the full results of a completed playbook execution including findings, risk flags, and extracted data.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Run detail with results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookRunDetail'
+
+  # ─── AI Analysis ───
+  /api/ai/analysis/create:
+    post:
+      operationId: createAnalysis
+      summary: Create a new document analysis
+      description: Creates an analysis record and optionally starts execution. Use for deep document analysis that requires the Analysis Workspace.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnalysisRequest'
+      responses:
+        '200':
+          description: Analysis created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRecord'
+
+  /api/ai/analysis/{analysisId}:
+    get:
+      operationId: getAnalysis
+      summary: Get analysis details
+      description: Returns the current state of an analysis including its output, findings, and status.
+      parameters:
+        - name: analysisId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Analysis details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRecord'
+
+  # ─── AI Scopes ───
+  /api/ai/scopes/skills:
+    get:
+      operationId: listSkills
+      summary: List available AI skills
+      description: Returns all available AI skills (inline analysis capabilities like summarize, extract, compare).
+      responses:
+        '200':
+          description: Available skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scope'
+
+  /api/ai/scopes/actions:
+    get:
+      operationId: listActions
+      summary: List available AI actions
+      description: Returns all available AI actions (JPS-based analysis actions).
+      responses:
+        '200':
+          description: Available actions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scope'
+
+  # ─── Documents ───
+  /api/v1/documents:
+    get:
+      operationId: listDocuments
+      summary: List documents
+      description: Returns documents accessible to the current user. Supports filtering by matter, project, and document type.
+      parameters:
+        - name: matterId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: projectId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: documentType
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Document list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Document'
+
+  /api/v1/documents/{id}:
+    get:
+      operationId: getDocument
+      summary: Get document details
+      description: Returns metadata and properties for a specific document.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+
+  /api/documents/{documentId}/preview-url:
+    get:
+      operationId: getDocumentPreviewUrl
+      summary: Get document preview URL
+      description: Returns a URL to preview the document in a browser. Use this to provide "View Document" links.
+      parameters:
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Preview URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewUrl'
+
+  /api/documents/{documentId}/open-links:
+    get:
+      operationId: getDocumentOpenLinks
+      summary: Get document open links
+      description: Returns URLs to open the document in various applications (browser, desktop Office, etc.).
+      parameters:
+        - name: documentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Open links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentOpenLinks'
+
+  # ─── Events / Tasks ───
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      summary: List events and tasks
+      description: >
+        Returns events (tasks, deadlines, appointments) for the current user.
+        Use when a user asks about their tasks, due dates, or assignments.
+        Supports filtering by matter, assignee, status, and date range.
+      parameters:
+        - name: matterId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: assigneeId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, completed, cancelled, overdue]
+        - name: dueBefore
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dueAfter
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Events list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+    post:
+      operationId: createEvent
+      summary: Create a new event or task
+      description: Creates a new event (task, deadline, or appointment) associated with a matter or project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+      responses:
+        '201':
+          description: Event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+
+  /api/v1/events/{id}:
+    get:
+      operationId: getEvent
+      summary: Get event details
+      description: Returns detailed information about a specific event including logs and associations.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Event details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+
+  /api/v1/events/{id}/complete:
+    post:
+      operationId: completeEvent
+      summary: Mark event as complete
+      description: Marks an event or task as completed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Event completed
+
+  # ─── Workspace ───
+  /api/workspace/portfolio:
+    get:
+      operationId: getPortfolio
+      summary: Get portfolio overview
+      description: Returns the user's portfolio overview including matters, projects, and summary metrics.
+      responses:
+        '200':
+          description: Portfolio data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Portfolio'
+
+  /api/workspace/briefing:
+    get:
+      operationId: getBriefing
+      summary: Get daily briefing
+      description: Returns the user's daily briefing with upcoming deadlines, recent activity, and priority items.
+      responses:
+        '200':
+          description: Briefing data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Briefing'
+
+  /api/workspace/matters/ai-summary:
+    post:
+      operationId: getMatterAiSummary
+      summary: Get AI-generated matter summary
+      description: Generates an AI summary of a matter including recent activity, key documents, and status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatterSummaryRequest'
+      responses:
+        '200':
+          description: AI summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatterSummary'
+
+  /api/workspace/files/summarize:
+    post:
+      operationId: summarizeFile
+      summary: Summarize a document
+      description: Generates an AI summary of a document's content. Returns structured summary suitable for Adaptive Card display.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummarizeFileRequest'
+      responses:
+        '200':
+          description: File summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileSummary'
+
+  # ─── Communications ───
+  /api/communications/send:
+    post:
+      operationId: sendCommunication
+      summary: Send a communication
+      description: Sends an email or other communication. Use when a user asks to draft and send an email about a matter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCommunicationRequest'
+      responses:
+        '200':
+          description: Communication sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommunicationResult'
+
+  # ─── Finance ───
+  /api/finance/matters/{matterId}/summary:
+    get:
+      operationId: getMatterFinanceSummary
+      summary: Get matter finance summary
+      description: Returns financial summary for a matter including budget, spend, and invoice status.
+      parameters:
+        - name: matterId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Finance summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinanceSummary'
+
+  # ─── User ───
+  /api/me:
+    get:
+      operationId: getCurrentUser
+      summary: Get current user profile
+      description: Returns the authenticated user's profile and permissions.
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+
+  /api/me/capabilities:
+    get:
+      operationId: getUserCapabilities
+      summary: Get user capabilities
+      description: Returns what the current user is permitted to do (e.g., which playbooks, which matters).
+      responses:
+        '200':
+          description: User capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserCapabilities'
+
+  # ─── Agent Gateway ───
+  /api/agent/message:
+    post:
+      operationId: handleAgentMessage
+      summary: Handle agent message
+      description: Receives a message from the M365 Copilot agent, routes to appropriate BFF services, and returns an Adaptive Card response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentMessageRequest'
+      responses:
+        '200':
+          description: Agent response with optional Adaptive Card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentMessageResponse'
+
+  /api/agent/playbooks:
+    get:
+      operationId: listAgentPlaybooks
+      summary: List playbooks for agent
+      description: Returns playbooks available for the agent to offer to users. Optionally filtered by document type.
+      parameters:
+        - name: documentType
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Available playbooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlaybookSummary'
+
+  /api/agent/run-playbook:
+    post:
+      operationId: runAgentPlaybook
+      summary: Run a playbook from agent
+      description: Invokes a playbook on a document and returns results as an Adaptive Card or a deep-link for long-running analysis.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentPlaybookRequest'
+      responses:
+        '200':
+          description: Playbook result or status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPlaybookResponse'
+
+  /api/agent/playbooks/status/{jobId}:
+    get:
+      operationId: getAgentPlaybookStatus
+      summary: Get agent playbook execution status
+      description: Returns the current status of a long-running playbook execution started from the agent.
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Playbook execution status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybookStatusResponse'
+
+components:
+  schemas:
+    # ─── Chat ───
+    CreateSessionRequest:
+      type: object
+      properties:
+        hostContext:
+          $ref: '#/components/schemas/ChatHostContext'
+    ChatHostContext:
+      type: object
+      properties:
+        entityType:
+          type: string
+        entityId:
+          type: string
+          format: uuid
+        workspaceType:
+          type: string
+    ChatSession:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ChatMessageRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        playbookId:
+          type: string
+          format: uuid
+    ChatMessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        citations:
+          type: array
+          items:
+            type: object
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # ─── Search ───
+    SearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        top:
+          type: integer
+          default: 10
+        entityType:
+          type: string
+        matterId:
+          type: string
+          format: uuid
+    SearchResults:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        totalCount:
+          type: integer
+    SearchResult:
+      type: object
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        snippet:
+          type: string
+        score:
+          type: number
+        matterName:
+          type: string
+        documentType:
+          type: string
+    RecordSearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        entityTypes:
+          type: array
+          items:
+            type: string
+        top:
+          type: integer
+    RecordSearchResults:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+
+    # ─── Playbooks ───
+    Playbook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        isPublic:
+          type: boolean
+        documentTypes:
+          type: array
+          items:
+            type: string
+    PlaybookSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+    PlaybookExecuteRequest:
+      type: object
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        parameters:
+          type: object
+    PlaybookRunResult:
+      type: object
+      properties:
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, completed, failed]
+    PlaybookRunStatus:
+      type: object
+      properties:
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        progress:
+          type: integer
+        currentStep:
+          type: string
+    PlaybookRunDetail:
+      type: object
+      properties:
+        runId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        findings:
+          type: array
+          items:
+            type: object
+        summary:
+          type: string
+        confidence:
+          type: number
+
+    # ─── Analysis ───
+    CreateAnalysisRequest:
+      type: object
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        playbookId:
+          type: string
+          format: uuid
+        matterId:
+          type: string
+          format: uuid
+    AnalysisRecord:
+      type: object
+      properties:
+        analysisId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        output:
+          type: string
+        documentId:
+          type: string
+          format: uuid
+
+    # ─── Documents ───
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        documentType:
+          type: string
+        matterName:
+          type: string
+        matterId:
+          type: string
+          format: uuid
+        uploadedAt:
+          type: string
+          format: date-time
+        fileSize:
+          type: integer
+        pageCount:
+          type: integer
+    PreviewUrl:
+      type: object
+      properties:
+        url:
+          type: string
+    DocumentOpenLinks:
+      type: object
+      properties:
+        webUrl:
+          type: string
+        desktopUrl:
+          type: string
+
+    # ─── Events ───
+    Event:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+        assigneeName:
+          type: string
+        matterName:
+          type: string
+        matterId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+    CreateEventRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+          format: date-time
+        matterId:
+          type: string
+          format: uuid
+        assigneeId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+
+    # ─── Workspace ───
+    Portfolio:
+      type: object
+      properties:
+        totalMatters:
+          type: integer
+        activeMatters:
+          type: integer
+        totalProjects:
+          type: integer
+    Briefing:
+      type: object
+      properties:
+        upcomingDeadlines:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        recentActivity:
+          type: array
+          items:
+            type: object
+    MatterSummaryRequest:
+      type: object
+      properties:
+        matterId:
+          type: string
+          format: uuid
+    MatterSummary:
+      type: object
+      properties:
+        matterId:
+          type: string
+          format: uuid
+        summary:
+          type: string
+        keyDocuments:
+          type: array
+          items:
+            type: string
+        recentActivity:
+          type: array
+          items:
+            type: string
+    SummarizeFileRequest:
+      type: object
+      properties:
+        documentId:
+          type: string
+          format: uuid
+    FileSummary:
+      type: object
+      properties:
+        summary:
+          type: string
+        keyPoints:
+          type: array
+          items:
+            type: string
+
+    # ─── Communications ───
+    SendCommunicationRequest:
+      type: object
+      properties:
+        recipientEmail:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        matterId:
+          type: string
+          format: uuid
+    CommunicationResult:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+
+    # ─── Finance ───
+    FinanceSummary:
+      type: object
+      properties:
+        matterId:
+          type: string
+          format: uuid
+        totalBudget:
+          type: number
+        totalSpend:
+          type: number
+        invoiceCount:
+          type: integer
+
+    # ─── User ───
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        email:
+          type: string
+    UserCapabilities:
+      type: object
+      properties:
+        canAccessPlaybooks:
+          type: boolean
+        canSearchDocuments:
+          type: boolean
+
+    # ─── Context Mappings ───
+    ContextMappings:
+      type: object
+      properties:
+        documentType:
+          type: string
+        availablePlaybooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaybookSummary'
+
+    # ─── Scopes ───
+    Scope:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+
+    # ─── Agent Gateway ───
+    AgentMessageRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        conversationId:
+          type: string
+        entityContext:
+          type: object
+          properties:
+            entityType:
+              type: string
+            entityId:
+              type: string
+              format: uuid
+    AgentMessageResponse:
+      type: object
+      properties:
+        text:
+          type: string
+        adaptiveCard:
+          type: object
+        suggestedActions:
+          type: array
+          items:
+            type: string
+    AgentPlaybookRequest:
+      type: object
+      properties:
+        playbookId:
+          type: string
+          format: uuid
+        documentId:
+          type: string
+          format: uuid
+        parameters:
+          type: object
+    AgentPlaybookResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [completed, running, deep-link]
+        adaptiveCard:
+          type: object
+        deepLinkUrl:
+          type: string
+        jobId:
+          type: string
+          format: uuid
+    PlaybookStatusResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, completed, failed]
+        progress:
+          type: integer
+        resultCard:
+          type: object
+
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+          scopes:
+            api://spe-api-dev-67e2xz/user_impersonation: Access Spaarke BFF API
+
+security:
+  - oauth2:
+      - api://spe-api-dev-67e2xz/user_impersonation

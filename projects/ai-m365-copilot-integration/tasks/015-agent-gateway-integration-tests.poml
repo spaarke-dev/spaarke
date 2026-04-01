@@ -1,0 +1,78 @@
+<task id="MCI-015" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Agent Gateway Integration Tests</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>testing, integration-test, bff-api</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+    <dependencies>MCI-010, MCI-011, MCI-013</dependencies>
+  </metadata>
+
+  <prompt>
+    Write integration tests for all agent gateway endpoints covering happy paths, auth flows, and error
+    scenarios. Follow existing test patterns established in the tests/ directory.
+  </prompt>
+
+  <role>Test engineer familiar with .NET integration testing and Spaarke test conventions</role>
+
+  <goal>
+    Create comprehensive integration tests for the agent gateway: message routing, playbook listing,
+    playbook invocation, SSO/OBO auth flow, and error scenarios (invalid token, missing permissions,
+    BFF service failures). Tests should use WebApplicationFactory and follow existing test patterns.
+  </goal>
+
+  <constraints>
+    - Follow existing test patterns and conventions in the tests/ directory
+    - Use WebApplicationFactory for integration tests — no external service dependencies
+    - Mock external services (Graph, Dataverse, Redis) — tests must run without infrastructure
+    - Test auth scenarios with fabricated JWT tokens — do not call real Entra ID
+    - Each test method should test one specific behavior (single assertion principle where practical)
+    - Tests must be deterministic and parallelizable
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing integration test patterns in tests/ for setup, fixtures, and conventions</step>
+    <step order="2">Create tests/integration/Agent/ directory and AgentGatewayTests.cs test class</step>
+    <step order="3">Set up WebApplicationFactory with mocked services (chat service, playbook service, token service)</step>
+    <step order="4">Write tests for POST /api/agent/message — valid message routing, empty message handling, service delegation</step>
+    <step order="5">Write tests for GET /api/agent/playbooks — playbook listing, empty results, filtering</step>
+    <step order="6">Write tests for POST /api/agent/run-playbook — valid invocation, invalid playbook ID, parameter validation</step>
+    <step order="7">Write auth flow tests — valid token accepted, expired token rejected, missing token returns 401, insufficient scope returns 403</step>
+    <step order="8">Write error scenario tests — BFF service failure returns 502, timeout handling, malformed request returns 400</step>
+    <step order="9">Run all tests with dotnet test and verify they pass</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/integration/Agent/AgentGatewayTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Integration tests exist for all three agent gateway endpoints (message, playbooks, run-playbook)</criterion>
+    <criterion>Auth flow tests cover: valid token, expired token (401), missing token (401), insufficient scope (403)</criterion>
+    <criterion>Error scenario tests cover: BFF service failure (502), malformed request (400), timeout handling</criterion>
+    <criterion>Tests use WebApplicationFactory with mocked external services</criterion>
+    <criterion>No tests depend on external infrastructure (Graph, Dataverse, Redis, Entra ID)</criterion>
+    <criterion>Tests follow existing patterns and conventions from the tests/ directory</criterion>
+    <criterion>All tests pass when run with dotnet test</criterion>
+    <criterion>Tests are deterministic and can run in parallel</criterion>
+  </acceptance-criteria>
+</task>

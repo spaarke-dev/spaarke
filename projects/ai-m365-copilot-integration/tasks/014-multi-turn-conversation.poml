@@ -1,0 +1,80 @@
+<task id="MCI-014" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Multi-Turn Conversation Support</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>bff-api, agent-gateway, chat</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+    <dependencies>MCI-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement conversation session management for the agent gateway that maps M365 conversation references
+    to existing BFF chat sessions. Maintain context across turns so the agent knows the current entity,
+    document, and playbook state without the user repeating information.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Spaarke chat architecture and session management</role>
+
+  <goal>
+    Implement AgentConversationService that maps M365 Copilot conversation references to BFF ChatSession
+    instances. Maintain multi-turn context (current entity, active document, in-progress playbook) across
+    conversation turns using the existing ChatSession infrastructure.
+  </goal>
+
+  <constraints>
+    - ADR-013: Extend existing AI architecture — do not create parallel session management
+    - ADR-009: Use Redis-first caching for session state — no in-memory session stores
+    - Reuse existing ChatSession model and infrastructure from BFF chat endpoints
+    - Conversation mapping must be by tenant + conversation ID (multi-tenant safe)
+    - Session expiry must align with existing chat session TTL policies
+    - Do not store sensitive data (tokens, PII) in session state
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Features/Ai/Chat/</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing ChatSession infrastructure in Features/Ai/Chat/ for session model and storage patterns</step>
+    <step order="2">Create AgentConversationService.cs in Features/Agent/ with methods: GetOrCreateSession, UpdateContext, GetSession</step>
+    <step order="3">Implement conversation reference to ChatSession mapping using composite key (tenantId:conversationId)</step>
+    <step order="4">Define AgentConversationContext model capturing current entity reference, active document ID, and playbook state</step>
+    <step order="5">Implement context update logic — each turn can update the current entity, document, or playbook focus</step>
+    <step order="6">Integrate with Redis cache for session persistence using existing cache patterns (ADR-009)</step>
+    <step order="7">Configure session TTL to match existing ChatSession policies</step>
+    <step order="8">Wire AgentConversationService into agent gateway endpoints from MCI-010</step>
+    <step order="9">Verify build succeeds with dotnet build</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentConversationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AgentConversationService maps M365 conversation references to BFF ChatSession instances</criterion>
+    <criterion>Conversation mapping uses composite key (tenantId:conversationId) for multi-tenant safety</criterion>
+    <criterion>Multi-turn context persists current entity, active document, and playbook state across turns</criterion>
+    <criterion>Session state is stored in Redis per ADR-009 — no in-memory session stores</criterion>
+    <criterion>Session TTL aligns with existing ChatSession expiry policies</criterion>
+    <criterion>No sensitive data (tokens, PII) is stored in session state</criterion>
+    <criterion>Existing ChatSession infrastructure is reused, not duplicated</criterion>
+    <criterion>Service integrates with agent gateway endpoints from MCI-010</criterion>
+    <criterion>Solution builds successfully with dotnet build</criterion>
+  </acceptance-criteria>
+</task>

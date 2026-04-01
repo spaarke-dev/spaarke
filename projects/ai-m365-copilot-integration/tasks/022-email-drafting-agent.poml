@@ -1,0 +1,89 @@
+<task id="MCI-022" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Email Drafting via Agent</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>bff-api, communications, agent-gateway</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010, MCI-019</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the email drafting flow for the M365 Copilot agent. When a user asks the agent
+    to draft an email related to a matter or document, the service resolves the matter context,
+    queries relevant activity history, calls Azure OpenAI to generate a contextual email draft,
+    and returns the result as an email preview Adaptive Card with edit/send/cancel actions.
+  </prompt>
+
+  <role>Senior .NET developer experienced with Azure OpenAI integration, communications modules, and BFF API patterns</role>
+
+  <goal>
+    Deliver an EmailDraftService that generates contextual email drafts via Azure OpenAI and
+    returns them as editable email preview Adaptive Cards, wrapping the existing communications
+    module capabilities.
+  </goal>
+
+  <constraints>
+    - Wrap existing communications module — do not reimplement email sending or activity queries
+    - Use Azure OpenAI for draft generation (follow existing AI integration patterns)
+    - Follow ADR-013: extend BFF, not a separate service
+    - Follow AI cost and rate limit constraints from ADR-016
+    - Return email-preview Adaptive Card with editable subject and body fields
+    - Include Action.Submit for Edit, Send, and Cancel operations
+    - Handle missing context gracefully (no matter found, no activity history)
+    - Sanitize any PII from AI-generated content before including in card
+    - Follow ADR-010 DI minimalism for service registration
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/ai-implementation-reference.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing communications module interfaces for activity queries and email operations</step>
+    <step order="2">Review ai-implementation-reference.md for Azure OpenAI integration patterns and prompt construction</step>
+    <step order="3">Create EmailDraftService.cs with constructor injecting communications module, Azure OpenAI client, and AdaptiveCardFormatterService</step>
+    <step order="4">Implement DraftEmailAsync method: accept matter reference, recipient hint, and user instructions</step>
+    <step order="5">Implement matter resolution — look up matter and retrieve relevant activity history for context</step>
+    <step order="6">Implement Azure OpenAI draft generation — construct prompt with matter context, activity summary, and user instructions; call completion API</step>
+    <step order="7">Implement response formatting — pass generated draft to AdaptiveCardFormatterService to create email-preview card</step>
+    <step order="8">Implement action handling — define Submit action payloads for Edit (re-draft with feedback), Send (trigger email send), and Cancel</step>
+    <step order="9">Implement error handling — missing matter returns error card, AI generation failure returns error card with suggestion</step>
+    <step order="10">Register service in DI and wire into Agent Gateway endpoints</step>
+    <step order="11">Add unit tests for draft generation flow, error scenarios, and action payload structure</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/EmailDraftService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - EmailDraftService is registered in DI and callable from Agent Gateway endpoints
+    - DraftEmailAsync accepts matter reference, recipient hint, and user instructions
+    - Service resolves matter context and queries activity history from existing communications module
+    - Azure OpenAI generates contextual email draft based on matter context and user instructions
+    - Response is an email-preview Adaptive Card with editable subject and body
+    - Edit action re-drafts with user feedback; Send action triggers email; Cancel dismisses
+    - Missing matter returns descriptive error card
+    - AI generation failure returns error card with retry suggestion
+    - Service follows existing AI integration patterns (no custom OpenAI client setup)
+    - Unit tests cover successful draft, missing matter, and AI failure scenarios
+  </acceptance-criteria>
+</task>

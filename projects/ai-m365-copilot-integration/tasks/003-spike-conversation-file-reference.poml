@@ -1,0 +1,68 @@
+<task id="MCI-003" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Spike 1 - ConversationFileReference Validation</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>spike, m365, foundation</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-002</dependencies>
+  </metadata>
+
+  <prompt>
+    Investigate what the ConversationFileReference object contains when a user attaches a file to a
+    Declarative Agent conversation in MDA Copilot. Determine whether the driveItem ID exposed by the
+    reference is Graph-resolvable and whether the OBO token has sufficient scope to retrieve file content.
+    This spike establishes whether file attachment is a viable input path for the document analysis pipeline.
+  </prompt>
+
+  <role>M365 platform developer with expertise in Copilot extensibility, Graph API, and Adaptive Cards</role>
+
+  <goal>
+    Determine the exact shape and contents of ConversationFileReference, confirm whether the driveItem ID
+    can be resolved via Microsoft Graph (GET /me/drive/items/{id}/content), and document the feasibility
+    of the file attachment flow for downstream pipeline integration.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Document all findings regardless of outcome — negative results are valuable</constraint>
+    <constraint source="project">Use dev tenant spaarkedev1.crm.dynamics.com for testing</constraint>
+    <constraint source="ADR-008">Use endpoint filters for auth; no global middleware</constraint>
+    <constraint source="spike">Do not build production code — capture findings in spike notes only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create test API plugin endpoint">Add a minimal API plugin endpoint that logs the full request payload when Copilot sends a message with an attached file</step>
+    <step order="2" name="Attach file and capture payload">In the dev tenant MDA Copilot, attach a file to a Declarative Agent conversation and inspect the payload received by the API plugin</step>
+    <step order="3" name="Document ConversationFileReference shape">Record the full JSON structure of ConversationFileReference — all fields, types, and values</step>
+    <step order="4" name="Test Graph resolution">Extract the driveItem ID from the reference and attempt GET /me/drive/items/{id} and GET /me/drive/items/{id}/content using the OBO token</step>
+    <step order="5" name="Test permission scopes">Verify which delegated scopes are required (Files.Read, Files.Read.All, Sites.Read.All) and whether the current app registration has them</step>
+    <step order="6" name="Document findings">Write spike results including: ConversationFileReference schema, Graph resolution outcome, required scopes, and feasibility assessment</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="npm">Agents Toolkit</tool>
+    <tool name="graph-explorer">Microsoft Graph Explorer for manual API testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-m365-copilot-integration/notes/spikes/spike-1-conversation-file-reference.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ConversationFileReference JSON structure is fully documented with all observed fields</criterion>
+    <criterion testable="true">Graph resolution test result is recorded (success with status 200 or failure with error code and reason)</criterion>
+    <criterion testable="true">Required OAuth scopes for file retrieval are identified</criterion>
+    <criterion testable="true">Spike notes include a clear feasibility verdict (viable / not viable / conditionally viable) with rationale</criterion>
+  </acceptance-criteria>
+</task>

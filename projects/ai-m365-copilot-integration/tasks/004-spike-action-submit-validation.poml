@@ -1,0 +1,69 @@
+<task id="MCI-004" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Spike 2 - Action.Submit in API Plugin Responses</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>spike, m365, adaptive-cards</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-002</dependencies>
+  </metadata>
+
+  <prompt>
+    Test whether Action.Submit buttons work in Adaptive Card responses returned by an API plugin within
+    MDA Copilot. The M365 Copilot platform has known limitations around interactive card elements — this
+    spike determines which card actions are supported and what payload shape is received when a user clicks
+    a button, informing the UX strategy for the entire integration.
+  </prompt>
+
+  <role>M365 platform developer with expertise in Copilot extensibility, Graph API, and Adaptive Cards</role>
+
+  <goal>
+    Determine whether Action.Submit buttons in API plugin Adaptive Card responses invoke follow-up actions
+    in MDA Copilot, document what payload (if any) is received by the API plugin, and catalog which
+    Adaptive Card action types are functional versus silently ignored.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Document all findings regardless of outcome — negative results are valuable</constraint>
+    <constraint source="project">Use dev tenant spaarkedev1.crm.dynamics.com for testing</constraint>
+    <constraint source="design">Reference known limitations from design.md — validate or refute each claim</constraint>
+    <constraint source="spike">Do not build production code — capture findings in spike notes only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create test Adaptive Card with Action.Submit">Build an Adaptive Card JSON payload containing Action.Submit buttons with distinct data payloads (e.g., approve/reject, view details)</step>
+    <step order="2" name="Create test card with Action.OpenUrl">Include Action.OpenUrl as a control comparison to verify basic card rendering works</step>
+    <step order="3" name="Return cards from API plugin">Configure the test API plugin endpoint to return the Adaptive Card in its response</step>
+    <step order="4" name="Test Action.Submit in MDA Copilot">Click the Action.Submit buttons in MDA Copilot and observe behavior — does Copilot invoke the API plugin again? Does the button do nothing? Is there an error?</step>
+    <step order="5" name="Capture follow-up payload">If Action.Submit triggers a follow-up call, log the full request payload to document the data shape and routing mechanism</step>
+    <step order="6" name="Test additional action types">Test Action.Execute and Action.ShowCard if time permits to build a complete compatibility matrix</step>
+    <step order="7" name="Document findings">Write spike results including: action compatibility matrix, payload shapes, UX implications, and recommended workarounds for unsupported actions</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI</tool>
+    <tool name="npm">Agents Toolkit</tool>
+    <tool name="adaptive-cards-designer">Adaptive Cards Designer for card prototyping</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-m365-copilot-integration/notes/spikes/spike-2-action-submit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Action.Submit behavior is documented with clear outcome (works / silently ignored / error)</criterion>
+    <criterion testable="true">Action.OpenUrl behavior is documented as baseline comparison</criterion>
+    <criterion testable="true">If Action.Submit works, the follow-up payload structure is fully documented</criterion>
+    <criterion testable="true">Action compatibility matrix covers at least Action.Submit, Action.OpenUrl, and Action.Execute</criterion>
+    <criterion testable="true">Spike notes include UX recommendations based on what is and is not supported</criterion>
+  </acceptance-criteria>
+</task>

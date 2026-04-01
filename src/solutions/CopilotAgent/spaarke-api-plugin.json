@@ -1,0 +1,143 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.2/schema.json",
+  "schema_version": "v2.2",
+  "name_for_human": "Spaarke Legal AI",
+  "description_for_human": "Search documents, run playbooks, manage matters and tasks with Spaarke AI.",
+  "description_for_model": "This plugin connects to the Spaarke legal document management platform. Use it when the user asks about legal documents, matters, tasks, deadlines, playbook analysis, financial summaries, or communications. All data is scoped to what the authenticated user is permitted to access.",
+  "namespace": "spaarke",
+  "runtimes": [
+    {
+      "type": "OpenApi",
+      "auth": {
+        "type": "None"
+      },
+      "spec": {
+        "url": "spaarke-bff-openapi.yaml"
+      },
+      "run_for_functions": [
+        "semanticSearch", "listDocuments", "getDocument", "getDocumentPreviewUrl", "summarizeFile",
+        "listChatPlaybooks", "listPublicPlaybooks", "executePlaybook", "getPlaybookRunStatus", "getPlaybookRunDetail",
+        "listEvents", "getEvent", "createEvent", "completeEvent",
+        "getPortfolio", "getBriefing", "getMatterAiSummary", "getMatterFinanceSummary", "searchRecords",
+        "sendCommunication",
+        "handleAgentMessage", "listAgentPlaybooks", "runAgentPlaybook", "getAgentPlaybookStatus",
+        "createAnalysis", "getAnalysis",
+        "getCurrentUser", "getUserCapabilities"
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "semanticSearch",
+      "description": "Call this when the user wants to find documents by topic, name, content, or description. Performs hybrid semantic and keyword search across all documents the user has access to."
+    },
+    {
+      "name": "listDocuments",
+      "description": "Call this when the user wants to see a list of documents, optionally filtered by matter, project, or document type."
+    },
+    {
+      "name": "getDocument",
+      "description": "Call this when the user asks for details about a specific document, such as its metadata, type, or matter association."
+    },
+    {
+      "name": "getDocumentPreviewUrl",
+      "description": "Call this when the user wants to view or preview a document. Returns a URL that opens the document in a browser."
+    },
+    {
+      "name": "summarizeFile",
+      "description": "Call this when the user wants a summary of a document's content or key points."
+    },
+    {
+      "name": "listChatPlaybooks",
+      "description": "Call this when the user asks what analysis playbooks or AI capabilities are available for chat."
+    },
+    {
+      "name": "listPublicPlaybooks",
+      "description": "Call this when the user asks 'What analysis tools are available?' or wants to browse all playbooks."
+    },
+    {
+      "name": "executePlaybook",
+      "description": "Call this when the user wants to run a document analysis playbook on a specific document."
+    },
+    {
+      "name": "getPlaybookRunStatus",
+      "description": "Call this to check the progress of a running playbook execution."
+    },
+    {
+      "name": "getPlaybookRunDetail",
+      "description": "Call this when a playbook execution has completed and the user wants to see the full results and findings."
+    },
+    {
+      "name": "listEvents",
+      "description": "Call this when the user asks about their tasks, deadlines, due dates, or assignments. Supports filtering by matter and status."
+    },
+    {
+      "name": "getEvent",
+      "description": "Call this when the user asks for details about a specific task, deadline, or event."
+    },
+    {
+      "name": "createEvent",
+      "description": "Call this when the user wants to create a new task, deadline, or appointment."
+    },
+    {
+      "name": "completeEvent",
+      "description": "Call this when the user wants to mark a task or event as completed."
+    },
+    {
+      "name": "getPortfolio",
+      "description": "Call this when the user asks for an overview of their matters, projects, or portfolio."
+    },
+    {
+      "name": "getBriefing",
+      "description": "Call this when the user asks for their daily briefing or what needs attention today."
+    },
+    {
+      "name": "getMatterAiSummary",
+      "description": "Call this when the user asks for a summary of a specific matter including recent activity and key documents."
+    },
+    {
+      "name": "getMatterFinanceSummary",
+      "description": "Call this when the user asks about the budget, spending, or invoices for a matter."
+    },
+    {
+      "name": "searchRecords",
+      "description": "Call this when the user wants to search for matters, projects, events, or documents by name."
+    },
+    {
+      "name": "sendCommunication",
+      "description": "Call this when the user wants to draft and send an email related to a matter."
+    },
+    {
+      "name": "handleAgentMessage",
+      "description": "Call this to route a conversational message through the Spaarke agent gateway."
+    },
+    {
+      "name": "listAgentPlaybooks",
+      "description": "Call this to get playbooks available for the agent, optionally filtered by document type."
+    },
+    {
+      "name": "runAgentPlaybook",
+      "description": "Call this to invoke a playbook on a document through the agent gateway."
+    },
+    {
+      "name": "getAgentPlaybookStatus",
+      "description": "Call this to check the status of a long-running playbook started through the agent."
+    },
+    {
+      "name": "createAnalysis",
+      "description": "Call this to start a deep document analysis that opens in the Analysis Workspace."
+    },
+    {
+      "name": "getAnalysis",
+      "description": "Call this to check the status and results of a document analysis."
+    },
+    {
+      "name": "getCurrentUser",
+      "description": "Call this to get the current user's profile and permissions."
+    },
+    {
+      "name": "getUserCapabilities",
+      "description": "Call this to determine what features the current user has access to."
+    }
+  ]
+}

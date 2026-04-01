@@ -1,0 +1,42 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "For detailed ${analysisType} analysis, I recommend using the Analysis Workspace where you can:",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "• Work with the analysis output in the editor\n• Use inline AI tools on selected text\n• Refine and iterate on findings\n• Export to Word",
+      "wrap": true,
+      "size": "Small",
+      "spacing": "Small"
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "✏️ Open Analysis Workspace",
+      "data": {
+        "action": "handoff_workspace",
+        "analysisId": "${analysisId}",
+        "sourceFileId": "${sourceFileId}",
+        "playbookId": "${playbookId}",
+        "deepLinkUrl": "${deepLinkUrl}"
+      }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "📋 Quick Summary",
+      "data": { "action": "summarize_document", "documentId": "${sourceFileId}" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "⚠️ Risk Scan",
+      "data": { "action": "run_playbook", "playbookId": "${riskScanId}", "documentId": "${sourceFileId}" }
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+<task id="MCI-013" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>SpaarkeAgentHandler Implementation</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>bff-api, m365, agents-sdk</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+    <dependencies>MCI-010, MCI-011</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement SpaarkeAgentHandler extending the M365 Agents SDK ActivityHandler. This is the core handler
+    that receives all bot activities from M365 Copilot, extracts user context and message content,
+    and routes them to the agent gateway adapter endpoints created in MCI-010.
+  </prompt>
+
+  <role>M365 Agents SDK developer with BFF integration experience</role>
+
+  <goal>
+    Implement SpaarkeAgentHandler that handles MessageActivity (user text messages) and InvokeActivity
+    (Action.Submit from Adaptive Cards). Extract user context, message content, and conversation references,
+    then route to the appropriate agent gateway endpoint. Register the handler in DI with minimal footprint.
+  </goal>
+
+  <constraints>
+    - ADR-001: Integrate within the Minimal API host — no separate bot hosting process
+    - ADR-010: DI minimalism — register SpaarkeAgentHandler and at most one supporting service
+    - Handler must be stateless — all conversation state is managed by AgentConversationService (MCI-014)
+    - Do not duplicate logic from agent gateway endpoints — delegate to them
+    - Handle unknown activity types gracefully (log and ignore, do not throw)
+    - Adaptive Card Action.Submit payloads must be validated before routing
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review M365 Agents SDK ActivityHandler base class and its virtual methods</step>
+    <step order="2">Create SpaarkeAgentHandler.cs in Features/Agent/ extending ActivityHandler</step>
+    <step order="3">Override OnMessageActivityAsync — extract message text, user identity, conversation reference; route to /api/agent/message</step>
+    <step order="4">Override OnInvokeActivityAsync — parse Action.Submit payload, validate structure, route to appropriate endpoint</step>
+    <step order="5">Implement user context extraction (tenant ID, user ID, display name, conversation ID) into a shared AgentUserContext model</step>
+    <step order="6">Add error handling — catch routing failures, return appropriate Activity responses to the user</step>
+    <step order="7">Register SpaarkeAgentHandler in DI via AddTransient and wire into the bot middleware pipeline</step>
+    <step order="8">Handle OnMembersAddedAsync for welcome message when agent is first added to a conversation</step>
+    <step order="9">Verify build succeeds with dotnet build</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/SpaarkeAgentHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SpaarkeAgentHandler extends M365 Agents SDK ActivityHandler</criterion>
+    <criterion>OnMessageActivityAsync extracts message text and user context, routes to agent gateway message endpoint</criterion>
+    <criterion>OnInvokeActivityAsync handles Action.Submit payloads from Adaptive Cards with validation</criterion>
+    <criterion>AgentUserContext model captures tenant ID, user ID, display name, and conversation ID</criterion>
+    <criterion>Unknown activity types are logged and ignored without throwing exceptions</criterion>
+    <criterion>Welcome message is sent when agent is first added to a conversation</criterion>
+    <criterion>Handler is registered in DI as transient with minimal additional registrations</criterion>
+    <criterion>Handler is stateless — no instance-level conversation state</criterion>
+    <criterion>Solution builds successfully with dotnet build</criterion>
+  </acceptance-criteria>
+</task>

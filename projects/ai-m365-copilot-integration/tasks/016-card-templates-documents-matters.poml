@@ -1,0 +1,81 @@
+<task id="MCI-016" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Adaptive Card Templates — Document and Matter Cards</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>adaptive-cards, m365, ui</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Create Adaptive Card JSON templates for document and matter presentation in the M365
+    Copilot agent. These cards are the primary way users see search results, document details,
+    matter summaries, and task lists returned by the agent. All templates must be Schema 1.5
+    compliant and include Action.Submit buttons and deep-link URLs for navigation back into
+    the Spaarke platform.
+  </prompt>
+
+  <role>Senior UI developer experienced with Adaptive Cards, M365 Copilot, and JSON templating</role>
+
+  <goal>
+    Deliver four production-ready Adaptive Card JSON templates that render correctly in
+    Microsoft 365 Copilot and Teams, following the ASCII mockups defined in design.md.
+  </goal>
+
+  <constraints>
+    - Adaptive Card schema version 1.5 (required for M365 Copilot compatibility)
+    - All cards must render correctly in both Teams and M365 Copilot surfaces
+    - Follow the ASCII mockups from design.md exactly for layout and field placement
+    - Include Action.Submit buttons where user interaction is needed
+    - Include Action.OpenUrl for deep-links back to Dataverse forms and Code Pages
+    - Use data-binding syntax ($\{property}) for dynamic content placeholders
+    - Keep card payload under 28 KB (Copilot limit)
+    - Support dark mode via Adaptive Card host config (no hard-coded colors)
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>.claude/adr/ADR-021.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review the ASCII mockups in design.md for document list, single document, matter summary, and task list cards</step>
+    <step order="2">Create document-list.json — tabular layout showing document name, type, modified date, and matter reference with Action.OpenUrl to open each document</step>
+    <step order="3">Create document-card.json — single document detail card with metadata fields, preview thumbnail placeholder, and actions (Open, Download, Analyze)</step>
+    <step order="4">Create matter-summary.json — matter overview with key fields (client, status, responsible attorney, document count) and navigation actions</step>
+    <step order="5">Create task-list.json — task items with status indicators, due dates, assignees, and Action.Submit for status updates</step>
+    <step order="6">Validate all four templates against Adaptive Card schema 1.5 using the Adaptive Card Designer schema</step>
+    <step order="7">Verify data-binding placeholders match the expected BFF API response shapes</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+  </tools>
+
+  <outputs>
+    <output>src/solutions/CopilotAgent/cards/document-list.json</output>
+    <output>src/solutions/CopilotAgent/cards/document-card.json</output>
+    <output>src/solutions/CopilotAgent/cards/matter-summary.json</output>
+    <output>src/solutions/CopilotAgent/cards/task-list.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - All four JSON files are valid Adaptive Card schema 1.5
+    - document-list.json renders a scrollable list of documents with name, type, date, and matter columns
+    - document-card.json shows full document metadata with Open, Download, and Analyze actions
+    - matter-summary.json displays matter details with navigation to the Dataverse matter form
+    - task-list.json shows tasks with status badges, due dates, and inline status-update actions
+    - All cards use data-binding syntax for dynamic content (no hard-coded sample data in templates)
+    - All Action.OpenUrl buttons use parameterized deep-link URLs
+    - Card payloads are each under 28 KB
+    - No hard-coded colors (dark mode compatible)
+  </acceptance-criteria>
+</task>

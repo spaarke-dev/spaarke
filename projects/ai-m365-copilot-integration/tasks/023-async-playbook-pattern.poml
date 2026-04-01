@@ -1,0 +1,93 @@
+<task id="MCI-023" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Async Playbook Pattern + Status Endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>bff-api, api, async, playbooks</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-021</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the async execution pattern for long-running playbooks invoked from the M365
+    Copilot agent. When a playbook is estimated to exceed the timeout threshold, the service
+    returns a job ID immediately and provides a status-check endpoint. The alternative path
+    returns a deep-link to the Analysis code page for real-time progress monitoring. The
+    timeout threshold determines which path is taken.
+  </prompt>
+
+  <role>Senior .NET developer experienced with async job patterns, background workers, and BFF API endpoint design</role>
+
+  <goal>
+    Deliver a status endpoint and async execution wrapper that enables long-running playbook
+    invocations from Copilot without blocking the chat response, while providing progress
+    visibility through either polling or platform handoff.
+  </goal>
+
+  <constraints>
+    - Follow ADR-001: use BackgroundService for async execution, not Azure Functions
+    - Follow ADR-016: respect AI cost and rate limits for concurrent playbook executions
+    - GET /api/agent/playbooks/status/{jobId} must return current execution progress
+    - Define a configurable timeout threshold (default: 30 seconds) to decide inline vs async
+    - Playbooks under threshold: execute inline and return results directly (handled by MCI-021)
+    - Playbooks over threshold: return job ID + progress-indicator card OR handoff card with Analysis deep-link
+    - Job status must include: jobId, status (queued/running/completed/failed), progress percentage, current step, result (when completed)
+    - Use endpoint filters for authorization on the status endpoint (ADR-008)
+    - Job metadata must expire after 24 hours (no unbounded storage growth)
+    - Follow ADR-010 DI minimalism for service registration
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/adr/ADR-016-ai-cost-rate-limits.md</file>
+      <file>.claude/adr/ADR-001.md</file>
+      <file>.claude/adr/ADR-008.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review background-workers.md and jobs.md constraints for async execution patterns</step>
+    <step order="2">Review ADR-016 for rate limit and concurrency constraints on playbook execution</step>
+    <step order="3">Define PlaybookJobStatus model with jobId, status enum (Queued/Running/Completed/Failed), progress percentage, current step label, and optional result payload</step>
+    <step order="4">Create PlaybookStatusEndpoints.cs with GET /api/agent/playbooks/status/{jobId} endpoint using endpoint filters for auth</step>
+    <step order="5">Implement in-memory job tracking store with 24-hour expiry (ConcurrentDictionary with background cleanup)</step>
+    <step order="6">Implement async playbook dispatch — enqueue playbook execution to BackgroundService, return job ID and progress-indicator card</step>
+    <step order="7">Implement the decision logic: compare estimated execution time against configurable timeout threshold to choose inline vs async path</step>
+    <step order="8">Implement alternative handoff path — return handoff card with Analysis Workspace deep-link instead of polling when user prefers real-time view</step>
+    <step order="9">Wire async dispatch into PlaybookInvocationService from MCI-021 as the long-running execution path</step>
+    <step order="10">Add unit tests for status endpoint, job lifecycle, expiry cleanup, and threshold decision logic</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/PlaybookStatusEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - GET /api/agent/playbooks/status/{jobId} returns PlaybookJobStatus JSON with correct fields
+    - Status endpoint uses endpoint filters for authorization (ADR-008)
+    - Job status includes: jobId, status (Queued/Running/Completed/Failed), progress (0-100), currentStep, result
+    - Configurable timeout threshold (default 30s) determines inline vs async execution path
+    - Async path enqueues to BackgroundService and returns job ID with progress-indicator card
+    - Alternative path returns handoff card with Analysis Workspace deep-link
+    - Job metadata expires after 24 hours with background cleanup
+    - Unknown jobId returns 404 Not Found
+    - Completed jobs include the result payload (Adaptive Card JSON)
+    - Unit tests cover job creation, status polling, completion, failure, expiry, and threshold logic
+    - Follows ADR-001 (BackgroundService), ADR-008 (endpoint filters), ADR-010 (DI minimalism), ADR-016 (rate limits)
+  </acceptance-criteria>
+</task>

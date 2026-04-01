@@ -1,0 +1,79 @@
+<task id="MCI-026" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Admin Controls and Configuration</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>admin, configuration, dataverse</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010</dependencies>
+  </metadata>
+
+  <prompt>
+    Create admin configuration for the Copilot agent that controls which playbooks are
+    exposed to users and enforces per-role restrictions. Store configuration in Dataverse
+    or appsettings with a runtime lookup in the agent gateway. Implement spec requirement
+    FR-19 (admin controls).
+  </prompt>
+
+  <role>Senior .NET engineer with experience in Dataverse configuration entities and multi-tenant admin patterns.</role>
+
+  <goal>
+    Administrators can control which playbooks are available through the Copilot agent
+    and restrict capabilities by security role, without redeployment.
+  </goal>
+
+  <constraints>
+    - Configuration must be changeable without code redeployment (runtime lookup)
+    - Support per-role playbook visibility (e.g., Legal role sees legal playbooks only)
+    - Cache configuration with reasonable TTL to avoid per-request Dataverse queries
+    - Follow existing appsettings/configuration patterns in Sprk.Bff.Api
+    - If using Dataverse entity, follow thin-plugin constraint (ADR-002) — no complex logic in Dataverse
+    - Provide sensible defaults when no configuration is present (all playbooks enabled)
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/config.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Features/Agent/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md FR-19 and existing configuration patterns in Sprk.Bff.Api.</step>
+    <step order="2">Design configuration model: AgentConfiguration with playbook visibility rules and role mappings.</step>
+    <step order="3">Create AgentConfigurationService.cs with methods to load, cache, and query configuration.</step>
+    <step order="4">Implement configuration source: Dataverse entity lookup or appsettings section (choose based on existing patterns).</step>
+    <step order="5">Add caching layer with configurable TTL (default 5 minutes) to avoid per-request lookups.</step>
+    <step order="6">Integrate AgentConfigurationService into agent gateway — filter playbook list before returning to user.</step>
+    <step order="7">Implement default behavior: when no configuration exists, all playbooks are enabled for all roles.</step>
+    <step order="8">Write unit tests for configuration loading, caching, role filtering, and default fallback.</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet build *)</tool>
+    <tool>Bash(dotnet test *)</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentConfigurationService.cs</output>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentConfiguration.cs (model)</output>
+    <output>tests/unit/Agent/AgentConfigurationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AgentConfigurationService loads playbook visibility and role restriction rules at runtime.</criterion>
+    <criterion>Configuration is cached with configurable TTL, avoiding per-request Dataverse queries.</criterion>
+    <criterion>Playbook list returned to Copilot user is filtered by the caller's security role.</criterion>
+    <criterion>Default behavior (no config present) enables all playbooks for all roles.</criterion>
+    <criterion>Configuration changes take effect within the cache TTL without redeployment.</criterion>
+    <criterion>Unit tests cover loading, caching, role filtering, and default fallback scenarios.</criterion>
+    <criterion>Solution builds without warnings.</criterion>
+  </acceptance-criteria>
+</task>

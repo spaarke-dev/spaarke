@@ -1,0 +1,70 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "${title}",
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "Container",
+      "$data": "${tasks}",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "auto",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "${statusIcon}",
+                  "size": "Medium"
+                }
+              ],
+              "verticalContentAlignment": "Center"
+            },
+            {
+              "type": "Column",
+              "width": "stretch",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "${taskTitle}",
+                  "weight": "Bolder",
+                  "wrap": true
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Due: ${dueDate} | Matter: ${matterName}",
+                  "spacing": "None",
+                  "isSubtle": true,
+                  "size": "Small"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "ActionSet",
+          "actions": [
+            {
+              "type": "Action.Submit",
+              "title": "Open",
+              "data": { "action": "open_task", "taskId": "${id}" }
+            },
+            {
+              "type": "Action.Submit",
+              "title": "Complete",
+              "data": { "action": "complete_task", "taskId": "${id}" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

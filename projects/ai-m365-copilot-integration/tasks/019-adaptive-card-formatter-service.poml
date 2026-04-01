@@ -1,0 +1,83 @@
+<task id="MCI-019" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>AdaptiveCardFormatterService</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>bff-api, adaptive-cards, service</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-010, MCI-016, MCI-017, MCI-018</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the AdaptiveCardFormatterService — a .NET service that transforms BFF API responses
+    (playbook output JSON, entity data, search results) into Adaptive Card JSON payloads.
+    The service loads card templates created in MCI-016/017/018, populates them with dynamic
+    data, and returns ready-to-send card JSON for the Agent Gateway to include in Copilot
+    responses.
+  </prompt>
+
+  <role>Senior .NET developer experienced with JSON templating, Adaptive Cards SDK, and BFF API patterns</role>
+
+  <goal>
+    Deliver a registered, tested AdaptiveCardFormatterService that can transform any supported
+    BFF API response type into the correct Adaptive Card JSON payload using the template
+    library from Phase 3 card tasks.
+  </goal>
+
+  <constraints>
+    - Follow ADR-010: DI minimalism — register as a single service, not per-card-type
+    - Load card templates from embedded resources or a known file path at startup
+    - Use AdaptiveCards.Templating NuGet package for data-binding
+    - Handle all card types: document-list, document-card, matter-summary, task-list, playbook-menu, risk-findings, playbook-library, progress-indicator, email-preview, handoff-card, wizard-launch, error-card
+    - Return serialized JSON string ready for Copilot response attachment
+    - Throw descriptive exceptions for unknown card types or template binding failures
+    - Keep the service stateless (templates loaded once, no per-request state)
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/ai-m365-copilot-integration/design.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review the card templates from MCI-016, MCI-017, MCI-018 to understand data-binding placeholders</step>
+    <step order="2">Create AdaptiveCardModels.cs with request/response models for each card type — typed input models that map BFF API responses to card data shapes</step>
+    <step order="3">Create AdaptiveCardFormatterService.cs with constructor that loads all card templates and a FormatCard method that accepts card type enum and data object</step>
+    <step order="4">Implement template loading — read JSON templates from embedded resources or cards/ directory at startup</step>
+    <step order="5">Implement data binding using AdaptiveCards.Templating — expand templates with provided data models</step>
+    <step order="6">Implement error card formatting as a fallback for any rendering failures</step>
+    <step order="7">Register service in DI following ADR-010 patterns (single AddSingleton registration)</step>
+    <step order="8">Add unit tests for each card type transformation with sample input data</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AdaptiveCardFormatterService.cs</output>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/Models/AdaptiveCardModels.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    - AdaptiveCardFormatterService is registered as singleton in DI
+    - FormatCard method accepts a card type and data object, returns valid Adaptive Card JSON string
+    - All 12 card types (from MCI-016/017/018) are supported
+    - Templates are loaded once at startup and cached in memory
+    - Invalid card type throws ArgumentException with descriptive message
+    - Template binding failure returns error card JSON instead of throwing
+    - AdaptiveCardModels.cs contains typed models for each card data shape
+    - Unit tests cover at least one sample transformation per card type
+    - Service follows ADR-010 (single DI registration, no per-type interfaces)
+  </acceptance-criteria>
+</task>

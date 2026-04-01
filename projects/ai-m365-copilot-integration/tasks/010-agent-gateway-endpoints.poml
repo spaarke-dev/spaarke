@@ -1,0 +1,85 @@
+<task id="MCI-010" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>Agent Gateway Adapter Endpoints</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>bff-api, api, agent-gateway</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+    <dependencies>MCI-009</dependencies>
+  </metadata>
+
+  <prompt>
+    Create thin adapter endpoints in the BFF API that expose existing services through an agent-friendly interface.
+    These endpoints will be consumed by the M365 Copilot Custom Connector and must wrap existing BFF services
+    (chat, playbook listing, analysis execution) without introducing any new AI logic.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Minimal APIs and Spaarke BFF architecture</role>
+
+  <goal>
+    Implement three agent gateway adapter endpoints — POST /api/agent/message, GET /api/agent/playbooks,
+    and POST /api/agent/run-playbook — that wrap existing BFF services. Register all endpoints in
+    EndpointMappingExtensions.cs following established Minimal API patterns.
+  </goal>
+
+  <constraints>
+    - ADR-001: Use Minimal API patterns — no controllers, define endpoints as static methods with MapPost/MapGet
+    - ADR-008: Use endpoint filters for authorization — no global middleware; apply AgentAuthorizationFilter per endpoint
+    - ADR-010: DI minimalism — reuse existing service registrations; do not add new DI registrations unless strictly necessary
+    - ADR-016: Apply rate limiting to all agent endpoints to prevent abuse from external connector calls
+    - These are thin adapters only — NO new AI logic, NO new orchestration; delegate entirely to existing services
+    - All endpoints must return ProblemDetails on error with correlation IDs
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing endpoint patterns in src/server/api/Sprk.Bff.Api/Features/ for structure and conventions</step>
+    <step order="2">Create Features/Agent/ directory and AgentEndpoints.cs with three endpoint methods</step>
+    <step order="3">Implement POST /api/agent/message — accept message payload, delegate to existing chat service, return response</step>
+    <step order="4">Implement GET /api/agent/playbooks — delegate to existing playbook listing service, return available playbooks</step>
+    <step order="5">Implement POST /api/agent/run-playbook — accept playbook ID and parameters, delegate to analysis execution service</step>
+    <step order="6">Create AgentAuthorizationFilter.cs implementing IEndpointFilter for agent-specific auth validation</step>
+    <step order="7">Create request/response DTOs in Features/Agent/Models/ (AgentMessageRequest, AgentMessageResponse, PlaybookRunRequest, etc.)</step>
+    <step order="8">Register all endpoints in EndpointMappingExtensions.cs under /api/agent route group</step>
+    <step order="9">Apply rate limiting and authorization filters to all agent endpoints</step>
+    <step order="10">Verify build succeeds with dotnet build</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentEndpoints.cs</output>
+    <output>src/server/api/Sprk.Bff.Api/Features/Agent/AgentAuthorizationFilter.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>POST /api/agent/message endpoint exists, accepts a message payload, and delegates to existing chat service</criterion>
+    <criterion>GET /api/agent/playbooks endpoint exists and returns available playbooks from existing service</criterion>
+    <criterion>POST /api/agent/run-playbook endpoint exists, accepts playbook ID and parameters, delegates to analysis execution</criterion>
+    <criterion>AgentAuthorizationFilter is applied to all agent endpoints via endpoint filters (not global middleware)</criterion>
+    <criterion>Rate limiting is configured for all agent endpoints per ADR-016</criterion>
+    <criterion>All endpoints are registered in EndpointMappingExtensions.cs</criterion>
+    <criterion>All endpoints return ProblemDetails on error with correlation IDs</criterion>
+    <criterion>No new AI logic introduced — endpoints are thin adapters only</criterion>
+    <criterion>Solution builds successfully with dotnet build</criterion>
+  </acceptance-criteria>
+</task>

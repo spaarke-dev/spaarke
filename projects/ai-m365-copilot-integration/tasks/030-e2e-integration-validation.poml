@@ -1,0 +1,86 @@
+<task id="MCI-030" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>End-to-End Integration Validation</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>testing, e2e, validation</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>MCI-024, MCI-025, MCI-026</dependencies>
+  </metadata>
+
+  <prompt>
+    Validate all eight use cases (UC-M1 through UC-M8) end-to-end in the dev tenant.
+    Test both Declarative Agent and Custom Engine Agent paths. Validate the complete
+    flow: auth, card rendering, playbook execution, handoff, and error handling.
+    Document results and any remaining issues.
+  </prompt>
+
+  <role>Senior QA engineer with expertise in Microsoft 365 Copilot, end-to-end testing, and integration validation.</role>
+
+  <goal>
+    All eight use cases are validated end-to-end in the dev tenant with documented
+    pass/fail results, and any remaining issues are catalogued with severity and
+    workarounds.
+  </goal>
+
+  <constraints>
+    - Test in dev tenant (https://spaarkedev1.crm.dynamics.com)
+    - Test both Declarative Agent and Custom Engine Agent paths where applicable
+    - Validate auth flow including token exchange (OBO) and SSO
+    - Verify Adaptive Card rendering in Teams Copilot chat
+    - Test error scenarios: BFF down, timeout, unauthorized user
+    - Document each test case with: steps, expected result, actual result, pass/fail, evidence
+    - Catalogue any issues with severity (P1-P4), description, and workaround if available
+    - Do not modify production configurations during testing
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+      <file>projects/ai-m365-copilot-integration/README.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Features/Agent/</file>
+      <file>src/client/copilot-agent/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md for all use cases (UC-M1 through UC-M8) and acceptance criteria.</step>
+    <step order="2">Prepare test environment: verify BFF API is deployed and healthy, verify agent is sideloaded in dev tenant.</step>
+    <step order="3">Test UC-M1 (Document Search): invoke Spaarke from Copilot, search for documents, verify Adaptive Card results.</step>
+    <step order="4">Test UC-M2 (Playbook Execution): trigger a playbook through Copilot, verify execution and result card.</step>
+    <step order="5">Test UC-M3 (Matter Query): query matter details through Copilot, verify data accuracy and card format.</step>
+    <step order="6">Test UC-M4 (Email Draft): request email draft, verify content generation and send/edit options.</step>
+    <step order="7">Test UC-M5 through UC-M8: validate remaining use cases per spec definitions.</step>
+    <step order="8">Test Declarative Agent path: verify manifest-driven interactions work correctly.</step>
+    <step order="9">Test Custom Engine Agent path: verify Bot Framework interactions work correctly.</step>
+    <step order="10">Test error scenarios: stop BFF, send invalid requests, test with unauthorized user.</step>
+    <step order="11">Test handoff flow: verify deep links open correct Dataverse forms/views.</step>
+    <step order="12">Document all results in e2e-validation-results.md with pass/fail, evidence, and issue catalogue.</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash(dotnet test *)</tool>
+    <tool>Bash(curl *)</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+  </tools>
+
+  <outputs>
+    <output>projects/ai-m365-copilot-integration/notes/e2e-validation-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All eight use cases (UC-M1 through UC-M8) have documented test results with pass/fail status.</criterion>
+    <criterion>Both Declarative Agent and Custom Engine Agent paths are tested.</criterion>
+    <criterion>Auth flow (OBO token exchange, SSO) is validated end-to-end.</criterion>
+    <criterion>Adaptive Card rendering is verified in Teams Copilot chat.</criterion>
+    <criterion>Error scenarios are tested and graceful degradation is confirmed.</criterion>
+    <criterion>Handoff deep links are validated to open correct Dataverse targets.</criterion>
+    <criterion>All issues are catalogued with severity (P1-P4), description, and workaround.</criterion>
+    <criterion>No P1 (blocking) issues remain unresolved.</criterion>
+    <criterion>e2e-validation-results.md is complete and committed.</criterion>
+  </acceptance-criteria>
+</task>

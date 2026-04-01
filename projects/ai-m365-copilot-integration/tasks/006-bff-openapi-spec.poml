@@ -1,0 +1,81 @@
+<task id="MCI-006" project="M365 Copilot Integration R1">
+  <metadata>
+    <title>BFF API OpenAPI Specification</title>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>api, openapi, declarative-agent, bff-api</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>MCI-001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a comprehensive OpenAPI 3.0 specification (spaarke-bff-openapi.yaml) that exposes the full BFF API surface
+    for consumption by the M365 Copilot API Plugin. Catalog all existing endpoints from EndpointMappingExtensions.cs
+    and document their request/response schemas, authentication requirements, and operation IDs suitable for
+    Copilot function mapping.
+  </prompt>
+
+  <role>Senior API developer with OpenAPI expertise and deep knowledge of the Spaarke BFF API architecture</role>
+
+  <goal>
+    A valid, complete OpenAPI 3.0 YAML specification that accurately represents all BFF API endpoints,
+    organized by functional domain, with clear operation IDs and descriptions that enable M365 Copilot
+    to understand and invoke each endpoint correctly.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-008">Endpoint filters for auth — document security schemes matching endpoint filter patterns</constraint>
+    <constraint source="ADR-001">Minimal API structure — reflect actual endpoint routing from MapGet/MapPost registrations</constraint>
+    <constraint source="project">OpenAPI 3.0 format required for M365 API Plugin compatibility</constraint>
+    <constraint source="project">Operation IDs must be stable, descriptive, and suitable for function name mapping</constraint>
+    <constraint source="project">All endpoint groups must be covered: AI chat, search, playbooks, analysis, documents, workspace, communications, RAG, knowledge, scopes, visualization</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/ai-m365-copilot-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inventory all BFF endpoints">Read EndpointMappingExtensions.cs and all referenced endpoint classes to catalog every route, HTTP method, request/response types, and endpoint filters</step>
+    <step order="2" name="Define OpenAPI info and servers">Create the YAML header with API title, version, description, and server URLs (dev environment endpoint)</step>
+    <step order="3" name="Define security schemes">Document the OAuth2/Bearer authentication scheme matching BFF endpoint filter patterns</step>
+    <step order="4" name="Define shared components">Create reusable schema definitions for common request/response types, error responses (ProblemDetails), and shared parameters</step>
+    <step order="5" name="Document AI chat endpoints">Define paths for AI chat streaming, conversation management, and tool execution endpoints</step>
+    <step order="6" name="Document search endpoints">Define paths for document search, full-text search, and faceted search operations</step>
+    <step order="7" name="Document playbook endpoints">Define paths for playbook listing, execution, status tracking, and result retrieval</step>
+    <step order="8" name="Document analysis endpoints">Define paths for analysis actions, scope queries, and analysis result endpoints</step>
+    <step order="9" name="Document document operations">Define paths for document CRUD, metadata, versions, and file operations via SpeFileStore</step>
+    <step order="10" name="Document workspace endpoints">Define paths for workspace management, member access, and workspace settings</step>
+    <step order="11" name="Document communications endpoints">Define paths for communication tracking, notifications, and correspondence operations</step>
+    <step order="12" name="Document RAG and knowledge endpoints">Define paths for RAG pipeline, knowledge base queries, and document intelligence operations</step>
+    <step order="13" name="Document scope and visualization endpoints">Define paths for scope management and data visualization endpoints</step>
+    <step order="14" name="Validate OpenAPI spec">Validate the YAML against OpenAPI 3.0 schema using available tooling; confirm endpoint count matches BFF inventory</step>
+    <step order="15" name="Verify M365 API Plugin compatibility">Review spec against M365 API Plugin requirements — ensure operation IDs, descriptions, and schemas are compatible</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Search endpoint registrations across BFF codebase</tool>
+    <tool name="read">Read endpoint source files and request/response models</tool>
+    <tool name="write">Create the OpenAPI YAML specification</tool>
+    <tool name="dotnet">Build to verify endpoint model types</tool>
+  </tools>
+
+  <outputs>
+    <output type="specification">src/solutions/CopilotAgent/spaarke-bff-openapi.yaml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Valid OpenAPI 3.0 YAML that passes schema validation</criterion>
+    <criterion testable="true">Endpoint count in spec matches the full BFF API endpoint inventory from EndpointMappingExtensions.cs</criterion>
+    <criterion testable="true">Every path has a unique, descriptive operationId suitable for function mapping</criterion>
+    <criterion testable="true">All endpoint groups covered: AI chat, search, playbooks, analysis, documents, workspace, communications, RAG, knowledge, scopes, visualization</criterion>
+    <criterion testable="true">Security schemes correctly reflect BFF authentication patterns</criterion>
+    <criterion testable="true">Spec is suitable for M365 API Plugin consumption</criterion>
+  </acceptance-criteria>
+</task>
