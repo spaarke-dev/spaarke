@@ -1,5 +1,5 @@
 import { initAuth, authenticatedFetch as sharedAuthFetch, getAuthProvider } from "@spaarke/auth";
-import { getBffBaseUrl, getBffOAuthScope, getMsalClientId } from "../config/runtimeConfig";
+import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, waitForConfig } from "../config/runtimeConfig";
 
 let _initPromise: Promise<void> | null = null;
 
@@ -7,6 +7,8 @@ export function ensureAuthInitialized(): Promise<void> {
   if (!_initPromise) {
     _initPromise = (async () => {
       try {
+        // Wait for runtime config to be set by bootstrapAuth() in main.tsx
+        await waitForConfig();
         await initAuth({
           clientId: getMsalClientId(),
           bffBaseUrl: getBffBaseUrl(),
