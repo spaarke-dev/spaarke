@@ -3,9 +3,8 @@
 > **Last Updated**: January 28, 2026
 > **Purpose**: Document creation process flows for all entry points into the Spaarke document pipeline
 
-> **PARTIALLY SUPERSEDED**: The AI analysis sections of this document are outdated.
-> For current AI architecture, see [`AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md) (v3.2+).
-> The **document creation process flows** (upload, email, Outlook, Word) below remain accurate.
+> Document creation process flows for all entry points (upload, email, Outlook, Word).
+> For AI architecture decisions, see [`AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md).
 
 ---
 
