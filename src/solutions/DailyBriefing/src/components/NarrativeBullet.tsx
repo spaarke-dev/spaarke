@@ -150,11 +150,11 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
 
   return (
     <div className={styles.root}>
-      <Text size={400} className={styles.bullet}>
+      <Text size={300} className={styles.bullet}>
         &bull;
       </Text>
       <div className={styles.content}>
-        <Text size={400} className={styles.narrativeText}>
+        <Text size={300} className={styles.narrativeText}>
           {narrative}
         </Text>
         {primaryEntityName && primaryEntityType && primaryEntityId && (
