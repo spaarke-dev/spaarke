@@ -104,8 +104,8 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
         const record: Record<string, unknown> = {
           sprk_eventname: item.title,
           sprk_todoflag: true,
-          sprk_todostatus: 0, // Open
-          sprk_todosource: 0, // User
+          sprk_todostatus: 100000000, // Open
+          sprk_todosource: 100000001, // User
           sprk_priority: mapPriorityToOptionSet(item.priority),
         };
 
