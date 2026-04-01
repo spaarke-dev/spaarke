@@ -38,19 +38,19 @@ export interface UseInlineTodoCreateResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Map notification priority string to Dataverse sprk_priority option set value. */
+/** Map notification priority string to Dataverse sprk_priority choice value. */
 function mapPriorityToOptionSet(priority: NotificationPriority): number {
   switch (priority) {
     case "urgent":
-      return 100000000;
+      return 3;
     case "high":
-      return 100000001;
+      return 2;
     case "normal":
-      return 100000002;
+      return 1;
     case "low":
-      return 100000003;
+      return 0;
     default:
-      return 100000002; // default to normal
+      return 1; // default to normal
   }
 }
 
@@ -100,12 +100,16 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
       try {
         // Build the sprk_event record
         const record: Record<string, unknown> = {
-          sprk_name: item.title,
+          sprk_eventname: item.title,
           sprk_todoflag: true,
-          sprk_todosource: 100000001, // User
-          sprk_description: item.body,
+          sprk_todostatus: 0, // Open
+          sprk_todosource: 0, // User
           sprk_priority: mapPriorityToOptionSet(item.priority),
         };
+
+        if (item.body) {
+          record["sprk_description"] = item.body;
+        }
 
         // Add regarding lookup if available
         if (item.regardingEntityType && item.regardingId) {
