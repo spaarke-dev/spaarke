@@ -1,7 +1,7 @@
 <task id="PBI-090" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Project wrap-up: finalize, review, and close Power BI Embedded Reporting R1</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>wrap-up</phase>
     <estimated-effort>2 hours</estimated-effort>
     <tags>docs, cleanup</tags>

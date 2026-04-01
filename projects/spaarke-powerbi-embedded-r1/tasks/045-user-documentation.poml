@@ -1,7 +1,7 @@
 <task id="PBI-045" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create user-facing and admin documentation for Reporting module</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>5</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>docs</tags>

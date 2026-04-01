@@ -1,7 +1,7 @@
 <task id="PBI-044" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>End-to-end smoke test checklist for Reporting module</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>5</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>testing, e2e-test</tags>
