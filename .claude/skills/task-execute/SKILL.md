@@ -878,7 +878,7 @@ REPORT:
 When task has `pcf`, `react`, or `fluent-ui` tags:
 
 - [ ] Read `src/client/pcf/CLAUDE.md`
-- [ ] Read `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md`
+- [ ] Read `docs/guides/PCF-DEPLOYMENT-GUIDE.md`
 - [ ] Version bumped in ControlManifest.Input.xml
 - [ ] Version bumped in Solution.xml
 - [ ] Version bumped in extracted ControlManifest.xml
@@ -907,7 +907,7 @@ When task has `bff-api`, `api`, or `minimal-api` tags:
 When task has `deploy` tag:
 
 - [ ] Read `.claude/skills/dataverse-deploy/SKILL.md`
-- [ ] Read `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md`
+- [ ] Read `docs/guides/PCF-DEPLOYMENT-GUIDE.md`
 - [ ] Fresh build (delete bin/obj first)
 - [ ] Version numbers correct
 - [ ] PAC CLI authenticated
@@ -928,7 +928,7 @@ When task has `deploy` tag:
 4. EXTRACT tags: pcf, react, fluent-ui, frontend
 5. LOAD KNOWLEDGE:
    - READ src/client/pcf/CLAUDE.md
-   - READ docs/ai-knowledge/guides/PCF-V9-PACKAGING.md
+   - READ docs/guides/PCF-DEPLOYMENT-GUIDE.md
    - UPDATE current-task.md with knowledge files loaded
 6. LOAD CONSTRAINTS:
    - ADR-006, ADR-021: PCF patterns

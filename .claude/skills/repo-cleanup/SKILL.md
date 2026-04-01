@@ -63,7 +63,7 @@ required_directories:
   - src/server/api/
   - tests/unit/
   - tests/integration/
-  - docs/ai-knowledge/
+  - docs/ai-knowledge/catalogs/
   - docs/reference/
   - infrastructure/bicep/
   - .claude/skills/
@@ -496,7 +496,7 @@ Proceed with cleanup? (y/n)
 ## Tips for AI
 
 - Always run in dry-run mode first and show report before making changes
-- Never delete files in `src/`, `docs/ai-knowledge/`, or `docs/reference/` without explicit approval
+- Never delete files in `src/`, `docs/` without explicit approval
 - When in doubt about whether to delete, flag for manual review
 - After cleanup, verify build still passes: `dotnet build`
 - Update TASK-INDEX.md if cleaning up a completed project

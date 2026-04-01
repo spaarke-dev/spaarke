@@ -124,8 +124,8 @@ IF projects/{project-name}/README.md already exists:
 
 ```
 LOAD templates:
-  - docs/ai-knowledge/templates/project-README.template.md
-  - docs/ai-knowledge/templates/project-plan.template.md
+  - .claude/templates/project-README.template.md
+  - .claude/templates/project-plan.template.md
 
 LOAD projects/{project-name}/spec.md
 
@@ -509,8 +509,8 @@ Every project must have measurable graduation criteria:
 ## Resources
 
 ### Templates (Auto-loaded)
-- `docs/ai-knowledge/templates/project-README.template.md`
-- `docs/ai-knowledge/templates/project-plan.template.md`
+- `.claude/templates/project-README.template.md`
+- `.claude/templates/project-plan.template.md`
 
 ### Related Skills
 - **project-pipeline**: Orchestrator that calls this skill (RECOMMENDED for most users)

@@ -34,7 +34,7 @@ Transforms `plan.md` work breakdown structure (WBS) into individual, executable 
 EXTRACT project-name from provided path
 LOAD: projects/{project-name}/plan.md
 LOAD: projects/{project-name}/README.md  # For context
-LOAD: docs/ai-knowledge/templates/task-execution.template.md  # POML format
+LOAD: .claude/templates/task-execution.template.md  # POML format
 
 EXTRACT from plan.md:
   - WBS phases (Section 5)
@@ -644,7 +644,7 @@ Recommended sections:
 ## Resources
 
 ### Templates (Auto-loaded)
-- `docs/ai-knowledge/templates/task-execution.template.md`
+- `.claude/templates/task-execution.template.md`
 
 ### Related Skills
 - **project-init**: Creates plan.md that this skill consumes

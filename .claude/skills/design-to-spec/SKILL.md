@@ -564,7 +564,7 @@ IF user said 'done':
 
 ## spec.md Template
 
-The generated spec.md follows this structure (also saved at `docs/ai-knowledge/templates/spec.template.md`):
+The generated spec.md follows this structure (no template file ΓÇö generate inline):
 
 ```markdown
 # {Project Name} - AI Implementation Specification

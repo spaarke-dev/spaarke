@@ -243,7 +243,7 @@ Recommendations:
 
 ### Step 2: Comprehensive Resource Discovery & Artifact Generation
 
-**Purpose:** Load ALL implementation context (ADRs, skills, patterns, knowledge docs, code examples) for task creation.
+**Purpose:** Load ALL implementation context (ADRs, skills, patterns, knowledge docs, pattern file pointers) for task creation.
 
 **Action Part 1: Comprehensive Resource Discovery**
 ```
@@ -266,8 +266,8 @@ DISCOVER RESOURCES (Comprehensive):
      - Example: "deploy to Dataverse" → dataverse-deploy skill
 
   4. SEARCH for knowledge docs and patterns
-     - Search docs/ai-knowledge/guides/ for relevant procedures
-     - Search docs/ai-knowledge/patterns/ for code patterns
+     - Search docs/guides/ for relevant procedures
+     - Search .claude/patterns/ for code patterns
      - Match technology names, patterns
      - Example: "Azure OpenAI" → openai, embeddings, streaming patterns
 
@@ -289,12 +289,12 @@ OUTPUT: Comprehensive resource discovery summary
   - X ADRs loaded (with full content)
   - Y skills applicable (with file paths)
   - Z knowledge docs found (guides + patterns)
-  - N code examples identified
+  - N canonical implementations identified (from codebase search)
   - M scripts available (for deployment/testing steps)
 
 ⚠️ **DIFFERENCE from design-to-spec Step 3**:
 - design-to-spec: Preliminary (ADR constraints only for spec enrichment)
-- project-pipeline: Comprehensive (full ADRs, patterns, code examples for implementation)
+- project-pipeline: Comprehensive (full ADRs, patterns, pattern pointers to canonical implementations)
 ```
 
 **Action Part 2: Generate Artifacts with Discovered Resources**
@@ -366,13 +366,13 @@ ENHANCE CLAUDE.md with discovered resources:
 ```
 LOAD:
   - projects/{project-name}/plan.md (Phase Breakdown section)
-  - docs/ai-knowledge/templates/task-execution.template.md (POML format)
+  - .claude/templates/task-execution.template.md (POML format)
   - Tag-to-knowledge mapping (from task-create skill)
 
 REQUIREMENTS (from task-create):
   - Each task file MUST follow the task-execution.template.md structure (root <task id="..." project="...">)
   - Each task MUST include <knowledge><files> and it MUST NOT be empty
-  - PCF tasks MUST include docs/ai-knowledge/guides/PCF-V9-PACKAGING.md and src/client/pcf/CLAUDE.md
+  - PCF tasks MUST include docs/guides/PCF-DEPLOYMENT-GUIDE.md and src/client/pcf/CLAUDE.md
   - Applicable ADRs MUST be included via docs/reference/adr/*.md (see task-create Step 3.5)
 
 CREATE directory:
