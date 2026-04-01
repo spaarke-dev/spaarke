@@ -471,6 +471,78 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+#### `Initialize-ReportingCustomer.ps1`
+**Purpose:** End-to-end customer onboarding for the Reporting module — creates a Power BI workspace, creates a service principal profile, adds the SP profile as workspace Admin, deploys standard product reports, enables the `sprk_ReportingModuleEnabled` environment variable, and documents the manual security role assignment step.
+**Usage:** 🟡 Occasional - New customer onboarding or re-provisioning after partial failure
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), service principal with PBI tenant-level access, `Deploy-ReportingReports.ps1`
+**Owner:** Reporting Team
+**Last Used:** March 2026 (Task 040 — initial implementation)
+
+**Required Environment Variables:**
+- `PBI_TENANT_ID` — Entra ID tenant ID (overridable via `-TenantId`)
+- `PBI_CLIENT_ID` — Service principal app (client) ID
+- `PBI_CLIENT_SECRET` — Service principal client secret
+- `DATAVERSE_URL` — Dataverse org URL (overridable via `-DataverseOrg`)
+- `PBI_DATAVERSE_DATASOURCE_URL` — Dataverse OData endpoint for dataset rebinding
+
+**When to Use:**
+- Onboarding a new customer to the Spaarke Reporting module
+- Re-running after a partial failure (idempotent — skips already-created resources)
+- Setting up the Reporting module in a new Dataverse environment
+
+**Command:**
+```powershell
+# Dry run — preview all onboarding steps
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "contoso-legal" `
+    -CustomerName "Contoso Legal Services" `
+    -DataverseOrg "https://contoso.crm.dynamics.com" `
+    -WhatIf
+
+# Full onboarding — shared capacity (dev/test)
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "contoso-legal" `
+    -CustomerName "Contoso Legal Services" `
+    -DataverseOrg "https://contoso.crm.dynamics.com"
+
+# Full onboarding — dedicated F2 capacity (production)
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "fabrikam-corp" `
+    -CustomerName "Fabrikam Corporation" `
+    -DataverseOrg "https://fabrikam.crm.dynamics.com" `
+    -CapacityId "00000000-0000-0000-0000-000000000000"
+
+# Onboarding with user list for security role assignment guidance
+.\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "woodgrove-legal" `
+    -CustomerName "Woodgrove Legal" `
+    -DataverseOrg "https://woodgrove.crm.dynamics.com" `
+    -SecurityRoleUsers @("alice@woodgrove.com", "bob@woodgrove.com")
+```
+
+**Onboarding Steps:**
+1. Validates prerequisites (env vars, Azure CLI, `Deploy-ReportingReports.ps1` present)
+2. Acquires PBI REST API token via service principal client credentials flow
+3. Creates workspace `"{CustomerName} - Reporting"` (or reuses if already exists)
+4. Assigns workspace to capacity if `-CapacityId` provided
+5. Creates SP profile `"sprk-{CustomerId}"` (or reuses if already exists)
+6. Adds SP profile as workspace Admin (skips if already assigned)
+7. Calls `Deploy-ReportingReports.ps1` to import `.pbix` files and sync Dataverse catalog
+8. Enables `sprk_ReportingModuleEnabled = Yes` in the customer's Dataverse environment
+9. Prints security role assignment commands (manual step)
+10. Outputs full onboarding summary (customer ID, workspace ID, profile ID, report count, Dataverse URL)
+
+**Notes:**
+- Idempotent: workspace lookup by exact name, profile lookup by exact display name — re-running after partial failure is safe
+- Security role assignment (`sprk_ReportingAccess`) is a documented manual step; script prints PAC CLI commands
+- Pass `-SecurityRoleUsers @("user@domain.com")` to pre-populate assignment commands in the output
+- `-CapacityId` is optional for dev/test; required for production (F-SKU F2+ recommended)
+- Workspace name pattern: `"{CustomerName} - Reporting"`; SP profile name pattern: `"sprk-{CustomerId}"`
+- `CustomerId` must be lowercase with hyphens only (validated by regex); used in profile name and logging
+
+---
+
 ### PCF & Custom Page Deployment
 
 #### `Deploy-SpeAdminApp.ps1`
@@ -951,3 +1023,4 @@ Most scripts require:
 
 - **2025-12-02:** Initial script registry created. Removed 21 scripts (deprecated, bash, docs). Established maintenance process.
 - **2026-03-31:** Added Deploy-ReportingReports.ps1 — Power BI report template deployment for the Reporting module (Task 035).
+- **2026-03-31:** Added Initialize-ReportingCustomer.ps1 — end-to-end customer onboarding for the Reporting module: PBI workspace, SP profile, report deployment, Dataverse module enablement (Task 040).

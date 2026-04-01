@@ -39,18 +39,13 @@ public static class ReportingModule
     /// Maps all Reporting API endpoint groups onto the application.
     /// Call this from <c>EndpointMappingExtensions.MapDomainEndpoints</c> after the app is built.
     ///
-    /// Implementation is added by task 005 (ReportingEndpoints.cs). This stub ensures that
-    /// <c>Program.cs</c> and <c>EndpointMappingExtensions</c> compile cleanly before task 005
-    /// lands, and that wiring is already in place when endpoints are added.
+    /// Delegates to <see cref="ReportingEndpoints.MapReportingEndpointGroup"/> which registers all
+    /// /api/reporting/* routes with <see cref="ReportingAuthorizationFilter"/> and RequireAuthorization
+    /// applied at the group level (ADR-008).
     /// </summary>
     /// <param name="app">The built <see cref="WebApplication"/>.</param>
     public static void MapReportingEndpoints(this WebApplication app)
     {
-        // TODO (task 005): map /api/reporting/* endpoint groups here.
-        // Example:
-        //   var group = app.MapGroup("/api/reporting")
-        //       .AddReportingAuthorizationFilter()
-        //       .RequireAuthorization();
-        //   group.MapGet("/embed-config", ReportingEndpoints.GetEmbedConfig);
+        app.MapReportingEndpointGroup();
     }
 }

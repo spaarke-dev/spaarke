@@ -1,7 +1,7 @@
 <task id="PBI-040" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create Initialize-ReportingCustomer.ps1 onboarding script</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>5</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>script, deploy</tags>

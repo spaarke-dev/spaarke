@@ -1,7 +1,7 @@
 <task id="PBI-005" project="spaarke-powerbi-embedded-r1">
   <metadata>
     <title>Create ReportingEndpoints with embed token, report CRUD, and export</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>1</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>bff-api, api</tags>
