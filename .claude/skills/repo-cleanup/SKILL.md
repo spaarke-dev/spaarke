@@ -46,7 +46,7 @@ ELSE:
 ### Step 2: Load Repository Standards
 
 ```
-READ: docs/reference/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md
+READ: docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md
 EXTRACT:
   - Valid directory patterns
   - Naming conventions
@@ -64,7 +64,7 @@ required_directories:
   - tests/unit/
   - tests/integration/
   - docs/ai-knowledge/catalogs/
-  - docs/reference/
+  - docs/_archive/
   - infrastructure/bicep/
   - .claude/skills/
 
@@ -345,8 +345,8 @@ When a project is complete:
 
 | Resource | Purpose |
 |----------|---------|
-| `docs/reference/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md` | Structure standards |
-| `docs/reference/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` | Naming standards |
+| `docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md` | Structure standards |
+| `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` | Naming standards |
 | `.gitignore` | Files that should be ignored |
 
 ---

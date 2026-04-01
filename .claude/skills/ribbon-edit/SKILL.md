@@ -266,8 +266,8 @@ Library="$webresource:prefix_ScriptName.js"
 
 | Resource | Purpose |
 |----------|----------|
-| `docs/reference/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md` | Full templates and location reference |
-| `docs/reference/articles/document-ribbon-example.xml` | Working Dark Mode menu example |
+| `docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md` | Full templates and location reference |
+| `docs/_archive/articles/document-ribbon-example.xml` | Working Dark Mode menu example |
 | `infrastructure/dataverse/ribbon/` | Ribbon XML templates and documentation |
 | `src/client/webresources/js/` | JavaScript web resources |
 | `src/client/assets/icons/` | SVG icons for ribbon buttons |
@@ -353,5 +353,5 @@ Library="$webresource:prefix_ScriptName.js"
 - When duplicating ribbon elements for multiple entities, use pattern: `sprk.{Feature}.{EntityName}.{ElementType}`
 - `TemplateAlias="o1"` is required for buttons to appear in the overflow menu
 - For subgrids, use `SelectedControl` CrmParameter instead of `PrimaryControl`
-- Reference `docs/reference/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md` for HideCustomAction and subgrid details
-- Reference [RIBBON-COMMAND-BAR-MODIFICATIONS.md](../../../docs/reference/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md) for templates
+- Reference `docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md` for HideCustomAction and subgrid details
+- Reference [RIBBON-COMMAND-BAR-MODIFICATIONS.md](../../../docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md) for templates

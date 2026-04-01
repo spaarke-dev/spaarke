@@ -274,7 +274,7 @@ FOR each pattern in <knowledge><patterns>:
 ```
 ADDITIONAL MODULE-SPECIFIC FILES:
   - pcf tags → READ src/client/pcf/CLAUDE.md
-  - pcf tags → READ docs/guides/PCF-V9-PACKAGING.md
+  - pcf tags → READ docs/guides/PCF-DEPLOYMENT-GUIDE.md
   - bff-api tags → READ src/server/api/CLAUDE.md (if exists)
   - dataverse tags → READ .claude/skills/dataverse-deploy/SKILL.md
   - deploy tags → READ .claude/skills/dataverse-deploy/SKILL.md
@@ -429,7 +429,7 @@ FOR each <step> in <steps>:
       - Add each file touched with purpose
 
   IF step involves PCF:
-    FOLLOW PCF-V9-PACKAGING.md version bumping rules
+    FOLLOW PCF-DEPLOYMENT-GUIDE.md version bumping rules
     UPDATE version in 4 locations
 
   IF step involves deployment:
@@ -976,7 +976,7 @@ When task has `deploy` tag:
 | Failure | Cause | Prevention |
 |---------|-------|------------|
 | Lost progress after compaction | Didn't update current-task.md | ALWAYS update after each step |
-| Stale PCF deployment | Didn't bump version | ALWAYS read PCF-V9-PACKAGING.md |
+| Stale PCF deployment | Didn't bump version | ALWAYS read PCF-DEPLOYMENT-GUIDE.md |
 | ADR violation | Didn't read ADRs | ALWAYS read ADRs in constraints |
 | Wrong patterns | Didn't read CLAUDE.md | ALWAYS read module CLAUDE.md |
 | Missing context | Skipped knowledge step | NEVER skip Step 4 |

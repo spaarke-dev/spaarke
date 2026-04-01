@@ -373,7 +373,7 @@ REQUIREMENTS (from task-create):
   - Each task file MUST follow the task-execution.template.md structure (root <task id="..." project="...">)
   - Each task MUST include <knowledge><files> and it MUST NOT be empty
   - PCF tasks MUST include docs/guides/PCF-DEPLOYMENT-GUIDE.md and src/client/pcf/CLAUDE.md
-  - Applicable ADRs MUST be included via docs/reference/adr/*.md (see task-create Step 3.5)
+  - Applicable ADRs MUST be included via docs/adr/*.md (see task-create Step 3.5)
 
 CREATE directory:
   - projects/{project-name}/tasks/
