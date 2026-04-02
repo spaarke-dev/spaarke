@@ -1,6 +1,6 @@
 # Current Task State - M365 Copilot Integration (R1)
 
-> **Last Updated**: 2026-03-28 08:00 (by context-handoff)
+> **Last Updated**: 2026-04-02 03:15 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,46 +9,62 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | API Plugin Auth Flow - Copilot cannot call BFF API |
-| **Step** | Blocked: Auth token exchange between Copilot and BFF API |
-| **Status** | blocked |
-| **Next Action** | Research Microsoft's exact OAuth flow for Declarative Agent API Plugins. The current setup sends tokens that the BFF rejects with 401. Need to determine: what audience/issuer does Copilot use, and how to configure BFF to accept it. |
+| **Task** | Auth Resolution + API Integration Fixes |
+| **Step** | Auth SOLVED. API spec fixes need verification. |
+| **Status** | in-progress |
+| **Next Action** | **CRITICAL: Wire OBO/MSAL into Copilot endpoints.** OAuth (step 1) is done — Copilot sends a user token. But without OBO (step 2), the BFF can't act as the user against Graph/SPE/Dataverse. All Copilot endpoints must use AgentTokenService.AcquireTokenOnBehalfOf to get user-scoped tokens for downstream services. Without this, Copilot integration is non-functional. |
 
-### Files Modified This Session (across 2 days)
-- `src/server/api/Sprk.Bff.Api/Api/Agent/*.cs` - 11 agent service files (endpoints, handler, formatter, auth, conversation, playbook, email, status, config, error, telemetry)
-- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AgentModule.cs` - DI registration for all agent services
-- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` - MapAgentEndpoints + debug/token endpoint
-- `src/server/api/Sprk.Bff.Api/Configuration/AgentTokenOptions.cs` - OBO token config
-- `src/server/api/Sprk.Bff.Api/Program.cs` - AddAgentModule registration
-- `src/server/api/Sprk.Bff.Api/appsettings.template.json` - AgentToken + CopilotAgent sections
-- `src/solutions/CopilotAgent/declarativeAgent.json` - Agent instructions with vocabulary mapping
-- `src/solutions/CopilotAgent/spaarke-api-plugin.json` - API Plugin with runtimes/functions (auth: None)
-- `src/solutions/CopilotAgent/spaarke-bff-openapi.yaml` - OpenAPI spec (35+ operations)
-- `src/solutions/CopilotAgent/appPackage/manifest.json` - Teams manifest with webApplicationInfo
-- `src/solutions/CopilotAgent/cards/*.json` - 10 Adaptive Card templates
-- `infrastructure/bot-service/main.bicep` - Bot Service Bicep template
-- `infrastructure/byok/` - BYOK deployment templates
-- `tests/unit/Sprk.Bff.Api.Tests/Api/Agent/*.cs` - 68 unit tests
-- `scripts/Update-CopilotEntityDescriptions.ps1` - Entity description updater
-- `scripts/Configure-CopilotKnowledge.ps1` - Glossary terms + synonyms configurator
-- `scripts/Deploy-CopilotAgent.ps1` - Full deployment orchestrator
-- `docs/guides/` - 5 documentation guides
+### Files Modified This Session
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs` - PostConfigure for Copilot audience + auth failure logging
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs` - Diagnostic middleware logging auth headers before JWT validation
+- `src/server/api/Sprk.Bff.Api/appsettings.template.json` - Added AgentToken.CopilotAudience
+- `src/solutions/CopilotAgent/spaarke-api-plugin.json` - Changed auth None→OAuthPluginVault, updated reference_id to OAuth registration
+- `src/solutions/CopilotAgent/spaarke-bff-openapi.yaml` - Fixed SearchRequest (added scope), RecordSearchRequest (entityTypes→recordTypes), events params (statusCode/dueDateFrom/dueDateTo), added securitySchemes for OAuth
+- `src/solutions/CopilotAgent/appPackage/manifest.json` - Currently devPreview, removed webApplicationInfo (testing), restored it
+- `src/solutions/CopilotAgent/declarativeAgent.json` - Rewrote to remove BOM + mojibake, updated instructions for correct API usage
+- `scripts/Deploy-CopilotAgent.ps1` - Fixed BOM issue (UTF8Encoding without BOM)
 
 ### Critical Context
 
-**The blocker**: M365 Copilot's Declarative Agent with API Plugin is deployed and visible in MDA Copilot and Teams. The agent responds using its Spaarke instructions. App Insights confirms Copilot DOES attempt to call our BFF API (GET /api/v1/events?status=overdue), but gets 401. The BFF's JWT middleware (AddMicrosoftIdentityWebApi) rejects the token. We pre-authorized the Copilot Bot app (f257a0a9) in the BFF's Entra app registration (1e40baad), but tokens are still rejected.
+**AUTH IS RESOLVED** — The full OAuth flow works:
+1. Copilot shows "Allow" consent card → user clicks Allow
+2. Sign-in popup appears → user authenticates
+3. Copilot sends Bearer token with `scp=access_as_user`, `aud=api://1e40baad-...`
+4. BFF accepts token via PostConfigure<JwtBearerOptions> with CopilotAudience
 
-**What we've tried that didn't work**:
-- webApplicationInfo in manifest.json (added, Copilot attempts API calls but gets 401)
-- Pre-authorizing Copilot Bot app in BFF Entra app registration (done, still 401)
-- Adding ValidAudiences config to App Service (added, no effect)
-- Anonymous endpoints (proved pipeline works but unsafe, reverted)
+**Key auth setup (DO NOT CHANGE):**
+- OAuth client registration in Teams Dev Portal (NOT Entra SSO — SSO didn't work)
+- Plugin manifest: `auth.type: "OAuthPluginVault"`, `reference_id: "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyMwNmViNWJjMC0wMTE4LTQ3OTgtODlkMS05MzBkNTNlYmFkNmE="`
+- Entra app (1e40baad): has `access_as_user` scope, enterprise token store (ab3be6b7) pre-authorized, redirect URI `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect`
+- BFF accepts both `api://1e40baad-...` and `api://auth-3e04ab58-...` audiences
 
-**What needs investigation**:
-1. What exact audience/issuer does the Copilot token have? (debug/token endpoint is deployed but needs Copilot to call it)
-2. Does API Plugin auth require "OAuthPluginVault" with a registered OAuth connection in Teams Developer Portal? (Teams Dev Portal doesn't show this option clearly for Declarative Agents)
-3. Should we use Copilot Studio to configure the API connection instead of manifest-only approach?
-4. Is there a Microsoft-specific token audience for API Plugins that we need to accept?
+**REMAINING ISSUES (not auth):**
+
+1. **OpenAPI spec mismatches causing 400s on search**:
+   - `POST /api/ai/search` requires `scope: "all"` field (REQUIRED, was missing from original spec, now added)
+   - `POST /api/ai/search/records` requires `recordTypes` not `entityTypes` (fixed in spec)
+   - But Copilot sometimes ignores spec and makes up params — may need function descriptions to guide it
+
+2. **Events endpoint has NO user filtering**:
+   - `GET /api/v1/events` uses app-only Dataverse auth (ClientSecretCredential)
+   - No OBO, no user impersonation, no OID extraction from token
+   - Returns ALL events or none — not scoped to current user
+   - EventEntity has no OwnerId/AssignedTo field
+   - NEEDS: Add user context extraction + Dataverse user filtering (separate task)
+
+3. **Confirmation cards on every read request**:
+   - Added `capabilities.confirmation.type: "None"` to read functions but had to strip it (schema validation issue with v2.2)
+   - Need to verify correct schema version that supports this
+
+4. **Copilot sometimes uses native Dataverse instead of API plugin**:
+   - Agent instructions say to always use plugin functions
+   - But Copilot may query Task/Activity entities directly (empty, since Spaarke uses sprk_event)
+
+5. **Teams app package upload sensitivity**:
+   - BOM in JSON files causes "can't read manifest" error
+   - devPreview manifest works for upload; v1.24 was rejected on fresh upload
+   - Deploy script now writes UTF-8 without BOM
+   - declarativeAgent.json was rewritten clean (had BOM + mojibake from PowerShell ConvertTo-Json)
 
 ---
 
@@ -63,63 +79,37 @@
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| BFF API | Live | https://spe-api-dev-67e2xz.azurewebsites.net (auth restored) |
-| Bot Service | Live | spaarke-bot-dev in spe-infrastructure-westus2 |
+| BFF API | Live | https://spe-api-dev-67e2xz.azurewebsites.net (with Copilot audience + diagnostic middleware) |
+| Bot Service | Live | spaarke-bot-dev |
 | Entra App (Bot) | Registered | f257a0a9-1061-4f9b-8918-3ad056fe90db |
-| Entra App (BFF) | Existing | 1e40baad-e065-4aea-a8d4-4b7ab273458c |
-| Teams App | Uploaded v1.0.4 | Spaarke AI in org app catalog |
-| App Service Config | Set | AgentToken + CopilotAgent sections configured |
-| Entity Descriptions | Applied | 9/10 Spaarke entities updated |
-| Glossary Terms | Applied | 15 terms in CopilotGlossaryTerm table |
-| Column Synonyms | Applied | 13 synonyms in CopilotSynonyms table |
+| Entra App (BFF) | Configured | 1e40baad-e065-4aea-a8d4-4b7ab273458c (access_as_user scope + enterprise token store) |
+| Teams App | Uploaded v1.1.0 | Spaarke AI in org app catalog |
+| OAuth Registration | Active | Teams Dev Portal, OAuth client registration |
+| App Service Config | Set | AgentToken__CopilotAudience configured |
 
-### Key Entra App Details
+### Key Entra App Configuration
 
-| App | App ID | Purpose |
-|-----|--------|---------|
-| SDAP-BFF-SPE-API | 1e40baad-e065-4aea-a8d4-4b7ab273458c | BFF API (token audience) |
-| Spaarke Copilot Bot Dev | f257a0a9-1061-4f9b-8918-3ad056fe90db | Bot/Copilot agent identity |
-
-BFF API accepts tokens with audience: api://1e40baad-e065-4aea-a8d4-4b7ab273458c
-Copilot Bot app is pre-authorized for user_impersonation + SDAP.Access scopes.
-webApplicationInfo in manifest points to BFF app: api://1e40baad-e065-4aea-a8d4-4b7ab273458c
-
-### App Insights Evidence
-
-Copilot IS attempting API calls (confirmed via App Insights query):
-```
-GET /api/v1/events?status=overdue           -> 401
-GET /api/v1/events?assigneeId=me&status=overdue -> 401
-```
-
-These come from the Copilot API Plugin invoking our listEvents function. The 401 means the BFF's JWT middleware rejects the token before it reaches application code.
+BFF App (1e40baad-e065-4aea-a8d4-4b7ab273458c):
+- identifierUris: `api://1e40baad-...` AND `api://auth-3e04ab58-.../1e40baad-...`
+- Scopes: `user_impersonation`, `SDAP.Access`, `access_as_external_user`, `access_as_user`
+- Authorized clients: enterprise token store (ab3be6b7), Bot app (f257a0a9), MDA app (170c98e1), others
+- Redirect URIs: `oAuthRedirect` AND `oAuthConsentRedirect` (both Teams URLs)
 
 ### Git State
 
 Branch: work/ai-m365-copilot-integration-r1
-Remote: pushed and up to date
-Last commit: 7ba6efc5 - "fix(copilot): restore auth on agent endpoints + add debug/token endpoint"
-Working tree: clean
-
-### Documentation Created
-
-| Guide | Path |
-|-------|------|
-| Deployment Guide | docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md |
-| Architecture Overview | docs/architecture/M365-COPILOT-INTEGRATION-ARCHITECTURE.md |
-| User Guide | docs/guides/M365-COPILOT-USER-GUIDE.md |
-| Admin Guide | docs/guides/M365-COPILOT-ADMIN-GUIDE.md |
-| Build & Deploy Lessons | docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md |
-| Knowledge Configuration | docs/guides/COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md |
+Commits this session:
+- 42aa7728 - fix(copilot): resolve API Plugin auth — OAuth flow with Entra SSO
+- 37aa1a7b - fix(copilot): align OpenAPI spec with actual endpoints + remove confirmations
+Uncommitted: manifest.json, declarativeAgent.json, Deploy-CopilotAgent.ps1, deploy/ binaries
 
 ### Recovery Instructions
 
 1. Read this file for current state
-2. The blocker is AUTH - Copilot tokens rejected by BFF
-3. Research: Microsoft docs on API Plugin OAuth for Declarative Agents
-4. Key question: What token audience does Copilot's API Plugin use?
-5. The /debug/token endpoint is deployed - if Copilot calls it, it will reveal the token claims
-6. Alternative: Configure API connection via Copilot Studio instead of manifest-only
+2. Auth is SOLVED — do not change the OAuth flow
+3. Next priorities: (a) Fix OpenAPI spec to match actual endpoints precisely, (b) Add user context to events endpoint, (c) Add confirmation:None to read functions (verify schema support), (d) Test search endpoints
+4. The diagnostic middleware in MiddlewarePipelineExtensions.cs should be removed before production
+5. The auth failure logging in AuthorizationModule.cs should be removed before production
 
 ---
 

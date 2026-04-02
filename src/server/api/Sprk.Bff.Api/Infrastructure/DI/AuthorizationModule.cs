@@ -23,20 +23,55 @@ public static class AuthorizationModule
             .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
 
         // Accept tokens from M365 Copilot API Plugin (uses a different audience URI
-        // issued via the Teams Developer Portal Entra SSO registration)
-        services.Configure<JwtBearerOptions>(
+        // issued via the Teams Developer Portal Entra SSO registration).
+        // PostConfigure runs AFTER AddMicrosoftIdentityWebApi's own configuration,
+        // ensuring our audience list isn't overwritten by the library.
+        services.PostConfigure<JwtBearerOptions>(
             JwtBearerDefaults.AuthenticationScheme,
             options =>
             {
                 var copilotAudience = configuration["AgentToken:CopilotAudience"];
                 if (!string.IsNullOrEmpty(copilotAudience))
                 {
-                    options.TokenValidationParameters.ValidAudiences =
-                    [
-                        configuration["AzureAd:Audience"] ?? $"api://{configuration["AzureAd:ClientId"]}",
-                        copilotAudience
-                    ];
+                    var existingAudiences = options.TokenValidationParameters.ValidAudiences?.ToList()
+                        ?? [];
+                    var primaryAudience = options.TokenValidationParameters.ValidAudience;
+
+                    var audiences = new HashSet<string>(existingAudiences, StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrEmpty(primaryAudience))
+                        audiences.Add(primaryAudience);
+                    audiences.Add(copilotAudience);
+
+                    options.TokenValidationParameters.ValidAudiences = audiences;
+                    // Clear singular to avoid conflicts with the plural list
+                    options.TokenValidationParameters.ValidAudience = null;
                 }
+
+                // Log auth failures with token details for diagnosing Copilot token issues
+                var existingOnFailed = options.Events?.OnAuthenticationFailed;
+                options.Events ??= new JwtBearerEvents();
+                options.Events.OnAuthenticationFailed = async context =>
+                {
+                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("CopilotAuth");
+                    var authHeader = context.HttpContext.Request.Headers.Authorization.ToString();
+                    if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
+                    {
+                        try
+                        {
+                            var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                            var jwt = handler.ReadJwtToken(authHeader["Bearer ".Length..]);
+                            logger.LogWarning(
+                                "JWT auth failed. Audience={Audience}, Issuer={Issuer}, AppId={AppId}, Error={Error}",
+                                string.Join(",", jwt.Audiences),
+                                jwt.Issuer,
+                                jwt.Claims.FirstOrDefault(c => c.Type == "appid")?.Value ?? jwt.Claims.FirstOrDefault(c => c.Type == "azp")?.Value,
+                                context.Exception?.Message);
+                        }
+                        catch { /* token unreadable — skip logging */ }
+                    }
+                    if (existingOnFailed != null) await existingOnFailed(context);
+                };
             });
 
         // Register authorization handler (Scoped to match AuthorizationService dependency)

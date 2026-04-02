@@ -1472,6 +1472,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         DateTime? dueDateTo = null,
         int skip = 0,
         int top = 50,
+        Guid? ownerUserId = null,
         CancellationToken ct = default)
     {
         // Stub: Return empty results until sprk_event entity is deployed

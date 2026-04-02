@@ -446,31 +446,44 @@ paths:
         Use when a user asks about their tasks, due dates, or assignments.
         Supports filtering by matter, assignee, status, and date range.
       parameters:
-        - name: matterId
+        - name: regardingRecordType
           in: query
+          description: "Entity type code (1=Matter, 2=Project)"
+          schema:
+            type: integer
+        - name: regardingRecordId
+          in: query
+          description: ID of the related record (matter or project)
           schema:
             type: string
-            format: uuid
-        - name: assigneeId
+        - name: statusCode
           in: query
+          description: "Status filter (1=Active, 2=Completed, 3=Cancelled)"
           schema:
-            type: string
-            format: uuid
-        - name: status
+            type: integer
+            enum: [1, 2, 3]
+        - name: priority
           in: query
+          description: "Priority filter (100000000=High, 100000001=Medium, 100000002=Low, 100000003=None)"
           schema:
-            type: string
-            enum: [active, completed, cancelled, overdue]
-        - name: dueBefore
+            type: integer
+        - name: dueDateFrom
           in: query
+          description: Events with due date on or after this date (YYYY-MM-DD)
           schema:
             type: string
             format: date
-        - name: dueAfter
+        - name: dueDateTo
           in: query
+          description: Events with due date on or before this date (YYYY-MM-DD)
           schema:
             type: string
             format: date
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 50
       responses:
         '200':
           description: Events list
@@ -803,17 +816,32 @@ components:
     # ─── Search ───
     SearchRequest:
       type: object
+      required:
+        - query
+        - scope
       properties:
         query:
           type: string
-        top:
-          type: integer
-          default: 10
+          description: The search query text
+        scope:
+          type: string
+          enum: [all, entity, documentIds]
+          default: all
+          description: Search scope — use "all" for general searches
         entityType:
           type: string
-        matterId:
+          description: Required when scope is "entity" (e.g., sprk_matter)
+        entityId:
           type: string
-          format: uuid
+          description: Required when scope is "entity"
+        options:
+          type: object
+          properties:
+            limit:
+              type: integer
+              default: 20
+              minimum: 1
+              maximum: 50
     SearchResults:
       type: object
       properties:
@@ -841,15 +869,27 @@ components:
           type: string
     RecordSearchRequest:
       type: object
+      required:
+        - query
+        - recordTypes
       properties:
         query:
           type: string
-        entityTypes:
+          description: Search query text
+        recordTypes:
           type: array
           items:
             type: string
-        top:
-          type: integer
+            enum: [sprk_matter, sprk_project, sprk_invoice]
+          description: Dataverse entity types to search
+        options:
+          type: object
+          properties:
+            limit:
+              type: integer
+              default: 20
+              minimum: 1
+              maximum: 50
     RecordSearchResults:
       type: object
       properties:
@@ -1247,15 +1287,16 @@ components:
           type: object
 
   securitySchemes:
-    oauth2:
+    oAuth2AuthCode:
       type: oauth2
+      description: OAuth configuration for the Spaarke BFF API
       flows:
         authorizationCode:
-          authorizationUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
-          tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+          authorizationUrl: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/token
           scopes:
-            api://spe-api-dev-67e2xz/user_impersonation: Access Spaarke BFF API
+            api://1e40baad-e065-4aea-a8d4-4b7ab273458c/access_as_user: Access Spaarke BFF API as the user
 
 security:
-  - oauth2:
-      - api://spe-api-dev-67e2xz/user_impersonation
+  - oAuth2AuthCode:
+      - api://1e40baad-e065-4aea-a8d4-4b7ab273458c/access_as_user
