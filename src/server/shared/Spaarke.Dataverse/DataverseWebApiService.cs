@@ -1159,12 +1159,15 @@ public class DataverseWebApiService : IDataverseService
         DateTime? dueDateTo = null,
         int skip = 0,
         int top = 50,
+        Guid? ownerUserId = null,
         CancellationToken ct = default)
     {
-
-
         // Build OData query
         var filters = new List<string>();
+
+        // Owner filter — scopes results to a specific user (used by Copilot integration)
+        if (ownerUserId.HasValue)
+            filters.Add($"_ownerid_value eq {ownerUserId.Value}");
 
         if (regardingRecordType.HasValue)
             filters.Add($"sprk_regardingrecordtype eq {regardingRecordType.Value}");

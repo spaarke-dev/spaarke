@@ -26,10 +26,10 @@ public sealed record SemanticSearchRequest
 
     /// <summary>
     /// Search scope: "all", "entity", or "documentIds".
+    /// Defaults to "all" when not provided (e.g., Copilot API Plugin calls).
     /// </summary>
-    [Required(ErrorMessage = "Scope is required")]
     [JsonPropertyName("scope")]
-    public required string Scope { get; init; }
+    public string Scope { get; init; } = SearchScope.All;
 
     /// <summary>
     /// Parent entity type when <c>scope=entity</c>.

@@ -16,6 +16,7 @@ public interface IEventDataverseService
         DateTime? dueDateTo = null,
         int skip = 0,
         int top = 50,
+        Guid? ownerUserId = null,
         CancellationToken ct = default);
 
     Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default);

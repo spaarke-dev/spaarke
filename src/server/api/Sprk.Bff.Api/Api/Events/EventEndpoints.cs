@@ -149,6 +149,7 @@ public static class EventEndpoints
         [FromQuery] DateTime? dueDateTo,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 50,
+        HttpContext httpContext = null!,
         IEventDataverseService dataverseService = null!,
         ILogger<Program> logger = null!,
         CancellationToken ct = default)
@@ -195,6 +196,9 @@ public static class EventEndpoints
 
         try
         {
+            // Extract user OID from token for owner-scoped queries (Copilot + MDA)
+            var ownerUserId = ExtractOwnerUserId(httpContext);
+
             var events = await QueryEventsAsync(
                 dataverseService,
                 regardingRecordType,
@@ -206,6 +210,7 @@ public static class EventEndpoints
                 dueDateTo,
                 pageNumber,
                 pageSize,
+                ownerUserId,
                 ct);
 
             var response = new EventListResponse
@@ -542,6 +547,7 @@ public static class EventEndpoints
         DateTime? dueDateTo,
         int pageNumber,
         int pageSize,
+        Guid? ownerUserId,
         CancellationToken ct)
     {
         // Calculate skip for pagination
@@ -558,6 +564,7 @@ public static class EventEndpoints
             dueDateTo,
             skip,
             pageSize,
+            ownerUserId,
             ct);
 
         // Map entities to DTOs
@@ -578,6 +585,17 @@ public static class EventEndpoints
             return null;
 
         return MapEntityToDto(entity);
+    }
+
+    /// <summary>
+    /// Extracts the user's Azure AD Object ID from token claims for owner-scoped queries.
+    /// Returns null if not available (e.g., app-only token), which means no owner filter is applied.
+    /// </summary>
+    private static Guid? ExtractOwnerUserId(HttpContext httpContext)
+    {
+        var oid = httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 
     /// <summary>
