@@ -12,7 +12,7 @@
 | **Task** | Auth Resolution + API Integration Fixes |
 | **Step** | Auth SOLVED. API spec fixes need verification. |
 | **Status** | in-progress |
-| **Next Action** | Fix remaining API integration issues: (1) OpenAPI spec params vs actual endpoint params, (2) user context scoping on events, (3) confirmation cards on read ops, (4) verify search endpoints work. Start new session fresh with these as discrete tasks. |
+| **Next Action** | **CRITICAL: Wire OBO/MSAL into Copilot endpoints.** OAuth (step 1) is done — Copilot sends a user token. But without OBO (step 2), the BFF can't act as the user against Graph/SPE/Dataverse. All Copilot endpoints must use AgentTokenService.AcquireTokenOnBehalfOf to get user-scoped tokens for downstream services. Without this, Copilot integration is non-functional. |
 
 ### Files Modified This Session
 - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs` - PostConfigure for Copilot audience + auth failure logging
