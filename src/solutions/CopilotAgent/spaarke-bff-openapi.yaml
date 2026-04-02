@@ -818,7 +818,6 @@ components:
       type: object
       required:
         - query
-        - scope
       properties:
         query:
           type: string
@@ -827,7 +826,7 @@ components:
           type: string
           enum: [all, entity, documentIds]
           default: all
-          description: Search scope — use "all" for general searches
+          description: Search scope — use "all" for general searches (defaults to "all" if not provided)
         entityType:
           type: string
           description: Required when scope is "entity" (e.g., sprk_matter)

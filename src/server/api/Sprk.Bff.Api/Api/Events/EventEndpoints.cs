@@ -151,6 +151,7 @@ public static class EventEndpoints
         [FromQuery] int pageSize = 50,
         HttpContext httpContext = null!,
         IEventDataverseService dataverseService = null!,
+        ICommunicationDataverseService communicationService = null!,
         ILogger<Program> logger = null!,
         CancellationToken ct = default)
     {
@@ -196,8 +197,17 @@ public static class EventEndpoints
 
         try
         {
-            // Extract user OID from token for owner-scoped queries (Copilot + MDA)
-            var ownerUserId = ExtractOwnerUserId(httpContext);
+            // Map Entra OID → Dataverse systemuserid for owner-scoped queries.
+            // _ownerid_value in Dataverse is the systemuserid GUID, not the Entra OID.
+            Guid? ownerUserId = null;
+            var oid = ExtractOid(httpContext);
+            if (!string.IsNullOrEmpty(oid))
+            {
+                ownerUserId = await communicationService.QuerySystemUserByAzureAdOidAsync(oid, ct);
+                logger.LogInformation(
+                    "[EVENTS] OID {Oid} → Dataverse systemuserid {SystemUserId}",
+                    oid, ownerUserId?.ToString() ?? "not found");
+            }
 
             var events = await QueryEventsAsync(
                 dataverseService,
@@ -588,14 +598,14 @@ public static class EventEndpoints
     }
 
     /// <summary>
-    /// Extracts the user's Azure AD Object ID from token claims for owner-scoped queries.
+    /// Extracts the user's Azure AD Object ID (OID) string from token claims.
     /// Returns null if not available (e.g., app-only token), which means no owner filter is applied.
+    /// Note: OID is NOT the Dataverse systemuserid — callers must map via QuerySystemUserByAzureAdOidAsync.
     /// </summary>
-    private static Guid? ExtractOwnerUserId(HttpContext httpContext)
+    private static string? ExtractOid(HttpContext httpContext)
     {
-        var oid = httpContext.User.FindFirst("oid")?.Value
+        return httpContext.User.FindFirst("oid")?.Value
             ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-        return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 
     /// <summary>
