@@ -30,38 +30,31 @@
   "functions": [
     {
       "name": "semanticSearch",
-      "description": "Call this when the user wants to find documents by topic, name, content, or description. Performs hybrid semantic and keyword search across all documents the user has access to.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user wants to find documents by topic, name, content, or description. Performs hybrid semantic and keyword search across all documents the user has access to."
     },
     {
       "name": "listDocuments",
-      "description": "Call this when the user wants to see a list of documents, optionally filtered by matter, project, or document type.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user wants to see a list of documents, optionally filtered by matter, project, or document type."
     },
     {
       "name": "getDocument",
-      "description": "Call this when the user asks for details about a specific document, such as its metadata, type, or matter association.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks for details about a specific document, such as its metadata, type, or matter association."
     },
     {
       "name": "getDocumentPreviewUrl",
-      "description": "Call this when the user wants to view or preview a document. Returns a URL that opens the document in a browser.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user wants to view or preview a document. Returns a URL that opens the document in a browser."
     },
     {
       "name": "summarizeFile",
-      "description": "Call this when the user wants a summary of a document's content or key points.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user wants a summary of a document's content or key points."
     },
     {
       "name": "listChatPlaybooks",
-      "description": "Call this when the user asks what analysis playbooks or AI capabilities are available for chat.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks what analysis playbooks or AI capabilities are available for chat."
     },
     {
       "name": "listPublicPlaybooks",
-      "description": "Call this when the user asks 'What analysis tools are available?' or wants to browse all playbooks.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks 'What analysis tools are available?' or wants to browse all playbooks."
     },
     {
       "name": "executePlaybook",
@@ -69,23 +62,19 @@
     },
     {
       "name": "getPlaybookRunStatus",
-      "description": "Call this to check the progress of a running playbook execution.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this to check the progress of a running playbook execution."
     },
     {
       "name": "getPlaybookRunDetail",
-      "description": "Call this when a playbook execution has completed and the user wants to see the full results and findings.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when a playbook execution has completed and the user wants to see the full results and findings."
     },
     {
       "name": "listEvents",
-      "description": "Call this when the user asks about their tasks, deadlines, due dates, or assignments. Returns all events — use dueDateTo with a past date and statusCode=1 for overdue items.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks about their tasks, deadlines, due dates, or assignments. Supports filtering by matter and status."
     },
     {
       "name": "getEvent",
-      "description": "Call this when the user asks for details about a specific task, deadline, or event.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks for details about a specific task, deadline, or event."
     },
     {
       "name": "createEvent",
@@ -97,28 +86,23 @@
     },
     {
       "name": "getPortfolio",
-      "description": "Call this when the user asks for an overview of their matters, projects, or portfolio.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks for an overview of their matters, projects, or portfolio."
     },
     {
       "name": "getBriefing",
-      "description": "Call this when the user asks for their daily briefing or what needs attention today.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks for their daily briefing or what needs attention today."
     },
     {
       "name": "getMatterAiSummary",
-      "description": "Call this when the user asks for a summary of a specific matter including recent activity and key documents.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks for a summary of a specific matter including recent activity and key documents."
     },
     {
       "name": "getMatterFinanceSummary",
-      "description": "Call this when the user asks about the budget, spending, or invoices for a matter.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user asks about the budget, spending, or invoices for a matter."
     },
     {
       "name": "searchRecords",
-      "description": "Call this when the user wants to search for matters, projects, events, or documents by name.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this when the user wants to search for matters, projects, events, or documents by name."
     },
     {
       "name": "sendCommunication",
@@ -126,13 +110,11 @@
     },
     {
       "name": "handleAgentMessage",
-      "description": "Call this to route a conversational message through the Spaarke agent gateway.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this to route a conversational message through the Spaarke agent gateway."
     },
     {
       "name": "listAgentPlaybooks",
-      "description": "Call this to get playbooks available for the agent, optionally filtered by document type.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this to get playbooks available for the agent, optionally filtered by document type."
     },
     {
       "name": "runAgentPlaybook",
@@ -140,8 +122,7 @@
     },
     {
       "name": "getAgentPlaybookStatus",
-      "description": "Call this to check the status of a long-running playbook started through the agent.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this to check the status of a long-running playbook started through the agent."
     },
     {
       "name": "createAnalysis",
@@ -149,18 +130,15 @@
     },
     {
       "name": "getAnalysis",
-      "description": "Call this to check the status and results of a document analysis.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this to check the status and results of a document analysis."
     },
     {
       "name": "getCurrentUser",
-      "description": "Call this to get the current user's profile and permissions.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this to get the current user's profile and permissions."
     },
     {
       "name": "getUserCapabilities",
-      "description": "Call this to determine what features the current user has access to.",
-      "capabilities": { "confirmation": { "type": "None" } }
+      "description": "Call this to determine what features the current user has access to."
     }
   ]
 }

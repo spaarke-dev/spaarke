@@ -119,7 +119,9 @@ if ($manifest.webApplicationInfo) {
     $manifest.webApplicationInfo.id = $BffAppId
     $manifest.webApplicationInfo.resource = "api://$BffAppId"
 }
-$manifest | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $tempDir "manifest.json") -Encoding UTF8
+# Write without BOM — Teams Admin Center rejects BOM-prefixed JSON
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText((Join-Path $tempDir "manifest.json"), ($manifest | ConvertTo-Json -Depth 10), $utf8NoBom)
 
 # Copy agent files
 Copy-Item (Join-Path $copilotDir "declarativeAgent.json") $tempDir
