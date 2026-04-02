@@ -442,9 +442,13 @@ paths:
       operationId: listEvents
       summary: List events and tasks
       description: >
-        Returns events (tasks, deadlines, appointments) for the current user.
-        Use when a user asks about their tasks, due dates, or assignments.
-        Supports filtering by matter, assignee, status, and date range.
+        Returns events (tasks, deadlines, appointments) for the authenticated user.
+        The current user is automatically identified from the authentication token — do NOT pass
+        an assignee, assignedTo, or user parameter. Use when a user asks about their tasks, due dates,
+        deadlines, or assignments. Use status="open" for open/active/current tasks (default),
+        status="completed" for done tasks, status="cancelled" for cancelled tasks.
+        For overdue tasks use status="open" with dueDateTo set to today's date.
+        If no status is specified, defaults to "open".
       parameters:
         - name: regardingRecordType
           in: query
@@ -456,12 +460,13 @@ paths:
           description: ID of the related record (matter or project)
           schema:
             type: string
-        - name: statusCode
+        - name: status
           in: query
-          description: "Status filter (1=Active, 2=Completed, 3=Cancelled)"
+          description: "Status filter: open (active/current tasks), completed, or cancelled. Use 'open' for tasks that need attention."
           schema:
-            type: integer
-            enum: [1, 2, 3]
+            type: string
+            enum: [open, completed, cancelled]
+            default: open
         - name: priority
           in: query
           description: "Priority filter (100000000=High, 100000001=Medium, 100000002=Low, 100000003=None)"
