@@ -68,11 +68,11 @@ export const GetStartedExpandDialog: React.FC<IGetStartedExpandDialogProps> = ({
             />
           }
         >
-          Playbook Library
+          Get Started
         </DialogTitle>
 
         <DialogBody>
-          <div className={styles.grid} role="group" aria-label="Playbook Library">
+          <div className={styles.grid} role="group" aria-label="Get Started actions">
             {ACTION_CARD_CONFIGS.map((config: IActionCardConfig) => (
               <ActionCard
                 key={config.id}

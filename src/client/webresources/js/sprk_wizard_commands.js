@@ -192,6 +192,27 @@ Spaarke.Commands.Wizards = (function () {
       var ctx = getEntityContext(primaryControl);
       var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId + "&intent=" + intent;
       openWizardWithBff(primaryControl, "sprk_playbooklibrary", baseData, "Playbook Library");
+    },
+
+    // -----------------------------------------------------------------------
+    // Standalone launchers (no parent context) — for entity homepage grid
+    // "+New" button replacements. No PrimaryControl needed.
+    // -----------------------------------------------------------------------
+
+    openCreateMatterStandalone: function () {
+      openWizardWithBff(null, "sprk_creatematterwizard", "", "Create New Matter");
+    },
+
+    openCreateProjectStandalone: function () {
+      openWizardWithBff(null, "sprk_createprojectwizard", "", "Create New Project");
+    },
+
+    openCreateEventStandalone: function () {
+      openWizardWithBff(null, "sprk_createeventwizard", "", "Create New Event");
+    },
+
+    openCreateWorkAssignmentStandalone: function () {
+      openWizardWithBff(null, "sprk_createworkassignmentwizard", "", "Assign Work");
     }
   };
 })();

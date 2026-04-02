@@ -85,13 +85,13 @@ export const documentsRegistration: SectionRegistration = {
             gap: "15px",
           },
         },
-        // Add document button
+        // Add document button — opens DocumentUploadWizard in standalone mode
         React.createElement(Button, {
           appearance: "subtle",
           size: "small",
           icon: React.createElement(AddRegular),
           onClick: () =>
-            context.onOpenWizard("sprk_adddocument"),
+            context.onOpenWizard("sprk_documentuploadwizard"),
           "aria-label": "Add document",
         }),
         // Open all documents button

@@ -67,15 +67,15 @@ export const getStartedRegistration: SectionRegistration = {
         ctx.onOpenWizard("sprk_playbooklibrary", "intent=meeting-schedule"),
     };
 
-    // Toolbar: expand button opens the Playbook Library dialog
+    // Toolbar: expand button opens the Get Started expand dialog (all 7 cards)
     const toolbar = React.createElement(
       Button,
       {
         appearance: "subtle" as const,
         size: "small" as const,
         icon: React.createElement(OpenRegular),
-        onClick: () => ctx.onOpenWizard("sprk_playbooklibrary"),
-        "aria-label": "Open Playbook Library",
+        onClick: () => ctx.onExpandSection?.("get-started"),
+        "aria-label": "Show all actions",
       },
     );
 

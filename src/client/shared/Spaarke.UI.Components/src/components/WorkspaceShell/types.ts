@@ -226,6 +226,12 @@ export interface SectionFactoryContext {
    * clicks a global refresh or when another section triggers a cross-refresh.
    */
   onRefetchReady: (refetch: () => void) => void;
+  /**
+   * Request the workspace to open a section's expand/detail dialog.
+   * The workspace maps sectionId to the appropriate local dialog (e.g.,
+   * "get-started" → GetStartedExpandDialog).
+   */
+  onExpandSection?: (sectionId: string) => void;
 }
 
 /**

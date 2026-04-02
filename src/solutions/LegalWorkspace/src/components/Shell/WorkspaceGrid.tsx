@@ -594,6 +594,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       onOpenWizard: handleOpenWizardGeneric,
       onBadgeCountChange: (/* count — handled per-section via factory */) => {},
       onRefetchReady: (/* refetch — handled per-section via factory */) => {},
+      onExpandSection: (sectionId: string) => {
+        if (sectionId === "get-started") handleExpandClick();
+        else if (sectionId === "quick-summary") handleDashboardOpen();
+      },
     };
   }, [webApi, userId, service, handleNavigate, handleOpenWizardGeneric]);
 
