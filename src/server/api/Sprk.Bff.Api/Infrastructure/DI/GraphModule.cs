@@ -50,6 +50,18 @@ public static class GraphModule
             return new DataverseServiceClientImpl(config, logger);
         });
 
+        // DataverseWebApiService - uses REST/HttpClient (no WCF). Handles event operations
+        // which require full OData query support not available in DataverseServiceClientImpl stub.
+        services.AddHttpClient("DataverseWebApi");
+        services.AddSingleton<DataverseWebApiService>(sp =>
+        {
+            var factory = sp.GetRequiredService<IHttpClientFactory>();
+            var httpClient = factory.CreateClient("DataverseWebApi");
+            var config = sp.GetRequiredService<IConfiguration>();
+            var logger = sp.GetRequiredService<ILogger<DataverseWebApiService>>();
+            return new DataverseWebApiService(httpClient, config, logger);
+        });
+
         // Narrow interface forwarding registrations (ADR-010: forwarding delegates don't count as new types).
         // IDataverseService is a composite interface inheriting all 9 narrow interfaces.
         // These forwarding registrations allow consumers to inject only the narrowest applicable interface.
@@ -57,7 +69,8 @@ public static class GraphModule
         services.AddSingleton<IAnalysisDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
         services.AddSingleton<IGenericEntityService>(sp => sp.GetRequiredService<IDataverseService>());
         services.AddSingleton<IProcessingJobService>(sp => sp.GetRequiredService<IDataverseService>());
-        services.AddSingleton<IEventDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        // Events use DataverseWebApiService (real implementation) instead of DataverseServiceClientImpl (stub).
+        services.AddSingleton<IEventDataverseService>(sp => sp.GetRequiredService<DataverseWebApiService>());
         services.AddSingleton<IFieldMappingDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
         services.AddSingleton<IKpiDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
         services.AddSingleton<ICommunicationDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
