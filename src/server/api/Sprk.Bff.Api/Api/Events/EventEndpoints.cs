@@ -129,7 +129,8 @@ public static class EventEndpoints
     /// <param name="regardingRecordType">Filter by regarding record type (0-7).</param>
     /// <param name="regardingRecordId">Filter by specific regarding record ID.</param>
     /// <param name="eventTypeId">Filter by event type ID.</param>
-    /// <param name="statusCode">Filter by status code.</param>
+    /// <param name="statusCode">Filter by status code (3=Open, 5=Completed, 6=Cancelled).</param>
+    /// <param name="status">String alias for statusCode: "open" (3), "completed" (5), "cancelled" (6). Takes precedence over statusCode.</param>
     /// <param name="priority">Filter by priority (0-3).</param>
     /// <param name="dueDateFrom">Filter events with due date on or after this date.</param>
     /// <param name="dueDateTo">Filter events with due date on or before this date.</param>
@@ -144,6 +145,7 @@ public static class EventEndpoints
         [FromQuery] string? regardingRecordId,
         [FromQuery] Guid? eventTypeId,
         [FromQuery] int? statusCode,
+        [FromQuery] string? status,
         [FromQuery] int? priority,
         [FromQuery] DateTime? dueDateFrom,
         [FromQuery] DateTime? dueDateTo,
@@ -168,6 +170,19 @@ public static class EventEndpoints
         else if (pageSize > 100)
         {
             pageSize = 100;
+        }
+
+        // Map string status alias (used by Copilot) to Dataverse integer statusCode.
+        // "open"→3, "completed"→5, "cancelled"→6. String wins over integer if both provided.
+        if (!string.IsNullOrEmpty(status))
+        {
+            statusCode = status.ToLowerInvariant() switch
+            {
+                "open" => 3,
+                "completed" => 5,
+                "cancelled" or "canceled" => 6,
+                _ => statusCode // unknown string → fall through to integer param
+            };
         }
 
         // Validate regardingRecordType if provided
