@@ -10,7 +10,7 @@
       "type": "OpenApi",
       "auth": {
         "type": "OAuthPluginVault",
-        "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyMzZTA0YWI1OC04NDUwLTQ0ZDYtYjk1Yi1kYWNhMTZiNmNiZGI="
+        "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyMwNmViNWJjMC0wMTE4LTQ3OTgtODlkMS05MzBkNTNlYmFkNmE="
       },
       "spec": {
         "url": "spaarke-bff-openapi.yaml"

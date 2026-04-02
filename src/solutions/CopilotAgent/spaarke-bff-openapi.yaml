@@ -1247,15 +1247,16 @@ components:
           type: object
 
   securitySchemes:
-    oauth2:
+    oAuth2AuthCode:
       type: oauth2
+      description: OAuth configuration for the Spaarke BFF API
       flows:
         authorizationCode:
-          authorizationUrl: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
-          tokenUrl: https://login.microsoftonline.com/common/oauth2/v2.0/token
+          authorizationUrl: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/token
           scopes:
-            api://spe-api-dev-67e2xz/user_impersonation: Access Spaarke BFF API
+            api://1e40baad-e065-4aea-a8d4-4b7ab273458c/access_as_user: Access Spaarke BFF API as the user
 
 security:
-  - oauth2:
-      - api://spe-api-dev-67e2xz/user_impersonation
+  - oAuth2AuthCode:
+      - api://1e40baad-e065-4aea-a8d4-4b7ab273458c/access_as_user

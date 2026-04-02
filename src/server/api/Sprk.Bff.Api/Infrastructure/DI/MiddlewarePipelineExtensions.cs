@@ -91,6 +91,45 @@ public static class MiddlewarePipelineExtensions
             });
         });
 
+        // DEBUG: Log auth header presence for Copilot API plugin diagnostics
+        // TODO: Remove before production
+        app.Use(async (ctx, next) =>
+        {
+            if (ctx.Request.Path.StartsWithSegments("/api"))
+            {
+                var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("CopilotAuth");
+                var authHeader = ctx.Request.Headers.Authorization.ToString();
+                if (string.IsNullOrEmpty(authHeader))
+                {
+                    logger.LogWarning("No Authorization header on {Method} {Path}",
+                        ctx.Request.Method, ctx.Request.Path);
+                }
+                else
+                {
+                    try
+                    {
+                        var token = authHeader["Bearer ".Length..].Trim();
+                        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                        var jwt = handler.ReadJwtToken(token);
+                        logger.LogWarning(
+                            "Token on {Method} {Path}: aud={Audience} iss={Issuer} appid={AppId} scp={Scope}",
+                            ctx.Request.Method, ctx.Request.Path,
+                            string.Join(",", jwt.Audiences), jwt.Issuer,
+                            jwt.Claims.FirstOrDefault(c => c.Type == "appid")?.Value
+                                ?? jwt.Claims.FirstOrDefault(c => c.Type == "azp")?.Value,
+                            jwt.Claims.FirstOrDefault(c => c.Type == "scp")?.Value);
+                    }
+                    catch
+                    {
+                        logger.LogWarning("Bearer token present but unreadable on {Method} {Path}",
+                            ctx.Request.Method, ctx.Request.Path);
+                    }
+                }
+            }
+            await next();
+        });
+
         // Authentication & Authorization
         app.UseAuthentication();
         app.UseAuthorization();
