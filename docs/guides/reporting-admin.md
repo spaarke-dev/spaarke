@@ -9,16 +9,194 @@
 
 ## Table of Contents
 
-1. [Architecture Overview](#architecture-overview)
-2. [Module Configuration](#module-configuration)
-3. [Environment Variables](#environment-variables)
-4. [Security Roles](#security-roles)
-5. [Customer Onboarding](#customer-onboarding)
-6. [Report Deployment](#report-deployment)
-7. [Code Page Deployment](#code-page-deployment)
-8. [Dataverse Schema](#dataverse-schema)
-9. [Capacity Planning](#capacity-planning)
-10. [Troubleshooting](#troubleshooting)
+1. [Production Environment Setup](#production-environment-setup)
+2. [Architecture Overview](#architecture-overview)
+3. [Module Configuration](#module-configuration)
+4. [Environment Variables](#environment-variables)
+5. [Security Roles](#security-roles)
+6. [Customer Onboarding](#customer-onboarding)
+7. [Report Deployment](#report-deployment)
+8. [Code Page Deployment](#code-page-deployment)
+9. [Dataverse Schema](#dataverse-schema)
+10. [Capacity Planning](#capacity-planning)
+11. [Troubleshooting](#troubleshooting)
+
+---
+
+## Production Environment Setup
+
+Complete checklist for standing up the Reporting module in a new environment (dev, staging, or production).
+
+### Prerequisites
+
+- Azure subscription with permissions to create App Registrations
+- Power BI Admin portal access (admin.powerbi.com)
+- Dataverse environment with the Spaarke Reporting managed solution imported
+- Azure CLI authenticated (`az login`)
+
+### Step 1: Create the Power BI Service Principal
+
+Create an Entra ID app registration dedicated to Power BI Embedded. This SP authenticates to the Power BI REST API using client credentials ("App Owns Data" pattern).
+
+```bash
+# 1a. Create the app registration
+az ad app create \
+  --display-name "Spaarke Reporting - Power BI SP ({Environment})" \
+  --sign-in-audience AzureADMyOrg
+
+# 1b. Note the appId from the output, then create a client secret
+az ad app credential reset \
+  --id <APP_ID> \
+  --display-name "Reporting {Environment} Secret" \
+  --years 1
+
+# 1c. Create the service principal
+az ad sp create --id <APP_ID>
+```
+
+Save these values — you'll need them for Step 3:
+- **Tenant ID** — from the credential reset output
+- **Client ID** — the `appId`
+- **Client Secret** — the `password` (store securely; consider Key Vault for production)
+
+> **Secret rotation**: Set a calendar reminder before expiry. Rotate with `az ad app credential reset` and update the App Service setting.
+
+### Step 2: Configure Entra ID and Power BI Permissions
+
+#### 2a. Entra ID — API Permission
+
+Add the single required **Application** permission:
+
+```bash
+# Add Tenant.ReadWrite.All (Application) — Power BI Service API
+az ad app permission add \
+  --id <APP_ID> \
+  --api 00000009-0000-0000-c000-000000000000 \
+  --api-permissions 28379fa9-8596-4fd9-869e-cb60a93b5d84=Role
+
+# Grant admin consent
+az ad app permission admin-consent --id <APP_ID>
+```
+
+| Permission | Type | GUID | Purpose |
+|------------|------|------|---------|
+| `Tenant.ReadWrite.All` | Application | `28379fa9-8596-4fd9-869e-cb60a93b5d84` | Full Power BI REST API access via client credentials |
+
+> **Note**: `Dataset.ReadWrite.All`, `Content.Create`, and `Workspace.ReadWrite.All` are **delegated** permissions — they do not apply to service principals. Fine-grained access is controlled at workspace membership level.
+
+#### 2b. Power BI Admin Portal — Tenant Settings
+
+Navigate to **admin.powerbi.com** > **Tenant settings** > **Developer settings** and enable:
+
+| Setting | Scope Recommendation | Purpose |
+|---------|---------------------|---------|
+| **Allow service principals to use Power BI APIs** | Security group containing the SP | Required for all API operations |
+| **Allow service principals to create and use profiles** | Same security group | Per-customer workspace isolation |
+| **Allow service principals to create workspaces** | Same security group | Onboarding script workspace provisioning |
+
+**Best practice**: Create an Entra security group (e.g., "Spaarke Power BI Service Principals"), add the SP to it, and scope the tenant settings to that group.
+
+```bash
+# Optional: Create the security group and add the SP
+az ad group create --display-name "Spaarke Power BI Service Principals" --mail-nickname "spaarke-pbi-sps"
+az ad group member add --group "Spaarke Power BI Service Principals" --member-id <SP_OBJECT_ID>
+```
+
+### Step 3: Configure BFF App Service
+
+Set the four required application settings on the BFF API App Service:
+
+```bash
+az webapp config appsettings set \
+  --resource-group <RESOURCE_GROUP> \
+  --name <APP_SERVICE_NAME> \
+  --settings \
+    Reporting__ModuleEnabled=true \
+    PowerBi__TenantId=<TENANT_ID> \
+    PowerBi__ClientId=<APP_ID> \
+    PowerBi__ClientSecret=<CLIENT_SECRET>
+```
+
+For **production**, store the client secret in Azure Key Vault and reference it:
+
+```bash
+# Store secret in Key Vault
+az keyvault secret set \
+  --vault-name <KEY_VAULT_NAME> \
+  --name "PowerBi-ClientSecret" \
+  --value <CLIENT_SECRET>
+
+# Reference from App Service (Key Vault reference syntax)
+az webapp config appsettings set \
+  --resource-group <RESOURCE_GROUP> \
+  --name <APP_SERVICE_NAME> \
+  --settings \
+    PowerBi__ClientSecret="@Microsoft.KeyVault(VaultName=<KEY_VAULT_NAME>;SecretName=PowerBi-ClientSecret)"
+```
+
+Restart the App Service to pick up the new configuration:
+
+```bash
+az webapp restart --name <APP_SERVICE_NAME> --resource-group <RESOURCE_GROUP>
+```
+
+### Step 4: Configure Dataverse
+
+1. **Import the Reporting managed solution** (if not already imported) — this creates the `sprk_report` entity, environment variables, and security roles.
+
+2. **Enable the module** via the `sprk_ReportingModuleEnabled` environment variable:
+   - Navigate to **Settings** > **Advanced Settings** > **Environment Variables**
+   - Set `sprk_ReportingModuleEnabled` to `Yes`
+   - Or via PAC CLI: `pac env update-settings --environment <url> --name sprk_ReportingModuleEnabled --value Yes`
+
+3. **Assign security roles** to users:
+   - `sprk_ReportingAccess` — Viewer (minimum required)
+   - `sprk_ReportingAuthor` — Author (create/edit/export reports)
+   - `sprk_ReportingAdmin` — Admin (delete reports, manage catalog)
+
+### Step 5: Provision Power BI Workspace and Deploy Reports
+
+Run the customer onboarding script to create the workspace, SP profile, and deploy standard reports:
+
+```powershell
+# Set required environment variables
+$env:PBI_TENANT_ID = "<TENANT_ID>"
+$env:PBI_CLIENT_ID = "<APP_ID>"
+$env:PBI_CLIENT_SECRET = "<CLIENT_SECRET>"
+$env:DATAVERSE_URL = "https://<org>.crm.dynamics.com"
+$env:PBI_DATAVERSE_DATASOURCE_URL = "https://<org>.crm.dynamics.com/api/data/v9.2/"
+
+# Dry run first
+.\scripts\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "<customer-id>" `
+    -CustomerName "<Customer Name>" `
+    -DataverseOrg $env:DATAVERSE_URL `
+    -WhatIf
+
+# Full onboarding (add -CapacityId for production)
+.\scripts\Initialize-ReportingCustomer.ps1 `
+    -CustomerId "<customer-id>" `
+    -CustomerName "<Customer Name>" `
+    -DataverseOrg $env:DATAVERSE_URL
+```
+
+### Step 6: Verify
+
+1. **BFF endpoint**: `GET https://<bff-url>/api/reporting/status` should return 200 with `{ "moduleEnabled": true, ... }`
+2. **Code Page**: Open the `sprk_reporting` web resource in Dataverse — reports should load
+3. **Logs**: Check App Service logs for `[REPORTING-AUTH]` entries to confirm the authorization flow
+
+### Quick Reference — Dev Environment Values
+
+| Setting | Dev Value |
+|---------|-----------|
+| Resource Group | `spe-infrastructure-westus2` |
+| App Service | `spe-api-dev-67e2xz` |
+| BFF URL | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| SP App Name | `Spaarke Reporting - Power BI SP (Dev)` |
+| SP Client ID | `67fea25a-a47c-4838-ba1c-a310550ceb5a` |
+| Tenant ID | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
+| Dataverse URL | `https://spaarkedev1.crm.dynamics.com` |
 
 ---
 
@@ -220,15 +398,39 @@ Before running the script:
 
 ### Required Service Principal Permissions
 
-In the Power BI Admin portal (**Tenant settings**), the service principal needs:
-- **Allow service principals to use Power BI APIs** — enabled (either globally or for the SP's security group)
-- **Allow service principals to create and use profiles** — enabled
-- **Allow service principals to create workspaces** — enabled (for onboarding only)
+#### Entra ID — App Registration API Permissions
 
-In Entra ID, the app registration needs these API permissions (granted by an admin):
-- `Dataset.ReadWrite.All`
-- `Content.Create`
-- `Workspace.ReadWrite.All`
+The app registration needs a single **Application** permission (not delegated):
+
+| Permission | Type | API | Admin Consent |
+|------------|------|-----|---------------|
+| `Tenant.ReadWrite.All` | Application | Power BI Service | Yes — required |
+
+> **Important**: `Dataset.ReadWrite.All`, `Content.Create`, and `Workspace.ReadWrite.All` are **delegated** permissions — they do not apply to service principals using client credentials. Only `Tenant.ReadWrite.All` (Application) is needed for the "App Owns Data" pattern. Fine-grained access is controlled at the workspace membership level.
+
+To add via CLI:
+```bash
+# Add Tenant.ReadWrite.All (Application) to the app registration
+az ad app permission add \
+  --id <PBI_CLIENT_ID> \
+  --api 00000009-0000-0000-c000-000000000000 \
+  --api-permissions 28379fa9-8596-4fd9-869e-cb60a93b5d84=Role
+
+# Grant admin consent
+az ad app permission admin-consent --id <PBI_CLIENT_ID>
+```
+
+#### Power BI Admin Portal — Tenant Settings
+
+In **admin.powerbi.com** > **Tenant settings** > **Developer settings**, enable:
+
+| Setting | Scope | Required For |
+|---------|-------|-------------|
+| **Allow service principals to use Power BI APIs** | SP's security group or entire org | All operations — embed tokens, REST API calls |
+| **Allow service principals to create and use profiles** | SP's security group or entire org | Per-customer workspace isolation via SP profiles |
+| **Allow service principals to create workspaces** | SP's security group or entire org | Customer onboarding (workspace provisioning) |
+
+> **Best practice**: Create an Entra security group (e.g., "Spaarke Power BI Service Principals"), add the SP to it, and scope the tenant settings to that group rather than enabling for the entire organization.
 
 ### Running the Script
 

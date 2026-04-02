@@ -222,7 +222,7 @@ if (-not (Test-Path $DeployReportsScript)) {
 }
 
 # Verify Azure CLI available
-$azVersion = az version --query '"azure-cli"' -o tsv 2>$null
+$azVersion = (az version 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue).'azure-cli'
 if (-not $azVersion) {
     Write-Host '  ERROR: Azure CLI not found. Install from https://aka.ms/installazurecliwindows' -ForegroundColor Red
     exit 1
@@ -352,7 +352,7 @@ if ($WhatIf) {
 } else {
     # Check if profile already exists (idempotency)
     try {
-        $existingProfiles = Invoke-RestMethod -Uri "$pbiApiBase/profiles?`$filter=displayName eq '$([Uri]::EscapeDataString($ProfileName))'&`$top=5" -Headers $pbiHeaders -Method Get
+        $existingProfiles = Invoke-RestMethod -Uri "$pbiApiBase/profiles" -Headers $pbiHeaders -Method Get
         $existingProfile  = $existingProfiles.value | Where-Object { $_.displayName -eq $ProfileName } | Select-Object -First 1
     } catch {
         Write-Host "  WARNING: Could not query existing profiles: $_" -ForegroundColor Yellow
@@ -415,9 +415,14 @@ if ($WhatIf) {
             Invoke-RestMethod -Uri "$pbiApiBase/groups/$workspaceId/users" -Method Post -Headers $pbiHeaders -Body ([System.Text.Encoding]::UTF8.GetBytes($addUserBody)) | Out-Null
             Write-Host '  SP profile added as workspace Admin' -ForegroundColor Green
         } catch {
-            Write-Host "  ERROR: Failed to add SP profile as workspace Admin: $_" -ForegroundColor Red
-            Write-Host '  Verify the profile ID is valid and the calling SP has workspace Admin rights.' -ForegroundColor Yellow
-            exit 1
+            # "AlreadyExists" is expected on re-runs — treat as success
+            if ($_.ToString() -match 'AlreadyExists') {
+                Write-Host '  SP profile is already a workspace member — no change needed.' -ForegroundColor Green
+            } else {
+                Write-Host "  ERROR: Failed to add SP profile as workspace Admin: $_" -ForegroundColor Red
+                Write-Host '  Verify the profile ID is valid and the calling SP has workspace Admin rights.' -ForegroundColor Yellow
+                exit 1
+            }
         }
     }
 }
@@ -428,13 +433,13 @@ if ($WhatIf) {
 Write-Host ''
 Write-Host '[7/9] Deploying standard product reports...' -ForegroundColor Yellow
 
-$deployArgs = @(
-    '-WorkspaceId', $workspaceId,
-    '-DataverseOrg', $DataverseOrg,
-    '-Environment', 'dev'
-)
-if ($ReportFolder)  { $deployArgs += '-ReportFolder', $ReportFolder }
-if ($WhatIf)        { $deployArgs += '-WhatIf' }
+$deployArgs = @{
+    WorkspaceId  = $workspaceId
+    DataverseOrg = $DataverseOrg
+    Environment  = 'dev'
+}
+if ($ReportFolder)  { $deployArgs['ReportFolder'] = $ReportFolder }
+if ($WhatIf)        { $deployArgs['WhatIf'] = $true }
 
 Write-Host "  Calling Deploy-ReportingReports.ps1 with WorkspaceId: $workspaceId" -ForegroundColor Gray
 
