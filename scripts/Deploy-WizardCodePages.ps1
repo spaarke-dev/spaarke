@@ -52,6 +52,7 @@ $webResources = @(
     @{ Name = 'sprk_wizard_commands';                DisplayName = 'Wizard Command Handlers';        Type = 3; Path = 'src\client\webresources\js\sprk_wizard_commands.js' }
     # Updated existing
     @{ Name = 'sprk_documentuploadwizard';           DisplayName = 'Upload Documents';               Type = 1; Path = 'src\solutions\DocumentUploadWizard\dist\index.html' }
+    @{ Name = 'sprk_alldocuments';                   DisplayName = 'Document List';                  Type = 1; Path = 'src\solutions\AllDocuments\dist\alldocuments.html' }
     @{ Name = 'sprk_corporateworkspace';             DisplayName = 'Corporate Workspace';            Type = 1; Path = 'src\solutions\LegalWorkspace\dist\corporateworkspace.html' }
 
 )
