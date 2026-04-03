@@ -108,3 +108,6 @@ export * from './TodoDetail';
 
 // ThemeToggle - Sun/moon toggle button for dark mode switching
 export * from './ThemeToggle';
+
+// RecordCardShell - Shared card shell for all entity record cards (Documents, Matters, Todos, etc.)
+export * from './RecordCardShell';
