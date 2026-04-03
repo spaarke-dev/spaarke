@@ -288,6 +288,12 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
     /// Auto-assembles all previous node outputs into a markdown document.
     /// Used when no explicit delivery template is configured.
     /// </summary>
+    /// <remarks>
+    /// When a node produced structured JSON output (StructuredData is present), we prefer that
+    /// over TextContent — for structured AI analysis nodes TextContent is just the raw JSON
+    /// response string. We extract a narrative field (fullReport, draftResponse, summary, etc.)
+    /// when one exists; otherwise we render all fields as a markdown definition list.
+    /// </remarks>
     private static (string textOutput, object structuredOutput) AutoAssembleOutputs(NodeExecutionContext context)
     {
         var sb = new System.Text.StringBuilder();
@@ -297,22 +303,78 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
             if (!output.Success)
                 continue;
 
-            if (!string.IsNullOrWhiteSpace(output.TextContent))
+            if (output.StructuredData.HasValue)
+            {
+                // Structured output — extract narrative field or render fields as markdown
+                var rendered = RenderStructuredDataAsMarkdown(output.StructuredData.Value);
+                if (!string.IsNullOrWhiteSpace(rendered))
+                {
+                    sb.AppendLine(rendered);
+                    sb.AppendLine();
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(output.TextContent))
             {
                 sb.AppendLine(output.TextContent);
-                sb.AppendLine();
-            }
-            else if (output.StructuredData.HasValue)
-            {
-                sb.AppendLine($"### {varName}");
-                sb.AppendLine();
-                sb.AppendLine(output.StructuredData.Value.GetRawText());
                 sb.AppendLine();
             }
         }
 
         var text = sb.ToString().TrimEnd();
         return (text, new { content = text, format = "markdown" });
+    }
+
+    /// <summary>
+    /// Renders a structured JSON element as readable markdown.
+    /// Prefers large narrative fields (fullReport, draftResponse, etc.) over field-by-field rendering.
+    /// </summary>
+    private static string RenderStructuredDataAsMarkdown(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return element.GetRawText();
+
+        // Prefer large narrative/report fields — these are the main deliverable content
+        var narrativeFields = new[] { "fullReport", "draftResponse", "summary", "report", "analysis", "response", "content", "text" };
+        foreach (var field in narrativeFields)
+        {
+            if (element.TryGetProperty(field, out var fieldValue) &&
+                fieldValue.ValueKind == JsonValueKind.String)
+            {
+                var value = fieldValue.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+        }
+
+        // No narrative field — render each property as a markdown definition line
+        var sb = new System.Text.StringBuilder();
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                continue;
+
+            var value = FormatJsonPropertyAsText(property.Value);
+            if (!string.IsNullOrWhiteSpace(value))
+                sb.AppendLine($"**{property.Name}:** {value}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string FormatJsonPropertyAsText(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString() ?? string.Empty,
+            JsonValueKind.Number => element.GetRawText(),
+            JsonValueKind.True => "Yes",
+            JsonValueKind.False => "No",
+            JsonValueKind.Array => string.Join(", ", element.EnumerateArray()
+                .Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() ?? string.Empty : e.GetRawText())
+                .Where(s => !string.IsNullOrWhiteSpace(s))),
+            JsonValueKind.Object => element.GetRawText(),
+            _ => string.Empty
+        };
     }
 
     /// <summary>
