@@ -83,6 +83,14 @@ public record NodeOutput
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
     /// <summary>
+    /// True when this output was produced by a DeliverOutput node.
+    /// Used by AnalysisOrchestrationService to identify the final rendered
+    /// deliverable and avoid confusing side-effect node messages (e.g.,
+    /// "Updated sprk_document record") with analysis content.
+    /// </summary>
+    public bool IsDeliverOutput { get; init; }
+
+    /// <summary>
     /// Deserializes the StructuredData property to the specified type.
     /// </summary>
     /// <typeparam name="T">The type to deserialize to.</typeparam>

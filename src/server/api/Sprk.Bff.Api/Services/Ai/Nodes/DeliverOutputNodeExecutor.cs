@@ -145,7 +145,8 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
                 context.Node.OutputVariable,
                 structuredOutput,
                 textContent: textOutput,
-                metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+                metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow))
+                with { IsDeliverOutput = true };
         }
         catch (Exception ex)
         {

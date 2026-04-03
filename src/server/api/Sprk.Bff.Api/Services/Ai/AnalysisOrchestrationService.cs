@@ -823,15 +823,13 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 }
 
                 // Capture Deliver Output node's rendered markdown from NodeCompleted events.
-                if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
+                // Use IsDeliverOutput flag — avoids capturing side-effect node messages
+                // (e.g., "Updated sprk_document record" from UpdateRecord nodes) as content.
+                if (evt.Type == PlaybookEventType.NodeCompleted &&
+                    evt.NodeOutput is { IsDeliverOutput: true } deliverOutput &&
+                    !string.IsNullOrEmpty(deliverOutput.TextContent))
                 {
-                    var outputVar = evt.NodeOutput.OutputVariable;
-                    if (outputVar != null &&
-                        (outputVar.Contains("output", StringComparison.OrdinalIgnoreCase) ||
-                         outputVar.Contains("deliver", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        deliverOutputContent = evt.NodeOutput.TextContent;
-                    }
+                    deliverOutputContent = deliverOutput.TextContent;
                 }
 
                 // Track node failures for partial data handling
