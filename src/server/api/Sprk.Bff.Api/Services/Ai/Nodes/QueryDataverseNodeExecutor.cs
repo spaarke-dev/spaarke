@@ -147,6 +147,11 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
 
     private static string? ResolveUserId(NodeExecutionContext context)
     {
+        // Primary: UserId set directly on the execution context by PlaybookSchedulerService
+        if (context.UserId.HasValue)
+            return context.UserId.Value.ToString();
+
+        // Fallback: check previous outputs for userId
         foreach (var (_, output) in context.PreviousOutputs)
         {
             if (output.StructuredData.HasValue)
