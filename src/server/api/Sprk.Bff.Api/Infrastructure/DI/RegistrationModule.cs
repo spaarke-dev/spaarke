@@ -29,12 +29,8 @@ public static class RegistrationModule
         services.AddSingleton<EmailDomainValidator>();
 
         // Background services (ADR-001: BackgroundService pattern)
-        // Only register expiration service if provisioning config is present
-        var demoSection = configuration.GetSection(DemoProvisioningOptions.SectionName);
-        if (demoSection.Exists() && demoSection.GetSection("Environments").GetChildren().Any())
-        {
-            services.AddHostedService<DemoExpirationService>();
-        }
+        // TODO: Re-enable once Graph permissions are confirmed working
+        // services.AddHostedService<DemoExpirationService>();
 
         return services;
     }
