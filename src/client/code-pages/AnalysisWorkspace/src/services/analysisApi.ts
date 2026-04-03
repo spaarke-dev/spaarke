@@ -151,7 +151,7 @@ export async function fetchAnalysis(analysisId: string): Promise<AnalysisRecord>
 
   const controller = createTimeoutController();
   const response = await fetch(
-    `/api/data/v9.2/sprk_analysises(${analysisId})?$select=sprk_name,sprk_workingdocument,statecode,statuscode,createdon,modifiedon,_sprk_documentid_value,_sprk_actionid_value,_sprk_analysisplaybookid_value`,
+    `/api/data/v9.2/sprk_analysises(${analysisId})?$select=sprk_name,sprk_workingdocument,statecode,statuscode,createdon,modifiedon,_sprk_documentid_value,_sprk_actionid_value,_sprk_playbook_value`,
     {
       method: 'GET',
       headers: {
@@ -192,7 +192,7 @@ export async function fetchAnalysis(analysisId: string): Promise<AnalysisRecord>
     createdOn: data.createdon ?? new Date().toISOString(),
     modifiedOn: data.modifiedon ?? new Date().toISOString(),
     actionId: data._sprk_actionid_value ?? undefined,
-    playbookId: data._sprk_analysisplaybookid_value ?? undefined,
+    playbookId: data._sprk_playbook_value ?? undefined,
     statusCode: data.statuscode ?? undefined,
     createdBy: undefined,
   };
