@@ -20,6 +20,8 @@ public static class RegistrationModule
             .ValidateDataAnnotations();
 
         // ADR-010: Concrete registrations (no interfaces)
+        services.AddSingleton<PasswordGenerator>();
+        services.AddSingleton<GraphUserService>();
         services.AddSingleton<TrackingIdGenerator>();
         services.AddSingleton<RegistrationDataverseService>();
         services.AddSingleton<RegistrationEmailService>();
