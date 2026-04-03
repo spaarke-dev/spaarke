@@ -3,25 +3,18 @@
  * Conditional Step 1 of the Document Upload Wizard — parent record association.
  *
  * Appears only in "standalone" mode (wizard opened without a parent context).
- * Allows the user to:
- *   1. Select a record type + specific record to associate uploaded documents with
- *   2. OR check "Upload without association" for general-purpose uploads
+ * Allows the user to select a record type + specific record to associate
+ * uploaded documents with. The step is skippable via the Skip button —
+ * skipping uploads to the general container without a parent record link.
  *
  * Layout:
  *   ┌─────────────────────────────────────────────────────────────────────┐
  *   │  Associate To                                                       │
- *   │  Select a record to associate documents with, or upload without.    │
+ *   │  Select a record to associate uploaded documents with.              │
  *   │                                                                     │
- *   │  Record Type:  [ Matter  ▼ ]     [ Select Record 🔍 ]             │
+ *   │  Record Type:  [ Account  ▼ ]     [ Select Record 🔍 ]            │
  *   │                                                                     │
- *   │  ┌─────────────────────────────────────────────────────────┐       │
- *   │  │  ✅ Smith v. Jones (MAT-2024-001)          [ ✕ Clear ] │       │
- *   │  └─────────────────────────────────────────────────────────┘       │
- *   │                                                                     │
- *   │  ── or ──                                                           │
- *   │                                                                     │
- *   │  ☐  Upload without association                                      │
- *   │     Documents will be stored without a parent record link.          │
+ *   │  You can always link records later.                                 │
  *   └─────────────────────────────────────────────────────────────────────┘
  *
  * Entity types are loaded dynamically from sprk_recordtype_ref (data-driven,
@@ -43,11 +36,9 @@ import {
     Dropdown,
     Option,
     Button,
-    Checkbox,
     Spinner,
     MessageBar,
     MessageBarBody,
-    Divider,
 } from "@fluentui/react-components";
 import {
     SearchRegular,
@@ -63,14 +54,10 @@ import { SUPPORTED_ENTITY_TYPES } from "../services/uploadOrchestrator";
 // ---------------------------------------------------------------------------
 
 export interface IAssociateToStepProps {
-    /** Resolved parent context (null until user selects or opts out). */
+    /** Resolved parent context (null until user selects a record). */
     resolvedParent: IResolvedParentContext | null;
-    /** Called when parent context changes (selection or "no association" toggle). */
+    /** Called when parent context changes (record selected or cleared). */
     onParentResolved: (ctx: IResolvedParentContext | null) => void;
-    /** Whether "upload without association" is checked. */
-    isUnassociated: boolean;
-    /** Toggle handler for the checkbox. */
-    onUnassociatedChanged: (checked: boolean) => void;
 }
 
 /** Record type definition loaded from sprk_recordtype_ref. */
@@ -117,7 +104,7 @@ interface XrmHandle {
     Utility: XrmUtility;
 }
 
-function resolveXrm(): XrmHandle | null {
+export function resolveXrm(): XrmHandle | null {
     const frames: Window[] = [window];
     try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
     try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
@@ -140,7 +127,7 @@ function resolveXrm(): XrmHandle | null {
 // Container ID resolution (business unit fallback)
 // ---------------------------------------------------------------------------
 
-async function resolveBusinessUnitContainerId(xrm: XrmHandle): Promise<string> {
+export async function resolveBusinessUnitContainerId(xrm: XrmHandle): Promise<string> {
     const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
     const userResult = await xrm.WebApi.retrieveRecord(
         "systemuser", userId, "?$select=_businessunitid_value"
@@ -237,15 +224,6 @@ const useStyles = makeStyles({
         paddingTop: tokens.spacingVerticalS,
         paddingBottom: tokens.spacingVerticalS,
     },
-    checkboxSection: {
-        display: "flex",
-        flexDirection: "column",
-        gap: tokens.spacingVerticalXS,
-    },
-    checkboxHint: {
-        color: tokens.colorNeutralForeground3,
-        paddingLeft: "30px",
-    },
 });
 
 // ---------------------------------------------------------------------------
@@ -255,8 +233,6 @@ const useStyles = makeStyles({
 export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
     resolvedParent,
     onParentResolved,
-    isUnassociated,
-    onUnassociatedChanged,
 }) => {
     const styles = useStyles();
 
@@ -367,44 +343,8 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
         }
     }, [selectedEntityType, onParentResolved]);
 
-    // ── Handle "upload without association" toggle ──────────────────────────
-    const handleUnassociatedToggle = React.useCallback(
-        async (_ev: unknown, data: { checked: boolean | "mixed" }) => {
-            const checked = data.checked === true;
-            onUnassociatedChanged(checked);
-
-            if (checked) {
-                const xrm = resolveXrm();
-                if (!xrm) {
-                    setError("Xrm not available — cannot resolve container.");
-                    return;
-                }
-
-                try {
-                    setIsResolving(true);
-                    setError(null);
-                    const containerId = await resolveBusinessUnitContainerId(xrm);
-                    onParentResolved({
-                        parentEntityType: "",
-                        parentEntityId: "",
-                        parentEntityName: "",
-                        containerId,
-                        isUnassociated: true,
-                    });
-                } catch (err) {
-                    console.error("[AssociateToStep] BU container resolution failed:", err);
-                    setError(err instanceof Error ? err.message : "Failed to resolve container.");
-                    onUnassociatedChanged(false);
-                } finally {
-                    setIsResolving(false);
-                }
-            } else {
-                // Unchecked — clear resolved parent
-                onParentResolved(null);
-            }
-        },
-        [onParentResolved, onUnassociatedChanged]
-    );
+    // NOTE: "Upload without association" is now handled by the Skip button
+    // in the wizard dialog (DocumentUploadWizardDialog.tsx), not by a checkbox.
 
     // ── Handle clear selection ─────────────────────────────────────────────
     const handleClear = React.useCallback(() => {
@@ -423,8 +363,7 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                     Associate To
                 </Text>
                 <Text size={200} className={styles.stepSubtitle}>
-                    Select a record to associate uploaded documents with, or upload
-                    without association.
+                    Select a record to associate uploaded documents with.
                 </Text>
             </div>
 
@@ -452,7 +391,7 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                                 // Clear previous selection when entity type changes
                                 if (hasSelection) onParentResolved(null);
                             }}
-                            disabled={isUnassociated || isResolving}
+                            disabled={isResolving}
                         >
                             {recordTypes.map((rt) => (
                                 <Option key={rt.logicalName} value={rt.logicalName}>
@@ -465,7 +404,7 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                         appearance="primary"
                         icon={<SearchRegular />}
                         onClick={handleSelectRecord}
-                        disabled={!selectedEntityType || isUnassociated || isResolving}
+                        disabled={!selectedEntityType || isResolving}
                     >
                         Select Record
                     </Button>
@@ -497,22 +436,10 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
                 <Spinner size="tiny" label="Resolving container..." />
             )}
 
-            {/* Divider */}
-            <Divider>or</Divider>
-
-            {/* Upload without association checkbox */}
-            <div className={styles.checkboxSection}>
-                <Checkbox
-                    label="Upload without association"
-                    checked={isUnassociated}
-                    onChange={handleUnassociatedToggle}
-                    disabled={isResolving}
-                />
-                <Text size={200} className={styles.checkboxHint}>
-                    Documents will be stored in the general container without a
-                    parent record link. You can associate them later.
-                </Text>
-            </div>
+            {/* Hint text */}
+            <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                You can always link records later.
+            </Text>
         </div>
     );
 };

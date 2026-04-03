@@ -53,7 +53,7 @@ import type {
 } from "./types";
 
 import { AddFilesStep } from "./components/AddFilesStep";
-import { AssociateToStep } from "./components/AssociateToStep";
+import { AssociateToStep, resolveXrm, resolveBusinessUnitContainerId } from "./components/AssociateToStep";
 import { SummaryStep } from "./components/SummaryStep";
 import type { UploadedDocumentInfo } from "./components/SummaryStep";
 import { NextStepsStep } from "./components/NextStepsStep";
@@ -221,12 +221,25 @@ export function DocumentUploadWizardDialog({
     const resolvedParentRef = useRef(resolvedParent);
     resolvedParentRef.current = resolvedParent;
 
+    // Eagerly resolve BU container ID so it's ready if user clicks Skip on AssociateToStep.
+    const buContainerIdRef = useRef<string>("");
+    useEffect(() => {
+        if (!isStandaloneMode) return;
+        const xrm = resolveXrm();
+        if (!xrm) return;
+        resolveBusinessUnitContainerId(xrm)
+            .then((id) => { buContainerIdRef.current = id; })
+            .catch((err) => console.warn("[DocumentUploadWizard] BU container pre-resolve failed:", err));
+    }, [isStandaloneMode]);
+
     // ── Effective values (bridge raw props vs AssociateToStep resolution) ────
+    // When standalone and user Skipped associate-to, resolvedParent is null.
+    // Fall back to BU container (pre-resolved at mount) for unassociated uploads.
     const effectiveParentEntityType = isStandaloneMode ? (resolvedParent?.parentEntityType ?? "") : parentEntityType;
     const effectiveParentEntityId = isStandaloneMode ? (resolvedParent?.parentEntityId ?? "") : parentEntityId;
     const effectiveParentEntityName = isStandaloneMode ? (resolvedParent?.parentEntityName ?? "") : parentEntityName;
-    const effectiveContainerId = isStandaloneMode ? (resolvedParent?.containerId ?? "") : containerId;
-    const effectiveIsUnassociated = isStandaloneMode && (resolvedParent?.isUnassociated ?? false);
+    const effectiveContainerId = isStandaloneMode ? (resolvedParent?.containerId || buContainerIdRef.current || "") : containerId;
+    const effectiveIsUnassociated = isStandaloneMode && (resolvedParent === null || resolvedParent?.isUnassociated === true);
 
     // ── File state (useReducer) ─────────────────────────────────────────────
     const [fileState, fileDispatch] = useReducer(fileReducer, INITIAL_FILE_STATE);
@@ -396,18 +409,21 @@ export function DocumentUploadWizardDialog({
         () => {
             const steps: IWizardStepConfig[] = [];
 
-            // Standalone mode: prepend AssociateToStep
+            // Standalone mode: prepend AssociateToStep (skippable — Skip uploads without association)
             if (isStandaloneMode) {
                 steps.push({
                     id: "associate-to",
                     label: "Associate To",
-                    canAdvance: () => resolvedParentRef.current !== null && resolvedParentRef.current.containerId !== "",
-                    renderContent: (_handle: IWizardShellHandle) => (
+                    canAdvance: () => resolvedParentRef.current !== null && !resolvedParentRef.current.isUnassociated && resolvedParentRef.current.containerId !== "",
+                    isSkippable: true,
+                    renderContent: (handle: IWizardShellHandle) => (
                         <AssociateToStep
                             resolvedParent={resolvedParent}
-                            onParentResolved={setResolvedParent}
-                            isUnassociated={isUnassociated}
-                            onUnassociatedChanged={setIsUnassociated}
+                            onParentResolved={(ctx) => {
+                                setResolvedParent(ctx);
+                                // When Skip advances past this step with no selection,
+                                // WizardShell sets resolvedParent via the effect below.
+                            }}
                         />
                     ),
                 });
