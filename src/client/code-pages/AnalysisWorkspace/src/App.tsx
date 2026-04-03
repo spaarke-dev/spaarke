@@ -68,6 +68,7 @@ import {
   ErrorCircle20Regular,
   LockClosed20Regular,
   ArrowClockwise20Regular,
+  ChevronLeft16Regular,
 } from '@fluentui/react-icons';
 import type { RichTextEditorRef } from '@spaarke/ui-components';
 import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS, PanelSplitter } from '@spaarke/ui-components';
@@ -131,6 +132,33 @@ const useStyles = makeStyles({
   sourcePanel: {
     overflow: 'hidden',
     flexShrink: 0,
+  },
+  sourcePanelCollapsed: {
+    // Narrow strip shown when source is hidden — click to re-expand
+    flex: '0 0 28px',
+    minWidth: '28px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingTop: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalXS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: 'pointer',
+    overflow: 'hidden',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2Hover,
+    },
+  },
+  sourcePanelCollapsedLabel: {
+    writingMode: 'vertical-rl',
+    transform: 'rotate(180deg)',
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    letterSpacing: '0.05em',
+    userSelect: 'none',
   },
   chatPanel: {
     // Fixed width — not user-resizable, no splitter on its left edge
@@ -586,8 +614,8 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
             />
           </div>
 
-          {/* Splitter + Source Panel — only when source is visible */}
-          {isSourceVisible && (
+          {/* Source Panel: expanded with splitter, or narrow collapsed strip to re-expand */}
+          {isSourceVisible ? (
             <>
               <PanelSplitter
                 onMouseDown={splitter1Handlers.onMouseDown}
@@ -608,6 +636,19 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                 />
               </div>
             </>
+          ) : (
+            <div
+              className={styles.sourcePanelCollapsed}
+              onClick={toggleSource}
+              role="button"
+              tabIndex={0}
+              title="Show source document"
+              aria-label="Show source document"
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSource(); } }}
+            >
+              <ChevronLeft16Regular style={{ color: 'var(--colorNeutralForeground3)', flexShrink: 0 }} />
+              <span className={styles.sourcePanelCollapsedLabel}>SOURCE</span>
+            </div>
           )}
 
           {/* Chat Panel — fixed 360px width, no splitter (not user-resizable) */}
