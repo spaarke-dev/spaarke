@@ -429,11 +429,9 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
             <MessageBarBody>{successMessage}</MessageBarBody>
           </MessageBar>
         </div>
-        {!embedded && (
-          <div className={styles.footer}>
-            <Button appearance="primary" onClick={handleCancel}>Close</Button>
-          </div>
-        )}
+        <div className={styles.footer}>
+          <Button appearance="primary" onClick={handleCancel}>Close</Button>
+        </div>
       </div>
     );
   }
@@ -524,25 +522,6 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
                   onSelect={handlePlaybookSelect}
                   isLoading={false}
                 />
-                {selectedPlaybook && playbookScopes && (
-                  <div className={styles.scopePreview}>
-                    <ScopeConfigurator
-                      actions={actions}
-                      skills={skills}
-                      knowledge={knowledge}
-                      tools={tools}
-                      selectedActionIds={playbookScopes.actionIds}
-                      selectedSkillIds={playbookScopes.skillIds}
-                      selectedKnowledgeIds={playbookScopes.knowledgeIds}
-                      selectedToolIds={playbookScopes.toolIds}
-                      onActionChange={() => {}}
-                      onSkillChange={() => {}}
-                      onKnowledgeChange={() => {}}
-                      onToolChange={() => {}}
-                      readOnly
-                    />
-                  </div>
-                )}
               </>
             ) : (
               <ScopeConfigurator
@@ -565,16 +544,14 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
       )}
 
       {/* Footer */}
-      {!embedded && (
-        <div className={styles.footer}>
-          <Button appearance="secondary" onClick={handleCancel} disabled={isExecuting}>
-            Cancel
-          </Button>
-          <Button appearance="primary" onClick={handleExecute} disabled={!canExecute || isExecuting}>
-            {isExecuting ? 'Creating...' : executeButtonLabel}
-          </Button>
-        </div>
-      )}
+      <div className={styles.footer}>
+        <Button appearance="secondary" onClick={handleCancel} disabled={isExecuting}>
+          Cancel
+        </Button>
+        <Button appearance="primary" onClick={handleExecute} disabled={!canExecute || isExecuting}>
+          {isExecuting ? 'Creating...' : executeButtonLabel}
+        </Button>
+      </div>
     </div>
   );
 };

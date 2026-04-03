@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -225,6 +226,10 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
             {
                 case AnalysisExecuteRequest request when request.DocumentIds.Length > 0:
                     documentIds.AddRange(request.DocumentIds);
+                    break;
+
+                case CreateAnalysisRequest request when request.DocumentId != Guid.Empty:
+                    documentIds.Add(request.DocumentId);
                     break;
 
                 case Guid documentId when documentId != Guid.Empty:

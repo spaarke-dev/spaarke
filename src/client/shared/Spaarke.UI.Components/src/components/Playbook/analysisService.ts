@@ -21,7 +21,7 @@ export type { AuthenticatedFetchFn };
 interface ICreateAnalysisRequest {
   name: string;
   documentId: string;
-  actionId: string;
+  actionId?: string;
   playbookId?: string;
   skillIds: string[];
   knowledgeIds: string[];
@@ -56,11 +56,14 @@ export async function createAndAssociate(
   const body: ICreateAnalysisRequest = {
     name: `Analysis - ${documentName || 'Document'}`,
     documentId,
-    actionId,
     skillIds,
     knowledgeIds,
     toolIds,
   };
+
+  if (actionId) {
+    body.actionId = actionId;
+  }
 
   if (playbookId) {
     body.playbookId = playbookId;

@@ -202,6 +202,69 @@ function App() {
   }, [isDialogContext, navigationService]);
 
   // -------------------------------------------------------------------------
+  // onComplete — open Analysis Workspace then close this dialog
+  // -------------------------------------------------------------------------
+
+  const handleComplete = React.useCallback(
+    ({ analysisId }: { analysisId: string }) => {
+      // Navigate to Analysis Workspace in the parent/host frame so it opens
+      // as a new dialog on top of the Dataverse page (not nested inside this one).
+      const dataParam = resolvedEntityId
+        ? `analysisId=${analysisId}&documentId=${resolvedEntityId}`
+        : `analysisId=${analysisId}`;
+
+      try {
+        // Walk up frames to find a Xrm.Navigation that can open a new dialog.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const frames: Window[] = [];
+        try {
+          if (window.parent && window.parent !== window) frames.push(window.parent);
+        } catch { /* cross-origin */ }
+        try {
+          if (window.top && window.top !== window && window.top !== window.parent)
+            frames.push(window.top!);
+        } catch { /* cross-origin */ }
+
+        let launched = false;
+        for (const frame of frames) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const xrmNav = (frame as any).Xrm?.Navigation;
+            if (xrmNav?.navigateTo) {
+              xrmNav.navigateTo(
+                {
+                  pageType: "webresource",
+                  webresourceName: "sprk_AnalysisWorkspace",
+                  data: dataParam,
+                },
+                {
+                  target: 2,
+                  width: { value: 95, unit: "%" },
+                  height: { value: 95, unit: "%" },
+                }
+              );
+              launched = true;
+              break;
+            }
+          } catch { /* try next frame */ }
+        }
+
+        if (!launched) {
+          console.warn(
+            "[PlaybookLibrary] Could not find Xrm.Navigation in parent frames to open Analysis Workspace"
+          );
+        }
+      } catch (err) {
+        console.warn("[PlaybookLibrary] Failed to open Analysis Workspace:", err);
+      }
+
+      // Close the Playbook Library dialog
+      handleClose();
+    },
+    [resolvedEntityId, handleClose]
+  );
+
+  // -------------------------------------------------------------------------
   // Loading gate
   // -------------------------------------------------------------------------
 
@@ -235,6 +298,7 @@ function App() {
         entityDisplayName={entityDisplayName}
         embedded={true}
         onClose={handleClose}
+        onComplete={handleComplete}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         mode={shellMode}

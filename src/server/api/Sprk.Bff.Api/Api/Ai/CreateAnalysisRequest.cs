@@ -14,7 +14,9 @@ public record CreateAnalysisRequest(
     Guid DocumentId,
     Guid[] SkillIds,
     Guid[] KnowledgeIds,
-    Guid[] ToolIds);
+    Guid[] ToolIds,
+    Guid? PlaybookId = null,
+    Guid? ActionId = null);
 
 /// <summary>
 /// Response body for POST /api/ai/analysis/create.

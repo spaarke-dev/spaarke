@@ -171,7 +171,7 @@ public static class AnalysisEndpoints
             var analysisId = await dataverseService.CreateAnalysisAsync(
                 request.DocumentId,
                 request.Name,
-                playbookId: null,
+                playbookId: request.PlaybookId,
                 cancellationToken);
 
             // Step 2: Associate N:N scope items (skills, knowledge, tools)

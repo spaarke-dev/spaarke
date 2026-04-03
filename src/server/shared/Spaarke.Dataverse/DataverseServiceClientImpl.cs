@@ -205,7 +205,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // Set playbook lookup if provided
         if (playbookId.HasValue)
         {
-            analysis["sprk_playbookid"] = new EntityReference("sprk_analysisplaybook", playbookId.Value);
+            analysis["sprk_analysisplaybookid"] = new EntityReference("sprk_analysisplaybook", playbookId.Value);
         }
 
         var analysisId = await _serviceClient.CreateAsync(analysis, ct);
