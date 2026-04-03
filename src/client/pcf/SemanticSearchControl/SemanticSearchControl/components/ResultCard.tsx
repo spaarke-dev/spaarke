@@ -1,19 +1,18 @@
 /**
- * ResultCard component
+ * ResultCard — search result card using the shared RecordCardShell.
  *
- * Displays a single search result using the 2-row DocumentCard design pattern:
- *   Row 1: File icon (40px circle) | Title + description | Actions (icon-only)
- *   Row 2: Similarity badge + metadata (created date, created by)
+ * Displays a single search result with the standard 2-row layout:
+ *   Row 1: File icon | Title + document type
+ *   Row 2: Relevance score badge + created date + created by
+ *   Tools: Preview, AI Summary, Open File, Find Similar
  *
- * Action button order (L→R): Preview, Summary, Open File, Find Similar
- * Preview opens the shared FilePreviewDialog (not a popover).
- *
- * @see ADR-021 for Fluent UI v9 requirements
+ * @see ADR-012 - Shared component library (RecordCardShell)
+ * @see ADR-021 - Fluent UI v9 requirements
  */
 
 import * as React from 'react';
 import { useCallback, useState } from 'react';
-import { makeStyles, tokens, Text, Button, Tooltip, shorthands } from '@fluentui/react-components';
+import { tokens, Text, Button, Tooltip } from '@fluentui/react-components';
 import {
   DocumentRegular,
   DocumentPdfRegular,
@@ -27,12 +26,13 @@ import {
   DocumentSearchRegular,
   FolderOpenRegular,
 } from '@fluentui/react-icons';
+import { RecordCardShell, CardIcon } from '@spaarke/ui-components/dist/components/RecordCardShell';
 import { AiSummaryPopover } from '@spaarke/ui-components/dist/components/AiSummaryPopover';
 import { IResultCardProps } from '../types';
 import { FilePreviewDialog } from './FilePreviewDialog';
 
 // ---------------------------------------------------------------------------
-// File icon mapping (mirrors LegalWorkspace fileIconMap.ts)
+// File icon mapping
 // ---------------------------------------------------------------------------
 
 type IconComponent = typeof DocumentRegular;
@@ -71,7 +71,7 @@ function getFileIcon(fileType: string): IconComponent {
 }
 
 // ---------------------------------------------------------------------------
-// Date formatter
+// Helpers
 // ---------------------------------------------------------------------------
 
 function formatShortDate(dateString: string | null): string {
@@ -89,115 +89,27 @@ function formatShortDate(dateString: string | null): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Styles (DocumentCard 2-row pattern)
-// ---------------------------------------------------------------------------
+const titleStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  color: tokens.colorNeutralForeground1,
+  fontWeight: tokens.fontWeightSemibold,
+  flexShrink: 1,
+  minWidth: 0,
+};
 
-const useStyles = makeStyles({
-  card: {
-    display: 'flex',
-    flexDirection: 'column',
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    boxShadow: tokens.shadow2,
-    marginBottom: tokens.spacingVerticalXS,
-    borderLeftWidth: '3px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: tokens.colorBrandStroke1,
-    cursor: 'pointer',
-    transitionProperty: 'background-color, box-shadow',
-    transitionDuration: tokens.durationFaster,
-    transitionTimingFunction: tokens.curveEasyEase,
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-      boxShadow: tokens.shadow4,
-    },
-    ':focus-visible': {
-      outlineStyle: 'solid',
-      outlineWidth: '2px',
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: '-2px',
-    },
-  },
-  mainRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalL,
-  },
-  typeIconCircle: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    width: '40px',
-    height: '40px',
-    ...shorthands.borderRadius('50%'),
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
-    marginTop: '2px',
-  },
-  contentColumn: {
-    flex: '1 1 0',
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-  },
-  primaryRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    flexWrap: 'nowrap',
-    minWidth: 0,
-  },
-  title: {
-    ...shorthands.overflow('hidden'),
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  description: {
-    ...shorthands.overflow('hidden'),
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: tokens.colorNeutralForeground3,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  secondaryRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    flexWrap: 'wrap',
-  },
-  metaText: {
-    ...shorthands.overflow('hidden'),
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: tokens.colorNeutralForeground3,
-  },
-  actionsColumn: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
-    flexShrink: 0,
-    marginLeft: tokens.spacingHorizontalL,
-  },
-});
+const fieldStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  color: tokens.colorNeutralForeground3,
+  flexShrink: 1,
+  minWidth: 0,
+};
 
 // ---------------------------------------------------------------------------
-// Similarity badge inline (small pill for secondary row)
+// Score badge
 // ---------------------------------------------------------------------------
 
 const ScoreBadge: React.FC<{ score: number }> = ({ score }) => {
@@ -233,9 +145,6 @@ const ScoreBadge: React.FC<{ score: number }> = ({ score }) => {
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * ResultCard component — 2-row DocumentCard design pattern.
- */
 export const ResultCard: React.FC<IResultCardProps> = ({
   result,
   onClick,
@@ -250,131 +159,85 @@ export const ResultCard: React.FC<IResultCardProps> = ({
   isInWorkspace,
   compactMode,
 }) => {
-  const styles = useStyles();
-
-  // FilePreviewDialog state
   const [previewOpen, setPreviewOpen] = useState(false);
+  const IconComp = getFileIcon(result.fileType);
 
-  // Resolve file icon
-  const IconComponent = getFileIcon(result.fileType);
-
-  // Card double-click opens record in new tab
   const handleCardDoubleClick = useCallback(() => {
     onOpenRecord(false);
   }, [onOpenRecord]);
 
-  // Card single-click selects the document
   const handleCardClick = useCallback(
-    (ev: React.MouseEvent) => {
-      if ((ev.target as HTMLElement).closest('button')) return;
+    (ev: React.MouseEvent | React.KeyboardEvent) => {
+      if ('target' in ev && (ev.target as HTMLElement).closest('button')) return;
       onClick();
     },
     [onClick]
   );
 
-  const handleCardKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        onOpenRecord(false);
-      }
-    },
-    [onOpenRecord]
-  );
-
-  // Stop propagation on action clicks
-  const handleActionsClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-  }, []);
-
-  // Preview — opens FilePreviewDialog
-  const handlePreviewClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handlePreview = useCallback(() => {
     setPreviewOpen(true);
   }, []);
 
-  // Open file — prefer desktop app
-  const handleOpenFileClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onOpenFile('desktop');
-    },
-    [onOpenFile]
-  );
+  const handleOpenFile = useCallback(() => {
+    onOpenFile('desktop');
+  }, [onOpenFile]);
 
-  // Open record in new tab (for FilePreviewDialog toolbar)
   const handleOpenRecord = useCallback(() => {
     onOpenRecord(false);
   }, [onOpenRecord]);
 
   const formattedDate = formatShortDate(result.createdAt);
 
-  // Build aria label
-  const cardAriaLabel = [result.name, result.documentType, formattedDate ? `Created: ${formattedDate}` : '']
+  const ariaLabel = [result.name, result.documentType, formattedDate ? `Created: ${formattedDate}` : '']
     .filter(Boolean)
     .join(', ');
 
   return (
     <>
-      <div
-        className={styles.card}
-        role="listitem"
-        tabIndex={0}
-        aria-label={cardAriaLabel}
-        onClick={handleCardClick}
-        onDoubleClick={handleCardDoubleClick}
-        onKeyDown={handleCardKeyDown}
-      >
-        <div className={styles.mainRow}>
-          {/* File type icon in 40px circle */}
-          <div className={styles.typeIconCircle} aria-label={result.fileType || 'Document'} role="img">
-            <IconComponent fontSize={20} />
-          </div>
-
-          {/* Content: 2 rows */}
-          <div className={styles.contentColumn}>
-            {/* Row 1: Title + document type */}
-            <div className={styles.primaryRow}>
-              <Text as="span" size={400} className={styles.title}>
-                {result.name}
+      <RecordCardShell
+        icon={
+          <CardIcon>
+            <IconComp fontSize={20} aria-label={result.fileType || 'Document'} />
+          </CardIcon>
+        }
+        primaryContent={
+          <>
+            <Text as="span" size={400} style={titleStyle}>
+              {result.name}
+            </Text>
+            {result.documentType && (
+              <Text as="span" size={300} style={fieldStyle}>
+                {result.documentType}
               </Text>
-              {result.documentType && (
-                <Text as="span" size={300} className={styles.description}>
-                  {result.documentType}
-                </Text>
-              )}
-            </div>
-
-            {/* Row 2: Score badge + metadata */}
-            <div className={styles.secondaryRow}>
-              <ScoreBadge score={result.combinedScore} />
-              {formattedDate && (
-                <Text as="span" size={200} className={styles.metaText}>
-                  Created: {formattedDate}
-                </Text>
-              )}
-              {result.createdBy && (
-                <Text as="span" size={200} className={styles.metaText}>
-                  By: {result.createdBy}
-                </Text>
-              )}
-            </div>
-          </div>
-
-          {/* Actions: icon-only buttons — Preview, Summary, Open File, Find Similar */}
-          <div className={styles.actionsColumn} role="toolbar" onClick={handleActionsClick}>
-            {/* 1. Preview */}
+            )}
+          </>
+        }
+        secondaryContent={
+          <>
+            <ScoreBadge score={result.combinedScore} />
+            {formattedDate && (
+              <Text as="span" size={200} style={fieldStyle}>
+                Created: {formattedDate}
+              </Text>
+            )}
+            {result.createdBy && (
+              <Text as="span" size={200} style={fieldStyle}>
+                By: {result.createdBy}
+              </Text>
+            )}
+          </>
+        }
+        tools={
+          <>
             <Tooltip content="Preview" relationship="label">
               <Button
                 appearance="subtle"
                 size="medium"
                 icon={<Eye20Regular aria-hidden="true" />}
                 aria-label="Preview document"
-                onClick={handlePreviewClick}
+                onClick={handlePreview}
               />
             </Tooltip>
-
-            {/* 2. Summary */}
             <AiSummaryPopover
               onFetchSummary={onSummary}
               trigger={
@@ -384,41 +247,35 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                     size="medium"
                     icon={<Sparkle20Regular aria-hidden="true" />}
                     aria-label="AI Summary"
-                    onClick={ev => ev.stopPropagation()}
                   />
                 </Tooltip>
               }
             />
-
-            {/* 3. Open File */}
             <Tooltip content="Open file" relationship="label">
               <Button
                 appearance="subtle"
                 size="medium"
                 icon={<FolderOpenRegular aria-hidden="true" />}
                 aria-label="Open file"
-                onClick={handleOpenFileClick}
+                onClick={handleOpenFile}
               />
             </Tooltip>
-
-            {/* 4. Find Similar */}
             <Tooltip content="Find Similar" relationship="label">
               <Button
                 appearance="subtle"
                 size="medium"
                 icon={<DocumentSearchRegular aria-hidden="true" />}
                 aria-label="Find Similar"
-                onClick={(e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  onFindSimilar();
-                }}
+                onClick={onFindSimilar}
               />
             </Tooltip>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+        onClick={handleCardClick}
+        onDoubleClick={handleCardDoubleClick}
+        ariaLabel={ariaLabel}
+      />
 
-      {/* FilePreviewDialog — same component used in CorporateWorkspace */}
       <FilePreviewDialog
         open={previewOpen}
         documentName={result.name}
