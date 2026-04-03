@@ -318,8 +318,19 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
           </Text>
         ),
         actions: (
-          <Button appearance="primary" onClick={() => window.close()}>
-            Close
+          <Button appearance="primary" onClick={() => {
+            const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
+            for (const frame of frames) {
+              try {
+                const closeBtn =
+                  frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement
+                  ?? frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement;
+                if (closeBtn) { closeBtn.click(); return; }
+              } catch { /* cross-origin */ }
+            }
+            try { window.close(); } catch { /* blocked */ }
+          }}>
+            Done
           </Button>
         ),
       };
@@ -423,21 +434,18 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         steps={steps}
         onClose={() => {
           (window as any).__dialogResult = { confirmed: false };
-          // Close the navigateTo dialog — try multiple approaches
-          try {
-            // Approach 1: Xrm closeDialog (works in managed dialog frames)
-            const xrm =
-              (window as any).Xrm ??
-              (window.parent as any)?.Xrm ??
-              (window.top as any)?.Xrm;
-            if (xrm?.Utility?.closeProgressIndicator) {
-              xrm.Utility.closeProgressIndicator();
-            }
-          } catch { /* ignore */ }
-          // Approach 2: window.close (works in some dialog modes)
-          try { window.close(); } catch { /* ignore */ }
-          // Approach 3: history.back (fallback for iframe-based dialogs)
-          try { window.history.back(); } catch { /* ignore */ }
+          // Close the navigateTo dialog by clicking the platform's close button
+          // (proven pattern from DocumentUploadWizard — window.close() is blocked in iframes)
+          const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
+          for (const frame of frames) {
+            try {
+              const closeBtn =
+                frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement
+                ?? frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement;
+              if (closeBtn) { closeBtn.click(); return; }
+            } catch { /* cross-origin */ }
+          }
+          try { window.close(); } catch { /* blocked */ }
         }}
         onFinish={handleFinish}
         finishLabel="Save Layout"

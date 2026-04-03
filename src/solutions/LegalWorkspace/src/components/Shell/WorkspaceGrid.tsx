@@ -720,8 +720,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 80, unit: "%" },
-          height: { value: 80, unit: "%" },
+          width: { value: 60, unit: "%" },
+          height: { value: 70, unit: "%" },
           title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
         },
       ).then(() => {
@@ -750,8 +750,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         },
         {
           target: 2,
-          width: { value: 80, unit: "%" },
-          height: { value: 80, unit: "%" },
+          width: { value: 60, unit: "%" },
+          height: { value: 70, unit: "%" },
           title: "Create New Workspace",
         },
       ).then(() => {

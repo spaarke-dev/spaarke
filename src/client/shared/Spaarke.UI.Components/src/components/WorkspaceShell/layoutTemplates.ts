@@ -19,7 +19,10 @@ export type LayoutTemplateId =
   | "sidebar-main"
   | "single-column"
   | "3-col-equal"
-  | "hero-grid";
+  | "hero-grid"
+  | "single-column-5"
+  | "3-col-3-row"
+  | "hero-2x2";
 
 /** A single row within a layout template. */
 export interface LayoutTemplateRow {
@@ -124,6 +127,44 @@ const HERO_GRID: LayoutTemplate = {
   slotCount: 4,
 };
 
+const SINGLE_COLUMN_5: LayoutTemplate = {
+  id: "single-column-5",
+  name: "Single Column (5)",
+  description: "Five stacked full-width rows.",
+  rows: [
+    { id: "row-1", gridTemplateColumns: "1fr", slotCount: 1 },
+    { id: "row-2", gridTemplateColumns: "1fr", slotCount: 1 },
+    { id: "row-3", gridTemplateColumns: "1fr", slotCount: 1 },
+    { id: "row-4", gridTemplateColumns: "1fr", slotCount: 1 },
+    { id: "row-5", gridTemplateColumns: "1fr", slotCount: 1 },
+  ],
+  slotCount: 5,
+};
+
+const THREE_COL_THREE_ROW: LayoutTemplate = {
+  id: "3-col-3-row",
+  name: "Three Column, Three Row",
+  description: "Three rows of three equal-width columns (9 slots).",
+  rows: [
+    { id: "row-1", gridTemplateColumns: "1fr 1fr 1fr", slotCount: 3 },
+    { id: "row-2", gridTemplateColumns: "1fr 1fr 1fr", slotCount: 3 },
+    { id: "row-3", gridTemplateColumns: "1fr 1fr 1fr", slotCount: 3 },
+  ],
+  slotCount: 9,
+};
+
+const HERO_2X2: LayoutTemplate = {
+  id: "hero-2x2",
+  name: "Hero + 2×2 Grid",
+  description: "Full-width hero row on top with two rows of two columns below.",
+  rows: [
+    { id: "row-1", gridTemplateColumns: "1fr", slotCount: 1 },
+    { id: "row-2", gridTemplateColumns: "1fr 1fr", slotCount: 2 },
+    { id: "row-3", gridTemplateColumns: "1fr 1fr", slotCount: 2 },
+  ],
+  slotCount: 5,
+};
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -134,8 +175,11 @@ export const LAYOUT_TEMPLATES: readonly LayoutTemplate[] = [
   THREE_ROW_MIXED,
   SIDEBAR_MAIN,
   SINGLE_COLUMN,
+  SINGLE_COLUMN_5,
   THREE_COL_EQUAL,
+  THREE_COL_THREE_ROW,
   HERO_GRID,
+  HERO_2X2,
 ] as const;
 
 /**
