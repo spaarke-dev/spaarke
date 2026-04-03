@@ -13,6 +13,7 @@
 | [msal-client.md](msal-client.md) | Legacy PCF MSAL singleton |
 | [spaarke-auth-initialization.md](spaarke-auth-initialization.md) | Code Page auth bootstrap |
 | [xrm-webapi-vs-bff-auth.md](xrm-webapi-vs-bff-auth.md) | Decision: Xrm.WebApi vs BFF auth |
+| [bff-url-normalization.md](bff-url-normalization.md) | **CRITICAL**: BFF URL must be HOST ONLY (no /api). Load when constructing ANY BFF fetch URL. |
 
 ## Graph API
 | Pattern | When to Load |

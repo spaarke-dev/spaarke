@@ -146,6 +146,7 @@ export function useSemanticSearch(
         setState('success');
       } catch (err) {
         const searchError = err as SearchError;
+        console.error('[useSemanticSearch] Search error:', searchError);
         setError(searchError);
         setState('error');
       }

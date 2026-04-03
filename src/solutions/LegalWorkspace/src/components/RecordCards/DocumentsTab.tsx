@@ -26,6 +26,8 @@ export interface IDocumentsTabProps {
   maxVisible?: number;
   /** Called when "Show more" is clicked. */
   onShowMore?: () => void;
+  /** When set, fetches documents using this saved view's filter/order. */
+  selectedViewId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,9 +41,10 @@ export const DocumentsTab: React.FC<IDocumentsTabProps> = ({
   onRefetchReady,
   maxVisible,
   onShowMore,
+  selectedViewId,
 }) => {
   const { documents, isLoading, error, totalCount, refetch } =
-    useDocumentsTabList(service, userId, { top: 50 });
+    useDocumentsTabList(service, userId, { top: 50, selectedViewId });
 
   // Report count to parent
   React.useEffect(() => {

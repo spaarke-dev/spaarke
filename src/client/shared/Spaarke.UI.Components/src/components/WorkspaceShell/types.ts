@@ -70,8 +70,15 @@ export type SectionType = "action-cards" | "metric-cards" | "content";
 interface SectionConfigBase {
   /** Stable identifier used as React key. */
   id: string;
-  /** Section title displayed in the header bar. */
+  /** Section title displayed in the header bar. Used for aria-labels and accessibility. */
   title: string;
+  /**
+   * Optional React node to render in the title area in place of the title text.
+   * When provided, the `title` string is still used for aria-labels (e.g. collapse button),
+   * but the visible title area renders this node instead of `<Text>{title}</Text>`.
+   * Useful for replacing the section title with a view selector dropdown.
+   */
+  titleContent?: React.ReactNode;
   /** Optional badge count shown beside the title. */
   badgeCount?: number;
   /** Custom toolbar node rendered in the section header (right side). */
@@ -232,6 +239,11 @@ export interface SectionFactoryContext {
    * "get-started" → GetStartedExpandDialog).
    */
   onExpandSection?: (sectionId: string) => void;
+  /**
+   * Open the Documents list dialog, optionally filtered to a specific Dataverse view.
+   * Called by the Documents section Open button with the currently selected view ID.
+   */
+  onOpenDocumentsDialog?: (viewId?: string) => void;
 }
 
 /**

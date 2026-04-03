@@ -29,6 +29,7 @@ import {
   buildDocumentsByMatterQuery,
   buildDocumentsByUserQuery,
   buildDocumentsTabQuery,
+  DOCUMENT_TAB_SELECT_FIELDS,
   buildTodoItemsQuery,
   buildDismissedTodoQuery,
 } from './queryHelpers';
@@ -379,6 +380,24 @@ export class DataverseService {
       const result = await this._webApi.retrieveMultipleRecords('sprk_document', query, top);
       return toTypedArray<IDocument>(mapDocumentTabFormattedValues(result.entities));
     }, 'DOCUMENTS_TAB_FETCH_ERROR');
+  }
+
+  /**
+   * Retrieve documents using a specific saved view's filter and order.
+   * Applies the view's WHERE clause while selecting the standard document fields.
+   */
+  async getDocumentsForView(
+    viewId: string,
+    options: { top?: number } = {}
+  ): Promise<IResult<IDocument[]>> {
+    const top = options.top ?? 50;
+    const select = DOCUMENT_TAB_SELECT_FIELDS.join(',');
+    const query = `?savedQuery=${viewId}&$select=${select}&$top=${top}`;
+
+    return tryCatch(async () => {
+      const result = await this._webApi.retrieveMultipleRecords('sprk_document', query, top);
+      return toTypedArray<IDocument>(mapDocumentTabFormattedValues(result.entities));
+    }, 'DOCUMENTS_VIEW_FETCH_ERROR');
   }
 
   // -------------------------------------------------------------------------

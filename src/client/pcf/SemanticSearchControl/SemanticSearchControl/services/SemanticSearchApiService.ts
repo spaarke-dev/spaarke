@@ -57,7 +57,7 @@ export class SemanticSearchApiService {
    * @param apiBaseUrl - Base URL for the BFF API (e.g., https://api.example.com)
    */
   constructor(apiBaseUrl: string) {
-    this.apiBaseUrl = apiBaseUrl.replace(/\/$/, ''); // Remove trailing slash
+    this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, ''); // Remove trailing slash
   }
 
   /**
@@ -235,6 +235,13 @@ export class SemanticSearchApiService {
       // Response not JSON, use status text
       errorMessage = response.statusText || errorMessage;
     }
+
+    console.error('[SemanticSearchApiService] HTTP error response:', {
+      status: response.status,
+      statusText: response.statusText,
+      errorCode,
+      errorMessage,
+    });
 
     switch (response.status) {
       case 400:

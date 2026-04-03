@@ -73,6 +73,7 @@ const SectionPanelWrapper: React.FC<SectionPanelWrapperProps> = ({
   return (
     <SectionPanel
       title={section.title}
+      titleContent={section.titleContent}
       badgeCount={section.badgeCount}
       toolbar={section.toolbar}
       className={section.className}

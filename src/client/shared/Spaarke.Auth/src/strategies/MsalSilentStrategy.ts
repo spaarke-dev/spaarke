@@ -31,6 +31,7 @@ export class MsalSilentStrategy implements ITokenStrategy {
     try {
       // 1. Try acquireTokenSilent with cached account
       const accounts = msal.getAllAccounts();
+      console.info('[SpaarkeAuth:MsalSilent] Accounts:', accounts.length, 'scope:', this._scope);
       if (accounts.length > 0) {
         const result = await msal.acquireTokenSilent({
           scopes,
@@ -42,12 +43,14 @@ export class MsalSilentStrategy implements ITokenStrategy {
       }
 
       // 2. Fall back to ssoSilent (Azure AD session cookie)
+      console.info('[SpaarkeAuth:MsalSilent] Trying ssoSilent...');
       const ssoResult = await msal.ssoSilent({ scopes });
       if (ssoResult?.accessToken) {
         return this._buildResult(ssoResult);
       }
-    } catch {
+    } catch (err) {
       // Silent acquisition failed — caller should try next strategy
+      console.warn('[SpaarkeAuth:MsalSilent] Silent acquisition failed:', err);
     }
 
     return null;

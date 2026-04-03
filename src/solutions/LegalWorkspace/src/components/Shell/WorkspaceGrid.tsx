@@ -73,6 +73,9 @@ const DialogLoadingFallback: React.FC = () => (
   </div>
 );
 
+/** Default Dataverse view ID for the sprk_document entity list dialog. */
+const DEFAULT_DOCUMENTS_VIEW_ID = "1ab4a862-3317-f111-8342-7c1e525abd8b";
+
 /** Workspace header state passed up to the PageHeader via onHeaderReady. */
 export interface WorkspaceHeaderState {
   activeLayout: WorkspaceLayoutSummary;
@@ -412,8 +415,8 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     }
   }, []);
 
-  const handleOpenDocumentsDialog = React.useCallback(() => {
-    navigateToEntityList("sprk_document", "1ab4a862-3317-f111-8342-7c1e525abd8b");
+  const handleOpenDocumentsDialog = React.useCallback((viewId?: string) => {
+    navigateToEntityList("sprk_document", viewId ?? DEFAULT_DOCUMENTS_VIEW_ID);
   }, []);
 
   // Open DocumentUploadWizard Code Page dialog (Integration Pattern C — frame-walking)
@@ -598,8 +601,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         if (sectionId === "get-started") handleExpandClick();
         else if (sectionId === "quick-summary") handleDashboardOpen();
       },
+      onOpenDocumentsDialog: handleOpenDocumentsDialog,
     };
-  }, [webApi, userId, service, handleNavigate, handleOpenWizardGeneric]);
+  }, [webApi, userId, service, handleNavigate, handleOpenWizardGeneric, handleOpenDocumentsDialog]);
 
   // -------------------------------------------------------------------------
   // Build dynamic WorkspaceConfig from active layout + SECTION_REGISTRY

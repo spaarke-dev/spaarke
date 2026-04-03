@@ -54,6 +54,25 @@ interface CachedValue {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// URL Normalization
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalize a BFF base URL: strip trailing slashes and /api suffix.
+ *
+ * WHY THIS EXISTS: The Dataverse env var sprk_BffApiBaseUrl stores the URL as
+ * "https://host/api", but all client-side endpoint paths include /api themselves
+ * (e.g., `${baseUrl}/api/ai/search`). Without stripping, URLs double up to
+ * /api/api/... (404). This matches @spaarke/auth's normalizeUrl() convention.
+ *
+ * This is the SINGLE normalization point for all PCF controls. Individual
+ * service constructors should NOT need their own normalization.
+ */
+function normalizeBffUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -68,7 +87,7 @@ const CACHE_DURATION_MS = 5 * 60 * 1000;
  * These should ONLY be used in development - production should always use environment variables
  */
 const DEFAULT_VALUES: Record<KnownEnvironmentVariable, string> = {
-  sprk_BffApiBaseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net/api',
+  sprk_BffApiBaseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
   sprk_BffApiAppId: '',
   sprk_MsalClientId: '',
   sprk_TenantId: '',
@@ -201,14 +220,19 @@ export async function getEnvironmentVariableOrDefault(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Get the BFF API base URL from environment variables
- * This is the most commonly used environment variable
+ * Get the BFF API base URL from environment variables.
+ *
+ * IMPORTANT: Returns HOST ONLY (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net").
+ * The Dataverse env var stores the value WITH /api suffix, but this function strips it
+ * via normalizeBffUrl() to match @spaarke/auth's resolveRuntimeConfig() convention.
+ * All callers MUST add /api prefix themselves: `${baseUrl}/api/ai/search`
  *
  * @param webApi - The PCF WebAPI instance
- * @returns The BFF API base URL
+ * @returns The BFF API base URL (host only, no /api suffix)
  */
 export async function getApiBaseUrl(webApi: ComponentFramework.WebApi): Promise<string> {
-  return getEnvironmentVariableOrDefault(webApi, 'sprk_BffApiBaseUrl');
+  const raw = await getEnvironmentVariableOrDefault(webApi, 'sprk_BffApiBaseUrl');
+  return normalizeBffUrl(raw);
 }
 
 /**
@@ -386,7 +410,7 @@ export async function loadSpaarkeConfiguration(webApi: ComponentFramework.WebApi
   ]);
 
   return {
-    apiBaseUrl: values['sprk_BffApiBaseUrl'] ?? DEFAULT_VALUES.sprk_BffApiBaseUrl,
+    apiBaseUrl: normalizeBffUrl(values['sprk_BffApiBaseUrl'] ?? DEFAULT_VALUES.sprk_BffApiBaseUrl),
     azureOpenAiEndpoint: values['sprk_AzureOpenAiEndpoint'] ?? DEFAULT_VALUES.sprk_AzureOpenAiEndpoint,
     appInsightsKey: values['sprk_ApplicationInsightsKey'] ?? DEFAULT_VALUES.sprk_ApplicationInsightsKey,
     containerId: values['sprk_SharePointEmbeddedContainerId'] ?? DEFAULT_VALUES.sprk_SharePointEmbeddedContainerId,

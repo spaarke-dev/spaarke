@@ -72,6 +72,20 @@ Load when:
 
 > See: `.claude/patterns/auth/spaarke-auth-initialization.md` and `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md`
 
+### BFF Base URL Convention (CRITICAL — Recurring Production Bug)
+
+- ✅ **MUST** treat `bffBaseUrl` / `apiBaseUrl` as HOST ONLY (e.g., `https://spe-api-dev-67e2xz.azurewebsites.net`)
+- ✅ **MUST** add `/api/` prefix in every fetch URL: `${bffBaseUrl}/api/ai/search`
+- ✅ **MUST** get the base URL from `getApiBaseUrl()` (PCF) or `resolveRuntimeConfig()` (Code Pages) — both return HOST ONLY
+- ✅ **MUST** construct fetch URLs as `${bffBaseUrl}/api/your/endpoint`
+- ❌ **MUST NOT** add your own `/api`-stripping normalization in service constructors — the source functions already handle it
+- ❌ **MUST NOT** read `sprk_BffApiBaseUrl` directly from Dataverse and pass it to services — always go through `getApiBaseUrl()` or `resolveRuntimeConfig()`
+- ❌ **MUST NOT** construct URLs as `${bffBaseUrl}/ai/search` (missing `/api` prefix)
+
+**Why this rule exists**: The Dataverse env var `sprk_BffApiBaseUrl` stores `https://host/api` (with `/api`). The resolution functions (`getApiBaseUrl()`, `resolveRuntimeConfig()`) strip it so all consumer code works with HOST ONLY. This is fixed at the source — individual services should not re-implement normalization.
+
+> See: `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md` for the full reference
+
 ---
 
 ## Quick Reference Patterns

@@ -33,8 +33,14 @@ import { ChevronDownRegular, ChevronUpRegular } from "@fluentui/react-icons";
 // ---------------------------------------------------------------------------
 
 export interface SectionPanelProps {
-  /** Section title displayed in the header bar. */
+  /** Section title used for aria-labels and accessibility. */
   title: string;
+  /**
+   * Optional React node to render in the title area instead of the title text.
+   * When provided, renders in place of `<Text>{title}</Text>`.
+   * The `title` string is still used for the collapsible button's aria-label.
+   */
+  titleContent?: React.ReactNode;
   /** Optional badge count shown beside the title. Renders only when > 0. */
   badgeCount?: number;
   /**
@@ -155,6 +161,7 @@ const useStyles = makeStyles({
  */
 export const SectionPanel: React.FC<SectionPanelProps> = ({
   title,
+  titleContent,
   badgeCount,
   toolbar,
   children,
@@ -188,9 +195,11 @@ export const SectionPanel: React.FC<SectionPanelProps> = ({
       {/* Title bar */}
       <div className={styles.titleBar}>
         <div className={styles.titleArea}>
-          <Text size={400} weight="semibold">
-            {title}
-          </Text>
+          {titleContent ?? (
+            <Text size={400} weight="semibold">
+              {title}
+            </Text>
+          )}
           {showBadge && (
             <Badge appearance="filled" color="brand" size="small">
               {badgeCount}

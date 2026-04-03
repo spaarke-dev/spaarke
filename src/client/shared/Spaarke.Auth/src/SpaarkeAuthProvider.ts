@@ -76,6 +76,7 @@ export class SpaarkeAuthProvider {
     // 2. Bridge (parent/window global)
     const bridged = await this._bridgeStrategy.tryAcquireToken();
     if (bridged) {
+      console.info('[SpaarkeAuth] Token acquired via bridge');
       this._cacheAndPublish(bridged);
       return bridged.accessToken;
     }
@@ -83,25 +84,44 @@ export class SpaarkeAuthProvider {
     // 3. Xrm platform (frame-walk)
     const xrmToken = await this._xrmStrategy.tryAcquireToken();
     if (xrmToken) {
+      console.info('[SpaarkeAuth] Token acquired via Xrm');
       this._cacheAndPublish(xrmToken);
       return xrmToken.accessToken;
     }
 
     // 4. MSAL silent
-    const msalToken = await this._msalSilentStrategy.tryAcquireToken();
-    if (msalToken) {
-      this._cacheAndPublish(msalToken);
-      return msalToken.accessToken;
+    try {
+      const msalToken = await this._msalSilentStrategy.tryAcquireToken();
+      if (msalToken) {
+        console.info('[SpaarkeAuth] Token acquired via MSAL silent');
+        this._cacheAndPublish(msalToken);
+        return msalToken.accessToken;
+      }
+      console.warn('[SpaarkeAuth] MSAL silent returned null (no token)');
+    } catch (err) {
+      console.warn('[SpaarkeAuth] MSAL silent failed:', err);
     }
 
     // 5. MSAL popup (interactive)
-    const popupToken = await this._msalPopupStrategy.tryAcquireToken();
-    if (popupToken) {
-      this._cacheAndPublish(popupToken);
-      return popupToken.accessToken;
+    try {
+      const popupToken = await this._msalPopupStrategy.tryAcquireToken();
+      if (popupToken) {
+        console.info('[SpaarkeAuth] Token acquired via MSAL popup');
+        this._cacheAndPublish(popupToken);
+        return popupToken.accessToken;
+      }
+      console.warn('[SpaarkeAuth] MSAL popup returned null (no token)');
+    } catch (err) {
+      console.warn('[SpaarkeAuth] MSAL popup failed:', err);
     }
 
     // All strategies exhausted
+    console.error('[SpaarkeAuth] All 5 token strategies failed. Config:', {
+      clientId: this._config.clientId?.substring(0, 8) + '...',
+      bffApiScope: this._config.bffApiScope,
+      authority: this._config.authority,
+      bffBaseUrl: this._config.bffBaseUrl,
+    });
     return '';
   }
 

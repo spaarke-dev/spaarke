@@ -59,7 +59,10 @@ function getConfig(): IRuntimeConfig {
 
 /**
  * BFF API base URL resolved from Dataverse Environment Variables at runtime.
- * Example: "https://spe-api-dev-67e2xz.azurewebsites.net/api"
+ * Returns HOST ONLY — the /api suffix is stripped by normalizeUrl() in @spaarke/auth.
+ * Example: "https://spe-api-dev-67e2xz.azurewebsites.net"
+ *
+ * All fetch URLs must include /api prefix themselves: `${getBffBaseUrl()}/api/documents/...`
  */
 export function getBffBaseUrl(): string {
   return getConfig().bffBaseUrl;

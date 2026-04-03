@@ -17,6 +17,8 @@ import { DataverseService } from '../services/DataverseService';
 
 export interface IUseDocumentsTabListOptions {
   top?: number;
+  /** When set, fetches documents using the saved view's filter/order instead of the default tab filter. */
+  selectedViewId?: string;
 }
 
 export interface IUseDocumentsTabListResult {
@@ -62,7 +64,7 @@ export function useDocumentsTabList(
   userId: string,
   options: IUseDocumentsTabListOptions = {}
 ): IUseDocumentsTabListResult {
-  const top = options.top ?? 50;
+  const { top = 50, selectedViewId } = options;
 
   const [documents, setDocuments] = useState<IDocument[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -71,10 +73,10 @@ export function useDocumentsTabList(
   const abortRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(() => {
-    const cacheKey = `documentsTab:${userId}:${top}`;
+    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}`;
     _cache.delete(cacheKey);
     setFetchKey((k) => k + 1);
-  }, [userId, top]);
+  }, [userId, top, selectedViewId]);
 
   useEffect(() => {
     if (!userId) {
@@ -84,7 +86,7 @@ export function useDocumentsTabList(
       return;
     }
 
-    const cacheKey = `documentsTab:${userId}:${top}`;
+    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}`;
 
     const cached = getCached(cacheKey);
     if (cached) {
@@ -108,8 +110,11 @@ export function useDocumentsTabList(
       cancelled = true;
     });
 
-    service
-      .getDocumentsForTab(userId, { top })
+    const fetchPromise = selectedViewId
+      ? service.getDocumentsForView(selectedViewId, { top })
+      : service.getDocumentsForTab(userId, { top });
+
+    fetchPromise
       .then((result) => {
         if (cancelled) return;
 
@@ -139,7 +144,7 @@ export function useDocumentsTabList(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [service, userId, top, fetchKey]);
+  }, [service, userId, top, selectedViewId, fetchKey]);
 
   return {
     documents,

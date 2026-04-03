@@ -217,12 +217,13 @@ export class NavigationService {
         const record = await xrm.WebApi.retrieveRecord(
           parentEntityType,
           cleanId,
-          '?$select=sprk_name,name,sprk_matternumber,sprk_projectname'
+          '?$select=sprk_mattername,sprk_projectname,sprk_matternumber,sprk_projectnumber,name'
         );
         parentEntityName =
-          (record.sprk_matternumber as string) ??
+          (record.sprk_mattername as string) ??
           (record.sprk_projectname as string) ??
-          (record.sprk_name as string) ??
+          (record.sprk_matternumber as string) ??
+          (record.sprk_projectnumber as string) ??
           (record.name as string) ??
           '';
       } catch {
