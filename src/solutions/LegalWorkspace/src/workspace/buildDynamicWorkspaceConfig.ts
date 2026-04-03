@@ -33,12 +33,17 @@ export interface LayoutJsonRow {
   sections: string[];
 }
 
+/** Record ownership scope for workspace queries. */
+export type WorkspaceScope = "my" | "all";
+
 /** Top-level layout JSON persisted in Dataverse. */
 export interface LayoutJson {
   /** Schema version for forward compatibility. Currently only version 1 is supported. */
   schemaVersion: number;
   /** Ordered row definitions with section assignments. */
   rows: LayoutJsonRow[];
+  /** Record scope: "my" = user-owned only, "all" = user + team/BU owned. Default: "my". */
+  scope?: WorkspaceScope;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +117,14 @@ export function buildDynamicWorkspaceConfig(
   context: SectionFactoryContext,
 ): WorkspaceConfig {
   // -------------------------------------------------------------------------
+  // Step 0: Inject scope from layout JSON into the factory context
+  // -------------------------------------------------------------------------
+  const effectiveContext: SectionFactoryContext = {
+    ...context,
+    scope: layoutJson.scope ?? "my",
+  };
+
+  // -------------------------------------------------------------------------
   // Step 1: Validate schema version
   // -------------------------------------------------------------------------
   if (layoutJson.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
@@ -146,7 +159,7 @@ export function buildDynamicWorkspaceConfig(
       }
 
       // Call the factory to produce the SectionConfig
-      const sectionConfig = registration.factory(context);
+      const sectionConfig = registration.factory(effectiveContext);
 
       // Apply defaultHeight from registration if factory didn't set minHeight
       if (registration.defaultHeight && !sectionConfig.style?.minHeight) {

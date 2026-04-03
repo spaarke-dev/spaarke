@@ -244,6 +244,17 @@ export interface SectionFactoryContext {
    * Called by the Documents section Open button with the currently selected view ID.
    */
   onOpenDocumentsDialog?: (viewId?: string) => void;
+  /**
+   * Record ownership scope for this workspace.
+   * - "my": show only records owned by the current user (default)
+   * - "all": show records owned by the user OR any team in the user's business unit
+   *
+   * When "all", query helpers use `_owningbusinessunit_value eq ${businessUnitId}`
+   * instead of `_ownerid_value eq ${userId}`.
+   */
+  scope?: "my" | "all";
+  /** User's business unit ID (GUID). Required when scope="all". */
+  businessUnitId?: string;
 }
 
 /**

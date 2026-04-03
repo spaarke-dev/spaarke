@@ -14,6 +14,7 @@
 import * as React from "react";
 import type { IWebApi } from "../types/xrm";
 import { QUICK_SUMMARY_CARDS } from "../components/QuickSummary/quickSummaryConfig";
+import type { IFilterContext } from "../components/QuickSummary/quickSummaryConfig";
 
 export interface IQuickSummaryCountsResult {
   /** Map of card id to count. undefined means the individual query failed. */
@@ -30,7 +31,9 @@ export interface IQuickSummaryCountsResult {
 
 export function useQuickSummaryCounts(
   webApi: IWebApi,
-  userId: string
+  userId: string,
+  scope?: "my" | "all",
+  businessUnitId?: string,
 ): IQuickSummaryCountsResult {
   const [counts, setCounts] = React.useState<Record<string, number | undefined>>({});
   const [badgeCounts, setBadgeCounts] = React.useState<Record<string, number | undefined>>({});
@@ -41,10 +44,12 @@ export function useQuickSummaryCounts(
     setIsLoading(true);
     setError(null);
     try {
+      const filterCtx: IFilterContext = { userId, scope, businessUnitId };
+
       // Build all queries: main counts + badge counts
       const mainQueries = QUICK_SUMMARY_CARDS.map(async (card) => {
         try {
-          const query = `?$select=${card.primaryKey}&$filter=${card.countFilter(userId)}&$top=500`;
+          const query = `?$select=${card.primaryKey}&$filter=${card.countFilter(filterCtx)}&$top=500`;
           const result = await webApi.retrieveMultipleRecords(card.entityName, query, 500);
           return { id: card.id, count: result.entities.length };
         } catch {
@@ -55,7 +60,7 @@ export function useQuickSummaryCounts(
       const badgeQueries = QUICK_SUMMARY_CARDS.map(async (card) => {
         if (!card.badgeFilter) return { id: card.id, count: undefined };
         try {
-          const filter = card.badgeFilter(userId);
+          const filter = card.badgeFilter(filterCtx);
           const query = `?$select=${card.primaryKey}&$filter=${filter}&$top=100`;
           const result = await webApi.retrieveMultipleRecords(card.entityName, query, 100);
           return { id: card.id, count: result.entities.length };
@@ -81,7 +86,7 @@ export function useQuickSummaryCounts(
     } finally {
       setIsLoading(false);
     }
-  }, [webApi, userId]);
+  }, [webApi, userId, scope, businessUnitId]);
 
   React.useEffect(() => {
     fetchCounts();

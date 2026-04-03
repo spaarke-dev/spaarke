@@ -9,6 +9,25 @@ import {
 /** Badge type for notification indicators on metric cards. */
 export type BadgeType = "new" | "overdue";
 
+/** Scope + identity context passed to filter builders. */
+export interface IFilterContext {
+  userId: string;
+  scope?: "my" | "all";
+  businessUnitId?: string;
+}
+
+/**
+ * Build the ownership OData filter clause based on scope.
+ * - "my" (default): `_ownerid_value eq ${userId}`
+ * - "all": `_owningbusinessunit_value eq ${businessUnitId}` (includes user + all BU teams)
+ */
+export function buildOwnerFilter(ctx: IFilterContext): string {
+  if (ctx.scope === "all" && ctx.businessUnitId) {
+    return `_owningbusinessunit_value eq ${ctx.businessUnitId}`;
+  }
+  return `_ownerid_value eq ${ctx.userId}`;
+}
+
 /** Configuration for a single Quick Summary metric card. */
 export interface IQuickSummaryCardConfig {
   /** Stable identifier used as React key. */
@@ -26,11 +45,11 @@ export interface IQuickSummaryCardConfig {
   /** GUID of the system view to open on click. */
   viewId: string;
   /** Builds an OData $filter string for the count query. */
-  countFilter: (userId: string) => string;
+  countFilter: (ctx: IFilterContext) => string;
   /** Badge type to display when badge count > 0. */
   badgeType?: BadgeType;
   /** Builds an OData $filter for the badge count query. Returns null if no badge. */
-  badgeFilter?: (userId: string) => string;
+  badgeFilter?: (ctx: IFilterContext) => string;
 }
 
 /**
@@ -48,12 +67,12 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
     entityName: "sprk_matter",
     primaryKey: "sprk_matterid",
     viewId: "6c3c5d88-2617-f111-8343-7c1e520aa4df",
-    countFilter: (userId) => `_ownerid_value eq ${userId} and statecode eq 0`,
+    countFilter: (ctx) => `${buildOwnerFilter(ctx)} and statecode eq 0`,
     badgeType: "new",
-    badgeFilter: (userId) => {
+    badgeFilter: (ctx) => {
       const d = new Date();
       d.setDate(d.getDate() - 7);
-      return `_ownerid_value eq ${userId} and statecode eq 0 and createdon ge ${d.toISOString()}`;
+      return `${buildOwnerFilter(ctx)} and statecode eq 0 and createdon ge ${d.toISOString()}`;
     },
   },
   {
@@ -64,12 +83,12 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
     entityName: "sprk_project",
     primaryKey: "sprk_projectid",
     viewId: "0e36d0a4-2617-f111-8343-7ced8d1dc988",
-    countFilter: (userId) => `_ownerid_value eq ${userId} and statecode eq 0`,
+    countFilter: (ctx) => `${buildOwnerFilter(ctx)} and statecode eq 0`,
     badgeType: "new",
-    badgeFilter: (userId) => {
+    badgeFilter: (ctx) => {
       const d = new Date();
       d.setDate(d.getDate() - 7);
-      return `_ownerid_value eq ${userId} and statecode eq 0 and createdon ge ${d.toISOString()}`;
+      return `${buildOwnerFilter(ctx)} and statecode eq 0 and createdon ge ${d.toISOString()}`;
     },
   },
   {
@@ -80,11 +99,11 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
     entityName: "sprk_workassignment",
     primaryKey: "sprk_workassignmentid",
     viewId: "b7cf5593-2517-f111-8343-7ced8d1dc988",
-    countFilter: (userId) => `_ownerid_value eq ${userId} and statecode eq 0`,
+    countFilter: (ctx) => `${buildOwnerFilter(ctx)} and statecode eq 0`,
     badgeType: "overdue",
-    badgeFilter: (userId) => {
+    badgeFilter: (ctx) => {
       const now = new Date().toISOString();
-      return `_ownerid_value eq ${userId} and statecode eq 0 and sprk_responseduedate lt ${now}`;
+      return `${buildOwnerFilter(ctx)} and statecode eq 0 and sprk_responseduedate lt ${now}`;
     },
   },
   {
@@ -95,12 +114,12 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
     entityName: "sprk_event",
     primaryKey: "sprk_eventid",
     viewId: "12a510e4-2517-f111-8343-7ced8d1dc988",
-    countFilter: (userId) =>
-      `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus ne 100000002`,
+    countFilter: (ctx) =>
+      `${buildOwnerFilter(ctx)} and sprk_todoflag eq true and sprk_todostatus ne 100000002`,
     badgeType: "overdue",
-    badgeFilter: (userId) => {
+    badgeFilter: (ctx) => {
       const now = new Date().toISOString();
-      return `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus ne 100000002 and sprk_duedate lt ${now}`;
+      return `${buildOwnerFilter(ctx)} and sprk_todoflag eq true and sprk_todostatus ne 100000002 and sprk_duedate lt ${now}`;
     },
   },
 ];

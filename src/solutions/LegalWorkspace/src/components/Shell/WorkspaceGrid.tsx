@@ -119,6 +119,24 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const service = useDataverseService(webApi);
 
   // -------------------------------------------------------------------------
+  // Resolve user's business unit ID (needed for scope="all" queries)
+  // -------------------------------------------------------------------------
+
+  const [businessUnitId, setBusinessUnitId] = React.useState<string>("");
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const cleanUserId = userId.replace(/[{}]/g, "");
+        const user = await webApi.retrieveRecord("systemuser", cleanUserId, "?$select=_businessunitid_value");
+        const buId = user["_businessunitid_value"] as string;
+        if (buId) setBusinessUnitId(buId);
+      } catch (err) {
+        console.warn("[WorkspaceGrid] Failed to resolve business unit ID:", err);
+      }
+    })();
+  }, [webApi, userId]);
+
+  // -------------------------------------------------------------------------
   // Daily Digest auto-popup (Task 051)
   // Opens sprk_dailyupdate Code Page on first workspace launch per session
   // if the user has the autoPopup preference enabled.
@@ -603,8 +621,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         else if (sectionId === "quick-summary") handleDashboardOpen();
       },
       onOpenDocumentsDialog: handleOpenDocumentsDialog,
+      businessUnitId,
     };
-  }, [webApi, userId, service, handleNavigate, handleOpenWizardGeneric, handleOpenDocumentsDialog]);
+  }, [webApi, userId, service, businessUnitId, handleNavigate, handleOpenWizardGeneric, handleOpenDocumentsDialog]);
 
   // -------------------------------------------------------------------------
   // Build dynamic WorkspaceConfig from active layout + SECTION_REGISTRY

@@ -89,7 +89,7 @@ const useStyles = makeStyles({
     ...shorthands.padding("8px"),
     ...shorthands.borderRadius(tokens.borderRadiusSmall),
     backgroundColor: tokens.colorNeutralBackground3,
-    aspectRatio: "4 / 3",
+    aspectRatio: "16 / 9",
     justifyContent: "center",
   },
   thumbnailRow: {
