@@ -103,6 +103,12 @@ public record NodeExecutionContext
     public string? CorrelationId { get; init; }
 
     /// <summary>
+    /// The Dataverse systemuserid of the target user for this execution.
+    /// Set by PlaybookSchedulerService for notification playbooks that run per-user.
+    /// </summary>
+    public Guid? UserId { get; init; }
+
+    /// <summary>
     /// Timestamp when this execution context was created.
     /// </summary>
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;

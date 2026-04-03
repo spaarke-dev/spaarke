@@ -36,8 +36,8 @@ interface ICacheEntry {
 
 const _cache = new Map<string, ICacheEntry>();
 
-function makeCacheKey(userId: string, filter: EventFilterCategory, top: number): string {
-  return `${userId}:${filter}:${top}`;
+function makeCacheKey(userId: string, filter: EventFilterCategory, top: number, scope?: string): string {
+  return `${userId}:${filter}:${top}:${scope ?? 'my'}`;
 }
 
 function getCachedEvents(key: string): IEvent[] | null {
@@ -72,6 +72,10 @@ export interface IUseEventsOptions {
    * When provided, bypasses Xrm.WebApi and resolves immediately.
    */
   mockEvents?: IEvent[];
+  /** Record scope. */
+  scope?: 'my' | 'all';
+  /** Business unit ID. */
+  businessUnitId?: string;
 }
 
 export interface IUseEventsResult {
@@ -153,7 +157,7 @@ export function useEvents(options: IUseEventsOptions): IUseEventsResult {
 
   const refetch = useCallback(() => {
     // Invalidate cache for this key and trigger re-fetch
-    const key = makeCacheKey(userId, filter, top);
+    const key = makeCacheKey(userId, filter, top, options.scope);
     _cache.delete(key);
     setFetchKey((k) => k + 1);
   }, [userId, filter, top]);
@@ -175,7 +179,7 @@ export function useEvents(options: IUseEventsOptions): IUseEventsResult {
       return;
     }
 
-    const key = makeCacheKey(userId, filter, top);
+    const key = makeCacheKey(userId, filter, top, options.scope);
 
     // --- Check in-memory cache ---
     const cached = getCachedEvents(key);
@@ -191,7 +195,7 @@ export function useEvents(options: IUseEventsOptions): IUseEventsResult {
     setError(null);
 
     serviceRef.current
-      .getEventsFeed(userId, filter, { top })
+      .getEventsFeed(userId, filter, { top, scope: options.scope, businessUnitId: options.businessUnitId })
       .then((result) => {
         if (cancelled) return;
 
@@ -217,7 +221,7 @@ export function useEvents(options: IUseEventsOptions): IUseEventsResult {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, filter, top, mockEvents, fetchKey]);
+  }, [userId, filter, top, mockEvents, fetchKey, options.scope, options.businessUnitId]);
 
   return {
     events,

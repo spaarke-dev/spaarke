@@ -22,7 +22,7 @@ import {
 import { useAuthContext, type AuthContextValue } from './AuthContext';
 import { useAnalysisLoader, type UseAnalysisLoaderResult } from '../hooks/useAnalysisLoader';
 import { getHostContext } from '../services/hostContext';
-import type { AnalysisRecord, DocumentMetadata } from '../types';
+import type { AnalysisRecord, DocumentMetadata, IChatMessage } from '../types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -106,6 +106,8 @@ export interface AnalysisAiContextValue {
   playbookId: string | undefined;
   /** Set playbook ID (called on playbook switch) */
   setPlaybookId: (playbookId: string) => void;
+  /** Pre-loaded chat history from sprk_chathistory (for SprkChat initialMessages) */
+  chatHistory: IChatMessage[] | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +285,7 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
       setChatSessionId,
       playbookId,
       setPlaybookId,
+      chatHistory: loader.analysis?.chatHistory,
     }),
     [
       loader,

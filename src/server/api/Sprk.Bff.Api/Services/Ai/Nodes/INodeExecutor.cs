@@ -129,5 +129,8 @@ public enum ActionType
     DeliverToIndex = 41,
 
     /// <summary>Create an in-app notification via the Dataverse appnotification entity.</summary>
-    CreateNotification = 50
+    CreateNotification = 50,
+
+    /// <summary>Execute a FetchXML query against Dataverse and return results.</summary>
+    QueryDataverse = 51
 }

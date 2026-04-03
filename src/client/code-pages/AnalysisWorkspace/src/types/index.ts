@@ -8,6 +8,8 @@
  * @see ADR-007 - Document access through SpeFileStore facade (BFF API)
  */
 
+export type { IChatMessage } from '@spaarke/ui-components';
+
 // ---------------------------------------------------------------------------
 // Analysis Record
 // ---------------------------------------------------------------------------
@@ -41,6 +43,8 @@ export interface AnalysisRecord {
   statusCode?: number;
   /** Display name of the user who created the analysis */
   createdBy?: string;
+  /** Persisted chat history from sprk_chathistory field (loaded on analysis fetch) */
+  chatHistory?: IChatMessage[];
 }
 
 /** Possible statuses for an analysis record */

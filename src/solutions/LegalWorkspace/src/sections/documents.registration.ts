@@ -189,6 +189,8 @@ interface IDocumentsSectionContentProps {
   onRefetchReady?: (refetch: () => void) => void;
   onControllerReady?: (setView: (view: ISelectedView) => void) => void;
   maxVisible?: number;
+  scope?: "my" | "all";
+  businessUnitId?: string;
 }
 
 const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
@@ -198,6 +200,8 @@ const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
   onRefetchReady,
   onControllerReady,
   maxVisible,
+  scope,
+  businessUnitId,
 }) => {
   const [selectedView, setSelectedView] = React.useState<ISelectedView>({ viewId: undefined, viewType: undefined });
 
@@ -213,6 +217,8 @@ const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
     userId,
     maxVisible: maxVisible ?? 6,
     selectedViewId: selectedView.viewId,
+    scope,
+    businessUnitId,
     selectedViewType: selectedView.viewType,
     onCountChange,
     onRefetchReady,
@@ -320,6 +326,8 @@ export const documentsRegistration: SectionRegistration = {
             service: context.service as DataverseService,
             userId: context.userId,
             maxVisible: 6,
+            scope: context.scope,
+            businessUnitId: context.businessUnitId,
             onCountChange: context.onBadgeCountChange,
             onRefetchReady: (refetch: () => void) => {
               refetchFn = refetch;

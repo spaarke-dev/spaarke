@@ -1,28 +1,32 @@
 /**
  * SourceViewerPanel Component
  *
- * Right panel of the AnalysisWorkspace 2-panel layout. Displays the original
- * source document (PDF, Word, etc.) for reference during analysis review.
- * The panel is collapsible via a toggle button in its header.
+ * Center panel of the AnalysisWorkspace layout. Displays the original source
+ * document (PDF, Word, etc.) for reference during analysis review. The panel
+ * is collapsible via a button in its header — hiding it expands the editor panel.
  *
- * Task 065: Replaced PH-061-B "No document loaded" placeholder with real
- * document viewer using BFF API preview URL. Supports PDF (direct iframe)
- * and Office documents (Office Online embed URL).
+ * The "Open" button opens the document in a full FilePreviewDialog (shared
+ * component) rather than navigating to a new tab.
+ *
+ * Task 065: Replaced PH-061-B placeholder with real document viewer using
+ * BFF API preview URL. Supports PDF (direct iframe) and Office docs (Office
+ * Online embed URL).
  *
  * @see ADR-007 - Document access through BFF API (SpeFileStore facade)
  * @see ADR-021 - Fluent UI v9 design system
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { makeStyles, mergeClasses, Button, Spinner, Text, tokens } from '@fluentui/react-components';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { makeStyles, Button, Spinner, Text, tokens } from '@fluentui/react-components';
 import {
   DocumentRegular,
-  ChevronLeftRegular,
   ChevronRightRegular,
   ArrowClockwiseRegular,
   OpenRegular,
   ErrorCircle20Regular,
 } from '@fluentui/react-icons';
+import { FilePreviewDialog } from '@spaarke/ui-components';
+import type { IFilePreviewServices } from '@spaarke/ui-components';
 import type { DocumentMetadata, AnalysisError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -30,10 +34,8 @@ import type { DocumentMetadata, AnalysisError } from '../types';
 // ---------------------------------------------------------------------------
 
 export interface SourceViewerPanelProps {
-  /** Whether the panel is collapsed */
-  isCollapsed: boolean;
-  /** Callback to toggle collapse state */
-  onToggleCollapse: () => void;
+  /** Callback to hide the source panel (editor will expand) */
+  onCollapse: () => void;
   /** Document metadata loaded from BFF API (null while loading or unavailable) */
   documentMetadata?: DocumentMetadata | null;
   /** Whether the document is currently loading */
@@ -63,12 +65,6 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  rootCollapsed: {
-    width: '36px',
-    minWidth: '36px',
-    maxWidth: '36px',
-    flexShrink: 0,
-  },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -81,17 +77,6 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground3,
     minHeight: '40px',
     flexShrink: 0,
-  },
-  headerCollapsed: {
-    flexDirection: 'column',
-    justifyContent: 'flex-start',
-    alignItems: 'center',
-    paddingLeft: tokens.spacingHorizontalXS,
-    paddingRight: tokens.spacingHorizontalXS,
-    paddingTop: tokens.spacingVerticalS,
-    borderBottom: 'none',
-    borderLeft: `1px solid ${tokens.colorNeutralStroke1}`,
-    height: '100%',
   },
   headerTitle: {
     display: 'flex',
@@ -168,8 +153,7 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export function SourceViewerPanel({
-  isCollapsed,
-  onToggleCollapse,
+  onCollapse,
   documentMetadata = null,
   isLoading = false,
   documentError = null,
@@ -179,6 +163,7 @@ export function SourceViewerPanel({
 
   const [isIframeLoading, setIsIframeLoading] = useState(false);
   const [iframeError, setIframeError] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Clean up iframe timeout on unmount
@@ -221,47 +206,44 @@ export function SourceViewerPanel({
     setIframeError('Failed to load document preview.');
   }, []);
 
-  const handleOpenInNewTab = useCallback(() => {
-    if (documentMetadata?.viewUrl) {
-      window.open(documentMetadata.viewUrl, '_blank', 'noopener,noreferrer');
-    }
-  }, [documentMetadata?.viewUrl]);
-
   const handleRefresh = useCallback(() => {
     setIframeError(null);
     onRetry?.();
   }, [onRetry]);
 
-  // ---- Collapsed state ----
-  if (isCollapsed) {
-    return (
-      <div className={mergeClasses(styles.root, styles.rootCollapsed)}>
-        <div className={mergeClasses(styles.header, styles.headerCollapsed)}>
-          <Button
-            icon={<ChevronLeftRegular />}
-            appearance="subtle"
-            size="small"
-            onClick={onToggleCollapse}
-            title="Expand source viewer"
-            aria-label="Expand source viewer"
-          />
-        </div>
-      </div>
-    );
-  }
+  const handleOpenPreview = useCallback(() => {
+    setIsPreviewOpen(true);
+  }, []);
+
+  const handleClosePreview = useCallback(() => {
+    setIsPreviewOpen(false);
+  }, []);
+
+  // Build a minimal IFilePreviewServices adapter using the already-loaded viewUrl.
+  // The panel does not have BFF access for open links or Xrm for navigation — those
+  // are stubbed with no-ops so FilePreviewDialog can still render the iframe preview.
+  const previewServices = useMemo<IFilePreviewServices>(
+    () => ({
+      getDocumentPreviewUrl: async (_documentId: string) =>
+        documentMetadata?.viewUrl ?? null,
+      getDocumentOpenLinks: async (_documentId: string) => null,
+      navigateToEntity: (_params: { action: 'openRecord'; entityName: string; entityId: string; openInNewWindow?: boolean }) => { /* not available in AnalysisWorkspace context */ },
+      copyDocumentLink: async (_documentId: string) => false,
+      setWorkspaceFlag: async (_documentId: string, _flag: boolean) => false,
+    }),
+    [documentMetadata?.viewUrl]
+  );
 
   // ---- Determine viewer content ----
   let viewerContent: JSX.Element;
 
   if (isLoading) {
-    // Loading state
     viewerContent = (
       <div className={styles.loadingState}>
         <Spinner size="medium" label="Loading document..." />
       </div>
     );
   } else if (documentError) {
-    // Error state with retry
     viewerContent = (
       <div className={styles.errorState}>
         <ErrorCircle20Regular className={styles.errorIcon} />
@@ -275,7 +257,6 @@ export function SourceViewerPanel({
       </div>
     );
   } else if (iframeError) {
-    // Iframe-level error
     viewerContent = (
       <div className={styles.errorState}>
         <ErrorCircle20Regular className={styles.errorIcon} />
@@ -287,7 +268,6 @@ export function SourceViewerPanel({
       </div>
     );
   } else if (documentMetadata?.viewUrl) {
-    // Document viewer iframe
     viewerContent = (
       <>
         {isIframeLoading && (
@@ -307,7 +287,6 @@ export function SourceViewerPanel({
       </>
     );
   } else {
-    // Empty state -- no document ID provided or metadata not yet loaded
     viewerContent = (
       <div className={styles.emptyState}>
         <DocumentRegular className={styles.emptyIcon} />
@@ -319,7 +298,6 @@ export function SourceViewerPanel({
     );
   }
 
-  // ---- Expanded state ----
   return (
     <div className={styles.root}>
       {/* Panel header */}
@@ -347,9 +325,9 @@ export function SourceViewerPanel({
                 icon={<OpenRegular />}
                 appearance="subtle"
                 size="small"
-                onClick={handleOpenInNewTab}
-                title="Open in new tab"
-                aria-label="Open document in new tab"
+                onClick={handleOpenPreview}
+                title="Open in preview dialog"
+                aria-label="Open document in preview dialog"
               />
             </>
           )}
@@ -357,15 +335,26 @@ export function SourceViewerPanel({
             icon={<ChevronRightRegular />}
             appearance="subtle"
             size="small"
-            onClick={onToggleCollapse}
-            title="Collapse source viewer"
-            aria-label="Collapse source viewer"
+            onClick={onCollapse}
+            title="Hide source viewer"
+            aria-label="Hide source viewer"
           />
         </div>
       </div>
 
       {/* Viewer content area */}
       <div className={styles.viewerContent}>{viewerContent}</div>
+
+      {/* FilePreviewDialog — opened by the Open button in the header */}
+      {documentMetadata && (
+        <FilePreviewDialog
+          open={isPreviewOpen}
+          documentId={documentMetadata.id}
+          documentName={documentMetadata.name}
+          onClose={handleClosePreview}
+          services={previewServices}
+        />
+      )}
     </div>
   );
 }

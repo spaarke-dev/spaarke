@@ -21,6 +21,10 @@ export interface IUseDocumentsTabListOptions {
   selectedViewId?: string;
   /** View type: 'savedquery' (system) or 'userquery' (personal). Default: 'savedquery'. */
   selectedViewType?: string;
+  /** Record scope: "my" (user only) or "all" (user + BU teams). */
+  scope?: 'my' | 'all';
+  /** Business unit ID (required when scope="all"). */
+  businessUnitId?: string;
 }
 
 export interface IUseDocumentsTabListResult {
@@ -66,7 +70,7 @@ export function useDocumentsTabList(
   userId: string,
   options: IUseDocumentsTabListOptions = {}
 ): IUseDocumentsTabListResult {
-  const { top = 50, selectedViewId, selectedViewType } = options;
+  const { top = 50, selectedViewId, selectedViewType, scope, businessUnitId } = options;
 
   const [documents, setDocuments] = useState<IDocument[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -75,7 +79,7 @@ export function useDocumentsTabList(
   const abortRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(() => {
-    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}`;
+    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}:${scope ?? 'my'}`;
     _cache.delete(cacheKey);
     setFetchKey((k) => k + 1);
   }, [userId, top, selectedViewId]);
@@ -88,7 +92,7 @@ export function useDocumentsTabList(
       return;
     }
 
-    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}`;
+    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}:${scope ?? 'my'}`;
 
     const cached = getCached(cacheKey);
     if (cached) {
@@ -114,7 +118,7 @@ export function useDocumentsTabList(
 
     const fetchPromise = selectedViewId
       ? service.getDocumentsForView(selectedViewId, { top, viewType: selectedViewType })
-      : service.getDocumentsForTab(userId, { top });
+      : service.getDocumentsForTab(userId, { top, scope, businessUnitId });
 
     fetchPromise
       .then((result) => {
@@ -146,7 +150,7 @@ export function useDocumentsTabList(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [service, userId, top, selectedViewId, fetchKey]);
+  }, [service, userId, top, selectedViewId, scope, businessUnitId, fetchKey]);
 
   return {
     documents,

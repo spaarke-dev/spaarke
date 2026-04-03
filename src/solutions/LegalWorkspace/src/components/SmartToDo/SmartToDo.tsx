@@ -253,6 +253,10 @@ export interface ISmartToDoProps {
   onShowMore?: () => void;
   /** When true, disables card click behavior (used for workspace glance mode). */
   disableSidePane?: boolean;
+  /** Record scope. */
+  scope?: "my" | "all";
+  /** Business unit ID. */
+  businessUnitId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +272,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onRefetchReady,
   onShowMore,
   disableSidePane = false,
+  scope,
+  businessUnitId,
 }) => {
   const styles = useStyles();
 
@@ -285,6 +291,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     webApi,
     userId,
     mockItems,
+    scope,
+    businessUnitId,
   });
 
   const { preferences, updatePreferences, isLoading: prefsLoading } =

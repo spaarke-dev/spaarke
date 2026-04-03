@@ -214,6 +214,8 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   const [workspaceName, setWorkspaceName] = React.useState(saveAsData?.name ?? "");
   const [isDefault, setIsDefault] = React.useState(false);
   const [scope, setScope] = React.useState<"my" | "all">("my");
+  const scopeRef = React.useRef(scope);
+  scopeRef.current = scope;
   const [sectionAssignments, setSectionAssignments] =
     React.useState<SlotAssignments>(saveAsData?.assignments ?? new Map());
 
@@ -281,7 +283,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
     const body = {
       name: workspaceName.trim(),
       layoutTemplateId: selectedTemplateId,
-      sectionsJson: buildSectionsJson(selectedTemplateId, sectionAssignments, scope),
+      sectionsJson: buildSectionsJson(selectedTemplateId, sectionAssignments, scopeRef.current),
       isDefault,
     };
 
@@ -420,6 +422,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       sectionAssignments,
       workspaceName,
       isDefault,
+      scope,
     ],
   );
 

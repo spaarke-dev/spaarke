@@ -409,6 +409,13 @@ export interface ISprkChatProps {
    * SECURITY (ADR-015): Only content tokens and structural metadata are included.
    */
   onDocumentStreamEvent?: ((event: IDocumentStreamSseEvent) => void) | null;
+
+  /**
+   * Pre-loaded chat messages to display before the session starts.
+   * Typically sourced from the sprk_chathistory field on the analysis record
+   * so that prior conversation context is visible when the workspace reopens.
+   */
+  initialMessages?: IChatMessage[];
 }
 
 /** Props for SprkChatMessage sub-component. */

@@ -16,7 +16,8 @@
  */
 
 import { forwardRef, useCallback, useEffect, useRef, type RefObject } from 'react';
-import { makeStyles, Spinner, Text, tokens } from '@fluentui/react-components';
+import { makeStyles, Spinner, Text, Button, tokens } from '@fluentui/react-components';
+import { Play20Regular } from '@fluentui/react-icons';
 import { RichTextEditor, InlineAiToolbar } from '@spaarke/ui-components';
 import type { RichTextEditorRef, InlineAiAction } from '@spaarke/ui-components';
 import { AnalysisToolbar } from './AnalysisToolbar';
@@ -66,6 +67,12 @@ export interface EditorPanelProps {
   canRedo?: boolean;
   /** History stack length */
   historyLength?: number;
+
+  // ---- Run Analysis (moved from top toolbar) ----
+  /** Callback to trigger analysis execution */
+  onRunAnalysis?: () => void;
+  /** Whether analysis can be triggered (has playbook/action configured) */
+  canRunAnalysis?: boolean;
 
   // ---- Inline AI Toolbar props (task 031) ----
   /**
@@ -178,6 +185,9 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
     canUndo = false,
     canRedo = false,
     historyLength = 0,
+    // Run Analysis
+    onRunAnalysis,
+    canRunAnalysis = false,
     // Inline AI Toolbar props (task 031)
     analysisId,
     onDiffAction,
@@ -335,6 +345,16 @@ export const EditorPanel = forwardRef<RichTextEditorRef, EditorPanelProps>(funct
           <Text weight="semibold">ANALYSIS OUTPUT</Text>
         </div>
         <div className={styles.toolbar}>
+          {onRunAnalysis && (
+            <Button
+              appearance="subtle"
+              icon={isStreaming ? <Spinner size="tiny" /> : <Play20Regular />}
+              onClick={onRunAnalysis}
+              disabled={isStreaming || !canRunAnalysis}
+              title={isStreaming ? 'Running analysis...' : 'Run Analysis'}
+              aria-label="Run Analysis"
+            />
+          )}
           {hasToolbar ? (
             <AnalysisToolbar
               saveState={saveState}

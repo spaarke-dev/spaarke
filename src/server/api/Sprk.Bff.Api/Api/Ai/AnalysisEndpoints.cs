@@ -430,17 +430,27 @@ public static class AnalysisEndpoints
         {
             var result = await orchestrationService.ExportAnalysisAsync(analysisId, request, cancellationToken);
 
-            if (result.Success)
-            {
-                logger.LogInformation("Exported analysis {AnalysisId} to {Format}: Status={Status}",
-                    analysisId, request.Format, result.Details?.Status);
-            }
-            else
+            if (!result.Success)
             {
                 logger.LogWarning("Export failed for analysis {AnalysisId}: {Error}",
                     analysisId, result.Error);
+                return Results.BadRequest(new { error = result.Error ?? "Export failed" });
             }
 
+            // File formats (Docx, Pdf) return bytes for direct browser download.
+            if (result.FileBytes != null)
+            {
+                logger.LogInformation("Streaming {Format} export for analysis {AnalysisId}: {Size} bytes",
+                    request.Format, analysisId, result.FileBytes.Length);
+                return Results.File(
+                    result.FileBytes,
+                    result.FileContentType ?? "application/octet-stream",
+                    result.FileName ?? $"analysis.{request.Format.ToString().ToLowerInvariant()}");
+            }
+
+            // Other formats (Email, Teams) return JSON result.
+            logger.LogInformation("Exported analysis {AnalysisId} to {Format}: Status={Status}",
+                analysisId, request.Format, result.Details?.Status);
             return Results.Ok(result);
         }
         catch (KeyNotFoundException)
