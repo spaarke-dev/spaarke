@@ -32,6 +32,7 @@ import {
   DOCUMENT_TAB_SELECT_FIELDS,
   buildTodoItemsQuery,
   buildDismissedTodoQuery,
+  buildOwnerFilter,
 } from './queryHelpers';
 
 // ---------------------------------------------------------------------------
@@ -780,7 +781,7 @@ export class DataverseService {
    */
   async getNotifications(
     userId: string,
-    options: { daysBack?: number; top?: number } = {}
+    options: { daysBack?: number; top?: number; scope?: 'my' | 'all'; businessUnitId?: string } = {}
   ): Promise<IResult<IEvent[]>> {
     const daysBack = options.daysBack ?? 7;
     const top = options.top ?? 20;
@@ -789,10 +790,10 @@ export class DataverseService {
     cutoff.setDate(cutoff.getDate() - daysBack);
     const cutoffIso = cutoff.toISOString();
 
-    // sprk_eventtype is a lookup — cannot filter server-side by display name.
-    // Fetch all recent events for the user and filter client-side by type.
+    const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
+    const ownerClause = ctx ? buildOwnerFilter(ctx) : `_ownerid_value eq ${userId}`;
     const filter =
-      `_ownerid_value eq ${userId}` +
+      ownerClause +
       ` and modifiedon gt ${cutoffIso}`;
 
     const query = `?$select=${[
