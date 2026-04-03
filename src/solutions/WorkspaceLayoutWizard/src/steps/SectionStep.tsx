@@ -213,31 +213,22 @@ export const SectionStep: React.FC<SectionStepProps> = ({
 
   return (
     <div className={classes.root}>
+      <Text className={classes.heading} size={400} weight="regular" as="p">
+        Select the sections you want in your workspace layout.
+      </Text>
+
       {/* Scope setting */}
-      <div style={{ display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS }}>
-        <Label weight="semibold">Scope</Label>
+      <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: tokens.spacingHorizontalM }}>
+        <Label weight="semibold" style={{ flexShrink: 0 }}>Scope</Label>
         <RadioGroup
           value={scope}
-          onChange={(_e, data) => onScopeChange(data.value as WorkspaceScope)}
+          onChange={(_ev: React.FormEvent, data: { value: string }) => onScopeChange(data.value as WorkspaceScope)}
           layout="horizontal"
         >
           <Radio value="my" label="Show only my records" />
           <Radio value="all" label="Show all records" />
         </RadioGroup>
       </div>
-
-      <Text className={classes.heading} size={400} weight="regular" as="p">
-        Select the sections you want in your workspace layout.
-      </Text>
-
-      {/* Counter */}
-      <Text
-        className={mergeClasses(classes.counter, counterClass)}
-        size={300}
-        weight="semibold"
-      >
-        Selected: {selectedCount} sections | Layout slots: {slotCount}
-      </Text>
 
       {/* Category groups */}
       {CATEGORY_ORDER.map((category) => {
