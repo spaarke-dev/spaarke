@@ -69,6 +69,10 @@ export interface IUseTodoItemsOptions {
    * When provided, bypasses Xrm.WebApi.
    */
   mockItems?: IEvent[];
+  /** Record scope. */
+  scope?: 'my' | 'all';
+  /** Business unit ID. */
+  businessUnitId?: string;
 }
 
 export interface IUseTodoItemsResult {
@@ -138,7 +142,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     setError(null);
 
     serviceRef.current
-      .getActiveTodos(userId)
+      .getActiveTodos(userId, { scope: options.scope, businessUnitId: options.businessUnitId })
       .then((result) => {
         if (cancelled) return;
 
@@ -191,7 +195,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
           // Using retrieveMultipleRecords with a filter is the cleanest approach
           // with Xrm.WebApi (no retrieveRecord equivalent in ComponentFramework.WebApi
           // without the entity type — and we have it: sprk_event).
-          const result = await serviceRef.current.getActiveTodos(userId);
+          const result = await serviceRef.current.getActiveTodos(userId, { scope: options.scope, businessUnitId: options.businessUnitId });
           if (!result.success) return;
 
           // Find the newly flagged event in the refreshed list

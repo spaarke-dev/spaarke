@@ -128,6 +128,8 @@ export const todoRegistration: SectionRegistration = {
           embedded: true,
           webApi: ctx.webApi as any,
           userId: ctx.userId,
+          scope: ctx.scope,
+          businessUnitId: ctx.businessUnitId,
           disableSidePane: true,
           onCountChange: ctx.onBadgeCountChange,
           onRefetchReady: (refetch: () => void) => {

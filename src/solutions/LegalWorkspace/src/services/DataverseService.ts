@@ -431,8 +431,9 @@ export class DataverseService {
    * @param userId - The GUID of the current user
    * @returns      IResult<IEvent[]>
    */
-  async getActiveTodos(userId: string): Promise<IResult<IEvent[]>> {
-    const query = buildTodoItemsQuery(userId);
+  async getActiveTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<IEvent[]>> {
+    const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
+    const query = buildTodoItemsQuery(userId, ctx);
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_event', query);
       return toTypedArray<IEvent>(mapEventFormattedValues(result.entities));
@@ -447,8 +448,9 @@ export class DataverseService {
    * @param userId - The GUID of the current user
    * @returns      IResult<IEvent[]>
    */
-  async getDismissedTodos(userId: string): Promise<IResult<IEvent[]>> {
-    const query = buildDismissedTodoQuery(userId);
+  async getDismissedTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<IEvent[]>> {
+    const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
+    const query = buildDismissedTodoQuery(userId, ctx);
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_event', query);
       return toTypedArray<IEvent>(mapEventFormattedValues(result.entities));
