@@ -260,6 +260,7 @@ public static class ChatEndpoints
         SprkChatAgentFactory agentFactory,
         PendingPlanManager pendingPlanManager,
         IChatClient chatClient,
+        IWorkingDocumentService workingDocumentService,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
@@ -504,7 +505,19 @@ public static class ChatEndpoints
                 CreatedAt: DateTimeOffset.UtcNow,
                 SequenceNumber: seqBase + 2);
 
-            await historyManager.AddMessageAsync(updatedSession, assistantMessage, CancellationToken.None);
+            var finalSession = await historyManager.AddMessageAsync(updatedSession, assistantMessage, CancellationToken.None);
+
+            // Persist chat history to sprk_chathistory when session is scoped to an analysis record.
+            // EntityType "sprk_analysisoutput" with EntityId = analysisId identifies analysis sessions.
+            if (session.HostContext?.EntityType == "sprk_analysisoutput" &&
+                Guid.TryParse(session.HostContext.EntityId, out var analysisGuid))
+            {
+                var historyPayload = finalSession.Messages
+                    .Select(m => new { role = m.Role.ToString(), content = m.Content, timestamp = m.CreatedAt.ToString("O") })
+                    .ToArray();
+                var chatHistoryJson = JsonSerializer.Serialize(historyPayload);
+                await workingDocumentService.UpdateChatHistoryAsync(analysisGuid, chatHistoryJson, CancellationToken.None);
+            }
         }
         catch (OperationCanceledException)
         {
