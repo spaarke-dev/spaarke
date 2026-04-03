@@ -177,12 +177,17 @@ const DocumentsViewMenuTitle: React.FC<IDocumentsViewMenuTitleProps> = ({
 // onControllerReady; the title calls it when the user picks a different view.
 // ---------------------------------------------------------------------------
 
+interface ISelectedView {
+  viewId: string | undefined;
+  viewType: string | undefined;
+}
+
 interface IDocumentsSectionContentProps {
   service: DataverseService;
   userId: string;
   onCountChange?: (count: number) => void;
   onRefetchReady?: (refetch: () => void) => void;
-  onControllerReady?: (setView: (viewId: string | undefined) => void) => void;
+  onControllerReady?: (setView: (view: ISelectedView) => void) => void;
   maxVisible?: number;
 }
 
@@ -194,19 +199,20 @@ const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
   onControllerReady,
   maxVisible,
 }) => {
-  const [selectedViewId, setSelectedViewId] = React.useState<string | undefined>();
+  const [selectedView, setSelectedView] = React.useState<ISelectedView>({ viewId: undefined, viewType: undefined });
 
   // Register the setter so the title component can trigger view changes.
   const stableOnControllerReady = React.useRef(onControllerReady);
   React.useEffect(() => {
-    stableOnControllerReady.current?.(setSelectedViewId);
+    stableOnControllerReady.current?.(setSelectedView);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return React.createElement(DocumentsTab, {
     service,
     userId,
     maxVisible: maxVisible ?? 6,
-    selectedViewId,
+    selectedViewId: selectedView.viewId,
+    selectedViewType: selectedView.viewType,
     onCountChange,
     onRefetchReady,
   });
@@ -222,7 +228,7 @@ export const documentsRegistration: SectionRegistration = {
   description: "Recent documents with quick actions",
   icon: DocumentRegular,
   category: "data",
-  defaultHeight: "300px",
+  defaultHeight: "560px",
 
   factory(context: SectionFactoryContext): ContentSectionConfig {
     // selectedViewIdRef — the currently selected view ID.
@@ -232,7 +238,7 @@ export const documentsRegistration: SectionRegistration = {
     // contentControllerRef — holds the setter exposed by DocumentsSectionContent.
     // Written by DocumentsSectionContent on mount, called by DocumentsViewMenuTitle.
     const contentControllerRef: {
-      current: ((viewId: string | undefined) => void) | undefined;
+      current: ((view: ISelectedView) => void) | undefined;
     } = { current: undefined };
 
     // Refetch handle — captured by the refresh button's onClick closure.
@@ -242,7 +248,7 @@ export const documentsRegistration: SectionRegistration = {
     const titleContent = React.createElement(DocumentsViewMenuTitle, {
       onViewChange: (view: IViewDefinition) => {
         selectedViewIdRef.current = view.id;
-        contentControllerRef.current?.(view.id);
+        contentControllerRef.current?.({ viewId: view.id, viewType: view.viewType });
       },
     });
 

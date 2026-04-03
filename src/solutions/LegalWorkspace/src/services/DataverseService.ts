@@ -384,18 +384,34 @@ export class DataverseService {
 
   /**
    * Retrieve documents using a specific saved view's filter and order.
-   * Applies the view's WHERE clause while selecting the standard document fields.
+   *
+   * Xrm.WebApi.retrieveMultipleRecords does NOT support the `savedQuery` OData
+   * parameter. Instead we fetch the view's FetchXML and execute it directly.
+   * Works for both system views (savedquery) and personal views (userquery).
    */
   async getDocumentsForView(
     viewId: string,
-    options: { top?: number } = {}
+    options: { top?: number; viewType?: string } = {}
   ): Promise<IResult<IDocument[]>> {
     const top = options.top ?? 50;
-    const select = DOCUMENT_TAB_SELECT_FIELDS.join(',');
-    const query = `?savedQuery=${viewId}&$select=${select}&$top=${top}`;
 
     return tryCatch(async () => {
-      const result = await this._webApi.retrieveMultipleRecords('sprk_document', query, top);
+      // 1. Retrieve the view's FetchXML
+      const entity = options.viewType === 'userquery' ? 'userquery' : 'savedquery';
+      const idField = options.viewType === 'userquery' ? 'userqueryid' : 'savedqueryid';
+      const viewRecord = await this._webApi.retrieveRecord(entity, viewId, '?$select=fetchxml');
+      let fetchXml = viewRecord.fetchxml as string;
+      if (!fetchXml) throw new Error(`View ${viewId} has no fetchxml`);
+
+      // 2. Inject top limit into the fetchxml
+      fetchXml = fetchXml.replace(/<fetch\b/, `<fetch top="${top}"`);
+
+      // 3. Execute via FetchXML query (supported by Xrm.WebApi)
+      const result = await this._webApi.retrieveMultipleRecords(
+        'sprk_document',
+        `?fetchXml=${encodeURIComponent(fetchXml)}`,
+        top
+      );
       return toTypedArray<IDocument>(mapDocumentTabFormattedValues(result.entities));
     }, 'DOCUMENTS_VIEW_FETCH_ERROR');
   }

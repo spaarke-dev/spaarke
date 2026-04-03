@@ -19,6 +19,8 @@ export interface IUseDocumentsTabListOptions {
   top?: number;
   /** When set, fetches documents using the saved view's filter/order instead of the default tab filter. */
   selectedViewId?: string;
+  /** View type: 'savedquery' (system) or 'userquery' (personal). Default: 'savedquery'. */
+  selectedViewType?: string;
 }
 
 export interface IUseDocumentsTabListResult {
@@ -64,7 +66,7 @@ export function useDocumentsTabList(
   userId: string,
   options: IUseDocumentsTabListOptions = {}
 ): IUseDocumentsTabListResult {
-  const { top = 50, selectedViewId } = options;
+  const { top = 50, selectedViewId, selectedViewType } = options;
 
   const [documents, setDocuments] = useState<IDocument[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -111,7 +113,7 @@ export function useDocumentsTabList(
     });
 
     const fetchPromise = selectedViewId
-      ? service.getDocumentsForView(selectedViewId, { top })
+      ? service.getDocumentsForView(selectedViewId, { top, viewType: selectedViewType })
       : service.getDocumentsForTab(userId, { top });
 
     fetchPromise
