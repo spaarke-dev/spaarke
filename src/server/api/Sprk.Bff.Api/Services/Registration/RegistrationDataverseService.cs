@@ -369,6 +369,33 @@ public class RegistrationDataverseService : IDisposable
         _logger.LogInformation("Removed systemuser {UserId} from team {TeamName}", systemUserId, teamName);
     }
 
+    /// <summary>
+    /// Resolves a Dataverse systemuser ID from an Azure AD object ID.
+    /// Returns null if no matching systemuser is found.
+    /// </summary>
+    public async Task<Guid?> ResolveSystemUserIdByAadObjectIdAsync(
+        string aadObjectId, CancellationToken ct = default)
+    {
+        var filter = $"azureactivedirectoryobjectid eq '{EscapeODataValue(aadObjectId)}'";
+        var url = $"{SystemUserEntitySet}?$filter={filter}&$select=systemuserid&$top=1";
+
+        _logger.LogDebug("Resolving systemuser by AAD object ID {AadObjectId}", aadObjectId);
+
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
+        var response = await _httpClient.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+        var user = result?.Value?.FirstOrDefault();
+        if (user == null)
+        {
+            _logger.LogWarning("No systemuser found for AAD object ID {AadObjectId}", aadObjectId);
+            return null;
+        }
+
+        return user.Value.GetProperty("systemuserid").GetGuid();
+    }
+
     #endregion
 
     #region Helpers

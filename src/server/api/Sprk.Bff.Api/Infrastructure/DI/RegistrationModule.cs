@@ -24,8 +24,8 @@ public static class RegistrationModule
         services.AddSingleton<DemoProvisioningService>();
         services.AddSingleton<EmailDomainValidator>();
 
-        // Services to be registered in subsequent tasks:
-        // - DemoExpirationService (Task 030) — hosted service
+        // Background services (ADR-001: BackgroundService pattern)
+        services.AddHostedService<DemoExpirationService>();
 
         return services;
     }
