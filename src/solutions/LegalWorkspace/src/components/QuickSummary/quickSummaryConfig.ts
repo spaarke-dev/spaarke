@@ -6,27 +6,15 @@ import {
   CheckboxCheckedRegular,
 } from "@fluentui/react-icons";
 
+import { buildOwnerFilter } from "../../services/queryHelpers";
+import type { IOwnershipContext } from "../../services/queryHelpers";
+
 /** Badge type for notification indicators on metric cards. */
 export type BadgeType = "new" | "overdue";
 
-/** Scope + identity context passed to filter builders. */
-export interface IFilterContext {
-  userId: string;
-  scope?: "my" | "all";
-  businessUnitId?: string;
-}
-
-/**
- * Build the ownership OData filter clause based on scope.
- * - "my" (default): `_ownerid_value eq ${userId}`
- * - "all": `_owningbusinessunit_value eq ${businessUnitId}` (includes user + all BU teams)
- */
-export function buildOwnerFilter(ctx: IFilterContext): string {
-  if (ctx.scope === "all" && ctx.businessUnitId) {
-    return `_owningbusinessunit_value eq ${ctx.businessUnitId}`;
-  }
-  return `_ownerid_value eq ${ctx.userId}`;
-}
+/** Re-export for consumers that import from this file. */
+export type IFilterContext = IOwnershipContext;
+export { buildOwnerFilter };
 
 /** Configuration for a single Quick Summary metric card. */
 export interface IQuickSummaryCardConfig {

@@ -13,6 +13,9 @@ import * as React from "react";
 import {
   Checkbox,
   Text,
+  Radio,
+  RadioGroup,
+  Label,
   makeStyles,
   tokens,
   mergeClasses,
@@ -34,6 +37,8 @@ export interface SectionCatalogItem {
   defaultHeight?: string;
 }
 
+export type WorkspaceScope = "my" | "all";
+
 export interface SectionStepProps {
   /** Available sections to display. */
   sections: SectionCatalogItem[];
@@ -43,6 +48,10 @@ export interface SectionStepProps {
   slotCount: number;
   /** Toggle a section's selection state. */
   onToggle: (sectionId: string) => void;
+  /** Record scope setting. */
+  scope: WorkspaceScope;
+  /** Called when scope changes. */
+  onScopeChange: (scope: WorkspaceScope) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +186,8 @@ export const SectionStep: React.FC<SectionStepProps> = ({
   selectedIds,
   slotCount,
   onToggle,
+  scope,
+  onScopeChange,
 }) => {
   const classes = useStyles();
   const selectedCount = selectedIds.size;
@@ -241,6 +252,19 @@ export const SectionStep: React.FC<SectionStepProps> = ({
           </div>
         );
       })}
+
+      {/* Scope setting */}
+      <div style={{ display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, marginTop: tokens.spacingVerticalM }}>
+        <Label weight="semibold">Scope</Label>
+        <RadioGroup
+          value={scope}
+          onChange={(_e, data) => onScopeChange(data.value as WorkspaceScope)}
+          layout="horizontal"
+        >
+          <Radio value="my" label="Show only my records" />
+          <Radio value="all" label="Show all records" />
+        </RadioGroup>
+      </div>
     </div>
   );
 };

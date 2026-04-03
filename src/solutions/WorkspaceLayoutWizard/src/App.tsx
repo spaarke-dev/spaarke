@@ -164,9 +164,10 @@ function parseSectionsJson(
 function buildSectionsJson(
   templateId: LayoutTemplateId,
   assignments: SlotAssignments,
+  scope: "my" | "all" = "my",
 ): string {
   const template = getLayoutTemplate(templateId);
-  if (!template) return JSON.stringify({ schemaVersion: 1, rows: [] });
+  if (!template) return JSON.stringify({ schemaVersion: 1, rows: [], scope });
 
   const rows: LayoutJsonRow[] = template.rows.map((row) => {
     const sections: string[] = [];
@@ -182,7 +183,7 @@ function buildSectionsJson(
     };
   });
 
-  return JSON.stringify({ schemaVersion: 1, rows } satisfies LayoutJson);
+  return JSON.stringify({ schemaVersion: 1, rows, scope } satisfies LayoutJson);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +213,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   >(() => saveAsData?.sectionIds ?? new Set(DEFAULT_SECTION_IDS));
   const [workspaceName, setWorkspaceName] = React.useState(saveAsData?.name ?? "");
   const [isDefault, setIsDefault] = React.useState(false);
+  const [scope, setScope] = React.useState<"my" | "all">("my");
   const [sectionAssignments, setSectionAssignments] =
     React.useState<SlotAssignments>(saveAsData?.assignments ?? new Map());
 
@@ -279,7 +281,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
     const body = {
       name: workspaceName.trim(),
       layoutTemplateId: selectedTemplateId,
-      sectionsJson: buildSectionsJson(selectedTemplateId, sectionAssignments),
+      sectionsJson: buildSectionsJson(selectedTemplateId, sectionAssignments, scope),
       isDefault,
     };
 
@@ -385,6 +387,8 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
             selectedIds={selectedSectionIds}
             slotCount={slotCount}
             onToggle={handleSectionToggle}
+            scope={scope}
+            onScopeChange={setScope}
           />
         ),
       },

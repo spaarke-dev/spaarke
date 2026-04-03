@@ -14,6 +14,13 @@ import { EventFilterCategory } from '../types/enums';
 // Types
 // ---------------------------------------------------------------------------
 
+/** Scope + identity context for ownership-based filters. */
+export interface IOwnershipContext {
+  userId: string;
+  scope?: 'my' | 'all';
+  businessUnitId?: string;
+}
+
 /** Parameters for building a retrieveMultiple OData query string */
 export interface IQueryOptions {
   select?: string[];
@@ -21,6 +28,22 @@ export interface IQueryOptions {
   orderby?: string;
   top?: number;
   expand?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Ownership filter builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the OData ownership filter clause based on workspace scope.
+ * - "my" (default): `_ownerid_value eq {userId}` — user-owned only
+ * - "all": `_owningbusinessunit_value eq {businessUnitId}` — user + all BU teams
+ */
+export function buildOwnerFilter(ctx: IOwnershipContext): string {
+  if (ctx.scope === 'all' && ctx.businessUnitId) {
+    return `_owningbusinessunit_value eq ${ctx.businessUnitId}`;
+  }
+  return `_ownerid_value eq ${ctx.userId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,9 +98,10 @@ export function buildQuery(opts: IQueryOptions): string {
  * user's linked contact record resolved from `systemuser._contactid_value`.
  * When contactId is null the attorney/paralegal clauses are omitted.
  */
-export function buildBroadOwnerFilter(userId: string, contactId: string | null): string {
+export function buildBroadOwnerFilter(userId: string, contactId: string | null, ctx?: IOwnershipContext): string {
+  const ownerClause = buildOwnerFilter(ctx ?? { userId });
   const clauses = [
-    `_ownerid_value eq ${userId}`,
+    ownerClause,
     `_modifiedby_value eq ${userId}`,
   ];
 
@@ -117,8 +141,8 @@ export const MATTER_SELECT_FIELDS: string[] = [
  * Build the OData $filter predicate for querying matters owned by a user.
  * Targets records where the OData ownerid equals the provided userId GUID.
  */
-export function buildMatterOwnerFilter(userId: string): string {
-  return `_ownerid_value eq ${userId}`;
+export function buildMatterOwnerFilter(userId: string, ctx?: IOwnershipContext): string {
+  return buildOwnerFilter(ctx ?? { userId });
 }
 
 /**
@@ -157,10 +181,10 @@ export const MATTER_TAB_SELECT_FIELDS: string[] = [
  * Build the full OData query string for the Matters tab.
  * Uses the broad owner filter (owner/modifier/attorney/paralegal).
  */
-export function buildMattersTabQuery(userId: string, contactId: string | null, top: number = 50): string {
+export function buildMattersTabQuery(userId: string, contactId: string | null, top: number = 50, ctx?: IOwnershipContext): string {
   return buildQuery({
     select: MATTER_TAB_SELECT_FIELDS,
-    filter: buildBroadOwnerFilter(userId, contactId),
+    filter: buildBroadOwnerFilter(userId, contactId, ctx),
     orderby: 'modifiedon desc',
     top,
   });
@@ -242,9 +266,10 @@ export function buildEventCategoryFilter(category: EventFilterCategory): string 
 export function buildEventsFeedQuery(
   userId: string,
   category: EventFilterCategory = EventFilterCategory.All,
-  top: number = 50
+  top: number = 50,
+  ctx?: IOwnershipContext,
 ): string {
-  const baseFilter = `_ownerid_value eq ${userId}`;
+  const baseFilter = buildOwnerFilter(ctx ?? { userId });
   const categoryFilter = buildEventCategoryFilter(category);
   const combinedFilter = categoryFilter
     ? `(${baseFilter}) and (${categoryFilter})`
@@ -279,10 +304,10 @@ export const PROJECT_SELECT_FIELDS: string[] = [
  * Build the full OData query string for getProjectsByUser.
  * Default $top is 5 (My Portfolio widget).
  */
-export function buildProjectsQuery(userId: string, top: number = 5): string {
+export function buildProjectsQuery(userId: string, top: number = 5, ctx?: IOwnershipContext): string {
   return buildQuery({
     select: PROJECT_SELECT_FIELDS,
-    filter: `_ownerid_value eq ${userId}`,
+    filter: buildOwnerFilter(ctx ?? { userId }),
     orderby: 'modifiedon desc',
     top,
   });
@@ -308,10 +333,10 @@ export const PROJECT_TAB_SELECT_FIELDS: string[] = [
  * Build the full OData query string for the Projects tab.
  * Uses the broad owner filter (owner/modifier/attorney/paralegal).
  */
-export function buildProjectsTabQuery(userId: string, contactId: string | null, top: number = 50): string {
+export function buildProjectsTabQuery(userId: string, contactId: string | null, top: number = 50, ctx?: IOwnershipContext): string {
   return buildQuery({
     select: PROJECT_TAB_SELECT_FIELDS,
-    filter: buildBroadOwnerFilter(userId, contactId),
+    filter: buildBroadOwnerFilter(userId, contactId, ctx),
     orderby: 'modifiedon desc',
     top,
   });
@@ -342,10 +367,10 @@ export const INVOICE_SELECT_FIELDS: string[] = [
  * Build the full OData query string for the Invoices tab.
  * Uses the broad owner filter (owner/modifier/attorney/paralegal).
  */
-export function buildInvoicesQuery(userId: string, contactId: string | null, top: number = 50): string {
+export function buildInvoicesQuery(userId: string, contactId: string | null, top: number = 50, ctx?: IOwnershipContext): string {
   return buildQuery({
     select: INVOICE_SELECT_FIELDS,
-    filter: buildBroadOwnerFilter(userId, contactId),
+    filter: buildBroadOwnerFilter(userId, contactId, ctx),
     orderby: 'sprk_invoicedate desc,modifiedon desc',
     top,
   });
@@ -382,14 +407,10 @@ export function buildDocumentsByMatterQuery(matterId: string, top: number = 5): 
  * Build the full OData query string for documents owned by a user (Documents tab).
  * Joins via matter ownership rather than direct document ownership.
  */
-export function buildDocumentsByUserQuery(userId: string, top: number = 5): string {
-  // Documents don't have a direct ownerid — filter via matter lookup's owner
-  // We fall back to filtering by the user's matters using an expand or
-  // a simple filter on _ownerid_value if that field exists on sprk_document.
-  // Dataverse typically propagates ownerid to child records — use it here.
+export function buildDocumentsByUserQuery(userId: string, top: number = 5, ctx?: IOwnershipContext): string {
   return buildQuery({
     select: DOCUMENT_SELECT_FIELDS,
-    filter: `_ownerid_value eq ${userId}`,
+    filter: buildOwnerFilter(ctx ?? { userId }),
     orderby: 'modifiedon desc',
     top,
   });
@@ -429,11 +450,12 @@ export const DOCUMENT_TAB_SELECT_FIELDS: string[] = [
  *   - Has workspace flag set to true
  *   - Checked out by the user (statuscode = 421500001)
  */
-export function buildDocumentsTabFilter(userId: string): string {
+export function buildDocumentsTabFilter(userId: string, ctx?: IOwnershipContext): string {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+  const ownerClause = buildOwnerFilter(ctx ?? { userId });
 
   const clauses = [
-    `_ownerid_value eq ${userId}`,
+    ownerClause,
     `(_createdby_value eq ${userId} and createdon ge ${thirtyDaysAgo})`,
     `(_modifiedby_value eq ${userId} and modifiedon ge ${thirtyDaysAgo})`,
     `sprk_workspaceflag eq true`,
@@ -447,10 +469,10 @@ export function buildDocumentsTabFilter(userId: string): string {
  * Build the full OData query string for the Documents tab.
  * Uses the complex filter (owner/creator/modifier/workspace/checked-out).
  */
-export function buildDocumentsTabQuery(userId: string, top: number = 50): string {
+export function buildDocumentsTabQuery(userId: string, top: number = 50, ctx?: IOwnershipContext): string {
   return buildQuery({
     select: DOCUMENT_TAB_SELECT_FIELDS,
-    filter: buildDocumentsTabFilter(userId),
+    filter: buildDocumentsTabFilter(userId, ctx),
     orderby: 'modifiedon desc',
     top,
   });
@@ -496,8 +518,8 @@ export const TODO_SELECT_FIELDS: string[] = [
  *
  * Sort: priorityscore desc, then duedate asc (most urgent first).
  */
-export function buildTodoItemsQuery(userId: string): string {
-  const filter = `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus ne 100000002`;
+export function buildTodoItemsQuery(userId: string, ctx?: IOwnershipContext): string {
+  const filter = `${buildOwnerFilter(ctx ?? { userId })} and sprk_todoflag eq true and sprk_todostatus ne 100000002`;
   return buildQuery({
     select: TODO_SELECT_FIELDS,
     filter,
@@ -508,8 +530,8 @@ export function buildTodoItemsQuery(userId: string): string {
 /**
  * Build the OData query for dismissed to-do items (collapsible section).
  */
-export function buildDismissedTodoQuery(userId: string): string {
-  const filter = `_ownerid_value eq ${userId} and sprk_todoflag eq true and sprk_todostatus eq 100000002`;
+export function buildDismissedTodoQuery(userId: string, ctx?: IOwnershipContext): string {
+  const filter = `${buildOwnerFilter(ctx ?? { userId })} and sprk_todoflag eq true and sprk_todostatus eq 100000002`;
   return buildQuery({
     select: TODO_SELECT_FIELDS,
     filter,
