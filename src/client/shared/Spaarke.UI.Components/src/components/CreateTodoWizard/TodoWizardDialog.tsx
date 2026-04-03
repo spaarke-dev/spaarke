@@ -78,6 +78,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   dataService,
   authenticatedFetch,
   bffBaseUrl,
+  embedded,
   resolveSpeContainerId,
 }) => {
   const [formValid, setFormValid] = React.useState(false);
@@ -240,6 +241,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       onClose={onClose}
       webApi={webApiAdapter}
       config={config}
+      embedded={embedded}
     />
   );
 };
