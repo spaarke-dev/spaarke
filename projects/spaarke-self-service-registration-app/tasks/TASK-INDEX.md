@@ -8,7 +8,7 @@ Tasks are structured for **maximum parallel execution**. Each phase completes be
 
 | Task | Title | Phase | Parallel Group | Status | Dependencies |
 |------|-------|-------|---------------|--------|-------------|
-| 001 | Foundation: Models, Configuration, DI Module | 0 | — (serial) | 🔲 | none |
+| 001 | Foundation: Models, Configuration, DI Module | 0 | — (serial) | ✅ | none |
 | 010 | Graph User Service: Entra ID User Management | 1 | P1 | 🔲 | 001 |
 | 011 | Dataverse Registration Service: CRUD + User Sync | 1 | P1 | 🔲 | 001 |
 | 012 | Dataverse Schema: Table, Views, Form, Sitemap | 1 | P1 | 🔲 | 001 |
@@ -82,7 +82,7 @@ Phase 5:  [050]
 ## Progress Summary
 
 - **Total tasks**: 15
-- **Completed**: 0
+- **Completed**: 1
 - **In Progress**: 0
-- **Remaining**: 15
+- **Remaining**: 14
 - **Max parallel agents**: 5 (Phase 1)
