@@ -43,9 +43,9 @@ const useStyles = makeStyles({
   root: {
     display: "flex",
     flexDirection: "column",
-    gap: "20px",
+    gap: "12px",
     width: "100%",
-    maxWidth: "720px",
+    maxWidth: "840px",
     alignSelf: "center",
   },
   heading: {
@@ -53,14 +53,14 @@ const useStyles = makeStyles({
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-    gap: "16px",
+    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+    gap: "12px",
   },
   card: {
     display: "flex",
     flexDirection: "column",
-    gap: "12px",
-    ...shorthands.padding("16px"),
+    gap: "8px",
+    ...shorthands.padding("12px"),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     border: `2px solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: tokens.colorNeutralBackground1,

@@ -377,7 +377,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       },
       {
         id: STEP_CONFIGURE_SECTIONS,
-        label: "Configure Sections",
+        label: "Select Components",
         canAdvance: () => selectedSectionIds.size > 0,
         renderContent: () => (
           <SectionStep
@@ -390,7 +390,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       },
       {
         id: STEP_REVIEW_SAVE,
-        label: "Review & Save",
+        label: "Arrange Sections",
         canAdvance: () => workspaceName.trim().length > 0,
         renderContent: () =>
           selectedTemplateId ? (

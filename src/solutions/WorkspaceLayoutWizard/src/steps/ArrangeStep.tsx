@@ -492,35 +492,31 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
 
   return (
     <div className={classes.root}>
-      {/* Workspace name input */}
-      <div className={classes.formRow}>
-        <Label htmlFor="workspace-name" required weight="semibold">
-          Workspace name
-        </Label>
-        <Input
-          id="workspace-name"
-          value={workspaceName}
-          onChange={(_e, data) => onNameChange(data.value)}
-          placeholder="e.g., My Dashboard"
-          appearance="outline"
-        />
-      </div>
-
-      {/* Set as default checkbox */}
-      <div className={classes.checkboxRow}>
+      {/* Workspace name + Set default (inline row) */}
+      <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end", gap: tokens.spacingHorizontalL }}>
+        <div style={{ flex: "1 1 0", minWidth: 0, maxWidth: "320px" }}>
+          <Label htmlFor="workspace-name" required weight="semibold">
+            Workspace name
+          </Label>
+          <Input
+            id="workspace-name"
+            value={workspaceName}
+            onChange={(_e, data) => onNameChange(data.value)}
+            placeholder="e.g., My Dashboard"
+            appearance="outline"
+          />
+        </div>
         <Checkbox
           checked={isDefault}
           onChange={(_e, data) => onDefaultChange(data.checked === true)}
-          label="Set as my default workspace"
+          label="Set default"
+          style={{ paddingBottom: "2px" }}
         />
       </div>
 
       {/* Section heading */}
       <Text size={400} weight="semibold">
-        Arrange sections
-      </Text>
-      <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-        Drag sections between slots to arrange your workspace layout.
+        Drag layout sections
       </Text>
 
       {/* Template grid */}
