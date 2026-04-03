@@ -12,10 +12,12 @@ public static class RegistrationModule
     public static IServiceCollection AddRegistrationModule(this IServiceCollection services, IConfiguration configuration)
     {
         // Bind DemoProvisioningOptions from "DemoProvisioning" section
+        // Bind without ValidateOnStart — config validated at runtime to avoid
+        // crashing the entire API if DemoProvisioning section is missing/incomplete.
+        // Registration endpoints return ProblemDetails if config is invalid.
         services.AddOptions<DemoProvisioningOptions>()
             .Bind(configuration.GetSection(DemoProvisioningOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+            .ValidateDataAnnotations();
 
         // ADR-010: Concrete registrations (no interfaces)
         services.AddSingleton<TrackingIdGenerator>();

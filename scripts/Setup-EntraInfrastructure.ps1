@@ -293,7 +293,7 @@ if ($DryRun) {
 Write-Header "STEP 3: Graph API Permissions — BFF API App Registration"
 
 if ($DryRun) {
-    Write-Info "DRY RUN: Would add application permissions to app $BffApiAppId:"
+    Write-Info "DRY RUN: Would add application permissions to app ${BffApiAppId}:"
     foreach ($perm in $PermissionsToAdd) {
         Write-Info "  - $($perm.Name) ($($perm.Id)) [Application]"
     }
