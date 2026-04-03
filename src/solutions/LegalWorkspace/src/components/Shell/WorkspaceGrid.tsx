@@ -763,27 +763,25 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, [refetchLayouts]);
 
   const handleDeleteLayout = React.useCallback(async (layoutId: string) => {
-    // Use setTimeout to escape the Dropdown's click handler (which closes
-    // the dropdown and may swallow the confirm dialog in some browsers).
     setTimeout(async () => {
       if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
 
       try {
         const bffBaseUrl = getBffBaseUrl();
+        console.info("[WorkspaceGrid] Deleting layout:", layoutId);
         const response = await authenticatedFetch(
           `${bffBaseUrl}/api/workspace/layouts/${layoutId}`,
           { method: "DELETE" },
         );
-        if (response.ok) {
-          if (activeLayout?.id === layoutId) {
-            setActiveLayoutById(undefined as unknown as string);
-          }
-          refetchLayouts();
-        } else {
-          console.error("[WorkspaceGrid] Delete failed:", response.status);
+        console.info("[WorkspaceGrid] Delete response:", response.status);
+        if (activeLayout?.id === layoutId) {
+          setActiveLayoutById(undefined as unknown as string);
         }
-      } catch (err) {
-        console.error("[WorkspaceGrid] Delete failed:", err);
+        refetchLayouts();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[WorkspaceGrid] Delete failed:", msg, err);
+        window.alert(`Failed to delete workspace: ${msg}`);
       }
     }, 0);
   }, [activeLayout?.id, refetchLayouts, setActiveLayoutById]);

@@ -346,11 +346,12 @@ public sealed class WorkspaceLayoutService
 
         try
         {
-            // Delete via update to deactivate (statecode = 1) — standard Dataverse soft delete
+            // Deactivate via statecode/statuscode update — values must be OptionSetValue
+            // for Dataverse SDK to process state transitions correctly.
             var fields = new Dictionary<string, object>
             {
-                ["statecode"] = 1,
-                ["statuscode"] = 2
+                ["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(1),
+                ["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(2)
             };
             await _entityService.UpdateAsync(EntityName, id, fields, ct);
 
