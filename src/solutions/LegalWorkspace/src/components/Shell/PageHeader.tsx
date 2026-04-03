@@ -15,6 +15,7 @@ import {
   AddRegular,
   LockClosedRegular,
   DeleteRegular,
+  CheckmarkSquareRegular,
 } from "@fluentui/react-icons";
 import { ThemeToggle } from "@spaarke/ui-components";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
@@ -76,6 +77,12 @@ const useStyles = makeStyles({
       color: tokens.colorPaletteRedForeground1,
     },
   },
+  actionOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground2,
+  },
   newWorkspaceOption: {
     display: "flex",
     alignItems: "center",
@@ -92,6 +99,7 @@ const useStyles = makeStyles({
 });
 
 const NEW_WORKSPACE_VALUE = "__new_workspace__";
+const SET_DEFAULT_VALUE = "__set_default__";
 
 export interface IPageHeaderProps {
   /** The currently active workspace layout. */
@@ -106,6 +114,8 @@ export interface IPageHeaderProps {
   onCreateClick?: () => void;
   /** Called when the user clicks the delete icon on a user workspace. */
   onDeleteClick?: (layoutId: string) => void;
+  /** Called when the user clicks "Set as default view". */
+  onSetDefaultClick?: (layoutId: string) => void;
 }
 
 export const PageHeader: React.FC<IPageHeaderProps> = ({
@@ -115,6 +125,7 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
   onEditClick,
   onCreateClick,
   onDeleteClick,
+  onSetDefaultClick,
 }) => {
   const styles = useStyles();
 
@@ -135,11 +146,17 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
         onCreateClick?.();
         return;
       }
+      if (value === SET_DEFAULT_VALUE) {
+        if (activeLayout && !activeLayout.isSystem) {
+          onSetDefaultClick?.(activeLayout.id);
+        }
+        return;
+      }
       if (value !== activeLayout?.id) {
         onLayoutChange?.(value);
       }
     },
-    [activeLayout?.id, onLayoutChange, onCreateClick],
+    [activeLayout, onLayoutChange, onCreateClick, onSetDefaultClick],
   );
 
   const settingsTooltip = activeLayout?.isSystem
@@ -187,7 +204,7 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           e.preventDefault();
-                          onDeleteClick(layout.id);
+                          setTimeout(() => onDeleteClick(layout.id), 0);
                         }}
                         aria-label={`Delete ${layout.name}`}
                       />
@@ -198,6 +215,14 @@ export const PageHeader: React.FC<IPageHeaderProps> = ({
             </OptionGroup>
           )}
           <Divider />
+          {activeLayout && !activeLayout.isSystem && onSetDefaultClick && (
+            <Option value={SET_DEFAULT_VALUE} text="Set as default view">
+              <span className={styles.actionOption}>
+                <CheckmarkSquareRegular fontSize={16} />
+                Set as default view
+              </span>
+            </Option>
+          )}
           <Option value={NEW_WORKSPACE_VALUE} text="New Workspace">
             <span className={styles.newWorkspaceOption}>
               <AddRegular fontSize={16} />

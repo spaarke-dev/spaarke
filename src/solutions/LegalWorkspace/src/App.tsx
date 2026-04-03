@@ -141,6 +141,7 @@ export const App: React.FC = () => {
             onEditClick={headerState?.onEditClick}
             onCreateClick={headerState?.onCreateClick}
             onDeleteClick={headerState?.onDeleteClick}
+            onSetDefaultClick={headerState?.onSetDefaultClick}
           />
           <main className={styles.content}>
             <WorkspaceGrid

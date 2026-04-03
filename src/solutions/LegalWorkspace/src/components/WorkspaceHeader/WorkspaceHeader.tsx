@@ -15,6 +15,7 @@ import {
   SettingsRegular,
   AddRegular,
   DeleteRegular,
+  CheckmarkSquareRegular,
 } from "@fluentui/react-icons";
 
 // ---------------------------------------------------------------------------
@@ -23,37 +24,30 @@ import {
 
 /** Summary of a workspace layout — enough for the header switcher. */
 export interface WorkspaceLayoutSummary {
-  /** Unique layout identifier. */
   id: string;
-  /** Display name of the layout. */
   name: string;
-  /** Whether this is a system-provided (non-editable) layout. */
   isSystem: boolean;
 }
 
 export interface IWorkspaceHeaderProps {
-  /** The currently active workspace layout. */
   activeLayout: WorkspaceLayoutSummary;
-  /** All available layouts (system + user). */
   layouts: WorkspaceLayoutSummary[];
-  /** Called when the user selects a different layout from the dropdown. */
   onLayoutChange: (layoutId: string) => void;
-  /** Called when the user clicks the settings gear button. */
   onEditClick: () => void;
-  /** Called when the user selects "+ New Workspace" from the dropdown. */
   onCreateClick: () => void;
-  /** Called when the user clicks the delete icon on a user workspace. */
   onDeleteClick?: (layoutId: string) => void;
+  onSetDefaultClick?: (layoutId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
-// Sentinel value for the "New Workspace" action option
+// Sentinel values for action options
 // ---------------------------------------------------------------------------
 
 const NEW_WORKSPACE_VALUE = "__new_workspace__";
+const SET_DEFAULT_VALUE = "__set_default__";
 
 // ---------------------------------------------------------------------------
-// Styles (Fluent v9 makeStyles / Griffel — semantic tokens for dark mode)
+// Styles
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
@@ -88,6 +82,12 @@ const useStyles = makeStyles({
       color: tokens.colorPaletteRedForeground1,
     },
   },
+  actionOption: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground2,
+  },
   newWorkspaceOption: {
     display: "flex",
     alignItems: "center",
@@ -101,14 +101,6 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * WorkspaceHeader — dropdown switcher for workspace layouts with settings
- * and create actions.
- *
- * Pure presentational component: the parent supplies data and callbacks.
- * System layouts appear first (with a lock icon), followed by user layouts
- * after a divider. A "+ New Workspace" action sits at the bottom.
- */
 export const WorkspaceHeader: React.FC<IWorkspaceHeaderProps> = ({
   activeLayout,
   layouts,
@@ -116,6 +108,7 @@ export const WorkspaceHeader: React.FC<IWorkspaceHeaderProps> = ({
   onEditClick,
   onCreateClick,
   onDeleteClick,
+  onSetDefaultClick,
 }) => {
   const styles = useStyles();
 
@@ -139,16 +132,27 @@ export const WorkspaceHeader: React.FC<IWorkspaceHeaderProps> = ({
         return;
       }
 
+      if (value === SET_DEFAULT_VALUE) {
+        // Set the currently active layout as default
+        if (!activeLayout.isSystem && onSetDefaultClick) {
+          onSetDefaultClick(activeLayout.id);
+        }
+        return;
+      }
+
       if (value !== activeLayout.id) {
         onLayoutChange(value);
       }
     },
-    [activeLayout.id, onLayoutChange, onCreateClick],
+    [activeLayout.id, activeLayout.isSystem, onLayoutChange, onCreateClick, onSetDefaultClick],
   );
 
   const settingsTooltip = activeLayout.isSystem
     ? "Save As new workspace"
     : "Edit workspace";
+
+  // Can set default if active layout is a user layout
+  const canSetDefault = !activeLayout.isSystem && !!onSetDefaultClick;
 
   return (
     <div className={styles.root}>
@@ -192,7 +196,9 @@ export const WorkspaceHeader: React.FC<IWorkspaceHeaderProps> = ({
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        onDeleteClick(layout.id);
+                        // setTimeout escapes the Dropdown's click handler
+                        // so the confirm dialog isn't swallowed
+                        setTimeout(() => onDeleteClick(layout.id), 0);
                       }}
                       aria-label={`Delete ${layout.name}`}
                     />
@@ -203,14 +209,21 @@ export const WorkspaceHeader: React.FC<IWorkspaceHeaderProps> = ({
           </OptionGroup>
         )}
 
-        {/* Divider before create action */}
+        {/* Actions divider */}
         <Divider />
 
+        {/* Set as default (only for user layouts) */}
+        {canSetDefault && (
+          <Option value={SET_DEFAULT_VALUE} text="Set as default view">
+            <span className={styles.actionOption}>
+              <CheckmarkSquareRegular fontSize={16} />
+              Set as default view
+            </span>
+          </Option>
+        )}
+
         {/* New Workspace action */}
-        <Option
-          value={NEW_WORKSPACE_VALUE}
-          text="New Workspace"
-        >
+        <Option value={NEW_WORKSPACE_VALUE} text="New Workspace">
           <span className={styles.newWorkspaceOption}>
             <AddRegular fontSize={16} />
             New Workspace

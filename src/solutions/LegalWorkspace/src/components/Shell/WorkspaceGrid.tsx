@@ -84,6 +84,7 @@ export interface WorkspaceHeaderState {
   onEditClick: () => void;
   onCreateClick: () => void;
   onDeleteClick: (layoutId: string) => void;
+  onSetDefaultClick: (layoutId: string) => void;
 }
 
 export interface IWorkspaceGridProps {
@@ -762,28 +763,59 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, [refetchLayouts]);
 
   const handleDeleteLayout = React.useCallback(async (layoutId: string) => {
-    // Confirm before deleting
-    if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
+    // Use setTimeout to escape the Dropdown's click handler (which closes
+    // the dropdown and may swallow the confirm dialog in some browsers).
+    setTimeout(async () => {
+      if (!window.confirm("Delete this workspace? This cannot be undone.")) return;
 
+      try {
+        const bffBaseUrl = getBffBaseUrl();
+        const response = await authenticatedFetch(
+          `${bffBaseUrl}/api/workspace/layouts/${layoutId}`,
+          { method: "DELETE" },
+        );
+        if (response.ok) {
+          if (activeLayout?.id === layoutId) {
+            setActiveLayoutById(undefined as unknown as string);
+          }
+          refetchLayouts();
+        } else {
+          console.error("[WorkspaceGrid] Delete failed:", response.status);
+        }
+      } catch (err) {
+        console.error("[WorkspaceGrid] Delete failed:", err);
+      }
+    }, 0);
+  }, [activeLayout?.id, refetchLayouts, setActiveLayoutById]);
+
+  const handleSetDefault = React.useCallback(async (layoutId: string) => {
     try {
       const bffBaseUrl = getBffBaseUrl();
+      const layout = workspaceLayouts.find((l) => l.id === layoutId);
+      if (!layout) return;
+
       const response = await authenticatedFetch(
-        `${bffBaseUrl.replace(/\/$/, "")}/api/workspace/layouts/${layoutId}`,
-        { method: "DELETE" },
+        `${bffBaseUrl}/api/workspace/layouts/${layoutId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: layout.name,
+            layoutTemplateId: layout.layoutTemplateId,
+            sectionsJson: layout.sectionsJson,
+            isDefault: true,
+          }),
+        },
       );
       if (response.ok) {
-        // If we just deleted the active layout, switch to default
-        if (activeLayout?.id === layoutId) {
-          setActiveLayoutById(undefined as unknown as string); // triggers default
-        }
         refetchLayouts();
       } else {
-        console.error("[WorkspaceGrid] Delete failed:", response.status);
+        console.error("[WorkspaceGrid] Set default failed:", response.status);
       }
     } catch (err) {
-      console.error("[WorkspaceGrid] Delete failed:", err);
+      console.error("[WorkspaceGrid] Set default failed:", err);
     }
-  }, [activeLayout?.id, refetchLayouts, setActiveLayoutById]);
+  }, [workspaceLayouts, refetchLayouts]);
 
   // -------------------------------------------------------------------------
   // Push header state to parent (PageHeader renders the dropdown + gear)
@@ -797,8 +829,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       onEditClick: handleEditLayout,
       onCreateClick: handleCreateLayout,
       onDeleteClick: handleDeleteLayout,
+      onSetDefaultClick: handleSetDefault,
     });
-  }, [headerActiveLayout, headerLayouts, handleLayoutChange, handleEditLayout, handleCreateLayout, handleDeleteLayout, onHeaderReady]);
+  }, [headerActiveLayout, headerLayouts, handleLayoutChange, handleEditLayout, handleCreateLayout, handleDeleteLayout, handleSetDefault, onHeaderReady]);
 
   // -------------------------------------------------------------------------
   // Layout — WorkspaceShell renders the full grid
