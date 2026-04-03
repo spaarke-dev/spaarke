@@ -1707,6 +1707,20 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    public async Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default)
+    {
+        try
+        {
+            await _serviceClient.DeleteAsync(entityLogicalName, id, ct);
+            _logger.LogInformation("[DATAVERSE] Deleted {EntityLogicalName} record {EntityId}", entityLogicalName, id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DATAVERSE] Error deleting {EntityLogicalName} record {EntityId}", entityLogicalName, id);
+            throw new InvalidOperationException($"Failed to delete {entityLogicalName} record {id}: {ex.Message}", ex);
+        }
+    }
+
     public async Task BulkUpdateAsync(
         string entityLogicalName,
         List<(Guid id, Dictionary<string, object> fields)> updates,

@@ -18,4 +18,5 @@ public interface IGenericEntityService
     Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
     Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
     Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default);
+    Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default);
 }

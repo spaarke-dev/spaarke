@@ -346,14 +346,8 @@ public sealed class WorkspaceLayoutService
 
         try
         {
-            // Deactivate via statecode/statuscode update — values must be OptionSetValue
-            // for Dataverse SDK to process state transitions correctly.
-            var fields = new Dictionary<string, object>
-            {
-                ["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(1),
-                ["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(2)
-            };
-            await _entityService.UpdateAsync(EntityName, id, fields, ct);
+            // Hard delete — the user confirmed "this cannot be undone"
+            await _entityService.DeleteAsync(EntityName, id, ct);
 
             _logger.LogInformation("Deleted layout {LayoutId} for user {UserId}", id, userId);
             return null;

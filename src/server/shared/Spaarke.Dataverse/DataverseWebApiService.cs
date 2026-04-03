@@ -2111,6 +2111,13 @@ public class DataverseWebApiService : IDataverseService
             "Configure DI to use ServiceClient implementation for finance entity operations.");
     }
 
+    public Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "DeleteAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation.");
+    }
+
     public Task<Entity> RetrieveByAlternateKeyAsync(
         string entityLogicalName,
         KeyAttributeCollection alternateKeyValues,
