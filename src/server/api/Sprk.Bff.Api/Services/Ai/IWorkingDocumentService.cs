@@ -64,4 +64,15 @@ public interface IWorkingDocumentService
         string content,
         int tokenDelta,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Persist the chat history JSON to the sprk_chathistory field on the analysis record.
+    /// </summary>
+    /// <param name="analysisId">The analysis record ID.</param>
+    /// <param name="chatHistoryJson">JSON-serialized chat message array.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task UpdateChatHistoryAsync(
+        Guid analysisId,
+        string chatHistoryJson,
+        CancellationToken cancellationToken);
 }

@@ -79,6 +79,14 @@ public class AnalysisResultPersistence
     }
 
     /// <summary>
+    /// Persist chat history JSON to the sprk_chathistory field on the analysis record.
+    /// </summary>
+    public Task UpdateChatHistoryAsync(Guid analysisId, string chatHistoryJson, CancellationToken cancellationToken)
+    {
+        return _workingDocumentService.UpdateChatHistoryAsync(analysisId, chatHistoryJson, cancellationToken);
+    }
+
+    /// <summary>
     /// Save working document to SPE via working document service.
     /// </summary>
     public Task<SavedDocumentResult> SaveToSpeAsync(

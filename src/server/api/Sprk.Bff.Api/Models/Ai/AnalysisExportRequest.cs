@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Sprk.Bff.Api.Models.Ai;
 
@@ -23,6 +24,7 @@ public record AnalysisExportRequest
 /// <summary>
 /// Export destination format.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ExportFormat
 {
     /// <summary>Create email activity in Dataverse.</summary>
@@ -98,6 +100,19 @@ public record ExportResult
     /// Error message if export failed.
     /// </summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// Raw file bytes for direct download (Docx/Pdf formats).
+    /// Populated so the endpoint can stream the file to the client
+    /// rather than redirecting to SPE.
+    /// </summary>
+    public byte[]? FileBytes { get; init; }
+
+    /// <summary>MIME type for the file (e.g. application/vnd.openxmlformats-...).</summary>
+    public string? FileContentType { get; init; }
+
+    /// <summary>Suggested download filename including extension.</summary>
+    public string? FileName { get; init; }
 }
 
 /// <summary>

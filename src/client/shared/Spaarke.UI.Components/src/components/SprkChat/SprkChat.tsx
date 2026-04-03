@@ -230,6 +230,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   hostContext,
   bridge,
   onDocumentStreamEvent: onDocumentStreamEventProp,
+  initialMessages,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -273,7 +274,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   }, [playbooks, discoveredPlaybooks]);
 
   // Session management
-  const chatSession = useChatSession({ apiBaseUrl, accessToken });
+  const chatSession = useChatSession({ apiBaseUrl, accessToken, initialMessages });
   const {
     session,
     messages,
