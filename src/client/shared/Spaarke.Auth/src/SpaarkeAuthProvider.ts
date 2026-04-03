@@ -142,13 +142,19 @@ export class SpaarkeAuthProvider {
   }
 
   /**
-   * Get the Azure AD tenant ID synchronously from MSAL accounts.
+   * Get the Azure AD tenant ID synchronously.
    *
-   * Safe to call from click handlers. Returns the tenant ID extracted from
-   * the JWT stored in the MSAL account after a successful silent auth.
-   * Returns empty string if no accounts are available (MSAL not yet used).
+   * Resolution order:
+   *   1. Cached token JWT `tid` claim — works for ALL token sources (bridge, MSAL, Xrm)
+   *   2. MSAL accounts[0].tenantId — only populated if MSAL was actually invoked
+   *   3. Empty string
    */
   getCachedTenantId(): string {
+    // 1. Extract tid from cached token — works even when bridge provided the token
+    const tid = this._extractTidFromCachedToken();
+    if (tid) return tid;
+
+    // 2. MSAL accounts (only populated if MSAL was used, NOT for bridge tokens)
     try {
       const msal = this._msalSilentStrategy.getMsalInstance();
       if (msal) {
@@ -161,14 +167,26 @@ export class SpaarkeAuthProvider {
         }
       }
     } catch {
-      // MSAL instance not yet available — caller will fall through to Xrm.
+      // MSAL not available
     }
     return '';
   }
 
-  /** Resolve Azure AD tenant ID from MSAL account or Xrm context. */
+  /**
+   * Resolve Azure AD tenant ID (async).
+   *
+   * Resolution order:
+   *   1. Cached token JWT `tid` claim — works for ALL token sources
+   *   2. MSAL accounts[0].tenantId
+   *   3. Xrm.organizationSettings.tenantId via frame-walk
+   *   4. Empty string
+   */
   async getTenantId(): Promise<string> {
-    // 1. MSAL account
+    // 1. Extract tid from cached token (bridge, MSAL, Xrm — JWT always has tid)
+    const tid = this._extractTidFromCachedToken();
+    if (tid) return tid;
+
+    // 2. MSAL account
     const msal = this._msalSilentStrategy.getMsalInstance();
     if (msal) {
       const accounts = msal.getAllAccounts();
@@ -177,7 +195,7 @@ export class SpaarkeAuthProvider {
       }
     }
 
-    // 2. Xrm global context (frame-walk)
+    // 3. Xrm global context (frame-walk)
     try {
       const frames: Window[] = [window];
       try {
@@ -195,8 +213,8 @@ export class SpaarkeAuthProvider {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const xrm = (frame as any).Xrm;
-          const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
-          if (tid) return tid;
+          const xrmTid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
+          if (xrmTid) return xrmTid;
         } catch {
           /* cross-origin */
         }
@@ -206,6 +224,23 @@ export class SpaarkeAuthProvider {
     }
 
     return '';
+  }
+
+  /**
+   * Extract the `tid` (tenant ID) claim from the cached access token JWT.
+   * Works for ALL token sources: bridge, cache, Xrm, MSAL.
+   */
+  private _extractTidFromCachedToken(): string {
+    try {
+      const token = this._cacheStrategy.getCachedToken();
+      if (!token) return '';
+      const parts = token.split('.');
+      if (parts.length !== 3) return '';
+      const payload = JSON.parse(atob(parts[1]));
+      return payload.tid ?? '';
+    } catch {
+      return '';
+    }
   }
 
   /** Stop proactive refresh (cleanup). */

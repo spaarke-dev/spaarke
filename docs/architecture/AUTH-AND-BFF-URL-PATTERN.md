@@ -207,16 +207,13 @@ authenticatedFetch(url, init?)
 ## Checklist: Adding a New BFF API Integration
 
 - [ ] Use `@spaarke/auth`'s `authenticatedFetch()` — never raw `fetch()` for BFF calls
-- [ ] Obtain `bffBaseUrl` from `resolveRuntimeConfig()` (code pages) or normalize from `getApiBaseUrl()` (PCF)
-- [ ] Verify `bffBaseUrl` is HOST ONLY (no `/api` suffix) before constructing URLs
-- [ ] Construct URLs as `${bffBaseUrl}/api/your/endpoint`
-- [ ] If accepting `apiBaseUrl` as constructor parameter, normalize it:
-  ```typescript
-  this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api$/i, '');
-  ```
+- [ ] Get base URL from `resolveRuntimeConfig()` (code pages) or `getApiBaseUrl()` (PCF) — both return HOST ONLY
+- [ ] Construct URLs as `${bffBaseUrl}/api/your/endpoint` — you add the `/api` prefix
+- [ ] Do NOT add your own `/api`-stripping normalization — the source functions handle it
+- [ ] Do NOT read `sprk_BffApiBaseUrl` directly — always go through the resolution functions
 - [ ] Handle `AuthError` with code `'auth_exhausted'` gracefully in UI
 - [ ] Handle `ApiError` with ProblemDetails for user-friendly error messages
-- [ ] Test with both URL formats: with and without `/api` suffix
+- [ ] For tenant ID: use `getAuthProvider().getTenantId()` — it reads the JWT `tid` claim from any token source
 
 ---
 
@@ -238,10 +235,18 @@ authenticatedFetch(url, init?)
 
 ### "Missing Parameters — tenantId: (missing)"
 **Symptom**: Dialog opens but tenant ID is empty
-**Cause**: `getTenantId()` returns empty string because:
-1. `Xrm.organizationSettings.tenantId` was empty at bootstrap (timing issue)
-2. MSAL auth init failed so `getCachedTenantId()` has no accounts
-**Fix**: Ensure `ensureAuthInitialized()` completes before rendering; it patches tenant ID from MSAL JWT
+**Root cause (discovered April 2, 2026)**:
+1. `Xrm.organizationSettings.tenantId` is empty at bootstrap (Dataverse timing issue — always empty on first load)
+2. The token comes via **bridge strategy** (parent iframe), so **MSAL is never invoked**
+3. `getTenantId()` checked MSAL accounts → empty (MSAL never ran)
+4. Result: no tenant ID anywhere
+
+**Fix (implemented)**: `SpaarkeAuthProvider.getTenantId()` and `getCachedTenantId()` now extract the `tid` claim directly from the cached access token JWT. This works for ALL token sources (bridge, MSAL, Xrm) because every Azure AD JWT contains `tid`. See `_extractTidFromCachedToken()` in `SpaarkeAuthProvider.ts`.
+
+**Resolution order** (current):
+1. Cached token JWT `tid` claim ← works even when bridge provides the token
+2. MSAL `getAllAccounts()[0].tenantId` ← only populated if MSAL was used
+3. Xrm frame-walk `organizationSettings.tenantId` ← empty on first load
 
 ---
 

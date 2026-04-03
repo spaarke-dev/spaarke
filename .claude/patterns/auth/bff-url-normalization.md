@@ -26,3 +26,14 @@ Both use: `.replace(/\/+$/, '').replace(/\/api$/i, '')`
 1. Get base URL from `getBffBaseUrl()` or `getApiBaseUrl()` — ALREADY normalized
 2. Construct: `${baseUrl}/api/...` — you add the `/api` prefix
 3. NEVER assume the base URL has `/api` in it
+
+## Tenant ID Resolution
+
+`getTenantId()` / `getCachedTenantId()` in `SpaarkeAuthProvider` resolve tenant ID from:
+1. **Cached token JWT `tid` claim** — works for ALL token sources (bridge, MSAL, Xrm)
+2. MSAL accounts (only if MSAL was invoked)
+3. Xrm frame-walk (unreliable on first load)
+
+**Key insight**: In Dataverse web resources, the **bridge strategy** often provides the token
+(from parent iframe). This means MSAL never runs, so MSAL accounts are empty. The JWT `tid`
+extraction (step 1) is the only reliable source in this scenario.

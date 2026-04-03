@@ -30,4 +30,11 @@ export class CacheStrategy implements ITokenStrategy {
   clear(): void {
     this._entry = null;
   }
+
+  /** Return the raw cached token string, or null if empty/expired. */
+  getCachedToken(): string | null {
+    if (!this._entry) return null;
+    if (Date.now() >= this._entry.expiresOn - TOKEN_EXPIRY_BUFFER_MS) return null;
+    return this._entry.accessToken;
+  }
 }
