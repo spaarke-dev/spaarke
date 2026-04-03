@@ -104,6 +104,31 @@ public class WorkingDocumentService : IWorkingDocumentService
     }
 
     /// <inheritdoc />
+    public async Task UpdateChatHistoryAsync(
+        Guid analysisId,
+        string chatHistoryJson,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Persisting chat history for analysis {AnalysisId}, {JsonLength} chars",
+            analysisId, chatHistoryJson.Length);
+
+        try
+        {
+            var fields = new Dictionary<string, object>
+            {
+                ["sprk_chathistory"] = chatHistoryJson
+            };
+
+            await _genericEntityService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to persist chat history for analysis {AnalysisId}", analysisId);
+        }
+    }
+
+    /// <inheritdoc />
     public Task<Guid> CreateWorkingVersionAsync(
         Guid analysisId,
         string content,

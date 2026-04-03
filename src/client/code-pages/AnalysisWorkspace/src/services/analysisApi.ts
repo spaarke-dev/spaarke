@@ -14,7 +14,7 @@
  * @see ADR-008 - Endpoint filters for auth (Bearer token)
  */
 
-import type { AnalysisRecord, DocumentMetadata, AnalysisError, ProblemDetails, ExportFormat } from '../types';
+import type { AnalysisRecord, DocumentMetadata, AnalysisError, ProblemDetails, ExportFormat, IChatMessage } from '../types';
 import { getRuntimeConfig } from './authInit';
 
 // ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ export async function fetchAnalysis(analysisId: string): Promise<AnalysisRecord>
 
   const controller = createTimeoutController();
   const response = await fetch(
-    `/api/data/v9.2/sprk_analysises(${analysisId})?$select=sprk_name,sprk_workingdocument,statecode,statuscode,createdon,modifiedon,_sprk_documentid_value,_sprk_actionid_value,_sprk_playbook_value`,
+    `/api/data/v9.2/sprk_analysises(${analysisId})?$select=sprk_name,sprk_workingdocument,sprk_chathistory,statecode,statuscode,createdon,modifiedon,_sprk_documentid_value,_sprk_actionid_value,_sprk_playbook_value`,
     {
       method: 'GET',
       headers: {
@@ -183,6 +183,15 @@ export async function fetchAnalysis(analysisId: string): Promise<AnalysisRecord>
     status = 'completed';
   }
 
+  let chatHistory: IChatMessage[] | undefined;
+  if (data.sprk_chathistory) {
+    try {
+      chatHistory = JSON.parse(data.sprk_chathistory) as IChatMessage[];
+    } catch {
+      console.warn(`${LOG_PREFIX} Failed to parse sprk_chathistory for analysis ${analysisId}`);
+    }
+  }
+
   const record: AnalysisRecord = {
     id: analysisId,
     title: data.sprk_name ?? 'Analysis',
@@ -195,6 +204,7 @@ export async function fetchAnalysis(analysisId: string): Promise<AnalysisRecord>
     playbookId: data._sprk_playbook_value ?? undefined,
     statusCode: data.statuscode ?? undefined,
     createdBy: undefined,
+    chatHistory,
   };
 
   console.log(

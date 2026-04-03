@@ -56,6 +56,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     bffBaseUrl,
     token,
     streaming,
+    chatHistory,
   } = useAnalysisAi();
 
   // Map onSessionCreated to setChatSessionId (extract sessionId from session object)
@@ -124,6 +125,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
         hostContext={hostContext}
         bridge={null}
         onDocumentStreamEvent={handleDocumentStreamEvent}
+        initialMessages={chatHistory}
       />
     </div>
   );

@@ -16,6 +16,8 @@ interface UseChatSessionOptions {
   apiBaseUrl: string;
   /** Bearer token for API authentication */
   accessToken: string;
+  /** Pre-loaded messages to show before any session is created (e.g. from sprk_chathistory) */
+  initialMessages?: IChatMessage[];
 }
 
 /**
@@ -34,10 +36,10 @@ interface UseChatSessionOptions {
  * ```
  */
 export function useChatSession(options: UseChatSessionOptions): IUseChatSessionResult {
-  const { apiBaseUrl, accessToken } = options;
+  const { apiBaseUrl, accessToken, initialMessages } = options;
 
   const [session, setSession] = useState<IChatSession | null>(null);
-  const [messages, setMessages] = useState<IChatMessage[]>([]);
+  const [messages, setMessages] = useState<IChatMessage[]>(() => initialMessages ?? []);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -110,7 +112,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
         };
 
         setSession(newSession);
-        setMessages([]);
+        setMessages(initialMessages ?? []);
         return newSession;
       } catch (err: unknown) {
         const errorObj = err instanceof Error ? err : new Error('Failed to create session');
@@ -120,7 +122,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
         setIsLoading(false);
       }
     },
-    [apiRequest, baseUrl]
+    [apiRequest, baseUrl, initialMessages]
   );
 
   /**

@@ -334,6 +334,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         await _resultPersistence.UpdateWorkingDocumentAsync(analysisId, response, cancellationToken);
 
+        var chatHistoryJson = JsonSerializer.Serialize(chatHistory);
+        await _resultPersistence.UpdateChatHistoryAsync(analysisId, chatHistoryJson, cancellationToken);
+
         _logger.LogInformation("Analysis continuation completed for {AnalysisId}", analysisId);
 
         yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(inputTokens, outputTokens));
@@ -441,16 +444,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             };
         }
 
-        // For file exports (DOCX, PDF), save to SPE and return result
+        // For file exports (DOCX, PDF), return bytes directly for client-side download.
+        // The caller (ExportAnalysis endpoint) will stream these bytes as a file response.
         if (result.FileBytes != null && request.Format is ExportFormat.Docx or ExportFormat.Pdf)
         {
-            var savedDoc = await _resultPersistence.SaveToSpeAsync(
-                analysisId,
-                result.FileName ?? $"export_{analysisId:N}.{request.Format.ToString().ToLowerInvariant()}",
-                result.FileBytes,
-                result.ContentType ?? "application/octet-stream",
-                cancellationToken);
-
             stopwatch.Stop();
             _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true, fileSizeBytes: result.FileBytes.Length);
 
@@ -458,11 +455,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             {
                 ExportType = request.Format,
                 Success = true,
+                FileBytes = result.FileBytes,
+                FileContentType = result.ContentType ?? "application/octet-stream",
+                FileName = result.FileName ?? $"export_{analysisId:N}.{formatName}",
                 Details = new ExportDetails
                 {
-                    DocumentId = savedDoc.DocumentId,
-                    WebUrl = savedDoc.WebUrl,
-                    Status = "Saved to SharePoint"
+                    Status = "Ready for download"
                 }
             };
         }

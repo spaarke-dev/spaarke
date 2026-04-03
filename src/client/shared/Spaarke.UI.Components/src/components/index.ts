@@ -111,3 +111,6 @@ export * from './ThemeToggle';
 
 // RecordCardShell - Shared card shell for all entity record cards (Documents, Matters, Todos, etc.)
 export * from './RecordCardShell';
+
+// FilePreviewDialog - Shared document preview dialog (iframe + toolbar actions)
+export * from './FilePreview';

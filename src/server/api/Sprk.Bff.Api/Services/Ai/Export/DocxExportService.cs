@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -376,7 +377,7 @@ public partial class DocxExportService : IExportService
     {
         var para = new Paragraph(
             new ParagraphProperties(new ParagraphStyleId { Val = styleId }),
-            new Run(new Text(text)));
+            new Run(new Text(SanitizeText(text)) { Space = SpaceProcessingModeValues.Preserve }));
         return para;
     }
 
@@ -488,9 +489,8 @@ public partial class DocxExportService : IExportService
     {
         var paragraphs = new List<Paragraph>();
 
-        // Simple parsing - split by double newlines or HTML tags
-        // Remove HTML tags for plain text extraction
-        var plainText = HtmlTagRegex().Replace(content, "");
+        // Strip HTML tags, then decode entities and sanitize for XML
+        var plainText = SanitizeText(HtmlTagRegex().Replace(content, " "));
 
         // Split into paragraphs
         var lines = plainText.Split(["\n\n", "\r\n\r\n"], StringSplitOptions.RemoveEmptyEntries);
@@ -546,6 +546,24 @@ public partial class DocxExportService : IExportService
             .Replace("\"", "&quot;")
             .Replace("'", "&apos;");
     }
+
+    /// <summary>
+    /// Sanitizes a string for safe embedding in OpenXML content:
+    /// 1. Decodes HTML entities (e.g. &amp;amp; → &amp;, &amp;nbsp; → space)
+    /// 2. Removes XML-illegal control characters (U+0000–U+0008, U+000B–U+000C, U+000E–U+001F)
+    ///    which cause "unreadable content" warnings when Word opens the file.
+    /// Tabs (U+0009), LF (U+000A), and CR (U+000D) are preserved as they are valid in XML.
+    /// </summary>
+    private static string SanitizeText(string value)
+    {
+        // Decode HTML entities first (&amp; → &, &nbsp; → space, etc.)
+        var decoded = WebUtility.HtmlDecode(value) ?? value;
+        // Strip XML-illegal control characters
+        return XmlInvalidCharRegex().Replace(decoded, string.Empty);
+    }
+
+    [GeneratedRegex(@"[\x00-\x08\x0B\x0C\x0E-\x1F]")]
+    private static partial Regex XmlInvalidCharRegex();
 
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex HtmlTagRegex();
