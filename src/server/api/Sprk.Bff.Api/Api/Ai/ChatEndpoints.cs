@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
@@ -260,7 +261,7 @@ public static class ChatEndpoints
         SprkChatAgentFactory agentFactory,
         PendingPlanManager pendingPlanManager,
         IChatClient chatClient,
-        IWorkingDocumentService workingDocumentService,
+        [FromServices] IWorkingDocumentService workingDocumentService,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
