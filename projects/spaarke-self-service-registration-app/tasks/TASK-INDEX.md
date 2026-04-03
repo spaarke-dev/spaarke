@@ -9,11 +9,11 @@ Tasks are structured for **maximum parallel execution**. Each phase completes be
 | Task | Title | Phase | Parallel Group | Status | Dependencies |
 |------|-------|-------|---------------|--------|-------------|
 | 001 | Foundation: Models, Configuration, DI Module | 0 | — (serial) | ✅ | none |
-| 010 | Graph User Service: Entra ID User Management | 1 | P1 | 🔲 | 001 |
-| 011 | Dataverse Registration Service: CRUD + User Sync | 1 | P1 | 🔲 | 001 |
-| 012 | Dataverse Schema: Table, Views, Form, Sitemap | 1 | P1 | 🔲 | 001 |
-| 013 | Entra ID Setup Scripts | 1 | P1 | 🔲 | 001 |
-| 014 | Email Templates and Registration Email Service | 1 | P1 | 🔲 | 001 |
+| 010 | Graph User Service: Entra ID User Management | 1 | P1 | ✅ | 001 |
+| 011 | Dataverse Registration Service: CRUD + User Sync | 1 | P1 | ✅ | 001 |
+| 012 | Dataverse Schema: Table, Views, Form, Sitemap | 1 | P1 | ✅ | 001 |
+| 013 | Entra ID Setup Scripts | 1 | P1 | ✅ | 001 |
+| 014 | Email Templates and Registration Email Service | 1 | P1 | ✅ | 001 |
 | 020 | Provisioning Orchestrator Service | 2 | P2 | 🔲 | 010, 011, 014 |
 | 021 | Registration API Endpoints | 2 | P2 | 🔲 | 010, 011, 014 |
 | 022 | Website: Request Early Access Form | 2 | P2 | 🔲 | 001 |
@@ -82,7 +82,7 @@ Phase 5:  [050]
 ## Progress Summary
 
 - **Total tasks**: 15
-- **Completed**: 1
+- **Completed**: 6
 - **In Progress**: 0
-- **Remaining**: 14
+- **Remaining**: 9
 - **Max parallel agents**: 5 (Phase 1)
