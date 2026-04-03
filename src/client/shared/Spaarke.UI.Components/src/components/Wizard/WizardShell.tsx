@@ -399,8 +399,15 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
         </div>
       </div>
 
-      {/* Footer — hidden after success */}
-      {!successConfig && (
+      {/* Footer — success screen shows actions in footer; normal steps show navigation */}
+      {successConfig ? (
+        <div className={styles.footer}>
+          <div className={styles.footerLeft} />
+          <div className={styles.footerRight}>
+            {successConfig.actions}
+          </div>
+        </div>
+      ) : (
         <div className={styles.footer}>
           <div className={styles.footerLeft}>
             <Button appearance="secondary" onClick={onClose} disabled={isFinishing}>

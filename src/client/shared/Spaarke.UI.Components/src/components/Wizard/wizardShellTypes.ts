@@ -197,7 +197,10 @@ export interface IWizardSuccessConfig {
   title: string;
   /** Body content below the title — can be a string or rich JSX. */
   body: React.ReactNode;
-  /** Action buttons displayed below the body (e.g., "Open Matter", "Close"). */
+  /**
+   * Action buttons displayed in the footer (right side, where Next/Finish normally are).
+   * Typically a "Done" or "Close" button.
+   */
   actions: React.ReactNode;
   /**
    * Optional warning messages to display alongside the success content.

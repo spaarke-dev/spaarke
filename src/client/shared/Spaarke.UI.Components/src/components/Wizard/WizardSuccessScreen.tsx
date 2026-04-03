@@ -109,9 +109,6 @@ export const WizardSuccessScreen: React.FC<Props> = ({ config }) => {
       {/* Body */}
       <div className={styles.body}>{config.body}</div>
 
-      {/* Action buttons */}
-      <div className={styles.actionsRow}>{config.actions}</div>
-
       {/* Warnings */}
       {hasWarnings && (
         <div className={styles.warningsSection} aria-live="polite">
