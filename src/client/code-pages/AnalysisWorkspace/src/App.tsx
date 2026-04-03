@@ -58,7 +58,6 @@ import {
   Spinner,
   Text,
   Button,
-  ToggleButton,
   Toaster,
   Toast,
   ToastTitle,
@@ -69,25 +68,21 @@ import {
   ErrorCircle20Regular,
   LockClosed20Regular,
   ArrowClockwise20Regular,
-  Play20Regular,
-  PanelRight20Regular,
-  Chat20Regular,
 } from '@fluentui/react-icons';
 import type { RichTextEditorRef } from '@spaarke/ui-components';
 import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS, PanelSplitter } from '@spaarke/ui-components';
+
 import { useDocumentHistory } from '@spaarke/ui-components/hooks/useDocumentHistory';
 import { useAuth } from './hooks/useAuth';
 import { useAnalysisLoader } from './hooks/useAnalysisLoader';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useExportAnalysis } from './hooks/useExportAnalysis';
-import { useReAnalysisProgress } from './hooks/useReAnalysisProgress';
 import { useAnalysisExecution } from './hooks/useAnalysisExecution';
 import { useDiffReview } from './hooks/useDiffReview';
 
 import { EditorPanel } from './components/EditorPanel';
 import { SourceViewerPanel } from './components/SourceViewerPanel';
 import { ChatPanel } from './components/ChatPanel';
-import { ReAnalysisProgressOverlay } from './components/ReAnalysisProgressOverlay';
 import { DiffReviewPanel } from './components/DiffReviewPanel';
 import { AnalysisAiProvider } from './context/AnalysisAiContext';
 import { usePanelLayout } from './hooks/usePanelLayout';
@@ -120,17 +115,6 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  toolbar: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    ...shorthands.gap(tokens.spacingHorizontalS),
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    height: '40px',
-    flexShrink: 0,
-  },
   content: {
     display: 'flex',
     flexDirection: 'row',
@@ -138,8 +122,10 @@ const useStyles = makeStyles({
     overflow: 'hidden',
   },
   editorPanel: {
+    // flex:1 — editor always fills remaining space after source and chat claim their widths
+    flex: 1,
+    minWidth: 0,
     overflow: 'hidden',
-    flexShrink: 0,
     position: 'relative',
   },
   sourcePanel: {
@@ -147,8 +133,10 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   chatPanel: {
-    overflow: 'hidden',
+    // Fixed width — not user-resizable, no splitter on its left edge
+    width: '360px',
     flexShrink: 0,
+    overflow: 'hidden',
   },
   // Task 036: Smooth collapse/expand animation for panel toggle transitions.
   // Applied only when NOT dragging to avoid janky animation during mouse resize.
@@ -210,7 +198,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   const { dispatchToast } = useToastController(toasterId);
 
   // ---- State (all hooks must be called before any early return) ----
-  const [isSourceCollapsed, setIsSourceCollapsed] = useState(false);
   const [editorContent, setEditorContent] = useState('');
 
   // ---- Resolved documentId: URL prop → Dataverse lookup fallback ----
@@ -224,17 +211,14 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
 
   // ---- Three-panel layout (Editor / Source / Chat) ----
   const {
-    panelSizes,
+    sourceWidthPx,
     isSourceVisible,
     isChatVisible,
     toggleSource,
     toggleChat,
     splitter1Handlers,
-    splitter2Handlers,
     isDragging,
-    activeSplitter,
     containerRef,
-    currentRatios,
   } = usePanelLayout();
 
   // ---- Task 035: M365 Copilot handoff — ensure Chat panel is visible ----
@@ -402,16 +386,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     };
   }, [analysisId, isAuthenticated]);
 
-  // ---- Task 081: Re-analysis progress tracking ----
-  const {
-    isAnalyzing: isReAnalyzing,
-    percent: reAnalysisPercent,
-    message: reAnalysisMessage,
-  } = useReAnalysisProgress({
-    bridge: appBridge,
-    enabled: isAuthenticated && !!analysisId,
-  });
-
   // ---- Task 103: Diff review for AI-proposed revisions ----
   const { diffState, acceptDiff, rejectDiff, isDiffStreaming } = useDiffReview({
     bridge: appBridge,
@@ -436,10 +410,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   }, [analysis]);
 
   // ---- Handlers ----
-  const handleToggleCollapse = useCallback(() => {
-    setIsSourceCollapsed(prev => !prev);
-  }, []);
-
   const handleEditorChange = useCallback(
     (html: string) => {
       setEditorContent(html);
@@ -513,45 +483,15 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   // Wrapped in AnalysisAiProvider for shared context between editor and chat.
   return (
     <AnalysisAiProvider bffBaseUrl={bffBaseUrl}>
-      <div className={styles.root} ref={containerRef}>
+      <div className={styles.root}>
         {/* Task 061: Toast provider */}
         <Toaster toasterId={toasterId} position="top-end" />
 
-        {/* Task 062: Workspace toolbar — Run Analysis + Source toggle + Chat toggle */}
-        <div className={styles.toolbar}>
-          <Button
-            appearance="primary"
-            icon={isExecuting ? <Spinner size="tiny" /> : <Play20Regular />}
-            onClick={triggerExecute}
-            disabled={isExecuting || (!analysis?.playbookId && !analysis?.actionId)}
-            data-testid="run-analysis-button"
-          >
-            {isExecuting ? 'Running...' : 'Run Analysis'}
-          </Button>
-          <ToggleButton
-            icon={<PanelRight20Regular />}
-            checked={isSourceVisible}
-            onClick={toggleSource}
-            data-testid="source-pane-toggle"
-          >
-            Source
-          </ToggleButton>
-          <ToggleButton
-            icon={<Chat20Regular />}
-            checked={isChatVisible}
-            onClick={toggleChat}
-            data-testid="chat-pane-toggle"
-          >
-            Chat
-          </ToggleButton>
-        </div>
-
-        {/* Content area: 3-panel layout (Editor | Source | Chat) */}
-        <div className={styles.content}>
-          {/* Editor Panel (always visible) */}
+        {/* Content area: Editor (flex:1) | [Splitter+Source] | Chat (360px fixed) */}
+        <div className={styles.content} ref={containerRef}>
+          {/* Editor Panel — flex:1 always fills remaining space */}
           <div
             className={mergeClasses(styles.editorPanel, !isDragging && styles.panelAnimated)}
-            style={{ width: panelSizes.editor }}
           >
             {/* Show error state if analysis load or execution failed */}
             {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
@@ -602,6 +542,9 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                 canUndo={canUndo}
                 canRedo={canRedo}
                 historyLength={historyLength}
+                // Run Analysis (moved from top toolbar into editor header)
+                onRunAnalysis={triggerExecute}
+                canRunAnalysis={!isExecuting && !!(analysis?.playbookId || analysis?.actionId)}
                 // Task 031: Inline AI Toolbar props
                 analysisId={analysisId}
                 onDiffAction={(selectedText: string) => {
@@ -633,12 +576,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                 isStreaming={isExecuting}
               />
             )}
-            {/* Task 081: Re-analysis progress overlay (positioned over editor) */}
-            <ReAnalysisProgressOverlay
-              isVisible={isReAnalyzing}
-              percent={reAnalysisPercent}
-              message={reAnalysisMessage}
-            />
             {/* Task 103: Diff review panel for AI-proposed revisions */}
             <DiffReviewPanel
               isOpen={diffState.isOpen}
@@ -649,26 +586,21 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
             />
           </div>
 
-          {/* Splitter 1 + Source Panel — visible when source is shown */}
+          {/* Splitter + Source Panel — only when source is visible */}
           {isSourceVisible && (
             <>
-              {!isSourceCollapsed && (
-                <PanelSplitter
-                  onMouseDown={splitter1Handlers.onMouseDown}
-                  onKeyDown={splitter1Handlers.onKeyDown}
-                  onDoubleClick={splitter1Handlers.onDoubleClick}
-                  isDragging={isDragging && activeSplitter === 1}
-                  currentRatio={currentRatios.editor}
-                />
-              )}
+              <PanelSplitter
+                onMouseDown={splitter1Handlers.onMouseDown}
+                onKeyDown={splitter1Handlers.onKeyDown}
+                onDoubleClick={splitter1Handlers.onDoubleClick}
+                isDragging={isDragging}
+              />
               <div
                 className={mergeClasses(styles.sourcePanel, !isDragging && styles.panelAnimated)}
-                style={isSourceCollapsed ? undefined : { width: panelSizes.source }}
+                style={{ width: `${sourceWidthPx}px` }}
               >
                 <SourceViewerPanel
-                  isCollapsed={isSourceCollapsed}
-                  onToggleCollapse={handleToggleCollapse}
-                  // Task 065: Document viewer props
+                  onCollapse={toggleSource}
                   documentMetadata={documentMetadata}
                   isLoading={isDocumentLoading}
                   documentError={documentError}
@@ -678,27 +610,14 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
             </>
           )}
 
-          {/* Splitter + Chat Panel — visible when chat is shown.
-              When source is visible, splitter 2 separates Source from Chat.
-              When source is hidden, splitter 1 separates Editor from Chat
-              (usePanelLayout handles the Editor<->Chat transfer in splitter 1). */}
+          {/* Chat Panel — fixed 360px width, no splitter (not user-resizable) */}
           {isChatVisible && (
-            <>
-              <PanelSplitter
-                onMouseDown={isSourceVisible ? splitter2Handlers.onMouseDown : splitter1Handlers.onMouseDown}
-                onKeyDown={isSourceVisible ? splitter2Handlers.onKeyDown : splitter1Handlers.onKeyDown}
-                onDoubleClick={isSourceVisible ? splitter2Handlers.onDoubleClick : splitter1Handlers.onDoubleClick}
-                isDragging={isDragging && (isSourceVisible ? activeSplitter === 2 : activeSplitter === 1)}
-                currentRatio={isSourceVisible ? currentRatios.source : currentRatios.editor}
-              />
-              <div
-                className={mergeClasses(styles.chatPanel, !isDragging && styles.panelAnimated)}
-                style={{ width: panelSizes.chat }}
-                data-testid="chat-panel-container"
-              >
-                <ChatPanel />
-              </div>
-            </>
+            <div
+              className={styles.chatPanel}
+              data-testid="chat-panel-container"
+            >
+              <ChatPanel />
+            </div>
           )}
         </div>
       </div>
