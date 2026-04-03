@@ -546,7 +546,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       const addFilesStep: IWizardStepConfig = {
         id: 'add-files',
         label: 'Add file(s)',
-        canAdvance: () => fileStateRef.current.selectedFiles.length > 0,
+        canAdvance: () => (fileStateRef.current?.selectedFiles?.length ?? 0) > 0,
         isSkippable: true,
         renderContent: () => (
           <>

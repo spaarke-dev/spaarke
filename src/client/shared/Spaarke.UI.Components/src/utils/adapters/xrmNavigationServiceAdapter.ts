@@ -164,48 +164,35 @@ export function createXrmNavigationService(): INavigationService {
 
     closeDialog(result?: unknown): void {
       // Code Pages opened via Xrm.Navigation.navigateTo({ target: 2 }) run
-      // inside a Dataverse dialog iframe. window.close() is blocked by browsers
-      // in iframe contexts. We try multiple approaches in order of reliability.
-      if (result !== undefined && typeof window !== 'undefined') {
+      // inside a Dataverse dialog iframe. window.close() is blocked by browsers.
+      // The proven approach: find and click the platform's X button in the
+      // parent frame DOM (same-origin in Dataverse web resources).
+      //
+      // This is the same pattern used by DocumentUploadWizard/App.tsx which
+      // has been validated in production.
+      if (typeof window === 'undefined') return;
+
+      if (result !== undefined) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__dialogResult = result;
       }
 
-      if (typeof window === 'undefined') return;
-
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const frames: Window[] = [window];
-      try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-      try { if (window.top && window.top !== window) frames.push(window.top!); } catch { /* cross-origin */ }
-
-      // 1. Try Xrm.Page.ui.close() — works in some Dataverse dialog contexts
+      const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
       for (const frame of frames) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const xrm = (frame as any).Xrm;
-          if (xrm?.Page?.ui?.close) {
-            xrm.Page.ui.close();
+          const closeBtn =
+            frame?.document?.querySelector('[data-id="dialogCloseIconButton"]') as HTMLElement
+            ?? frame?.document?.querySelector('.ms-Dialog-button--close') as HTMLElement;
+          if (closeBtn) {
+            closeBtn.click();
             return;
           }
-        } catch { /* cross-origin */ }
+        } catch { /* cross-origin frame */ }
       }
 
-      // 2. Try Xrm.Navigation.closeDialog — available in some MDA contexts
-      for (const frame of frames) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const xrm = (frame as any).Xrm;
-          if (xrm?.Navigation?.closeDialog) {
-            xrm.Navigation.closeDialog();
-            return;
-          }
-        } catch { /* cross-origin */ }
-      }
-
-      // 3. Fallback: window.close() — works for pop-out windows, may be blocked in iframes
-      try {
-        window.close();
-      } catch { /* blocked by browser */ }
+      // Fallback: window.close() — works for standalone popups
+      try { window.close(); } catch { /* blocked by browser */ }
     },
 
     async openLookup(options: LookupOptions): Promise<LookupResult[]> {
