@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -16,10 +17,12 @@ public static class RegistrationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // Services will be registered here as they are created in subsequent tasks:
-        // - GraphUserService (Task 010)
-        // - RegistrationDataverseService (Task 011)
-        // - RegistrationEmailService (Task 014)
+        // ADR-010: Concrete registrations (no interfaces)
+        services.AddSingleton<TrackingIdGenerator>();
+        services.AddSingleton<RegistrationDataverseService>();
+        services.AddSingleton<RegistrationEmailService>();
+
+        // Services to be registered in subsequent tasks:
         // - DemoProvisioningService (Task 020)
         // - EmailDomainValidator (Task 021)
         // - DemoExpirationService (Task 030) — hosted service

@@ -100,6 +100,11 @@
     <Content Update="builder-scopes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Registration email templates embedded as resources -->
+  <ItemGroup>
+    <EmbeddedResource Include="Services\Registration\EmailTemplates\*.html" />
+  </ItemGroup>
+
   <!-- Exclude template config from publish - all config comes from Azure App Settings -->
   <ItemGroup>
     <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
