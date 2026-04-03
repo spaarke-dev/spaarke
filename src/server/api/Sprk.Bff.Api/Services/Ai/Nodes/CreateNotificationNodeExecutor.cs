@@ -126,6 +126,12 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             // Parse configuration
             var config = JsonSerializer.Deserialize<NotificationNodeConfig>(context.Node.ConfigJson!, JsonOptions)!;
 
+            // Handle iterate items mode: create one notification per item from upstream query
+            if (config.IterateItems && config.ItemNotification is not null)
+            {
+                return await ExecuteIterateItemsAsync(context, config, startedAt, cancellationToken);
+            }
+
             // Build template context from previous outputs
             var templateContext = BuildTemplateContext(context);
 
@@ -256,6 +262,108 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     /// <summary>
     /// Resolves the recipient systemuserid from config template or run context.
     /// </summary>
+    /// <summary>
+    /// Executes the iterate-items path: loops over items from upstream query output,
+    /// creates one notification per item using the itemNotification template.
+    /// </summary>
+    private async Task<NodeOutput> ExecuteIterateItemsAsync(
+        NodeExecutionContext context,
+        NotificationNodeConfig config,
+        DateTimeOffset startedAt,
+        CancellationToken cancellationToken)
+    {
+        var templateContext = BuildTemplateContext(context);
+
+        // Find upstream query results from previous outputs
+        List<JsonElement>? items = null;
+        foreach (var (varName, output) in context.PreviousOutputs)
+        {
+            if (output.StructuredData.HasValue)
+            {
+                var data = output.StructuredData.Value;
+                if (data.TryGetProperty("items", out var itemsArray) && itemsArray.ValueKind == JsonValueKind.Array)
+                {
+                    items = new List<JsonElement>();
+                    foreach (var item in itemsArray.EnumerateArray())
+                        items.Add(item);
+                    break;
+                }
+            }
+        }
+
+        if (items is null || items.Count == 0)
+        {
+            _logger.LogInformation(
+                "CreateNotification node {NodeId} iterate mode -- no items found, skipping",
+                context.Node.Id);
+
+            return NodeOutput.Ok(
+                context.Node.Id,
+                context.Node.OutputVariable,
+                new { created = 0, skipped = 0, reason = "No items from upstream query" },
+                textContent: "No items to notify about",
+                metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+        }
+
+        var itemConfig = config.ItemNotification!;
+        var created = 0;
+        var skipped = 0;
+
+        foreach (var item in items)
+        {
+            // Build item-specific template context
+            var itemContext = new Dictionary<string, object?>(templateContext);
+            var itemDict = JsonSerializer.Deserialize<Dictionary<string, object?>>(item.GetRawText(), JsonOptions);
+            itemContext["item"] = itemDict;
+
+            var title = _templateEngine.Render(itemConfig.Title!, itemContext);
+            var body = _templateEngine.Render(itemConfig.Body!, itemContext);
+            var category = itemConfig.Category is not null ? _templateEngine.Render(itemConfig.Category, itemContext) : null;
+            var actionUrl = itemConfig.ActionUrl is not null ? _templateEngine.Render(itemConfig.ActionUrl, itemContext) : null;
+
+            var recipientId = ResolveRecipientId(itemConfig, itemContext);
+            if (recipientId is null)
+            {
+                skipped++;
+                continue;
+            }
+
+            Guid? regardingId = null;
+            string? regardingType = null;
+            if (!string.IsNullOrWhiteSpace(itemConfig.RegardingId))
+            {
+                var regardingIdStr = _templateEngine.Render(itemConfig.RegardingId, itemContext);
+                if (Guid.TryParse(regardingIdStr, out var parsedRegardingId))
+                {
+                    regardingId = parsedRegardingId;
+                    regardingType = itemConfig.RegardingType;
+                }
+            }
+
+            // Idempotency check
+            if (regardingId.HasValue && !string.IsNullOrWhiteSpace(category))
+            {
+                var isDuplicate = await CheckForDuplicateNotificationAsync(recipientId.Value, regardingId.Value, category, cancellationToken);
+                if (isDuplicate) { skipped++; continue; }
+            }
+
+            var payload = BuildNotificationPayload(title, body, category, itemConfig.Priority ?? 200_000_000, actionUrl, recipientId.Value, regardingId, regardingType, context);
+            await CreateAppNotificationAsync(payload, cancellationToken);
+            created++;
+        }
+
+        _logger.LogInformation(
+            "CreateNotification node {NodeId} iterate completed -- created: {Created}, skipped: {Skipped}, total items: {Total}",
+            context.Node.Id, created, skipped, items.Count);
+
+        return NodeOutput.Ok(
+            context.Node.Id,
+            context.Node.OutputVariable,
+            new { created, skipped, totalItems = items.Count },
+            textContent: $"Created {created} notifications ({skipped} skipped)",
+            metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+    }
+
     private Guid? ResolveRecipientId(NotificationNodeConfig config, Dictionary<string, object?> templateContext)
     {
         if (!string.IsNullOrWhiteSpace(config.RecipientId))
@@ -508,4 +616,9 @@ internal sealed record NotificationNodeConfig
 
     /// <summary>Recipient systemuserid (supports template variables). Falls back to run context userId.</summary>
     public string? RecipientId { get; init; }
+    /// <summary>When true, iterate over items from upstream query output and create one notification per item.</summary>
+    public bool IterateItems { get; init; }
+
+    /// <summary>Notification template for each item when IterateItems is true. Supports {{item.fieldName}} variables.</summary>
+    public NotificationNodeConfig? ItemNotification { get; init; }
 }
