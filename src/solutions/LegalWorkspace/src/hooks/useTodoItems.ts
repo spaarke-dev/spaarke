@@ -169,7 +169,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     return () => {
       cancelled = true;
     };
-  }, [userId, mockItems, fetchKey]);
+  }, [userId, mockItems, fetchKey, options.scope, options.businessUnitId]);
 
   // -------------------------------------------------------------------------
   // FeedTodoSyncContext subscription — react to cross-block flag changes

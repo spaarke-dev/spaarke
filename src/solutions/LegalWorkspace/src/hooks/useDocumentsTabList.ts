@@ -79,7 +79,7 @@ export function useDocumentsTabList(
   const abortRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(() => {
-    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}`;
+    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}:${scope ?? 'my'}`;
     _cache.delete(cacheKey);
     setFetchKey((k) => k + 1);
   }, [userId, top, selectedViewId]);
@@ -92,7 +92,7 @@ export function useDocumentsTabList(
       return;
     }
 
-    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}`;
+    const cacheKey = `documentsTab:${userId}:${top}:${selectedViewId ?? ''}:${scope ?? 'my'}`;
 
     const cached = getCached(cacheKey);
     if (cached) {
@@ -150,7 +150,7 @@ export function useDocumentsTabList(
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [service, userId, top, selectedViewId, fetchKey]);
+  }, [service, userId, top, selectedViewId, scope, businessUnitId, fetchKey]);
 
   return {
     documents,
