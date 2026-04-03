@@ -76,6 +76,37 @@ Load when:
 - ✅ **MUST** export TypeScript types alongside components
 - ✅ **MUST** achieve 90%+ test coverage on shared components
 
+### Shared Library Build Chain (CRITICAL)
+
+PCF controls and Code Pages consume the shared libraries differently:
+
+| Consumer | Resolution | Source |
+|----------|-----------|--------|
+| **Code Pages** (Vite) | `resolve.alias` in vite.config.ts | TypeScript **source** (`src/`) |
+| **PCF Controls** (webpack) | `package.json` `main` field | Compiled **dist/** (`dist/index.js`) |
+
+**This means:**
+
+- ✅ **MUST** rebuild shared lib `dist/` before building any PCF control if shared lib source changed
+- ✅ **MUST** rebuild in dependency order: `Spaarke.Auth` → `Spaarke.UI.Components` → PCF control
+- ✅ **MUST** rebuild `@spaarke/auth` dist if auth code changed (PCF uses compiled dist)
+- ❌ **MUST NOT** assume a PCF build picks up shared lib source changes — it reads `dist/` only
+- ❌ **MUST NOT** skip the shared lib rebuild when deploying PCF controls after shared lib changes
+
+**Build commands:**
+```bash
+# 1. Rebuild @spaarke/auth (if auth code changed)
+cd src/client/shared/Spaarke.Auth && rm -rf dist/ && npm run build
+
+# 2. Rebuild @spaarke/ui-components (if UI component code changed)
+cd src/client/shared/Spaarke.UI.Components && rm -rf dist/ && npm run build
+
+# 3. Then build the PCF control
+cd src/client/pcf/SemanticSearchControl && npm run build
+```
+
+Code Pages do NOT need this — Vite reads source directly via alias. But Code Pages DO need `npm install` if the shared lib added new dependencies.
+
 ---
 
 ## MUST NOT Rules
