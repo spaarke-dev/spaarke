@@ -494,7 +494,7 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
     <div className={classes.root}>
       {/* Workspace name + Set default (inline row) */}
       <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end", gap: tokens.spacingHorizontalL }}>
-        <div style={{ flex: "1 1 0", minWidth: 0, maxWidth: "320px" }}>
+        <div style={{ flex: "1 1 0", minWidth: 0, maxWidth: "480px" }}>
           <Label htmlFor="workspace-name" required weight="semibold">
             Workspace name
           </Label>
