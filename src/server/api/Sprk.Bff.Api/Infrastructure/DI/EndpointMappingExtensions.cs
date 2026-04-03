@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
+using Sprk.Bff.Api.Endpoints;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -218,6 +219,9 @@ public static class EndpointMappingExtensions
 
         // Reporting module endpoints (/api/reporting/*) — Power BI Embedded (App Owns Data)
         app.MapReportingEndpoints();
+
+        // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection
+        app.MapRegistrationEndpoints();
     }
 
     private static void MapSpaFallback(WebApplication app)

@@ -21,10 +21,10 @@ public static class RegistrationModule
         services.AddSingleton<TrackingIdGenerator>();
         services.AddSingleton<RegistrationDataverseService>();
         services.AddSingleton<RegistrationEmailService>();
+        services.AddSingleton<DemoProvisioningService>();
+        services.AddSingleton<EmailDomainValidator>();
 
         // Services to be registered in subsequent tasks:
-        // - DemoProvisioningService (Task 020)
-        // - EmailDomainValidator (Task 021)
         // - DemoExpirationService (Task 030) — hosted service
 
         return services;
