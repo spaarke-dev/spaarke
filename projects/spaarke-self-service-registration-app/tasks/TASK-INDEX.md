@@ -14,9 +14,9 @@ Tasks are structured for **maximum parallel execution**. Each phase completes be
 | 012 | Dataverse Schema: Table, Views, Form, Sitemap | 1 | P1 | ✅ | 001 |
 | 013 | Entra ID Setup Scripts | 1 | P1 | ✅ | 001 |
 | 014 | Email Templates and Registration Email Service | 1 | P1 | ✅ | 001 |
-| 020 | Provisioning Orchestrator Service | 2 | P2 | 🔲 | 010, 011, 014 |
-| 021 | Registration API Endpoints | 2 | P2 | 🔲 | 010, 011, 014 |
-| 022 | Website: Request Early Access Form | 2 | P2 | 🔲 | 001 |
+| 020 | Provisioning Orchestrator Service | 2 | P2 | ✅ | 010, 011, 014 |
+| 021 | Registration API Endpoints | 2 | P2 | ✅ | 010, 011, 014 |
+| 022 | Website: Request Early Access Form | 2 | P2 | ✅ | 001 |
 | 030 | Demo Expiration BackgroundService | 3 | P3 | 🔲 | 020 |
 | 031 | Ribbon Buttons and JS Webresource | 3 | P3 | 🔲 | 012, 021 |
 | 040 | DI Wiring, Configuration, Program.cs Integration | 4 | — (serial) | 🔲 | 020, 021, 030 |
@@ -82,7 +82,7 @@ Phase 5:  [050]
 ## Progress Summary
 
 - **Total tasks**: 15
-- **Completed**: 6
+- **Completed**: 9
 - **In Progress**: 0
-- **Remaining**: 9
+- **Remaining**: 6
 - **Max parallel agents**: 5 (Phase 1)
