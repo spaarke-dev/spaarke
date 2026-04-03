@@ -53,7 +53,7 @@ const useStyles = makeStyles({
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+    gridTemplateColumns: "repeat(3, 1fr)",
     gap: "12px",
   },
   card: {
