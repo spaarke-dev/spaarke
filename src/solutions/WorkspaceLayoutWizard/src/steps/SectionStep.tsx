@@ -213,6 +213,19 @@ export const SectionStep: React.FC<SectionStepProps> = ({
 
   return (
     <div className={classes.root}>
+      {/* Scope setting */}
+      <div style={{ display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS }}>
+        <Label weight="semibold">Scope</Label>
+        <RadioGroup
+          value={scope}
+          onChange={(_e, data) => onScopeChange(data.value as WorkspaceScope)}
+          layout="horizontal"
+        >
+          <Radio value="my" label="Show only my records" />
+          <Radio value="all" label="Show all records" />
+        </RadioGroup>
+      </div>
+
       <Text className={classes.heading} size={400} weight="regular" as="p">
         Select the sections you want in your workspace layout.
       </Text>
@@ -253,18 +266,6 @@ export const SectionStep: React.FC<SectionStepProps> = ({
         );
       })}
 
-      {/* Scope setting */}
-      <div style={{ display: "flex", flexDirection: "column", gap: tokens.spacingVerticalXS, marginTop: tokens.spacingVerticalM }}>
-        <Label weight="semibold">Scope</Label>
-        <RadioGroup
-          value={scope}
-          onChange={(_e, data) => onScopeChange(data.value as WorkspaceScope)}
-          layout="horizontal"
-        >
-          <Radio value="my" label="Show only my records" />
-          <Radio value="all" label="Show all records" />
-        </RadioGroup>
-      </div>
     </div>
   );
 };
