@@ -71,7 +71,7 @@ import {
   ChevronLeft16Regular,
 } from '@fluentui/react-icons';
 import type { RichTextEditorRef } from '@spaarke/ui-components';
-import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS, PanelSplitter } from '@spaarke/ui-components';
+import { PanelSplitter } from '@spaarke/ui-components';
 
 import { useDocumentHistory } from '@spaarke/ui-components/hooks/useDocumentHistory';
 import { useAuth } from './hooks/useAuth';
@@ -327,9 +327,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
     isExecuting,
     executionError,
     progressMessage: executionProgress,
-    chunkCount,
-    activeStepId,
-    completedStepIds,
     triggerExecute,
     cancelExecution,
   } = useAnalysisExecution({
@@ -590,18 +587,6 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
                     selectedText.length
                   );
                 }}
-              />
-            )}
-            {/* AI analysis progress stepper (new analysis only — hide once streaming begins) */}
-            {isExecuting && chunkCount < 5 && (
-              <AiProgressStepper
-                variant="card"
-                steps={DOCUMENT_ANALYSIS_STEPS}
-                activeStepId={activeStepId}
-                completedStepIds={completedStepIds}
-                title="Analyzing Document"
-                onCancel={cancelExecution}
-                isStreaming={isExecuting}
               />
             )}
             {/* Task 103: Diff review panel for AI-proposed revisions */}
