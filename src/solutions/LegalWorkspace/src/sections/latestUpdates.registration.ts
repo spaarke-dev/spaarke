@@ -47,6 +47,8 @@ export const latestUpdatesRegistration: SectionRegistration = {
           embedded: true,
           webApi: context.webApi as any,
           userId: context.userId,
+          scope: context.scope,
+          businessUnitId: context.businessUnitId,
           textOnlyFilter: true,
           gridLayout: true,
           hideOverflowMenu: true,

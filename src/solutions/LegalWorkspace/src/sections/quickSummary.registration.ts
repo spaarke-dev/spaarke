@@ -91,6 +91,8 @@ export const quickSummaryRegistration: SectionRegistration = {
           React.createElement(QuickSummaryRow, {
             webApi: context.webApi as any,
             userId: context.userId,
+            scope: context.scope,
+            businessUnitId: context.businessUnitId,
           }),
         ),
     };

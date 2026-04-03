@@ -11,6 +11,10 @@ export interface IQuickSummaryRowProps {
   webApi: IWebApi;
   /** Current user's systemuserid GUID. */
   userId: string;
+  /** Record scope: "my" (user only) or "all" (user + BU teams). */
+  scope?: "my" | "all";
+  /** Business unit ID (required when scope="all"). */
+  businessUnitId?: string;
 }
 
 const useStyles = makeStyles({
@@ -35,9 +39,11 @@ const useStyles = makeStyles({
 export const QuickSummaryRow: React.FC<IQuickSummaryRowProps> = ({
   webApi,
   userId,
+  scope,
+  businessUnitId,
 }) => {
   const styles = useStyles();
-  const { counts, badgeCounts, isLoading } = useQuickSummaryCounts(webApi, userId);
+  const { counts, badgeCounts, isLoading } = useQuickSummaryCounts(webApi, userId, scope, businessUnitId);
 
   return (
     <div className={styles.row}>

@@ -238,6 +238,10 @@ export interface IActivityFeedProps {
   onRefresh?: () => void;
   /** Called when the user clicks "+ Create" in the filter bar. */
   onCreateNew?: () => void;
+  /** Record scope: "my" (user only) or "all" (user + BU teams). */
+  scope?: "my" | "all";
+  /** Business unit ID (required when scope="all"). */
+  businessUnitId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +261,8 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
   onOpenAll,
   onRefresh,
   onCreateNew,
+  scope,
+  businessUnitId,
 }) => {
   const styles = useStyles();
 
@@ -276,6 +282,8 @@ export const ActivityFeed: React.FC<IActivityFeedProps> = ({
     filter: EventFilterCategory.All,
     top: 500,
     mockEvents,
+    scope,
+    businessUnitId,
   });
 
   // Seed FeedTodoSyncContext with initial todoflag states from the fetched events.

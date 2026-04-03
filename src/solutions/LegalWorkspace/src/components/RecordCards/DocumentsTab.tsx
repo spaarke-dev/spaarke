@@ -30,6 +30,10 @@ export interface IDocumentsTabProps {
   selectedViewId?: string;
   /** View type: 'savedquery' or 'userquery'. */
   selectedViewType?: string;
+  /** Record scope. */
+  scope?: 'my' | 'all';
+  /** Business unit ID. */
+  businessUnitId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,9 +49,11 @@ export const DocumentsTab: React.FC<IDocumentsTabProps> = ({
   onShowMore,
   selectedViewId,
   selectedViewType,
+  scope,
+  businessUnitId,
 }) => {
   const { documents, isLoading, error, totalCount, refetch } =
-    useDocumentsTabList(service, userId, { top: 50, selectedViewId, selectedViewType });
+    useDocumentsTabList(service, userId, { top: 50, selectedViewId, selectedViewType, scope, businessUnitId });
 
   // Report count to parent
   React.useEffect(() => {

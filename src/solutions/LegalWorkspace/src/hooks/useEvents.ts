@@ -72,6 +72,10 @@ export interface IUseEventsOptions {
    * When provided, bypasses Xrm.WebApi and resolves immediately.
    */
   mockEvents?: IEvent[];
+  /** Record scope. */
+  scope?: 'my' | 'all';
+  /** Business unit ID. */
+  businessUnitId?: string;
 }
 
 export interface IUseEventsResult {
@@ -191,7 +195,7 @@ export function useEvents(options: IUseEventsOptions): IUseEventsResult {
     setError(null);
 
     serviceRef.current
-      .getEventsFeed(userId, filter, { top })
+      .getEventsFeed(userId, filter, { top, scope: options.scope, businessUnitId: options.businessUnitId })
       .then((result) => {
         if (cancelled) return;
 

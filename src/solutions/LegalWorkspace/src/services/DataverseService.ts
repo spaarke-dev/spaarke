@@ -194,10 +194,11 @@ export class DataverseService {
   async getEventsFeed(
     userId: string,
     filter: EventFilterCategory = EventFilterCategory.All,
-    options: { top?: number } = {}
+    options: { top?: number; scope?: 'my' | 'all'; businessUnitId?: string } = {}
   ): Promise<IResult<IEvent[]>> {
     const top = options.top ?? 50;
-    const query = buildEventsFeedQuery(userId, filter, top);
+    const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
+    const query = buildEventsFeedQuery(userId, filter, top, ctx);
 
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_event', query, top);
@@ -371,10 +372,11 @@ export class DataverseService {
    */
   async getDocumentsForTab(
     userId: string,
-    options: { top?: number } = {}
+    options: { top?: number; scope?: 'my' | 'all'; businessUnitId?: string } = {}
   ): Promise<IResult<IDocument[]>> {
     const top = options.top ?? 50;
-    const query = buildDocumentsTabQuery(userId, top);
+    const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
+    const query = buildDocumentsTabQuery(userId, top, ctx);
 
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_document', query, top);
