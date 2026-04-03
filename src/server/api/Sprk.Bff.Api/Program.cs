@@ -48,6 +48,9 @@ builder.Services.AddFinanceModule(builder.Configuration);
 // Communication module (email sending via Graph API)
 builder.Services.AddCommunicationModule(builder.Configuration);
 
+// Demo Registration module (self-service demo access provisioning)
+builder.Services.AddRegistrationModule(builder.Configuration);
+
 // SPE Admin module (environments, container type configs, Graph service, audit logging, dashboard sync)
 builder.Services.AddSpeAdminModule(builder.Configuration);
 
