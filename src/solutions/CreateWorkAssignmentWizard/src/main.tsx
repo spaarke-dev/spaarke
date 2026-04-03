@@ -46,6 +46,21 @@ function App() {
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
+  // Resolve SPE container ID from the user's business unit
+  const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
+    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
+    const buId = user["_businessunitid_value"] as string;
+    if (!buId) throw new Error("Could not resolve business unit");
+    const bu = await xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid");
+    const containerId = bu["sprk_containerid"] as string;
+    if (!containerId) throw new Error("Business unit has no SPE container configured");
+    return containerId;
+  }, []);
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
@@ -70,6 +85,7 @@ function App() {
         onClose={handleClose}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
+        resolveSpeContainerId={resolveSpeContainerId}
       />
     </FluentProvider>
   );

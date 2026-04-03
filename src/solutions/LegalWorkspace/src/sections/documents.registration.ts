@@ -202,10 +202,11 @@ const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
   const [selectedView, setSelectedView] = React.useState<ISelectedView>({ viewId: undefined, viewType: undefined });
 
   // Register the setter so the title component can trigger view changes.
-  const stableOnControllerReady = React.useRef(onControllerReady);
+  // Runs on every render to ensure the controller ref always has the latest setter
+  // (the ref is recreated when the factory's config memo re-evaluates).
   React.useEffect(() => {
-    stableOnControllerReady.current?.(setSelectedView);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    onControllerReady?.(setSelectedView);
+  });
 
   return React.createElement(DocumentsTab, {
     service,

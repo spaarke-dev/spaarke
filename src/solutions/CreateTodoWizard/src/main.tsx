@@ -50,6 +50,18 @@ function App() {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
 
+  const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
+    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
+    const buId = user["_businessunitid_value"] as string;
+    if (!buId) throw new Error("Could not resolve business unit");
+    const bu = await xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid");
+    return (bu["sprk_containerid"] as string) || "";
+  }, []);
+
   if (!isAuthReady) {
     return (
       <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -69,6 +81,7 @@ function App() {
         onClose={handleClose}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
+        resolveSpeContainerId={resolveSpeContainerId}
       />
     </FluentProvider>
   );
