@@ -1,17 +1,15 @@
 /**
- * DocumentCard — 2-row card for sprk_document records in the Documents tab.
+ * DocumentCard — card for sprk_document records in the Documents tab.
  *
- * Follows the same visual pattern as RecordCard but with:
- *   - Dynamic file-type icon (based on sprk_filetype)
- *   - Preview button (eye icon) opens FilePreviewDialog
- *   - Overflow menu: Find Similar, Summary
+ * Thin wrapper around RecordCardShell from @spaarke/ui-components.
+ * Handles document-specific tools (preview, AI summary, open file,
+ * find similar) and child dialogs.
  *
- * Card double-click opens the record in a new tab via Xrm.Navigation.openForm.
+ * Double-click opens the record in a new tab via Xrm.Navigation.openForm.
  */
 
 import * as React from "react";
 import {
-  makeStyles,
   tokens,
   Text,
   Button,
@@ -30,109 +28,9 @@ import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { getBffBaseUrl, getTenantId } from "../../config/runtimeConfig";
-import { AiSummaryPopover, type ISummaryData, FindSimilarDialog } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarDialog } from "@spaarke/ui-components";
+import type { ISummaryData } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
-
-// ---------------------------------------------------------------------------
-// Styles (matching RecordCard pattern)
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  card: {
-    display: "flex",
-    flexDirection: "column",
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusMedium,
-    boxShadow: tokens.shadow2,
-    marginBottom: tokens.spacingVerticalS,
-    borderLeftWidth: "3px",
-    borderLeftStyle: "solid",
-    borderLeftColor: tokens.colorBrandStroke1,
-    cursor: "pointer",
-    transitionProperty: "background-color, box-shadow",
-    transitionDuration: tokens.durationFaster,
-    transitionTimingFunction: tokens.curveEasyEase,
-    ":hover": {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-      boxShadow: tokens.shadow4,
-    },
-    ":focus-visible": {
-      outlineStyle: "solid",
-      outlineWidth: "2px",
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: "-2px",
-    },
-  },
-  mainRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: tokens.spacingHorizontalL,
-  },
-  typeIconCircle: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    width: "40px",
-    height: "40px",
-    borderRadius: "50%",
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
-    marginTop: "2px",
-  },
-  contentColumn: {
-    flex: "1 1 0",
-    minWidth: 0,
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalS,
-  },
-  primaryRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    flexWrap: "nowrap",
-    minWidth: 0,
-  },
-  title: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-    flexShrink: 0,
-    maxWidth: "50%",
-  },
-  fieldText: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    color: tokens.colorNeutralForeground3,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  secondaryRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
-  },
-  actionsColumn: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalXXS,
-    flexShrink: 0,
-    marginLeft: tokens.spacingHorizontalL,
-  },
-});
 
 // ---------------------------------------------------------------------------
 // Badge sub-component
@@ -183,6 +81,29 @@ function formatShortDate(isoDate: string | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Styles (content-specific only — layout handled by RecordCardShell)
+// ---------------------------------------------------------------------------
+
+const titleStyle: React.CSSProperties = {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: tokens.colorNeutralForeground1,
+  fontWeight: tokens.fontWeightSemibold,
+  flexShrink: 0,
+  maxWidth: "50%",
+};
+
+const fieldStyle: React.CSSProperties = {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: tokens.colorNeutralForeground3,
+  flexShrink: 1,
+  minWidth: 0,
+};
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -196,21 +117,14 @@ export interface IDocumentCardProps {
 
 export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
   ({ document: doc }) => {
-    const styles = useStyles();
-
-    // Resolve dynamic file icon
     const IconComponent = getFileTypeIcon(doc.sprk_filetype);
 
-    // ----- File Preview Dialog state -----
+    // ----- Dialog state -----
     const [filePreviewOpen, setFilePreviewOpen] = React.useState(false);
+    const [findSimilarUrl, setFindSimilarUrl] = React.useState<string | null>(null);
 
-    // ----- Find Similar state -----
-    const [findSimilarUrl, setFindSimilarUrl] = React.useState<string | null>(
-      null
-    );
-
-    // ----- Card double-click → open record in new tab -----
-    const handleCardDoubleClick = React.useCallback(() => {
+    // ----- Card double-click → open record -----
+    const handleDoubleClick = React.useCallback(() => {
       navigateToEntity({
         action: "openRecord",
         entityName: "sprk_document",
@@ -218,9 +132,10 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       });
     }, [doc.sprk_documentid]);
 
-    const handleCardKeyDown = React.useCallback(
-      (e: React.KeyboardEvent) => {
-        if (e.key === "Enter") {
+    // ----- Card Enter key → same as double-click -----
+    const handleKeyDown = React.useCallback(
+      (e: React.MouseEvent | React.KeyboardEvent) => {
+        if ("key" in e && e.key === "Enter") {
           e.preventDefault();
           navigateToEntity({
             action: "openRecord",
@@ -232,48 +147,38 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       [doc.sprk_documentid]
     );
 
-    // ----- Preview action (opens FilePreviewDialog) -----
-    const handlePreviewClick = React.useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setFilePreviewOpen(true);
-      },
-      []
-    );
+    // ----- Tool: Preview -----
+    const handlePreview = React.useCallback(() => {
+      setFilePreviewOpen(true);
+    }, []);
 
-    // ----- Open File — prefer desktop app, fall back to web -----
-    const handleOpenFileClick = React.useCallback(
-      async (e: React.MouseEvent) => {
-        e.stopPropagation();
-        try {
-          const links = await getDocumentOpenLinks(doc.sprk_documentid);
-          if (links?.desktopUrl) {
-            window.location.href = links.desktopUrl;
-            return;
-          }
-          // No desktop protocol — download via BFF and let OS open with default app
-          const contentUrl = `${getBffBaseUrl()}/api/documents/${encodeURIComponent(doc.sprk_documentid)}/content`;
-          const response = await authenticatedFetch(contentUrl);
-          if (response.ok) {
-            const blob = await response.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = objectUrl;
-            a.download = links?.fileName ?? doc.sprk_name ?? "document";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(objectUrl);
-            return;
-          }
-        } catch (err) {
-          console.error("[DocumentCard] Open file error:", err);
+    // ----- Tool: Open File -----
+    const handleOpenFile = React.useCallback(async () => {
+      try {
+        const links = await getDocumentOpenLinks(doc.sprk_documentid);
+        if (links?.desktopUrl) {
+          window.location.href = links.desktopUrl;
+          return;
         }
-      },
-      [doc.sprk_documentid]
-    );
+        const contentUrl = `${getBffBaseUrl()}/api/documents/${encodeURIComponent(doc.sprk_documentid)}/content`;
+        const response = await authenticatedFetch(contentUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = objectUrl;
+          a.download = links?.fileName ?? doc.sprk_name ?? "document";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(objectUrl);
+        }
+      } catch (err) {
+        console.error("[DocumentCard] Open file error:", err);
+      }
+    }, [doc.sprk_documentid]);
 
-    // ----- Find Similar -----
+    // ----- Tool: Find Similar -----
     const handleFindSimilar = React.useCallback(async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -283,35 +188,25 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
           (window as any)?.Xrm;
         const clientUrl =
           xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "";
-        // tenantId is captured at bootstrap via resolveRuntimeConfig() which has
-        // reliable Xrm access. The runtimeConfig singleton is the authoritative source.
         const tenantId = getTenantId();
-
         const theme = getEffectiveDarkMode() ? "dark" : "light";
         const data = new URLSearchParams({
           documentId: doc.sprk_documentid,
           tenantId,
           theme,
         }).toString();
-
-        const url = `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(data)}`;
-        setFindSimilarUrl(url);
+        setFindSimilarUrl(
+          `${clientUrl}/WebResources/sprk_documentrelationshipviewer?data=${encodeURIComponent(data)}`
+        );
       } catch (err) {
         console.error("[DocumentCard] Find Similar error:", err);
       }
     }, [doc.sprk_documentid]);
 
-    // ----- Stop propagation on menu/action clicks -----
-    const handleActionsClick = React.useCallback((e: React.MouseEvent) => {
-      e.stopPropagation();
-    }, []);
-
-    // ----- Summary fetch callback for AiSummaryPopover -----
+    // ----- Tool: AI Summary -----
     const handleFetchSummary = React.useCallback(async (): Promise<ISummaryData> => {
-      // Data is already on the document record — resolve synchronously
       const tldr = doc.sprk_filetldr ?? null;
       let summary = doc.sprk_filesummary ?? null;
-      // Skip structured data (JSON blobs, markdown code fences)
       if (summary) {
         const trimmed = summary.trim();
         if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith("```")) {
@@ -321,8 +216,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
       return { summary, tldr };
     }, [doc.sprk_filetldr, doc.sprk_filesummary]);
 
-    // Build card aria label
-    const cardAriaLabel = [
+    const ariaLabel = [
       doc.sprk_documentname,
       doc.sprk_documentdescription,
       doc.statuscodeName ? `Status: ${doc.statuscodeName}` : "",
@@ -332,66 +226,48 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
 
     return (
       <>
-        <div
-          className={styles.card}
-          role="listitem"
-          tabIndex={0}
-          aria-label={cardAriaLabel}
-          onDoubleClick={handleCardDoubleClick}
-          onKeyDown={handleCardKeyDown}
-        >
-          <div className={styles.mainRow}>
-            {/* File type icon in 40px circle */}
-            <div
-              className={styles.typeIconCircle}
-              aria-label={doc.sprk_filetype ?? "Document"}
-              role="img"
-            >
-              <IconComponent fontSize={20} />
-            </div>
-
-            {/* Content: 2 rows */}
-            <div className={styles.contentColumn}>
-              {/* Row 1: Document name + description */}
-              <div className={styles.primaryRow}>
-                <Text as="span" size={400} className={styles.title}>
-                  {doc.sprk_documentname}
+        <RecordCardShell
+          icon={
+            <CardIcon>
+              <IconComponent fontSize={20} aria-label={doc.sprk_filetype ?? "Document"} />
+            </CardIcon>
+          }
+          primaryContent={
+            <>
+              <Text as="span" size={400} style={titleStyle}>
+                {doc.sprk_documentname}
+              </Text>
+              {doc.sprk_documentdescription && (
+                <Text as="span" size={300} style={fieldStyle}>
+                  {doc.sprk_documentdescription}
                 </Text>
-                {doc.sprk_documentdescription && (
-                  <Text as="span" size={300} className={styles.fieldText}>
-                    {doc.sprk_documentdescription}
-                  </Text>
-                )}
-              </div>
-
-              {/* Row 2: Status badge + dates */}
-              <div className={styles.secondaryRow}>
-                {doc.statuscodeName && (
-                  <StatusBadge label={doc.statuscodeName} />
-                )}
-                {doc.createdon && (
-                  <Text as="span" size={200} className={styles.fieldText}>
-                    Created: {formatShortDate(doc.createdon)}
-                  </Text>
-                )}
-                {doc.modifiedon && (
-                  <Text as="span" size={200} className={styles.fieldText}>
-                    Modified: {formatShortDate(doc.modifiedon)}
-                  </Text>
-                )}
-              </div>
-            </div>
-
-            {/* Actions: icon-only buttons — Preview, Summary, Open File, Find Similar */}
-            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-            <div className={styles.actionsColumn} onClick={handleActionsClick}>
+              )}
+            </>
+          }
+          secondaryContent={
+            <>
+              {doc.statuscodeName && <StatusBadge label={doc.statuscodeName} />}
+              {doc.createdon && (
+                <Text as="span" size={200} style={fieldStyle}>
+                  Created: {formatShortDate(doc.createdon)}
+                </Text>
+              )}
+              {doc.modifiedon && (
+                <Text as="span" size={200} style={fieldStyle}>
+                  Modified: {formatShortDate(doc.modifiedon)}
+                </Text>
+              )}
+            </>
+          }
+          tools={
+            <>
               <Tooltip content="Preview" relationship="label">
                 <Button
                   appearance="subtle"
                   size="medium"
                   icon={<EyeRegular aria-hidden="true" />}
                   aria-label="Preview document"
-                  onClick={handlePreviewClick}
+                  onClick={handlePreview}
                 />
               </Tooltip>
               <AiSummaryPopover
@@ -403,7 +279,6 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                       size="medium"
                       icon={<SparkleRegular aria-hidden="true" />}
                       aria-label="AI Summary"
-                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     />
                   </Tooltip>
                 }
@@ -414,7 +289,7 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                   size="medium"
                   icon={<FolderOpenRegular aria-hidden="true" />}
                   aria-label="Open file"
-                  onClick={handleOpenFileClick}
+                  onClick={handleOpenFile}
                 />
               </Tooltip>
               <Tooltip content="Find Similar" relationship="label">
@@ -423,24 +298,22 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
                   size="medium"
                   icon={<DocumentSearchRegular aria-hidden="true" />}
                   aria-label="Find Similar"
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    handleFindSimilar();
-                  }}
+                  onClick={handleFindSimilar}
                 />
               </Tooltip>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+          onDoubleClick={handleDoubleClick}
+          onClick={handleKeyDown}
+          ariaLabel={ariaLabel}
+        />
 
-        {/* Find Similar — shared iframe dialog */}
+        {/* Child dialogs */}
         <FindSimilarDialog
           open={!!findSimilarUrl}
           onClose={() => setFindSimilarUrl(null)}
           url={findSimilarUrl}
         />
-
-        {/* File Preview Dialog */}
         <FilePreviewDialog
           open={filePreviewOpen}
           documentId={doc.sprk_documentid}
