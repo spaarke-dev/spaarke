@@ -561,7 +561,8 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         {
             id = context.RunId.ToString(),
             playbookId = context.PlaybookId.ToString(),
-            tenantId = context.TenantId
+            tenantId = context.TenantId,
+            userId = context.UserId?.ToString()
         };
 
         return templateContext;
