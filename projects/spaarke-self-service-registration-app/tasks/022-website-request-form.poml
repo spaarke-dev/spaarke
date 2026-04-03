@@ -1,0 +1,72 @@
+<task id="REG-022" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Website: Request Early Access Form</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>website, react, nextjs, frontend</tags>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the "Request Early Access" page on the Spaarke website (spaarke-website repo,
+    Next.js 16 + React 19). Public page at /demo with a form collecting: first name, last name,
+    work email, organization, job title, phone, use case (dropdown), referral source (dropdown),
+    notes, consent checkbox. Client-side validation, reCAPTCHA, and a Next.js API route that
+    proxies to the BFF API. Shows confirmation with tracking ID on success.
+
+    NOTE: This task works in the spaarke-website repo, not the main spaarke repo.
+  </prompt>
+
+  <role>React/Next.js developer with form handling, validation, and Tailwind CSS experience</role>
+
+  <goal>
+    A working public form at spaarke.com/demo that submits demo access requests to the BFF API
+    and shows a confirmation message. Form has proper validation, reCAPTCHA, and responsive design.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="spec">Public page — no authentication required</constraint>
+    <constraint source="spec">Next.js 16 + React 19 + Tailwind CSS (website's existing stack)</constraint>
+    <constraint source="spec">reCAPTCHA already integrated in website — reuse existing setup</constraint>
+    <constraint source="spec">10 form fields per spec Section 5.2</constraint>
+    <constraint source="spec">API route proxies to BFF: POST /api/registration/demo-request</constraint>
+    <constraint source="spec">Confirmation shows tracking ID from API response</constraint>
+    <constraint source="spec">Navigation CTA: "Request Early Access" button in site header/hero</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Explore website repo">Understand existing page structure, components, reCAPTCHA setup</step>
+    <step order="2" name="Create demo page">app/demo/page.tsx with page layout and metadata</step>
+    <step order="3" name="Create DemoRequestForm component">React 19 form with all fields, client-side validation</step>
+    <step order="4" name="Add reCAPTCHA">Integrate existing reCAPTCHA component into form</step>
+    <step order="5" name="Create API route">app/api/registration/demo-request/route.ts — proxy to BFF</step>
+    <step order="6" name="Add confirmation state">Success message with tracking ID after submission</step>
+    <step order="7" name="Add navigation CTA">Request Early Access button in site header/hero</step>
+    <step order="8" name="Responsive design">Test on mobile and desktop</step>
+  </steps>
+
+  <outputs>
+    <output type="code">spaarke-website: app/demo/page.tsx</output>
+    <output type="code">spaarke-website: components/DemoRequestForm.tsx</output>
+    <output type="code">spaarke-website: app/api/registration/demo-request/route.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Form renders at /demo with all 10 fields</criterion>
+    <criterion>Client-side validation prevents empty required fields</criterion>
+    <criterion>reCAPTCHA token included in submission</criterion>
+    <criterion>API route proxies to BFF API correctly</criterion>
+    <criterion>Confirmation shows tracking ID on success</criterion>
+    <criterion>Error states shown for validation failures and API errors</criterion>
+    <criterion>Responsive on mobile and desktop</criterion>
+  </acceptance-criteria>
+</task>

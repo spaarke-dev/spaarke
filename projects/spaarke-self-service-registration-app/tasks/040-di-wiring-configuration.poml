@@ -1,0 +1,67 @@
+<task id="REG-040" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>DI Wiring, Configuration, and Program.cs Integration</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>bff-api, di, configuration, integration</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>020,021,030</dependencies>
+  </metadata>
+
+  <prompt>
+    Complete the RegistrationModule DI wiring: register all services (GraphUserService,
+    RegistrationDataverseService, RegistrationEmailService, DemoProvisioningService,
+    EmailDomainValidator, DemoExpirationService), configure DemoProvisioningOptions from
+    appsettings, register endpoints in Program.cs, add appsettings section with placeholder
+    values for demo environment configuration.
+  </prompt>
+
+  <role>Senior .NET developer with DI, Options pattern, and Minimal API registration experience</role>
+
+  <goal>
+    All registration services properly wired in DI. BFF API starts successfully with
+    registration endpoints mapped and expiration service running. Appsettings has
+    DemoProvisioning section with documented placeholder values.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-010">Max 15 non-framework DI registrations; register concretes</constraint>
+    <constraint source="spec">DemoProvisioningOptions validated on startup (ValidateOnStart)</constraint>
+    <constraint source="spec">Configuration supports multiple environments via array</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Complete RegistrationModule">Register all services, add Options configuration</step>
+    <step order="2" name="Wire in Program.cs">Add builder.Services.AddRegistrationModule() and endpoint mapping</step>
+    <step order="3" name="Add appsettings section">DemoProvisioning with placeholder values and comments</step>
+    <step order="4" name="Verify startup">dotnet run — confirm API starts, endpoints registered, expiration service running</step>
+    <step order="5" name="Verify build">dotnet build and dotnet test</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All registration services registered in DI</criterion>
+    <criterion>DemoProvisioningOptions validates on startup</criterion>
+    <criterion>Registration endpoints accessible at /api/registration/*</criterion>
+    <criterion>DemoExpirationService starts as hosted service</criterion>
+    <criterion>Appsettings has documented placeholder configuration</criterion>
+    <criterion>API starts without errors</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

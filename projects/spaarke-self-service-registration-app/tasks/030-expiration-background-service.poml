@@ -1,0 +1,74 @@
+<task id="REG-030" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Demo Expiration BackgroundService</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>bff-api, background-service, expiration</tags>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <prompt>
+    Create DemoExpirationService — a BackgroundService that runs daily at midnight UTC
+    (following the exact DailySendCountResetService pattern). It queries Dataverse for
+    provisioned records past their expiration date, disables the Entra account, removes
+    from Demo Team, revokes SPE access, sends expiration email, and updates status to Expired.
+    Also sends pre-expiration warning emails 3 days before expiry.
+  </prompt>
+
+  <role>Senior .NET developer with BackgroundService and scheduled task experience</role>
+
+  <goal>
+    A DemoExpirationService that runs daily, automatically disables expired demo accounts,
+    and sends warning emails before expiration. Follows DailySendCountResetService pattern exactly.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/DailySendCountResetService.cs</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationEmailService.cs</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">BackgroundService pattern — not Azure Functions</constraint>
+    <constraint source="spec">Runs daily at midnight UTC</constraint>
+    <constraint source="spec">Disable (not delete) expired accounts</constraint>
+    <constraint source="spec">Pre-expiration warning: 3 days before expiry</constraint>
+    <constraint source="spec">On expiry: disable Entra account, remove from team, revoke SPE, send email, update status</constraint>
+    <constraint source="spec">Admin can manually adjust expiration date — service respects the date on the record</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read DailySendCountResetService">Follow this exact pattern for loop, delay, error handling</step>
+    <step order="2" name="Create DemoExpirationService">BackgroundService with daily midnight UTC execution</step>
+    <step order="3" name="Implement expiration check">Query expired records, process each</step>
+    <step order="4" name="Implement account disable">Disable Entra, remove team, revoke SPE, send email, update status</step>
+    <step order="5" name="Implement pre-expiration warning">Query records expiring in 3 days, send warning email</step>
+    <step order="6" name="Write unit tests">Test delay calculation, expiration logic, warning logic</step>
+    <step order="7" name="Verify build">dotnet build and dotnet test</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/DemoExpirationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Follows DailySendCountResetService pattern exactly</criterion>
+    <criterion>Runs daily at midnight UTC</criterion>
+    <criterion>Disables expired accounts (accountEnabled=false)</criterion>
+    <criterion>Removes from Demo Team</criterion>
+    <criterion>Revokes SPE container access</criterion>
+    <criterion>Sends expiration email</criterion>
+    <criterion>Sends warning email 3 days before</criterion>
+    <criterion>Respects manually-adjusted expiration dates</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,74 @@
+<task id="REG-042" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>End-to-End Testing and Verification</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>testing, e2e, verification</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>041</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute comprehensive end-to-end testing of the full registration flow:
+    1. Submit form → verify record created in Demo Dataverse
+    2. Verify admin notification email received
+    3. Approve in MDA → verify account provisioned (Entra user, licenses, Dataverse user, team, SPE)
+    4. Verify welcome email received with correct credentials
+    5. Log in to demo environment with provisioned account
+    6. Verify no MFA prompt
+    7. Test idempotency (approve same request twice)
+    8. Test expiration (set date to past, run service, verify disable)
+    9. Test username collision (two "Jane Smith" requests)
+    10. Test rejection flow
+    Document results and any issues found.
+  </prompt>
+
+  <role>QA engineer with end-to-end testing and Azure/Dataverse verification experience</role>
+
+  <goal>
+    All E2E tests pass. Full registration→provisioning→login→expiration flow verified working.
+    Any issues documented and resolved.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="spec">Provisioning must complete in less than 60 seconds</constraint>
+    <constraint source="spec">Idempotent — no duplicates on retry</constraint>
+    <constraint source="spec">Username collision: jane.smith2@demo.spaarke.com</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Test submit">Submit form, verify Dataverse record + admin email</step>
+    <step order="2" name="Test approve">Click Approve ribbon, verify full provisioning chain</step>
+    <step order="3" name="Test login">Log in with demo credentials in InPrivate browser</step>
+    <step order="4" name="Test no MFA">Confirm no MFA prompt during login</step>
+    <step order="5" name="Test idempotency">Approve same request again, verify no duplicates</step>
+    <step order="6" name="Test collision">Submit second "Jane Smith", verify numbered username</step>
+    <step order="7" name="Test rejection">Reject a request, verify status update + optional email</step>
+    <step order="8" name="Test expiration">Set expiration to past, run service, verify account disabled</step>
+    <step order="9" name="Test warning email">Set expiration to 3 days out, run service, verify email</step>
+    <step order="10" name="Document results">Record all test results, issues, and resolutions</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/spaarke-self-service-registration-app/notes/e2e-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Full submit → approve → login flow works end-to-end</criterion>
+    <criterion>Provisioning completes in less than 60 seconds</criterion>
+    <criterion>Welcome email received with correct credentials</criterion>
+    <criterion>Demo account can log in without MFA</criterion>
+    <criterion>Idempotency verified — no duplicates</criterion>
+    <criterion>Username collision handled correctly</criterion>
+    <criterion>Expiration service disables accounts correctly</criterion>
+    <criterion>Pre-expiration warning emails sent</criterion>
+  </acceptance-criteria>
+</task>

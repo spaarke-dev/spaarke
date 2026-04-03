@@ -1,0 +1,72 @@
+<task id="REG-031" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Ribbon Buttons and JS Webresource</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>dataverse, ribbon, webresource, javascript</tags>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>012,021</dependencies>
+  </metadata>
+
+  <prompt>
+    Create Approve Demo Access and Reject Request ribbon buttons on the sprk_registrationrequest
+    entity in the Demo MDA. Buttons appear on both HomePageGrid (list view) and form command bar.
+    Visible only when sprk_status = Submitted. The JS webresource (sprk_registrationribbon.js)
+    handles button clicks: Approve shows confirmation dialog then calls BFF API POST
+    /api/registration/requests/{id}/approve; Reject prompts for reason then calls reject endpoint.
+    Support bulk approve from list view multi-select.
+  </prompt>
+
+  <role>Dataverse ribbon customization developer with JavaScript and Xrm API experience</role>
+
+  <goal>
+    Working Approve and Reject ribbon buttons on sprk_registrationrequest entity that call
+    BFF API endpoints, with proper enable rules, confirmation dialogs, progress indicators,
+    and bulk approve support. Packaged in the DemoRegistration solution.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md</file>
+      <file>.claude/patterns/webresource/custom-dialogs-in-dataverse.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-006">Ribbon JS is permitted (it's a command handler, not a standalone UI)</constraint>
+    <constraint source="spec">Buttons visible only when sprk_status = Submitted</constraint>
+    <constraint source="spec">Approve calls POST /api/registration/requests/{id}/approve</constraint>
+    <constraint source="spec">Reject prompts for reason, calls POST /api/registration/requests/{id}/reject</constraint>
+    <constraint source="spec">Bulk approve: multi-select in list view, process sequentially</constraint>
+    <constraint source="spec">BFF API URL must come from environment variable or config (not hardcoded)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read ribbon guide">Study RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md</step>
+    <step order="2" name="Create ribbon XML">Define Approve and Reject buttons with enable rules</step>
+    <step order="3" name="Create JS webresource">sprk_registrationribbon.js with approve/reject handlers</step>
+    <step order="4" name="Implement confirmation dialog">Approve: "Are you sure?" → call API → show result</step>
+    <step order="5" name="Implement rejection dialog">Prompt for reason → call API → show result</step>
+    <step order="6" name="Implement bulk approve">Multi-select handler, sequential processing with progress</step>
+    <step order="7" name="Add to solution">Include ribbon XML and JS webresource in DemoRegistration solution</step>
+    <step order="8" name="Test in browser">Verify buttons appear/hide based on status</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DemoRegistration/RibbonDiffXml/sprk_registrationrequest_ribbon.xml</output>
+    <output type="code">src/client/webresources/sprk_registrationribbon.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Approve button visible only when status = Submitted</criterion>
+    <criterion>Reject button visible only when status = Submitted</criterion>
+    <criterion>Approve calls BFF API and shows success/error</criterion>
+    <criterion>Reject prompts for reason before calling API</criterion>
+    <criterion>Bulk approve processes multiple records sequentially</criterion>
+    <criterion>BFF API URL from config (not hardcoded)</criterion>
+    <criterion>Buttons work on both list view and form</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,53 @@
+<task id="REG-050" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>5</phase>
+    <tags>documentation, wrap-up</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>042</dependencies>
+  </metadata>
+
+  <prompt>
+    Final project wrap-up: update README status to Complete, verify all tasks in TASK-INDEX.md
+    are marked ✅, create lessons-learned.md, run /repo-cleanup to validate structure,
+    final commit, and prepare for merge to master.
+  </prompt>
+
+  <role>Project manager wrapping up a completed project</role>
+
+  <goal>
+    Project marked complete with all artifacts finalized, lessons documented, and branch
+    ready for merge to master.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/README.md</file>
+      <file>projects/spaarke-self-service-registration-app/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Update README">Set status to Complete</step>
+    <step order="2" name="Verify TASK-INDEX">All tasks ✅</step>
+    <step order="3" name="Create lessons-learned">Document key decisions, challenges, outcomes</step>
+    <step order="4" name="Run repo-cleanup">Validate structure compliance</step>
+    <step order="5" name="Final commit">Commit all remaining changes</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-self-service-registration-app/README.md (updated)</output>
+    <output type="docs">projects/spaarke-self-service-registration-app/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is Complete</criterion>
+    <criterion>All TASK-INDEX entries are ✅</criterion>
+    <criterion>Lessons-learned documented</criterion>
+    <criterion>Repo-cleanup passes</criterion>
+    <criterion>Branch ready for merge</criterion>
+  </acceptance-criteria>
+</task>

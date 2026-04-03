@@ -1,0 +1,74 @@
+<task id="REG-020" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Provisioning Orchestrator Service</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>bff-api, provisioning, orchestration</tags>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>010,011,014</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the DemoProvisioningService that orchestrates the full provisioning pipeline:
+    generate username → create Entra user → add to security group → assign licenses →
+    sync Dataverse systemuser → add to team → grant SPE container access → send welcome email →
+    update registration record. The entire pipeline runs synchronously (~10-30s) and must be
+    idempotent (safe to retry). Composes GraphUserService, RegistrationDataverseService,
+    and RegistrationEmailService.
+  </prompt>
+
+  <role>Senior .NET developer with orchestration and idempotency pattern expertise</role>
+
+  <goal>
+    DemoProvisioningService that executes the full provisioning pipeline, handling partial
+    failures gracefully and supporting idempotent retries. Unit tests cover happy path,
+    partial failure, and idempotent retry scenarios.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationEmailService.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-004">Idempotent — each step checks state before acting</constraint>
+    <constraint source="spec">Synchronous execution — no Service Bus for Phase 1</constraint>
+    <constraint source="spec">Pipeline order: username → Entra user → group → licenses → Dataverse → team → SPE → email → update record</constraint>
+    <constraint source="spec">Default expiration: 14 days from provisioning (configurable)</constraint>
+    <constraint source="spec">SPE container access: Writer permissions via Graph API</constraint>
+    <constraint source="spec">Welcome email sent to applicant's WORK email (not demo.spaarke.com)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read dependent services">Understand GraphUserService, RegistrationDataverseService, RegistrationEmailService APIs</step>
+    <step order="2" name="Create DemoProvisioningService">Orchestrate all 9 provisioning steps</step>
+    <step order="3" name="Implement SPE access">Grant Writer permissions to demo container via Graph API</step>
+    <step order="4" name="Implement idempotency">Check existing state at each step; skip if already done</step>
+    <step order="5" name="Handle partial failures">Report which steps succeeded/failed; allow retry from failure point</step>
+    <step order="6" name="Write unit tests">Happy path, retry, partial failure, already-provisioned scenarios</step>
+    <step order="7" name="Verify build">dotnet build and dotnet test</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/DemoProvisioningServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Full pipeline executes in correct order</criterion>
+    <criterion>Idempotent — calling twice produces same result</criterion>
+    <criterion>Partial failure reported clearly</criterion>
+    <criterion>SPE container Writer access granted</criterion>
+    <criterion>Welcome email sent to work email with all required fields</criterion>
+    <criterion>Expiration date set from config default (14 days)</criterion>
+    <criterion>Unit tests pass for all scenarios</criterion>
+  </acceptance-criteria>
+</task>

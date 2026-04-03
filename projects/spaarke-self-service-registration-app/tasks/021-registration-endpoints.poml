@@ -1,0 +1,84 @@
+<task id="REG-021" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Registration API Endpoints</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2</phase>
+    <tags>bff-api, api, endpoints</tags>
+    <parallel-group>P2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>010,011,014</dependencies>
+  </metadata>
+
+  <prompt>
+    Create RegistrationEndpoints.cs with 3 Minimal API endpoints:
+    1. POST /api/registration/demo-request (unauthenticated — public form submission with reCAPTCHA)
+    2. POST /api/registration/requests/{id}/approve (admin-authenticated — triggers provisioning)
+    3. POST /api/registration/requests/{id}/reject (admin-authenticated — with rejection reason)
+    Include RegistrationAuthorizationFilter for admin endpoints and EmailDomainValidator for
+    disposable email blocking. Follow AnalysisEndpoints.cs as the canonical exemplar.
+  </prompt>
+
+  <role>Senior .NET developer with Minimal API, endpoint filter, and input validation expertise</role>
+
+  <goal>
+    Three working API endpoints following the canonical endpoint pattern, with proper
+    authorization filter, input validation, reCAPTCHA verification, rate limiting,
+    and ProblemDetails error responses. Unit tests for all endpoints.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Ai/AnalysisEndpoints.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern — static class, MapGroup, private static handlers</constraint>
+    <constraint source="ADR-008">Endpoint filters for admin authorization — not middleware</constraint>
+    <constraint source="ADR-019">ProblemDetails for all errors with correlation ID</constraint>
+    <constraint source="spec">Submit endpoint is UNAUTHENTICATED (public form)</constraint>
+    <constraint source="spec">Approve/reject endpoints require Spaarke Registration Admin role</constraint>
+    <constraint source="spec">Submit: 202 Accepted with trackingId</constraint>
+    <constraint source="spec">Approve: 200 OK with status, username, expirationDate</constraint>
+    <constraint source="spec">Rate limiting on submit endpoint</constraint>
+    <constraint source="spec">reCAPTCHA token validation on submit</constraint>
+    <constraint source="spec">Block disposable email domains</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read exemplar">Study AnalysisEndpoints.cs for exact endpoint structure</step>
+    <step order="2" name="Create EmailDomainValidator">Block disposable providers (mailinator, guerrillamail, etc.)</step>
+    <step order="3" name="Create RegistrationAuthorizationFilter">Check Spaarke Registration Admin role</step>
+    <step order="4" name="Create RegistrationEndpoints">MapGroup("/api/registration") with 3 endpoints</step>
+    <step order="5" name="Implement submit endpoint">Validation, duplicate check, reCAPTCHA, create record, notify admin</step>
+    <step order="6" name="Implement approve endpoint">Auth filter, call DemoProvisioningService, return result</step>
+    <step order="7" name="Implement reject endpoint">Auth filter, update status, optional rejection email</step>
+    <step order="8" name="Write unit tests">All endpoints, validation, auth, error cases</step>
+    <step order="9" name="Verify build">dotnet build and dotnet test</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Filters/RegistrationAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/EmailDomainValidator.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Endpoints/RegistrationEndpointsTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/EmailDomainValidatorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>3 endpoints follow AnalysisEndpoints.cs pattern exactly</criterion>
+    <criterion>Submit endpoint is unauthenticated with reCAPTCHA validation</criterion>
+    <criterion>Approve/reject use RegistrationAuthorizationFilter</criterion>
+    <criterion>Disposable email domains blocked</criterion>
+    <criterion>ProblemDetails returned for all error cases</criterion>
+    <criterion>Rate limiting applied to submit endpoint</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

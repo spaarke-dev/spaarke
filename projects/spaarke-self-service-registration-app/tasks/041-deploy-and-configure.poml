@@ -1,0 +1,69 @@
+<task id="REG-041" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Deploy BFF API, Dataverse Solution, and Run Entra Scripts</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>4</phase>
+    <tags>deploy, bff-api, dataverse, entra-id</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>040,012,013</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy all components:
+    1. Run Setup-EntraInfrastructure.ps1 — create security group, Conditional Access, Graph permissions
+    2. Run Get-LicenseSkuIds.ps1 — get SKU IDs for appsettings
+    3. Import DemoRegistration solution to spaarke-demo.crm.dynamics.com
+    4. Deploy BFF API with registration endpoints to Azure
+    5. Update BFF API appsettings with real values (Demo Dataverse URL, BU/team names, SKU IDs, container ID)
+    6. Verify all services start and connect correctly
+  </prompt>
+
+  <role>DevOps engineer with Azure, Dataverse, and PowerShell deployment experience</role>
+
+  <goal>
+    All components deployed and configured. BFF API running with real Demo Dataverse connection.
+    Dataverse solution imported. Entra infrastructure ready. System ready for E2E testing.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>scripts/Deploy-DataverseSolutions.ps1</file>
+      <file>scripts/Setup-EntraInfrastructure.ps1</file>
+      <file>scripts/Get-LicenseSkuIds.ps1</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="spec">Demo Dataverse: https://spaarke-demo.crm.dynamics.com</constraint>
+    <constraint source="spec">Unmanaged solution import</constraint>
+    <constraint source="spec">BFF API App Registration: 1e40baad-e065-4aea-a8d4-4b7ab273458c</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Run Entra scripts">Setup-EntraInfrastructure.ps1 then Get-LicenseSkuIds.ps1</step>
+    <step order="2" name="Import Dataverse solution">Deploy DemoRegistration to demo environment</step>
+    <step order="3" name="Update BFF appsettings">Set real values from scripts output and environment</step>
+    <step order="4" name="Deploy BFF API">Run Deploy-BffApi.ps1</step>
+    <step order="5" name="Verify connectivity">Test API health, Demo Dataverse connection, Graph permissions</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">BFF API deployed with registration endpoints</output>
+    <output type="deployment">DemoRegistration solution imported</output>
+    <output type="deployment">Entra infrastructure configured</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Entra security group created</criterion>
+    <criterion>Conditional Access policy active</criterion>
+    <criterion>Graph permissions granted</criterion>
+    <criterion>Dataverse solution imported successfully</criterion>
+    <criterion>BFF API running with real config</criterion>
+    <criterion>API can connect to Demo Dataverse</criterion>
+  </acceptance-criteria>
+</task>

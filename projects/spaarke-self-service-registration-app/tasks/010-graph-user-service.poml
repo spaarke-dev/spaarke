@@ -1,0 +1,74 @@
+<task id="REG-010" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Graph User Service: Entra ID User Management</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>bff-api, graph-api, entra-id</tags>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the GraphUserService that handles all Entra ID operations for demo user provisioning:
+    create internal users (demo.spaarke.com), check UPN availability with collision handling,
+    assign licenses, manage security group membership, disable accounts, and generate secure
+    temporary passwords. Uses app-only Graph API tokens via existing GraphClientFactory.ForApp().
+  </prompt>
+
+  <role>Senior .NET developer with Microsoft Graph API expertise and Entra ID user management experience</role>
+
+  <goal>
+    A fully tested GraphUserService that can create demo.spaarke.com users, assign 3 licenses,
+    add to security group, and disable accounts. All operations idempotent. Unit tests with 80%+ coverage.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/IGraphClientFactory.cs</file>
+      <file>.claude/patterns/auth/service-principal.md</file>
+      <file>.claude/patterns/auth/graph-sdk-v5.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-010">Register as concrete — no interface needed unless seam required</constraint>
+    <constraint source="spec">Username pattern: firstname.lastname@demo.spaarke.com with collision handling (append number)</constraint>
+    <constraint source="spec">Temp password: 16+ chars, mixed case, numbers, symbols</constraint>
+    <constraint source="spec">forceChangePasswordNextSignIn: true</constraint>
+    <constraint source="spec">Licenses: Power Apps Plan 2 Trial, Fabric Free, Power Automate Free — SKU IDs from config</constraint>
+    <constraint source="spec">All operations must be idempotent — check state before acting</constraint>
+    <constraint source="spec">Disable (not delete) expired accounts</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read GraphClientFactory">Understand ForApp() pattern for app-only tokens</step>
+    <step order="2" name="Create PasswordGenerator">Secure random password generation (16+ chars, complexity requirements)</step>
+    <step order="3" name="Create GraphUserService">Implement: CreateUserAsync, CheckUPNAvailableAsync, GenerateUniqueUPNAsync, AssignLicensesAsync, AddToGroupAsync, RemoveFromGroupAsync, DisableUserAsync</step>
+    <step order="4" name="Implement idempotency">Each method checks current state before mutating</step>
+    <step order="5" name="Write unit tests">Test all methods including collision handling and idempotency</step>
+    <step order="6" name="Verify build">dotnet build and dotnet test</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/PasswordGenerator.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/GraphUserServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/PasswordGeneratorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GraphUserService creates users with correct UPN pattern</criterion>
+    <criterion>Username collision handling appends incrementing number</criterion>
+    <criterion>Assigns all 3 licenses from config SKU IDs</criterion>
+    <criterion>Adds user to configurable security group</criterion>
+    <criterion>DisableUserAsync sets accountEnabled=false (not delete)</criterion>
+    <criterion>All operations idempotent — no errors on retry</criterion>
+    <criterion>PasswordGenerator produces 16+ char passwords meeting complexity</criterion>
+    <criterion>Unit tests pass with 80%+ coverage</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,29 +1,30 @@
 # Spaarke Self-Service Registration App — Design Document
 
 > **Author**: Ralph Schroeder
-> **Date**: 2026-03-10 (updated 2026-03-11)
-> **Status**: Draft v2
-> **Scope**: Phase 1 — Demo Access in Shared Environment
+> **Date**: 2026-03-10 (updated 2026-04-03)
+> **Status**: Draft v3
+> **Scope**: Phase 1 — Demo Access via Internal Accounts
 
 ---
 
 ## 1. Executive Summary
 
-Build a self-service registration process that allows prospective users to request access to Spaarke, go through an approval workflow, and receive automated provisioning of all required access (Dataverse model-driven app, SPE containers, BFF API authorization). The initial phase focuses on **demo access** — a time-limited trial in a shared demo environment with sample data.
+Build a streamlined demo access process: prospective users submit a "Request Early Access" form on the Spaarke website, an admin reviews and approves in the Spaarke MDA via a ribbon button, and the system auto-provisions an internal demo account (`user@demo.spaarke.com`) with all required licenses and access. No separate registration form — approval triggers full provisioning and a welcome email with credentials.
 
-Future phases extend to production access (shared business unit or dedicated environment) with customer-scoped registration and more robust identity governance.
+The architecture is designed to extend to production user provisioning in future phases.
 
 ---
 
 ## 2. Problem Statement
 
-Today, onboarding a new Spaarke user is entirely manual:
-1. An admin creates/confirms the user in Entra ID
-2. An admin assigns Dataverse security roles via Power Platform Admin Center
-3. An admin grants SPE container access
-4. The user is manually notified
+Today, onboarding a new Spaarke demo user is entirely manual:
+1. An admin creates a user account in Entra ID
+2. An admin assigns licenses (Power Apps, Fabric, Power Automate)
+3. An admin assigns Dataverse security roles and business unit
+4. An admin grants SPE container access
+5. The user is manually notified with credentials
 
-This doesn't scale for demo/trial access, multi-customer onboarding, or self-service scenarios. We need a streamlined, partially automated process that maintains security review while eliminating repetitive manual steps.
+This doesn't scale for demo/trial access or future multi-customer onboarding. We need a one-click approval process that automates all provisioning steps.
 
 ---
 
@@ -31,136 +32,169 @@ This doesn't scale for demo/trial access, multi-customer onboarding, or self-ser
 
 | # | Objective | Phase |
 |---|-----------|-------|
-| 1 | User can submit a demo access request through a secure web form | Phase 1 |
-| 2 | Request is reviewed/approved (human approval initially, automated later) | Phase 1 |
-| 3 | Approved users are automatically provisioned in Dataverse + SPE | Phase 1 |
-| 4 | User receives confirmation email with access instructions | Phase 1 |
-| 5 | Demo access is time-limited (e.g., 14-30 days) with expiration handling | Phase 1 |
-| 6 | Production access with customer BU/environment scoping | Phase 2 |
-| 7 | Customer admin self-manages their user roster | Phase 2 |
+| 1 | User can submit a demo access request through a public web form on spaarke.com | Phase 1 |
+| 2 | Admin reviews and approves requests in Spaarke MDA (ribbon button) | Phase 1 |
+| 3 | Approved users are auto-provisioned: internal Entra ID account, licenses, Dataverse role, SPE access | Phase 1 |
+| 4 | User receives welcome email with credentials, access URL, and quick start guide | Phase 1 |
+| 5 | Demo access is time-limited (default 14 days, adjustable) with automated expiration | Phase 1 |
+| 6 | No MFA/authenticator required for demo accounts | Phase 1 |
+| 7 | Production user provisioning (customer-scoped, dedicated environments) | Phase 2 |
 
 ---
 
-## 4. Assumptions — Existing Infrastructure
+## 4. Infrastructure
 
-### What We Already Have
+### Demo Environment(s)
+
+The demo environment is **pre-provisioned and fully configured** — Spaarke solution deployed, business unit created, security roles defined, sample data loaded, SPE containers ready. This project does NOT set up the environment itself.
+
+What this project automates is **per-user provisioning** into the existing environment: create the Entra account, assign them to the correct BU/team/role, grant SPE access, assign licenses, and send credentials.
+
+**Phase 1**: Single environment. **Future**: Support multiple environments by adding config entries.
+
+| Setting | Phase 1 Value | Description |
+|---------|---------------|-------------|
+| Environment URL | `https://spaarke-demo.crm.dynamics.com/` | Pre-existing Dataverse environment |
+| Account Domain | `demo.spaarke.com` | UPN domain for demo accounts |
+| Account Format | `firstname.lastname@demo.spaarke.com` | Auto-generated from request |
+| Business Unit | "Spaarke Demo" (pre-existing) | User is assigned to this BU |
+| Team | "Spaarke Demo Team" (pre-existing) | User is added to this team → inherits `Spaarke Demo User` security role |
+| SPE Container | (pre-existing) | User is granted access to this container |
+| Demo Duration (default) | 14 days | Default; admin can manually adjust expiration date on any record |
+
+#### Environment Configuration
+
+Environment references are stored in **BFF API configuration** (appsettings / Key Vault):
+
+```json
+{
+  "DemoProvisioning": {
+    "Environments": [
+      {
+        "Name": "Demo 1",
+        "DataverseUrl": "https://spaarke-demo.crm.dynamics.com",
+        "BusinessUnitName": "Spaarke Demo",
+        "TeamName": "Spaarke Demo Team",
+        "SpeContainerId": "{container-id}",
+        "DefaultDemoDurationDays": 14
+      }
+    ],
+    "DefaultEnvironment": "Demo 1",
+    "AccountDomain": "demo.spaarke.com"
+  }
+}
+```
+
+**Adding a second demo environment** = add another entry to the config array. The provisioning pipeline reads the target environment config and provisions the user into it. No code changes required.
+
+### Existing Infrastructure (Reused)
 
 | Resource | Details | Used For |
 |----------|---------|----------|
-| Entra ID Tenant | `a221a95e-6abc-4434-aecc-e48338a1b2f2` | Identity provider for all Spaarke users |
-| BFF API | `spe-api-dev-67e2xz` (.NET 8 Minimal API) | Middle-tier; validates tokens, OBO for Graph/Dataverse |
-| BFF API App Registration | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | Token validation, OBO grants |
-| Dataverse Dev Environment | `https://spaarkedev1.crm.dynamics.com` | Model-driven app, security roles, data |
-| Dataverse App Registration | `170c98e1-d486-4355-bcbe-170454e0207c` | S2S Dataverse access (ClientSecret auth) |
-| SPE Container Type | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` | Document storage containers |
-| Service Bus | `spaarke-servicebus-dev` | Job queue (has unused `customer-onboarding` queue) |
+| Entra ID Tenant | `a221a95e-6abc-4434-aecc-e48338a1b2f2` | Identity provider; demo.spaarke.com domain |
+| BFF API | `spe-api-dev-67e2xz` (.NET 8 Minimal API) | Provisioning endpoints |
+| BFF API App Registration | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | Token validation, app-only Graph calls |
+| Dataverse App Registration | `170c98e1-d486-4355-bcbe-170454e0207c` | S2S Dataverse access |
+| Spaarke Website | `spaarke-website` repo (Next.js 16 + React 19) | Request Early Access form |
+| Spaarke Communication Service | BFF API `POST /api/communications/send` | Email notifications |
 | Key Vault | `spaarke-spekvcert` | Secrets management |
-| Azure OpenAI | `spaarke-openai-dev` | AI features (available in demo) |
 
 ### What We Need to Create
 
-| Resource | Purpose | Phase |
-|----------|---------|-------|
-| Registration page on Spaarke website | Integrated registration form at `/demo` or `/get-started` (Next.js 16 + React 19) | Phase 1 |
-| Website authentication | Entra ID sign-in on website (NextAuth / MSAL) for verified identity | Phase 1 |
-| BFF API registration endpoints | Submission, approval, provisioning, expiration APIs | Phase 1 |
-| BFF API provisioning BackgroundService | Service Bus consumer for automated user provisioning | Phase 1 |
-| Dataverse tables | `sprk_registrationrequest`, `sprk_demoaccess` | Phase 1 |
-| Email templates (Spaarke Communication Service) | Welcome, confirmation, expiration warning, conversion offer | Phase 1 |
-| Demo Dataverse BU | Dedicated business unit for demo users in shared environment | Phase 1 |
-| Demo SPE Container | Shared container with sample documents | Phase 1 |
-| Admin review UI | Registration request management view in Spaarke MDA or website admin section | Phase 1 |
+| Resource | Purpose |
+|----------|---------|
+| "Request Early Access" page on spaarke.com | Public form for demo requests |
+| BFF API registration endpoints | Submission + approval/provisioning APIs |
+| `sprk_registrationrequest` Dataverse table | Track requests (deployed to demo environment via solution) |
+| Approval fields on `sprk_registrationrequest` | Status, provisioned username, expiration |
+| MDA view + ribbon button | "Approve Demo Access" in Spaarke Demo MDA |
+| Ribbon button JS webresource | Calls BFF API approve endpoint |
+| "Spaarke Demo Users" Entra security group | For Conditional Access MFA exclusion (setup script) |
+| Conditional Access policy | Exclude demo user group from MFA (setup script) |
+| Graph API permissions on BFF app reg | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Directory.ReadWrite.All` (setup script) |
+| Email templates | Admin notification, welcome email, expiration warning |
+
+**Prerequisites (already in place, NOT part of this project)**:
+- Demo Dataverse environment (`spaarke-demo.crm.dynamics.com`) with Spaarke solution deployed
+- "Spaarke Demo" Business Unit, Team, and `Spaarke Demo User` security role
+- Demo SPE container with sample documents
+- Sample data (matters, projects, playbooks)
 
 ---
 
-## 5. Architecture — Phase 1 (Demo Access)
+## 5. Architecture — Phase 1
 
-### 5.1 High-Level Flow
+### 5.1 End-to-End Flow
 
 ```
-┌─────────────────────┐     ┌──────────────────────┐     ┌──────────────────────┐
-│  Spaarke Website     │     │  Approval             │     │  Provisioning        │
-│  (Next.js 16)        │     │  (BFF API + Admin UI)  │     │  Pipeline            │
-│                      │     │                        │     │  (BackgroundService)  │
-│  1. User signs in    │     │  Admin reviews in      │     │                      │
-│     (Entra ID SSO)   │────▶│  Spaarke MDA or        │────▶│  Service Bus queue    │
-│  2. Fills demo       │     │  website admin panel   │     │  consumer executes:   │
-│     request form     │     │                        │     │                      │
-└─────────────────────┘     └──────────────────────┘     └──────────────────────┘
-        │                        │                         │
-        ▼                        ▼                         ▼
-   Authenticated user      Admin approves/rejects     Automated steps:
-   submits request         via BFF API endpoint       1. Send Entra guest invitation
-   (identity verified)     Notification via Spaarke   2. Assign Dataverse security role
-                           Communication Service      3. Add to Demo BU team
-                                                      4. Grant SPE container access
-                                                      5. Send welcome email (Comm Svc)
-                                                      6. Set expiration timer
+1. User visits spaarke.com → clicks "Request Early Access"
+2. Fills out public form (name, email, org, use case, consent)
+3. Website submits to BFF API → creates sprk_registrationrequest in Demo Dataverse
+4. Admin receives notification email (FYI — no action links)
+5. Admin opens Spaarke Demo MDA → "Pending Demo Requests" view
+6. Admin selects request → clicks "Approve Demo Access" ribbon button
+7. Ribbon button calls BFF API POST /api/registration/requests/{id}/approve
+8. BFF API auto-provisions (synchronous, ~10-30 seconds):
+   a. Generate username (firstname.lastname@demo.spaarke.com)
+   b. Create Entra ID user account with temp password
+   c. Assign licenses: Power Apps Plan 2 Trial, Fabric (Free), Power Automate (Free)
+   d. Add user to "Spaarke Demo" BU team in Dataverse
+   e. Grant SPE demo container access
+   f. Send welcome email (username, temp password, access URL)
+   g. Update request status to "Provisioned", set expiration date
+9. User receives welcome email:
+   - Username: jane.smith@demo.spaarke.com
+   - Temporary password (must change on first login)
+   - Access URL: https://spaarke-demo.crm.dynamics.com/
+   - Quick start guide link
+   - "Use InPrivate/Incognito if signed into other Microsoft accounts"
+   - Demo expires on [date]
+10. User logs in → explores Spaarke with sample data
+11. Day 27: "Your demo is expiring" email
+12. Day 30: Access disabled, expiration email sent
 ```
 
-### 5.2 Registration — Integrated into Spaarke Website
+### 5.2 Request Form (Spaarke Website)
 
-**Technology: New page on existing Spaarke website (Next.js 16 + React 19 + Tailwind CSS)**
+**Location**: New page on `spaarke-website` repo — `spaarke.com/demo` or `spaarke.com/get-started`
 
-The registration experience is built directly into the Spaarke marketing website (`spaarke-website` repo), not as a separate app. This provides a seamless brand experience and reuses existing infrastructure (Azure Static Web App, reCAPTCHA, Application Insights).
+**No authentication required** — this is a public marketing form. The website already has reCAPTCHA integrated for bot protection.
 
-**Why React 19**: The Spaarke website already runs React 19.2.3 and Next.js 16. Fluent UI v9 is compatible with React 19 (confirmed in our code-pages: AnalysisWorkspace, SprkChatPane both use `@fluentui/react-components ^9.54.0` with React 19). There is no stability reason to use React 18 — React 19 has been stable since December 2024 and is the standard for all new Spaarke web work.
+#### Form Fields
 
-#### Authentication-First Registration Flow
-
-Users sign in to the Spaarke website before accessing the registration form. This provides:
-- **Verified identity** — we know who is requesting access (Entra ID SSO)
-- **Pre-populated fields** — name, email, organization pulled from token claims
-- **Reduced spam** — authenticated users only, no bot protection needed on form
-- **Audit trail** — every request tied to an Entra ID identity
-
-**Website Auth Implementation**:
-- Add NextAuth.js (or MSAL.js) with Entra ID provider to the website
-- Authority: `https://login.microsoftonline.com/common/v2.0` (multi-tenant, any org user can sign in)
-- The website app registration can be a new lightweight one (no API permissions needed beyond `User.Read`)
-- Sign-in only required for `/demo` and `/account` routes (marketing pages remain public)
-
-**Registration Form Fields**:
-
-| Field | Type | Required | Source | Notes |
-|-------|------|----------|--------|-------|
-| First Name | text | Yes | Auto from token | Pre-populated, editable |
-| Last Name | text | Yes | Auto from token | Pre-populated, editable |
-| Email | email | Yes | Auto from token | Read-only (verified identity) |
-| Organization | text | Yes | Auto from token | Pre-populated from `tid` claim org name |
-| Job Title | text | No | Manual | Helps prioritize/qualify |
-| Phone | tel | No | Manual | |
-| Use Case | dropdown | Yes | Manual | "Document Management", "AI Analysis", "Financial Intelligence", "General Evaluation" |
-| How Did You Hear About Us | dropdown | No | Manual | Marketing tracking |
-| Notes | textarea | No | Manual | Additional context |
-| Consent | checkbox | Yes | Manual | Terms of use, data processing |
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| First Name | text | Yes | |
+| Last Name | text | Yes | |
+| Work Email | email | Yes | Used for communications and username derivation |
+| Organization | text | Yes | |
+| Job Title | text | No | Helps qualify/prioritize |
+| Phone | tel | No | |
+| Use Case | dropdown | Yes | "Document Management", "AI Analysis", "Financial Intelligence", "General Evaluation" |
+| How Did You Hear About Us | dropdown | No | Marketing tracking |
+| Notes | textarea | No | Additional context |
+| Consent | checkbox | Yes | Terms of use, data processing |
 
 **Anti-Spam/Bot Protection**:
-- Authentication gate is the primary protection (user must sign in with a valid Entra ID org account)
-- Rate limiting on submission endpoint (5 per user per day)
-- Email domain validation (block consumer domains if desired)
-- reCAPTCHA available as fallback (already integrated in website)
+- reCAPTCHA (already integrated in website)
+- Rate limiting on BFF API endpoint
+- Email domain validation (block disposable email providers)
 
-**Submission Flow**:
-1. User visits `spaarke.com/demo` → prompted to sign in (Entra ID SSO)
-2. After sign-in, registration form renders with pre-populated fields
-3. User completes form → client-side validation
-4. Next.js API route `POST /api/registration/demo-request` proxies to BFF API
-5. BFF API validates, creates `sprk_registrationrequest` in Dataverse
-6. BFF API publishes message to Service Bus `customer-onboarding` queue
-7. BFF API sends notification to admin(s) via Spaarke Communication Service
-8. User sees confirmation: "Thanks! We'll review your request within 1 business day."
-9. User can check status at `spaarke.com/demo/status` (authenticated)
+**Submission**:
+1. Client-side validation
+2. Next.js API route `POST /api/registration/demo-request` proxies to BFF API
+3. BFF API validates, creates `sprk_registrationrequest` in Demo Dataverse
+4. BFF API sends admin notification email via Spaarke Communication Service
+5. User sees confirmation: "Thanks! We'll review your request within 1 business day."
 
-### 5.3 Registration API Endpoints
+### 5.3 API Endpoints
 
-**New BFF API endpoints** — authenticated (bearer token from website sign-in):
+**New BFF API endpoints** in `RegistrationEndpoints.cs`:
 
-#### Submit Demo Request
+#### Submit Demo Request (called by website)
 
 ```
 POST /api/registration/demo-request
-Authorization: Bearer {user-token-from-website}
 Content-Type: application/json
 
 {
@@ -170,189 +204,193 @@ Content-Type: application/json
   "organization": "Contoso Ltd",
   "jobTitle": "Legal Operations Manager",
   "phone": "+1-555-0123",
-  "useCase": "Document Management",
+  "useCase": "DocumentManagement",
   "referralSource": "Conference",
   "notes": "Interested in SPE integration",
-  "consentAccepted": true,
-  "entraObjectId": "abc123-...",
-  "tenantId": "def456-..."
+  "consentAccepted": true
 }
 ```
 
-**Response**: `202 Accepted` with tracking ID and status URL
-
+**Response**: `202 Accepted`
 ```json
 {
-  "trackingId": "REG-20260311-A1B2",
-  "statusUrl": "/api/registration/status/REG-20260311-A1B2",
+  "trackingId": "REG-20260403-A1B2",
   "message": "Your request has been submitted for review."
 }
 ```
 
-#### Check Request Status
+**Validation**:
+- Duplicate check: reject if email already has an active/pending request
+- Email domain validation: block disposable providers
+- Input sanitization and length limits
+- reCAPTCHA token validation
+
+**Note**: This endpoint is **unauthenticated** (public form submission). Security relies on reCAPTCHA, rate limiting, and email domain validation.
+
+#### Approve Demo Request (called by MDA ribbon button)
 
 ```
-GET /api/registration/status/{trackingId}
-Authorization: Bearer {user-token}
-```
-
-Returns current status (Submitted, Under Review, Approved, Provisioning, Ready, Rejected).
-
-#### Admin: Review Requests
-
-```
-GET /api/registration/requests?status=submitted
 POST /api/registration/requests/{id}/approve
-POST /api/registration/requests/{id}/reject
 Authorization: Bearer {admin-token}
 ```
 
-Admin endpoints secured with a new `Spaarke Registration Admin` security role check.
+This is the **single trigger** for the entire provisioning pipeline. The endpoint:
+1. Validates admin has `Spaarke Registration Admin` role
+2. Runs provisioning synchronously (Section 5.5)
+3. Returns provisioning result
 
-**Security**:
-- All endpoints authenticated (no public/anonymous endpoints)
-- Rate limiting: 5 submissions per user per day
-- Input sanitization and length limits
-- Correlation IDs for tracing (ADR-019)
+**Response**: `200 OK`
+```json
+{
+  "status": "Provisioned",
+  "username": "jane.smith@demo.spaarke.com",
+  "expirationDate": "2026-05-03T00:00:00Z"
+}
+```
+
+#### Reject Demo Request (called by MDA ribbon button)
+
+```
+POST /api/registration/requests/{id}/reject
+Authorization: Bearer {admin-token}
+Content-Type: application/json
+
+{
+  "reason": "Not a qualified prospect"
+}
+```
+
+Updates status to "Rejected". Optionally sends rejection notification email.
 
 ### 5.4 Dataverse Data Model
 
-#### `sprk_registrationrequest` (Registration Request)
+#### `sprk_registrationrequest` (in Demo Dataverse environment)
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `sprk_registrationrequestid` | PK (GUID) | |
+| `sprk_name` | Text (200) | Primary name: "{FirstName} {LastName} - {Organization}" |
 | `sprk_firstname` | Text (100) | |
 | `sprk_lastname` | Text (100) | |
-| `sprk_email` | Text (200) | Unique key |
+| `sprk_email` | Text (200) | Applicant's work email |
 | `sprk_organization` | Text (200) | |
 | `sprk_jobtitle` | Text (200) | |
 | `sprk_phone` | Text (50) | |
 | `sprk_usecase` | Choice | Document Management, AI Analysis, Financial Intelligence, General |
 | `sprk_referralsource` | Choice | Conference, Website, Referral, Search, Other |
 | `sprk_notes` | Multiline Text | |
-| `sprk_status` | Choice | Submitted (default), Under Review, Approved, Rejected, Provisioned, Expired |
+| `sprk_status` | Choice | Submitted (default), Approved, Rejected, Provisioned, Expired, Revoked |
+| `sprk_trackingid` | Text (50) | Public reference (REG-20260403-A1B2) |
 | `sprk_requestdate` | DateTime | Auto-set on create |
 | `sprk_reviewedby` | Lookup (SystemUser) | Who approved/rejected |
 | `sprk_reviewdate` | DateTime | When approved/rejected |
 | `sprk_rejectionreason` | Text (500) | If rejected |
-| `sprk_provisioneddate` | DateTime | When access was granted |
-| `sprk_expirationdate` | DateTime | Demo access expiry |
-| `sprk_trackingid` | Text (50) | Public-facing reference (e.g., REG-20260310-A1B2) |
+| `sprk_demousername` | Text (200) | Provisioned: `jane.smith@demo.spaarke.com` |
+| `sprk_demouserobjectid` | Text (50) | Entra ID object ID of provisioned user |
+| `sprk_provisioneddate` | DateTime | When account was created |
+| `sprk_expirationdate` | DateTime | Demo access expiry (default: now + 14 days; admin can adjust on the record) |
 | `sprk_consentaccepted` | Boolean | |
 | `sprk_consentdate` | DateTime | |
 
-#### `sprk_demoaccess` (Demo Access Record — tracks active demo sessions)
+**Design decision**: Single table (`sprk_registrationrequest`) instead of separate request + access tables. The request record tracks the full lifecycle from submission through provisioning to expiration. Simpler for Phase 1; can split later if needed for production user management.
 
-| Column | Type | Notes |
-|--------|------|-------|
-| `sprk_demoaccessid` | PK (GUID) | |
-| `sprk_registrationrequest` | Lookup | Link to original request |
-| `sprk_userid` | Lookup (SystemUser) | Dataverse user record |
-| `sprk_entraidobjectid` | Text (50) | Entra ID user object ID |
-| `sprk_email` | Text (200) | |
-| `sprk_status` | Choice | Active, Expired, Revoked, Converted (to production) |
-| `sprk_activateddate` | DateTime | |
-| `sprk_expirationdate` | DateTime | |
-| `sprk_lastlogindate` | DateTime | Updated by BFF API on auth |
-| `sprk_businessunit` | Lookup (BusinessUnit) | Demo BU |
-| `sprk_containerid` | Text (200) | SPE container ID for demo |
-| `sprk_securityrole` | Text (200) | Assigned role name |
+### 5.5 Provisioning Pipeline (Synchronous)
 
-### 5.5 Approval Workflow (BFF API BackgroundService)
+Triggered by `POST /api/registration/requests/{id}/approve`. All steps run synchronously — no Service Bus for Phase 1. The entire pipeline takes ~10-30 seconds.
 
-**No Power Automate** — the entire workflow runs in the BFF API, consistent with ADR-001 (no Azure Functions, no Power Automate in the product).
+**Idempotency**: Each step checks current state before acting. If the endpoint is called twice (e.g., network retry), it won't create duplicate users or send duplicate emails.
 
-**Trigger**: Service Bus message on `customer-onboarding` queue (published when request is created)
+#### Step 1: Generate Username
 
-**BackgroundService Steps**:
+- Pattern: `firstname.lastname@demo.spaarke.com`
+- Handle collisions: append number if taken (`jane.smith2@demo.spaarke.com`)
+- Check Entra ID for existing UPN: `GET /users?$filter=userPrincipalName eq '{upn}'`
 
-1. **Duplicate Check** — Query Dataverse for existing requests by email
-   - If duplicate with status "Provisioned" or "Active": Auto-reject with message "Already has access"
-   - If duplicate with status "Submitted": Auto-reject as duplicate
+#### Step 2: Create Entra ID User
 
-2. **Validation** — Check email domain
-   - Block disposable email domains (mailinator, guerrillamail, etc.)
-   - Flag free consumer email providers (gmail, outlook) for manual review
-   - Known partner/customer domains: auto-flag as priority
+```
+POST https://graph.microsoft.com/v1.0/users
+{
+  "accountEnabled": true,
+  "displayName": "Jane Smith",
+  "givenName": "Jane",
+  "surname": "Smith",
+  "userPrincipalName": "jane.smith@demo.spaarke.com",
+  "mailNickname": "jane.smith",
+  "passwordProfile": {
+    "password": "{generated-temp-password}",
+    "forceChangePasswordNextSignIn": true
+  },
+  "usageLocation": "US",
+  "department": "Demo",
+  "companyName": "Contoso Ltd",
+  "jobTitle": "Legal Operations Manager"
+}
+```
 
-3. **Notify Admin** — Send email via Spaarke Communication Service (`POST /api/communications/send`)
-   - HTML email to designated reviewer(s) with request details
-   - Include deep link to admin review page (website or MDA)
-   - Request appears in Spaarke MDA as a `sprk_registrationrequest` record
+- Temp password: auto-generated (16+ chars, mixed case, numbers, symbols)
+- `forceChangePasswordNextSignIn: true` — user sets their own password on first login
+- Add to "Spaarke Demo Users" security group (for Conditional Access MFA exclusion)
 
-4. **Admin Reviews** — via:
-   - **Option A**: Spaarke MDA view — admin opens the request record, clicks Approve/Reject (triggers BFF API endpoint)
-   - **Option B**: Website admin panel at `spaarke.com/admin/registrations` (authenticated, admin role required)
-   - **Option C**: Email reply link (deep link to approve/reject endpoint with one-time token)
+**Graph API Permissions** (application-level, on BFF API app registration):
+- `User.ReadWrite.All` — create users, check existing, update properties
+- `GroupMember.ReadWrite.All` — add user to demo security group
+- `Directory.ReadWrite.All` — license assignment
 
-5. **On Approval** (admin calls `POST /api/registration/requests/{id}/approve`):
-   - Update request status to "Approved"
-   - Publish provisioning message to Service Bus `customer-onboarding` queue with action "provision"
-   - BackgroundService picks up and executes provisioning pipeline (Section 5.6)
+#### Step 3: Assign Licenses
 
-6. **On Rejection** (admin calls `POST /api/registration/requests/{id}/reject`):
-   - Update request status to "Rejected" with reason
-   - Send rejection email to applicant via Spaarke Communication Service
+```
+POST https://graph.microsoft.com/v1.0/users/{userId}/assignLicense
+{
+  "addLicenses": [
+    { "skuId": "{PowerApps-Plan2-Trial-SKU}" },
+    { "skuId": "{Fabric-Free-SKU}" },
+    { "skuId": "{PowerAutomate-Free-SKU}" }
+  ],
+  "removeLicenses": []
+}
+```
 
-7. **Escalation** — A separate scheduled BackgroundService (daily) checks for requests older than 3 business days in "Submitted" status and sends reminder emails to reviewers
+Licenses assigned:
+- **Microsoft Power Apps Plan 2 Trial** — required for Dataverse MDA access
+- **Microsoft Fabric (Free)** — required for data platform features
+- **Microsoft Power Automate (Free)** — included for completeness
 
-### 5.6 Provisioning Pipeline
+**Note**: SKU IDs must be looked up from the tenant's `subscribedSkus` endpoint. These are trial/free plans so no cost impact.
 
-After approval, the provisioning BackgroundService processes the Service Bus message and executes all steps automatically.
+#### Step 4: Dataverse User Sync + Team Assignment
 
-**Orchestrator: BFF API BackgroundService** (consistent with ADR-001, reuses existing Service Bus `customer-onboarding` queue)
+After the Entra ID user is created:
 
-#### Step 1: Entra ID Guest Invitation
+1. **Create systemuser in Dataverse** — Using S2S (existing app registration):
+   ```
+   POST https://spaarke-demo.crm.dynamics.com/api/data/v9.2/systemusers
+   {
+     "azureactivedirectoryobjectid": "{entra-object-id}",
+     "firstname": "Jane",
+     "lastname": "Smith",
+     "internalemailaddress": "jane.smith@demo.spaarke.com",
+     "businessunitid@odata.bind": "/businessunits({demo-bu-id})"
+   }
+   ```
 
-Since the user already signed in to the website (they have a valid Entra ID in their own tenant), we know their identity. To give them access to **our** Dataverse environment, they need to exist as a **guest user** in our Entra ID tenant.
+2. **Add to Demo Team** — The "Spaarke Demo" team inherits the `Spaarke Demo User` security role
+   ```
+   POST https://spaarke-demo.crm.dynamics.com/api/data/v9.2/teams({team-id})/teammembership_association/$ref
+   {
+     "@odata.id": "systemusers({user-id})"
+   }
+   ```
 
-**Process**:
-- Check if guest already exists: `GET /users?$filter=mail eq '{email}'` (using app-only Graph token)
-- If guest exists: skip invitation, proceed to Step 2
-- If guest doesn't exist: Send guest invitation via Microsoft Graph:
-  ```
-  POST /invitations
-  {
-    "invitedUserEmailAddress": "jane.smith@contoso.com",
-    "inviteRedirectUrl": "https://spaarkedev1.crm.dynamics.com",
-    "sendInvitationMessage": false,
-    "invitedUserDisplayName": "Jane Smith",
-    "invitedUserType": "Guest"
-  }
-  ```
-  - `sendInvitationMessage: false` — we send our own branded email via Spaarke Communication Service
-  - The invitation creates a guest user object in our tenant
-  - User redeems by signing in with their own org credentials (federated SSO)
+#### Step 5: SPE Container Access
 
-**Why Guest Users**: Guest users in our Entra ID tenant is the standard Microsoft pattern for giving external users access to Dataverse. The user authenticates with their own organization's credentials — no separate password needed. Their access to our tenant is scoped by the security roles we assign.
-
-**Graph API Permissions needed** (application-level, added to BFF API app registration):
-- `User.Invite.All` (send guest invitations)
-- `User.ReadWrite.All` (check existing users, update properties)
-- `Directory.Read.All` (resolve tenant/org info)
-
-#### Step 2: Dataverse User + Security Role Assignment
-
-Using Dataverse S2S (existing `170c98e1...` app registration):
-
-1. **Sync user to Dataverse** — Users sync automatically when they first access the environment, OR can be triggered via `systemuser` create with `azureactivedirectoryobjectid`
-2. **Add user to Demo Business Unit team** — Assign to a "Demo Users" team that inherits appropriate security roles
-3. **Assign security role** — `Spaarke Demo User` role (new, limited variant of full user role)
-   - Read access to demo data only (BU-scoped)
-   - No delete permissions
-   - No admin features
-   - AI features enabled (read-only playbooks)
-
-#### Step 3: SPE Container Access
-
-- Add the demo user to the **shared demo SPE container** with `Reader` or `Writer` permissions
-- Use Graph API: `POST /storage/fileStorage/containers/{containerId}/permissions`
+- Add demo user to shared demo SPE container with `Writer` permissions
+- Graph API: `POST /storage/fileStorage/containers/{containerId}/permissions`
 - Demo container pre-loaded with sample documents
 
-#### Step 4: Send Welcome Email (Spaarke Communication Service)
+#### Step 6: Send Welcome Email
 
-Via existing `POST /api/communications/send` endpoint (app-only mode via shared mailbox):
+Via Spaarke Communication Service (`POST /api/communications/send`, app-only mode):
 
 ```json
 {
@@ -367,96 +405,91 @@ Via existing `POST /api/communications/send` endpoint (app-only mode via shared 
 ```
 
 Welcome email includes:
-  - Access URL (Dataverse MDA): `https://spaarkedev1.crm.dynamics.com`
-  - **Power Apps license activation link** (see Section 5.8)
-  - Quick start guide link
-  - Demo expiration date
-  - Support contact
-  - Sample scenarios to try
+- **Username**: `jane.smith@demo.spaarke.com`
+- **Temporary password**: `{generated-password}` (must change on first login)
+- **Access URL**: `https://spaarke-demo.crm.dynamics.com/`
+- **Quick start guide** link
+- **Browser tip**: "Use InPrivate/Incognito if you're signed into other Microsoft accounts"
+- **Demo expiration date**
+- **Support contact**
 
-#### Step 5: Create Demo Access Record
+#### Step 7: Update Request Record
 
-- Create `sprk_demoaccess` record linked to the registration request
-- Set expiration date (request date + 14 or 30 days)
+- Set `sprk_status` to "Provisioned"
+- Set `sprk_demousername` to generated UPN
+- Set `sprk_demouserobjectid` to Entra ID object ID
+- Set `sprk_provisioneddate` to now
+- Set `sprk_expirationdate` to now + default duration (14 days; admin can manually adjust afterward)
 
-#### Step 6: Schedule Expiration
+### 5.6 Admin Approval UI (Spaarke Demo MDA)
 
-- BFF API **DemoAccessExpirationService** (BackgroundService, runs daily at midnight UTC — same pattern as `DailySendCountResetService`)
-- Queries Dataverse for `sprk_demoaccess` records where `sprk_expirationdate <= today` and `sprk_status = Active`
-- On expiration:
-  1. Remove user from Demo BU team (revokes Dataverse security role)
-  2. Revoke SPE container permissions via Graph API
-  3. Send expiration notice email via Spaarke Communication Service
-  4. Update `sprk_demoaccess.sprk_status` to "Expired"
-  5. Update `sprk_registrationrequest.sprk_status` to "Expired"
-- **Pre-expiration warning**: 3 days before expiry, sends "Your demo is expiring" email with option to request extension or convert to production
+#### MDA View: "Pending Demo Requests"
 
-### 5.8 Power Apps Licensing for Demo Users
+- Entity: `sprk_registrationrequest`
+- Filter: `sprk_status = Submitted`
+- Columns: Name, Email, Organization, Use Case, Request Date
+- Sort: Request Date ascending (oldest first)
 
-**This is the most significant operational consideration.** Guest users accessing a Dataverse model-driven app require a Power Apps license.
+#### Additional Views
 
-#### Licensing Options
+- "All Demo Requests" — no filter, all statuses
+- "Active Demo Users" — `sprk_status = Provisioned`, shows username + expiration
+- "Expired Demo Users" — `sprk_status = Expired`
 
-| Option | Duration | Cost | Provisioning | Best For |
-|--------|----------|------|--------------|----------|
-| **Power Apps per-app plan** | Monthly | ~$5/user/app/month | Admin assigns in M365 Admin Center | Controlled demos, predictable cost |
-| **Power Apps Trial** | 30 days | Free | User self-activates via link | Zero-cost demos, self-service |
-| **Power Apps Developer Plan** | Indefinite | Free | User signs up | Dev/test only (not shared envs) |
-| **Included with M365 E3/E5** | Ongoing | N/A | Already licensed | Users whose org has E3/E5 |
+#### Ribbon Button: "Approve Demo Access"
 
-#### Recommended Approach for Demo Access
+- **Location**: `sprk_registrationrequest` entity — both list view (HomePageGrid) and form command bar
+- **Visibility**: Only when `sprk_status = Submitted`
+- **Action**: JavaScript webresource calls BFF API `POST /api/registration/requests/{id}/approve`
+- **UX**: Confirmation dialog → progress indicator → success/error notification
+- **Bulk approve**: Support multi-select in list view (process sequentially)
 
-**Hybrid: Trial-first with per-app fallback**
+#### Ribbon Button: "Reject Request"
 
-1. **In the welcome email**, include a Power Apps trial activation link:
-   - `https://aka.ms/tryppsa` — 30-day self-service trial
-   - User clicks, activates trial, immediately has access
-   - Aligns with demo period (30-day trial = 30-day demo)
+- Same location as approve button
+- Prompts for rejection reason (text input dialog)
+- Calls BFF API `POST /api/registration/requests/{id}/reject`
 
-2. **If trial isn't available** (user already used their one-time trial):
-   - Admin assigns a **Power Apps per-app plan** ($5/month) from the M365 Admin Center
-   - This is a manual step flagged to admin during provisioning
-   - Can be automated later via Microsoft Graph licensing APIs
+### 5.7 Demo Expiration
 
-3. **Users with existing M365 E3/E5 licenses** already have Power Apps access — no additional license needed. The provisioning pipeline should check for this.
+**DemoAccessExpirationService** — BFF API BackgroundService, runs daily at midnight UTC (same pattern as existing `DailySendCountResetService`).
 
-#### License Check in Provisioning Pipeline
+**Daily check**:
+1. Query Dataverse: `sprk_registrationrequest` where `sprk_status = Provisioned` and `sprk_expirationdate <= today`
+2. For each expired request:
+   a. Disable Entra ID account: `PATCH /users/{id}` → `{ "accountEnabled": false }`
+   b. Remove from Demo Team in Dataverse (revokes security role)
+   c. Revoke SPE container permissions
+   d. Send expiration email via Communication Service
+   e. Update `sprk_status` to "Expired"
 
-After guest invitation (Step 1), before completing provisioning:
-- Query Microsoft Graph: `GET /users/{userId}/licenseDetails`
-- Check for Power Apps-relevant SKU IDs (E3, E5, Power Apps per-user, Power Apps per-app)
-- If licensed: proceed normally
-- If unlicensed: include trial activation link in welcome email + flag for admin review
+**Pre-expiration warning**: 3 days before expiry, send "Your demo is expiring in 3 days" email with:
+- Option to contact us for extension
+- Offer to discuss production access
 
-#### Important Constraints
+**Note**: We disable the Entra account rather than delete it — allows easy reactivation if the user requests an extension. Deletion can happen as a separate cleanup process for accounts expired > 90 days.
 
-- Power Apps trial is **one-time per user** — cannot be reactivated
-- Guest users from tenants with E3/E5 may already have Power Apps access via their home tenant, but this does NOT grant access to apps in our tenant — they need a license assigned in our tenant or a trial
-- Per-app plans are assigned per environment — the demo environment needs its own allocation
-- **Budget consideration**: At $5/user/month, 50 concurrent demo users = $250/month
+### 5.8 No-MFA Configuration for Demo Accounts
 
-### 5.7 Demo Environment Setup (One-Time)
+**Approach**: Conditional Access policy exclusion.
 
-**Business Unit**: Create "Spaarke Demo" business unit in Dataverse
-- Isolates demo users from internal data
-- BU-scoped security roles limit data visibility
+1. Create Entra ID security group: **"Spaarke Demo Users"**
+2. All provisioned demo accounts are added to this group (Step 2 of provisioning)
+3. Create or modify Conditional Access policy:
+   - **Exclude**: "Spaarke Demo Users" group from MFA requirements
+   - Scope: applies only to demo.spaarke.com accounts
 
-**Security Role**: `Spaarke Demo User`
-- Clone of `Spaarke AI Analysis User` with restrictions:
-  - Organization-scope Read on reference data (playbooks, skills)
-  - BU-scope Read/Write on documents, matters
-  - No Delete on anything
-  - No customization privileges
+**Important**: This is a one-time Azure Portal configuration, not automated by the provisioning pipeline. The pipeline just adds users to the group.
 
-**Demo Data**: Pre-populated in Demo BU
-- Sample matters/projects
-- Sample documents (in demo SPE container)
-- Sample AI playbooks (read-only)
+### 5.9 Browser Session Conflict Mitigation
 
-**Demo SPE Container**: Shared container with sample documents
-- Pre-loaded with ~20 sample legal documents
-- Read-write for demo users (they can upload their own test docs)
-- Reset weekly or on-demand (scheduled cleanup)
+Since demo accounts are internal (`demo.spaarke.com`) rather than B2B guest accounts, there's no cross-tenant session conflict. However, users with active Microsoft sessions in the same browser may experience credential caching issues.
+
+**Mitigation**: Welcome email includes clear guidance:
+- "Open the access URL in an InPrivate (Edge) or Incognito (Chrome) window"
+- "This avoids conflicts with your existing Microsoft account sessions"
+
+This is a known friction point with B2B guest access that internal accounts largely avoid — but the browser tip handles the remaining edge case.
 
 ---
 
@@ -464,109 +497,186 @@ After guest invitation (Step 1), before completing provisioning:
 
 | Concern | Mitigation |
 |---------|------------|
-| Registration abuse | Authentication-first (Entra ID sign-in required); rate limiting per user |
-| Guest user over-privilege | Dedicated Demo BU with scoped security role; no cross-BU access |
+| Form spam/abuse | reCAPTCHA (website); rate limiting on BFF API; email domain validation |
+| Unauthorized approval | Admin endpoint requires `Spaarke Registration Admin` role; ribbon button only visible to admins |
+| Demo user over-privilege | Dedicated Demo BU with scoped security role; no cross-BU access; no delete permissions |
 | Demo data leakage | Demo BU contains only synthetic/sample data |
-| Stale demo accounts | Automated expiration via DemoAccessExpirationService (daily BackgroundService) |
-| PII in registration data | Dataverse handles at-rest encryption; access restricted to Registration Admin role |
-| Credential management | No passwords stored; Entra ID federated SSO via guest invitation |
-| Provisioning service permissions | App-only Graph permissions scoped to `User.Invite.All` + `User.ReadWrite.All` |
-| Cross-tenant trust | Guest invitation uses standard Entra ID B2B — user's home tenant controls their credentials |
+| Stale demo accounts | Automated expiration via DemoAccessExpirationService |
+| Password in email | Temp password with forced change on first login; welcome email sent to verified work email |
+| Credential stuffing on demo accounts | No MFA, but accounts are time-limited and low-value (sample data only) |
+| Provisioning service permissions | App-only Graph permissions: `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Directory.ReadWrite.All` |
+| PII in registration data | Dataverse handles at-rest encryption; access restricted to admin role |
 
 ---
 
-## 7. User Experience Flow
-
-```
-1. User visits spaarke.com → clicks "Try Spaarke" / "Request Demo"
-2. Redirected to spaarke.com/demo → prompted to sign in (Entra ID SSO)
-3. User signs in with their work account (any organization)
-4. Registration form renders with pre-populated name/email/org
-5. User completes remaining fields → submits
-6. Confirmation page: "Thanks! Tracking ID: REG-20260311-A1B2"
-7. User can check status anytime at spaarke.com/demo/status
-8. (Behind scenes: Dataverse record created, admin notified via email)
-9. Admin reviews request → Approves via Spaarke MDA or admin panel
-10. (Behind scenes: provisioning pipeline runs — guest invite, roles, SPE)
-11. User receives branded welcome email:
-    - "Your Spaarke Demo Access is Ready!"
-    - Power Apps license activation link (if needed)
-    - Dataverse MDA access URL
-    - Quick start guide
-    - Demo expires on [date]
-12. User activates Power Apps trial (if not already licensed)
-13. User clicks MDA link → SSO via their Entra ID → lands in Spaarke
-14. User explores Spaarke features with sample data for 14-30 days
-15. Day 27: "Your demo is expiring in 3 days" email
-16. Day 30: Access revoked, "Convert to production?" email sent
-```
-
----
-
-## 8. Technology Decisions
+## 7. Technology Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Registration UI | Integrated into Spaarke website (Next.js 16) | Seamless brand experience, reuse existing infrastructure |
-| React version | React 19 | Website already on 19.2.3; Fluent UI v9 compatible; stable since Dec 2024 |
-| Website authentication | NextAuth.js with Entra ID provider (multi-tenant) | Verified identity before registration; pre-populated fields |
-| Submission endpoint | BFF API (authenticated) | Reuse existing API; identity verified via token |
-| Approval workflow | BFF API BackgroundService + Service Bus | No Power Automate — consistent with ADR-001 and product architecture |
-| Admin notification | Spaarke Communication Service | Existing email infrastructure; branded templates; audit trail in Dataverse |
-| Provisioning orchestration | BFF API BackgroundService + Service Bus `customer-onboarding` queue | ADR-001 compliant; reuses existing queue |
-| User identity | Entra ID Guest Invitation (B2B) | Standard Microsoft pattern; user keeps their own credentials |
-| Email notifications | Spaarke Communication Service (`POST /api/communications/send`) | Existing service; HTML templates; tracking records; approved sender management |
-| Demo data isolation | Dataverse Business Unit | Native multi-tenancy mechanism |
-| Demo expiration | BFF API BackgroundService (daily scheduled) | Same pattern as DailySendCountResetService |
-| Power Apps licensing | Trial-first with per-app fallback | Zero-cost for most demos; $5/user/month for non-trial users |
+| User identity | Internal Entra ID account (`demo.spaarke.com`) | Avoids B2B guest cross-tenant conflicts; cleaner auth experience; full control over account lifecycle |
+| Demo environment | Separate Dataverse environment (`spaarke-demo.crm.dynamics.com`) | Complete isolation from dev/prod |
+| Request form | Public form on Spaarke website (no auth required) | Lower friction; reCAPTCHA for bot protection |
+| Registration form | **Eliminated** — not needed | Admin approval triggers auto-provisioning directly; username/password auto-generated |
+| Admin approval UI | MDA view + ribbon button | Centralized, auditable, filterable, extensible to production user mgmt; no separate admin UI to build |
+| Provisioning | Synchronous (BFF API endpoint) | Simpler than Service Bus for Phase 1; pipeline takes ~10-30s; can add async later if volume demands |
+| Licensing | Auto-assign 3 licenses via Graph API | Power Apps Plan 2 Trial + Fabric Free + Power Automate Free; no manual admin steps |
+| MFA for demo users | Disabled via Conditional Access exclusion | Reduces demo friction; accounts are time-limited with sample data only |
+| Expiration handling | BFF API BackgroundService (daily) | Same pattern as DailySendCountResetService; disable account rather than delete |
+| Email notifications | Spaarke Communication Service | Existing infrastructure; branded templates; Dataverse audit trail |
+| Password handling | Auto-generated temp password, forced change on first login | No password selection form needed; secure enough for demo |
 
 ---
 
-## 9. Phase 2 Considerations (Future — Not in Scope)
+## 8. Extensibility for Production
 
-For context on where this design extends:
+| Phase 1 (Demo) | Future (Production) |
+|-----------------|---------------------|
+| Internal demo accounts (`demo.spaarke.com`) | Customer-scoped accounts or B2B guest |
+| Single pre-existing demo environment | Per-customer dedicated environments |
+| Default 14-day access (adjustable) | Subscription-based access |
+| Manual admin approval | Rules-based auto-approve for known domains |
+| Single security role | Customer-specific role templates |
+| Shared demo data | Customer-isolated data |
+| Config-driven environment reference | Config-driven customer environment reference |
 
-- **Production customer onboarding**: provision dedicated BU or environment, assign customer admin role
-- **Customer admin portal**: customer admins manage their own user roster
-- **Automated approval**: rules-based auto-approve for known domains/organizations
-- **Usage analytics**: track demo engagement to qualify leads
-- **Conversion flow**: seamless upgrade from demo to production access
-- **Multi-environment**: separate registration for dev/staging/production
-
----
-
-## 10. Open Questions
-
-1. **Demo duration**: 30 days recommended (aligns with Power Apps trial period). Configurable via Dataverse environment variable?
-2. **Concurrent demo users**: Any limit on total active demo users? At $5/month per-app fallback, what's the budget ceiling?
-3. **Demo data reset**: Should each demo user get a fresh data set (isolated), or share the same sample data (simpler)?
-4. **Approval SLA**: Is 1 business day review acceptable, or should some requests auto-approve (e.g., known partner domains)?
-5. **Website auth scope**: Should sign-in be required only for `/demo` routes, or should we add auth to other website sections (e.g., blog, support portal)?
-6. **Admin review UI**: Spaarke MDA view (simpler, Dataverse-native) vs. website admin panel (richer, but more to build)?
-7. **Extension requests**: Can demo users request an extension? If so, how many days and how many times?
+**Key extensibility points**:
+- Provisioning pipeline already reads environment config — just add new entries to appsettings array
+- `sprk_registrationrequest` table can add fields for customer tier, environment preference
+- Provisioning steps are modular — can swap "create internal user" for "invite B2B guest" per request type
 
 ---
 
-## 11. Success Criteria
+## 9. Open Questions (Resolved)
+
+| # | Question | Resolution |
+|---|----------|------------|
+| 1 | Demo duration | Default 14 days; admin can adjust expiration date per record |
+| 2 | Admin review UI | MDA view + ribbon button (not website admin panel) |
+| 3 | User identity model | Internal accounts (`demo.spaarke.com`), not B2B guest |
+| 4 | Registration form needed? | No — approval triggers auto-provisioning directly |
+| 5 | MFA for demo users | Disabled via Conditional Access exclusion |
+| 6 | Service Bus for provisioning? | No — synchronous for Phase 1 (simpler) |
+
+### Remaining Open Questions
+
+1. **Demo data**: Shared sample data across all demo users (simpler) vs. per-user data sets?
+2. **Password policy**: Allow simple passwords for demo accounts, or enforce standard complexity?
+3. **Account extension**: Can demo users request more time? If so, process and max duration?
+4. **Concurrent user limit**: Any cap on active demo users?
+5. **Demo data reset**: Automated cleanup of user-created data in demo environment?
+
+---
+
+## 10. Success Criteria
 
 | Metric | Target |
 |--------|--------|
-| Registration to provisioned | < 4 hours (with human approval) |
-| Provisioning (after approval) | < 5 minutes (fully automated) |
-| Zero manual provisioning steps | After approval click, everything is automated |
-| Demo expiration enforcement | 100% — no stale demo accounts |
-| Registration form completion rate | > 70% of visitors who start the form |
+| Request to provisioned | < 4 hours (with human approval) |
+| Provisioning (after approval click) | < 60 seconds (fully automated) |
+| Zero manual provisioning steps | After "Approve" click, everything is automated |
+| Demo expiration enforcement | 100% — no stale accounts |
+| Form completion rate | > 70% of visitors who start the form |
 
 ---
 
-## 12. Risks
+## 11. Risks
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| **Power Apps licensing cost** at scale | High | Trial-first approach; per-app plan at $5/user/month for fallback; budget cap on concurrent demos |
-| **Guest invitation blocked** by user's org tenant | Medium | Document prerequisite (org must allow external collaboration); provide troubleshooting guide; detect during provisioning and notify admin |
-| **Entra ID B2B guest limits** | Low | Default limit is 5 guests per inviter per day; use app-only permissions (no limit) |
-| **Demo data quality degrades** over time | Low | Weekly reset of demo BU sample data via scheduled BackgroundService |
-| **Website auth adds friction** to registration | Medium | Sign-in is one click for users with Entra ID; alternative: allow unauthenticated registration with email verification as fallback |
-| **BFF API scope expansion** | Low | New endpoints are well-isolated in `RegistrationEndpoints.cs` + `RegistrationModule.cs`; follows existing endpoint pattern |
-| **Power Apps trial already used** by returning users | Medium | Detect via Graph licensing API; flag for admin to assign per-app plan |
+| **Graph API permission escalation** (`User.ReadWrite.All`, `Directory.ReadWrite.All`) | Medium | Scope to demo tenant only; document justification; review with security |
+| **Power Apps Plan 2 Trial license availability** | Low | Trial is free and auto-assigned; falls within tenant license pool |
+| **Demo data quality degrades** from user activity | Low | Weekly or on-demand data reset via scheduled BackgroundService |
+| **Username collisions** (`firstname.lastname`) | Low | Auto-append number; check Entra ID before creation |
+| **Browser session conflicts** despite internal accounts | Low | Welcome email guidance: use InPrivate/Incognito |
+| **BFF API needs connectivity to Demo Dataverse** (different from dev) | Medium | Add Demo Dataverse connection string to BFF API config; may need separate S2S app registration |
+| **Conditional Access misconfiguration** | Medium | Test thoroughly; demo group exclusion is narrow and well-scoped |
+| **Temp password in email** | Low | Forced change on first login; email sent to verified work address; demo data only |
+
+---
+
+## 12. Implementation Scope — Complete Deliverables
+
+**Project completion means everything is in place end-to-end.** When the last task is done, an admin can click "Approve" on a real request and the user receives a working demo account. No manual setup steps remain.
+
+### A. BFF API — Registration & Provisioning (spaarke repo)
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| Registration endpoints | `Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs` | Submit, approve, reject APIs |
+| Provisioning service | `Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs` | Orchestrates all provisioning steps |
+| Graph user service | `Sprk.Bff.Api/Services/Registration/GraphUserService.cs` | Create Entra user, assign licenses, manage group |
+| Dataverse registration service | `Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs` | CRUD for `sprk_registrationrequest`, systemuser sync, team assignment |
+| Expiration BackgroundService | `Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs` | Daily: disable expired accounts, send warnings |
+| Email templates | `Sprk.Bff.Api/Services/Registration/EmailTemplates/` | HTML templates: admin notification, welcome, expiration warning, expired |
+| Configuration | `appsettings.json` / Key Vault | Demo Dataverse URL, Graph permissions, SKU IDs, demo BU/team IDs |
+| Request/response models | `Sprk.Bff.Api/Models/Registration/` | DTOs for endpoints |
+
+### B. Website — Request Early Access Form (spaarke-website repo)
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| Demo request page | `app/demo/page.tsx` (or `app/get-started/page.tsx`) | Public form with reCAPTCHA |
+| Form component | `components/DemoRequestForm.tsx` | React 19 form with client-side validation |
+| API route | `app/api/registration/demo-request/route.ts` | Next.js API route → proxies to BFF API |
+| Confirmation page/state | Same page or `app/demo/thank-you/page.tsx` | "Thanks! We'll review within 1 business day." |
+| Navigation link | Site header/hero | "Request Early Access" / "Try Spaarke" CTA button |
+
+### C. Dataverse — Schema & MDA Configuration (Demo environment)
+
+| Component | Description |
+|-----------|-------------|
+| `sprk_registrationrequest` table | Full schema per Section 5.4 — created via solution import or setup script |
+| MDA views | "Pending Demo Requests", "All Demo Requests", "Active Demo Users", "Expired Demo Users" |
+| MDA form | Registration request form with all fields, status timeline |
+| Ribbon button: "Approve Demo Access" | List + form command bar; calls BFF API approve endpoint |
+| Ribbon button: "Reject Request" | List + form command bar; prompts for reason; calls BFF API reject endpoint |
+| Ribbon JS webresource | `sprk_registrationribbon.js` — button click handlers |
+| Site map entry | Registration Requests added to MDA navigation |
+
+**Note**: The `sprk_registrationrequest` table/views/ribbon are deployed to the demo environment via Dataverse solution import. The BU, team, security role, and sample data are **prerequisites** (already set up in the demo environment).
+
+### D. Entra ID / Azure Setup Scripts (one-time)
+
+| Script | Purpose |
+|--------|---------|
+| `Setup-EntraInfrastructure.ps1` | Create "Spaarke Demo Users" security group, Conditional Access MFA exclusion, Graph API permissions + admin consent |
+| `Get-LicenseSkuIds.ps1` | Discover and output tenant SKU IDs for the 3 required licenses (for BFF config) |
+
+These are **one-time setup scripts** for Entra ID infrastructure only. The demo Dataverse environment (solution, BU, team, role, SPE, sample data) is a **prerequisite** and not part of this project.
+
+### E. Email Templates
+
+| Template | Trigger | Content |
+|----------|---------|---------|
+| Admin notification | New request submitted | Request details, link to MDA record |
+| Welcome email | Account provisioned | Username, temp password, access URL, browser tip, expiry date, quick start guide |
+| Expiration warning | 3 days before expiry | "Demo expiring soon", contact us for extension, production access offer |
+| Expired notification | Day of expiry | Account disabled, thank you, production access CTA |
+
+### F. Testing & Verification
+
+| Test | Description |
+|------|-------------|
+| End-to-end smoke test | Submit form → approve in MDA → verify account created → verify login works |
+| Provisioning idempotency | Call approve twice → no duplicate users or emails |
+| Expiration service | Create expired record → run service → verify account disabled |
+| Username collision | Submit two "Jane Smith" requests → verify `jane.smith2@demo.spaarke.com` |
+| Form validation | Required fields, email format, reCAPTCHA, duplicate email rejection |
+| Ribbon button visibility | Button hidden when status ≠ Submitted |
+
+### Delivery Checklist
+
+When the project is complete, all of the following must be true:
+
+- [ ] Website form at `spaarke.com/demo` accepts and submits requests
+- [ ] BFF API creates `sprk_registrationrequest` in Demo Dataverse
+- [ ] Admin notification email sent on new request
+- [ ] MDA view shows pending requests with Approve/Reject ribbon buttons
+- [ ] "Approve" button provisions full account in < 60 seconds
+- [ ] User receives welcome email with working credentials
+- [ ] User can log in to `https://spaarke-demo.crm.dynamics.com/` with demo account
+- [ ] No MFA prompt for demo accounts
+- [ ] Expired accounts are automatically disabled based on expiration date (default 14 days, adjustable)
+- [ ] Pre-expiration warning email sent 3 days before expiry
+- [ ] Entra ID setup scripted (security group, Conditional Access, Graph permissions)
+- [ ] BFF config has demo environment settings (URL, BU name, team name, SPE container, SKU IDs)

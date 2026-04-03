@@ -1,0 +1,66 @@
+<task id="REG-001" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Foundation: Models, Configuration, and DI Module</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>0</phase>
+    <tags>bff-api, foundation, models, configuration</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the foundational shared types that all subsequent parallel streams depend on:
+    request/response DTOs, configuration model, status enum, and DI module skeleton.
+    This task MUST complete before Phase 1 parallel tasks can begin.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Minimal APIs, Options pattern, and DI conventions</role>
+
+  <goal>
+    All shared models, configuration classes, and DI skeleton exist and compile.
+    Phase 1 parallel agents can start immediately after this completes.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>projects/spaarke-self-service-registration-app/plan.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — register concretes, max 15 non-framework registrations</constraint>
+    <constraint source="ADR-019">All API responses use ProblemDetails for errors</constraint>
+    <constraint source="spec">Configuration must support multiple demo environments via array</constraint>
+    <constraint source="spec">Status values: Submitted, Approved, Rejected, Provisioned, Expired, Revoked</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read canonical DI module">Read CommunicationModule.cs to understand the module pattern</step>
+    <step order="2" name="Create status enum">Create RegistrationStatus enum with all values</step>
+    <step order="3" name="Create DTOs">Create DemoRequestDto, ApproveResponseDto, RejectRequestDto</step>
+    <step order="4" name="Create config model">Create DemoProvisioningOptions with Environments array, AccountDomain, DefaultEnvironment</step>
+    <step order="5" name="Create DI module skeleton">Create RegistrationModule.cs with AddRegistrationModule() — empty service registrations for now</step>
+    <step order="6" name="Verify build">Run dotnet build to confirm compilation</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Registration/DemoRequestDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Registration/ApproveResponseDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Registration/RejectRequestDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Registration/RegistrationStatus.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 6 files compile without errors</criterion>
+    <criterion>DemoProvisioningOptions supports an array of environment configs</criterion>
+    <criterion>RegistrationModule follows CommunicationModule pattern</criterion>
+    <criterion>Status enum includes all 6 values from spec</criterion>
+  </acceptance-criteria>
+</task>

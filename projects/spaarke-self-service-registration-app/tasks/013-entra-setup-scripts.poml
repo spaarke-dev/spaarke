@@ -1,0 +1,69 @@
+<task id="REG-013" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Entra ID Setup Scripts</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>entra-id, scripts, infrastructure</tags>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create two PowerShell scripts for one-time Entra ID infrastructure setup:
+    1. Setup-EntraInfrastructure.ps1 — creates "Spaarke Demo Users" security group, creates/modifies
+       Conditional Access policy to exclude the group from MFA, adds Graph API permissions
+       (User.ReadWrite.All, GroupMember.ReadWrite.All, Directory.ReadWrite.All) to the BFF API app
+       registration, and grants admin consent.
+    2. Get-LicenseSkuIds.ps1 — queries tenant subscribedSkus and outputs SKU IDs for Power Apps
+       Plan 2 Trial, Microsoft Fabric (Free), and Microsoft Power Automate (Free).
+    Both scripts must be idempotent (safe to re-run).
+  </prompt>
+
+  <role>Azure/Entra ID administrator with PowerShell and Microsoft Graph API expertise</role>
+
+  <goal>
+    Two idempotent PowerShell scripts that fully configure Entra ID infrastructure for demo
+    user provisioning. After running, the BFF API can create users, assign licenses, and
+    demo users are excluded from MFA.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>scripts/Register-EntraAppRegistrations.ps1</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="spec">Security group name: "Spaarke Demo Users"</constraint>
+    <constraint source="spec">BFF API App Registration: 1e40baad-e065-4aea-a8d4-4b7ab273458c</constraint>
+    <constraint source="spec">Permissions: User.ReadWrite.All, GroupMember.ReadWrite.All, Directory.ReadWrite.All</constraint>
+    <constraint source="spec">Conditional Access: exclude demo group from MFA policies</constraint>
+    <constraint source="spec">Scripts must be idempotent — check existence before creating</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read reference script">Study Register-EntraAppRegistrations.ps1 for conventions</step>
+    <step order="2" name="Create Setup-EntraInfrastructure.ps1">Security group, Conditional Access policy, Graph permissions, admin consent</step>
+    <step order="3" name="Create Get-LicenseSkuIds.ps1">Query subscribedSkus, filter and output relevant SKU IDs</step>
+    <step order="4" name="Add error handling">Idempotency checks, clear error messages, prerequisite validation</step>
+    <step order="5" name="Document usage">Add header comments with prerequisites, parameters, examples</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/Setup-EntraInfrastructure.ps1</output>
+    <output type="code">scripts/Get-LicenseSkuIds.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Setup-EntraInfrastructure.ps1 creates security group if not exists</criterion>
+    <criterion>Conditional Access policy created/updated to exclude demo group</criterion>
+    <criterion>Graph API permissions added to BFF app registration</criterion>
+    <criterion>Admin consent granted</criterion>
+    <criterion>Get-LicenseSkuIds.ps1 outputs 3 SKU IDs</criterion>
+    <criterion>Both scripts are idempotent</criterion>
+    <criterion>Both scripts have clear usage documentation</criterion>
+  </acceptance-criteria>
+</task>

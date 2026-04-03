@@ -1,0 +1,74 @@
+<task id="REG-011" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Dataverse Registration Service: CRUD + User Sync</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>bff-api, dataverse, s2s</tags>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the RegistrationDataverseService for all Dataverse operations against the Demo environment:
+    CRUD for sprk_registrationrequest records, duplicate detection by email, tracking ID generation,
+    systemuser creation/sync, and team membership assignment. Uses S2S (client secret) auth to the
+    Demo Dataverse environment (separate from dev). Include TrackingIdGenerator for REG-YYYYMMDD-XXXX format.
+  </prompt>
+
+  <role>Senior .NET developer with Dataverse Web API and S2S authentication expertise</role>
+
+  <goal>
+    A fully tested RegistrationDataverseService that can create/update/query registration requests,
+    sync systemusers, and manage team membership in the Demo Dataverse environment.
+    TrackingIdGenerator produces unique, human-readable IDs.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiClient.cs</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>docs/guides/DATAVERSE-AUTHENTICATION-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="spec">Target: Demo Dataverse environment (separate URL from dev) — read from DemoProvisioningOptions</constraint>
+    <constraint source="spec">Table: sprk_registrationrequest with all columns per spec data model</constraint>
+    <constraint source="spec">Duplicate check: reject if email has active/pending request</constraint>
+    <constraint source="spec">Tracking ID format: REG-{YYYYMMDD}-{4 alphanumeric chars}</constraint>
+    <constraint source="spec">Systemuser creation uses azureactivedirectoryobjectid + businessunitid binding</constraint>
+    <constraint source="spec">Team assignment via teammembership_association/$ref</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read Dataverse patterns">Study DataverseServiceClientImpl and entity-operations pattern</step>
+    <step order="2" name="Create TrackingIdGenerator">REG-YYYYMMDD-XXXX format with uniqueness</step>
+    <step order="3" name="Create RegistrationDataverseService">Implement: CreateRequestAsync, UpdateRequestAsync, GetRequestByIdAsync, GetRequestsByStatusAsync, CheckDuplicateAsync, CreateSystemUserAsync, AddToTeamAsync, RemoveFromTeamAsync</step>
+    <step order="4" name="Handle Demo environment connection">Service connects to Demo Dataverse URL from config (not dev)</step>
+    <step order="5" name="Write unit tests">Test CRUD, duplicate detection, tracking ID generation</step>
+    <step order="6" name="Verify build">dotnet build and dotnet test</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/TrackingIdGenerator.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/RegistrationDataverseServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/TrackingIdGeneratorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Creates sprk_registrationrequest records with all spec columns</criterion>
+    <criterion>Duplicate detection prevents second request from same email</criterion>
+    <criterion>TrackingIdGenerator produces unique REG-YYYYMMDD-XXXX IDs</criterion>
+    <criterion>Creates systemuser in Demo Dataverse with correct BU binding</criterion>
+    <criterion>Adds/removes team membership correctly</criterion>
+    <criterion>Uses Demo Dataverse URL from config (not hardcoded)</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

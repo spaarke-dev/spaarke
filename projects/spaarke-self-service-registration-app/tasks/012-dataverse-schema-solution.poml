@@ -1,0 +1,62 @@
+<task id="REG-012" project="Spaarke Self-Service Registration App">
+  <metadata>
+    <title>Dataverse Schema: Table, Views, Form, Sitemap</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse, schema, solution</tags>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the Dataverse solution containing the sprk_registrationrequest table with all columns,
+    4 MDA views (Pending, All, Active, Expired), a form with logical field grouping and status-based
+    sections, and a sitemap entry for Registration Requests in the MDA navigation. Package as
+    unmanaged solution for import to Demo Dataverse environment.
+  </prompt>
+
+  <role>Dataverse solution architect with experience in entity design, views, forms, and solution packaging</role>
+
+  <goal>
+    An unmanaged Dataverse solution (DemoRegistration) containing the sprk_registrationrequest table
+    with all columns, 4 views, a main form, and sitemap entry — ready for import to demo environment.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-self-service-registration-app/spec.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="spec">Table: sprk_registrationrequest — all columns per spec data model section</constraint>
+    <constraint source="spec">Views: Pending Demo Requests (status=Submitted), All Demo Requests, Active Demo Users (status=Provisioned), Expired Demo Users (status=Expired)</constraint>
+    <constraint source="spec">Unmanaged solution — demo is not a production/customer environment</constraint>
+    <constraint source="spec">Choice fields: sprk_usecase (4 options), sprk_referralsource (5 options), sprk_status (6 options)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Read schema guide">Study DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md for process</step>
+    <step order="2" name="Create solution project">Create src/solutions/DemoRegistration/ with solution.xml</step>
+    <step order="3" name="Define entity schema">Create sprk_registrationrequest entity with all columns, types, constraints</step>
+    <step order="4" name="Create views">4 views with appropriate filters, columns, and sort orders</step>
+    <step order="5" name="Create main form">Form with sections: Request Info, Status, Provisioning Details, Review</step>
+    <step order="6" name="Add sitemap entry">Registration Requests in MDA navigation</step>
+    <step order="7" name="Package solution">Prepare as unmanaged solution ZIP for import</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/DemoRegistration/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Solution contains sprk_registrationrequest with all spec columns</criterion>
+    <criterion>4 views created with correct filters</criterion>
+    <criterion>Main form has logical grouping of fields</criterion>
+    <criterion>Sitemap includes Registration Requests entry</criterion>
+    <criterion>Solution is unmanaged and importable</criterion>
+  </acceptance-criteria>
+</task>
