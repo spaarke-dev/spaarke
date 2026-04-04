@@ -340,7 +340,7 @@ public class RegistrationDataverseService : IDisposable
         using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, ct);
         var refBody = new Dictionary<string, string>
         {
-            ["@odata.id"] = $"{SystemUserEntitySet}({systemUserId})"
+            ["@odata.id"] = $"{_apiUrl}/{SystemUserEntitySet}({systemUserId})"
         };
         request.Content = JsonContent.Create(refBody);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");

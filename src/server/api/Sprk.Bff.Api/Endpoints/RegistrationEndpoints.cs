@@ -261,12 +261,15 @@ public static class RegistrationEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Provisioning Failed",
-                detail: "Demo provisioning failed partway through. An administrator may need to clean up partial resources.",
+                detail: $"Demo provisioning failed: {ex.InnerException?.Message ?? ex.Message}",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.6.1",
                 extensions: new Dictionary<string, object?>
                 {
                     ["correlationId"] = httpContext.TraceIdentifier,
-                    ["completedSteps"] = ex.CompletedSteps
+                    ["completedSteps"] = ex.CompletedSteps,
+                    ["failedAfterStep"] = ex.CompletedSteps.Count > 0 ? ex.CompletedSteps[^1] : "none",
+                    ["entraUserId"] = ex.EntraUserId,
+                    ["upn"] = ex.Upn
                 });
         }
         catch (Exception ex)
