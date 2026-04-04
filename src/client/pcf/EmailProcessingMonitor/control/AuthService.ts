@@ -172,8 +172,17 @@ export class AuthService {
    */
   private async attemptSsoSilent(): Promise<AuthenticationResult | null> {
     try {
-      const ssoRequest: SilentRequest = {
+      // Resolve loginHint from Xrm context for first-load ssoSilent success
+      let loginHint: string | undefined;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+        loginHint = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userName;
+      } catch { /* cross-origin */ }
+
+      const ssoRequest = {
         scopes: [this.namedScope],
+        loginHint,
       };
 
       return await this.msalInstance.ssoSilent(ssoRequest);

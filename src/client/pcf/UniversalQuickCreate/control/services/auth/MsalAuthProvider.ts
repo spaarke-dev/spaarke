@@ -483,12 +483,21 @@ export class MsalAuthProvider implements IAuthProvider {
     // This attempts to acquire token using existing browser session
     // (user already logged into Model-driven apps, so session exists)
 
-    console.debug('[MsalAuthProvider] Using ssoSilent to discover account from browser session');
+    // Resolve loginHint from Xrm context — the user is already logged into Dataverse,
+    // so we can use their UPN to tell Azure AD which account to authenticate silently.
+    // This prevents the "pick an account" prompt and eliminates unnecessary popups.
+    let loginHint: string | undefined;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+      loginHint = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userName;
+    } catch { /* cross-origin */ }
 
-    const ssoRequest: SilentRequest = {
+    console.debug('[MsalAuthProvider] Using ssoSilent to discover account from browser session', loginHint ? `hint=${loginHint}` : '(no hint)');
+
+    const ssoRequest = {
       scopes,
-      // Note: MSAL v4 doesn't support loginHint in SilentRequest
-      // It will automatically discover the account from the browser session
+      loginHint,
     };
 
     const tokenResponse = await this.msalInstance.ssoSilent(ssoRequest);

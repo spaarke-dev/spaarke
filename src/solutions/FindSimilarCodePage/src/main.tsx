@@ -1,79 +1,92 @@
 /**
  * Find Similar Documents Dialog - Code Page Entry Point
  *
- * Thin wrapper that renders the DocumentRelationshipViewer iframe directly
- * inside a Dataverse modal dialog. Since Dataverse navigateTo already provides
- * the modal chrome, this Code Page renders the iframe content without an
- * additional Dialog shell. Parses URL parameters (documentId, containerId)
- * and resolves theme.
+ * Single-step dialog with two mutually exclusive paths:
+ *   Path A: Select existing Document via Xrm lookup → open DocumentRelationshipViewer
+ *   Path B: Upload file → BFF extracts/embeds → temp AI Search entry → open viewer
  *
  * Opened via Xrm.Navigation.navigateTo with pageType: "webresource".
  * Web resource name: sprk_findsimilar
  *
- * Note: This is a standalone web resource (not a PCF control), so it uses
- * React 18 which includes native useId() support required by Fluent UI v9.
- *
- * Uses deep imports from @spaarke/ui-components to avoid pulling in
- * Lexical/RichTextEditor and other heavy dependencies.
+ * Auth: @spaarke/auth with resolveRuntimeConfig() → initAuth() pattern.
+ * Tenant ID: JWT tid claim (bridge token compatible).
  */
 
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import { FluentProvider, Text } from "@fluentui/react-components";
+import { FluentProvider, Spinner } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
-import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
+import { resolveRuntimeConfig, initAuth, getAuthProvider, authenticatedFetch } from "@spaarke/auth";
+import { FindSimilarApp } from "./App";
 
-function App() {
-  const [theme, setTheme] = React.useState(resolveCodePageTheme);
-  const params = React.useMemo(() => parseDataParams(), []);
+const container = document.getElementById("root");
+if (!container) throw new Error("[FindSimilar] Root container #root not found in DOM.");
 
-  React.useEffect(() => {
-    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
-  }, []);
+const root = createRoot(container);
 
-  // Build the iframe URL from params passed via Xrm.Navigation.navigateTo data string
-  const iframeUrl = React.useMemo(() => {
-    const documentId = params.documentId;
-    const containerId = params.containerId;
-    if (!documentId || !containerId) return null;
+// Render loading state while bootstrapping
+let currentTheme = resolveCodePageTheme();
+root.render(
+  <FluentProvider theme={currentTheme} style={{ height: "100%" }}>
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}>
+      <Spinner label="Initializing..." />
+    </div>
+  </FluentProvider>
+);
 
-    const urlParams = new URLSearchParams();
-    urlParams.set("documentId", documentId);
-    urlParams.set("containerId", containerId);
-    if (params.bffBaseUrl) urlParams.set("bffBaseUrl", params.bffBaseUrl);
+/**
+ * Bootstrap sequence:
+ *   1. Resolve runtime config from Dataverse Environment Variables
+ *   2. Initialize MSAL auth with resolved config
+ *   3. Resolve tenantId from auth
+ *   4. Render App with apiBaseUrl and tenantId
+ */
+async function bootstrap(): Promise<void> {
+  // 1. Resolve runtime config (BFF URL, MSAL client ID, OAuth scope)
+  const runtimeConfig = await resolveRuntimeConfig();
 
-    // The iframe loads the DocumentRelationshipViewer web resource
-    return `sprk_documentrelationshipviewer?data=${encodeURIComponent(urlParams.toString())}`;
-  }, [params.documentId, params.containerId, params.bffBaseUrl]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
 
-  return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
-      {iframeUrl ? (
-        <iframe
-          src={iframeUrl}
-          style={{ width: "100%", height: "100%", border: "none" }}
-          title="Find Similar Documents"
-        />
-      ) : (
-        <div style={{ padding: 16 }}>
-          <Text>No document selected. Close this dialog and select a document first.</Text>
-        </div>
-      )}
+  // 2. Initialize auth
+  await initAuth({
+    clientId: runtimeConfig.msalClientId,
+    bffApiScope: runtimeConfig.bffOAuthScope,
+    bffBaseUrl: runtimeConfig.bffBaseUrl,
+  });
+
+  // 3. Resolve tenantId
+  let tenantId = "";
+  try {
+    tenantId = await getAuthProvider().getTenantId();
+  } catch (err) {
+    console.warn("[FindSimilar] Could not resolve tenantId:", err);
+  }
+
+  // 4. Render
+  root.render(
+    <FluentProvider theme={currentTheme} style={{ height: "100%" }}>
+      <FindSimilarApp
+        apiBaseUrl={runtimeConfig.bffBaseUrl}
+        tenantId={tenantId}
+        authenticatedFetch={authenticatedFetch}
+      />
     </FluentProvider>
   );
 }
 
-// Mount React application to #root element
-const rootElement = document.getElementById("root");
+// Listen for theme changes
+setupCodePageThemeListener(() => {
+  currentTheme = resolveCodePageTheme();
+});
 
-if (rootElement) {
-  // React 18 createRoot API
-  const root = createRoot(rootElement);
+bootstrap().catch((err) => {
+  console.error("[FindSimilar] Bootstrap failed:", err);
   root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
+    <FluentProvider theme={currentTheme} style={{ height: "100%" }}>
+      <div style={{ padding: 24, color: "red" }}>
+        Failed to initialize. Please close and try again.
+      </div>
+    </FluentProvider>
   );
-} else {
-  console.error("[FindSimilarDialog] Root element not found");
-}
+});

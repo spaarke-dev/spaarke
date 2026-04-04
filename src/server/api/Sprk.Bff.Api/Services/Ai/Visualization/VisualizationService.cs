@@ -30,6 +30,8 @@ public class VisualizationService : IVisualizationService
 {
     private readonly IKnowledgeDeploymentService _deploymentService;
     private readonly IDocumentDataverseService _documentService;
+    private readonly ITextExtractor _textExtractor;
+    private readonly IOpenAiClient _openAiClient;
     private readonly ILogger<VisualizationService> _logger;
     private readonly DataverseOptions _dataverseOptions;
 
@@ -40,14 +42,21 @@ public class VisualizationService : IVisualizationService
     // Maximum nodes to prevent exponential growth
     private const int MaxTotalNodes = 100;
 
+    // Prefix for temporary document IDs to identify them for cleanup
+    private const string TempDocumentPrefix = "temp-viz-";
+
     public VisualizationService(
         IKnowledgeDeploymentService deploymentService,
         IDocumentDataverseService documentService,
+        ITextExtractor textExtractor,
+        IOpenAiClient openAiClient,
         IOptions<DataverseOptions> dataverseOptions,
         ILogger<VisualizationService> logger)
     {
         _deploymentService = deploymentService;
         _documentService = documentService;
+        _textExtractor = textExtractor;
+        _openAiClient = openAiClient;
         _dataverseOptions = dataverseOptions.Value;
         _logger = logger;
     }
@@ -199,6 +208,116 @@ public class VisualizationService : IVisualizationService
         {
             _logger.LogError(ex, "Unexpected error during visualization for document {DocumentId}", documentId);
             throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ContentUploadResult> IndexTemporaryContentAsync(
+        Stream fileStream,
+        string fileName,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fileStream);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        var stopwatch = Stopwatch.StartNew();
+        var tempDocumentId = Guid.NewGuid().ToString();
+        var searchDocId = $"{TempDocumentPrefix}{tempDocumentId}";
+
+        _logger.LogInformation(
+            "[VISUALIZATION] Indexing temporary content: FileName={FileName}, TenantId={TenantId}, TempDocId={TempDocId}",
+            fileName, tenantId, tempDocumentId);
+
+        try
+        {
+            // Step 1: Extract text from uploaded file
+            var extractionResult = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
+
+            if (!extractionResult.Success || string.IsNullOrWhiteSpace(extractionResult.Text))
+            {
+                _logger.LogWarning(
+                    "[VISUALIZATION] Text extraction failed: FileName={FileName}, Error={Error}",
+                    fileName, extractionResult.ErrorMessage);
+
+                return new ContentUploadResult
+                {
+                    Success = false,
+                    ErrorMessage = extractionResult.ErrorMessage ?? "No text could be extracted from the uploaded file"
+                };
+            }
+
+            // Step 2: Generate embedding via OpenAI text-embedding-3-large
+            var embedding = await _openAiClient.GenerateEmbeddingAsync(
+                extractionResult.Text, cancellationToken: cancellationToken);
+
+            if (embedding.Length == 0)
+            {
+                return new ContentUploadResult
+                {
+                    Success = false,
+                    ErrorMessage = "Failed to generate embedding for uploaded content"
+                };
+            }
+
+            // Step 3: Write temp entry to Azure AI Search index
+            var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+
+            var extension = Path.GetExtension(fileName)?.TrimStart('.').ToLowerInvariant() ?? "unknown";
+            var tempDocument = new VisualizationDocument
+            {
+                Id = searchDocId,
+                DocumentId = tempDocumentId,
+                FileName = fileName,
+                FileType = extension,
+                DocumentType = $"Uploaded {extension.ToUpperInvariant()}",
+                TenantId = tenantId,
+                DocumentVector3072 = embedding,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                Tags = new List<string> { "temporary", "find-similar-upload" }
+            };
+
+            var batch = Azure.Search.Documents.Models.IndexDocumentsBatch.MergeOrUpload(new[] { tempDocument });
+            var indexResponse = await searchClient.IndexDocumentsAsync(batch, cancellationToken: cancellationToken);
+
+            var result = indexResponse.Value.Results.FirstOrDefault();
+            if (result is { Succeeded: false })
+            {
+                _logger.LogError(
+                    "[VISUALIZATION] Failed to index temp document: TempDocId={TempDocId}, Error={Error}",
+                    tempDocumentId, result.ErrorMessage);
+
+                return new ContentUploadResult
+                {
+                    Success = false,
+                    ErrorMessage = "Failed to index content for similarity search"
+                };
+            }
+
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "[VISUALIZATION] Temporary content indexed: TempDocId={TempDocId}, FileName={FileName}, Latency={Latency}ms",
+                tempDocumentId, fileName, stopwatch.ElapsedMilliseconds);
+
+            return new ContentUploadResult
+            {
+                DocumentId = tempDocumentId,
+                Success = true
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[VISUALIZATION] Failed to index temporary content: FileName={FileName}, TempDocId={TempDocId}",
+                fileName, tempDocumentId);
+
+            return new ContentUploadResult
+            {
+                Success = false,
+                ErrorMessage = "An error occurred while processing the uploaded file"
+            };
         }
     }
 
