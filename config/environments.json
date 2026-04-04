@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Environment registry — maps environment names to Azure resource details. BFF URLs MUST be host only (no /api suffix). See docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md for naming patterns.",
+
+  "environments": {
+    "dev": {
+      "displayName": "Development",
+      "dataverseUrl": "https://spaarkedev1.crm.dynamics.com",
+      "bffApiUrl": "https://spe-api-dev-67e2xz.azurewebsites.net",
+      "appServiceName": "spe-api-dev-67e2xz",
+      "appServiceSlot": "staging",
+      "resourceGroup": "spe-infrastructure-westus2",
+      "keyVaultName": "spaarke-spekvcert",
+      "location": "westus2",
+      "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+      "servicePrincipal": {
+        "clientId": "REPLACE_WITH_DEV_SP_CLIENT_ID",
+        "$comment": "Secret stored in Key Vault — never in this file"
+      },
+      "appRegistrations": {
+        "bffApi": {
+          "clientId": "1e40baad-e065-4aea-a8d4-4b7ab273458c",
+          "scopeUri": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"
+        },
+        "msalClient": {
+          "clientId": "5175798e-f23e-41c3-b09b-7a90b9218189"
+        },
+        "codePageClient": {
+          "clientId": "170c98e1-d486-4355-bcbe-170454e0207c"
+        }
+      },
+      "aiResources": {
+        "openAiEndpoint": "https://spaarke-openai-dev.openai.azure.com/",
+        "openAiResourceName": "spaarke-openai-dev",
+        "searchServiceName": "spaarke-search-dev",
+        "docIntelName": "spaarke-docintel-dev"
+      },
+      "dataverseRegion": "unitedstates",
+      "isLegacyNaming": true,
+      "$comment_legacy": "Dev environment uses pre-v3 naming (spe-* prefix). New environments use spaarke-* naming."
+    },
+
+    "demo": {
+      "displayName": "Demo",
+      "dataverseUrl": "https://spaarke-demo.crm.dynamics.com",
+      "bffApiUrl": "https://api.spaarke.com",
+      "appServiceName": "spaarke-bff-prod",
+      "appServiceSlot": "staging",
+      "resourceGroup": "rg-spaarke-platform-prod",
+      "keyVaultName": "sprk-platform-prod-kv",
+      "location": "westus2",
+      "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+      "servicePrincipal": {
+        "clientId": "REPLACE_WITH_DEMO_SP_CLIENT_ID",
+        "$comment": "Secret stored in Key Vault — never in this file"
+      },
+      "appRegistrations": {
+        "bffApi": {
+          "clientId": "REPLACE_WITH_DEMO_BFF_APP_ID",
+          "scopeUri": "api://REPLACE_WITH_DEMO_BFF_APP_ID/user_impersonation"
+        },
+        "msalClient": {
+          "clientId": "REPLACE_WITH_DEMO_MSAL_CLIENT_ID"
+        }
+      },
+      "aiResources": {
+        "openAiEndpoint": "https://spaarke-openai-demo.openai.azure.com/",
+        "openAiResourceName": "spaarke-openai-demo",
+        "searchServiceName": "spaarke-search-demo",
+        "docIntelName": "spaarke-docintel-demo"
+      },
+      "dataverseRegion": "unitedstates",
+      "isLegacyNaming": false
+    },
+
+    "_template": {
+      "$comment": "Template entry showing the full schema. Copy this to add a new customer environment. All fields are required unless marked optional.",
+      "displayName": "REQUIRED — Human-readable name",
+      "dataverseUrl": "https://{org}.crm.dynamics.com",
+      "bffApiUrl": "https://{host-only-no-api-suffix}",
+      "appServiceName": "spaarke-bff-{env}",
+      "appServiceSlot": "staging",
+      "resourceGroup": "rg-spaarke-{env}",
+      "keyVaultName": "sprk-{env}-kv",
+      "location": "westus2",
+      "tenantId": "REQUIRED — Azure AD / Entra ID tenant GUID",
+      "servicePrincipal": {
+        "clientId": "REQUIRED — Service principal client ID for PAC CLI and Admin API auth",
+        "$comment": "Secret stored in Key Vault — never in this file"
+      },
+      "appRegistrations": {
+        "bffApi": {
+          "clientId": "REQUIRED — BFF API app registration client ID",
+          "scopeUri": "api://{bffApiClientId}/user_impersonation"
+        },
+        "msalClient": {
+          "clientId": "REQUIRED — MSAL SPA client ID for PCF/Code Pages"
+        }
+      },
+      "aiResources": {
+        "openAiEndpoint": "https://spaarke-openai-{env}.openai.azure.com/",
+        "openAiResourceName": "spaarke-openai-{env}",
+        "searchServiceName": "spaarke-search-{env}",
+        "docIntelName": "spaarke-docintel-{env}"
+      },
+      "dataverseRegion": "unitedstates",
+      "isLegacyNaming": false
+    }
+  }
+}
