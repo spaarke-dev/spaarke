@@ -27,6 +27,27 @@ public interface IVisualizationService
         Guid documentId,
         VisualizationOptions options,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Index temporary uploaded content into Azure AI Search for similarity comparison.
+    /// Extracts text, generates embedding, writes a temp entry to the index, and returns
+    /// a temporary documentId that can be used with <see cref="GetRelatedDocumentsAsync"/>.
+    /// </summary>
+    Task<ContentUploadResult> IndexTemporaryContentAsync(
+        Stream fileStream,
+        string fileName,
+        string tenantId,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Result of indexing temporary content for similarity comparison.
+/// </summary>
+public record ContentUploadResult
+{
+    public string DocumentId { get; init; } = string.Empty;
+    public bool Success { get; init; }
+    public string? ErrorMessage { get; init; }
 }
 
 /// <summary>

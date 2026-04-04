@@ -53,6 +53,23 @@ public static class VisualizationEndpoints
             .ProducesProblem(404)
             .ProducesProblem(500);
 
+        // POST /api/ai/visualization/related-from-content - Upload file for similarity comparison
+        group.MapPost("/related-from-content", IndexTemporaryContent)
+            .RequireRateLimiting("ai-upload")
+            .DisableAntiforgery()
+            .WithName("VisualizationIndexTemporaryContent")
+            .WithSummary("Upload a file to find similar documents")
+            .WithDescription("Accepts a PDF, DOCX, TXT, or MD file (max 50 MB), extracts text, generates embedding, "
+                + "and indexes a temporary entry in AI Search. Returns a temporary documentId for use with the "
+                + "GET /related/{documentId} endpoint.")
+            .Accepts<IFormFile>("multipart/form-data")
+            .Produces<ContentUploadResult>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(413)
+            .ProducesProblem(422)
+            .ProducesProblem(500);
+
         // Debug endpoint - only available in Development environment
         var env = app.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
         if (env.IsDevelopment())
@@ -159,6 +176,114 @@ public static class VisualizationEndpoints
             return Results.Problem(
                 title: "Visualization Failed",
                 detail: "An error occurred while retrieving related documents",
+                statusCode: 500);
+        }
+    }
+
+    // =========================================================================
+    // File upload constants
+    // =========================================================================
+
+    private const long MaxFileSizeBytes = 50L * 1024 * 1024;
+
+    private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".docx", ".txt", ".md"
+    };
+
+    /// <summary>
+    /// Upload a file and index it as temporary content for similarity comparison.
+    /// </summary>
+    private static async Task<IResult> IndexTemporaryContent(
+        [FromQuery(Name = "tenantId")] string? tenantId,
+        HttpContext httpContext,
+        IVisualizationService visualizationService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        var effectiveTenantId = tenantId
+            ?? httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(effectiveTenantId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "TenantId is required (query parameter or JWT tid claim)",
+                Status = 400
+            });
+        }
+
+        if (!httpContext.Request.HasFormContentType)
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Bad Request",
+                Detail = "Request must be multipart/form-data with a 'file' field",
+                Status = 400
+            });
+        }
+
+        var form = await httpContext.Request.ReadFormAsync(cancellationToken);
+        var file = form.Files.GetFile("file");
+
+        if (file == null || file.Length == 0)
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Bad Request",
+                Detail = "No file provided. Include a 'file' field in the multipart form data.",
+                Status = 400
+            });
+        }
+
+        if (file.Length > MaxFileSizeBytes)
+        {
+            var sizeMb = file.Length / (1024.0 * 1024.0);
+            return Results.Problem(
+                statusCode: 413,
+                title: "Request Entity Too Large",
+                detail: $"File size ({sizeMb:F1} MB) exceeds the 50 MB limit");
+        }
+
+        var fileName = file.FileName ?? "document";
+        var extension = Path.GetExtension(fileName)?.ToLowerInvariant() ?? string.Empty;
+        if (!AllowedExtensions.Contains(extension))
+        {
+            return Results.Problem(
+                statusCode: 422,
+                title: "Unprocessable Entity",
+                detail: $"File type '{extension}' is not supported. Allowed types: PDF, DOCX, TXT, MD.");
+        }
+
+        logger.LogInformation(
+            "[VISUALIZATION] Processing file upload for similarity: FileName={FileName}, Size={SizeBytes}, TenantId={TenantId}",
+            fileName, file.Length, effectiveTenantId);
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var result = await visualizationService.IndexTemporaryContentAsync(
+                stream, fileName, effectiveTenantId, cancellationToken);
+
+            if (!result.Success)
+            {
+                return Results.Problem(
+                    statusCode: 422,
+                    title: "Unprocessable Entity",
+                    detail: result.ErrorMessage ?? "Failed to process uploaded file");
+            }
+
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[VISUALIZATION] Failed to process file upload: FileName={FileName}", fileName);
+
+            return Results.Problem(
+                title: "Processing Failed",
+                detail: "An error occurred while processing the uploaded file for similarity search",
                 statusCode: 500);
         }
     }

@@ -21,8 +21,20 @@ export class MsalPopupStrategy implements ITokenStrategy {
     if (!msal) return null;
 
     try {
+      // Use loginHint from cached accounts or Xrm to pre-fill the popup
+      const accounts = msal.getAllAccounts();
+      let loginHint = accounts[0]?.username;
+      if (!loginHint) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
+          loginHint = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userName;
+        } catch { /* cross-origin */ }
+      }
+
       const result = await msal.acquireTokenPopup({
         scopes: [this._scope],
+        loginHint,
       });
       if (result?.accessToken) {
         return this._buildResult(result);

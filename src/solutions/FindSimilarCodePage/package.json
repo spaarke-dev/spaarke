@@ -2,7 +2,7 @@
   "name": "find-similar-dialog",
   "version": "1.0.0",
   "private": true,
-  "description": "Find Similar Documents Dialog - Code Page wrapper for Dataverse modal dialog",
+  "description": "Find Similar Documents Dialog - Document lookup or file upload for similarity search",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@fluentui/react-components": "^9.46.2",
-    "@fluentui/react-icons": "^2.0.200"
+    "@fluentui/react-icons": "^2.0.200",
+    "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

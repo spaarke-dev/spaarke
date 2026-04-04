@@ -206,7 +206,14 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
         };
       }
     }
-    const ssoResult = await msal.ssoSilent({ scopes });
+    // Resolve loginHint from Xrm context for first-load ssoSilent success
+    let loginHint: string | undefined;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+      loginHint = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userName;
+    } catch { /* cross-origin */ }
+    const ssoResult = await msal.ssoSilent({ scopes, loginHint });
     if (ssoResult?.accessToken) {
       return {
         token: ssoResult.accessToken,

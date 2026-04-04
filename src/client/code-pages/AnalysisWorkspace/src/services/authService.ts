@@ -335,8 +335,14 @@ async function acquireTokenViaMsal(): Promise<TokenCache | null> {
       }
     }
 
-    // Fall back to ssoSilent (uses existing Azure AD session cookie)
-    const ssoResult = await msal.ssoSilent({ scopes });
+    // Fall back to ssoSilent with loginHint from Xrm context
+    let loginHint: string | undefined;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+      loginHint = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userName;
+    } catch { /* cross-origin */ }
+    const ssoResult = await msal.ssoSilent({ scopes, loginHint });
     if (ssoResult?.accessToken) {
       console.info(`${LOG_PREFIX} Token acquired via MSAL ssoSilent`);
       return {
