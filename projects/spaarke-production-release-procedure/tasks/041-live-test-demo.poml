@@ -1,0 +1,77 @@
+<task id="PRPR-041" project="Production Release Procedure">
+  <metadata>
+    <title>Live Test Against Demo Environment</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>Claude Code + Human</assigned>
+    <tags>testing, deployment, verification</tags>
+    <phase>5</phase>
+    <dependencies>
+      <dependency task="PRPR-040" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Execute `/deploy-new-release` end-to-end against `https://spaarke-demo.crm.dynamics.com`.
+    This is the full live test — builds, deploys BFF API, imports solutions, deploys web resources,
+    validates, and tags the release. Requires human approval at each gate.
+  </prompt>
+
+  <role>
+    Release engineer executing a production deployment.
+  </role>
+
+  <goal>
+    Successfully deploy a release to the demo environment using the `/deploy-new-release` skill,
+    with all validation checks passing and a release tag created.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Requires human approval at confirmation gate</constraint>
+    <constraint source="project">Demo environment: https://spaarke-demo.crm.dynamics.com</constraint>
+    <constraint source="project">Must pass Validate-DeployedEnvironment.ps1 after deployment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/deploy-new-release/SKILL.md</file>
+      <file>scripts/Deploy-Release.ps1</file>
+      <file>config/environments.json</file>
+      <file>docs/procedures/production-release.md</file>
+      <file>scripts/Validate-DeployedEnvironment.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Invoke skill">Run /deploy-new-release</step>
+    <step order="2" name="Pre-flight">Verify pre-flight checks pass</step>
+    <step order="3" name="Select environment">Choose demo environment</step>
+    <step order="4" name="Review changes">Review change detection output</step>
+    <step order="5" name="Approve deployment">Human approves deployment plan</step>
+    <step order="6" name="Monitor execution">Watch deployment progress</step>
+    <step order="7" name="Verify validation">Confirm Validate-DeployedEnvironment.ps1 passes</step>
+    <step order="8" name="Create tag">Approve release tag creation</step>
+    <step order="9" name="Post-deploy check">Manual spot-check of demo environment</step>
+    <step order="10" name="Document results">Record deployment results and any issues</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell execution</tool>
+    <tool name="git">Version control and tagging</tool>
+    <tool name="az">Azure CLI for verification</tool>
+    <tool name="pac">PAC CLI for Dataverse verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-production-release-procedure/notes/working/live-test-demo-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/deploy-new-release skill executes end-to-end</criterion>
+    <criterion testable="true">BFF API deployed and health check passes</criterion>
+    <criterion testable="true">All Dataverse solutions imported successfully</criterion>
+    <criterion testable="true">All web resources deployed</criterion>
+    <criterion testable="true">Validate-DeployedEnvironment.ps1 passes</criterion>
+    <criterion testable="true">Git release tag created</criterion>
+  </acceptance-criteria>
+</task>

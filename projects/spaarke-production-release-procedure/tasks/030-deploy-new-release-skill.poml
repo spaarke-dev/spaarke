@@ -1,0 +1,96 @@
+<task id="PRPR-030" project="Production Release Procedure">
+  <metadata>
+    <title>Create deploy-new-release Claude Code Skill</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>skill, claude-code, automation</tags>
+    <phase>4</phase>
+    <dependencies>
+      <dependency task="PRPR-023" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Create `.claude/skills/deploy-new-release/SKILL.md` — an interactive Claude Code skill
+    invoked via `/deploy-new-release`. The skill guides the operator through a release:
+    pre-flight checks, environment selection, change detection, deployment plan confirmation,
+    script execution, and release tagging.
+
+    This is the human-friendly interface to Deploy-Release.ps1.
+  </prompt>
+
+  <role>
+    Claude Code skill developer familiar with SKILL.md format and PowerShell orchestration.
+  </role>
+
+  <goal>
+    A complete Claude Code skill at `.claude/skills/deploy-new-release/SKILL.md` that an operator
+    can invoke with `/deploy-new-release` to interactively deploy a Spaarke release.
+  </goal>
+
+  <constraints>
+    <constraint source="spec-FR-06">Skill must: pre-flight, select env, detect changes, confirm plan, execute, tag</constraint>
+    <constraint source="project">Must call Deploy-Release.ps1 — do not reimplement orchestration logic</constraint>
+    <constraint source="project">Interactive with confirmation gates — operator approves before deploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Claude Code skills, SKILL.md format, deployment automation</topic>
+    <files>
+      <file>projects/spaarke-production-release-procedure/spec.md</file>
+      <file>projects/spaarke-production-release-procedure/CLAUDE.md</file>
+      <file>docs/procedures/production-release.md</file>
+      <file>scripts/Deploy-Release.ps1</file>
+      <file>config/environments.json</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/skills/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The Claude Code skill provides the interactive UX layer over Deploy-Release.ps1.
+      It's the primary way operators will deploy releases. The skill handles human interaction
+      (environment selection, confirmation, reporting) while the script handles execution.
+    </background>
+    <dependencies>
+      <dependency task="PRPR-023" status="not-started">
+        Deploy-Release.ps1 must exist (the skill wraps it)
+      </dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Study existing skills">Read bff-deploy, dataverse-deploy, azure-deploy SKILL.md files for patterns</step>
+    <step order="2" name="Study INDEX.md">Understand skill registration format</step>
+    <step order="3" name="Design skill flow">Map out interactive steps with user prompts and confirmation gates</step>
+    <step order="4" name="Write SKILL.md">Create the skill with frontmatter, purpose, steps, examples</step>
+    <step order="5" name="Write pre-flight step">Check git, CI, auth — show results to operator</step>
+    <step order="6" name="Write env selection">Read environments.json, present options, let operator choose</step>
+    <step order="7" name="Write change detection">git diff since last tag, summarize changes by component</step>
+    <step order="8" name="Write confirmation gate">Show deployment plan, require explicit approval</step>
+    <step order="9" name="Write execution step">Call Deploy-Release.ps1 with selected parameters</step>
+    <step order="10" name="Write tagging step">Prompt for version, create git tag</step>
+    <step order="11" name="Write error handling">How to handle partial failures, rollback guidance</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.claude/skills/deploy-new-release/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">.claude/skills/deploy-new-release/SKILL.md exists with valid frontmatter</criterion>
+    <criterion testable="true">Skill has pre-flight, env selection, change detection, confirmation, execution, tagging steps</criterion>
+    <criterion testable="true">Calls Deploy-Release.ps1 (does not reimplement orchestration)</criterion>
+    <criterion testable="true">Interactive with confirmation gates before deployment</criterion>
+    <criterion testable="true">Error handling includes rollback guidance</criterion>
+    <criterion testable="true">Examples show common usage patterns</criterion>
+  </acceptance-criteria>
+</task>
