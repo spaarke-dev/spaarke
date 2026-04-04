@@ -163,7 +163,7 @@ public sealed class DemoProvisioningService
             // ── Step 8: Grant SPE container Writer access ──
             _logger.LogInformation("[Step 8/9] Granting Writer access on SPE container {ContainerId} to user {UserId}",
                 environment.SpeContainerId, entraUserId);
-            await GrantSpeContainerAccessAsync(environment.SpeContainerId, entraUserId, ct);
+            await GrantSpeContainerAccessAsync(environment.SpeContainerId, entraUserId, upn, ct);
             completedSteps.Add("GrantSpeContainerAccess");
             _logger.LogInformation("[Step 8/9] Granted SPE container Writer access");
 
@@ -234,7 +234,7 @@ public sealed class DemoProvisioningService
     /// POST /storage/fileStorage/containers/{containerId}/permissions
     /// </summary>
     private async Task GrantSpeContainerAccessAsync(
-        string containerId, string userId, CancellationToken ct)
+        string containerId, string userId, string upn, CancellationToken ct)
     {
         var graphClient = _graphClientFactory.ForApp();
 
@@ -243,7 +243,14 @@ public sealed class DemoProvisioningService
             Roles = new List<string> { "writer" },
             GrantedToV2 = new SharePointIdentitySet
             {
-                User = new SharePointIdentity { Id = userId }
+                User = new SharePointIdentity
+                {
+                    Id = userId,
+                    AdditionalData = new Dictionary<string, object>
+                    {
+                        ["userPrincipalName"] = upn
+                    }
+                }
             }
         };
 
