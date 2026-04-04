@@ -947,6 +947,23 @@ function enableRejectButtonForm(formContext) {
 }
 
 // ============================================================================
+// NAMESPACE EXPORT — Required for Ribbon XML FunctionName references
+// Ribbon XML uses: Sprk.RegistrationRibbon.approveRequest (etc.)
+// ============================================================================
+
+var Sprk = Sprk || {};
+Sprk.RegistrationRibbon = {
+    approveRequest: approveRequest,
+    approveRequestFromForm: approveRequestFromForm,
+    rejectRequest: rejectRequest,
+    rejectRequestFromForm: rejectRequestFromForm,
+    enableApproveButton: enableApproveButton,
+    enableApproveButtonForm: enableApproveButtonForm,
+    enableRejectButton: enableRejectButton,
+    enableRejectButtonForm: enableRejectButtonForm
+};
+
+// ============================================================================
 // DEPLOYMENT NOTES
 // ============================================================================
 
