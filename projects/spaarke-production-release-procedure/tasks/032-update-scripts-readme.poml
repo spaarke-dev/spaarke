@@ -1,0 +1,58 @@
+<task id="PRPR-032" project="Production Release Procedure">
+  <metadata>
+    <title>Update scripts/README.md with New Scripts</title>
+    <status>complete</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>documentation</tags>
+    <phase>4</phase>
+    <dependencies>
+      <dependency task="PRPR-021" />
+      <dependency task="PRPR-022" />
+      <dependency task="PRPR-023" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Update `scripts/README.md` to document the three new orchestrator scripts:
+    Build-AllClientComponents.ps1, Deploy-AllWebResources.ps1, and Deploy-Release.ps1.
+    Follow the existing documentation format with usage examples, parameters, and when-to-use.
+  </prompt>
+
+  <role>Technical writer familiar with PowerShell documentation conventions.</role>
+
+  <goal>
+    scripts/README.md updated with entries for all three new scripts following existing format.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Follow existing README.md format (synopsis, parameters, examples, when-to-use)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/README.md</file>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+      <file>scripts/Deploy-AllWebResources.ps1</file>
+      <file>scripts/Deploy-Release.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read README.md">Understand existing documentation format</step>
+    <step order="2" name="Document Build-AllClientComponents.ps1">Add entry with examples</step>
+    <step order="3" name="Document Deploy-AllWebResources.ps1">Add entry with examples</step>
+    <step order="4" name="Document Deploy-Release.ps1">Add entry with examples</step>
+    <step order="5" name="Update categories">Add new scripts to appropriate category sections</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">scripts/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/README.md has entries for all 3 new scripts</criterion>
+    <criterion testable="true">Each entry follows existing documentation format</criterion>
+    <criterion testable="true">Usage examples included for each script</criterion>
+  </acceptance-criteria>
+</task>

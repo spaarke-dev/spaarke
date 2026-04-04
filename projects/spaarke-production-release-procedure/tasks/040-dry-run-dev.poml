@@ -1,0 +1,68 @@
+<task id="PRPR-040" project="Production Release Procedure">
+  <metadata>
+    <title>Dry-Run Against Dev Environment</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>testing, verification</tags>
+    <phase>5</phase>
+    <dependencies>
+      <dependency task="PRPR-023" />
+      <dependency task="PRPR-030" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Run `Deploy-Release.ps1 -WhatIf` against the dev environment to verify the orchestration
+    logic works end-to-end without actually deploying. Fix any issues discovered.
+  </prompt>
+
+  <role>
+    QA engineer verifying deployment automation.
+  </role>
+
+  <goal>
+    Deploy-Release.ps1 -WhatIf runs successfully against dev, showing a complete deployment
+    plan without errors. All orchestration paths verified.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Use -WhatIf only — do NOT actually deploy to dev in this task</constraint>
+    <constraint source="project">Dev environment: https://spaarkedev1.crm.dynamics.com</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-Release.ps1</file>
+      <file>config/environments.json</file>
+      <file>docs/procedures/production-release.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run -WhatIf">Execute Deploy-Release.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -WhatIf</step>
+    <step order="2" name="Verify pre-flight">Confirm pre-flight checks run and report correctly</step>
+    <step order="3" name="Verify build phase">Confirm Build-AllClientComponents.ps1 -WhatIf shows correct build order</step>
+    <step order="4" name="Verify deploy phases">Confirm all deploy scripts are invoked with correct parameters</step>
+    <step order="5" name="Verify validation">Confirm Validate-DeployedEnvironment.ps1 would be called</step>
+    <step order="6" name="Verify tagging">Confirm git tag step shows correctly</step>
+    <step order="7" name="Fix issues">Address any errors or incorrect parameters</step>
+    <step order="8" name="Run -WhatIf again">Verify clean run after fixes</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell execution</tool>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-production-release-procedure/notes/working/dry-run-dev-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-Release.ps1 -WhatIf completes without errors</criterion>
+    <criterion testable="true">All 6 phases shown in WhatIf output</criterion>
+    <criterion testable="true">Correct environment details resolved from environments.json</criterion>
+    <criterion testable="true">All sub-scripts would be called with correct parameters</criterion>
+  </acceptance-criteria>
+</task>

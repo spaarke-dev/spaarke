@@ -1,0 +1,51 @@
+<task id="PRPR-001" project="Production Release Procedure">
+  <metadata>
+    <title>Project Setup</title>
+    <status>complete</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>1 hour</actual-effort>
+    <assigned>Claude Code</assigned>
+    <started>2026-04-04</started>
+    <completed>2026-04-04</completed>
+    <tags>setup, documentation</tags>
+    <phase>1</phase>
+  </metadata>
+
+  <prompt>
+    Create project artifacts: spec.md, plan.md, README.md, CLAUDE.md, folder structure, and task files.
+  </prompt>
+
+  <role>Project setup automation</role>
+
+  <goal>
+    All project artifacts created and committed. Task files generated. Feature branch ready.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-production-release-procedure/spec.md</file>
+      <file>projects/spaarke-production-release-procedure/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Create artifacts">Create spec.md, plan.md, README.md, CLAUDE.md</step>
+    <step order="2" name="Create structure">Create tasks/ and notes/ directories</step>
+    <step order="3" name="Generate tasks">Generate POML task files</step>
+    <step order="4" name="Commit">Commit and push to feature branch</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-production-release-procedure/spec.md</output>
+    <output type="docs">projects/spaarke-production-release-procedure/plan.md</output>
+    <output type="docs">projects/spaarke-production-release-procedure/README.md</output>
+    <output type="docs">projects/spaarke-production-release-procedure/CLAUDE.md</output>
+    <output type="docs">projects/spaarke-production-release-procedure/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All project artifacts exist and are well-formed</criterion>
+    <criterion testable="true">Task files cover all phases from plan.md</criterion>
+    <criterion testable="true">Feature branch created and pushed</criterion>
+  </acceptance-criteria>
+</task>

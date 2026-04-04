@@ -1,0 +1,69 @@
+<task id="PRPR-031" project="Production Release Procedure">
+  <metadata>
+    <title>Register deploy-new-release Skill</title>
+    <status>complete</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>skill, documentation, configuration</tags>
+    <phase>4</phase>
+    <dependencies>
+      <dependency task="PRPR-030" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Register the new `/deploy-new-release` skill in the repository:
+    1. Update `.claude/skills/INDEX.md` with the new skill entry
+    2. Update root `CLAUDE.md` trigger phrases table
+    3. Update root `CLAUDE.md` slash commands table
+    4. Update root `CLAUDE.md` auto-detection rules
+  </prompt>
+
+  <role>
+    Developer familiar with Claude Code skill registration conventions.
+  </role>
+
+  <goal>
+    The `/deploy-new-release` skill is fully registered and discoverable via trigger phrases,
+    slash commands, and auto-detection rules.
+  </goal>
+
+  <constraints>
+    <constraint source="project">Follow existing registration patterns in CLAUDE.md and INDEX.md</constraint>
+    <constraint source="project">Trigger phrases must include: "deploy release", "new release", "production release", "deploy to production"</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Claude Code skill registration</topic>
+    <files>
+      <file>.claude/skills/INDEX.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/skills/deploy-new-release/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read INDEX.md">Understand existing skill entry format</step>
+    <step order="2" name="Add to INDEX.md">Add deploy-new-release entry with tags, description, path</step>
+    <step order="3" name="Update CLAUDE.md triggers">Add trigger phrases to the trigger table</step>
+    <step order="4" name="Update CLAUDE.md slash commands">Add /deploy-new-release to slash commands table</step>
+    <step order="5" name="Update auto-detection">Add rule for detecting release/deploy intent</step>
+    <step order="6" name="Verify">Confirm all references are consistent</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/skills/INDEX.md</output>
+    <output type="docs">CLAUDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">.claude/skills/INDEX.md has deploy-new-release entry</criterion>
+    <criterion testable="true">CLAUDE.md trigger phrases table includes release/deploy triggers</criterion>
+    <criterion testable="true">CLAUDE.md slash commands table includes /deploy-new-release</criterion>
+    <criterion testable="true">CLAUDE.md auto-detection rules cover deployment scenarios</criterion>
+  </acceptance-criteria>
+</task>

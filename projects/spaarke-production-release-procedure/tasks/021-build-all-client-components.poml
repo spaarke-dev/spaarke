@@ -1,0 +1,99 @@
+<task id="PRPR-021" project="Production Release Procedure">
+  <metadata>
+    <title>Create Build-AllClientComponents.ps1</title>
+    <status>complete</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>powershell, build, automation</tags>
+    <phase>3</phase>
+    <dependencies>
+      <dependency task="PRPR-010" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Create `scripts/Build-AllClientComponents.ps1` — the build orchestrator that builds all
+    client-side components in correct dependency order: shared libraries first, then Vite solutions,
+    webpack code pages, PCF controls, and external SPA.
+
+    Must support -WhatIf, -SkipSharedLibs, -Component, with clear progress output and timing.
+    Exit with non-zero on any build failure.
+  </prompt>
+
+  <role>
+    Senior PowerShell developer familiar with npm, webpack, Vite, and PCF build tooling.
+  </role>
+
+  <goal>
+    A working `scripts/Build-AllClientComponents.ps1` that builds all client components in the
+    correct dependency order with progress reporting and error handling.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-006">PCF controls use pcf-scripts build; Code Pages use webpack/Vite</constraint>
+    <constraint source="ADR-012">Shared component library (@spaarke/ui-components) must build before consumers</constraint>
+    <constraint source="ADR-022">PCF: React 16 platform-provided; Code Pages: React 18 bundled — different build configs</constraint>
+    <constraint source="spec-FR-02">Must support -WhatIf, -SkipSharedLibs, -Component parameters</constraint>
+    <constraint source="spec-FR-02">Exit with non-zero on any build failure</constraint>
+    <constraint source="spec-FR-02">Clear progress output with timing per component</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>client builds, npm, webpack, Vite, PCF</topic>
+    <files>
+      <file>projects/spaarke-production-release-procedure/spec.md</file>
+      <file>projects/spaarke-production-release-procedure/CLAUDE.md</file>
+      <file>docs/procedures/production-release.md</file>
+      <file>scripts/README.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The build orchestrator is the first phase of a release. It must build shared libraries first
+      (Auth → SdapClient → UI.Components) because all downstream components depend on them.
+      Then it builds 14 Vite solutions, 5 webpack code pages, 13 PCF controls, and 1 external SPA.
+    </background>
+    <dependencies>
+      <dependency task="PRPR-010" status="not-started">
+        Procedure guide defines the exact build order and components
+      </dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Study build order">Read CLAUDE.md build dependency order and verify against actual directories</step>
+    <step order="2" name="Enumerate components">List all Vite solutions, webpack code pages, PCF controls, external SPA</step>
+    <step order="3" name="Study existing build patterns">Check package.json files for build commands in each component type</step>
+    <step order="4" name="Write script skeleton">Parameters, help, CmdletBinding with SupportsShouldProcess</step>
+    <step order="5" name="Implement shared lib builds">Build Auth, SdapClient, UI.Components in order</step>
+    <step order="6" name="Implement Vite solution builds">Loop through all 14 solutions</step>
+    <step order="7" name="Implement webpack code page builds">Loop through all 5 code pages</step>
+    <step order="8" name="Implement PCF builds">Build all 13 PCF controls</step>
+    <step order="9" name="Implement external SPA build">Build external SPA</step>
+    <step order="10" name="Add progress reporting">Timing per component, summary table at end</step>
+    <step order="11" name="Add -Component filter">Support building only specific components</step>
+    <step order="12" name="Test -WhatIf">Verify WhatIf shows plan without executing</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React projects</tool>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Build-AllClientComponents.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/Build-AllClientComponents.ps1 exists and is valid PowerShell</criterion>
+    <criterion testable="true">Builds shared libs (Auth, SdapClient, UI.Components) before consumers</criterion>
+    <criterion testable="true">Builds all 14 Vite solutions, 5 code pages, 13 PCF controls, 1 external SPA</criterion>
+    <criterion testable="true">-WhatIf previews without building</criterion>
+    <criterion testable="true">-SkipSharedLibs skips shared library builds</criterion>
+    <criterion testable="true">-Component filters to specific components</criterion>
+    <criterion testable="true">Reports timing per component and summary</criterion>
+    <criterion testable="true">Exits non-zero on build failure</criterion>
+  </acceptance-criteria>
+</task>
