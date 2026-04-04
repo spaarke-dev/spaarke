@@ -29,8 +29,7 @@ public static class RegistrationModule
         services.AddSingleton<EmailDomainValidator>();
 
         // Background services (ADR-001: BackgroundService pattern)
-        // TODO: Re-enable once Graph permissions are confirmed working
-        // services.AddHostedService<DemoExpirationService>();
+        services.AddHostedService<DemoExpirationService>();
 
         return services;
     }
