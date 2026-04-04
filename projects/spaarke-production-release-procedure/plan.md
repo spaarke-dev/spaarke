@@ -109,3 +109,49 @@ Phase 5 (verification) --- dry-run then live test
 - **BFF URL must be host-only** — recurring production issue, validate in pre-flight
 - **SpaarkeCore imports first** — solution dependency order enforced by `Deploy-DataverseSolutions.ps1`
 - **Shared libs build first** — blocks all downstream client builds
+
+---
+
+## Discovered Resources
+
+### Applicable ADRs
+| ADR | Relevance |
+|-----|-----------|
+| ADR-001 | Minimal API + BackgroundService — BFF API deployment |
+| ADR-006 | PCF vs Code Page — different build tools (pcf-scripts vs webpack/Vite) |
+| ADR-012 | Shared component library — build order dependency |
+| ADR-022 | PCF platform libraries — React 16 PCF vs React 18 Code Pages |
+
+### Applicable Skills
+| Skill | Purpose |
+|-------|---------|
+| `bff-deploy` | BFF API deployment (CRITICAL: use this, not raw az commands) |
+| `dataverse-deploy` | Solution/web resource deployment via PAC CLI |
+| `pcf-deploy` | PCF control build, pack, deploy |
+| `code-page-deploy` | React Code Page build and deploy |
+| `power-page-deploy` | Vite SPA build and deploy |
+| `azure-deploy` | Azure infrastructure and App Service config |
+| `ci-cd` | GitHub Actions pipeline management |
+
+### Existing Deployment Guides
+| Guide | Path |
+|-------|------|
+| Customer Deployment Guide | `docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md` |
+| Customer Onboarding Runbook | `docs/guides/CUSTOMER-ONBOARDING-RUNBOOK.md` |
+| Production Deployment Guide | `docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md` |
+| PCF Deployment Guide | `docs/guides/PCF-DEPLOYMENT-GUIDE.md` |
+| Environment Deployment Guide | `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md` |
+
+### Existing Procedures
+| Procedure | Path |
+|-----------|------|
+| CI/CD Workflow | `docs/procedures/ci-cd-workflow.md` |
+
+### Key Scripts (134 total in scripts/)
+See `scripts/README.md` for full registry. Scripts called by this project's orchestrators are listed in project CLAUDE.md.
+
+### Relevant Patterns
+| Pattern | Path |
+|---------|------|
+| BFF URL Normalization | `.claude/patterns/auth/bff-url-normalization.md` |
+| Service Registration | `.claude/patterns/api/service-registration.md` |

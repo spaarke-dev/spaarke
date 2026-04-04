@@ -1,0 +1,122 @@
+<task id="PRPR-010" project="Production Release Procedure">
+  <metadata>
+    <title>Create Production Release Procedure Guide</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>documentation, procedure</tags>
+    <phase>2</phase>
+    <dependencies>
+      <dependency task="PRPR-001" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Create `docs/procedures/production-release.md` — the complete human-readable release procedure
+    that serves as the source of truth for all scripts and the Claude Code skill. This document
+    must be comprehensive enough that an operator can follow it manually without any scripts.
+
+    Must cover all aspects from FR-01 in spec.md: pre-flight checklist, release phases with
+    dependency ordering, per-component deployment with exact commands, multi-environment flow,
+    rollback procedures, emergency hotfix path, first-time vs subsequent release matrix, and
+    release versioning strategy.
+
+    All commands must reference `https://spaarke-demo.crm.dynamics.com` as the production
+    Dataverse URL. Cross-reference CUSTOMER-DEPLOYMENT-GUIDE.md and CUSTOMER-ONBOARDING-RUNBOOK.md.
+  </prompt>
+
+  <role>
+    Senior DevOps engineer familiar with Azure App Service, Dataverse, PAC CLI, and PowerShell deployment automation.
+  </role>
+
+  <goal>
+    A complete, production-ready procedure document at `docs/procedures/production-release.md` that
+    an operator can follow end-to-end to deploy a Spaarke release to one or more environments.
+  </goal>
+
+  <constraints>
+    <constraint source="spec-FR-07">Reuse existing scripts — document exact script invocations, do not describe reimplemented logic</constraint>
+    <constraint source="spec-FR-08">Cross-reference CUSTOMER-DEPLOYMENT-GUIDE.md and CUSTOMER-ONBOARDING-RUNBOOK.md</constraint>
+    <constraint source="spec-FR-09">Use git tags in v{major}.{minor}.{patch} format for release versioning</constraint>
+    <constraint source="project">All commands reference https://spaarke-demo.crm.dynamics.com as production URL</constraint>
+    <constraint source="project">BFF URL must be host-only (no /api suffix) — validate in pre-flight</constraint>
+    <constraint source="project">Sequential per-environment deployment — no parallel env deploys</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deployment, procedures, Azure, Dataverse, PowerShell</topic>
+    <files>
+      <file>projects/spaarke-production-release-procedure/spec.md</file>
+      <file>projects/spaarke-production-release-procedure/plan.md</file>
+      <file>projects/spaarke-production-release-procedure/CLAUDE.md</file>
+      <file>docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/CUSTOMER-ONBOARDING-RUNBOOK.md</file>
+      <file>docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>scripts/README.md</file>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>scripts/Deploy-DataverseSolutions.ps1</file>
+      <file>scripts/Deploy-CorporateWorkspace.ps1</file>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+      <file>scripts/Deploy-SpeAdminApp.ps1</file>
+      <file>scripts/Deploy-WizardCodePages.ps1</file>
+      <file>scripts/Deploy-EventsPage.ps1</file>
+      <file>scripts/Deploy-PCFWebResources.ps1</file>
+      <file>scripts/Deploy-RibbonIcons.ps1</file>
+      <file>scripts/Configure-ProductionAppSettings.ps1</file>
+      <file>scripts/Validate-DeployedEnvironment.ps1</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This procedure document is the blueprint for everything else in the project. Phase 3 scripts
+      implement what this document describes. Phase 4 skill wraps the scripts. The document must be
+      self-contained — an operator should be able to follow it even without the scripts.
+    </background>
+    <related-work>
+      <item>CUSTOMER-DEPLOYMENT-GUIDE.md — existing customer deployment procedures</item>
+      <item>CUSTOMER-ONBOARDING-RUNBOOK.md — full onboarding workflow (Provision-Customer.ps1)</item>
+      <item>PRODUCTION-DEPLOYMENT-GUIDE.md — existing production deployment steps</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="1" name="Study existing docs">Read all existing deployment guides, scripts, and procedures to understand current state</step>
+    <step order="2" name="Study Provision-Customer.ps1">Understand the onboarding flow to align Deploy-Release.ps1 as the "update" counterpart</step>
+    <step order="3" name="Study all deploy scripts">Read each deploy script to document exact parameters and invocation patterns</step>
+    <step order="4" name="Draft procedure structure">Create section outline: pre-flight, phases, per-component, multi-env, rollback, hotfix, versioning</step>
+    <step order="5" name="Write pre-flight checklist">Auth checks, CI green, git status, BFF URL validation</step>
+    <step order="6" name="Write release phases">Document Phase 0-5 with dependency diagram and gates</step>
+    <step order="7" name="Write per-component deployment">Exact commands for each component with production parameters</step>
+    <step order="8" name="Write multi-environment flow">Sequential deployment loop with stop-on-failure</step>
+    <step order="9" name="Write rollback procedures">Per-component rollback with exact commands</step>
+    <step order="10" name="Write emergency hotfix path">Abbreviated deployment for critical fixes</step>
+    <step order="11" name="Write first-time vs subsequent matrix">What changes between initial setup and updates</step>
+    <step order="12" name="Write versioning strategy">Git tag format, change detection, release notes</step>
+    <step order="13" name="Add cross-references">Link to CUSTOMER-DEPLOYMENT-GUIDE.md and CUSTOMER-ONBOARDING-RUNBOOK.md</step>
+    <step order="14" name="Review and verify">Verify all scripts referenced exist, all commands are valid</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/procedures/production-release.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">docs/procedures/production-release.md exists and is complete</criterion>
+    <criterion testable="true">Pre-flight checklist includes auth, CI, git status, and BFF URL validation</criterion>
+    <criterion testable="true">All 6 release phases documented with dependency diagram</criterion>
+    <criterion testable="true">Every deploy script from CLAUDE.md is referenced with exact invocation</criterion>
+    <criterion testable="true">Rollback procedures exist for each component</criterion>
+    <criterion testable="true">Emergency hotfix path documented</criterion>
+    <criterion testable="true">First-time vs subsequent release matrix included</criterion>
+    <criterion testable="true">Git tag versioning strategy documented</criterion>
+    <criterion testable="true">Cross-references to CUSTOMER-DEPLOYMENT-GUIDE.md and CUSTOMER-ONBOARDING-RUNBOOK.md</criterion>
+  </acceptance-criteria>
+</task>

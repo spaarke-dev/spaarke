@@ -1,0 +1,51 @@
+<task id="PRPR-090" project="Production Release Procedure">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>documentation, cleanup</tags>
+    <phase>wrap-up</phase>
+    <dependencies>
+      <dependency task="PRPR-041" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Complete the project: update README status to Complete, create lessons-learned.md,
+    clean up ephemeral files, and prepare for merge to master.
+  </prompt>
+
+  <role>Project manager completing project wrap-up.</role>
+
+  <goal>
+    Project artifacts finalized, README updated, lessons learned documented, ready for merge.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-production-release-procedure/README.md</file>
+      <file>projects/spaarke-production-release-procedure/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Update README">Set status to Complete, add final deliverable summary</step>
+    <step order="2" name="Create lessons learned">Document what went well, challenges, improvements</step>
+    <step order="3" name="Clean up notes">Remove ephemeral working files from notes/</step>
+    <step order="4" name="Final TASK-INDEX update">Verify all tasks marked complete</step>
+    <step order="5" name="Prepare for merge">Run /repo-cleanup, commit final state</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-production-release-procedure/README.md</output>
+    <output type="docs">projects/spaarke-production-release-procedure/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md status is "Complete"</criterion>
+    <criterion testable="true">lessons-learned.md exists</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md are ✅</criterion>
+    <criterion testable="true">No ephemeral files in notes/</criterion>
+  </acceptance-criteria>
+</task>
