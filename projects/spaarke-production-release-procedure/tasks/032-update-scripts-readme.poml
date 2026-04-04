@@ -1,7 +1,7 @@
 <task id="PRPR-032" project="Production Release Procedure">
   <metadata>
     <title>Update scripts/README.md with New Scripts</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>1 hour</estimated-effort>
     <assigned>Claude Code</assigned>
     <tags>documentation</tags>
