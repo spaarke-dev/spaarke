@@ -161,11 +161,20 @@ public sealed class DemoProvisioningService
             _logger.LogInformation("[Step 7/9] Added to team {TeamName}", environment.TeamName);
 
             // ── Step 8: Grant SPE container Writer access ──
-            _logger.LogInformation("[Step 8/9] Granting Writer access on SPE container {ContainerId} to user {UserId}",
-                environment.SpeContainerId, entraUserId);
-            await GrantSpeContainerAccessAsync(environment.SpeContainerId, entraUserId, upn, ct);
-            completedSteps.Add("GrantSpeContainerAccess");
-            _logger.LogInformation("[Step 8/9] Granted SPE container Writer access");
+            // SPE container access is optional — skip gracefully if container ID is a placeholder or grant fails
+            try
+            {
+                _logger.LogInformation("[Step 8/9] Granting Writer access on SPE container {ContainerId} to user {UserId}",
+                    environment.SpeContainerId, entraUserId);
+                await GrantSpeContainerAccessAsync(environment.SpeContainerId, entraUserId, upn, ct);
+                completedSteps.Add("GrantSpeContainerAccess");
+                _logger.LogInformation("[Step 8/9] Granted SPE container Writer access");
+            }
+            catch (Exception speEx)
+            {
+                _logger.LogWarning(speEx, "[Step 8/9] SPE container access grant failed (non-fatal): {Message}", speEx.Message);
+                completedSteps.Add("GrantSpeContainerAccess:SKIPPED");
+            }
 
             // ── Step 9: Send welcome email ──
             // Welcome email goes to applicant's WORK email (request.Email), not demo.spaarke.com
