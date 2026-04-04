@@ -10,25 +10,24 @@
         <tr>
             <td style="padding: 40px 20px;">
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);">
-                    <!-- Header -->
+                    <!-- Header: Logo only, left-aligned -->
                     <tr>
-                        <td style="background-color: #0f6cbd; padding: 32px 40px; text-align: center;">
-                            <h1 style="margin: 0 0 8px; color: #ffffff; font-size: 24px; font-weight: 600;">Welcome to Spaarke!</h1>
-                            <p style="margin: 0; color: #c7e0f4; font-size: 15px;">Your demo access is ready</p>
+                        <td style="padding: 24px 40px 16px; border-bottom: 1px solid #e8e8e8;">
+                            <img src="https://www.spaarke.com/spaarke-logo-black.png" alt="Spaarke" width="140" style="display: block; height: auto;" />
                         </td>
                     </tr>
                     <!-- Body -->
                     <tr>
-                        <td style="padding: 40px;">
-                            <p style="margin: 0 0 20px; color: #242424; font-size: 16px; line-height: 1.6;">
+                        <td style="padding: 32px 40px 40px;">
+                            <p style="margin: 0 0 16px; color: #242424; font-size: 16px; line-height: 1.6;">
                                 Hi {{FirstName}},
                             </p>
                             <p style="margin: 0 0 24px; color: #242424; font-size: 16px; line-height: 1.6;">
-                                Your Spaarke demo environment has been provisioned and is ready to use. Below are your login credentials.
+                                Thank you for your interest in Spaarke's Legal Operations Intelligence platform. Below are your login credentials for our demo environment.
                             </p>
 
                             <!-- Credentials Box -->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 24px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 28px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
                                 <tr>
                                     <td style="background-color: #f0f4f8; padding: 12px 16px; font-size: 13px; font-weight: 600; color: #616161; text-transform: uppercase; letter-spacing: 0.5px;">
                                         Your Login Credentials
@@ -42,100 +41,42 @@
                                                 <td style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #242424; font-weight: 600; font-family: 'Cascadia Code', 'Consolas', monospace;">{{Username}}</td>
                                             </tr>
                                             <tr>
-                                                <td style="padding: 12px 16px; font-size: 14px; color: #616161; width: 140px;">Temporary Password</td>
-                                                <td style="padding: 12px 16px; font-size: 14px; color: #242424; font-weight: 600; font-family: 'Cascadia Code', 'Consolas', monospace;">{{TemporaryPassword}}</td>
+                                                <td style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #616161; width: 140px;">Temporary Password</td>
+                                                <td style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #242424; font-weight: 600; font-family: 'Cascadia Code', 'Consolas', monospace;">{{TemporaryPassword}}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 12px 16px; font-size: 14px; color: #616161; width: 140px;">Access URL</td>
+                                                <td style="padding: 12px 16px; font-size: 14px;"><a href="{{AccessUrl}}" style="color: #0f6cbd; text-decoration: none; font-weight: 600;">{{AccessUrl}}</a></td>
                                             </tr>
                                         </table>
                                     </td>
                                 </tr>
                             </table>
 
-                            <!-- InPrivate / Incognito Warning -->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 24px; border-left: 4px solid #f7630c; background-color: #fff8f0; border-radius: 0 6px 6px 0;">
+                            <!-- Important Information -->
+                            <p style="margin: 0 0 12px; color: #242424; font-size: 16px; line-height: 1.6;">
+                                Please also be aware of the following important information about using the Spaarke demo system:
+                            </p>
+
+                            <ul style="margin: 0 0 12px; padding-left: 24px; color: #242424; font-size: 14px; line-height: 1.8;">
+                                <li>You will be prompted to change your password on first login.</li>
+                                <li>If you are already signed into another Microsoft account in your browser, you may be prompted to choose an account &mdash; select <strong>"Use another account"</strong> and enter the demo credentials above.</li>
+                                <li>Your demo access expires on <strong>{{ExpirationDate}}</strong>.</li>
+                            </ul>
+
+                            <!-- Confidentiality Warning -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 24px; border-left: 4px solid #d13438; background-color: #fdf3f4; border-radius: 0 6px 6px 0;">
                                 <tr>
                                     <td style="padding: 16px 20px;">
-                                        <p style="margin: 0 0 6px; color: #d83b01; font-size: 14px; font-weight: 700;">
-                                            Important: Use an InPrivate or Incognito Window
+                                        <p style="margin: 0 0 8px; color: #a4262c; font-size: 14px; font-weight: 700;">
+                                            Important Notice
                                         </p>
-                                        <p style="margin: 0; color: #6e4a1e; font-size: 14px; line-height: 1.5;">
-                                            To avoid conflicts with your personal or work Microsoft account, always open Spaarke in an <strong>InPrivate</strong> (Edge) or <strong>Incognito</strong> (Chrome) browser window. This ensures you log in with the demo credentials above, not your existing account.
+                                        <p style="margin: 0; color: #442726; font-size: 14px; line-height: 1.6;">
+                                            The demo environment is <strong>NOT CONFIDENTIAL</strong>. <strong>DO NOT ENTER ANY CONFIDENTIAL, SENSITIVE, OR INAPPROPRIATE INFORMATION</strong> into the system.
                                         </p>
-                                    </td>
-                                </tr>
-                            </table>
-
-                            <!-- Access URL Button -->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 24px;">
-                                <tr>
-                                    <td style="text-align: center;">
-                                        <a href="{{AccessUrl}}" style="display: inline-block; padding: 16px 40px; background-color: #0f6cbd; color: #ffffff; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 6px;">
-                                            Open Spaarke Demo
-                                        </a>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="text-align: center; padding-top: 8px;">
-                                        <p style="margin: 0; color: #8a8a8a; font-size: 12px;">
-                                            {{AccessUrl}}
+                                        <p style="margin: 8px 0 0; color: #442726; font-size: 14px; line-height: 1.6;">
+                                            By accessing the system you agree to our <a href="https://spaarke.com/termsandconditions" style="color: #0f6cbd; text-decoration: underline;">Terms and Conditions</a>.
                                         </p>
-                                    </td>
-                                </tr>
-                            </table>
-
-                            <!-- Details Table -->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 24px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
-                                <tr>
-                                    <td style="background-color: #f0f4f8; padding: 12px 16px; font-size: 13px; font-weight: 600; color: #616161; text-transform: uppercase; letter-spacing: 0.5px;">
-                                        Demo Details
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 0;">
-                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                            <tr>
-                                                <td style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #616161; width: 140px;">Access Expires</td>
-                                                <td style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #242424; font-weight: 600;">{{ExpirationDate}}</td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding: 12px 16px; font-size: 14px; color: #616161; width: 140px;">Environment</td>
-                                                <td style="padding: 12px 16px; font-size: 14px; color: #242424;">{{EnvironmentName}}</td>
-                                            </tr>
-                                        </table>
-                                    </td>
-                                </tr>
-                            </table>
-
-                            <!-- Quick Start -->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 24px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
-                                <tr>
-                                    <td style="background-color: #f0f4f8; padding: 12px 16px; font-size: 13px; font-weight: 600; color: #616161; text-transform: uppercase; letter-spacing: 0.5px;">
-                                        Getting Started
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 16px;">
-                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                            <tr>
-                                                <td style="padding: 6px 0; font-size: 14px; color: #242424; line-height: 1.5;">
-                                                    <strong>1.</strong> Open an InPrivate/Incognito browser window
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding: 6px 0; font-size: 14px; color: #242424; line-height: 1.5;">
-                                                    <strong>2.</strong> Navigate to <a href="{{AccessUrl}}" style="color: #0f6cbd; text-decoration: none;">{{AccessUrl}}</a>
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding: 6px 0; font-size: 14px; color: #242424; line-height: 1.5;">
-                                                    <strong>3.</strong> Sign in with your demo credentials above
-                                                </td>
-                                            </tr>
-                                            <tr>
-                                                <td style="padding: 6px 0; font-size: 14px; color: #242424; line-height: 1.5;">
-                                                    <strong>4.</strong> You will be prompted to change your password on first login
-                                                </td>
-                                            </tr>
-                                        </table>
                                     </td>
                                 </tr>
                             </table>
