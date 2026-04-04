@@ -16,7 +16,7 @@
 | 020 | PRPR-020 | Create Environment Registry | 3 | ✅ | 010 | 2h |
 | 021 | PRPR-021 | Create Build-AllClientComponents.ps1 | 3 | ✅ | 010 | 4h |
 | 022 | PRPR-022 | Create Deploy-AllWebResources.ps1 | 3 | ✅ | 010 | 3h |
-| 023 | PRPR-023 | Create Deploy-Release.ps1 | 3 | 🔲 | 020, 021, 022 | 4h |
+| 023 | PRPR-023 | Create Deploy-Release.ps1 | 3 | ✅ | 020, 021, 022 | 4h |
 | 030 | PRPR-030 | Create deploy-new-release Claude Code Skill | 4 | 🔲 | 023 | 3h |
 | 031 | PRPR-031 | Register deploy-new-release Skill | 4 | 🔲 | 030 | 1h |
 | 032 | PRPR-032 | Update scripts/README.md | 4 | 🔲 | 021, 022, 023 | 1h |
