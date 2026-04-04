@@ -11,8 +11,7 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// </summary>
 public sealed class RegistrationEmailService
 {
-    // TODO: Switch to demo@demo.spaarke.com once Exchange Application Access Policy is configured
-    private const string FromMailbox = "mailbox-central@spaarke.com";
+    private const string FromMailbox = "demo@demo.spaarke.com";
     private const string SupportEmail = "support@spaarke.com";
     private const string QuickStartGuideUrl = "https://www.spaarke.com/quick-start";
     private const string ProductionAccessUrl = "https://www.spaarke.com/contact";
