@@ -1,7 +1,7 @@
 <task id="PRPR-023" project="Production Release Procedure">
   <metadata>
     <title>Create Deploy-Release.ps1</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
     <assigned>Claude Code</assigned>
     <tags>powershell, deploy, automation</tags>
