@@ -12,7 +12,7 @@
 | # | ID | Title | Phase | Status | Dependencies | Estimate |
 |---|-----|-------|-------|--------|--------------|----------|
 | 001 | PRPR-001 | Project Setup | 1 | ✅ | — | 1h |
-| 010 | PRPR-010 | Create Production Release Procedure Guide | 2 | 🔲 | 001 | 4h |
+| 010 | PRPR-010 | Create Production Release Procedure Guide | 2 | ✅ | 001 | 4h |
 | 020 | PRPR-020 | Create Environment Registry | 3 | 🔲 | 010 | 2h |
 | 021 | PRPR-021 | Create Build-AllClientComponents.ps1 | 3 | 🔲 | 010 | 4h |
 | 022 | PRPR-022 | Create Deploy-AllWebResources.ps1 | 3 | 🔲 | 010 | 3h |
