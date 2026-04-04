@@ -254,7 +254,6 @@ public sealed class DemoProvisioningService
             {
                 User = new SharePointIdentity
                 {
-                    Id = userId,
                     AdditionalData = new Dictionary<string, object>
                     {
                         ["userPrincipalName"] = upn
