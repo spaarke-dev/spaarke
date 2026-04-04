@@ -1,7 +1,7 @@
 <task id="PRPR-030" project="Production Release Procedure">
   <metadata>
     <title>Create deploy-new-release Claude Code Skill</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3 hours</estimated-effort>
     <assigned>Claude Code</assigned>
     <tags>skill, claude-code, automation</tags>

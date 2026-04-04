@@ -2,7 +2,7 @@
 
 **Purpose:** Utility scripts for SDAP development, deployment, and operations.
 
-**Last Updated:** March 31, 2026
+**Last Updated:** April 4, 2026
 
 ---
 
@@ -408,6 +408,141 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - `All` — All of the above
 
 **Audit:** Produces timestamped JSON audit log in `scripts/logs/secret-rotation-*.log`
+
+---
+
+## Release & Deployment Orchestration
+
+### `Deploy-Release.ps1`
+**Purpose:** Master release orchestrator — deploys the full Spaarke platform to one or more environments. Runs a 7-phase pipeline: pre-flight checks, client build, BFF API deployment, Dataverse solution import, web resource deployment, post-deploy validation, and git release tagging. Environments are processed sequentially; each phase delegates to existing deployment scripts.
+**Usage:** 🟢 Active - Production and demo releases
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), PAC CLI (`pac auth`), Node.js + npm, `config/environments.json`, all sub-deployment scripts
+**Owner:** DevOps Team
+**Last Used:** April 2026
+
+**When to Use:**
+- Deploying a full release to production, demo, or staging environments
+- Multi-environment sequential rollout (e.g., dev then demo then production)
+- End-to-end release with automatic validation and git tagging
+
+**Command:**
+```powershell
+# Full release pipeline to the dev environment with auto-suggested version tag
+.\scripts\Deploy-Release.ps1 -EnvironmentUrl dev
+
+# Deploy to dev then demo, tag as v2.1.0
+.\scripts\Deploy-Release.ps1 -EnvironmentUrl dev, demo -Version v2.1.0
+
+# Deploy to demo, skipping build and validation phases
+.\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -SkipBuild -SkipPhase Validation
+
+# Preview the full release pipeline without executing anything
+.\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -WhatIf
+```
+
+**Parameters:**
+- `-EnvironmentUrl` — One or more Dataverse environment URLs or names from `config/environments.json` (e.g., `dev`, `demo`, `https://spaarkedev1.crm.dynamics.com`)
+- `-Version` — Release version tag in `v{major}.{minor}.{patch}` format; auto-suggests from latest git tag if omitted
+- `-SkipPhase` — Array of phase names to skip: `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation`
+- `-SkipBuild` — Shortcut for `-SkipPhase Build`
+- `-StopOnFailure` — Stop deploying to remaining environments if a deployment fails (default: `$true`)
+- `-ClientSecret` — Service principal client secret for Dataverse solution import (falls back to `SPAARKE_SP_CLIENT_SECRET` env var)
+
+**Pipeline Phases:**
+| Phase | Script Called | Description |
+|-------|-------------|-------------|
+| 0 | (built-in) | Pre-flight checks: git clean, branch, auth, BFF URL validation |
+| 1 | `Build-AllClientComponents.ps1` | Build all client components in dependency order |
+| 2 | `Deploy-BffApi.ps1` | BFF API deployment (per environment) |
+| 3 | `Deploy-DataverseSolutions.ps1` | Dataverse solution import (per environment) |
+| 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
+| 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |
+| 6 | (built-in) | Tag release in git |
+
+---
+
+### `Build-AllClientComponents.ps1`
+**Purpose:** Build all client-side components in correct dependency order — shared libraries first, then Vite solutions, webpack code pages, PCF controls, and external SPA. Ensures downstream components always build against fresh shared library output.
+**Usage:** 🟢 Active - Before any release deployment or when rebuilding client components
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Node.js + npm, shared library source in `src/client/shared/`
+**Owner:** DevOps Team
+**Last Used:** April 2026
+
+**When to Use:**
+- Before deploying web resources (ensures all artifacts are current)
+- Full client rebuild after pulling latest changes
+- Building specific components after targeted changes
+- Called automatically by `Deploy-Release.ps1` (Phase 1)
+
+**Command:**
+```powershell
+# Full build of all client components in dependency order
+.\scripts\Build-AllClientComponents.ps1
+
+# Build everything except shared libraries (assumes they are already built)
+.\scripts\Build-AllClientComponents.ps1 -SkipSharedLibs
+
+# Build only the LegalWorkspace and SmartTodo solutions
+.\scripts\Build-AllClientComponents.ps1 -Component LegalWorkspace, SmartTodo
+
+# Preview what would happen when building PCF controls
+.\scripts\Build-AllClientComponents.ps1 -Component PCF -WhatIf
+```
+
+**Parameters:**
+- `-SkipSharedLibs` — Skip shared library builds (step 1). Use when shared libs are already built.
+- `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `AnalysisWorkspace`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`.
+
+**Build Order:**
+1. Shared libraries (`Spaarke.Auth`, `Spaarke.SdapClient`, `Spaarke.UI.Components`)
+2. Vite solutions (20 projects in `src/solutions/`)
+3. Webpack code pages (4 projects in `src/client/code-pages/`)
+4. PCF controls (`src/client/pcf/`)
+5. External SPA (`src/client/external-spa/`)
+
+---
+
+### `Deploy-AllWebResources.ps1`
+**Purpose:** Deploy all Spaarke web resources to a single Dataverse environment — orchestrates 7 individual deploy scripts in sequence. Each sub-script handles its own authentication, encoding, and error handling. Failures in individual components do not stop the overall run.
+**Usage:** 🟢 Active - After building client components, or as part of a release
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), PAC CLI (`pac auth`), Dataverse connection, built client artifacts
+**Owner:** DevOps Team
+**Last Used:** April 2026
+
+**When to Use:**
+- Deploying all web resources after a full client build
+- Deploying to a new environment after solution import
+- Called automatically by `Deploy-Release.ps1` (Phase 4)
+
+**Command:**
+```powershell
+# Deploy all web resources to an environment
+.\scripts\Deploy-AllWebResources.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com
+
+# Skip specific components
+.\scripts\Deploy-AllWebResources.ps1 -SkipComponent RibbonIcons, PCFWebResources
+
+# Preview which components would be deployed
+.\scripts\Deploy-AllWebResources.ps1 -WhatIf
+```
+
+**Parameters:**
+- `-DataverseUrl` — Target Dataverse environment URL (falls back to `DATAVERSE_URL` env var)
+- `-SkipComponent` — Array of component names to skip: `CorporateWorkspace`, `ExternalWorkspaceSpa`, `SpeAdminApp`, `WizardCodePages`, `EventsPage`, `PCFWebResources`, `RibbonIcons`
+
+**Deployment Sequence:**
+| # | Script Called | Web Resource |
+|---|-------------|--------------|
+| 1 | `Deploy-CorporateWorkspace.ps1` | `sprk_corporateworkspace` (HTML) |
+| 2 | `Deploy-ExternalWorkspaceSpa.ps1` | `sprk_externalworkspace` (HTML + inline JS) |
+| 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
+| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources |
+| 5 | `Deploy-EventsPage.ps1` | `sprk_eventspage.html` |
+| 6 | `Deploy-PCFWebResources.ps1` | PCF bundle.js + CSS |
+| 7 | `Deploy-RibbonIcons.ps1` | 3 SVG ribbon icons |
 
 ---
 
@@ -968,6 +1103,9 @@ These scripts were used during initial SPE Container Type registration and are k
 - `Test-SdapBffApi.ps1` - Validate API changes
 
 **Deployment:**
+- `Deploy-Release.ps1` - Full platform release (build + deploy + validate + tag)
+- `Build-AllClientComponents.ps1` - Build all client artifacts before deployment
+- `Deploy-AllWebResources.ps1` - Deploy all web resources to Dataverse
 - `Deploy-CustomPage.ps1` - Deploy custom pages
 - CI/CD workflows (preferred over manual scripts)
 
@@ -1065,3 +1203,4 @@ Most scripts require:
 - **2026-03-31:** Added Deploy-ReportingReports.ps1 — Power BI report template deployment for the Reporting module (Task 035).
 - **2026-03-31:** Added Initialize-ReportingCustomer.ps1 — end-to-end customer onboarding for the Reporting module: PBI workspace, SP profile, report deployment, Dataverse module enablement (Task 040).
 - **2026-03-31:** Added Deploy-ReportingCodePage.ps1 — builds and deploys the Reporting Code Page (sprk_reporting web resource) to Dataverse using vite-plugin-singlefile single-file output (Task 016).
+- **2026-04-04:** Added Release & Deployment Orchestration section with three new scripts: Deploy-Release.ps1 (master release orchestrator), Build-AllClientComponents.ps1 (dependency-ordered client build), Deploy-AllWebResources.ps1 (all web resources to Dataverse) — Task PRPR-032.
