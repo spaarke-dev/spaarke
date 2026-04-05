@@ -12,7 +12,8 @@ This directory contains comprehensive architecture documentation covering system
 ### Authentication & Authorization
 
 - [auth-security-boundaries.md](auth-security-boundaries.md) - Security boundary definitions and trust zones
-- [auth-performance-monitoring.md](auth-performance-monitoring.md) - Auth performance metrics and monitoring
+- [AUTH-AND-BFF-URL-PATTERN.md](AUTH-AND-BFF-URL-PATTERN.md) - BFF URL normalization, auth cascade, PCF/Code Page auth init, authenticatedFetch retry semantics
+- [auth-performance-monitoring.md](auth-performance-monitoring.md) - Auth performance metrics and monitoring (illustrative — see doc for actual OBO cache implementation)
 - [auth-AI-azure-resources.md](auth-AI-azure-resources.md) - AI resource endpoints, models, CLI commands
 - [auth-azure-resources.md](auth-azure-resources.md) - Full Azure resource inventory
 - [uac-access-control.md](uac-access-control.md) - UAC access control patterns
@@ -34,15 +35,17 @@ This directory contains comprehensive architecture documentation covering system
 - [chat-architecture.md](chat-architecture.md) - SprkChat conversational AI: session management, playbook dispatch, compound intent detection, streaming pipeline
 - [rag-architecture.md](rag-architecture.md) - RAG pipeline: text chunking, embedding cache, dual-index strategy, hybrid search, scheduled indexing
 - [scope-architecture.md](scope-architecture.md) - Scope management: resolution chain, SYS-/CUST- ownership, single-level inheritance, gap detection
-- [sdap-document-processing-architecture.md](sdap-document-processing-architecture.md) - Consolidated document processing and summarization pipeline (supersedes ai-document-summary-architecture.md)
-- [ai-semantic-relationship-graph.md](ai-semantic-relationship-graph.md) - Semantic relationship graph design
+- [ai-semantic-relationship-graph.md](ai-semantic-relationship-graph.md) - Multi-modal document discovery combining Dataverse structural lookups with AI Search vector similarity
+- [M365-COPILOT-INTEGRATION-ARCHITECTURE.md](M365-COPILOT-INTEGRATION-ARCHITECTURE.md) - M365 Copilot integration: Declarative Agent, API Plugin, agent gateway layer, Adaptive Cards
+
+> For document processing and summarization pipeline (which consolidates former ai-document-summary-architecture.md), see [sdap-document-processing-architecture.md](sdap-document-processing-architecture.md) in the SDAP section above.
 
 ### UI Components
 
 - [shared-ui-components-architecture.md](shared-ui-components-architecture.md) - @spaarke/ui-components shared library: component catalog, theming, composition patterns, PCF-safe exports
 - [code-pages-architecture.md](code-pages-architecture.md) - React 19 Code Pages: auth bootstrap, webpack single-chunk pipeline, deployment as HTML web resources
 - [universal-dataset-grid-architecture.md](universal-dataset-grid-architecture.md) - Universal DataGrid for PCF and Custom Pages with OOB parity
-- [SIDE-PANE-PLATFORM-ARCHITECTURE.md](SIDE-PANE-PLATFORM-ARCHITECTURE.md) - Always-available side panes: SidePaneManager, context detection, cross-pane communication, auth patterns
+- [SIDE-PANE-PLATFORM-ARCHITECTURE.md](SIDE-PANE-PLATFORM-ARCHITECTURE.md) - ⚠️ **SUPERSEDED** — describes removed SidePaneManager/auto-injection model. Retained for historical context only. For current SprkChat side pane implementation see `code-pages-architecture.md` and `chat-architecture.md`.
 - [ui-dialog-shell-architecture.md](ui-dialog-shell-architecture.md) - Dialog shell architecture
 - [VISUALHOST-ARCHITECTURE.md](VISUALHOST-ARCHITECTURE.md) - VisualHost architecture
 - [wizard-framework-architecture.md](wizard-framework-architecture.md) - Shared WizardShell: domain-free multi-step wizard dialog, dynamic steps, all wizard implementations
@@ -59,7 +62,6 @@ This directory contains comprehensive architecture documentation covering system
 - [event-to-do-architecture.md](event-to-do-architecture.md) - Event-to-do feature architecture
 - [external-access-spa-architecture.md](external-access-spa-architecture.md) - External access SPA architecture
 - [finance-intelligence-architecture.md](finance-intelligence-architecture.md) - Finance intelligence feature design
-- [multi-environment-portability-strategy.md](multi-environment-portability-strategy.md) - Multi-environment portability strategy
 
 > **Moved**: `AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md` is a strategy/positioning doc — relocated to [`docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md`](../enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md). For current SprkChat technical architecture, see [`chat-architecture.md`](chat-architecture.md).
 
@@ -74,6 +76,7 @@ This directory contains comprehensive architecture documentation covering system
 - [resilience-architecture.md](resilience-architecture.md) - Circuit breakers, retry policies, resilient search client, ProblemDetails error handling
 - [shared-libraries-architecture.md](shared-libraries-architecture.md) - Spaarke.Core (auth, caching, utilities) and Spaarke.Dataverse (Web API client, entity models, ISP interfaces)
 - [caching-architecture.md](caching-architecture.md) - Redis-first caching: 5 cache types, TTL tiers, key conventions, fail-open pattern, OpenTelemetry metrics
+- [multi-environment-portability-strategy.md](multi-environment-portability-strategy.md) - Multi-environment deployment strategy: alternate keys, option sets, environment variables architecture
 
 ### Infrastructure & Repository
 
