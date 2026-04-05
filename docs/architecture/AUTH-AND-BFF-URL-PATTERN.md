@@ -1,21 +1,33 @@
 # BFF Authentication & URL Construction Pattern
 
-> **Last Updated**: 2026-04-02
+> **Last Updated**: 2026-04-05
 > **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Verified (all claims matched against code; no discrepancies)
+> **Reviewed By**: ai-procedure-refactoring-r2 + /api helper consolidation
+> **Status**: Verified — helper-based construction mandatory as of 2026-04-05
 > **Audience**: Developers, AI agents (Claude Code), CI/CD pipelines
 
 ---
 
-## The Golden Rule
+## The Golden Rule (Updated 2026-04-05)
 
-```
-bffBaseUrl = HOST ONLY (no /api suffix)
-fetch URL  = ${bffBaseUrl}/api/...
+**Use `buildBffApiUrl()`. Always. Template literals are banned.**
+
+```typescript
+// ✅ CORRECT
+import { buildBffApiUrl } from '@spaarke/auth';
+const url = buildBffApiUrl(bffBaseUrl, '/ai/visualization/related/123');
+
+// ❌ WRONG — banned
+const url = `${bffBaseUrl}/api/ai/visualization/related/123`;
 ```
 
-**Every BFF API call in the Spaarke codebase follows this convention.** The `/api` prefix is the caller's responsibility, never part of the base URL.
+**Why**: `bffBaseUrl` is HOST ONLY (no `/api` suffix). Callers previously had to manually add `/api/` when building fetch URLs. This manual step was error-prone and caused multiple production bugs:
+
+- Missing `/api/` → 404
+- Duplicate `/api/api/` → 404
+- Different call sites in the same component disagreeing on the format
+
+The `buildBffApiUrl()` helper is idempotent and makes this class of bug impossible.
 
 ---
 
@@ -59,35 +71,41 @@ function normalizeUrl(raw: string): string {
 }
 ```
 
-**Safe usage:**
+**Safe usage with helper (MANDATORY):**
 ```typescript
-const response = await authenticatedFetch(`${config.bffBaseUrl}/api/documents/123`);
+import { resolveRuntimeConfig, buildBffApiUrl, authenticatedFetch } from '@spaarke/auth';
+
+const config = await resolveRuntimeConfig();
+const url = buildBffApiUrl(config.bffBaseUrl, '/documents/123');
+const response = await authenticatedFetch(url);
 ```
 
 ### Path B: PCF `environmentVariables.ts` (PCF Controls)
 
-PCF controls query Dataverse environment variables via `Xrm.WebApi`:
+PCF controls query Dataverse environment variables via `Xrm.WebApi`. The `getApiBaseUrl()` function normalizes the raw value and returns HOST ONLY:
 
 ```typescript
-import { getApiBaseUrl } from '../shared/utils/environmentVariables';
+import { getApiBaseUrl, buildBffApiUrl } from '../shared/utils/environmentVariables';
+import { authenticatedFetch } from '@spaarke/auth';
 
-const apiBaseUrl = await getApiBaseUrl(webApi);
-// Returns the RAW env var value: "https://spe-api-dev-67e2xz.azurewebsites.net/api"
-//                                                                              ^^^^
+const base = await getApiBaseUrl(context.webAPI);
+// Returns HOST ONLY: "https://spe-api-dev-67e2xz.azurewebsites.net"
+
+const url = buildBffApiUrl(base, '/ai/visualization/related/123');
+// → "https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/visualization/related/123"
+
+const response = await authenticatedFetch(url);
 ```
 
-**Any service receiving this value MUST normalize it:**
-```typescript
-constructor(apiBaseUrl: string) {
-  // Strip trailing slashes and /api to prevent double /api/api/
-  this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, '').replace(/\/api$/i, '');
-}
-```
+**The helper is also exported from `@spaarke/auth`** for parity. PCFs that already import from `@spaarke/auth` may use either import.
 
-Then construct URLs the same way:
-```typescript
-const endpoint = `${this.apiBaseUrl}/api/ai/search`;
-```
+**Idempotency guarantee** — these all produce the identical output:
+
+| Input path           | Output                            |
+|---------------------|-----------------------------------|
+| `/ai/search`        | `{base}/api/ai/search`            |
+| `/api/ai/search`    | `{base}/api/ai/search` (same)     |
+| `ai/search`         | `{base}/api/ai/search` (same)     |
 
 ---
 
@@ -184,12 +202,24 @@ If all strategies fail:
 authenticatedFetch(url, init?)
 ```
 
-1. **Resolves relative URLs**: `/api/documents/123` → `${bffBaseUrl}/api/documents/123`
+1. **Resolves relative URLs via `buildBffApiUrl()`**: Any relative URL (with or without `/api/`) is routed through the helper, guaranteeing a correct `/api/` prefix. This is a safety net for the recurring `/api` missing / duplicated bug.
+   - `/ai/chat/sessions` → `${bffBaseUrl}/api/ai/chat/sessions`
+   - `/api/ai/chat/sessions` → `${bffBaseUrl}/api/ai/chat/sessions` (same)
 2. **Acquires token** via `SpaarkeAuthProvider.getAccessToken()`
 3. **Sets `Authorization: Bearer <token>`** header
 4. **On 401**: Clears cache, retries with exponential backoff (500ms, 1000ms, 2000ms)
 5. **After 3 failed retries**: Throws `AuthError('Authentication failed after all retry attempts', 'auth_exhausted')`
 6. **On other HTTP errors**: Throws `ApiError` with RFC 7807 ProblemDetails
+
+**Preferred call style**:
+```typescript
+// Option 1: Build URL explicitly (works with fetch() or authenticatedFetch())
+const url = buildBffApiUrl(config.bffBaseUrl, '/ai/chat/sessions');
+await authenticatedFetch(url);
+
+// Option 2: Pass relative path (authenticatedFetch resolves via buildBffApiUrl internally)
+await authenticatedFetch('/ai/chat/sessions');
+```
 
 ---
 

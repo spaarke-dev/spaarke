@@ -75,19 +75,41 @@ Load when:
 
 > See: `.claude/patterns/auth/spaarke-auth-initialization.md` and `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md`
 
-### BFF Base URL Convention (CRITICAL — Recurring Production Bug)
+### BFF Base URL Convention (CRITICAL — Use `buildBffApiUrl()` Helper)
 
-- ✅ **MUST** treat `bffBaseUrl` / `apiBaseUrl` as HOST ONLY (e.g., `https://spe-api-dev-67e2xz.azurewebsites.net`)
-- ✅ **MUST** add `/api/` prefix in every fetch URL: `${bffBaseUrl}/api/ai/search`
+**Rule**: All BFF API URL construction MUST go through the `buildBffApiUrl()` helper.
+Template literal concatenation (`${bffBaseUrl}/api/...`) is banned as of 2026-04-05.
+
+- ✅ **MUST** use `buildBffApiUrl(baseUrl, path)` from `@spaarke/auth` (Code Pages / PCF / workspaces) or from `../shared/utils/environmentVariables` (PCF shared utils)
 - ✅ **MUST** get the base URL from `getApiBaseUrl()` (PCF) or `resolveRuntimeConfig()` (Code Pages) — both return HOST ONLY
-- ✅ **MUST** construct fetch URLs as `${bffBaseUrl}/api/your/endpoint`
+- ✅ **MUST** pass the endpoint path with or without leading `/api/` — the helper is idempotent
+- ❌ **MUST NOT** construct URLs as `` `${bffBaseUrl}/api/ai/search` `` or `` `${bffBaseUrl}/ai/search` `` — use the helper
 - ❌ **MUST NOT** add your own `/api`-stripping normalization in service constructors — the source functions already handle it
 - ❌ **MUST NOT** read `sprk_BffApiBaseUrl` directly from Dataverse and pass it to services — always go through `getApiBaseUrl()` or `resolveRuntimeConfig()`
-- ❌ **MUST NOT** construct URLs as `${bffBaseUrl}/ai/search` (missing `/api` prefix)
 
-**Why this rule exists**: The Dataverse env var `sprk_BffApiBaseUrl` stores `https://host/api` (with `/api`). The resolution functions (`getApiBaseUrl()`, `resolveRuntimeConfig()`) strip it so all consumer code works with HOST ONLY. This is fixed at the source — individual services should not re-implement normalization.
+**Why this rule exists**: The Dataverse env var `sprk_BffApiBaseUrl` stores `https://host/api` (with `/api`). The resolution functions strip it so all consumer code works with HOST ONLY, and then every caller must add `/api/` back when building request URLs. Manual concatenation has caused multiple production bugs — URLs missing `/api/` (404s) or duplicated `/api/api/` (also 404s). The `buildBffApiUrl()` helper makes this impossible by normalizing both sides.
 
-> See: `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md` for the full reference
+**Correct usage**:
+```typescript
+// Code Page
+import { buildBffApiUrl, authenticatedFetch } from '@spaarke/auth';
+const config = await resolveRuntimeConfig();
+const url = buildBffApiUrl(config.bffBaseUrl, '/ai/visualization/related/123');
+const response = await authenticatedFetch(url);
+
+// PCF Control
+import { getApiBaseUrl, buildBffApiUrl } from '../../shared/utils/environmentVariables';
+const base = await getApiBaseUrl(context.webAPI);
+const url = buildBffApiUrl(base, '/ai/chat/sessions');
+
+// Relative path (authenticatedFetch auto-resolves + adds /api/)
+await authenticatedFetch('/ai/chat/sessions'); // resolveUrl() routes through buildBffApiUrl()
+```
+
+**Additional safety net**: `authenticatedFetch()` internally routes relative URLs through `buildBffApiUrl()`, so passing a relative path (with or without `/api/`) will always produce the correct URL.
+
+> See: [`docs/architecture/AUTH-AND-BFF-URL-PATTERN.md`](../../docs/architecture/AUTH-AND-BFF-URL-PATTERN.md) for the full reference
+> See: [`.claude/patterns/auth/bff-url-normalization.md`](../patterns/auth/bff-url-normalization.md) for the helper pattern
 
 ---
 

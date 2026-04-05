@@ -1,6 +1,7 @@
 import type { IProblemDetails } from './types';
 import { ApiError, AuthError } from './errors';
 import { getAuthProvider } from './initAuth';
+import { buildBffApiUrl } from './buildBffApiUrl';
 
 /** Exponential backoff base delay (ms). */
 const RETRY_BASE_MS = 500;
@@ -75,16 +76,21 @@ export async function authenticatedFetch(url: string, init?: RequestInit): Promi
   );
 }
 
-/** Resolve a potentially relative URL against the BFF base URL. */
+/**
+ * Resolve a potentially relative URL against the BFF base URL.
+ *
+ * If the URL is absolute (http/https), it is used as-is.
+ * If the URL is relative, it is routed through buildBffApiUrl() so the
+ * final URL always has a correct `/api/` prefix — even if the caller
+ * forgot to include it. This is a safety net for the recurring
+ * `/api` missing / duplicated production bug.
+ */
 function resolveUrl(url: string, baseUrl: string): string {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
   if (!baseUrl) return url;
-
-  const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-  const path = url.startsWith('/') ? url : `/${url}`;
-  return `${base}${path}`;
+  return buildBffApiUrl(baseUrl, url);
 }
 
 /** Attempt to parse a response body as RFC 7807 ProblemDetails. */

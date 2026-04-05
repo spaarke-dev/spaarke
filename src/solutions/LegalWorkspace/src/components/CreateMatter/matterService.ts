@@ -23,6 +23,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress } from '../../services/EntityCreationService';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 import { authenticatedFetch } from '../../services/authInit';
+import { buildBffApiUrl } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -516,9 +517,8 @@ export async function streamAiDraftSummary(
 ): Promise<IAiDraftSummaryResponse> {
   const { onProgress } = callbacks;
   try {
-    const bffBaseUrl = getBffBaseUrl();
     const response = await authenticatedFetch(
-      `${bffBaseUrl}/workspace/matters/ai-summary`,
+      buildBffApiUrl(getBffBaseUrl(), '/workspace/matters/ai-summary'),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

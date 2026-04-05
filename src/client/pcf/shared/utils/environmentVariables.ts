@@ -225,7 +225,9 @@ export async function getEnvironmentVariableOrDefault(
  * IMPORTANT: Returns HOST ONLY (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net").
  * The Dataverse env var stores the value WITH /api suffix, but this function strips it
  * via normalizeBffUrl() to match @spaarke/auth's resolveRuntimeConfig() convention.
- * All callers MUST add /api prefix themselves: `${baseUrl}/api/ai/search`
+ *
+ * DO NOT construct URLs manually with template literals — use buildBffApiUrl() below.
+ * Manual concatenation has been the source of multiple production bugs.
  *
  * @param webApi - The PCF WebAPI instance
  * @returns The BFF API base URL (host only, no /api suffix)
@@ -233,6 +235,48 @@ export async function getEnvironmentVariableOrDefault(
 export async function getApiBaseUrl(webApi: ComponentFramework.WebApi): Promise<string> {
   const raw = await getEnvironmentVariableOrDefault(webApi, 'sprk_BffApiBaseUrl');
   return normalizeBffUrl(raw);
+}
+
+/**
+ * Build a BFF API URL from a base URL and a path.
+ *
+ * Use this helper for ALL BFF API URL construction in PCF controls.
+ * It is idempotent and accepts paths with or without the `/api/` prefix.
+ *
+ * @example
+ *   const base = await getApiBaseUrl(context.webAPI);
+ *   const url = buildBffApiUrl(base, '/ai/visualization/related/123');
+ *   // → 'https://host.azurewebsites.net/api/ai/visualization/related/123'
+ *
+ * @example
+ *   // Idempotent: accepts /api/... and adds it if missing
+ *   buildBffApiUrl(base, '/ai/chat/sessions')     // OK
+ *   buildBffApiUrl(base, '/api/ai/chat/sessions') // OK (same result)
+ *   buildBffApiUrl(base, 'ai/chat/sessions')      // OK (same result)
+ *
+ * @param baseUrl - BFF base URL (host only). Trailing slashes are tolerated.
+ * @param path    - Endpoint path. The helper guarantees a single `/api/` prefix.
+ * @returns Full URL ready for fetch().
+ * @throws Error if baseUrl is empty or missing.
+ *
+ * @see docs/architecture/AUTH-AND-BFF-URL-PATTERN.md
+ * @see .claude/constraints/auth.md → "BFF Base URL Convention"
+ */
+export function buildBffApiUrl(baseUrl: string, path: string): string {
+  if (!baseUrl || baseUrl.trim() === '') {
+    throw new Error(
+      '[buildBffApiUrl] baseUrl is empty. Did you forget to await getApiBaseUrl() first?'
+    );
+  }
+  const base = baseUrl.replace(/\/+$/, '');
+  let normalizedPath = path.trim();
+  if (!normalizedPath.startsWith('/')) {
+    normalizedPath = '/' + normalizedPath;
+  }
+  if (!/^\/api(\/|$)/i.test(normalizedPath)) {
+    normalizedPath = '/api' + normalizedPath;
+  }
+  return base + normalizedPath;
 }
 
 /**
