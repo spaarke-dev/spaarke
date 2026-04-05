@@ -1,12 +1,12 @@
 # Coding Standards & Patterns
 
-> **Purpose**: Coding standards, conventions, and best practices for Spaarke development
+> **Purpose**: Cross-cutting coding standards, anti-patterns, and integration contracts for Spaarke
 > **Audience**: Developers, AI coding agents
-> **Status**: Under review - content needs systematic revision
+> **Last Reviewed**: 2026-04-05
 
 ## Overview
 
-This directory contains standards for authentication, data access patterns, and platform-specific coding conventions.
+This directory contains cross-cutting coding standards, anti-pattern catalog, integration contracts between subsystems, and authentication patterns.
 
 ## Standards Index
 
@@ -31,11 +31,3 @@ This directory contains standards for authentication, data access patterns, and 
 - Dataverse authentication → Load DATAVERSE-AUTHENTICATION-GUIDE.md
 - Code review → Check against anti-patterns
 
-## Phase 3 TODO
-
-- [ ] Review for current accuracy
-- [ ] Add general coding standards (naming, formatting, etc.)
-- [ ] Create domain-specific constraint files for `.claude/constraints/`
-- [ ] Add examples and code snippets
-- [ ] Cross-reference with relevant ADRs
-- [ ] Identify gaps in standards coverage
