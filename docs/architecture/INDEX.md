@@ -79,7 +79,6 @@ This directory contains comprehensive architecture documentation covering system
 
 - [AZURE-RESOURCE-NAMING-CONVENTION.md](AZURE-RESOURCE-NAMING-CONVENTION.md) - Azure resource naming standards
 - [INFRASTRUCTURE-PACKAGING-STRATEGY.md](INFRASTRUCTURE-PACKAGING-STRATEGY.md) - Infrastructure packaging approach
-- [SPAARKE-REPOSITORY-ARCHITECTURE.md](SPAARKE-REPOSITORY-ARCHITECTURE.md) - Repository structure guide for developers and AI agents
 - [dataverse-infrastructure-architecture.md](dataverse-infrastructure-architecture.md) - Dataverse infrastructure: document storage resolver, access data source, cached permissions, fail-closed security
 - [ci-cd-architecture.md](ci-cd-architecture.md) - CI/CD: 13 GitHub Actions workflows, slot-swap deployment, multi-stage promotion, quality gates
 
@@ -94,7 +93,7 @@ This directory contains comprehensive architecture documentation covering system
 - Creating new Azure resources → Load `AZURE-RESOURCE-NAMING-CONVENTION.md`
 - Understanding AI features → Load `AI-ARCHITECTURE.md`, `playbook-architecture.md`
 - Side panes, context awareness, cross-pane communication → Load `SIDE-PANE-PLATFORM-ARCHITECTURE.md`
-- Repository structure, directory layout → Load `SPAARKE-REPOSITORY-ARCHITECTURE.md`
+- Repository structure, directory layout → Load `docs/guides/REPOSITORY-NAVIGATION-GUIDE.md`
 - Configuration, options classes → Load `configuration-architecture.md`
 - Retry/circuit breaker, error handling → Load `resilience-architecture.md`
 - Shared .NET libraries, authorization, caching → Load `shared-libraries-architecture.md`, `caching-architecture.md`

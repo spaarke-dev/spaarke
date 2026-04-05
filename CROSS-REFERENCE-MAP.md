@@ -135,7 +135,7 @@
 | OAuth/OBO Anti-Patterns | Included in [.claude/constraints/auth.md](.claude/constraints/auth.md) | [oauth-obo-patterns.md](docs/standards/oauth-obo-patterns.md) |
 | OAuth/OBO Errors | Included in [.claude/patterns/auth/obo-flow.md](.claude/patterns/auth/obo-flow.md) | [oauth-obo-errors.md](docs/standards/oauth-obo-errors.md) |
 | SDAP Overview | - | [sdap-overview.md](docs/architecture/sdap-overview.md) |
-| Repository Architecture | - | [SPAARKE-REPOSITORY-ARCHITECTURE.md](docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md) |
+| Repository Navigation | - | [REPOSITORY-NAVIGATION-GUIDE.md](docs/guides/REPOSITORY-NAVIGATION-GUIDE.md) |
 | UX Management | - | [ui-dialog-shell-architecture.md](docs/architecture/ui-dialog-shell-architecture.md) |
 | AI Architecture | - | [AI-ARCHITECTURE.md](docs/architecture/AI-ARCHITECTURE.md) |
 

@@ -12,6 +12,10 @@ This directory contains practical guides for implementing features, configuring 
 
 <!-- TODO: Phase 3 - Organize by category and add descriptions -->
 
+### Repository Navigation
+
+- **[REPOSITORY-NAVIGATION-GUIDE.md](REPOSITORY-NAVIGATION-GUIDE.md)** - Quick navigation reference for developers and AI agents: top-level directory map, source code layout, naming conventions, file-location lookup
+
 ### Shared Libraries
 
 - **[SHARED-UI-COMPONENTS-GUIDE.md](SHARED-UI-COMPONENTS-GUIDE.md)** - `@spaarke/ui-components` library: component inventory, consumption patterns (barrel vs deep import), build workflow, adding components
