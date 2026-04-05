@@ -1,0 +1,68 @@
+<task id="040" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create caching-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, caching, redis, distributed-cache</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/caching-architecture.md — document Redis caching strategy including distributed cache, request-scoped cache, token cache, embedding cache, and TTL tiers</goal>
+    <context>The BFF API uses Redis as its primary caching layer (ADR-009) with multiple cache tiers: distributed cache for shared state, request-scoped cache for per-request deduplication, token cache for MSAL tokens, and embedding cache for AI vector embeddings. Each tier has distinct TTL policies. No architecture document captures this caching system end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent cache strategies
+      - Document each cache tier: distributed, request-scoped, token, embedding
+      - Map TTL policies for each tier and key pattern
+      - Include Redis configuration and connection management
+      - Document cache invalidation strategies and eviction policies
+      - Reference ADR-009 (Redis-first) constraint
+      - Cite source files for every cache implementation
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read ADR-009 for Redis-first caching constraints</step>
+    <step>Search for IDistributedCache, Redis, cache-related services across src/server/</step>
+    <step>Read each cache implementation to document tier behavior and TTL</step>
+    <step>Read Redis configuration and connection setup in Program.cs</step>
+    <step>Identify token cache implementation for MSAL</step>
+    <step>Identify embedding cache for AI vector storage</step>
+    <step>Map cache invalidation strategies and key patterns</step>
+    <step>Draft caching-architecture.md following skill structure</step>
+    <step>Verify every cache tier cites its source file</step>
+    <step>Write to docs/architecture/caching-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/caching-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All cache tiers documented: distributed, request-scoped, token, embedding</criterion>
+    <criterion>TTL policies mapped for each tier and key pattern</criterion>
+    <criterion>Redis configuration and connection management documented</criterion>
+    <criterion>Cache invalidation strategies documented</criterion>
+    <criterion>ADR-009 constraint referenced</criterion>
+    <criterion>Every cache implementation cites its source file</criterion>
+    <criterion>No invented strategies — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

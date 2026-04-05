@@ -1,0 +1,59 @@
+<task id="063" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, spe, containers</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md — check commands and procedures match current SPE implementation</goal>
+    <context>The container setup guide documents SharePoint Embedded container type and container provisioning. Commands and APIs may have changed.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against source code
+      - Check all CLI commands and API calls against current tooling
+      - Verify container type registration and provisioning steps
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Spe/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md</step>
+    <step>Read SPE service and infrastructure classes for current container operations</step>
+    <step>Verify CLI commands and API calls referenced in the guide</step>
+    <step>Check container type registration flow against current code</step>
+    <step>Identify discrepancies between guide and current implementation</step>
+    <step>Update docs/guides/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md with corrections</step>
+    <step>Verify all file paths and command references are accurate</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All CLI commands and API calls verified against current tooling</criterion>
+    <criterion>Container provisioning steps match current implementation</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+  </acceptance-criteria>
+</task>

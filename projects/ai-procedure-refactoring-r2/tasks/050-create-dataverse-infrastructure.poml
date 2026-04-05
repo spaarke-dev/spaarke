@@ -1,0 +1,61 @@
+<task id="050" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create dataverse-infrastructure-architecture.md</title>
+    <phase>4</phase>
+    <tags>architecture, documentation, dataverse, infrastructure</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/dataverse-infrastructure-architecture.md — document the repository pattern, security layer, and document storage resolver for Dataverse integration</goal>
+    <context>The BFF API integrates with Dataverse through a structured infrastructure layer including repository patterns, security abstractions, and document storage resolution. No architecture document captures this subsystem end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent patterns that don't exist
+      - Document the repository pattern and how it abstracts Dataverse access
+      - Document the security layer and authorization flow
+      - Document the document storage resolver and how it maps to SPE containers
+      - Cite source files for every class and interface documented
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all classes in src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/</step>
+    <step>Read repository classes to understand the data access pattern</step>
+    <step>Read security layer classes for authorization flow</step>
+    <step>Read document storage resolver for SPE container mapping</step>
+    <step>Read Program.cs for DI registrations related to Dataverse infrastructure</step>
+    <step>Draft dataverse-infrastructure-architecture.md following skill structure</step>
+    <step>Verify every class and interface is documented with source file reference</step>
+    <step>Write to docs/architecture/dataverse-infrastructure-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/dataverse-infrastructure-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Repository pattern documented with class hierarchy and usage</criterion>
+    <criterion>Security layer documented with authorization flow</criterion>
+    <criterion>Document storage resolver documented with SPE container mapping</criterion>
+    <criterion>Every class and interface cites its source file</criterion>
+    <criterion>No invented patterns — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

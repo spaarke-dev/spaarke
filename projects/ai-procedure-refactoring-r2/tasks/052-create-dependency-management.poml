@@ -1,0 +1,60 @@
+<task id="052" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create DEPENDENCY-MANAGEMENT.md</title>
+    <phase>4</phase>
+    <tags>procedures, documentation, dependencies, package-management</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/procedures/DEPENDENCY-MANAGEMENT.md — document the shared lib to consumer dependency graph and update procedures</goal>
+    <context>The repository has multiple shared libraries (NuGet packages, npm packages, shared UI components) consumed by various projects. No procedure documents the dependency graph or how to safely update shared dependencies.</context>
+    <constraints>
+      - Use /docs-procedures skill structure
+      - Source ALL dependency relationships from actual package.json and .csproj files
+      - Map the complete dependency graph: shared libs → consumers
+      - Include version management strategy and update procedures
+      - Document breaking change detection and rollback procedures
+      - Cite actual file paths for every dependency relationship
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-procedures/SKILL.md</file>
+      <file>src/client/shared/</file>
+      <file>src/server/shared/</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-procedures/SKILL.md for mandatory structure</step>
+    <step>Glob all package.json files to find npm dependency relationships</step>
+    <step>Glob all .csproj files to find NuGet/project dependency relationships</step>
+    <step>Map shared library consumers: @spaarke/ui-components, @spaarke/auth, shared .NET libs</step>
+    <step>Identify version pinning strategy from lock files and project references</step>
+    <step>Draft DEPENDENCY-MANAGEMENT.md following skill structure</step>
+    <step>Verify every dependency relationship cites actual file paths</step>
+    <step>Write to docs/procedures/DEPENDENCY-MANAGEMENT.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-procedures)</tool>
+  </tools>
+  <outputs>
+    <output>docs/procedures/DEPENDENCY-MANAGEMENT.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-procedures skill structure</criterion>
+    <criterion>Complete dependency graph mapped: shared libs → all consumers</criterion>
+    <criterion>Version management strategy documented</criterion>
+    <criterion>Update and rollback procedures included</criterion>
+    <criterion>Every dependency relationship cites actual file paths</criterion>
+    <criterion>No invented dependencies — all sourced from actual project files</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,62 @@
+<task id="064" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify PRODUCTION-DEPLOYMENT-GUIDE.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, deployment, production</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md — check commands, resource names, quotas, and deployment procedures</goal>
+    <context>The production deployment guide is critical for safe production releases. Commands, resource names, and Azure quotas may have changed since the guide was written.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against source code and Azure resource docs
+      - Check all az CLI commands for correctness
+      - Verify resource names match CLAUDE.md Azure Infrastructure section
+      - Verify deployment slot names and swap procedures
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>.github/workflows/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md</step>
+    <step>Read CLAUDE.md Azure Infrastructure section for resource names</step>
+    <step>Read docs/architecture/auth-azure-resources.md for full resource inventory</step>
+    <step>Verify all az CLI commands in the guide for correctness</step>
+    <step>Verify resource names, slot names, and deployment procedures</step>
+    <step>Identify discrepancies and outdated references</step>
+    <step>Update docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md with corrections</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All az CLI commands verified for correctness</criterion>
+    <criterion>Resource names match CLAUDE.md and Azure resource documentation</criterion>
+    <criterion>Deployment slot and swap procedures verified</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+  </acceptance-criteria>
+</task>

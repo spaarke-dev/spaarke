@@ -1,0 +1,69 @@
+<task id="021" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create Jobs Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, jobs, service-bus, new</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/jobs-architecture.md — Service Bus processor, 11 handlers, idempotency, dead-letter</goal>
+    <context>No architecture doc exists for the jobs subsystem. The Service Bus job processor routes messages to 11 handler types, implements idempotency checks, and manages dead-letter queues. This doc needs to be created from scratch by reading the source code.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — read all job service files before writing
+      - This is a NEW document, not a restoration — no git log recovery needed
+      - Must include Known Pitfalls section
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+    </files>
+    <globs>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Jobs/*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Jobs/**/*.cs</glob>
+    </globs>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read ServiceBusJobProcessor.cs for the core processing loop</step>
+    <step>Read all job handler files in Services/Jobs/ to catalog the 11 handler types</step>
+    <step>Identify idempotency mechanism: how duplicate messages are detected and skipped</step>
+    <step>Identify dead-letter handling: when messages are dead-lettered, retry policy, monitoring</step>
+    <step>Document the job routing mechanism: message type to handler mapping</step>
+    <step>Document each of the 11 handlers with purpose, message type, and processing logic</step>
+    <step>Document idempotency: key generation, dedup window, storage</step>
+    <step>Document dead-letter queue: conditions, retry policy, alerting</step>
+    <step>Draft new document following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section covering handler not found, idempotency key collision, dead-letter overflow, message ordering assumptions</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write new doc to docs/architecture/jobs-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/jobs-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Service Bus processor core loop is documented</criterion>
+    <criterion>All 11 job handlers are cataloged with message type and processing logic</criterion>
+    <criterion>Idempotency mechanism is documented: key generation, dedup window, storage</criterion>
+    <criterion>Dead-letter handling is documented: conditions, retry, monitoring</criterion>
+    <criterion>Job routing mechanism is explained</criterion>
+    <criterion>Known Pitfalls section is present and substantive</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

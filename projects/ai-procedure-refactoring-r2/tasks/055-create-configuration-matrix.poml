@@ -1,0 +1,61 @@
+<task id="055" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create CONFIGURATION-MATRIX.md</title>
+    <phase>4</phase>
+    <tags>guides, documentation, configuration, settings</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/guides/CONFIGURATION-MATRIX.md — every application setting mapped to its location, default value, and override mechanism</goal>
+    <context>Configuration is spread across appsettings.json, environment variables, Azure App Service settings, Key Vault references, and client-side runtime config. No single document maps every setting to its location and defaults.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Source ALL settings from actual code — Options classes, appsettings.json, environment variables
+      - Map every setting: name, location, default value, override mechanism, required/optional
+      - Cover server-side (appsettings, env vars, Key Vault) and client-side (runtime config) settings
+      - Cite source files (Options classes, appsettings.json) for every entry
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Inventory all Options classes in Configuration/ and Options/ directories</step>
+    <step>Read appsettings.json for all configuration sections and default values</step>
+    <step>Read Program.cs for configuration binding and environment variable overrides</step>
+    <step>Search for Key Vault references in configuration</step>
+    <step>Identify client-side runtime config endpoints and their settings</step>
+    <step>Draft CONFIGURATION-MATRIX.md as a comprehensive settings table</step>
+    <step>Verify every setting cites its source file and has accurate defaults</step>
+    <step>Write to docs/guides/CONFIGURATION-MATRIX.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/CONFIGURATION-MATRIX.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+    <criterion>Every Options class setting mapped with name, location, default, override mechanism</criterion>
+    <criterion>Server-side and client-side configuration covered</criterion>
+    <criterion>Key Vault references documented</criterion>
+    <criterion>Every setting cites its source file</criterion>
+    <criterion>No invented settings — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

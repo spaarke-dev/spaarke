@@ -1,0 +1,70 @@
+<task id="022" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create Background Workers Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, background-workers, hosted-service, new</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/background-workers-architecture.md — all IHostedService implementations</goal>
+    <context>No architecture doc exists for the background workers subsystem. Multiple IHostedService implementations run alongside the BFF API: subscription renewal, cache warming, health monitors, scheduled tasks. This doc needs to be created from scratch by searching for and reading all IHostedService implementations.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — search for and read all IHostedService and BackgroundService implementations
+      - This is a NEW document, not a restoration — no git log recovery needed
+      - Must include Known Pitfalls section
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+    </files>
+    <search>
+      <query>IHostedService</query>
+      <query>BackgroundService</query>
+      <query>: IHostedService</query>
+      <query>: BackgroundService</query>
+    </search>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Search codebase for all classes implementing IHostedService or extending BackgroundService</step>
+    <step>Read each implementation to understand purpose, schedule, and dependencies</step>
+    <step>Categorize workers: periodic (timer-based), event-driven, startup-only</step>
+    <step>Document each worker: class name, purpose, trigger mechanism, error handling</step>
+    <step>Document lifecycle: startup ordering, graceful shutdown, cancellation token handling</step>
+    <step>Document registration pattern: how workers are registered in DI</step>
+    <step>Document interactions: which workers depend on shared services or external resources</step>
+    <step>Draft new document following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section covering startup ordering dependencies, unhandled exceptions killing the host, timer drift, resource contention between workers</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write new doc to docs/architecture/background-workers-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/background-workers-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All IHostedService and BackgroundService implementations are cataloged</criterion>
+    <criterion>Each worker is documented with purpose, trigger mechanism, and error handling</criterion>
+    <criterion>Worker lifecycle is documented: startup order, shutdown, cancellation</criterion>
+    <criterion>Registration pattern in DI is explained</criterion>
+    <criterion>Worker categorization (periodic, event-driven, startup-only) is clear</criterion>
+    <criterion>Known Pitfalls section covers startup ordering, unhandled exceptions, timer drift</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

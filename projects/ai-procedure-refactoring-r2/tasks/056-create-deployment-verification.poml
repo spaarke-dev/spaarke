@@ -1,0 +1,61 @@
+<task id="056" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create DEPLOYMENT-VERIFICATION-GUIDE.md</title>
+    <phase>4</phase>
+    <tags>guides, documentation, deployment, verification</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md — post-deployment verification checks for all component types</goal>
+    <context>The repository deploys multiple component types (BFF API, PCF controls, Code Pages, Dataverse solutions, Azure infrastructure) each requiring different post-deploy verification steps. No single guide consolidates these checks.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Source verification steps from actual deploy skills and scripts
+      - Cover all component types: BFF API, PCF, Code Pages, Dataverse solutions, Azure resources
+      - Include health check endpoints, smoke tests, and rollback triggers
+      - Cite deploy skill and script paths for every verification procedure
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read each deploy skill for post-deployment steps: bff-deploy, pcf-deploy, code-page-deploy, dataverse-deploy, azure-deploy</step>
+    <step>Inventory deploy scripts in scripts/ directory for verification commands</step>
+    <step>Identify health check endpoints and smoke test patterns</step>
+    <step>Identify rollback triggers and procedures per component type</step>
+    <step>Draft DEPLOYMENT-VERIFICATION-GUIDE.md with per-component checklists</step>
+    <step>Verify every verification step cites its source skill or script</step>
+    <step>Write to docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+    <criterion>All component types covered: BFF API, PCF, Code Pages, Dataverse, Azure</criterion>
+    <criterion>Health check endpoints and smoke tests documented</criterion>
+    <criterion>Rollback triggers and procedures included</criterion>
+    <criterion>Every verification step cites its source skill or script</criterion>
+    <criterion>No invented procedures — all sourced from actual deploy skills and scripts</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,59 @@
+<task id="080" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Cross-reference path verification</title>
+    <phase>7</phase>
+    <tags>verification, cross-reference, file-paths, quality</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>all-phases</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Grep all documentation files for file paths, verify each resolves to a real file in the repository, and fix broken references</goal>
+    <context>After all documentation has been created, enhanced, and verified, a final pass is needed to ensure every file path reference in every doc resolves to an actual file. Broken paths cause confusion and wasted time during task execution.</context>
+    <constraints>
+      - Scan ALL docs/ files for file path patterns (src/, .claude/, .github/, infrastructure/, scripts/)
+      - Verify each extracted path resolves to an actual file or directory
+      - Fix broken references where the correct path can be determined
+      - Flag ambiguous references that cannot be auto-resolved
+      - Create a summary report of all fixes and remaining issues
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>docs/</file>
+      <file>.claude/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Grep all markdown files in docs/ for path patterns matching src/, .claude/, .github/, infrastructure/, scripts/</step>
+    <step>Extract unique file paths from grep results</step>
+    <step>For each extracted path, verify it resolves to an actual file or directory</step>
+    <step>Categorize results: valid paths, broken paths with obvious fix, ambiguous broken paths</step>
+    <step>Fix broken paths where the correct target can be determined</step>
+    <step>Also check .claude/ files (ADRs, constraints, patterns) for broken path references</step>
+    <step>Create a summary of all fixes applied and any remaining unresolved references</step>
+    <step>Report total paths checked, fixed, and flagged</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash</tool>
+  </tools>
+  <outputs>
+    <output>Fixed broken file path references across all documentation</output>
+    <output>Summary report of verification results</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All markdown files in docs/ scanned for file path references</criterion>
+    <criterion>All .claude/ files scanned for file path references</criterion>
+    <criterion>Every extractable file path verified against repository</criterion>
+    <criterion>Broken paths fixed where correct target is determinable</criterion>
+    <criterion>Ambiguous references flagged for human review</criterion>
+    <criterion>Summary report includes total paths checked, fixed, and flagged</criterion>
+  </acceptance-criteria>
+</task>

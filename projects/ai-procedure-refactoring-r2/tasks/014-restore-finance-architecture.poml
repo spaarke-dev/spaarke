@@ -1,0 +1,69 @@
+<task id="014" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Restore Finance Intelligence Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, finance, over-trimmed</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Restore depth to docs/architecture/finance-intelligence-architecture.md — VisualHost integration, invoice analysis, signal evaluation, spend snapshots</goal>
+    <context>The finance intelligence architecture doc was over-trimmed, losing critical detail about VisualHost integration for Power BI embedding, invoice analysis pipeline, signal evaluation engine, and spend snapshot generation. This doc supports financial feature development and debugging.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — read all finance service files before writing
+      - Recover trimmed content via git log -p where possible
+      - Must include Known Pitfalls section
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+    </files>
+    <globs>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Finance/*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Finance/**/*.cs</glob>
+    </globs>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/finance-intelligence-architecture.md to understand what remains</step>
+    <step>Run git log -p -- docs/architecture/finance-intelligence-architecture.md to recover trimmed content</step>
+    <step>Read all finance service files in Services/Finance/</step>
+    <step>Document VisualHost integration pattern for Power BI embedding</step>
+    <step>Document invoice analysis pipeline: ingestion, extraction, classification</step>
+    <step>Document signal evaluation engine: trigger conditions, evaluation flow, output actions</step>
+    <step>Document spend snapshot generation and storage</step>
+    <step>Draft restored document following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section covering VisualHost token expiry, invoice parsing edge cases, signal evaluation false positives</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write restored doc to docs/architecture/finance-intelligence-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash(git log)</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/finance-intelligence-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>VisualHost integration pattern is documented with token flow</criterion>
+    <criterion>Invoice analysis pipeline is described end-to-end</criterion>
+    <criterion>Signal evaluation engine is documented with trigger and output mechanics</criterion>
+    <criterion>Spend snapshot generation and storage are explained</criterion>
+    <criterion>Known Pitfalls section is present and substantive</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

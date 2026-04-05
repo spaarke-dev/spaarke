@@ -1,0 +1,69 @@
+<task id="036" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create shared-ui-components-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, ui-components, fluent-ui, pcf, react</tags>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/shared-ui-components-architecture.md — document the 37 shared UI components, composition patterns, theming, and PCF-safe exports</goal>
+    <context>The @spaarke/ui-components library provides 37+ reusable React components shared across PCF controls, Code Pages, and solution pages. It uses Fluent UI v9, supports dark mode theming, and provides PCF-safe exports compatible with React 16. No architecture document captures this component library end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent components
+      - Document the full component inventory (all 37+ components) with category grouping
+      - Map composition patterns: how components compose with each other
+      - Document theming system: Fluent UI v9 tokens, dark mode, custom tokens
+      - Explain PCF-safe exports: how React 18 components are made compatible with React 16 PCF hosts
+      - Include build pipeline and package structure
+      - Cite source files for every component
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all component files in Spaarke.UI.Components/src/</step>
+    <step>Read index.ts to identify all exported components</step>
+    <step>Categorize components by function (layout, data display, forms, navigation, etc.)</step>
+    <step>Read theming files to document Fluent UI v9 token usage and dark mode</step>
+    <step>Identify PCF-safe export mechanism and React version compatibility layer</step>
+    <step>Read package.json and build config for pipeline and package structure</step>
+    <step>Read ADR-012, ADR-021, ADR-022 for architectural constraints</step>
+    <step>Draft shared-ui-components-architecture.md following skill structure</step>
+    <step>Verify every component cites its source file</step>
+    <step>Write to docs/architecture/shared-ui-components-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/shared-ui-components-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All 37+ components inventoried and categorized</criterion>
+    <criterion>Composition patterns between components documented</criterion>
+    <criterion>Theming system documented (Fluent v9 tokens, dark mode, custom tokens)</criterion>
+    <criterion>PCF-safe export mechanism and React 16 compatibility explained</criterion>
+    <criterion>Build pipeline and package structure documented</criterion>
+    <criterion>Every component cites its source file</criterion>
+    <criterion>No invented components — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

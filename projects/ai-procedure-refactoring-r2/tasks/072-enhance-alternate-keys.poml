@@ -1,0 +1,60 @@
+<task id="072" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Enhance alternate keys and constraints documentation</title>
+    <phase>6</phase>
+    <tags>data-model, documentation, alternate-keys, enhancement</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Enhance docs/data-model/schema-additions-alternate-keys.md — verify alternate keys match current Dataverse schema</goal>
+    <context>The alternate keys documentation may be outdated as schema additions have been made. Keys need verification against current Dataverse configuration.</context>
+    <constraints>
+      - Use /docs-data-model skill structure
+      - Read the current document first, then verify against source code and solution files
+      - Check alternate key definitions against Dataverse solution XML
+      - Verify constraint definitions match current entity configurations
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>docs/data-model/schema-additions-alternate-keys.md</file>
+      <file>src/solutions/</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-data-model/SKILL.md for mandatory structure</step>
+    <step>Read current docs/data-model/schema-additions-alternate-keys.md</step>
+    <step>Search solution XML files for alternate key definitions</step>
+    <step>Compare documented keys against solution definitions</step>
+    <step>Search source code for alternate key usage patterns</step>
+    <step>Identify discrepancies: missing keys, removed keys, changed compositions</step>
+    <step>Update docs/data-model/schema-additions-alternate-keys.md with corrections</step>
+    <step>Verify all key definitions match current schema</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-data-model)</tool>
+  </tools>
+  <outputs>
+    <output>docs/data-model/schema-additions-alternate-keys.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All alternate keys verified against Dataverse solution definitions</criterion>
+    <criterion>Missing or removed keys identified and documented</criterion>
+    <criterion>Key compositions match current entity configurations</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-data-model skill structure</criterion>
+  </acceptance-criteria>
+</task>

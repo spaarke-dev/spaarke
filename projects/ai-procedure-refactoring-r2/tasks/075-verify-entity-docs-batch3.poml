@@ -1,0 +1,69 @@
+<task id="075" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify entity docs batch 3 (remaining files)</title>
+    <phase>6</phase>
+    <tags>data-model, documentation, verification, entities, batch</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify remaining entity documentation files: sprk_spendsnapshot, sprk_workassignment, sprk_ai-analysis-related-entities, schema-corrections, sprk_ERD-ai-analysis-entities</goal>
+    <context>These remaining entity and schema documentation files need verification against current code. The AI analysis entity docs are particularly important as the AI pipeline evolves frequently.</context>
+    <constraints>
+      - Use /docs-data-model skill structure
+      - Read each document, then verify against corresponding source code
+      - Check field names, data types, and relationships against actual entity usage
+      - Verify AI analysis entity relationships match current pipeline code
+      - Verify schema corrections have been applied
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>docs/data-model/sprk_spendsnapshot.md</file>
+      <file>docs/data-model/sprk_workassignment.md</file>
+      <file>docs/data-model/sprk_ai-analysis-related-entities.md</file>
+      <file>docs/data-model/schema-corrections.md</file>
+      <file>docs/data-model/sprk_ERD-ai-analysis-entities.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-data-model/SKILL.md for mandatory structure</step>
+    <step>Read each of the remaining entity documentation files</step>
+    <step>Search source code for usage of each entity's logical name</step>
+    <step>Verify AI analysis entity relationships against pipeline service code</step>
+    <step>Check sprk_spendsnapshot and sprk_workassignment against C# models</step>
+    <step>Verify schema corrections have been applied to current schema</step>
+    <step>Verify ERD diagram matches current entity relationships</step>
+    <step>Identify discrepancies in each file</step>
+    <step>Update each file with corrections, citing source files</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-data-model)</tool>
+  </tools>
+  <outputs>
+    <output>docs/data-model/sprk_spendsnapshot.md</output>
+    <output>docs/data-model/sprk_workassignment.md</output>
+    <output>docs/data-model/sprk_ai-analysis-related-entities.md</output>
+    <output>docs/data-model/schema-corrections.md</output>
+    <output>docs/data-model/sprk_ERD-ai-analysis-entities.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All remaining entity docs verified against source code</criterion>
+    <criterion>AI analysis entity relationships match current pipeline code</criterion>
+    <criterion>Schema corrections verified as applied or flagged as pending</criterion>
+    <criterion>ERD diagram matches current entity relationships</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Documents follow /docs-data-model skill structure</criterion>
+  </acceptance-criteria>
+</task>

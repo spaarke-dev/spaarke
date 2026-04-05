@@ -1,0 +1,58 @@
+<task id="082" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>7</phase>
+    <tags>wrap-up, project-management, final-report</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>081</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Update project README status to Complete, create lessons-learned.md, and produce final status report</goal>
+    <context>All tasks in the ai-procedure-refactoring-r2 project are complete. The project needs formal wrap-up: README status update, lessons learned, and a final status report summarizing all work done.</context>
+    <constraints>
+      - Update README.md project status to "Complete"
+      - Create lessons-learned.md documenting what worked well, what was challenging, and recommendations
+      - Produce a final status report with task completion summary
+      - Update TASK-INDEX.md to reflect all completed tasks
+      - Reference actual task outcomes, not planned outcomes
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-refactoring-r2/README.md</file>
+      <file>projects/ai-procedure-refactoring-r2/tasks/TASK-INDEX.md</file>
+      <file>projects/ai-procedure-refactoring-r2/plan.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read projects/ai-procedure-refactoring-r2/README.md</step>
+    <step>Update README.md status to "Complete" with completion date</step>
+    <step>Read TASK-INDEX.md to summarize task completion across all phases</step>
+    <step>Count completed, skipped, and deferred tasks per phase</step>
+    <step>Create projects/ai-procedure-refactoring-r2/notes/lessons-learned.md</step>
+    <step>Document what worked well, challenges encountered, and recommendations for future projects</step>
+    <step>Create final status report summarizing: total tasks, completed, docs created, docs verified, docs enhanced</step>
+    <step>Verify TASK-INDEX.md reflects final status of all tasks</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+  </tools>
+  <outputs>
+    <output>projects/ai-procedure-refactoring-r2/README.md (updated)</output>
+    <output>projects/ai-procedure-refactoring-r2/notes/lessons-learned.md</output>
+    <output>Final status report (in task completion output)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>README.md status updated to "Complete" with date</criterion>
+    <criterion>lessons-learned.md created with substantive content</criterion>
+    <criterion>Final status report includes per-phase task completion counts</criterion>
+    <criterion>TASK-INDEX.md reflects final status of all tasks</criterion>
+    <criterion>All project artifacts accounted for</criterion>
+  </acceptance-criteria>
+</task>

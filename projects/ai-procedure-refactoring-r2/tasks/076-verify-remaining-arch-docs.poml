@@ -1,0 +1,65 @@
+<task id="076" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify remaining architecture docs</title>
+    <phase>6</phase>
+    <tags>architecture, documentation, verification, uac, events, infrastructure</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify accuracy of: uac-access-control.md, event-to-do-architecture.md, INFRASTRUCTURE-PACKAGING-STRATEGY.md</goal>
+    <context>These three architecture documents cover distinct subsystems (access control, event/todo management, infrastructure packaging) and each needs verification against current code.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Read each document, then verify against corresponding source code
+      - Check class names, service references, and flow descriptions
+      - Verify infrastructure packaging strategy matches current deployment scripts
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+      <file>docs/architecture/event-to-do-architecture.md</file>
+      <file>docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Authorization/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Events/</file>
+      <file>infrastructure/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read docs/architecture/uac-access-control.md and verify against authorization service code</step>
+    <step>Read docs/architecture/event-to-do-architecture.md and verify against event service code</step>
+    <step>Read docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md and verify against infrastructure/ and deploy scripts</step>
+    <step>Search source code for class names and service references mentioned in each doc</step>
+    <step>Identify discrepancies: changed class names, missing services, outdated flows</step>
+    <step>Update each document with corrections, citing source files</step>
+    <step>Verify all references resolve to actual code files</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/uac-access-control.md</output>
+    <output>docs/architecture/event-to-do-architecture.md</output>
+    <output>docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All three architecture docs verified against corresponding source code</criterion>
+    <criterion>Class names and service references match current code</criterion>
+    <criterion>Infrastructure packaging strategy matches current deployment approach</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Documents follow /docs-architecture skill structure</criterion>
+  </acceptance-criteria>
+</task>

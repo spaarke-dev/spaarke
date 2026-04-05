@@ -1,0 +1,69 @@
+<task id="017" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Restore PCF Patterns Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, pcf, over-trimmed</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Restore depth to docs/architecture/sdap-pcf-patterns.md — 14 PCF controls overview, categories, shared patterns, initialization lifecycle</goal>
+    <context>The PCF patterns doc was over-trimmed, losing the catalog of all 14 PCF controls with categories, the shared initialization patterns, and the control lifecycle details (init, updateView, destroy). This doc is essential for PCF control development and understanding the control landscape.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — read all PCF control index.ts files before writing
+      - Recover trimmed content via git log -p where possible
+      - Must include Known Pitfalls section
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/sdap-pcf-patterns.md</file>
+    </files>
+    <globs>
+      <glob>src/client/pcf/*/control/index.ts</glob>
+      <glob>src/client/pcf/*/ControlManifest.Input.xml</glob>
+      <glob>src/client/pcf/*/*.ts</glob>
+    </globs>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/sdap-pcf-patterns.md to understand what remains</step>
+    <step>Run git log -p -- docs/architecture/sdap-pcf-patterns.md to recover trimmed content</step>
+    <step>Read all PCF control index.ts entry points to catalog the 14 controls</step>
+    <step>Read ControlManifest.Input.xml files to understand control metadata and bound fields</step>
+    <step>Categorize controls by function (data display, AI, navigation, utility)</step>
+    <step>Document shared patterns: FluentProvider wrapping, context forwarding, property binding</step>
+    <step>Document initialization lifecycle: init(), updateView(), destroy()</step>
+    <step>Draft restored document following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section covering React version mismatch, updateView re-render storms, context stale reads</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write restored doc to docs/architecture/sdap-pcf-patterns.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash(git log)</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/sdap-pcf-patterns.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All 14 PCF controls are cataloged with name, category, and purpose</criterion>
+    <criterion>Shared patterns are documented: FluentProvider, context forwarding, property binding</criterion>
+    <criterion>Initialization lifecycle (init, updateView, destroy) is explained</criterion>
+    <criterion>Known Pitfalls section covers React version mismatch and re-render storms</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

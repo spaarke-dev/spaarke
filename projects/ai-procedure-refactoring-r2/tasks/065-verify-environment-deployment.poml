@@ -1,0 +1,59 @@
+<task id="065" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify ENVIRONMENT-DEPLOYMENT-GUIDE.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, deployment, bicep</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md — verify Bicep template references and environment setup procedures</goal>
+    <context>The environment deployment guide documents how to stand up new environments using Bicep templates. Template references and parameter files may have changed.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against Bicep templates
+      - Check all Bicep template file paths resolve to actual files
+      - Verify parameter file references and default values
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>infrastructure/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</step>
+    <step>Inventory all Bicep templates in infrastructure/ directory</step>
+    <step>Verify every Bicep file path referenced in the guide resolves to an actual file</step>
+    <step>Check parameter file references and default values</step>
+    <step>Verify az deployment commands for correctness</step>
+    <step>Identify discrepancies between guide and current infrastructure files</step>
+    <step>Update docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md with corrections</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All Bicep template file paths verified against actual files</criterion>
+    <criterion>Parameter file references and defaults verified</criterion>
+    <criterion>az deployment commands verified for correctness</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+  </acceptance-criteria>
+</task>

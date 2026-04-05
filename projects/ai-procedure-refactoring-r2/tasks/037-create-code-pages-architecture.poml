@@ -1,0 +1,65 @@
+<task id="037" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create code-pages-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, code-pages, react-18, webpack, vite</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/code-pages-architecture.md — document React 18 Code Page entry points, auth bootstrap, webpack vs Vite build pipelines, and deployment as Dataverse web resources</goal>
+    <context>Code Pages are standalone React 18 SPAs deployed as Dataverse web resources, opened via Xrm.Navigation.navigateTo. They use @spaarke/auth for MSAL bootstrap and call the BFF API. Some use webpack (legacy), others use Vite (preferred). No architecture document captures this pattern end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent Code Pages
+      - Document every existing Code Page with its purpose and entry point
+      - Map the auth bootstrap sequence: resolveRuntimeConfig → setRuntimeConfig → ensureAuthInitialized → render
+      - Compare webpack and Vite build pipelines with pros/cons
+      - Document deployment as Dataverse web resources (naming, upload, publishing)
+      - Cite source files for every Code Page and build config
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/client/code-pages/</file>
+      <file>.claude/adr/ADR-006-anti-legacy-js.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all Code Pages in src/client/code-pages/</step>
+    <step>Read each Code Page's main.tsx entry point to document purpose and structure</step>
+    <step>Read auth bootstrap pattern from @spaarke/auth usage</step>
+    <step>Compare webpack.config.js and vite.config.ts across Code Pages</step>
+    <step>Read deployment scripts for web resource upload process</step>
+    <step>Read ADR-006 and ADR-022 for architectural constraints</step>
+    <step>Draft code-pages-architecture.md following skill structure</step>
+    <step>Verify every Code Page cites its source file and build config</step>
+    <step>Write to docs/architecture/code-pages-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/code-pages-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Every existing Code Page documented with purpose and entry point</criterion>
+    <criterion>Auth bootstrap sequence fully mapped</criterion>
+    <criterion>Webpack vs Vite build pipelines compared</criterion>
+    <criterion>Deployment as Dataverse web resources documented</criterion>
+    <criterion>Every Code Page cites its source file and build config</criterion>
+    <criterion>No invented Code Pages — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

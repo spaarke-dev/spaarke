@@ -1,0 +1,71 @@
+<task id="011" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Restore Auth Patterns Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, auth, over-trimmed</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Restore depth to docs/architecture/sdap-auth-patterns.md — nine-pattern auth taxonomy, OBO vs app-only flows, endpoint filters, Graph client factory</goal>
+    <context>The auth patterns doc was over-trimmed, losing critical detail about the nine distinct auth patterns, the OBO vs app-only token flow differences, endpoint filter implementation, and GraphClientFactory internals. This doc is essential for any work touching authentication or authorization.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — read GraphClientFactory.cs and all auth filters before writing
+      - Recover trimmed content via git log -p where possible
+      - Must include Known Pitfalls section (token not propagated, wrong scope, tenant ID race)
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/sdap-auth-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </files>
+    <globs>
+      <glob>src/server/api/Sprk.Bff.Api/Api/Filters/*Auth*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Api/Filters/*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/*.cs</glob>
+    </globs>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/sdap-auth-patterns.md to understand what remains</step>
+    <step>Run git log -p -- docs/architecture/sdap-auth-patterns.md to recover trimmed content</step>
+    <step>Read GraphClientFactory.cs to understand OBO vs app-only token acquisition</step>
+    <step>Read all auth-related endpoint filters in Api/Filters/</step>
+    <step>Read Infrastructure/Graph/ and Infrastructure/Auth/ for auth infrastructure</step>
+    <step>Catalog the nine auth patterns with their usage contexts</step>
+    <step>Draft restored document following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section: token not propagated to downstream calls, wrong scope requested, tenant ID race condition in multi-tenant scenarios</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write restored doc to docs/architecture/sdap-auth-patterns.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash(git log)</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/sdap-auth-patterns.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All nine auth patterns are documented with taxonomy and usage context</criterion>
+    <criterion>OBO vs app-only flows are clearly differentiated with sequence descriptions</criterion>
+    <criterion>Endpoint filter auth mechanism is documented with examples</criterion>
+    <criterion>GraphClientFactory internals are explained</criterion>
+    <criterion>Known Pitfalls section covers token propagation, wrong scope, and tenant ID race</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

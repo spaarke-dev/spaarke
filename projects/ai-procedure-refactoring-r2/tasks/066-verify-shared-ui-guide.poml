@@ -1,0 +1,61 @@
+<task id="066" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify SHARED-UI-COMPONENTS-GUIDE.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, ui-components, shared</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/SHARED-UI-COMPONENTS-GUIDE.md — check component list against actual exported components in code</goal>
+    <context>The shared UI components guide documents available components in @spaarke/ui-components. The component list may be outdated as new components are added or existing ones change.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against source code
+      - Check every documented component exists in the actual exports
+      - Check for undocumented components that should be added
+      - Verify props/API descriptions match actual TypeScript interfaces
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</step>
+    <step>Read src/client/shared/Spaarke.UI.Components/src/index.ts for all exports</step>
+    <step>Inventory all component directories in src/client/shared/Spaarke.UI.Components/src/components/</step>
+    <step>Compare documented components against actual exports — find missing or removed</step>
+    <step>Spot-check component props against TypeScript interfaces</step>
+    <step>Identify discrepancies between guide and current code</step>
+    <step>Update docs/guides/SHARED-UI-COMPONENTS-GUIDE.md with corrections</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Every documented component verified against actual code exports</criterion>
+    <criterion>Undocumented components identified and added</criterion>
+    <criterion>Component props/API descriptions match TypeScript interfaces</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+  </acceptance-criteria>
+</task>

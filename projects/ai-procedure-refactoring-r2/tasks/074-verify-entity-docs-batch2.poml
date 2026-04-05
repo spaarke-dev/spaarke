@@ -1,0 +1,71 @@
+<task id="074" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify entity docs batch 2 (7 files)</title>
+    <phase>6</phase>
+    <tags>data-model, documentation, verification, entities, batch</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify 7 entity documentation files: sprk_event-views-guids, sprk_financial-related-entities, sprk_invoice-matter-project, sprk_invoice, sprk_kpiassessment, sprk_matter-related-tables, sprk_spendsignal</goal>
+    <context>Entity documentation may have drifted from actual Dataverse schema and code usage. Each file needs verification against source code and solution definitions.</context>
+    <constraints>
+      - Use /docs-data-model skill structure
+      - Read each document, then verify against corresponding source code
+      - Check field names, data types, and relationships against actual entity usage in C# code
+      - Verify view GUIDs against solution XML where applicable
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>docs/data-model/sprk_event-views-guids.md</file>
+      <file>docs/data-model/sprk_financial-related-entities.md</file>
+      <file>docs/data-model/sprk_invoice-matter-project.md</file>
+      <file>docs/data-model/sprk_invoice.md</file>
+      <file>docs/data-model/sprk_kpiassessment.md</file>
+      <file>docs/data-model/sprk_matter-related-tables.md</file>
+      <file>docs/data-model/sprk_spendsignal.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-data-model/SKILL.md for mandatory structure</step>
+    <step>Read each of the 7 entity documentation files</step>
+    <step>Search source code for usage of each entity's logical name</step>
+    <step>Verify field names and data types against C# model properties</step>
+    <step>Verify view GUIDs against solution XML where applicable</step>
+    <step>Check relationship definitions and financial entity cross-references</step>
+    <step>Identify discrepancies in each file</step>
+    <step>Update each file with corrections, citing source files</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-data-model)</tool>
+  </tools>
+  <outputs>
+    <output>docs/data-model/sprk_event-views-guids.md</output>
+    <output>docs/data-model/sprk_financial-related-entities.md</output>
+    <output>docs/data-model/sprk_invoice-matter-project.md</output>
+    <output>docs/data-model/sprk_invoice.md</output>
+    <output>docs/data-model/sprk_kpiassessment.md</output>
+    <output>docs/data-model/sprk_matter-related-tables.md</output>
+    <output>docs/data-model/sprk_spendsignal.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All 7 entity docs verified against source code usage</criterion>
+    <criterion>Field names and data types match C# model properties</criterion>
+    <criterion>View GUIDs verified where applicable</criterion>
+    <criterion>Financial entity cross-references validated</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Documents follow /docs-data-model skill structure</criterion>
+  </acceptance-criteria>
+</task>

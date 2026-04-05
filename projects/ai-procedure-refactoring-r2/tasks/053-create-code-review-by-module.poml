@@ -1,0 +1,57 @@
+<task id="053" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create CODE-REVIEW-BY-MODULE.md</title>
+    <phase>4</phase>
+    <tags>procedures, documentation, code-review, quality</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/procedures/CODE-REVIEW-BY-MODULE.md — module-specific code review checklists for each major subsystem</goal>
+    <context>The existing code-review skill provides a general checklist, but different modules (BFF API, PCF controls, Code Pages, Plugins, AI Pipeline) have distinct concerns. Claude needs module-specific review guidance.</context>
+    <constraints>
+      - Use /docs-procedures skill structure
+      - Source review criteria from existing ADRs, CLAUDE.md, and code-review skill
+      - Create separate checklists for: BFF API, PCF Controls, Code Pages, Dataverse Plugins, AI Pipeline, Shared UI Components
+      - Every checklist item must cite its source (ADR, skill, or CLAUDE.md)
+      - Include common anti-patterns per module
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-procedures/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-procedures/SKILL.md for mandatory structure</step>
+    <step>Read .claude/skills/code-review/SKILL.md for existing review checklist</step>
+    <step>Read CLAUDE.md coding standards section for module-specific rules</step>
+    <step>Read relevant ADRs for constraints by module type</step>
+    <step>Draft module-specific checklists for each subsystem</step>
+    <step>Verify every checklist item cites its source</step>
+    <step>Write to docs/procedures/CODE-REVIEW-BY-MODULE.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-procedures)</tool>
+  </tools>
+  <outputs>
+    <output>docs/procedures/CODE-REVIEW-BY-MODULE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-procedures skill structure</criterion>
+    <criterion>Separate checklists for BFF API, PCF, Code Pages, Plugins, AI Pipeline, Shared UI</criterion>
+    <criterion>Every checklist item cites its source (ADR, skill, or CLAUDE.md)</criterion>
+    <criterion>Common anti-patterns listed per module</criterion>
+    <criterion>No invented review criteria — all sourced from existing materials</criterion>
+  </acceptance-criteria>
+</task>
