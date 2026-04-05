@@ -35,7 +35,7 @@
     <files>
       <file>projects/ai-m365-copilot-integration/design.md</file>
       <file>projects/ai-m365-copilot-integration/spec.md</file>
-      <file>docs/architecture/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md</file>
+      <file>docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md</file>
     </files>
   </knowledge>
 

@@ -60,7 +60,8 @@ This directory contains comprehensive architecture documentation covering system
 - [external-access-spa-architecture.md](external-access-spa-architecture.md) - External access SPA architecture
 - [finance-intelligence-architecture.md](finance-intelligence-architecture.md) - Finance intelligence feature design
 - [multi-environment-portability-strategy.md](multi-environment-portability-strategy.md) - Multi-environment portability strategy
-- [AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md](AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) - M365 Copilot vs Sprk Chat strategy analysis
+
+> **Moved**: `AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md` is a strategy/positioning doc — relocated to [`docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md`](../enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md). For current SprkChat technical architecture, see [`chat-architecture.md`](chat-architecture.md).
 
 ### Background Processing
 

@@ -71,7 +71,7 @@
 
 **Architecture Docs**:
 - `docs/architecture/AI-ARCHITECTURE.md` — Four-tier AI architecture
-- `docs/architecture/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md` — Copilot vs SprkChat positioning
+- `docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md` — Copilot vs SprkChat positioning
 - `docs/architecture/ai-implementation-reference.md` — Working code examples
 - `docs/architecture/sdap-auth-patterns.md` — OBO flow, token management
 - `docs/architecture/sdap-bff-api-patterns.md` — API endpoint design

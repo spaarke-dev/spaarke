@@ -1,9 +1,11 @@
 # AI Chat Strategy: M365 Copilot + SprkChat
 
-> **Status**: Active — Strategic Architecture
-> **Date**: 2026-03-16 (Updated)
-> **Branch**: `work/ai-sprk-chat-context-awareness-r1`
-> **Author**: Ralph Schroeder + Claude Code
+> **Note**: This is a strategy/positioning document. For the current SprkChat technical architecture, see [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md). For the current M365 Copilot integration architecture, see [`docs/architecture/M365-COPILOT-INTEGRATION-ARCHITECTURE.md`](../architecture/M365-COPILOT-INTEGRATION-ARCHITECTURE.md).
+>
+> **Status**: Active — Strategic positioning
+> **Date**: 2026-03-16
+> **Last Reviewed**: 2026-04-05
+> **Related project**: [`projects/ai-sprk-chat-workspace-analysis-r1/`](../../projects/ai-sprk-chat-workspace-analysis-r1/)
 
 ---
 
