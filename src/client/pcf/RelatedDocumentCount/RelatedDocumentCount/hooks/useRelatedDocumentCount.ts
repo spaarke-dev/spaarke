@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, buildBffApiUrl } from '@spaarke/auth';
 
 /**
  * API response shape for countOnly=true calls.
@@ -97,12 +97,11 @@ export function useRelatedDocumentCount(
         setIsLoading(false);
         return;
       }
-      const baseUrl = apiBaseUrl.replace(/\/$/, '');
-      const url = `${baseUrl}/api/ai/visualization/related/${documentId}?countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ''}`;
+      const query = `countOnly=true${tenantId ? `&tenantId=${encodeURIComponent(tenantId)}` : ''}`;
+      const url = buildBffApiUrl(apiBaseUrl, `/ai/visualization/related/${documentId}?${query}`);
 
       console.log('[useRelatedDocumentCount] Fetching count:', {
         documentId,
-        baseUrl,
         url,
       });
 
