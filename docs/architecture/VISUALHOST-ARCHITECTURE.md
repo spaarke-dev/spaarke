@@ -6,6 +6,12 @@
 >
 > **Purpose**: Architecture decisions, data source modes, and design principles for the VisualHost visualization framework
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified (accurate)
+>
+> Verified against `src/client/pcf/VisualHost/control/`: services (`ConfigurationLoader`, `DataAggregationService`, `FieldPivotService`, `ViewDataService`, `ClickActionHandler`) all present; components (`VisualHostRoot`, `ChartRenderer`, `MetricCard`, `MetricCardMatrix`, `GaugeVisual`, `HorizontalStackedBar`, `BarChart`, `LineChart`, `DonutChart`, `StatusDistributionBar`, `CalendarVisual`, `MiniTable`, `TrendCard`, `DueDateCard`, `DueDateCardList`, `EventDueDateCard`) all present; `utils/cardConfigResolver.ts` present. Finance services referenced by drill-through (`src/server/api/Sprk.Bff.Api/Services/Finance/`) verified restored (FinanceRollupService, FinanceSummaryService, InvoiceAnalysisService, InvoiceReviewService, InvoiceSearchService, SignalEvaluationService, SpendSnapshotService). `GradeMetricCard.tsx` still exists in components folder but is correctly marked DEPRECATED in this document.
+
 ---
 
 ## Architecture Overview

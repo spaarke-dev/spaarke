@@ -1,7 +1,9 @@
 # BFF Authentication & URL Construction Pattern
 
-> **Last Updated**: April 2, 2026
-> **Status**: Authoritative reference — all BFF API integrations MUST follow this pattern
+> **Last Updated**: 2026-04-02
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified (all claims matched against code; no discrepancies)
 > **Audience**: Developers, AI agents (Claude Code), CI/CD pipelines
 
 ---

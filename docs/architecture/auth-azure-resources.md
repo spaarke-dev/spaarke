@@ -1,7 +1,10 @@
 # Authentication Azure Resources & GUIDs
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: January 13, 2026
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (OpenAI region corrected; config keys aligned with `DocumentIntelligence` section)
 > **Applies To**: Debugging, deployment, configuration lookup
 
 ---
@@ -164,7 +167,7 @@ requests
 |----------|-------|
 | **Name** | `spaarke-openai-dev` |
 | **Resource Group** | `spe-infrastructure-westus2` |
-| **Region** | East US |
+| **Region** | West US 2 (dev — production deploys to `westus3` per `infrastructure/bicep/parameters/platform-prod.bicepparam`) |
 | **Endpoint** | `https://spaarke-openai-dev.openai.azure.com/` |
 | **SKU** | S0 (Standard) |
 
@@ -173,12 +176,12 @@ requests
 |-----------------|-------|---------|
 | `gpt-4o-mini` | gpt-4o-mini (2024-07-18) | Document summarization |
 
-**App Service Settings**:
+**App Service Settings** (bound to `DocumentIntelligenceOptions`, section `DocumentIntelligence`):
 ```
-Ai__Enabled=true
-Ai__OpenAiEndpoint=https://spaarke-openai-dev.openai.azure.com/
-Ai__OpenAiKey=(from Key Vault: ai-openai-key)
-Ai__SummarizeModel=gpt-4o-mini
+DocumentIntelligence__Enabled=true
+DocumentIntelligence__OpenAiEndpoint=https://spaarke-openai-dev.openai.azure.com/
+DocumentIntelligence__OpenAiKey=(from Key Vault: ai-openai-key)
+DocumentIntelligence__SummarizeModel=gpt-4o-mini
 ```
 
 ---
