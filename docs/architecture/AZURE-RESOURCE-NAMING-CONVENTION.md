@@ -1,8 +1,12 @@
 # Azure Resource Naming Convention
 
 > **Version**: 3.0
-> **Date**: March 25, 2026
-> **Status**: Adopted (v3 — replaces v2)
+> **Date**: 2026-03-25
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified (v3 — replaces v2)
+
+> **Verification note (2026-04-05)**: Confirmed dev legacy resource names match root CLAUDE.md Azure Infrastructure Resources section: `spe-infrastructure-westus2`, `spe-api-dev-67e2xz`, `spaarke-spekvcert`, `spaarke-openai-dev`, `spaarke-docintel-dev`, `spaarke-search-dev`. v3 patterns are the authoritative standard for new environments.
 
 ## Overview
 

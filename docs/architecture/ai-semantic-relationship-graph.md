@@ -1,8 +1,12 @@
 # AI Semantic Relationship Graph — Architecture
 
-> **Last Updated**: February 23, 2026
-> **Status**: Production (Dev Environment)
+> **Last Updated**: 2026-02-23
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified (Production - Dev Environment)
 > **Components**: BFF API, PCF Control, Code Page, Azure AI Search, Dataverse
+
+> **Verification note (2026-04-05)**: All referenced code confirmed present — `VisualizationService` and `IVisualizationService` (Services/Ai/Visualization/), `VisualizationEndpoints` (Api/Ai/), `VisualizationAuthorizationFilter` (Api/Filters/), PCF controls `DocumentRelationshipViewer` and `SemanticSearchControl` (src/client/pcf/), `FindSimilarCodePage` (src/solutions/). Feature is in production.
 
 ---
 

@@ -1,9 +1,13 @@
 # Unified Access Control (UAC) Architecture
 
 > **Domain**: Authorization, Access Control, Permission Management
-> **Status**: Production-Ready (Internal); Design (External)
+> **Status**: Verified (Production-Ready Internal; Design External)
 > **Last Updated**: 2026-03-16
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
 > **Source ADRs**: ADR-003, ADR-008, ADR-009
+
+> **Verification note (2026-04-05)**: All 6 referenced classes confirmed present in code — `AuthorizationService` (Spaarke.Core/Auth), `OperationAccessPolicy` (Spaarke.Core/Auth), `CachedAccessDataSource` (Sprk.Bff.Api/Infrastructure/Caching), `DocumentAuthorizationFilter`, `AiAuthorizationFilter` (Sprk.Bff.Api/Api/Filters), `DataverseAccessDataSource` (Spaarke.Dataverse).
 
 ---
 
