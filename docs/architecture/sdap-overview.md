@@ -575,10 +575,6 @@ src/client/shared/Spaarke.UI.Components/              Shared UI library
 
 ## Known Pitfalls
 
-Renamed from "Common Mistakes" for consistency with architecture doc standards.
-
-## Common Mistakes
-
 | Mistake | Why It Fails | Correct Approach |
 |---------|--------------|------------------|
 | Hardcoding `sprk_matter@odata.bind` | Case-sensitive, varies by relationship | Use metadata discovery (`/api/navmap`) |
@@ -598,7 +594,7 @@ Renamed from "Common Mistakes" for consistency with architecture doc standards.
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF API endpoints and services
 - [sdap-component-interactions.md](sdap-component-interactions.md) — Component interaction patterns
 - [sdap-workspace-integration-patterns.md](sdap-workspace-integration-patterns.md) — Workspace integration
-- [EMAIL-TO-DOCUMENT-ARCHITECTURE.md](../guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md) — Email automation architecture
+- [email-processing-architecture.md](email-processing-architecture.md) — Email automation architecture
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) — AI platform architecture
 - [BFF API Architecture Assessment](../../projects/x-ai-spaarke-platform-enhancements-r1/notes/bff-api-architecture-assessment.md) — Full assessment with recommendations
 
