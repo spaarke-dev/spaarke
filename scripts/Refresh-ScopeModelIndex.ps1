@@ -18,7 +18,7 @@
 
 .PARAMETER OutputFile
     Relative or absolute path to the output JSON file.
-    Default: docs/ai-knowledge/catalogs/scope-model-index.json
+    Default: .claude/catalogs/scope-model-index.json
 
 .EXAMPLE
     .\Refresh-ScopeModelIndex.ps1
@@ -45,7 +45,7 @@ param(
 
     [string]$DataverseUrl = $env:DATAVERSE_URL,
 
-    [string]$OutputFile = 'docs/ai-knowledge/catalogs/scope-model-index.json'
+    [string]$OutputFile = '.claude/catalogs/scope-model-index.json'
 )
 
 $ErrorActionPreference = 'Stop'

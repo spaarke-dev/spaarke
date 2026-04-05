@@ -46,7 +46,7 @@ Ask the user:
 
 ```
 LOAD knowledge files:
-  - docs/ai-knowledge/catalogs/scope-model-index.json (REQUIRED — scope catalog + model rules)
+  - .claude/catalogs/scope-model-index.json (REQUIRED — scope catalog + model rules)
   - docs/architecture/playbook-architecture.md (playbook data model, node type system, ActionType dispatch, canvas design)
   - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference, playbook design patterns, scope catalog, model selection)
 

@@ -2,7 +2,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
 /// Maps AI-extracted document type strings to Dataverse choice field values.
-/// See: docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md Section 5.1
+/// See: docs/architecture/AI-ARCHITECTURE.md for the AI tool framework.
 /// </summary>
 public static class DocumentTypeMapper
 {

@@ -59,7 +59,7 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ---
 
 ### `Refresh-ScopeModelIndex.ps1`
-**Purpose:** Regenerate `docs/ai-knowledge/catalogs/scope-model-index.json` from current Dataverse state — keeps the scope catalog in sync for Claude Code
+**Purpose:** Regenerate `.claude/catalogs/scope-model-index.json` from current Dataverse state — keeps the scope catalog in sync for Claude Code
 **Usage:** 🟡 Occasional - After adding new scopes to Dataverse
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Dataverse connection

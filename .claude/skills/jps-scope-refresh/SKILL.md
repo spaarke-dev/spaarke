@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## Purpose
 
-**Tier 3 Operational Skill** — Regenerates `docs/ai-knowledge/catalogs/scope-model-index.json` from current Dataverse state. This keeps Claude Code's scope catalog in sync after new actions, skills, knowledge, or tools are created.
+**Tier 3 Operational Skill** — Regenerates `.claude/catalogs/scope-model-index.json` from current Dataverse state. This keeps Claude Code's scope catalog in sync after new actions, skills, knowledge, or tools are created.
 
 **Why This Skill Exists**:
 - Claude Code reads `scope-model-index.json` when designing playbooks (`jps-playbook-design`)
@@ -45,7 +45,7 @@ EXPECTED OUTPUT:
 ### Step 2: Verify Update
 
 ```
-READ docs/ai-knowledge/catalogs/scope-model-index.json
+READ .claude/catalogs/scope-model-index.json
 
 REPORT:
   "Scope index refreshed:
@@ -60,7 +60,7 @@ REPORT:
 
 ```
 IF scope-model-index.json has changes:
-  git add docs/ai-knowledge/catalogs/scope-model-index.json
+  git add .claude/catalogs/scope-model-index.json
   git commit -m "chore(ai): refresh scope-model-index from Dataverse"
 
 IF no changes:
@@ -71,7 +71,7 @@ IF no changes:
 
 ## Conventions
 
-- The index file lives at `docs/ai-knowledge/catalogs/scope-model-index.json`
+- The index file lives at `.claude/catalogs/scope-model-index.json`
 - The refresh script lives at `scripts/Refresh-ScopeModelIndex.ps1`
 - Curated fields (tags, documentTypes, compatibleActions) are preserved across refreshes
 - Static sections (models, modelSelectionRules, compositions) are never overwritten by refresh

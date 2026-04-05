@@ -172,8 +172,9 @@ After deployment, verify the data:
 
 ## Related Documentation
 
-- **Playbook Design**: `docs/ai-knowledge/playbook-design.md` (if exists)
-- **PCF Integration**: `docs/guides/PCF-AI-SUMMARY.md` (if exists)
+- **Playbook Architecture**: `docs/architecture/playbook-architecture.md`
+- **JPS Authoring Guide**: `docs/guides/JPS-AUTHORING-GUIDE.md`
+- **Scope Catalog**: `.claude/catalogs/scope-model-index.json`
 - **API Endpoints**: `src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs`
 
 ---
