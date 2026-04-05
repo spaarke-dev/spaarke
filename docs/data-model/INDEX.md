@@ -11,37 +11,47 @@ This directory contains authoritative documentation for Dataverse entity schemas
 
 ### Cross-Entity References
 
-- **[entity-relationship-model.md](entity-relationship-model.md)** - Complete ERD across all `sprk_*` entities: relationships (1:N, N:1, N:N), cascade rules, dependency graph
-- **[field-mapping-reference.md](field-mapping-reference.md)** - Field mapping reference: Dataverse logical names to DTO property names to PCF/Code Page bindings, with type conversions
-- **[json-field-schemas.md](json-field-schemas.md)** - JSON field payload schemas for fields that store structured JSON (scope metadata, event config, AI results, workspace layouts)
-- [schema-additions-alternate-keys.md](schema-additions-alternate-keys.md) - Alternate key additions and schema enhancements
-- [schema-corrections.md](schema-corrections.md) - Schema corrections applied during refactoring
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| **[entity-relationship-model.md](entity-relationship-model.md)** | Complete ERD across all `sprk_*` entities: relationships (1:N, N:1, N:N), cascade rules, dependency graph | 2026-04-05 | 2026-04-05 | New |
+| **[field-mapping-reference.md](field-mapping-reference.md)** | Field mapping reference: Dataverse logical names to DTO property names to PCF/Code Page bindings, with type conversions | 2026-04-05 | 2026-04-05 | New |
+| **[json-field-schemas.md](json-field-schemas.md)** | JSON field payload schemas for fields that store structured JSON (scope metadata, event config, AI results, workspace layouts) | 2026-04-05 | 2026-04-05 | New |
+| [schema-additions-alternate-keys.md](schema-additions-alternate-keys.md) | Alternate key additions and schema enhancements | 2026-04-05 | 2026-04-05 | Current |
+| [schema-corrections.md](schema-corrections.md) | Schema corrections applied during refactoring | 2026-02-12 | — | — |
 
 ### Entity Documentation — Communication
 
-- [sprk_communication.md](sprk_communication.md) - Communication entity
-- [sprk_communicationaccount.md](sprk_communicationaccount.md) - Communication account entity
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [sprk_communication.md](sprk_communication.md) | Communication entity | 2026-04-05 | 2026-04-05 | Current |
+| [sprk_communicationaccount.md](sprk_communicationaccount.md) | Communication account entity | 2026-04-05 | 2026-04-05 | Current |
 
 ### Entity Documentation — Financial
 
-- [sprk_billingevent.md](sprk_billingevent.md)
-- [sprk_budget.md](sprk_budget.md)
-- [sprk_invoice-matter-project.md](sprk_invoice-matter-project.md)
-- [sprk_financial-related-entities.md](sprk_financial-related-entities.md) - Includes `sprk_budgetbucket`, `sprk_invoice`, `sprk_spendsignal`, `sprk_spendsnapshot` (stub entity pages archived under `archive/`)
-- [sprk_workassignment.md](sprk_workassignment.md)
-- [sprk_kpiassessment.md](sprk_kpiassessment.md)
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [sprk_billingevent.md](sprk_billingevent.md) | Billing event entity | 2026-02-12 | — | — |
+| [sprk_budget.md](sprk_budget.md) | Budget entity | 2026-02-12 | — | — |
+| [sprk_invoice-matter-project.md](sprk_invoice-matter-project.md) | Invoice / matter / project entities | 2026-02-13 | — | — |
+| [sprk_financial-related-entities.md](sprk_financial-related-entities.md) | Includes `sprk_budgetbucket`, `sprk_invoice`, `sprk_spendsignal`, `sprk_spendsnapshot` (stub entity pages archived under `archive/`) | 2026-02-12 | — | — |
+| [sprk_workassignment.md](sprk_workassignment.md) | Work assignment entity | 2026-03-12 | — | — |
+| [sprk_kpiassessment.md](sprk_kpiassessment.md) | KPI assessment entity | 2026-02-13 | — | — |
 
 ### Entity Documentation — AI Analysis
 
-- [sprk_ERD-ai-analysis-entities.md](sprk_ERD-ai-analysis-entities.md)
-- [sprk_ai-analysis-related-entities.md](sprk_ai-analysis-related-entities.md)
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [sprk_ERD-ai-analysis-entities.md](sprk_ERD-ai-analysis-entities.md) | AI analysis entity ERD | 2026-02-13 | — | — |
+| [sprk_ai-analysis-related-entities.md](sprk_ai-analysis-related-entities.md) | AI analysis related entities | 2026-02-13 | — | — |
 
 ### Entity Documentation — Matter / Event
 
-- [sprk_matter-related-tables.md](sprk_matter-related-tables.md)
-- [sprk_event-forms-guids.md](sprk_event-forms-guids.md)
-- [sprk_event-views-guids.md](sprk_event-views-guids.md)
-- [sprk_event-related-tables.md](sprk_event-related-tables.md)
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [sprk_matter-related-tables.md](sprk_matter-related-tables.md) | Matter-related tables | 2026-02-20 | — | — |
+| [sprk_event-forms-guids.md](sprk_event-forms-guids.md) | Event form GUID reference | 2026-02-12 | — | — |
+| [sprk_event-views-guids.md](sprk_event-views-guids.md) | Event view GUID reference | 2026-02-12 | — | — |
+| [sprk_event-related-tables.md](sprk_event-related-tables.md) | Event-related tables | 2026-02-18 | — | — |
 
 ## For AI Agents
 

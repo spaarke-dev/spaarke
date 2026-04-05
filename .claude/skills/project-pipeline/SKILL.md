@@ -44,23 +44,27 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 
 **If not set**, the pipeline may fail or produce incomplete results. See root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
 
-### Permission Mode: Plan Mode (RECOMMENDED)
+### Permission Mode: Plan Mode (REQUIRED for Steps 0-3)
 
-**This skill performs planning and analysis. Use Plan Mode for safe exploration.**
+**This skill MUST run in Plan Mode for Steps 0-3. Claude Code must confirm Plan Mode before proceeding past Step 0.**
 
 ```
-⏸ PLAN MODE RECOMMENDED
+⏸ PLAN MODE REQUIRED — ENFORCED
 
-Before starting this skill:
-  1. Press Shift+Tab twice to enter Plan Mode
-  2. Look for indicator: "⏸ plan mode on"
-  3. Plan Mode ensures read-only operations during planning
+Before starting this skill, Claude MUST:
+  1. Verify Plan Mode is active (look for "⏸ plan mode on" indicator in UI)
+  2. If NOT in Plan Mode → STOP and ask user to press Shift+Tab twice to enter Plan Mode
+  3. Do NOT proceed past Step 0 until Plan Mode is confirmed
 
-WHY: Steps 1-3 analyze spec.md, discover resources, and generate artifacts.
-     Plan Mode prevents accidental edits during exploration.
+WHY: Steps 0-3 analyze spec.md, discover resources, and generate planning artifacts.
+     Plan Mode ensures Claude reads and plans before making any file changes.
+     This is the single most effective enforcement of the "plan before implement" discipline.
 
-WHEN TO SWITCH: After Step 3 completes and you're ready for Step 4 (branch creation),
-                press Shift+Tab to return to Auto-Accept Mode for git operations.
+WHEN TO SWITCH TO ACCEPT EDITS MODE:
+  - After Step 3 completes (all planning artifacts reviewed)
+  - Before Step 4 (feature branch creation — requires git write)
+  - User must Shift+Tab to Accept Edits mode explicitly
+  - Skill reports: "Ready for implementation phase — please switch to Accept Edits mode"
 ```
 
 ---
@@ -88,6 +92,71 @@ WHEN TO SWITCH: After Step 3 completes and you're ready for Step 4 (branch creat
 - A `spec.md` file exists at `projects/{project-name}/spec.md`
 
 ## Pipeline Steps
+
+### Step 0: Plan Mode Confirmation
+
+**Purpose**: Enforce Plan Mode before any planning operations.
+
+**Action**:
+```
+ASK user: "Please confirm Plan Mode is active (look for ⏸ indicator)"
+IF not confirmed:
+  → STOP — request user to press Shift+Tab twice
+  → Do not proceed until confirmed
+```
+
+---
+
+### Step 0.3: Pre-Flight Checks
+
+**Purpose**: Ensure clean baseline before starting a new project. Catches common "stale start" problems.
+
+**Checks (all must pass)**:
+
+```
+a. Main repo (or current worktree) on correct branch
+   git branch --show-current
+   IF on master AND creating feature project → WARN, suggest feature branch
+
+b. Working tree clean
+   git status --porcelain
+   IF dirty → STOP — ask user to commit/stash first
+
+c. Master is current with origin
+   git fetch origin
+   git rev-list --count HEAD..origin/master
+   IF > 0 → STOP — user must pull origin/master first
+
+d. Build succeeds on current baseline
+   dotnet build src/server/api/Sprk.Bff.Api/
+   IF build fails → STOP — broken baseline cannot start new project
+
+e. If in a worktree: main repo is synced
+   DETECT: git rev-parse --git-common-dir
+   IF worktree AND main repo master != origin/master → WARN, suggest worktree-sync
+
+f. Previous project lessons-learned read (if exists)
+   IF projects/*/notes/lessons-learned.md exists (sorted by mtime):
+     → Remind user: "Latest lessons-learned: {path} — have you reviewed it?"
+     → Non-blocking, informational only
+```
+
+**Output**:
+```
+✅ Pre-flight checks passed:
+   - On branch: {branch}
+   - Working tree: clean
+   - Master: current (0 commits behind)
+   - Build: passing (0 errors, {N} warnings)
+   - Main repo sync: {status}
+
+📋 Recent lessons-learned: {path} (please review if not already)
+```
+
+**Autonomous mode**: Reports results, STOPS if any critical check fails. No auto-fix (the user must resolve).
+**Interactive mode**: Same behavior — these are safety gates, not confirmation gates.
+
+---
 
 ### Step 0.5: Master Staleness Check
 
@@ -602,6 +671,26 @@ PARALLEL EXECUTION REQUIREMENTS:
   - Each task agent uses its own task-execute invocation with full context loading
   - Track parallel tasks in current-task.md "Parallel Execution" section
   - If a parallel task fails, continue other tasks in the group — report failure at group end
+  - **MAX CONCURRENCY: 6 agents per wave** (hard limit — API overload guard, tune only with evidence)
+  - **PERMISSION BOUNDARY: Tasks touching `.claude/` paths MUST be sequential (main-session-only)**
+    - task-create auto-marks these as `parallel-safe: false`
+    - If a parallel agent is accidentally dispatched to a `.claude/` task, it will fail with "Edit denied"
+    - This is EXPECTED behavior — main session picks up the task and runs it sequentially
+    - See root CLAUDE.md "Sub-Agent Write Boundary" section
+
+BUILD VERIFICATION BETWEEN WAVES (MANDATORY):
+  After each wave completes, main session MUST verify the codebase still builds:
+  - If any `.cs` file was modified in the wave: `dotnet build src/server/api/Sprk.Bff.Api/`
+  - If any `.ts`/`.tsx` file was modified: `npm run build` in the relevant package
+  - If build fails: STOP. Do not dispatch next wave. Report breakage with wave identifier.
+  - This catches incoherent changes across parallel agents before they compound.
+
+FAILURE ISOLATION:
+  - One agent failing does NOT abort the wave
+  - Collect all agent outcomes (success/failure/timeout)
+  - At wave completion, report: "Wave X: {N} succeeded, {M} failed"
+  - Mark failed tasks in TASK-INDEX as 🔄 (needs retry) not ❌ (abandoned)
+  - Main session decides whether to retry failed tasks sequentially or report and stop
 
 EXAMPLE parallel execution flow:
   Group A (tasks 010, 011, 012) — prerequisite: 001 ✅

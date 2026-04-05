@@ -792,6 +792,30 @@ Use these commands to explicitly invoke skills:
 
 **Audit stamps**: All files in `docs/architecture/`, `docs/standards/`, `docs/procedures/`, `docs/data-model/`, `.claude/constraints/`, and `.claude/patterns/` carry `Last Reviewed` headers. Files stamped `2026-04-05` were verified against current code during the R2 documentation refactoring project.
 
+### Sub-Agent Write Boundary (IMPORTANT)
+
+**Sub-agents launched via the Agent tool cannot write to `.claude/` paths** (patterns, constraints, skills, catalogs). This is an intentional permission boundary that protects skill definitions from accidental modification by parallel agents.
+
+**The canonical audit pattern** (proven in R2):
+1. Sub-agents **read and audit** files in `.claude/` — they can find issues, verify references, produce reports
+2. Sub-agents **return findings** to the main session as structured output
+3. The **main session applies fixes** using Edit/Write tools
+
+**Do not try to loosen this restriction.** It caught accidental modifications during R2. If you need to update many `.claude/` files, launch agents to audit in parallel (fast, read-only), then apply fixes sequentially from the main session.
+
+**Expected behavior**: When an agent reports "Edit denied on `.claude/...`", that is the boundary working correctly, not a bug.
+
+### Hooks: Current Guidance
+
+We evaluated automated hooks (`PostToolUse` for format-on-edit, `PreToolUse` for destructive-command blocking, etc.) in R2. **Current decision**: hooks are NOT configured in `.claude/settings.json` beyond what already exists.
+
+**Rationale**: Hooks only add value if they run consistently and accurately. We chose to enforce quality via:
+1. **Skill-level enforcement** — skills like `task-execute`, `adr-check`, `code-review` handle quality gates
+2. **CI/CD** — tier 1 blocking checks (see `projects/ci-cd-github-enhancement/` when implemented)
+3. **`doc-drift-audit` skill** — catches drift at project transitions
+
+**When to reconsider**: If we identify specific, high-value automations that run in <5 seconds, never produce false positives, and will be used every day. Candidates to watch: format-on-edit for `.cs` and `.tsx`, block-destructive-git-commands. Otherwise, skip hooks to keep the toolchain simple.
+
 ### System Entry Points
 
 | Subsystem | Start Here | What It Shows |

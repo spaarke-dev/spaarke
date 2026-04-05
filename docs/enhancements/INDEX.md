@@ -12,22 +12,26 @@ This directory contains enhancement proposals, positioning/strategy documents, a
 
 ## Strategy & Positioning
 
-- [SPAARKE-AI-STRATEGY-AND-ROADMAP.md](SPAARKE-AI-STRATEGY-AND-ROADMAP.md) - Spaarke AI platform strategy: custom-first approach, Playbook System as product differentiator, 4-tier architecture, Microsoft Foundry adoption plan, phased roadmap, cost model. **For current technical architecture, see `docs/architecture/AI-ARCHITECTURE.md`.**
-- [AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md](AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) - Two-plane AI strategy: M365 Copilot (general) + SprkChat (contextual). Positioning and roadmap. **For current SprkChat technical architecture, see [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md).**
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [SPAARKE-AI-STRATEGY-AND-ROADMAP.md](SPAARKE-AI-STRATEGY-AND-ROADMAP.md) | Spaarke AI platform strategy: custom-first approach, Playbook System as product differentiator, 4-tier architecture, Microsoft Foundry adoption plan, phased roadmap, cost model. **For current technical architecture, see [`docs/architecture/AI-ARCHITECTURE.md`](../architecture/AI-ARCHITECTURE.md).** | 2026-04-05 | 2026-04-05 | Strategy / Roadmap |
+| [AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md](AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) | Two-plane AI strategy: M365 Copilot (general) + SprkChat (contextual). Positioning and roadmap. **For current SprkChat technical architecture, see [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md).** | 2026-04-05 | 2026-04-05 | Active |
 
 ## Cross-Cutting Enhancements
 
-- [ENH-013-ai-authorization-and-service-unification.md](ENH-013-ai-authorization-and-service-unification.md) - AI authorization filter unification and service consolidation
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [ENH-013-ai-authorization-and-service-unification.md](ENH-013-ai-authorization-and-service-unification.md) | AI authorization filter unification and service consolidation | 2026-01-06 | — | Analysis Complete |
 
 ## AI Playbook Node Builder R2
 
 Enhancement designs for the Playbook Node Builder R2 project:
 
-| ENH | Title | Priority | Status | Document |
-|-----|-------|----------|--------|----------|
-| **001/002** | Canvas Node Types | High/Medium | Pending | [ENH-001-002-canvas-node-types.md](ENH-001-002-canvas-node-types.md) |
-| **003** | Flexible Input Model | High | Pending | [ENH-003-flexible-input-model.md](ENH-003-flexible-input-model.md) |
-| **004** | Parallel Execution Visualization | Low | Pending | [ENH-004-parallel-visualization.md](ENH-004-parallel-visualization.md) |
+| ENH | Title | Priority | Document | Last Updated | Last Reviewed | Status |
+|-----|-------|----------|----------|--------------|---------------|--------|
+| **001/002** | Canvas Node Types | High/Medium | [ENH-001-002-canvas-node-types.md](ENH-001-002-canvas-node-types.md) | 2026-01-19 | — | Pending |
+| **003** | Flexible Input Model | High | [ENH-003-flexible-input-model.md](ENH-003-flexible-input-model.md) | 2026-01-19 | — | Pending |
+| **004** | Parallel Execution Visualization | Low | [ENH-004-parallel-visualization.md](ENH-004-parallel-visualization.md) | 2026-01-19 | — | Pending |
 
 ### Enhancement Summaries
 

@@ -61,6 +61,62 @@ WHEN TO USE PLAN MODE: If you want to analyze code before changes,
 
 ## Execution Protocol (MANDATORY STEPS)
 
+### Step 0.3: Parallel Execution Detection (NEW)
+
+**BEFORE executing tasks, check if parallel mode applies.**
+
+This step only runs when task-execute is invoked for **multiple tasks at once** (e.g., "work on Phase 2 tasks" or called from project-pipeline Step 5). For single-task invocation, skip to Step 0.5.
+
+```
+IF invoked for multiple tasks:
+  1. READ TASK-INDEX.md "Parallel Execution Groups" section
+  2. IDENTIFY current wave (group whose prerequisites are satisfied)
+  3. COUNT parallel-safe tasks in this wave
+
+  IF wave has >1 parallel-safe task AND main session context < 60%:
+    → ENTER PARALLEL MODE:
+      a. Cap concurrency at 6 agents
+      b. Spawn N sub-agents (one per task) using Agent tool
+         - ONE message with MULTIPLE Agent tool calls (critical — must be parallel, not sequential)
+         - Each agent runs task-execute for its own task
+         - Each agent gets its task POML file path + minimal context
+      c. Wait for ALL agents to complete (background: true, notified on complete)
+      d. Aggregate results (success/failure per task)
+      e. **MANDATORY BUILD VERIFICATION**:
+         - If any wave task modified `.cs` files: `dotnet build src/server/api/Sprk.Bff.Api/`
+         - If any wave task modified `.ts`/`.tsx`: `npm run build` in the relevant package
+         - If build fails: STOP. Report breakage. Do not start next wave.
+      f. Update TASK-INDEX.md statuses (🔲 → ✅ for success, 🔄 for retry)
+      g. Proceed to next wave
+
+  IF wave has any task marked `<parallel-safe>false</parallel-safe>`:
+    → Execute those tasks SEQUENTIALLY from main session
+    → Reason for sequential: check <parallel-reason> metadata
+    → Common reason: "touches .claude/ — main-session-only (permission boundary)"
+
+  IF main session context >= 60%:
+    → Checkpoint first (context-handoff skill)
+    → Then enter parallel mode (each sub-agent gets fresh context window)
+
+FAILURE ISOLATION:
+  - One agent failing does NOT abort the wave
+  - Collect all agent outcomes (success/failure/timeout)
+  - Report: "Wave X complete: {N} succeeded, {M} failed, {K} need retry"
+  - Mark failed tasks 🔄 (not ❌) — they may succeed on retry
+
+PERMISSION BOUNDARY REMINDER:
+  - Sub-agents CANNOT write to `.claude/` paths
+  - Tasks touching `.claude/` are auto-marked `parallel-safe: false` by task-create
+  - If an agent is accidentally dispatched to a `.claude/` task, it will fail with "Edit denied"
+  - This is EXPECTED behavior — main session picks up the task and runs sequentially
+  - See root CLAUDE.md "Sub-Agent Write Boundary" section
+
+ELSE (single task invocation):
+  → Skip to Step 0.5
+```
+
+---
+
 ### Step 0.5: Determine Required Rigor Level (MANDATORY)
 
 **BEFORE executing any task, determine rigor level using this decision tree:**

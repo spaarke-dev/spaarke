@@ -38,21 +38,26 @@ If not set, see root [CLAUDE.md](../../../CLAUDE.md#development-environment) for
 
 ### Permission Mode: Plan Mode (RECOMMENDED)
 
-**This skill analyzes design documents. Use Plan Mode for safe exploration.**
+**This skill MUST run in Plan Mode during the analysis phase. Claude must confirm Plan Mode before proceeding.**
 
 ```
-⏸ PLAN MODE RECOMMENDED
+⏸ PLAN MODE REQUIRED — ENFORCED
 
-Before starting this skill:
-  1. Press Shift+Tab twice to enter Plan Mode
-  2. Look for indicator: "⏸ plan mode on"
-  3. Plan Mode ensures read-only operations during analysis
+Before starting this skill, Claude MUST:
+  1. Verify Plan Mode is active (look for "⏸ plan mode on" indicator)
+  2. If NOT in Plan Mode → STOP and ask user to press Shift+Tab twice
+  3. Do NOT proceed with design analysis until Plan Mode is confirmed
 
-WHY: This skill reads and analyzes design documents, discovers ADR constraints,
-     and extracts requirements. Plan Mode prevents accidental edits.
+WHY: Plan Mode forces "understand before write" discipline. This skill reads and
+     analyzes design documents, discovers ADR constraints, and extracts requirements.
+     Without Plan Mode, Claude can generate premature spec.md based on incomplete analysis.
 
-OUTPUT: When analysis is complete, Claude will generate spec.md.
-        Switch to Auto-Accept Mode (Shift+Tab) when ready to write the file.
+WHEN TO SWITCH TO ACCEPT EDITS:
+  - After analysis is complete and Claude has articulated the plan
+  - User reviews the proposed spec.md structure
+  - User presses Shift+Tab to enter Accept Edits mode
+  - Claude then generates spec.md
+  - Skill reports: "Analysis complete — please switch to Accept Edits mode to write spec.md"
 ```
 
 ---

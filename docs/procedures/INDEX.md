@@ -11,15 +11,19 @@ This directory contains process documentation covering CI/CD, testing, code revi
 
 ### CI/CD & Quality
 
-- [ci-cd-workflow.md](ci-cd-workflow.md) - GitHub Actions workflow inventory, slot-swap deployment, quality gates, promotion flow
-- [testing-and-code-quality.md](testing-and-code-quality.md) - Testing strategy, coverage standards, test patterns by module (API, PCF, plugins)
-- **[DEPENDENCY-MANAGEMENT.md](DEPENDENCY-MANAGEMENT.md)** - Dependency update cadence, security patching process, version pinning conventions, Dependabot configuration
-- **[CODE-REVIEW-BY-MODULE.md](CODE-REVIEW-BY-MODULE.md)** - Module-specific code review checklists for BFF API, PCF controls, plugins, Code Pages, shared libraries
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [ci-cd-workflow.md](ci-cd-workflow.md) | GitHub Actions workflow inventory, slot-swap deployment, quality gates, promotion flow | 2026-04-05 | 2026-04-05 | Current |
+| [testing-and-code-quality.md](testing-and-code-quality.md) | Testing strategy, coverage standards, test patterns by module (API, PCF, plugins) | 2026-04-05 | 2026-04-05 | Current |
+| **[DEPENDENCY-MANAGEMENT.md](DEPENDENCY-MANAGEMENT.md)** | Dependency update cadence, security patching process, version pinning conventions, Dependabot configuration | 2026-04-05 | 2026-04-05 | New |
+| **[CODE-REVIEW-BY-MODULE.md](CODE-REVIEW-BY-MODULE.md)** | Module-specific code review checklists for BFF API, PCF controls, plugins, Code Pages, shared libraries | 2026-04-05 | 2026-04-05 | New |
 
 ### Development Workflow
 
-- [context-recovery.md](context-recovery.md) - Full protocol for resuming work after session compaction or new session
-- [parallel-claude-sessions.md](parallel-claude-sessions.md) - Running multiple Claude Code sessions in parallel via worktrees
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [context-recovery.md](context-recovery.md) | Full protocol for resuming work after session compaction or new session | 2026-01-04 | 2026-04-05 | Verified |
+| [parallel-claude-sessions.md](parallel-claude-sessions.md) | Running multiple Claude Code sessions in parallel via worktrees | 2026-01-06 | 2026-04-05 | Verified |
 
 ## For AI Agents
 

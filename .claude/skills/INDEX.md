@@ -70,6 +70,7 @@
 | [jps-scope-refresh](jps-scope-refresh/SKILL.md) | Refresh scope-model-index.json from Dataverse state | No | "refresh scope index", "update scope catalog", "sync scopes" |
 | [jps-validate](jps-validate/SKILL.md) | Validate JPS JSON against schema and test rendering | No | "validate JPS", "check JPS", "test JPS definition" |
 | [add-reference-to-index](add-reference-to-index/SKILL.md) | Index golden reference documents into AI Search for RAG retrieval | No | "add reference to index", "index reference document", "add golden reference" |
+| [doc-drift-audit](doc-drift-audit/SKILL.md) | Detect documentation drift — stale refs in docs and .claude/ that no longer match code (compact diff-based audit) | No | `/doc-drift-audit`, "audit doc drift", "check for stale docs", "project transition audit", "find stale references" |
 
 ## Skill Categories
 
@@ -92,6 +93,7 @@
 - **adr-check** - Architecture compliance validation (post-hoc)
 - **ui-test** - Browser-based UI testing for PCF/frontend (requires Chrome)
 - **repo-cleanup** - Repository structure validation and hygiene
+- **doc-drift-audit** - Diff-based documentation drift detection (stale refs, broken paths)
 
 ### 🤖 AI / JPS Playbook Authoring
 - **jps-action-create** - Component: Create a new JPS definition for an Analysis Action (Tier 1)
@@ -389,4 +391,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: March 5, 2026*
+*Last updated: April 5, 2026 (added doc-drift-audit skill)*
