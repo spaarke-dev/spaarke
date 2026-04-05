@@ -2,7 +2,7 @@
 # Authentication Performance & Monitoring
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
 > **Applies To**: Performance optimization, alerting, observability
 
 ---

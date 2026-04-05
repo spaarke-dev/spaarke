@@ -2,7 +2,7 @@
 # Authentication Security Boundaries
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
 > **Applies To**: Security reviews, compliance audits, threat modeling
 
 ---

@@ -1,7 +1,7 @@
 # JPS Authoring Guide
 
 > **Version**: 3.0 (consolidated)
-> **Date**: March 2026
+> **Date**: 2026-04-05
 > **Status**: Production
 > **Author**: Spaarke Engineering
 > **Audience**: Developers, AI engineers, prompt authors, solution architects
@@ -1386,4 +1386,4 @@ Deploy with:
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: March 2026*
+*Last Updated: 2026-04-05*

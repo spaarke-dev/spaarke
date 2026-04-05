@@ -2,7 +2,7 @@
 
 > **Task 055**: Dark mode verification and theming documentation
 >
-> **Last Updated**: January 2026
+> **Last Updated**: 2026-04-05
 
 This guide documents the theming approach for AI Assistant components, ensuring ADR-021 compliance with Fluent UI v9 design tokens.
 

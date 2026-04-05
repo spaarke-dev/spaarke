@@ -1,6 +1,6 @@
 # Secret Rotation Procedures
 
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
 >
 > **Applies To**: Spaarke Production Environment
 >

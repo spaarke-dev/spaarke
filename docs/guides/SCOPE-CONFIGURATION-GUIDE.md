@@ -1,7 +1,7 @@
 # Scope Configuration Guide
 
 > **Version**: 1.1 (verified)
-> **Date**: April 2026
+> **Date**: 2026-04-05
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Verified (Production)
@@ -1257,4 +1257,4 @@ After creating or modifying scopes, verify the setup:
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: April 2026*
+*Last Updated: 2026-04-05*

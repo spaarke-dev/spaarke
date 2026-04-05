@@ -1,7 +1,7 @@
 # AI Scope Configuration Guide
 
 > **Audience**: AI Administrators, Business Analysts, Power Platform Administrators
-> **Last Updated**: January 2026
+> **Last Updated**: 2026-04-05
 > **Version**: 1.0
 
 ---

@@ -1,6 +1,6 @@
 # Documentation Gap Analysis: Document Intelligence Service Rename
 
-> **Date**: January 2025  
+> **Date**: 2026-04-05
 > **Context**: Code-level rename of AI Summarize → Document Intelligence services completed  
 > **Status**: Documentation updates completed, gap analysis complete
 

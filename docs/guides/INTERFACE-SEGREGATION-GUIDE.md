@@ -1,6 +1,6 @@
 # Interface Segregation Guide
 
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
 > **Source**: Code Quality and Assurance R2 project
 > **Applies To**: Shared .NET libraries, service interfaces
 

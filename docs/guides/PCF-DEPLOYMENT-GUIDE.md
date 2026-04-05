@@ -1,6 +1,6 @@
 # PCF Deployment Guide
 
-> **Last Updated**: February 2026
+> **Last Updated**: 2026-04-05
 >
 > **Related Skill**: `.claude/skills/pcf-deploy/SKILL.md`
 

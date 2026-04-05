@@ -1,6 +1,6 @@
 # How To: Create and Update Dataverse Schema via Web API
 
-> **Last Updated**: January 2026
+> **Last Updated**: 2026-04-05
 > **Author**: AI Node Playbook Builder Project (Task 009)
 > **Related Skill**: `.claude/skills/dataverse-create-schema/SKILL.md`
 

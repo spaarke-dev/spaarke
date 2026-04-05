@@ -2,7 +2,7 @@
 
 > **Version**: 1.0.0
 >
-> **Last Updated**: January 2026
+> **Last Updated**: 2026-04-05
 
 ## Overview
 
