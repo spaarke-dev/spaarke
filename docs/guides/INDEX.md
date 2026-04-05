@@ -10,8 +10,6 @@ This directory contains practical guides for implementing features, configuring 
 
 ## Guide Index
 
-<!-- TODO: Phase 3 - Organize by category and add descriptions -->
-
 ### Repository Navigation
 
 - **[REPOSITORY-NAVIGATION-GUIDE.md](REPOSITORY-NAVIGATION-GUIDE.md)** - Quick navigation reference for developers and AI agents: top-level directory map, source code layout, naming conventions, file-location lookup
