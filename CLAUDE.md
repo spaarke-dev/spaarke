@@ -1,6 +1,9 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: February 11, 2026
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (Context Layer Hierarchy expanded with R2 docs directories)
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -778,10 +781,16 @@ Use these commands to explicitly invoke skills:
 1. **Read the code** — the actual `.cs`, `.ts`, `.tsx` files
 2. **Read `.claude/patterns/`** — 25-line pointer files that tell you WHICH code to read
 3. **Read `.claude/adr/`** — concise constraints and MUST/MUST NOT rules
-4. **Read `docs/architecture/`** — decisions and rationale only (implementation details removed)
-5. **Read `docs/guides/`** — operational procedures (deployment, configuration)
+4. **Read `.claude/constraints/`** — topic-based MUST/MUST NOT summaries
+5. **Read `docs/architecture/`** — decisions and rationale only (implementation details removed)
+6. **Read `docs/standards/`** — coding standards, anti-patterns, integration contracts (cross-cutting)
+7. **Read `docs/guides/`** — operational procedures (deployment, configuration)
+8. **Read `docs/procedures/`** — development workflow (testing, CI/CD, code review, dependency management)
+9. **Read `docs/data-model/`** — Dataverse entity schemas, ERD, field mappings, JSON schemas
 
 **Never trust a doc over the code.** If a doc describes implementation and the code differs, the code wins.
+
+**Audit stamps**: All files in `docs/architecture/`, `docs/standards/`, `docs/procedures/`, `docs/data-model/`, `.claude/constraints/`, and `.claude/patterns/` carry `Last Reviewed` headers. Files stamped `2026-04-05` were verified against current code during the R2 documentation refactoring project.
 
 ### System Entry Points
 
@@ -804,8 +813,13 @@ Use these commands to explicitly invoke skills:
 | **`.claude/patterns/`** | 25-line pointer files → code entry points | Per-task — tells you what to read |
 | **`.claude/adr/`** | Concise ADR constraints (MUST/MUST NOT) | Per-task — rules to follow |
 | **`.claude/constraints/`** | Topic-based constraint summaries | Per-task — quick rule reference |
+| **`.claude/catalogs/`** | AI scope & model catalog (JSON) | JPS playbook authoring/auditing |
 | **`docs/architecture/`** | Decisions and rationale only | When you need "why" behind a decision |
+| **`docs/standards/`** | Cross-cutting coding standards, anti-patterns, integration contracts | Before implementing new code |
 | **`docs/guides/`** | Operational procedures | When deploying, configuring, or troubleshooting |
+| **`docs/procedures/`** | Development workflow (testing, CI/CD, code review, dependency management) | During development process |
+| **`docs/data-model/`** | Dataverse entity schemas, ERD, field mappings, JSON schemas | When touching Dataverse data |
+| **`docs/enhancements/`** | Feature proposals, strategy documents, roadmaps | When planning new features |
 | **`docs/adr/`** | Full ADR history | Rarely — only for deep architectural context |
 
 ---
