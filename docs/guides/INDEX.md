@@ -53,7 +53,8 @@ This directory contains practical guides for deploying, configuring, administeri
 - [ai-document-summary.md](ai-document-summary.md) - AI document summarization user guide
 - [ai-assistant-theming.md](ai-assistant-theming.md) - AI assistant theming and customization
 - [ai-troubleshooting.md](ai-troubleshooting.md) - AI feature troubleshooting
-- [SPAARKE-AI-STRATEGY-AND-ROADMAP.md](SPAARKE-AI-STRATEGY-AND-ROADMAP.md) - Strategic overview of Spaarke's AI platform direction and roadmap (strategy document — candidate for `docs/enhancements/`)
+
+> **Moved**: `SPAARKE-AI-STRATEGY-AND-ROADMAP.md` was relocated to [`docs/enhancements/SPAARKE-AI-STRATEGY-AND-ROADMAP.md`](../enhancements/SPAARKE-AI-STRATEGY-AND-ROADMAP.md) — it's a strategy/positioning document, not a how-to guide.
 
 ### M365 Copilot
 

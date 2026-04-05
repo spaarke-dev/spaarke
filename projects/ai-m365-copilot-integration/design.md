@@ -1020,6 +1020,6 @@ Results returned with user's authorization enforced
 - [Agent 365 Control Plane](https://www.microsoft.com/en-us/microsoft-agent-365)
 - [Copilot Cowork and Wave 3](https://www.microsoft.com/en-us/microsoft-365/blog/2026/03/09/powering-frontier-transformation-with-copilot-and-agents/)
 - [Power Pages Agent API](https://www.microsoft.com/en-us/power-platform/blog/power-pages/seamlessly-embed-copilot-studio-agents-into-power-pages/)
-- [Spaarke AI Strategy & Roadmap](../../docs/guides/SPAARKE-AI-STRATEGY-AND-ROADMAP.md)
+- [Spaarke AI Strategy & Roadmap](../../docs/enhancements/SPAARKE-AI-STRATEGY-AND-ROADMAP.md)
 - [Spaarke AI Chat Strategy (prior version)](../../docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md)
 - [Spaarke AI Architecture](../../docs/architecture/AI-ARCHITECTURE.md)

@@ -12,6 +12,7 @@ This directory contains enhancement proposals, positioning/strategy documents, a
 
 ## Strategy & Positioning
 
+- [SPAARKE-AI-STRATEGY-AND-ROADMAP.md](SPAARKE-AI-STRATEGY-AND-ROADMAP.md) - Spaarke AI platform strategy: custom-first approach, Playbook System as product differentiator, 4-tier architecture, Microsoft Foundry adoption plan, phased roadmap, cost model. **For current technical architecture, see `docs/architecture/AI-ARCHITECTURE.md`.**
 - [AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md](AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) - Two-plane AI strategy: M365 Copilot (general) + SprkChat (contextual). Positioning and roadmap. **For current SprkChat technical architecture, see [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md).**
 
 ## Cross-Cutting Enhancements

@@ -1,11 +1,21 @@
 # Spaarke AI Strategy & Roadmap
 
 > **Version**: 1.0
-> **Last Updated**: February 21, 2026
+> **Date**: 2026-02-21
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Strategy / Roadmap (not architecture decisions)
 > **Audience**: Business stakeholders, executives, product management
 > **Purpose**: Strategic overview of Spaarke's AI platform direction, competitive positioning, and roadmap
-> **Supersedes**: `docs/architecture/SPAARKE-AI-STRATEGY.md` (v2.1), `docs/architecture/Spaarke-Microsoft-IQ-ADOPTION-ANALYSIS.md`, `projects/ai-document-analysis-enhancements/Spaarke_AI_Architecture_and_Roadmap.md` (v1.0)
-> **Technical Reference**: See `docs/architecture/AI-ARCHITECTURE.md` for component-level architecture
+
+> **Note (2026-04-05)**: Moved from `docs/guides/` to `docs/enhancements/` during the R2 documentation refactoring — this is a strategy/positioning document, not a how-to guide. Prior "Supersedes" references removed because the source documents (`docs/architecture/SPAARKE-AI-STRATEGY.md`, `Spaarke-Microsoft-IQ-ADOPTION-ANALYSIS.md`) no longer exist in the repo.
+>
+> **For current technical architecture**, see:
+> - [`docs/architecture/AI-ARCHITECTURE.md`](../architecture/AI-ARCHITECTURE.md) — AI tool framework, 4-tier architecture
+> - [`docs/architecture/playbook-architecture.md`](../architecture/playbook-architecture.md) — Playbook execution engine, node executors
+> - [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md) — SprkChat conversational AI
+> - [`docs/architecture/rag-architecture.md`](../architecture/rag-architecture.md) — RAG pipeline, hybrid search
+> - [`docs/architecture/scope-architecture.md`](../architecture/scope-architecture.md) — Scope library, resolution chain
 
 ---
 
