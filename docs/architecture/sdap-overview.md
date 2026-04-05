@@ -1,7 +1,7 @@
 # SDAP System Overview
 
 > **SDAP**: **Spaarke Data & AI Platform** (formerly "SharePoint Document Access Platform")
-> **Last Updated**: March 4, 2026
+> **Last Updated**: April 5, 2026
 > **Applies To**: Any work involving the Spaarke BFF API, document management, AI services, or platform integrations
 
 ---
@@ -65,7 +65,7 @@ SDAP is an enterprise platform integrating Dataverse with SharePoint Embedded (S
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
 │  │  BACKGROUND PROCESSING                                                 │  │
-│  │  ServiceBusJobProcessor → 13+ Job Handlers                            │  │
+│  │  ServiceBusJobProcessor → 11 Job Handlers                             │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
            │              │              │              │
@@ -99,7 +99,7 @@ The BFF API is organized into 7 functional domains, each with its own endpoint g
 | **Workspace / Portfolio** | `/api/workspace/*` | ~18 | PortfolioService, BriefingService, PriorityScoringService, WorkspaceLayoutService, SectionRegistry | Azure OpenAI (optional), Dataverse |
 | **Admin / System** | `/api/admin/*`, `/api/resilience` | ~8 | BuilderScopeAdmin, RecordMatchingAdmin | AI Search, Dataverse |
 
-**Total**: 128+ endpoints, 99+ DI registrations, 13+ background job handlers.
+**Total**: 128+ endpoints, 99+ DI registrations, 11 background job handlers.
 
 ---
 
@@ -114,10 +114,10 @@ The foundational domain. All document file storage uses SharePoint Embedded (SPE
 **Services**:
 | Service | Purpose | Constraint |
 |---------|---------|-----------|
-| `SpeFileStore` | Facade for all SPE operations | ADR-007: No Graph SDK type leakage above this layer |
+| `SpeFileStore` | Delegating facade for all SPE operations (delegates to `ContainerOperations`, `DriveItemOperations`, `UploadSessionManager`, `UserOperations`) | ADR-007: No Graph SDK type leakage above this layer |
 | `GraphClientFactory` | Constructs Graph clients with app-only or OBO auth | Singleton, Redis-cached tokens |
 | `UploadSessionManager` | Chunked upload sessions for large files (>4MB) | |
-| `IDataverseService` | Document metadata CRUD | From Spaarke.Dataverse shared library |
+| `IDocumentDataverseService` | Document metadata CRUD | From Spaarke.Dataverse shared library |
 
 **Endpoints**:
 ```
@@ -146,7 +146,7 @@ The largest domain by endpoint count and service complexity. Provides document i
 | `ChatHistoryManager` | Scoped | Message history with Redis hot cache + Dataverse persistence |
 | `RagService` | Singleton | Hybrid search (keyword + vector + semantic ranking) |
 | `AnalysisOrchestrationService` | — | Orchestrates document analysis pipeline |
-| `DocumentParserRouter` | Singleton | Routes documents to appropriate parser |
+| `DocumentParserRouter` | Singleton | Routes documents to appropriate text extractor |
 | `DocumentIntelligenceService` | Singleton | Azure Document Intelligence integration |
 | `OpenAiClient` | Singleton | Azure OpenAI wrapper with circuit breaker |
 | `IChatClient` | Singleton | Microsoft.Extensions.AI bridge to Azure OpenAI |
@@ -270,19 +270,18 @@ All async work runs through Azure Service Bus with a single `ServiceBusJobProces
 
 | Handler | Purpose | Trigger |
 |---------|---------|---------|
+| `AppOnlyDocumentAnalysisJobHandler` | Background analysis (app-only auth) | API enqueue |
+| `AttachmentClassificationJobHandler` | Attachment type classification | Upload completion |
+| `BulkRagIndexingJobHandler` | Batch embedding generation | Admin trigger |
 | `DocumentProcessingJobHandler` | Chunking, extraction, indexing | Upload completion |
-| `EmailToDocumentJobHandler` | Email → EML → SPE | Webhook or polling |
 | `EmailAnalysisJobHandler` | Email content analysis | Email save |
-| `BatchProcessEmailsJobHandler` | Bulk email processing | Admin trigger |
+| `IncomingCommunicationJobHandler` | Inbound email processing | Webhook |
 | `InvoiceExtractionJobHandler` | Invoice field extraction | Finance confirm |
 | `InvoiceIndexingJobHandler` | Invoice → AI Search | Post-extraction |
-| `BulkRagIndexingJobHandler` | Batch embedding generation | Admin trigger |
-| `RagIndexingJobHandler` | Single document indexing | Knowledge source upload |
 | `ProfileSummaryJobHandler` | Matter profile aggregation | Scheduled |
-| `AppOnlyDocumentAnalysisJobHandler` | Background analysis (app-only auth) | API enqueue |
-| `IncomingCommunicationJobHandler` | Inbound email processing | Webhook |
+| `RagIndexingJobHandler` | Single document indexing | Knowledge source upload |
 | `SpendSnapshotGenerationJobHandler` | Financial snapshot generation | Scheduled |
-| `DocumentVectorBackfillService` | Embedding migration/backfill | On-demand |
+| `DocumentVectorBackfillService` | Embedding migration/backfill (not a job handler) | On-demand |
 
 ---
 
@@ -503,7 +502,7 @@ The BFF has grown from its original SPE gateway role to a 7-domain platform. Thi
 |------|----------|--------|
 | **In-memory state loss** — App Service restart loses active analyses | High | OPS-05 identified, not yet resolved |
 | **No domain isolation** — failure in one domain can crash others | Medium | No runtime circuit breaking between domains |
-| **Background job contention** — 13 handler types share one processor | Medium | No priority queues |
+| **Background job contention** — 11 handler types share one processor | Medium | No priority queues |
 | **Program.cs complexity** — 1,881 lines in composition root | Medium | Modularized via `AddXxxModule()` but still one file |
 
 ### Recommended Enhancements
@@ -518,7 +517,7 @@ The BFF has grown from its original SPE gateway role to a 7-domain platform. Thi
 
 **Key Principle**: Invest in internal structure (modular monolith), not external separation (microservices). The coordination benefits of a single deployment outweigh the isolation benefits of splitting — at current team size and scale.
 
-Full assessment: `projects/ai-spaarke-platform-enhancements-r1/notes/bff-api-architecture-assessment.md`
+Full assessment: `projects/x-ai-spaarke-platform-enhancements-r1/notes/bff-api-architecture-assessment.md`
 
 ---
 
@@ -540,17 +539,40 @@ Full assessment: `projects/ai-spaarke-platform-enhancements-r1/notes/bff-api-arc
 
 **Key Files**:
 ```
-src/server/api/Sprk.Bff.Api/              BFF API (all 7 domains)
-src/server/api/Sprk.Bff.Api/CLAUDE.md     Module-specific AI instructions
-src/server/shared/Spaarke.Core/           Core library (auth, cache, constants)
-src/server/shared/Spaarke.Dataverse/      Dataverse client library
-src/client/pcf/                           PCF controls (React 16/17)
-src/client/code-pages/                    React Code Pages (React 18)
-src/client/office-addins/                 Office Add-ins (React 18)
-src/client/shared/Spaarke.UI.Components/  Shared UI library
+src/server/api/Sprk.Bff.Api/                          BFF API (all 7 domains)
+src/server/api/Sprk.Bff.Api/CLAUDE.md                 Module-specific AI instructions
+src/server/api/Sprk.Bff.Api/Infrastructure/Graph/     SpeFileStore, GraphClientFactory
+src/server/api/Sprk.Bff.Api/Api/                      Endpoint definitions (Ai/, Office/, etc.)
+src/server/api/Sprk.Bff.Api/Services/Jobs/            ServiceBusJobProcessor + handlers
+src/server/shared/Spaarke.Core/                       Core library (auth, cache, constants)
+src/server/shared/Spaarke.Dataverse/                  Dataverse client library
+src/client/pcf/                                       PCF controls (React 16/17)
+src/client/code-pages/                                React Code Pages (React 18)
+src/client/office-addins/                             Office Add-ins (React 18)
+src/client/shared/Spaarke.UI.Components/              Shared UI library
 ```
 
 ---
+
+## Integration Points
+
+| Direction | Subsystem | Interface | Notes |
+|-----------|-----------|-----------|-------|
+| Depends on | Microsoft Graph | `SpeFileStore` (`Infrastructure/Graph/SpeFileStore.cs`) | OBO + app-only auth for SPE file operations |
+| Depends on | Azure OpenAI | `IOpenAiClient`, `IChatClient` | Chat, analysis, embeddings |
+| Depends on | Azure AI Search | `RagService` | Hybrid search (keyword + vector + semantic ranking) |
+| Depends on | Azure Document Intelligence | `DocumentIntelligenceService` | PDF/DOCX text extraction |
+| Depends on | Dataverse Web API | `DataverseWebApiService` (Spaarke.Dataverse) | Entity CRUD, metadata |
+| Depends on | Azure Service Bus | `ServiceBusJobProcessor` | Async job dispatch and consumption |
+| Depends on | Redis | Various caches | OBO tokens, UAC snapshots, chat sessions, embeddings |
+| Consumed by | PCF Controls | BFF API endpoints (HTTPS + Bearer) | Field-bound form controls |
+| Consumed by | React Code Pages | BFF API endpoints (HTTPS + Bearer) | Standalone dialogs and pages |
+| Consumed by | Office Add-ins | BFF API endpoints (Dialog API auth) | Outlook/Word integrations |
+| Consumed by | Dataverse Webhooks | BFF API webhook endpoints | Change notifications |
+
+## Known Pitfalls
+
+Renamed from "Common Mistakes" for consistency with architecture doc standards.
 
 ## Common Mistakes
 
@@ -575,7 +597,7 @@ src/client/shared/Spaarke.UI.Components/  Shared UI library
 - [sdap-workspace-integration-patterns.md](sdap-workspace-integration-patterns.md) — Workspace integration
 - [EMAIL-TO-DOCUMENT-ARCHITECTURE.md](../guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md) — Email automation architecture
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) — AI platform architecture
-- [BFF API Architecture Assessment](../../projects/ai-spaarke-platform-enhancements-r1/notes/bff-api-architecture-assessment.md) — Full assessment with recommendations
+- [BFF API Architecture Assessment](../../projects/x-ai-spaarke-platform-enhancements-r1/notes/bff-api-architecture-assessment.md) — Full assessment with recommendations
 
 ---
 

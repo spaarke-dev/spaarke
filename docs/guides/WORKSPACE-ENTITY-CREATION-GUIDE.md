@@ -1,7 +1,7 @@
 # Workspace Entity Creation Guide
 
-> **Version:** 2.0.0
-> **Last Updated:** March 12, 2026
+> **Version:** 2.0.1
+> **Last Updated:** April 5, 2026
 > **Applies To:** Corporate Workspace SPA — Create New Matter, Project, Event, Todo, Work Assignment wizards
 
 ---
@@ -206,7 +206,7 @@ Results are cached per entity for the session. The `_resolveNavProp()` helper fa
 
 - `bffAuthProvider.ts → authenticatedFetch()` acquires an OBO token
 - Token flow: User's Entra ID token → BFF → Graph API (OBO exchange)
-- BFF base URL configured in `bffConfig.ts`
+- BFF base URL configured in `runtimeConfig.ts`
 
 ### Required Permissions
 
@@ -265,7 +265,7 @@ The service uses constructor injection so it works in any environment:
 ```typescript
 import { EntityCreationService } from '@spaarke/ui-components';
 import { authenticatedFetch } from '../../services/authInit';
-import { getBffBaseUrl } from '../../config/bffConfig';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 
 // In your entity service constructor:
 this._creationService = new EntityCreationService(
@@ -356,7 +356,7 @@ services/
 │   ├── xrmProvider.ts            # Xrm frame-walk, userId, container resolution
 │   └── bffAuthProvider.ts        # OBO token acquisition for BFF
 config/
-│   └── bffConfig.ts              # BFF base URL configuration
+│   └── runtimeConfig.ts              # BFF base URL configuration
 ```
 
 ### BFF API (Server-Side)

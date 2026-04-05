@@ -1,7 +1,7 @@
 # HOW TO: Setup SharePoint Embedded Container Types and Containers
 
 **Version:** 2.0
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-04-05
 **Author:** Claude Code Session
 **Status:** Production Guide
 
@@ -444,7 +444,7 @@ Invoke-RestMethod `
 ## Related Documentation
 
 - [PRODUCTION-DEPLOYMENT-GUIDE.md Section 19](./PRODUCTION-DEPLOYMENT-GUIDE.md#19-sharepoint-embedded-spe-setup) — Production SPE setup steps
-- [KM-HOW-TO-DEPLOY-TO-DATAVERSE.md](./KM-HOW-TO-DEPLOY-TO-DATAVERSE.md) — PCF deployment guide
+- [PCF-DEPLOYMENT-GUIDE.md](./PCF-DEPLOYMENT-GUIDE.md) — PCF deployment guide
 
 ---
 

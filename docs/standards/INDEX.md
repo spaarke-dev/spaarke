@@ -10,7 +10,11 @@ This directory contains standards for authentication, data access patterns, and 
 
 ## Standards Index
 
-<!-- TODO: Phase 3 - Review and organize -->
+### General Coding Standards
+
+- **[CODING-STANDARDS.md](CODING-STANDARDS.md)** - Naming conventions, file organization, formatting, error handling, and language-specific rules (.NET/C#, TypeScript, PCF, Code Pages)
+- **[ANTI-PATTERNS.md](ANTI-PATTERNS.md)** - Catalog of patterns to avoid across BFF API, PCF controls, plugins, auth, and AI integration with corrective examples
+- **[INTEGRATION-CONTRACTS.md](INTEGRATION-CONTRACTS.md)** - Cross-module integration contracts: API → PCF, PCF → BFF, plugin → API, job contracts, event shapes, and versioning rules
 
 ### Authentication & Security
 

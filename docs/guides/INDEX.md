@@ -50,6 +50,8 @@ This directory contains practical guides for implementing features, configuring 
 
 ### Deployment & Infrastructure
 
+- **[CONFIGURATION-MATRIX.md](CONFIGURATION-MATRIX.md)** - Complete reference of all BFF API configuration settings: sections, defaults, locations (appsettings/env var/Key Vault/Dataverse), and Key Vault secrets
+- **[DEPLOYMENT-VERIFICATION-GUIDE.md](DEPLOYMENT-VERIFICATION-GUIDE.md)** - Consolidated post-deploy verification steps for BFF API, PCF controls, code pages, web resources, and infrastructure
 - [RIBBON-CUSTOMIZATION-GUIDE.md](RIBBON-CUSTOMIZATION-GUIDE.md)
 - [TASK-MANAGEMENT-GUIDE.md](TASK-MANAGEMENT-GUIDE.md)
 

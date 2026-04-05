@@ -169,7 +169,7 @@ pac auth list   # Verify connection
 
 ### Naming Convention
 
-All resources follow `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` (Adopted v2.0):
+All resources follow `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` (current: v3.0, production deployed under v2 patterns):
 
 | Pattern | Example |
 |---------|---------|
@@ -433,7 +433,7 @@ Or set individually. App settings use the `@Microsoft.KeyVault(...)` pattern —
 | `Dataverse__ClientSecret` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=Dataverse--ClientSecret)` |
 | `Redis__Enabled` | `false` (until per-customer Redis provisioned) |
 
-Full non-secret configuration is in `src/server/api/Sprk.Bff.Api/appsettings.Production.json` (30 Key Vault references, zero plaintext secrets).
+Full non-secret configuration is in `src/server/api/Sprk.Bff.Api/appsettings.Production.json.template` (30 Key Vault references, zero plaintext secrets).
 
 ---
 

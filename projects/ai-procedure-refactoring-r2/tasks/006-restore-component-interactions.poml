@@ -4,7 +4,7 @@
     <phase>1</phase>
     <tags>architecture, documentation, component-interactions, restore</tags>
     <estimate>3h</estimate>
-    <status>pending</status>
+    <status>completed</status>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
     <dependencies>none</dependencies>

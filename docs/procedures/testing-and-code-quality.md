@@ -2,7 +2,7 @@
 
 > **Purpose**: Authoritative guide for the Spaarke code quality system, covering the full quality lifecycle: pre-commit hooks, PR quality gates, nightly sweeps, weekly summaries, quarterly audits, and task-level quality gates within Claude Code.
 >
-> **Last Updated**: March 13, 2026
+> **Last Updated**: April 5, 2026
 
 ---
 
@@ -48,8 +48,12 @@ This guide explains the complete code quality system in the Spaarke development 
 11. [Claude Code Hooks](#claude-code-hooks)
 12. [AI-Assisted PR Reviews](#ai-assisted-pr-reviews)
 13. [Repository Cleanup (Task 090)](#repository-cleanup-task-090)
-14. [Complete Quality Flow](#complete-quality-flow)
-15. [Skill Reference](#skill-reference)
+14. [Module-Specific Test Guidance](#module-specific-test-guidance)
+15. [Test Selection Matrix](#test-selection-matrix)
+16. [Coverage Targets](#coverage-targets)
+17. [Architecture Test Enforcement](#architecture-test-enforcement)
+18. [Complete Quality Flow](#complete-quality-flow)
+19. [Skill Reference](#skill-reference)
 
 ---
 
@@ -942,6 +946,357 @@ Proceed with cleanup? (y/n)
 
 ---
 
+## Module-Specific Test Guidance
+
+This section defines **which tests to run when you modify code in a specific module**. Each subsection lists the relevant test projects, run commands, and what the tests validate.
+
+### Test Project Inventory
+
+| Test Project | Path | Framework | Covers |
+|-------------|------|-----------|--------|
+| **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + NSubstitute + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
+| **Spaarke.Core.Tests** | `tests/unit/Spaarke.Core.Tests/` | xUnit + FluentAssertions | Shared .NET library (Spaarke.Core) |
+| **Spaarke.Plugins.Tests** | `tests/unit/Spaarke.Plugins.Tests/` | xUnit + FluentAssertions + Moq + CRM SDK | Dataverse plugin validation and projection logic |
+| **Spe.Integration.Tests** | `tests/integration/Spe.Integration.Tests/` | xUnit + FluentAssertions + Moq + Mvc.Testing | End-to-end API integration (auth, AI, reporting, RAG) |
+| **Spaarke.ArchTests** | `tests/Spaarke.ArchTests/` | xUnit + NetArchTest.Rules | ADR compliance via architecture reflection tests |
+| **E2E (Playwright)** | `tests/e2e/` | Playwright + TypeScript | Browser-based PCF control and add-in testing |
+
+### For BFF API Endpoints
+
+**When you modify**: `src/server/api/Sprk.Bff.Api/Api/` (endpoint definitions, route handlers)
+
+**Run these tests**:
+```bash
+# Unit tests for endpoint logic
+dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Api"
+
+# Integration tests for endpoint behavior (auth, HTTP pipeline)
+dotnet test tests/integration/Spe.Integration.Tests/
+
+# Architecture tests (ADR-001 Minimal API, ADR-008 endpoint filters)
+dotnet test tests/Spaarke.ArchTests/
+```
+
+**Key test files**:
+- `tests/unit/Sprk.Bff.Api.Tests/EndpointGroupingTests.cs` -- endpoint registration and grouping
+- `tests/unit/Sprk.Bff.Api.Tests/HealthAndHeadersTests.cs` -- health check and response headers
+- `tests/unit/Sprk.Bff.Api.Tests/AuthorizationTests.cs` -- auth filter behavior
+- `tests/unit/Sprk.Bff.Api.Tests/CorsAndAuthTests.cs` -- CORS and authentication
+- `tests/unit/Sprk.Bff.Api.Tests/Api/` -- endpoint-specific tests (Agent, AI, ExternalAccess, Reporting, etc.)
+- `tests/integration/Spe.Integration.Tests/AuthorizationIntegrationTests.cs` -- authorization end-to-end
+
+**ADR constraints validated**: ADR-001 (Minimal API), ADR-008 (endpoint filters for auth), ADR-010 (DI minimalism)
+
+### For AI Pipeline
+
+**When you modify**: `src/server/api/Sprk.Bff.Api/Services/Ai/` (orchestration, tools, playbooks, RAG, semantic search)
+
+**Run these tests**:
+```bash
+# Unit tests for AI services (60+ test files)
+dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Services.Ai"
+
+# Integration tests for AI endpoints and tool framework
+dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~Analysis|FullyQualifiedName~ToolFramework|FullyQualifiedName~Playbook|FullyQualifiedName~Rag|FullyQualifiedName~SemanticSearch"
+```
+
+**Key test areas** (under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/`):
+- `AnalysisOrchestrationServiceTests.cs` -- core AI orchestration
+- `PlaybookExecutionEngineTests.cs` -- playbook engine execution
+- `PlaybookOrchestrationServiceTests.cs` -- playbook scheduling and dispatch
+- `Chat/` -- chat agent, context resolution, session management, streaming, middleware
+- `Chat/Tools/` -- tool handler tests (document search, web search, working document, analysis execution)
+- `Nodes/` -- execution graph node executors (AI analysis, condition, email, task, notification, record update)
+- `Tools/` -- Dataverse update tool, communication tool handlers
+- `Rag*.cs` -- RAG indexing pipeline, query builder, service
+- `SemanticSearch/` -- search filter builder, semantic search service
+- `Visualization/` -- visualization service rendering
+- `PromptSchema*.cs` -- prompt template rendering and override merging
+
+**Integration test files**:
+- `tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs` -- analysis streaming and enqueue
+- `tests/integration/Spe.Integration.Tests/ToolFrameworkIntegrationTests.cs` -- tool handler resolution
+- `tests/integration/Spe.Integration.Tests/PlaybookExecutionIntegrationTests.cs` -- playbook end-to-end
+- `tests/integration/Spe.Integration.Tests/RagDedicatedDeploymentTests.cs` -- RAG with dedicated index
+- `tests/integration/Spe.Integration.Tests/RagSharedDeploymentTests.cs` -- RAG with shared index
+- `tests/integration/Spe.Integration.Tests/SemanticSearch/` -- semantic search integration
+- `tests/integration/Spe.Integration.Tests/Api/Ai/` -- chat endpoints, knowledge base, re-analysis, upload integration
+
+**ADR constraints validated**: ADR-013 (AI tool framework; extend BFF, not separate service)
+
+### For PCF Controls
+
+**When you modify**: `src/client/pcf/{ControlName}/` (TypeScript/React PCF controls)
+
+**Run these tests**:
+```bash
+# Lint and format check (mandatory before commit)
+cd src/client/pcf && npx eslint . --max-warnings 0
+npx prettier --check "src/client/pcf/**/*.{ts,tsx}"
+
+# E2E tests for specific controls (requires Playwright and environment setup)
+cd tests/e2e && npx playwright test --project=edge specs/spe-file-viewer/
+cd tests/e2e && npx playwright test --project=edge specs/universal-dataset-grid/
+```
+
+**Available E2E test specs** (under `tests/e2e/specs/`):
+- `spe-file-viewer/` -- SpeFileViewer control (document viewing)
+- `universal-dataset-grid/` -- UniversalDatasetGrid control (dataset display)
+- `outlook-addins/` -- Outlook add-in save and share flows
+- `word-addins/` -- Word add-in task pane
+- `secure-project/` -- Secure project access, invitation, revocation, closure
+- `secure-project-creation/` -- Secure project creation flow
+- `quickcreate-flow.spec.ts` -- Quick create dialog
+
+**Page objects** (under `tests/e2e/pages/`):
+- `BasePCFPage.ts` -- base page for all PCF control tests
+- `controls/SpeFileViewerPage.ts` -- SpeFileViewer page object
+- `controls/UniversalDatasetGridPage.ts` -- UniversalDatasetGrid page object
+- `addins/OutlookTaskPanePage.ts`, `WordTaskPanePage.ts` -- Office add-in page objects
+
+**Playwright configuration**: `tests/e2e/config/playwright.config.ts` (Edge primary, 60s timeout, Power Apps URLs)
+
+**PCF controls in the codebase**: AIMetadataExtractor, AssociationResolver, DocumentRelationshipViewer, DrillThroughWorkspace, EmailProcessingMonitor, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost
+
+**ADR constraints validated**: ADR-006 (PCF over webresources), ADR-012 (shared component library), ADR-021 (Fluent UI v9, dark mode), ADR-022 (PCF uses React 16 platform libraries)
+
+### For Dataverse Plugins
+
+**When you modify**: `src/server/plugins/Spaarke.Plugins/` (Dataverse plugin classes)
+
+**Run these tests**:
+```bash
+# Plugin unit tests (validation and projection logic)
+dotnet test tests/unit/Spaarke.Plugins.Tests/
+
+# Architecture tests (ADR-002 thin plugin constraints)
+dotnet test tests/Spaarke.ArchTests/ --filter "DisplayName~ADR-002"
+```
+
+**Key test files**:
+- `tests/unit/Spaarke.Plugins.Tests/ValidationPluginTests.cs` -- field validation logic
+- `tests/unit/Spaarke.Plugins.Tests/ProjectionPluginTests.cs` -- projection/mapping logic
+- `tests/Spaarke.ArchTests/ADR002_PluginTests.cs` -- enforces no HTTP/Graph calls, plugin size constraints
+
+**ADR constraints validated**: ADR-002 (thin plugins, <50ms, no HTTP/Graph calls)
+
+### For Shared Libraries (Spaarke.Core, Spaarke.Dataverse)
+
+**When you modify**: `src/server/shared/Spaarke.Core/` or `src/server/shared/Spaarke.Dataverse/`
+
+**Run these tests**:
+```bash
+# Core library unit tests
+dotnet test tests/unit/Spaarke.Core.Tests/
+
+# BFF API tests (depend on Core and Dataverse libraries)
+dotnet test tests/unit/Sprk.Bff.Api.Tests/
+
+# Architecture tests (validate DI and Graph isolation)
+dotnet test tests/Spaarke.ArchTests/
+```
+
+**Key test files**:
+- `tests/unit/Spaarke.Core.Tests/DesktopUrlBuilderTests.cs` -- URL construction utilities
+- `tests/Spaarke.ArchTests/ADR007_GraphIsolationTests.cs` -- Graph SDK types don't leak above facade
+- `tests/Spaarke.ArchTests/ADR009_CachingTests.cs` -- Redis-first caching
+
+**ADR constraints validated**: ADR-007 (Graph isolation in facade), ADR-009 (Redis-first caching), ADR-010 (DI minimalism)
+
+### For Infrastructure and Auth
+
+**When you modify**: `src/server/api/Sprk.Bff.Api/Infrastructure/` (DI modules, Graph auth, resilience, streaming)
+
+**Run these tests**:
+```bash
+# Infrastructure-specific unit tests
+dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Infrastructure"
+
+# Auth and DI architecture tests
+dotnet test tests/Spaarke.ArchTests/ --filter "DisplayName~ADR-008|DisplayName~ADR-010"
+
+# Integration tests (auth pipeline, CORS)
+dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedName~Authorization"
+```
+
+**Key test files**:
+- `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DataverseWebApiThreadSafetyTests.cs` -- thread safety
+- `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Resilience/` -- circuit breaker and retry policies
+- `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Streaming/` -- SSE streaming
+- `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Json/` -- JSON serialization
+- `tests/Spaarke.ArchTests/ADR008_AuthorizationTests.cs` -- endpoint filter auth enforcement
+- `tests/Spaarke.ArchTests/ADR010_DITests.cs` -- DI registration patterns, singleton enforcement, options POCO validation
+
+### For Background Jobs and Workers
+
+**When you modify**: `src/server/api/Sprk.Bff.Api/Services/Jobs/` or `src/server/api/Sprk.Bff.Api/BackgroundServices/`
+
+**Run these tests**:
+```bash
+# Job processor and worker tests
+dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Job|FullyQualifiedName~Worker"
+```
+
+**Key test files**:
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/` -- job processing logic
+- `tests/unit/Sprk.Bff.Api.Tests/Workers/` -- background worker tests
+
+---
+
+## Test Selection Matrix
+
+Given a changed file path, this matrix determines which test projects to execute.
+
+| Changed File Pattern | Unit Tests | Integration Tests | Arch Tests | E2E Tests |
+|---------------------|-----------|-------------------|-----------|-----------|
+| `src/server/api/Sprk.Bff.Api/Api/**` | `Sprk.Bff.Api.Tests` (filter: `Api`) | `Spe.Integration.Tests` | `Spaarke.ArchTests` | -- |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/**` | `Sprk.Bff.Api.Tests` (filter: `Services.Ai`) | `Spe.Integration.Tests` (filter: `Analysis\|ToolFramework\|Playbook\|Rag\|SemanticSearch`) | -- | -- |
+| `src/server/api/Sprk.Bff.Api/Services/**` (non-AI) | `Sprk.Bff.Api.Tests` (filter: `Services`) | `Spe.Integration.Tests` | -- | -- |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/**` | `Sprk.Bff.Api.Tests` (filter: `Infrastructure`) | `Spe.Integration.Tests` (filter: `Authorization`) | `Spaarke.ArchTests` (filter: `ADR-008\|ADR-010`) | -- |
+| `src/server/api/Sprk.Bff.Api/Program.cs` | `Sprk.Bff.Api.Tests` | `Spe.Integration.Tests` | `Spaarke.ArchTests` | -- |
+| `src/server/shared/Spaarke.Core/**` | `Spaarke.Core.Tests` + `Sprk.Bff.Api.Tests` | -- | `Spaarke.ArchTests` (filter: `ADR-007\|ADR-009`) | -- |
+| `src/server/shared/Spaarke.Dataverse/**` | `Sprk.Bff.Api.Tests` | `Spe.Integration.Tests` | `Spaarke.ArchTests` (filter: `ADR-007`) | -- |
+| `src/server/plugins/Spaarke.Plugins/**` | `Spaarke.Plugins.Tests` | -- | `Spaarke.ArchTests` (filter: `ADR-002`) | -- |
+| `src/client/pcf/**` | -- | -- | -- | `tests/e2e/` (matching control spec) |
+| `src/client/code-pages/**` | -- | -- | -- | -- (manual or UI test via Step 9.7) |
+| `src/client/shared/**` | -- | -- | -- | `tests/e2e/` (all control specs, since shared components affect all) |
+
+### How to Use This Matrix
+
+1. Identify which files your task modifies (from `current-task.md` or `git diff`)
+2. Look up each file pattern in the matrix
+3. Run the **union** of all required test projects
+4. When in doubt, run the full suite: `dotnet test`
+
+### Quick Reference Commands
+
+```bash
+# Run ALL .NET tests (safest option)
+dotnet test
+
+# Run all tests with coverage collection
+dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
+
+# Run a specific test project
+dotnet test tests/unit/Sprk.Bff.Api.Tests/
+dotnet test tests/unit/Spaarke.Core.Tests/
+dotnet test tests/unit/Spaarke.Plugins.Tests/
+dotnet test tests/integration/Spe.Integration.Tests/
+dotnet test tests/Spaarke.ArchTests/
+
+# Run tests matching a filter
+dotnet test --filter "FullyQualifiedName~Services.Ai"
+dotnet test --filter "DisplayName~ADR-002"
+
+# Run E2E tests (requires Playwright setup)
+cd tests/e2e && npx playwright test --project=edge
+
+# Run E2E for a specific control
+cd tests/e2e && npx playwright test --project=edge specs/universal-dataset-grid/
+
+# Generate coverage report
+dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
+reportgenerator -reports:**/coverage.cobertura.xml -targetdir:coverage-report
+```
+
+---
+
+## Coverage Targets
+
+Coverage is collected via Coverlet (configured in `config/coverlet.runsettings`). The `Include` filter covers: `[Sprk.Bff.Api]*`, `[Spaarke.Plugins]*`, `[Spaarke.Core]*`, `[Spaarke.Dataverse]*`. Test assemblies and `Program.cs` are excluded.
+
+### Per-Module Coverage Targets
+
+| Module | Source Path | Target | Rationale |
+|--------|-----------|--------|-----------|
+| **Core services** (SpeFileStore, auth, caching) | `src/server/shared/Spaarke.Core/` | **80%+** | Critical shared infrastructure; high reuse surface |
+| **BFF API endpoints** | `src/server/api/Sprk.Bff.Api/Api/` | **70%+** | Route handlers; integration tests cover remaining paths |
+| **AI pipeline services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | **70%+** | Complex orchestration; some paths require live AI services |
+| **Dataverse plugins** | `src/server/plugins/Spaarke.Plugins/` | **80%+** | Thin, testable logic; must be exhaustively validated |
+| **Infrastructure** (DI, auth, resilience) | `src/server/api/Sprk.Bff.Api/Infrastructure/` | **60%+** | Framework glue code; some paths only exercised at runtime |
+| **Dataverse abstractions** | `src/server/shared/Spaarke.Dataverse/` | **60%+** | Thin wrappers over SDK; mocking limited by CRM SDK |
+| **Utility/helper classes** | (scattered) | **90%+** | Pure functions; easy to test exhaustively |
+| **PCF controls** (TypeScript) | `src/client/pcf/` | **Lint + E2E** | No unit test framework configured; quality enforced via ESLint strict mode + Playwright E2E |
+| **Code Pages** (React 18) | `src/client/code-pages/` | **Lint + manual** | Quality enforced via ESLint/Prettier + UI testing (Step 9.7) |
+
+### Checking Coverage
+
+```bash
+# Run tests with coverage
+dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
+
+# Generate HTML report
+reportgenerator -reports:**/coverage.cobertura.xml -targetdir:coverage-report
+
+# Open report
+start coverage-report/index.html
+```
+
+SonarCloud tracks coverage trends automatically during nightly runs. Dashboard: `https://sonarcloud.io/project/overview?id=spaarke-dev_spaarke`
+
+---
+
+## Architecture Test Enforcement
+
+Architecture tests (`tests/Spaarke.ArchTests/`) use **NetArchTest.Rules** to enforce ADR compliance at build time. These tests run in CI (code-quality job) and block PR merges on failure.
+
+### Architecture Test Inventory
+
+| Test File | ADR | What It Enforces |
+|-----------|-----|-----------------|
+| `ADR001_MinimalApiTests.cs` | ADR-001 | No Azure Functions packages or attributes; Minimal API + BackgroundService only |
+| `ADR002_PluginTests.cs` | ADR-002 | Plugin assembly has no HTTP/Graph dependencies; plugins stay thin |
+| `ADR007_GraphIsolationTests.cs` | ADR-007 | Graph SDK types do not leak above the SpeFileStore facade layer |
+| `ADR008_AuthorizationTests.cs` | ADR-008 | Authorization uses endpoint filters, not global middleware |
+| `ADR009_CachingTests.cs` | ADR-009 | Redis-first caching; no hybrid L1 cache without profiling justification |
+| `ADR010_DITests.cs` | ADR-010 | Expensive resources are Singleton; 1:1 interface ceiling enforced; feature modules use extension methods; Options classes are POCOs |
+
+### How Architecture Tests Work
+
+Architecture tests reflect over compiled assemblies (primarily `Sprk.Bff.Api.dll`) and validate structural constraints:
+
+1. **Dependency checks** -- verify that forbidden namespaces are not referenced (e.g., no `Microsoft.Azure.WebJobs` per ADR-001)
+2. **Type checks** -- verify type relationships (e.g., no 1:1 interfaces growing unchecked per ADR-010)
+3. **Source scanning** -- some tests read source files to validate patterns (e.g., DI registration lifetimes in ADR-010)
+4. **Ceiling assertions** -- some constraints use ceiling values that must not increase (e.g., `knownOneToOneCeiling = 76` for 1:1 interfaces)
+
+### When Architecture Tests Fail
+
+| Failure | Meaning | Resolution |
+|---------|---------|------------|
+| "Found dependency on forbidden namespace" | Code references a banned package | Remove the dependency; use the ADR-approved alternative |
+| "1:1 interface mapping count increased" | New interface added without justification | Either register concrete per ADR-010 or update the ceiling with documentation |
+| "Expensive resource registered as Scoped/Transient" | Singleton-required service has wrong lifetime | Change to `AddSingleton<>()` in DI module |
+| "Directly instantiates HttpClient" | Bypasses IHttpClientFactory | Inject `IHttpClientFactory` instead of `new HttpClient()` |
+
+### Running Architecture Tests
+
+```bash
+# Run all architecture tests
+dotnet test tests/Spaarke.ArchTests/
+
+# Run tests for a specific ADR
+dotnet test tests/Spaarke.ArchTests/ --filter "DisplayName~ADR-001"
+dotnet test tests/Spaarke.ArchTests/ --filter "DisplayName~ADR-002"
+dotnet test tests/Spaarke.ArchTests/ --filter "DisplayName~ADR-010"
+
+# Run as part of CI code-quality check
+dotnet test tests/Spaarke.ArchTests/ --logger "trx;LogFileName=arch-test-results.trx"
+```
+
+### Adding New Architecture Tests
+
+When a new ADR is created that has enforceable structural constraints:
+
+1. Create `tests/Spaarke.ArchTests/ADR{NNN}_{Name}Tests.cs`
+2. Reference the BFF API assembly: `typeof(Program).Assembly`
+3. Use `NetArchTest.Rules.Types.InAssembly()` for dependency and type checks
+4. Use source-file scanning for pattern checks (see `ADR010_DITests.cs` for example)
+5. Add the test to the inventory table above
+6. Architecture tests run in CI automatically -- no workflow changes needed
+
+---
+
 ## Complete Quality Flow
 
 ### Task-Level Flow (Every Task)
@@ -1170,4 +1525,4 @@ claude --chrome
 
 ---
 
-*Last updated: March 13, 2026*
+*Last updated: April 5, 2026*

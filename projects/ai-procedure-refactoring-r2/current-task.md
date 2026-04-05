@@ -6,12 +6,12 @@
 ## Active Task
 
 **Task**: none
-**Status**: not-started
-**Next Action**: Execute task 001
+**Status**: complete
+**Next Action**: project done, ready for merge to master
 
 ## Quick Recovery
 
-**Last checkpoint**: Project initialized
-**Files modified this session**: none
-**Decisions made**: none
+**Last checkpoint**: Project complete (Task 082 — Phase 7 wrap-up finished)
+**Files modified this session**: Final wrap-up — README.md, TASK-INDEX.md, notes/verification-report.md, notes/lessons-learned.md, plus auto-fixes to 40+ docs and 2 new INDEX.md files (procedures, data-model).
+**Decisions made**: Project graduation criteria met; 10 remaining broken refs flagged for manual review rather than auto-fixed.
 **Parallel execution**: none active

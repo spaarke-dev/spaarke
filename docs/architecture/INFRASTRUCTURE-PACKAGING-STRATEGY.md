@@ -93,8 +93,8 @@ Infrastructure is organized into two parallel packaging tracks:
 
 **Azure (Bicep)**:
 - `infrastructure/bicep/modules/` — Reusable Bicep modules per resource type
-- `infrastructure/bicep/stacks/` — Composed deployments for each scenario: `model1-shared.bicep`, `model1-customer.bicep`, `model2-full.bicep`, `ai-services.bicep`
-- `infrastructure/bicep/parameters/` — Environment-specific parameter files: `dev.bicepparam`, `staging.bicepparam`, `prod.bicepparam`, `customer-template.bicepparam`
+- `infrastructure/bicep/stacks/` — Composed deployments for each scenario: `model1-shared.bicep`, `model1-customer.bicep`, `model2-full.bicep`, `ai-foundry-stack.bicep`
+- `infrastructure/bicep/parameters/` — Environment-specific parameter files: `dev.bicepparam`, `staging.bicepparam`, `prod.bicepparam`, `customer-template.bicepparam`, `platform-prod.bicepparam`, `model2-customer-template.bicepparam`, `demo-customer.bicepparam`
 
 **Power Platform**:
 - `power-platform/solutions/SpaarkeCore/` — Core entities, forms, views (managed solution ZIP)

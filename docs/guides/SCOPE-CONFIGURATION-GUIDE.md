@@ -1,7 +1,7 @@
 # Scope Configuration Guide
 
-> **Version**: 1.0 (consolidated)
-> **Date**: March 2026
+> **Version**: 1.1 (verified)
+> **Date**: April 2026
 > **Status**: Production
 > **Audience**: Dataverse Administrators, Power Users, Engineers, End Users
 > **Supersedes**: PLAYBOOK-SCOPE-CONFIGURATION-GUIDE.md, PLAYBOOK-BUILDER-GUIDE.md, PLAYBOOK-PRE-FILL-INTEGRATION-GUIDE.md
@@ -1237,5 +1237,22 @@ Validate JSON syntax using online validator (jsonlint.com). Common issues:
 
 ---
 
+## Verification
+
+After creating or modifying scopes, verify the setup:
+
+1. **Scope visibility** — call `GET /api/ai/scopes/actions`, `/skills`, `/knowledge`, `/tools` to confirm scopes appear in API responses
+2. **Handler registration** — call `GET /api/ai/handlers` to confirm all expected tool handlers are listed (including `GenericAnalysisHandler`)
+3. **Tool execution** — create a test playbook with one AI Analysis node, assign an Action + Tool, and execute via `POST /api/ai/playbooks/{id}/execute`
+4. **Scope services present** — verify these service files exist in the codebase:
+   - `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs` (scope resolution orchestration)
+   - `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeManagementService.cs` (CRUD operations)
+   - `src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeCopyService.cs` (Save As functionality)
+   - `src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeInheritanceService.cs` (Extend functionality)
+   - `src/server/api/Sprk.Bff.Api/Services/Scopes/OwnershipValidator.cs` (SYS-/CUST- prefix validation)
+5. **Pre-fill integration** — upload a document to `POST /api/workspace/matters/pre-fill` and verify structured JSON response with constrained field values
+
+---
+
 *Document Owner: Spaarke Engineering*
-*Last Updated: March 2026*
+*Last Updated: April 2026*

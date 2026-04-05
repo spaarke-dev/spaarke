@@ -4,7 +4,7 @@
     <phase>5</phase>
     <tags>guides, documentation, verification, ai, models</tags>
     <estimate>2h</estimate>
-    <status>pending</status>
+    <status>completed</status>
     <parallel-group>E</parallel-group>
     <parallel-safe>true</parallel-safe>
     <dependencies>none</dependencies>

@@ -1,6 +1,6 @@
 # AI Model Selection Guide
 
-> **Last Updated**: 2026-03-05
+> **Last Updated**: 2026-04-05
 >
 > **Audience**: Playbook authors, platform engineers, and developers configuring AI analysis nodes
 >
@@ -232,6 +232,18 @@ If o1-mini is unavailable in westus2, use this configuration workaround instead:
   }
 }
 ```
+
+---
+
+## Verification
+
+After configuring or changing model assignments, verify the setup:
+
+1. **OperationType enum** — confirm all 6 operation types exist in `ModelSelector.cs`: `IntentClassification`, `EntityResolution`, `PlanGeneration`, `ScopeGeneration`, `Validation`, `Explanation`
+2. **ModelSelectorOptions defaults** — check `ModelSelector.cs` for current compiled-in defaults (they match the table in "Operation Types and Default Model Assignments" above)
+3. **Deployment availability** — run `az cognitiveservices account deployment list --name spaarke-openai-dev --resource-group spe-infrastructure-westus2 -o table` to confirm which models are deployed
+4. **Runtime model selection** — enable Debug logging for `Sprk.Bff.Api.Services.Ai.ModelSelector` and observe `"Selected model {Model} for operation type {OperationType}"` log entries
+5. **GenericAnalysisHandler operations** — confirm supported operations (`extract`, `classify`, `validate`, `generate`, `transform`, `analyze`) in `Handlers/GenericAnalysisHandler.cs`
 
 ---
 
