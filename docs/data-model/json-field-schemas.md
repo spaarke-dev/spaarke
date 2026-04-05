@@ -1,6 +1,9 @@
 # JSON Field Schemas
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Solution**: Spaarke (Dataverse)
 > **Replaces**: `sprk_event-json-fields.md` (scope expanded to all entities)
 

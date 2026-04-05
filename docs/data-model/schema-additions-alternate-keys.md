@@ -2,6 +2,9 @@
 
 > **Last Updated**: April 5, 2026
 > **Original Date**: 2026-02-11
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Reference document for alternate key definitions, their usage in code, and the multi-environment deployment pattern they enable.
 
 ---

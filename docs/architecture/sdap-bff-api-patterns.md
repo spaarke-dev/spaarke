@@ -1,6 +1,9 @@
 # SDAP BFF API Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Architecture of the Sprk.Bff.Api — the unified .NET 8 Minimal API backend for the SDAP platform.
 
 ---

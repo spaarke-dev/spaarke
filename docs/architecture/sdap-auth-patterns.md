@@ -1,6 +1,9 @@
 # SDAP Authentication Patterns Architecture
 
 > **Last Updated**: April 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Nine-pattern authentication taxonomy governing how every component in SDAP acquires tokens and authorizes operations.
 
 ---
@@ -248,7 +251,7 @@ Token acquisition priority for React Code Pages:
 - [ADR-009](../../.claude/adr/ADR-009-redis-caching.md) — Redis-first caching
 - [auth-azure-resources.md](auth-azure-resources.md) — App registration GUIDs and Azure config
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF patterns that use these auth patterns
-- [email-to-document-architecture.md](email-to-document-architecture.md) — Pattern 6 (app-only) in detail
+- [email-processing-architecture.md](email-processing-architecture.md) — Pattern 6 (app-only) in detail
 
 ---
 

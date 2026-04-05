@@ -3,6 +3,9 @@
 > **Purpose**: Authoritative guide for the Spaarke code quality system, covering the full quality lifecycle: pre-commit hooks, PR quality gates, nightly sweeps, weekly summaries, quarterly audits, and task-level quality gates within Claude Code.
 >
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 
 ---
 

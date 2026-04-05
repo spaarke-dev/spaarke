@@ -1,6 +1,9 @@
 # Office Add-ins Integration Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Architecture of the SDAP Office Add-ins for Outlook and Word integration with SharePoint Embedded
 
 ---
@@ -242,7 +245,7 @@ Tokens are cached in memory with expiration tracking. A 5-minute buffer ensures 
 - [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) — Fluent UI v9 requirements
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) — Authentication patterns
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF API endpoint patterns
-- [email-to-document-architecture.md](email-to-document-architecture.md) — Email-to-document conversion pipeline
+- [email-processing-architecture.md](email-processing-architecture.md) — Email-to-document conversion pipeline
 
 ---
 

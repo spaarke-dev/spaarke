@@ -1,6 +1,9 @@
 # Resilience Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Documents the BFF API resilience subsystem — circuit breakers, retry policies, resilient clients, error handling middleware, and ProblemDetails patterns.
 
 ---

@@ -26,12 +26,8 @@ This directory contains authoritative documentation for Dataverse entity schemas
 
 - [sprk_billingevent.md](sprk_billingevent.md)
 - [sprk_budget.md](sprk_budget.md)
-- [sprk_budgetbucket.md](sprk_budgetbucket.md)
-- [sprk_invoice.md](sprk_invoice.md)
 - [sprk_invoice-matter-project.md](sprk_invoice-matter-project.md)
-- [sprk_financial-related-entities.md](sprk_financial-related-entities.md)
-- [sprk_spendsignal.md](sprk_spendsignal.md)
-- [sprk_spendsnapshot.md](sprk_spendsnapshot.md)
+- [sprk_financial-related-entities.md](sprk_financial-related-entities.md) - Includes `sprk_budgetbucket`, `sprk_invoice`, `sprk_spendsignal`, `sprk_spendsnapshot` (stub entity pages archived under `archive/`)
 - [sprk_workassignment.md](sprk_workassignment.md)
 - [sprk_kpiassessment.md](sprk_kpiassessment.md)
 
@@ -45,7 +41,6 @@ This directory contains authoritative documentation for Dataverse entity schemas
 - [sprk_matter-related-tables.md](sprk_matter-related-tables.md)
 - [sprk_event-forms-guids.md](sprk_event-forms-guids.md)
 - [sprk_event-views-guids.md](sprk_event-views-guids.md)
-- [sprk_event-json-fields.md](sprk_event-json-fields.md)
 - [sprk_event-related-tables.md](sprk_event-related-tables.md)
 
 ## For AI Agents

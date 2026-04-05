@@ -1,6 +1,9 @@
 # SDAP Component Interactions Architecture
 
 > **Last Updated**: April 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Cross-module impact map for Spaarke — when you change component X, what else is affected.
 
 ---
@@ -138,7 +141,7 @@ Sequence: User → PCF (AnalysisWorkspace) or Chat → BFF (AnalysisEndpoints/Ch
 
 ## Data Flow: Email-to-Document Conversion
 
-See [email-to-document-automation.md](email-to-document-automation.md) for full design.
+See [email-processing-architecture.md](email-processing-architecture.md) for full design.
 
 Dual entry: Webhook (real-time) + EmailPollingBackupService (5-min backup) → EmailToDocumentJobHandler → SPE upload + Dataverse record + AI analysis enqueue.
 
@@ -379,7 +382,7 @@ The 26 DI module files in `Infrastructure/DI/` have implicit ordering dependenci
 
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) — Auth pattern details (OBO bugs, dual strategies)
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF field mappings, container model, caching TTLs
-- [email-to-document-automation.md](email-to-document-automation.md) — Email pipeline design decisions
+- [email-processing-architecture.md](email-processing-architecture.md) — Email pipeline design decisions
 - [uac-access-control.md](uac-access-control.md) — Three-plane access control model
 - [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) — Office add-in architecture
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) — AI tool framework and playbook architecture

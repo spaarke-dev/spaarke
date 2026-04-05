@@ -1,6 +1,9 @@
 # Playbook Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Technical reference for the Spaarke Playbook system — visual AI workflows, node execution, canvas data model, builder subsystem, scheduler
 > **Parent**: [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) (Spaarke AI platform overview)
 

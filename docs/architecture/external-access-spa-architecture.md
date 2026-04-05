@@ -1,6 +1,9 @@
 # External Access SPA Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Architecture of the Secure Project Workspace — a React 18 SPA for external stakeholders hosted on Power Pages
 
 ---

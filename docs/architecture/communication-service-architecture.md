@@ -1,6 +1,9 @@
 # Communication Service Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Architecture documentation for the Communication Service module — outbound/inbound email via Microsoft Graph, Dataverse-managed mailbox accounts, webhook/polling hybrid for inbound, SPE archival, deduplication, mailbox verification, and AI playbook integration.
 
 ---

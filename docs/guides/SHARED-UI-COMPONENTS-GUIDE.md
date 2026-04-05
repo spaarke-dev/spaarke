@@ -4,6 +4,9 @@
 > **Location**: `src/client/shared/Spaarke.UI.Components/`
 > **ADR**: [ADR-012](../adr/ADR-012-shared-component-library.md)
 > **Last Updated**: 2026-03-30
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 
 ---
 

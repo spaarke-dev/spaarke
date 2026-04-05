@@ -1,6 +1,9 @@
 # Entity Relationship Model
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Solution**: Spaarke (Dataverse)
 
 ---
@@ -461,6 +464,6 @@ The `contact` entity (Dataverse built-in) is referenced by several entities for 
 | Event Entities (full fields) | `docs/data-model/sprk_event-related-tables.md` |
 | Financial Entities (full fields) | `docs/data-model/sprk_financial-related-entities.md` |
 | Matter Entities (full fields) | `docs/data-model/sprk_matter-related-tables.md` |
-| Event JSON Fields | `docs/data-model/sprk_event-json-fields.md` |
+| JSON Field Schemas | `docs/data-model/json-field-schemas.md` |
 | Event Form GUIDs | `docs/data-model/sprk_event-forms-guids.md` |
 | Event View GUIDs | `docs/data-model/sprk_event-views-guids.md` |

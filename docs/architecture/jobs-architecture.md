@@ -1,6 +1,9 @@
 # Jobs Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Azure Service Bus job processing system — contract, routing, handlers, idempotency, and dead-letter management
 
 ---

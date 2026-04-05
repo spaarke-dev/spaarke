@@ -1,6 +1,9 @@
 # Finance Intelligence Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Purpose**: Architecture documentation for the Finance Intelligence module — AI-powered invoice classification and extraction, deterministic spend aggregation, signal evaluation, VisualHost visualization, and semantic invoice search.
 
 ---

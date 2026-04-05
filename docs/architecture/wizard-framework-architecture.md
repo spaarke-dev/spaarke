@@ -1,6 +1,9 @@
 # Wizard Framework Architecture
 
 > **Last Updated**: April 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Describes the shared, domain-free multi-step wizard dialog framework and all wizard implementations that consume it.
 
 ---

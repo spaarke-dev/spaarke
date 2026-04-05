@@ -34,7 +34,7 @@ This directory contains comprehensive architecture documentation covering system
 - [chat-architecture.md](chat-architecture.md) - SprkChat conversational AI: session management, playbook dispatch, compound intent detection, streaming pipeline
 - [rag-architecture.md](rag-architecture.md) - RAG pipeline: text chunking, embedding cache, dual-index strategy, hybrid search, scheduled indexing
 - [scope-architecture.md](scope-architecture.md) - Scope management: resolution chain, SYS-/CUST- ownership, single-level inheritance, gap detection
-- [ai-document-summary-architecture.md](ai-document-summary-architecture.md) - Document summarization architecture
+- [sdap-document-processing-architecture.md](sdap-document-processing-architecture.md) - Consolidated document processing and summarization pipeline (supersedes ai-document-summary-architecture.md)
 - [ai-semantic-relationship-graph.md](ai-semantic-relationship-graph.md) - Semantic relationship graph design
 
 ### UI Components
@@ -51,8 +51,6 @@ This directory contains comprehensive architecture documentation covering system
 ### Email & Communication
 
 - [email-processing-architecture.md](email-processing-architecture.md) - Consolidated email-to-document pipeline (hybrid triggers, idempotency, .eml archival, RAG indexing)
-- [email-to-document-architecture.md](email-to-document-architecture.md) - (Legacy) Email-to-document conversion — see email-processing-architecture.md
-- [email-to-document-automation.md](email-to-document-automation.md) - (Legacy) Email automation service — see email-processing-architecture.md
 - [communication-service-architecture.md](communication-service-architecture.md) - Communication service: outbound/inbound email, webhook/polling hybrid, mailbox verification, deduplication
 - [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) - Office, Outlook, and Teams integration
 

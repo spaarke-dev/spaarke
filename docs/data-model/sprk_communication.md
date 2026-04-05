@@ -1,3 +1,10 @@
+# sprk_communication Entity Fields
+
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
+> **Solution**: Spaarke (Dataverse)
+
 | Entity Display Name   | Entity Logical Name       | Logical Name                     | Schema Name                      | Display Name                  | Attribute Type   | Description                                                     | Custom Attribute | Type   | Additional data                                                                                                                                                                                     |
 | --------------------- | ------------------------- | -------------------------------- | -------------------------------- | ----------------------------- | ---------------- | --------------------------------------------------------------- | ---------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Communication         | sprk_communication        | createdby                        | CreatedBy                        | Created By                    | Lookup           | Unique identifier of the user who created the record.           | False            | Simple | Targets:<br><br>systemuser                                                                                                                                                                          |

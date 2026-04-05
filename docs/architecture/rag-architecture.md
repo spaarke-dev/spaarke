@@ -1,6 +1,9 @@
 # RAG Architecture
 
 > **Last Updated**: April 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Describes the Retrieval-Augmented Generation (RAG) pipeline — text chunking, embedding generation and caching, indexing strategies, hybrid search, and multi-tenant index routing.
 
 ---
@@ -129,4 +132,4 @@ The key design decision is **idempotent re-indexing** (ADR-004): re-indexing the
 ## Related
 
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) -- Four-tier AI framework overview
-- [ai-document-summary-architecture.md](ai-document-summary-architecture.md) -- Document summarization pipeline
+- [sdap-document-processing-architecture.md](sdap-document-processing-architecture.md) -- Document processing and summarization pipeline

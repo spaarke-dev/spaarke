@@ -1,6 +1,9 @@
 # Shared Libraries Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Documents the two shared .NET libraries — Spaarke.Core and Spaarke.Dataverse — that provide cross-cutting utilities, authorization, caching, and Dataverse client abstraction for the BFF API.
 
 ---

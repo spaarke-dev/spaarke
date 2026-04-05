@@ -2,6 +2,9 @@
 
 > **SDAP**: **Spaarke Data & AI Platform** (formerly "SharePoint Document Access Platform")
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Applies To**: Any work involving the Spaarke BFF API, document management, AI services, or platform integrations
 
 ---

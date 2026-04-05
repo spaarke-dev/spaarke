@@ -1,6 +1,9 @@
 # Scope Architecture
 
 > **Last Updated**: April 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Describes the scope management subsystem — scope types, resolution chain, inheritance model, ownership validation, gap detection, and fallback catalog.
 
 ---

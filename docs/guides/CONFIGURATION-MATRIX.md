@@ -1,6 +1,9 @@
 # Configuration Matrix Guide
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Complete reference of all BFF API configuration settings -- where they live, what values they accept, and their defaults
 > **Audience**: Developer, Admin, Operator
 

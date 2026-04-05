@@ -16,32 +16,11 @@ This directory contains practical guides for implementing features, configuring 
 
 - **[SHARED-UI-COMPONENTS-GUIDE.md](SHARED-UI-COMPONENTS-GUIDE.md)** - `@spaarke/ui-components` library: component inventory, consumption patterns (barrel vs deep import), build workflow, adding components
 
-### PCF Development
-
-- [PCF-BUILDING-BLOCKS.md](PCF-BUILDING-BLOCKS.md)
-- [PCF-CONTROL-DEVELOPMENT.md](PCF-CONTROL-DEVELOPMENT.md)
-- [PCF-DATASET-CONTROL.md](PCF-DATASET-CONTROL.md)
-- [PCF-FIELD-CONTROL.md](PCF-FIELD-CONTROL.md)
-
 ### AI & Document Processing
 
-- [AI-AGENT-PROMPT-ENGINEERING.md](AI-AGENT-PROMPT-ENGINEERING.md)
-- [AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md](AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md)
-- [AI-STREAMING-SSE-IMPLEMENTATION.md](AI-STREAMING-SSE-IMPLEMENTATION.md)
-- [AI-TOOL-FRAMEWORK-GUIDE.md](AI-TOOL-FRAMEWORK-GUIDE.md)
 - **[JPS-AUTHORING-GUIDE.md](JPS-AUTHORING-GUIDE.md)** - JPS schema reference, playbook design with Claude Code, scope catalog, model selection, migration guide
 - **[SCOPE-CONFIGURATION-GUIDE.md](SCOPE-CONFIGURATION-GUIDE.md)** - Dataverse admin guide: creating Tools, Skills, Knowledge, Actions; Playbook Builder UI; pre-fill integration
 - [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) - RAG pipeline architecture and knowledge-augmented execution
-
-### Email Automation
-
-- [EMAIL-TO-DOCUMENT-ARCHITECTURE.md](EMAIL-TO-DOCUMENT-ARCHITECTURE.md) - Email-to-document automation architecture, webhooks, filtering, and processing
-
-### Dataverse & Platform
-
-- [DATAVERSE-LOOKUP-INTEGRATION.md](DATAVERSE-LOOKUP-INTEGRATION.md)
-- [DATAVERSE-NAVMAP-API.md](DATAVERSE-NAVMAP-API.md)
-- [DATAVERSE-PLUGIN-DEVELOPMENT.md](DATAVERSE-PLUGIN-DEVELOPMENT.md)
 
 ### Code Quality & Refactoring
 
@@ -52,12 +31,7 @@ This directory contains practical guides for implementing features, configuring 
 
 - **[CONFIGURATION-MATRIX.md](CONFIGURATION-MATRIX.md)** - Complete reference of all BFF API configuration settings: sections, defaults, locations (appsettings/env var/Key Vault/Dataverse), and Key Vault secrets
 - **[DEPLOYMENT-VERIFICATION-GUIDE.md](DEPLOYMENT-VERIFICATION-GUIDE.md)** - Consolidated post-deploy verification steps for BFF API, PCF controls, code pages, web resources, and infrastructure
-- [RIBBON-CUSTOMIZATION-GUIDE.md](RIBBON-CUSTOMIZATION-GUIDE.md)
-- [TASK-MANAGEMENT-GUIDE.md](TASK-MANAGEMENT-GUIDE.md)
-
-### Workspace Features
-
-- **[EVENT-TODO-ARCHITECTURE.md](EVENT-TODO-ARCHITECTURE.md)** - Smart To Do Kanban board + Todo Detail side pane architecture, dual-entity data model, score formula, cross-component sync
+- [RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md](RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md)
 
 ### Workspace & Entity Creation
 
@@ -66,9 +40,8 @@ This directory contains practical guides for implementing features, configuring 
 
 ### How-To Guides
 
-- [HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md](HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md)
-- [HOW-TO-CREATE-NEW-PCF-CONTROL.md](HOW-TO-CREATE-NEW-PCF-CONTROL.md)
-- [HOW-TO-DEPLOY-PCF-CONTROL.md](HOW-TO-DEPLOY-PCF-CONTROL.md)
+- [HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md](HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md)
+- [PCF-DEPLOYMENT-GUIDE.md](PCF-DEPLOYMENT-GUIDE.md)
 
 ## For AI Agents
 
@@ -76,18 +49,14 @@ This directory contains practical guides for implementing features, configuring 
 
 **Common scenarios**:
 - Shared UI components → Load SHARED-UI-COMPONENTS-GUIDE.md
-- Creating PCF control → Load HOW-TO-CREATE-NEW-PCF-CONTROL.md, PCF-CONTROL-DEVELOPMENT.md
-- Adding document support → Load HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md
+- Deploying PCF control → Load PCF-DEPLOYMENT-GUIDE.md
+- Adding SDAP to an entity → Load HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md
 - **Creating AI playbook scopes → Load SCOPE-CONFIGURATION-GUIDE.md**
 - **Designing AI playbooks → Load JPS-AUTHORING-GUIDE.md** (or use `/jps-playbook-design` skill)
 - **Builder UI usage → Load SCOPE-CONFIGURATION-GUIDE.md**
 - **JPS prompt schema → Load JPS-AUTHORING-GUIDE.md**
-- AI integration → Load AI-TOOL-FRAMEWORK-GUIDE.md, AI-STREAMING-SSE-IMPLEMENTATION.md
-- Dataverse work → Load DATAVERSE-*.md guides
-- Email automation → Load EMAIL-TO-DOCUMENT-ARCHITECTURE.md
 - Workspace entity creation → Load WORKSPACE-ENTITY-CREATION-GUIDE.md
 - AI pre-fill → Load WORKSPACE-AI-PREFILL-GUIDE.md
-- To Do / Kanban work → Load EVENT-TODO-ARCHITECTURE.md
 
 ## Phase 3 TODO
 

@@ -1,6 +1,9 @@
 # Dataverse Infrastructure Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Describes how the BFF API interacts with Dataverse for document storage resolution, user access control, and data retrieval.
 
 ---

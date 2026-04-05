@@ -1,6 +1,9 @@
 # Email Processing Architecture
 
 > **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: New
 > **Purpose**: Consolidated architecture documentation for the email-to-document pipeline — hybrid webhook/polling triggers, idempotency design, RFC 2822 .eml archival, attachment processing, RAG indexing, and document relationship model. Merges the R1 email-to-document-architecture.md and email-to-document-automation.md into a single reference.
 
 ---
