@@ -1,5 +1,9 @@
 # Pattern: Multi-Step Provisioning Pipeline
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (added full path for RegistrationEndpoints.cs)
+
 **Canonical implementation**: `src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs`
 
 ## What to look for
@@ -26,4 +30,4 @@ Any multi-step provisioning or setup workflow where:
 ## Related
 
 - `DemoExpirationService.cs` — Same per-step try/catch pattern for cleanup operations
-- `RegistrationEndpoints.cs` — Catches `DemoProvisioningException` and returns step details in ProblemDetails
+- `src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs` — Catches `DemoProvisioningException` and returns step details in ProblemDetails

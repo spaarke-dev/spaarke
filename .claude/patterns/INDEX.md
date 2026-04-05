@@ -1,5 +1,9 @@
 # Code Patterns — Pointer-Based Reference
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 > **Format**: Each pattern file is max 25 lines pointing to canonical source code.
 > **Structure**: When (context) → Read These Files (source paths) → Constraints (ADRs) → Key Rules
 > **Principle**: Code is the source of truth — patterns point to it, not describe it.

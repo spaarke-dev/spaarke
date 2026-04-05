@@ -1,5 +1,9 @@
 # OAuth Scopes Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Configuring OAuth scopes for BFF API, Graph API, or Dataverse access.
 

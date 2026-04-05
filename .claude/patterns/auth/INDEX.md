@@ -1,5 +1,9 @@
 # Auth Patterns Index
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 > Pointer-based patterns for OAuth, OBO, MSAL, and access control.
 
 ## Authentication

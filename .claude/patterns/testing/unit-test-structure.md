@@ -1,5 +1,9 @@
 # Unit Test Structure Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Writing xUnit unit tests for BFF API services, endpoint filters, or Dataverse plugins.
 

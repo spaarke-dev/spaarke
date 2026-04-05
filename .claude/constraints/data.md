@@ -3,7 +3,10 @@
 > **Domain**: Data Access, Storage, Caching
 > **Source ADRs**: ADR-005, ADR-007, ADR-009
 > **See Also**: [Document Upload Architecture](../../docs/architecture/sdap-bff-api-patterns.md#document-upload-architecture)
-> **Last Updated**: 2026-02-17
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (broken storage pattern link fixed)
 
 ---
 
@@ -92,7 +95,7 @@ var stream = await _speFileStore.GetContentAsync(containerId, driveItemId, ct);
 var driveItem = await _graphClient.Drives[driveId].Items[itemId].GetAsync(); // ❌
 ```
 
-**See**: [SpeFileStore Pattern](../patterns/storage/spe-filestore.md)
+**See**: [SDAP BFF API Patterns](../../docs/architecture/sdap-bff-api-patterns.md) and [Shared Libraries Architecture](../../docs/architecture/shared-libraries-architecture.md) for the SpeFileStore facade.
 
 ### Cache Key Pattern
 

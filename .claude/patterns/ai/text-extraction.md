@@ -1,5 +1,9 @@
 # Text Extraction Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Use when implementing document text extraction for AI analysis — selecting the correct extraction method based on file type and handling OBO authentication for SPE file downloads.
 

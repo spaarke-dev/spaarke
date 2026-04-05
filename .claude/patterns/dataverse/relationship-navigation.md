@@ -1,5 +1,9 @@
 # Relationship Navigation Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Setting lookup fields, querying by relationship, or discovering navigation properties.
 

@@ -1,5 +1,9 @@
 # MSAL Client Pattern (Legacy)
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Maintaining legacy PCF controls that use direct MSAL singleton for BFF API auth. New code should use `@spaarke/auth`.
 

@@ -1,8 +1,11 @@
 # Testing Constraints
 
 > **Domain**: Unit and Integration Testing
-> **Source ADRs**: ADR-022 (Testing Strategy)
-> **Last Updated**: 2025-12-25
+> **See Also**: [Testing and Code Quality Procedure](../../docs/procedures/testing-and-code-quality.md) (definitive testing strategy)
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (removed incorrect ADR-022 reference, fixed pattern paths)
 
 ---
 
@@ -118,15 +121,16 @@ await speFileStore.Received(1).GetContainerAsync("123");
 
 ## Pattern Files (Complete Examples)
 
-- [Unit Test Structure](.claude/patterns/testing/unit-test-structure.md)
-- [Mocking Patterns](.claude/patterns/testing/mocking-patterns.md)
-- [Integration Tests](.claude/patterns/testing/integration-tests.md)
+- [Unit Test Structure](../patterns/testing/unit-test-structure.md)
+- [Mocking Patterns](../patterns/testing/mocking-patterns.md)
+- [Integration Tests](../patterns/testing/integration-tests.md)
 
 ---
 
-## Source ADRs (Full Context)
+## Authoritative References
 
-- [ADR-022 Testing Strategy](../../docs/adr/ADR-022-testing-strategy.md) - Full rationale and examples
+- [Testing and Code Quality Procedure](../../docs/procedures/testing-and-code-quality.md) — Module-specific test guidance, coverage targets, architecture test enforcement
+- Note: ADR-022 is the PCF Platform Libraries ADR, not a testing strategy ADR. There is no dedicated testing-strategy ADR — testing rules live in the procedure doc above.
 
 ---
 

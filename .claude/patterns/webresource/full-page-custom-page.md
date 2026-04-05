@@ -1,5 +1,9 @@
 # Full-Page Custom Page
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Building a full navigation page or side pane hosted in a Dataverse Model-Driven App, deployed as a single self-contained HTML web resource. Use PCF instead if the UI is embedded in a form (field, subgrid, tab).
 

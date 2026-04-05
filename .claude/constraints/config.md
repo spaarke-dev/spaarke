@@ -2,7 +2,10 @@
 
 > **Domain**: Feature Flags, Versioning, Configuration
 > **Source ADRs**: ADR-018, ADR-020
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (broken config pattern links replaced with R2 architecture docs)
 
 ---
 
@@ -116,8 +119,8 @@ public record AnalysisPayload
 
 ## Pattern Files (Complete Examples)
 
-- [Feature Flag Pattern](../patterns/config/feature-flags.md)
-- [Options Registration Pattern](../patterns/config/options-registration.md)
+- [Configuration Architecture](../../docs/architecture/configuration-architecture.md) — 21 options classes, validators, Key Vault integration
+- [Configuration Matrix](../../docs/guides/CONFIGURATION-MATRIX.md) — Complete reference of all BFF API settings
 
 ---
 

@@ -1,5 +1,9 @@
 # Streaming Endpoints Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Use when implementing SSE (Server-Sent Events) endpoints for AI analysis features that stream results to the client in real-time.
 

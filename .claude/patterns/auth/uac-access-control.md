@@ -1,5 +1,9 @@
 # UAC Access Control Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Implementing authorization checks in endpoint filters or adding new operations to access policies.
 

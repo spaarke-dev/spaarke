@@ -1,5 +1,9 @@
 # Dataverse Queries Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Querying Dataverse data from PCF controls via WebAPI or context.
 

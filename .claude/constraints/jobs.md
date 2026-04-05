@@ -2,7 +2,10 @@
 
 > **Domain**: Async Processing, Background Workers
 > **Source ADRs**: ADR-004, ADR-017
-> **Last Updated**: 2026-03-12
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (broken jobs pattern links fixed)
 
 ---
 
@@ -145,8 +148,9 @@ This ensures deterministic deduplication even for long keys (e.g., email message
 
 ## Pattern Files (Complete Examples)
 
-- [Background Worker Pattern](../patterns/jobs/background-workers.md)
-- [Job Status Pattern](../patterns/jobs/status-persistence.md)
+- [Background Workers Pattern](../patterns/api/background-workers.md)
+- [Jobs Architecture](../../docs/architecture/jobs-architecture.md) — Service Bus processors, 13 job handlers, idempotency, dead-letter
+- [Background Workers Architecture](../../docs/architecture/background-workers-architecture.md) — 17 IHostedService implementations
 
 ---
 

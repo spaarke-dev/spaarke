@@ -1,5 +1,9 @@
 # Token Cache Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Caching OBO (On-Behalf-Of) Graph tokens to avoid repeated token exchanges.
 

@@ -1,5 +1,9 @@
 # Mocking Patterns
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Setting up test doubles for unit or integration tests (Moq for interfaces, WireMock for HTTP, custom fakes for stateful behavior).
 

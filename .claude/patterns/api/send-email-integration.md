@@ -1,5 +1,9 @@
 # Send Email Integration Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Adding email sending capability to any module (UI, AI playbook, or server-side).
 

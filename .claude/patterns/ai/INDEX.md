@@ -2,6 +2,9 @@
 
 > **Domain**: AI Tool Framework, Document Analysis
 > **Last Updated**: 2026-03-31
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
 
 ## When to Load
 Load these patterns when implementing AI analysis features, document extraction, streaming endpoints, or Azure OpenAI integration.

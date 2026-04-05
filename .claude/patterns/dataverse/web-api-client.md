@@ -1,5 +1,9 @@
 # Web API Client Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Accessing Dataverse from the BFF API (REST or SDK client).
 

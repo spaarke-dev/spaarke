@@ -3,6 +3,9 @@
 > **Domain**: Dataverse Extensibility
 > **Source ADRs**: ADR-002
 > **Last Updated**: 2026-01-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
 
 ---
 

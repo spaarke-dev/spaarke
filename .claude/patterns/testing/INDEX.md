@@ -1,5 +1,9 @@
 # Testing Patterns Index
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 > Pointer-based pattern files for unit tests, integration tests, and mocking.
 > Each file points to canonical source code — read the code, not descriptions.
 

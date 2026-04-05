@@ -3,6 +3,9 @@
 > **Domain**: Dataverse JavaScript Web Resources
 > **Source ADRs**: ADR-006 (PCF preferred), ADR-008 (endpoint auth)
 > **Last Updated**: 2026-02-16
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
 
 ---
 

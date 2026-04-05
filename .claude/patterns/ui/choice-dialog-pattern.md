@@ -1,5 +1,9 @@
 # Choice Dialog Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Use for dialogs presenting 2-4 mutually exclusive options where each needs an icon, title, and description. Do NOT use for simple yes/no confirmations (use `ConfirmDialog`) or 5+ options (use `Select`/`Combobox`).
 

@@ -1,5 +1,9 @@
 # Code Page Wizard Wrapper Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Use when a shared wizard/dialog component from `@spaarke/ui-components` must be opened as a standalone Dataverse modal via `Xrm.Navigation.navigateTo`. Do NOT use when the component only renders inline within a PCF control.
 

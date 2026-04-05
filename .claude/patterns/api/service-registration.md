@@ -1,5 +1,9 @@
 # Service Registration Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Registering new services in DI or adding a new feature module.
 

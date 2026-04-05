@@ -1,5 +1,9 @@
 # Distributed Cache Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Adding Redis-backed caching for cross-request data (tokens, metadata, idempotency).
 

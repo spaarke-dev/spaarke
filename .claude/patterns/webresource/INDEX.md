@@ -1,5 +1,9 @@
 # Webresource & UI Patterns Index
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 > Pointer-based patterns for Code Pages, custom dialogs, and legacy webresources.
 
 ## Webresource Patterns

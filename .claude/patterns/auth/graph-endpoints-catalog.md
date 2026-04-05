@@ -1,5 +1,9 @@
 # BFF Graph Endpoints Catalog
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Adding new Graph API features — check this catalog first to avoid duplicating existing functionality.
 

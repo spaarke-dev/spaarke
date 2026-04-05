@@ -3,6 +3,9 @@
 > **Domain**: UI / Theming
 > **Source ADRs**: ADR-021, ADR-012
 > **Last Updated**: 2026-03-30
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
 
 ---
 

@@ -1,5 +1,9 @@
 # BFF Base URL Normalization Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 > **Entry Point**: `src/client/shared/Spaarke.Auth/src/resolveRuntimeConfig.ts:388` (Code Pages)
 > **Entry Point**: `src/client/pcf/shared/utils/environmentVariables.ts:getApiBaseUrl()` (PCF Controls)
 > **Full Reference**: `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md`
