@@ -7,17 +7,17 @@
 > Pointer-based patterns for Code Pages, custom dialogs, and legacy webresources.
 
 ## Webresource Patterns
-| Pattern | When to Load |
-|---------|-------------|
-| [full-page-custom-page.md](full-page-custom-page.md) | Building full-page React SPAs (Vite + React 18) |
-| [code-page-wizard-wrapper.md](code-page-wizard-wrapper.md) | Building wizard dialogs as Code Pages |
-| [custom-dialogs-in-dataverse.md](custom-dialogs-in-dataverse.md) | Opening dialogs from form scripts or ribbons |
-| [subgrid-parent-rollup.md](subgrid-parent-rollup.md) | Legacy JS for KPI refresh on subgrid changes |
+| Pattern | When to Load | Last Reviewed | Status |
+|---------|-------------|---------------|--------|
+| [full-page-custom-page.md](full-page-custom-page.md) | Building full-page React SPAs (Vite + React 18) | 2026-04-05 | Verified |
+| [code-page-wizard-wrapper.md](code-page-wizard-wrapper.md) | Building wizard dialogs as Code Pages | 2026-04-05 | Verified |
+| [custom-dialogs-in-dataverse.md](custom-dialogs-in-dataverse.md) | Opening dialogs from form scripts or ribbons | 2026-04-05 | Verified |
+| [subgrid-parent-rollup.md](subgrid-parent-rollup.md) | Legacy JS for KPI refresh on subgrid changes | 2026-04-05 | Verified |
 
 ## UI Patterns
-| Pattern | When to Load |
-|---------|-------------|
-| [../ui/choice-dialog-pattern.md](../ui/choice-dialog-pattern.md) | Reusable choice/confirmation dialogs |
+| Pattern | When to Load | Last Reviewed | Status |
+|---------|-------------|---------------|--------|
+| [../ui/choice-dialog-pattern.md](../ui/choice-dialog-pattern.md) | Reusable choice/confirmation dialogs | 2026-04-05 | Verified |
 
 ## Key Constraint (ADR-006)
 Standalone dialogs → Code Page (React 18). NOT PCF wrapper + custom page.
