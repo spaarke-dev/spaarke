@@ -70,8 +70,13 @@ const useStyles = makeStyles({
   },
   grid: {
     width: '100%',
+    tableLayout: 'fixed',
     '& th, & td': {
-      paddingRight: '10px',
+      paddingRight: '12px',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      boxSizing: 'border-box',
     },
   },
   emptyState: {

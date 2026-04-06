@@ -112,14 +112,43 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
     center: { x: layoutOptions?.centerX ?? 0, y: layoutOptions?.centerY ?? 0 },
   });
 
-  // Map positioned output back to @xyflow/react Node format
+  // Map positioned output back to @xyflow/react Node format.
+  // Pin source node to upper-left and matter/project/invoice hubs to upper-right
+  // so the graph reads naturally left-to-right with the settings panel on the right.
   const layoutNodes = useMemo<DocumentNode[]>(() => {
     const posMap = new Map(layoutResult.nodes.map(pn => [pn.id, pn]));
+
+    // Compute bounding box of force-layout output for relative positioning
+    let minX = Infinity, maxX = -Infinity, minY = Infinity;
+    for (const pn of layoutResult.nodes) {
+      if (pn.x < minX) minX = pn.x;
+      if (pn.x > maxX) maxX = pn.x;
+      if (pn.y < minY) minY = pn.y;
+    }
+    const spanX = maxX - minX || 1;
+
     return inputNodes.map(node => {
       const pos = posMap.get(node.id);
+      let x = pos?.x ?? 0;
+      let y = pos?.y ?? 0;
+
+      // Pin source node to upper-left corner
+      if (node.data.isSource) {
+        x = minX;
+        y = minY;
+      }
+
+      // Pin parent hub nodes (matter, project, invoice, email) to upper-right
+      // Offset each hub slightly so they don't stack on top of each other
+      const hubTypes = ['matter', 'project', 'invoice', 'email'];
+      if (node.data.nodeType && hubTypes.includes(node.data.nodeType)) {
+        x = maxX - spanX * 0.05; // slightly inset from right edge
+        y = minY;
+      }
+
       return {
         ...node,
-        position: { x: pos?.x ?? 0, y: pos?.y ?? 0 },
+        position: { x, y },
         data: { ...node.data, compactMode },
       };
     });

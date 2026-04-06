@@ -29,6 +29,7 @@ import {
   DialogSurface,
   DialogBody,
   Button,
+  Text,
   Tooltip,
   shorthands,
 } from '@fluentui/react-components';
@@ -91,7 +92,7 @@ const useStyles = makeStyles({
   titleBar: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalXS,
     paddingTop: tokens.spacingVerticalXS,
     paddingRight: tokens.spacingHorizontalS,
@@ -146,18 +147,21 @@ export const FindSimilarDialog: React.FC<IFindSimilarDialogProps> = ({
       <DialogSurface className={styles.surface}>
         {!embedded && (
           <div className={styles.titleBar}>
-            <Tooltip content="Open in new tab" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<ArrowExpandRegular />}
-                size="small"
-                onClick={handleExpand}
-                aria-label="Open in new tab"
-              />
-            </Tooltip>
-            <Tooltip content="Close" relationship="label">
-              <Button appearance="subtle" icon={<DismissRegular />} size="small" onClick={onClose} aria-label="Close" />
-            </Tooltip>
+            <Text weight="semibold" size={400}>Similar Documents</Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
+              <Tooltip content="Open in new tab" relationship="label">
+                <Button
+                  appearance="subtle"
+                  icon={<ArrowExpandRegular />}
+                  size="small"
+                  onClick={handleExpand}
+                  aria-label="Open in new tab"
+                />
+              </Tooltip>
+              <Tooltip content="Close" relationship="label">
+                <Button appearance="subtle" icon={<DismissRegular />} size="small" onClick={onClose} aria-label="Close" />
+              </Tooltip>
+            </div>
           </div>
         )}
         <DialogBody className={styles.body}>
