@@ -311,13 +311,27 @@ function _sprkReg_cleanGuid(guid) {
  * Approve Demo Access — HomePageGrid (list view, supports multi-select).
  * Called by the "Approve Demo Access" ribbon button on the entity list view.
  *
- * @param {Array} selectedItems - Selected items from the grid (SelectedItemReferences)
+ * @param {object} gridControl - The grid context (SelectedControl CrmParameter)
  */
-async function approveRequest(selectedItems) {
+async function approveRequest(gridControl) {
     try {
         console.log(SPRK_REG_LOG, "========================================");
         console.log(SPRK_REG_LOG, "approveRequest: Starting v" + SPRK_REG_CONFIG.version);
-        console.log(SPRK_REG_LOG, "Selected items:", selectedItems ? selectedItems.length : 0);
+
+        // Extract selected items from grid context
+        var selectedItems = [];
+        if (gridControl && gridControl.getGrid) {
+            var selectedRows = gridControl.getGrid().getSelectedRows();
+            selectedRows.forEach(function (row) {
+                var data = row.getData();
+                selectedItems.push({
+                    Id: data.getEntity().getId().replace(/[{}]/g, ""),
+                    Name: data.getEntity().getPrimaryAttributeValue() || data.getEntity().getId()
+                });
+            });
+        }
+
+        console.log(SPRK_REG_LOG, "Selected items:", selectedItems.length);
         console.log(SPRK_REG_LOG, "========================================");
 
         if (!selectedItems || selectedItems.length === 0) {
@@ -411,9 +425,8 @@ async function approveRequest(selectedItems) {
 
         // Refresh the grid
         try {
-            // Modern API for grid refresh
-            if (Xrm.Utility && Xrm.Utility.refreshParentGrid) {
-                Xrm.Utility.refreshParentGrid();
+            if (gridControl && gridControl.refresh) {
+                gridControl.refresh();
             }
         } catch (refreshError) {
             console.log(SPRK_REG_LOG, "Grid refresh failed (may need manual refresh):", refreshError);
@@ -520,13 +533,27 @@ async function approveRequestFromForm(formContext) {
  * Reject Request — HomePageGrid (list view, supports multi-select).
  * Prompts for a rejection reason, then calls the BFF API reject endpoint.
  *
- * @param {Array} selectedItems - Selected items from the grid (SelectedItemReferences)
+ * @param {object} gridControl - The grid context (SelectedControl CrmParameter)
  */
-async function rejectRequest(selectedItems) {
+async function rejectRequest(gridControl) {
     try {
         console.log(SPRK_REG_LOG, "========================================");
         console.log(SPRK_REG_LOG, "rejectRequest: Starting v" + SPRK_REG_CONFIG.version);
-        console.log(SPRK_REG_LOG, "Selected items:", selectedItems ? selectedItems.length : 0);
+
+        // Extract selected items from grid context
+        var selectedItems = [];
+        if (gridControl && gridControl.getGrid) {
+            var selectedRows = gridControl.getGrid().getSelectedRows();
+            selectedRows.forEach(function (row) {
+                var data = row.getData();
+                selectedItems.push({
+                    Id: data.getEntity().getId().replace(/[{}]/g, ""),
+                    Name: data.getEntity().getPrimaryAttributeValue() || data.getEntity().getId()
+                });
+            });
+        }
+
+        console.log(SPRK_REG_LOG, "Selected items:", selectedItems.length);
         console.log(SPRK_REG_LOG, "========================================");
 
         if (!selectedItems || selectedItems.length === 0) {
@@ -610,8 +637,8 @@ async function rejectRequest(selectedItems) {
 
         // Refresh the grid
         try {
-            if (Xrm.Utility && Xrm.Utility.refreshParentGrid) {
-                Xrm.Utility.refreshParentGrid();
+            if (gridControl && gridControl.refresh) {
+                gridControl.refresh();
             }
         } catch (refreshError) {
             console.log(SPRK_REG_LOG, "Grid refresh failed (may need manual refresh):", refreshError);
