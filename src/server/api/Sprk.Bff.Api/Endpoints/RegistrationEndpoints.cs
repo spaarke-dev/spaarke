@@ -171,7 +171,8 @@ public static class RegistrationEndpoints
 
             // Send admin notification (fire-and-forget — do not block the response)
             _ = SendAdminNotificationAsync(
-                emailService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier);
+                emailService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier,
+                dataverseUrl: null, appId: null);
 
             // Send acknowledgement email to applicant (fire-and-forget)
             _ = SendAcknowledgementEmailAsync(
@@ -440,14 +441,35 @@ public static class RegistrationEndpoints
         DemoRequestDto request,
         Guid recordId,
         ILogger logger,
-        string traceIdentifier)
+        string traceIdentifier,
+        string? dataverseUrl = null,
+        string? appId = null)
     {
         try
         {
-            var defaultEnv = options.Environments.FirstOrDefault(e => e.Name == options.DefaultEnvironment)
-                ?? options.Environments.First();
-            var appIdParam = !string.IsNullOrEmpty(defaultEnv.AppId) ? $"appid={defaultEnv.AppId}&" : "";
-            var recordUrl = $"{defaultEnv.DataverseUrl.TrimEnd('/')}/main.aspx?{appIdParam}pagetype=entityrecord&etn=sprk_registrationrequest&id={recordId}";
+            // Build record URL: prefer explicit parameters, fall back to Environments config (legacy)
+            string envUrl;
+            string? envAppId;
+            if (!string.IsNullOrEmpty(dataverseUrl))
+            {
+                envUrl = dataverseUrl;
+                envAppId = appId;
+            }
+            else if (options.Environments.Length > 0)
+            {
+                var defaultEnv = options.Environments.FirstOrDefault(e => e.Name == options.DefaultEnvironment)
+                    ?? options.Environments.First();
+                envUrl = defaultEnv.DataverseUrl;
+                envAppId = defaultEnv.AppId;
+            }
+            else
+            {
+                // No environment config available — use a generic URL
+                envUrl = "https://spaarkedev1.crm.dynamics.com";
+                envAppId = null;
+            }
+            var appIdParam = !string.IsNullOrEmpty(envAppId) ? $"appid={envAppId}&" : "";
+            var recordUrl = $"{envUrl.TrimEnd('/')}/main.aspx?{appIdParam}pagetype=entityrecord&etn=sprk_registrationrequest&id={recordId}";
 
             await emailService.SendAdminNotificationAsync(
                 adminEmails: options.AdminNotificationEmails,
