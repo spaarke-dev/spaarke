@@ -760,6 +760,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           isInWorkspace={isInWorkspace}
           onViewAll={handleViewAll}
           onReload={handleReload}
+          onAddDocument={handleAddDocument}
+          onOpenViewer={handleOpenViewer}
           compactMode={compactMode}
         />
       );
@@ -786,8 +788,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           disabled={isLoading}
           onValueChange={setQueryInput}
           onSearch={handleSearch}
-          onAddDocument={handleAddDocument}
-          onOpenViewer={handleOpenViewer}
         />
         {hasSearched && !isLoading && totalCount > 0 && (
           <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '4px' }}>
@@ -842,7 +842,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.29 • Built 2026-04-05</Text>
+        <Text size={100}>v1.1.30 • Built 2026-04-05</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}
