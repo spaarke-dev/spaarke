@@ -28,6 +28,8 @@ export interface ISearchInputProps {
   onValueChange: (value: string) => void;
   onSearch: () => void;
   onAddDocument: () => void;
+  /** Open the full DocumentRelationshipViewer dialog */
+  onOpenViewer?: () => void;
 }
 
 /**
