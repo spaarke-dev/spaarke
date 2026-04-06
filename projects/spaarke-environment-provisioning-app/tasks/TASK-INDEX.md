@@ -11,7 +11,7 @@
 | 002 | Run Schema Script Against Dev | 1 | ✅ | 001 |
 | 003 | Create Environment Entity Form | 1 | ✅ | 002 |
 | 004 | Create Environment Entity Views | 1 | ✅ | 002 |
-| 005 | Add Sitemap Entry | 1 | 🔲 | 002 |
+| 005 | Add Sitemap Entry | 1 | ✅ | 002 |
 | 006 | Add Environment Lookup to Registration | 1 | ✅ | 002 |
 | 007 | Seed Dev and Demo 1 Records | 1 | ✅ | 002 |
 | 010 | Create DataverseEnvironmentRecord DTO | 2 | ✅ | — |
