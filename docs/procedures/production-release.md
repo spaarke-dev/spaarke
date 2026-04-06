@@ -1,6 +1,6 @@
 # Production Release Procedure
 
-> **Last Updated**: 2026-04-04
+> **Last Updated**: 2026-04-06
 > **Owner**: Platform Operations
 > **Scope**: Deploying Spaarke updates to existing production environments
 >
@@ -14,7 +14,7 @@
 
 ## Overview
 
-This procedure deploys a Spaarke release to one or more **existing** production environments. It covers building all client components, deploying the BFF API, importing Dataverse solutions, deploying web resources, validating the deployment, and tagging the release.
+This procedure deploys a Spaarke release to one or more **existing** production environments. It covers building all client components, preparing the dev environment, exporting the SpaarkeMaster solution, deploying the BFF API, importing the solution to target environments, and validating the deployment.
 
 **Key Distinction**:
 - `Provision-Customer.ps1` = **new environment** (creates infrastructure, Dataverse org, etc.)
@@ -28,7 +28,11 @@ Both share the same sub-scripts for solution import, web resource deployment, an
 Phase 0: Pre-flight (git clean, CI green, auth configured)
          │
          ▼ ─── GATE ───
-Phase 1: Build (shared libs → Vite solutions → code pages → PCF → external SPA)
+Phase 1: Build & prepare dev (build all code, upload to dev, publish)
+         │
+         ▼ ─── GATE ───
+Phase 1.5: Export SpaarkeMaster from dev
+         │  (pac solution export --name SpaarkeMaster)
          │
          ▼ ─── GATE ───
          ┌─────────────────────────────────────────────┐
@@ -37,12 +41,12 @@ Phase 1: Build (shared libs → Vite solutions → code pages → PCF → extern
          │  Phase 2: BFF API (Deploy-BffApi.ps1)       │
          │           │                                 │
          │           ▼                                 │
-         │  Phase 3: Dataverse Solutions               │
-         │           (Deploy-DataverseSolutions.ps1)   │
+         │  Phase 3: Import SpaarkeMaster              │
+         │           (pac solution import)             │
          │           │                                 │
          │           ▼                                 │
-         │  Phase 4: Web Resources                     │
-         │           (Deploy-AllWebResources.ps1)      │
+         │  Phase 4: Publish customizations            │
+         │           (pac org publish)                 │
          │           │                                 │
          │           ▼                                 │
          │  Phase 5: Validation                        │
@@ -55,6 +59,149 @@ Phase 6: Tag release (git tag v{major}.{minor}.{patch})
 ```
 
 **Sequential per-environment**: Environments are deployed one at a time. Never deploy to multiple environments in parallel — this ensures each deployment is verified before proceeding.
+
+---
+
+## Deployment Package: SpaarkeMaster Solution
+
+The Dataverse deployment is based on a single comprehensive solution — **SpaarkeMaster** — that contains all Spaarke platform components. This solution is the authoritative package for what gets exported from dev and imported to target environments.
+
+### Source and Target Model
+
+```
+Source: Dev Dataverse (https://spaarkedev1.crm.dynamics.com)
+  │
+  ├── SpaarkeMaster solution (unmanaged)
+  │   Contains: all sprk_ entities, web resources, PCFs, security roles, etc.
+  │
+  └── Export as unmanaged ZIP
+        │
+        ▼
+Target: Production Dataverse (one or more environments)
+  └── Import SpaarkeMaster ZIP (unmanaged)
+```
+
+**Key principles**:
+- **No build step during deployment** — all solution components (including web resources built from code) must be ready in the dev environment before export
+- **Full solution import** (V1) — every release exports and imports the complete SpaarkeMaster solution. Incremental (diff-only) deployment is a V2 enhancement.
+- **Dev is the source of truth** — entities, forms, views, security roles, and web resources are developed in dev, then promoted via solution export/import
+
+### Component Inventory
+
+SpaarkeMaster contains **375 confirmed components** across these categories:
+
+#### Entities (91)
+
+**87 custom entities** (full — includes all forms, views, columns, relationships):
+
+| Category | Entities |
+|----------|----------|
+| **Core** | sprk_matter, sprk_project, sprk_event, sprk_document, sprk_organization, sprk_communication |
+| **Financial** | sprk_invoice, sprk_invoicelineitem, sprk_billingevent, sprk_budget, sprk_budgetbucket, sprk_spendsignal, sprk_spendsnapshot |
+| **Events/Tasks** | sprk_event, sprk_eventset, sprk_eventtodo, sprk_eventlog, sprk_workassignment |
+| **AI/Analysis** | sprk_analysis, sprk_analysisaction, sprk_analysisplaybook, sprk_analysischatmessage, sprk_analysisoutput, sprk_analysisworkingversion, sprk_playbooknode, sprk_playbooknoderun, sprk_playbookrun |
+| **AI Configuration** | sprk_aiactiontype, sprk_aichatcontextmap, sprk_aichatmessage, sprk_aichatsummary, sprk_aiknowledgedeployment, sprk_aiknowledgesource, sprk_aiknowledgetype, sprk_aimodeldeployment, sprk_aioutputtype, sprk_airetrievalmode, sprk_aiskilltype, sprk_aitooltype, sprk_analysisknowledge, sprk_analysisskill, sprk_analysistool |
+| **Document Management** | sprk_container, sprk_documenttype, sprk_fileversion, sprk_uploadcontext, sprk_attachmentartifact, sprk_emailartifact |
+| **Communication** | sprk_communicationaccount, sprk_communicationattachment, sprk_emailsaverule, sprk_analysisemailmetadata |
+| **Configuration** | sprk_chartdefinition, sprk_charttype, sprk_deliverytemplate, sprk_externalrecordaccess, sprk_externalserviceconfig, sprk_fieldmappingprofile, sprk_fieldmappingrule, sprk_gridconfiguration, sprk_speauditlog, sprk_specontainertypeconfig, sprk_speenvironment, sprk_userpreferences, sprk_workspacelayout |
+| **Reference/Lookup** | sprk_accounttype_ref, sprk_contacttype_ref, sprk_countryregion_ref, sprk_eventtype_ref, sprk_mattersubtype_ref, sprk_mattertype_ref, sprk_organizationtype_ref, sprk_practicearea_ref, sprk_projecttype_ref, sprk_recordtype_ref, sprk_usertype_ref |
+| **Reporting** | sprk_report, sprk_reportcard, sprk_reportingentity, sprk_reportingview, sprk_kpiassessment |
+| **Other** | sprk_memo, sprk_processingjob, sprk_registrationrequest, sprk_timekeeper, sprk_outputtypes, sprk_analysisdeliverytype, sprk_analysisactiontype |
+
+**4 standard Microsoft entities** (metadata-only — only sprk_ customizations, not the full entity):
+
+| Entity | Custom Columns |
+|--------|---------------|
+| account | sprk_containerid |
+| contact | sprk_containerid, sprk_invoice, sprk_organization, sprk_systemuser |
+| systemuser | sprk_containerid, sprk_usertype |
+| businessunit | sprk_containerid |
+
+**Not included**: `email` entity (not using sprk_ customizations on email).
+
+#### Web Resources (195)
+
+All `sprk_*` prefixed web resources including:
+- HTML code pages (wizards, workspaces, admin apps)
+- JavaScript bundles (form scripts, ribbon commands)
+- CSS stylesheets
+- SVG icons (ribbon icons, theme icons)
+
+These are built from source code and uploaded to dev before export.
+
+#### PCF Custom Controls (11 confirmed in-use)
+
+| Control | Used On |
+|---------|---------|
+| DocumentRelationshipViewer | sprk_document main form |
+| EventFormController | sprk_event (3 forms) |
+| RelatedDocumentCount | sprk_document main form |
+| SpeDocumentViewer | sprk_document main form |
+| VisualHost | sprk_matter, sprk_project, sprk_workassignment main forms |
+| SemanticSearchControl | sprk_matter, sprk_project, sprk_invoice, sprk_workassignment main forms |
+| UpdateRelatedButton | Views |
+| EmailProcessingMonitor | Forms |
+| ThemeEnforcer | Forms |
+| UniversalDatasetGrid | Subgrids and views |
+| RegardingLink | sprk_event views (dataset binding) |
+
+**Excluded PCFs** (orphaned — registered in system but not bound to any active form/view):
+AssociationResolver, EventAutoAssociate, UniversalDocumentUpload, ScopeConfigEditor, AnalysisBuilder, AnalysisWorkspace, DueDatesWidget, EventCalendarFilter, FieldMappingAdmin, PlaybookBuilderHost, SpaarkeGridCustomizer, LegalWorkspace (PCF).
+
+#### Other Components
+
+| Type | Count | Notes |
+|------|-------|-------|
+| Global Option Sets | 24 | All `sprk_*` global choices; entity-level choices come with entities |
+| Security Roles | 7 | Spaarke Basic User, Office Add In User, Reporting (Author/Viewer/Admin), AI Analysis (User/Admin) |
+| Environment Variable Definitions | 21 | All `sprk_*` env vars (BFF URL, tenant ID, AI endpoints, feature flags, etc.) |
+| Environment Variable Values | 9 | Current values (environment-specific — overridden per target) |
+| Entity Relationships | 4 | M2M junction tables (included as relationship components) |
+| Site Maps | 4 | App navigation |
+| Plugin Types | 1 | Dataverse plugin registration |
+
+### Building the SpaarkeMaster Solution
+
+The SpaarkeMaster solution in dev is built programmatically using the Dataverse Web API `AddSolutionComponent` action. The identification logic:
+
+1. **Custom entities**: All entities with `sprk_` prefix (excluding M2M intersection tables which come as relationship subcomponents)
+2. **Standard entities**: `account`, `contact`, `systemuser`, `businessunit` — added with `DoNotIncludeSubcomponents=true`, then `sprk_` columns added individually as Attribute components
+3. **Web resources**: All records in `webresourceset` where name starts with `sprk_`
+4. **Global option sets**: All records in `GlobalOptionSetDefinitions` where name starts with `sprk_`
+5. **PCF controls**: 11 specific controls from the confirmed in-use list (by customcontrolid)
+6. **Security roles**: Root business unit roles containing "Spaarke" in the name
+7. **Environment variables**: All definitions where schemaname starts with `sprk_` (component type 380 + values type 381)
+
+**What's NOT included**:
+- Canvas apps, PowerApps settings, PowerApps components (not migrating SPAs via solution)
+- Managed solutions (Creator Kit, Dataverse Accelerator — installed separately)
+- The `email` standard entity
+- 12 orphaned PCF controls
+
+### Pre-Release: Preparing Dev for Export
+
+Before exporting SpaarkeMaster, ensure all deployable artifacts are in the dev environment:
+
+1. **Build all client code** (shared libs → Vite solutions → code pages → PCFs)
+2. **Upload built web resources** to dev Dataverse (via deploy scripts)
+3. **Deploy PCF controls** to dev (via `pac pcf push` or solution import)
+4. **Publish all customizations** in dev
+5. **Verify** SpaarkeMaster component count matches expected (currently 375)
+
+Then export:
+```powershell
+pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
+```
+
+### Future: Build-SpaarkeMaster.ps1 (V2)
+
+A `Build-SpaarkeMaster.ps1` script will automate the solution composition:
+- Create/recreate SpaarkeMaster solution in dev
+- Add all components programmatically using the identification logic above
+- Verify component count
+- Export to ZIP
+
+This eliminates manual solution management and ensures reproducible builds.
 
 ---
 
@@ -352,156 +499,106 @@ curl https://api.spaarke.com/ping        # Should return 200
 
 ---
 
-## Phase 3: Deploy Dataverse Solutions
+## Phase 3: Deploy Dataverse Solution (SpaarkeMaster)
 
-Import all managed solutions to the target Dataverse environment in dependency order.
+Import the SpaarkeMaster solution to the target Dataverse environment. This is a single unmanaged solution containing all Spaarke platform components (see [Deployment Package](#deployment-package-spaarkemaster-solution) above).
 
-### Deployment
+### Export from Dev
+
+Before deploying to any target, export SpaarkeMaster from the dev environment:
 
 ```powershell
-.\scripts\Deploy-DataverseSolutions.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
-    -TenantId "a221a95e-..." `
-    -ClientId "..." `
-    -ClientSecret "..."
+# Ensure PAC CLI is connected to dev
+pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
+
+# Export SpaarkeMaster
+pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
 ```
 
-### Import Order (Dependency Tiers)
+### Import to Target
 
-Solutions are imported in strict dependency order:
+```powershell
+# Connect PAC CLI to target environment
+pac auth select --environment "https://spaarke-demo.crm.dynamics.com"
 
-| Tier | Solution | Dependencies |
-|------|----------|-------------|
-| 1 | **SpaarkeCore** | None (base entities, option sets, security roles) |
-| 2 | **webresources** | SpaarkeCore (JS files for forms/ribbons) |
-| 3 | CalendarSidePane | SpaarkeCore |
-| 3 | DocumentUploadWizard | SpaarkeCore |
-| 3 | EventCommands | SpaarkeCore |
-| 3 | EventDetailSidePane | SpaarkeCore |
-| 3 | EventsPage | SpaarkeCore |
-| 3 | LegalWorkspace | SpaarkeCore |
-| 3 | TodoDetailSidePane | SpaarkeCore |
+# Import SpaarkeMaster
+pac solution import --path ./deploy/SpaarkeMaster.zip --publish-changes
 
-**SpaarkeCore must import first** — all other solutions depend on it. The script handles this automatically.
+# Or via Deploy-Release.ps1 which handles this automatically
+.\scripts\Deploy-Release.ps1 `
+    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
+    -Version "v1.1.0"
+```
+
+### What Gets Imported
+
+A single import of SpaarkeMaster deploys:
+- 87 custom entities (full schema, forms, views, relationships)
+- 4 standard entity customizations (sprk_ columns on account, contact, systemuser, businessunit)
+- 195 web resources (HTML pages, JS bundles, CSS, SVG icons)
+- 11 PCF custom controls
+- 24 global option sets
+- 7 security roles
+- 21 environment variable definitions + values
+- 4 sitemaps, entity relationships, plugin registrations
+
+**Note**: Environment variable **values** will be imported from dev. After first import to a new target, update environment-specific values (BFF URL, tenant ID, etc.) — see Phase 5 validation.
 
 ### Preview Without Deploying
 
 ```powershell
-.\scripts\Deploy-DataverseSolutions.ps1 `
+.\scripts\Deploy-Release.ps1 `
     -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
-    -TenantId "..." -ClientId "..." -ClientSecret "..." `
     -WhatIf
 ```
 
-### Import Subset
-
-```powershell
-# Only import specific solutions (e.g., after targeted changes)
-.\scripts\Deploy-DataverseSolutions.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
-    -TenantId "..." -ClientId "..." -ClientSecret "..." `
-    -SolutionsToImport @("SpaarkeCore", "LegalWorkspace")
-```
-
-### Parameters Reference
-
-| Parameter | Type | Required | Notes |
-|-----------|------|----------|-------|
-| `-EnvironmentUrl` | string | Yes | Dataverse URL (e.g., `https://spaarke-demo.crm.dynamics.com`) |
-| `-TenantId` | string | Yes | Azure AD tenant ID |
-| `-ClientId` | string | Yes | Service principal client ID |
-| `-ClientSecret` | string | Yes* | Mutually exclusive with `-CertificateThumbprint` |
-| `-CertificateThumbprint` | string | Yes* | Mutually exclusive with `-ClientSecret` |
-| `-SolutionsToImport` | string[] | No | Subset of solutions to import |
-| `-SkipVerification` | switch | No | Skip post-import verification |
-
-**GATE**: All solution imports must succeed and verify before proceeding to web resources.
+**GATE**: Solution import must succeed before proceeding. Check for import errors in the Power Platform Admin Center if the import fails.
 
 ---
 
-## Phase 4: Deploy Web Resources
+## Phase 4: Publish Customizations
 
-Deploy all web resources (HTML pages, JavaScript bundles, CSS, SVG icons) to the target Dataverse environment.
+With SpaarkeMaster imported, all web resources, PCF controls, and schema changes are already in the target environment. This phase ensures all changes are published and visible to users.
 
-### Automated Deployment (Recommended)
-
-```powershell
-.\scripts\Deploy-AllWebResources.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
-```
-
-### What Gets Deployed
-
-The orchestrator calls these scripts in order:
-
-| # | Script | Web Resources | Count |
-|---|--------|--------------|-------|
-| 1 | `Deploy-CorporateWorkspace.ps1` | sprk_corporateworkspace (HTML) | 1 |
-| 2 | `Deploy-ExternalWorkspaceSpa.ps1` | sprk_externalworkspace (HTML + inline JS) | 1 |
-| 3 | `Deploy-SpeAdminApp.ps1` | sprk_speadmin (HTML) | 1 |
-| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources | 12 |
-| 5 | `Deploy-EventsPage.ps1` | sprk_eventspage.html | 1 |
-| 6 | `Deploy-PCFWebResources.ps1` | PCF bundle.js + CSS | 2 |
-| 7 | `Deploy-RibbonIcons.ps1` | 3 SVG ribbon icons | 3 |
-
-**Total**: ~21 web resources per environment.
-
-### Individual Script Invocations
-
-If you need to deploy a single component:
+### Publish All
 
 ```powershell
-# Corporate Workspace
-.\scripts\Deploy-CorporateWorkspace.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
-
-# External SPA (Vite build with inline JS)
-.\scripts\Deploy-ExternalWorkspaceSpa.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
-
-# SPE Admin App
-.\scripts\Deploy-SpeAdminApp.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
-
-# All Wizard Code Pages (12 web resources)
-.\scripts\Deploy-WizardCodePages.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
-
-# Events Page
-.\scripts\Deploy-EventsPage.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
-
-# PCF Control Bundles
-.\scripts\Deploy-PCFWebResources.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
-
-# Ribbon Icons
-.\scripts\Deploy-RibbonIcons.ps1
+# Publish all customizations in the target environment
+pac org publish --async
 ```
 
-### Additional Web Resources
+### Verify Web Resources
 
-These are not included in the standard orchestrator but may be needed:
+Spot-check that key web resources were imported correctly:
 
 ```powershell
-# Smart Todo (if changed)
-.\scripts\Deploy-SmartTodo.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+# Use the Dataverse Web API to verify a few key web resources exist
+$token = az account get-access-token --resource "https://spaarke-demo.crm.dynamics.com" --query accessToken -o tsv
+$headers = @{ "Authorization" = "Bearer $token"; "OData-Version" = "4.0" }
 
-# Theme Icons (if changed)
-.\scripts\Deploy-ThemeIcons.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+# Check corporate workspace
+Invoke-RestMethod -Uri "https://spaarke-demo.crm.dynamics.com/api/data/v9.2/webresourceset?`$filter=name eq 'sprk_corporateworkspace'&`$select=name,displayname" -Headers $headers
 
-# Theme Menu JS (if changed)
-.\scripts\Deploy-ThemeMenuJs.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+# Check a PCF control
+Invoke-RestMethod -Uri "https://spaarke-demo.crm.dynamics.com/api/data/v9.2/customcontrols?`$filter=contains(name,'SemanticSearchControl')&`$select=name,version" -Headers $headers
 ```
 
-### Authentication Notes
+### Dev-Only: Updating Web Resources Without Full Solution Import
 
-- **Azure CLI scripts** (Deploy-CorporateWorkspace, Deploy-ExternalWorkspaceSpa, Deploy-SpeAdminApp, Deploy-WizardCodePages, Deploy-EventsPage): Use `az account get-access-token` — requires `az login`.
-- **PAC CLI scripts** (Deploy-PCFWebResources, Deploy-RibbonIcons): Use authenticated PAC CLI session — requires `pac auth create`.
+During development, individual web resources can be updated without re-exporting and re-importing SpaarkeMaster. These scripts upload directly to the dev environment:
 
-### Skip Specific Components
+| Script | Purpose |
+|--------|---------|
+| `Deploy-CorporateWorkspace.ps1` | Upload sprk_corporateworkspace HTML |
+| `Deploy-WizardCodePages.ps1` | Upload 12 wizard/code page web resources |
+| `Deploy-EventsPage.ps1` | Upload sprk_eventspage HTML |
+| `Deploy-SpeAdminApp.ps1` | Upload sprk_speadmin HTML |
+| `Deploy-PCFWebResources.ps1` | Upload PCF bundle.js + CSS |
+| `Deploy-RibbonIcons.ps1` | Upload SVG ribbon icons |
 
-```powershell
-.\scripts\Deploy-AllWebResources.ps1 `
-    -DataverseUrl "https://spaarke-demo.crm.dynamics.com" `
-    -SkipComponent "RibbonIcons","PCFWebResources"
-```
+These are **development iteration tools**, not part of the production release flow. For production releases, all web resources are included in the SpaarkeMaster solution import.
 
-**GATE**: Web resource deployment summary must show all components succeeded.
+**GATE**: `pac org publish` must complete without errors.
 
 ---
 
