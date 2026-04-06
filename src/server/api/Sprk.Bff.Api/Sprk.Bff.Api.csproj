@@ -34,7 +34,7 @@
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
     <!-- Azure.AI.OpenAI 2.8.0-beta.1: restores compat with OpenAI 2.8.0 (2.1.0 threw MissingMethodException on SerializedAdditionalRawData) -->
     <PackageReference Include="Azure.AI.OpenAI" Version="2.8.0-beta.1" />
-    <PackageReference Include="Azure.Identity" Version="1.17.1" />
+    <PackageReference Include="Azure.Identity" Version="1.20.0" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.27.0" />
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.18.1" />
     <PackageReference Include="Azure.Search.Documents" Version="11.6.0" />
@@ -46,7 +46,7 @@
     <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.5" />
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
     <PackageReference Include="Microsoft.Graph" Version="5.101.0" />
@@ -61,7 +61,7 @@
 
     <!-- Microsoft Identity (CRITICAL - must be 3.x or higher) -->
     <!-- Identity.Web 3.8.2+ fixes CVE-2025-32016; requires Identity.Client >= 4.70.0 -->
-    <PackageReference Include="Microsoft.Identity.Client" Version="4.79.2" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.83.3" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.3.0" />
     <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="4.3.0" />
     <!-- MimeKit 4.15.1: fixes CVE-2026-30227 (CRLF injection in SMTP envelope address) -->
