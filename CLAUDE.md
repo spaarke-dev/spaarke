@@ -702,6 +702,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "create tasks", "decompose plan", "generate tasks" | `task-create` | Load `.claude/skills/task-create/SKILL.md` and follow procedure |
 | "review code", "code review" | `code-review` | Load `.claude/skills/code-review/SKILL.md` and follow checklist |
 | "check ADRs", "validate architecture" | `adr-check` | Load `.claude/skills/adr-check/SKILL.md` and validate |
+| "deploy release", "new release", "production release", "deploy to production", "release to production" | `deploy-new-release` | Load `.claude/skills/deploy-new-release/SKILL.md` and follow procedure |
 | "deploy to azure", "deploy api", "azure deployment", "deploy infrastructure" | `azure-deploy` | Load `.claude/skills/azure-deploy/SKILL.md` and follow procedure |
 | "deploy to dataverse", "pac pcf push", "solution import", "deploy control", "publish customizations" | `dataverse-deploy` | Load `.claude/skills/dataverse-deploy/SKILL.md` and follow procedure |
 | "edit ribbon", "add ribbon button", "ribbon customization", "command bar button" | `ribbon-edit` | Load `.claude/skills/ribbon-edit/SKILL.md` and follow procedure |
@@ -747,6 +748,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Inspecting Dataverse table structure or querying data | Use `mcp__dataverse__*` tools directly (no skill required) |
 | Exploring entity relationships or field definitions before coding | Use `mcp__dataverse__describe_table` for current schema state |
 | Creating or verifying Dataverse schema during development | Use MCP tools for inspection; `dataverse-create-schema` skill for scripted creation |
+| User says "deploy release", "new release", or "production release" | Run `deploy-new-release` for interactive release deployment |
 
 ### Always-Apply Skills
 
@@ -772,6 +774,7 @@ Use these commands to explicitly invoke skills:
 | `/repo-cleanup` | Repository hygiene audit and ephemeral file cleanup |
 | `/code-review` | Review recent changes |
 | `/adr-check` | Validate ADR compliance |
+| `/deploy-new-release` | Interactive production release — pre-flight, env selection, deploy, validate, tag |
 | `/azure-deploy` | Deploy Azure infrastructure, BFF API, or configure App Service |
 | `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
 | `/power-page-deploy` | Build external SPA and deploy to Dataverse as `sprk_externalworkspace` web resource |

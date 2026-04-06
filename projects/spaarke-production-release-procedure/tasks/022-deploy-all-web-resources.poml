@@ -1,0 +1,97 @@
+<task id="PRPR-022" project="Production Release Procedure">
+  <metadata>
+    <title>Create Deploy-AllWebResources.ps1</title>
+    <status>complete</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>powershell, deploy, automation</tags>
+    <phase>3</phase>
+    <dependencies>
+      <dependency task="PRPR-010" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Create `scripts/Deploy-AllWebResources.ps1` — the web resource deployment orchestrator that
+    deploys all web resources to a single Dataverse environment by calling existing individual
+    deploy scripts. Must NOT reimplement any deploy logic — only call existing scripts.
+
+    Calls: Deploy-CorporateWorkspace.ps1, Deploy-ExternalWorkspaceSpa.ps1, Deploy-SpeAdminApp.ps1,
+    Deploy-WizardCodePages.ps1, Deploy-EventsPage.ps1, Deploy-PCFWebResources.ps1, Deploy-RibbonIcons.ps1.
+  </prompt>
+
+  <role>
+    Senior PowerShell developer familiar with Dataverse web resource deployment.
+  </role>
+
+  <goal>
+    A working `scripts/Deploy-AllWebResources.ps1` that deploys all web resources to a Dataverse
+    environment by calling existing deploy scripts with proper error handling and reporting.
+  </goal>
+
+  <constraints>
+    <constraint source="spec-FR-07">MUST call existing deploy scripts — do NOT reimplement their logic</constraint>
+    <constraint source="spec-FR-03">Must support -DataverseUrl (required), -WhatIf, -SkipComponent</constraint>
+    <constraint source="spec-FR-03">Must provide summary report of successes/failures</constraint>
+    <constraint source="project">Sequential deployment — no parallel component deploys</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse deployment, web resources, PAC CLI</topic>
+    <files>
+      <file>projects/spaarke-production-release-procedure/spec.md</file>
+      <file>projects/spaarke-production-release-procedure/CLAUDE.md</file>
+      <file>docs/procedures/production-release.md</file>
+      <file>scripts/Deploy-CorporateWorkspace.ps1</file>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+      <file>scripts/Deploy-SpeAdminApp.ps1</file>
+      <file>scripts/Deploy-WizardCodePages.ps1</file>
+      <file>scripts/Deploy-EventsPage.ps1</file>
+      <file>scripts/Deploy-PCFWebResources.ps1</file>
+      <file>scripts/Deploy-RibbonIcons.ps1</file>
+      <file>scripts/README.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This orchestrator is called by Deploy-Release.ps1 as Phase 3 (web resources) of the release.
+      Each individual deploy script handles its own authentication, encoding, and error handling.
+      This script only needs to call them in order and aggregate results.
+    </background>
+    <dependencies>
+      <dependency task="PRPR-010" status="not-started">
+        Procedure guide defines the deployment order
+      </dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Study deploy scripts">Read each deploy script to understand parameters and invocation patterns</step>
+    <step order="2" name="Identify common parameters">Find which parameters each script needs (DataverseUrl, auth, etc.)</step>
+    <step order="3" name="Write script skeleton">Parameters (DataverseUrl, WhatIf, SkipComponent), CmdletBinding</step>
+    <step order="4" name="Implement deployment calls">Call each script in order, passing through common parameters</step>
+    <step order="5" name="Add error handling">Catch failures, continue or stop based on severity</step>
+    <step order="6" name="Add summary report">Table of component → status → duration at end</step>
+    <step order="7" name="Add -SkipComponent">Support skipping specific components</step>
+    <step order="8" name="Test -WhatIf">Verify WhatIf passes through to sub-scripts</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Deploy-AllWebResources.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/Deploy-AllWebResources.ps1 exists and is valid PowerShell</criterion>
+    <criterion testable="true">Calls all 7 individual deploy scripts</criterion>
+    <criterion testable="true">Does NOT reimplement any deploy logic</criterion>
+    <criterion testable="true">-DataverseUrl parameter is required</criterion>
+    <criterion testable="true">-WhatIf previews without deploying</criterion>
+    <criterion testable="true">-SkipComponent excludes specific components</criterion>
+    <criterion testable="true">Summary report shows success/failure per component</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,80 @@
+<task id="PRPR-020" project="Production Release Procedure">
+  <metadata>
+    <title>Create Environment Registry</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>Claude Code</assigned>
+    <tags>configuration, infrastructure</tags>
+    <phase>3</phase>
+    <dependencies>
+      <dependency task="PRPR-010" />
+    </dependencies>
+  </metadata>
+
+  <prompt>
+    Create `config/environments.json` — the environment registry that maps environment names
+    to their Azure resource details (Dataverse URL, BFF API URL, App Service, Key Vault, etc.).
+    This file is consumed by Deploy-Release.ps1 and the Claude Code skill.
+  </prompt>
+
+  <role>
+    Infrastructure engineer familiar with Azure resource naming conventions and Spaarke environments.
+  </role>
+
+  <goal>
+    A well-structured `config/environments.json` that maps environment names to all required
+    Azure resource details, with the demo environment fully populated.
+  </goal>
+
+  <constraints>
+    <constraint source="spec-FR-05">Must map Dataverse URLs to associated Azure resources</constraint>
+    <constraint source="project">Demo environment uses https://spaarke-demo.crm.dynamics.com</constraint>
+    <constraint source="project">BFF URL must be host-only (no /api suffix)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure resources, environment configuration</topic>
+    <files>
+      <file>projects/spaarke-production-release-procedure/spec.md</file>
+      <file>projects/spaarke-production-release-procedure/CLAUDE.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>scripts/Provision-Customer.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The environment registry centralizes all environment-specific configuration. Deploy-Release.ps1
+      will look up environments by name or URL. The Claude Code skill will present available
+      environments for the operator to choose.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Study existing config">Check for any existing environment configuration files</step>
+    <step order="2" name="Study Provision-Customer.ps1">Understand what resource details are needed per environment</step>
+    <step order="3" name="Design schema">Define JSON schema with all required fields per environment</step>
+    <step order="4" name="Populate demo env">Fill in demo environment details from CLAUDE.md and Azure docs</step>
+    <step order="5" name="Add dev env">Add dev environment (spaarkedev1) for testing</step>
+    <step order="6" name="Add template">Add a template entry for new customer environments</step>
+    <step order="7" name="Validate">Verify all URLs and resource names are correct</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">config/environments.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">config/environments.json exists and is valid JSON</criterion>
+    <criterion testable="true">Demo environment entry has dataverseUrl, bffApiUrl, appServiceName, resourceGroup, keyVaultName</criterion>
+    <criterion testable="true">Dev environment entry populated for testing</criterion>
+    <criterion testable="true">BFF URLs are host-only (no /api suffix)</criterion>
+    <criterion testable="true">Schema is extensible for additional environments</criterion>
+  </acceptance-criteria>
+</task>
