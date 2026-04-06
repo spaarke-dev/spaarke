@@ -20,7 +20,7 @@
 | 030 | PRPR-030 | Create deploy-new-release Claude Code Skill | 4 | ✅ | 023 | 3h |
 | 031 | PRPR-031 | Register deploy-new-release Skill | 4 | ✅ | 030 | 1h |
 | 032 | PRPR-032 | Update scripts/README.md | 4 | ✅ | 021, 022, 023 | 1h |
-| 040 | PRPR-040 | Dry-Run Against Dev | 5 | 🔲 | 023, 030 | 2h |
+| 040 | PRPR-040 | Dry-Run Against Dev | 5 | ✅ | 023, 030 | 2h |
 | 041 | PRPR-041 | Live Test Against Demo | 5 | 🔲 | 040 | 3h |
 | 090 | PRPR-090 | Project Wrap-Up | wrap-up | 🔲 | 041 | 1h |
 

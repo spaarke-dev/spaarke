@@ -1,7 +1,7 @@
 <task id="PRPR-040" project="Production Release Procedure">
   <metadata>
     <title>Dry-Run Against Dev Environment</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2 hours</estimated-effort>
     <assigned>Claude Code</assigned>
     <tags>testing, verification</tags>
