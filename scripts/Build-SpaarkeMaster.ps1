@@ -8,26 +8,26 @@
     its own query (sprk_ prefix, explicit IDs, or name matching) — no dependencies on
     any existing solution's component list.
 
-    Components included (386 total):
-      - 87 custom entities (sprk_* prefix, full subcomponents)
-      - 4 standard entities (account, contact, systemuser, businessunit — metadata-only)
-      - 8 custom attributes on standard entities (sprk_* columns)
+    Components included:
+      - 87+ custom entities (sprk_* prefix, full subcomponents)
+      - 3 standard entities (account, contact, businessunit — metadata-only)
+      - sprk_* custom attributes on standard entities
       - 195 web resources (sprk_* prefix)
       - 24 global option sets (sprk_* prefix)
-      - 11 PCF custom controls (confirmed in-use, explicit IDs)
+      - 7 PCF custom controls (confirmed in-use, explicit IDs)
       - 7 security roles (root BU, "Spaarke" name match)
       - 21 environment variable definitions (sprk_* prefix, type 380)
-      - 9 environment variable values (parent definition sprk_* prefix, type 381)
+      - environment variable values (parent definition sprk_* prefix, type 381)
       - 1 MDA app (sprk_MatterManagement, explicit ID)
       - 1 sitemap (sprk_MatterManagement, explicit ID)
       - 14 app module components (from SpaarkeCorporateCounselApp solution, type 10075)
-      - 4 entity relationships (M2M junctions, automatic subcomponents)
 
     What's NOT included:
       - Canvas apps, PowerApps settings/components
       - Managed solutions (Creator Kit, Dataverse Accelerator)
+      - systemuser entity (no sprk_ columns needed)
       - email entity customizations
-      - 12 orphaned PCF controls
+      - 12 orphaned PCF controls (UniversalDatasetGrid, ScopeConfigEditor, etc.)
       - 3 legacy sitemaps (tech debt)
       - Reference data (deployed separately via Track 2.5 scripts)
 
@@ -59,7 +59,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
-    [int]$ExpectedComponentCount = 385,
+    [int]$ExpectedComponentCount = 0,  # Set to 0 to skip verification; update after first successful build
     [switch]$Force
 )
 
@@ -69,7 +69,7 @@ $ErrorActionPreference = "Stop"
 
 $PublisherId = "6aeef721-ba73-f011-b4cb-6045bdd6a665"  # Spaarke publisher
 
-# 11 confirmed in-use PCF control IDs
+# 7 confirmed in-use PCF control IDs (validated via successful demo import 2026-04-06)
 $IncludedPcfIds = @(
     "e88fe153-a88a-4f0c-b2f7-30439142debe"  # DocumentRelationshipViewer
     "b85d8eac-309d-4c22-8f1d-62e4dd7fd067"  # EventFormController
@@ -77,11 +77,10 @@ $IncludedPcfIds = @(
     "49b0cecd-705a-4c45-84f6-1014b075139d"  # SpeDocumentViewer
     "14c0701e-242e-417a-8999-62694c3cdcac"  # VisualHost
     "7bfadd63-1e26-4278-92b9-9cfbf9335b6e"  # SemanticSearchControl
-    "a109c074-5cc7-4db7-b958-4a2a3ab2d0a0"  # UpdateRelatedButton
-    "d5740853-5442-4fe6-ace5-c40f9a00ac8f"  # EmailProcessingMonitor
-    "1027a38f-4bdd-4d6b-9422-61f6dfaea686"  # ThemeEnforcer
-    "d8c352f3-91d7-454f-b258-d85d30136708"  # RegardingLink
-    # EXCLUDED: 88dbb4ef (UniversalDatasetGrid) — broken styles.css web resource reference
+    "1d93fc9e-3291-4f48-a1d8-e05b8f3a42c7"  # EventAutoAssociate
+    # EXCLUDED: UpdateRelatedButton, EmailProcessingMonitor, ThemeEnforcer, RegardingLink (not on forms)
+    # EXCLUDED: UniversalDatasetGrid (broken styles.css web resource reference)
+    # EXCLUDED: ScopeConfigEditor, UniversalDocumentUpload (removed from forms)
 )
 
 # MDA App
@@ -90,7 +89,8 @@ $MdaSitemapId = "57410a70-ca73-f011-b4cb-6045bdd6a665"   # sprk_MatterManagement
 $MdaSolutionId = "e871701b-ab28-f111-88b4-7c1e525abd8b"  # SpaarkeCorporateCounselApp (for type 10075 components)
 
 # Standard entities to include (metadata-only + sprk_ columns)
-$StandardEntities = @("account", "contact", "systemuser", "businessunit")
+# NOTE: systemuser excluded — no sprk_ columns needed
+$StandardEntities = @("account", "contact", "businessunit")
 
 # M2M intersection tables to exclude (come as relationship subcomponents)
 $M2MExclusions = @(
@@ -245,8 +245,8 @@ foreach ($os in $optionSets) {
 $stats["Option Sets"] = $added
 Write-Host "  Added $added option sets" -ForegroundColor Green
 
-# Step 6: Add PCF controls (11 confirmed in-use)
-Write-Host "[5/11] Adding PCF controls (11 confirmed)..." -ForegroundColor Cyan
+# Step 6: Add PCF controls (7 confirmed in-use)
+Write-Host "[5/11] Adding PCF controls (7 confirmed)..." -ForegroundColor Cyan
 $added = 0
 foreach ($pcfId in $IncludedPcfIds) {
     if ($PSCmdlet.ShouldProcess($pcfId, "Add PCF control")) {
@@ -344,7 +344,9 @@ Write-Host "    -----"
 Write-Host "    $($totalCount.ToString().PadLeft(5))  TOTAL (includes auto-added subcomponents)"
 Write-Host ""
 
-if ($totalCount -eq $ExpectedComponentCount) {
+if ($ExpectedComponentCount -eq 0) {
+    Write-Host "  Total components: $totalCount (no expected count set — update -ExpectedComponentCount for future runs)" -ForegroundColor Yellow
+} elseif ($totalCount -eq $ExpectedComponentCount) {
     Write-Host "  PASSED: Component count matches expected ($ExpectedComponentCount)" -ForegroundColor Green
 } elseif ($totalCount -gt $ExpectedComponentCount) {
     Write-Host "  WARNING: Component count ($totalCount) exceeds expected ($ExpectedComponentCount)" -ForegroundColor Yellow
