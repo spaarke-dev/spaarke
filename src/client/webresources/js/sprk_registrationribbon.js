@@ -54,7 +54,13 @@ var SPRK_REG_CONFIG = {
         REVOKED: 5
     },
 
-    version: "1.0.0"
+    // Available demo environments (must match server config)
+    environments: [
+        { name: "Dev", label: "Dev (spaarkedev1)" },
+        { name: "Demo 1", label: "Demo 1 (spaarke-demo)" }
+    ],
+
+    version: "1.1.0"
 };
 
 var SPRK_REG_LOG = "[Sprk.RegistrationRibbon]";
@@ -304,6 +310,90 @@ function _sprkReg_cleanGuid(guid) {
 }
 
 // ============================================================================
+// ENVIRONMENT PICKER
+// ============================================================================
+
+/**
+ * Show an environment selection dialog before approval.
+ * Returns the selected environment name or null if cancelled.
+ *
+ * @returns {Promise<string|null>} Selected environment name, or null if cancelled
+ */
+function _sprkReg_promptForEnvironment() {
+    return new Promise(function (resolve) {
+        try {
+            var targetDoc = window.top ? window.top.document : document;
+            var envs = SPRK_REG_CONFIG.environments;
+
+            var overlay = targetDoc.createElement("div");
+            overlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;";
+
+            var dialog = targetDoc.createElement("div");
+            dialog.style.cssText = "background:#ffffff;border-radius:8px;padding:24px;min-width:360px;max-width:440px;box-shadow:0 8px 32px rgba(0,0,0,0.24);";
+
+            var titleEl = targetDoc.createElement("h2");
+            titleEl.style.cssText = "margin:0 0 8px 0;font-size:18px;font-weight:600;color:#242424;";
+            titleEl.textContent = "Select Environment";
+            dialog.appendChild(titleEl);
+
+            var promptEl = targetDoc.createElement("p");
+            promptEl.style.cssText = "margin:0 0 16px 0;font-size:14px;color:#616161;";
+            promptEl.textContent = "Which environment should this user be provisioned in?";
+            dialog.appendChild(promptEl);
+
+            var select = targetDoc.createElement("select");
+            select.style.cssText = "width:100%;padding:8px 12px;border:1px solid #d1d1d1;border-radius:4px;font-size:14px;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;box-sizing:border-box;";
+
+            for (var i = 0; i < envs.length; i++) {
+                var opt = targetDoc.createElement("option");
+                opt.value = envs[i].name;
+                opt.textContent = envs[i].label;
+                select.appendChild(opt);
+            }
+            dialog.appendChild(select);
+
+            var buttonContainer = targetDoc.createElement("div");
+            buttonContainer.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:16px;";
+
+            var cancelBtn = targetDoc.createElement("button");
+            cancelBtn.style.cssText = "padding:6px 16px;border:1px solid #d1d1d1;border-radius:4px;background:#ffffff;color:#242424;font-size:14px;cursor:pointer;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;";
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.onclick = function () { cleanup(); resolve(null); };
+            buttonContainer.appendChild(cancelBtn);
+
+            var approveBtn = targetDoc.createElement("button");
+            approveBtn.style.cssText = "padding:6px 16px;border:1px solid #0f6cbd;border-radius:4px;background:#0f6cbd;color:#ffffff;font-size:14px;cursor:pointer;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;";
+            approveBtn.textContent = "Approve";
+            approveBtn.onclick = function () { cleanup(); resolve(select.value); };
+            buttonContainer.appendChild(approveBtn);
+
+            dialog.appendChild(buttonContainer);
+            overlay.appendChild(dialog);
+
+            function onKeyDown(e) {
+                if (e.key === "Escape") { cleanup(); resolve(null); }
+            }
+
+            function cleanup() {
+                try {
+                    targetDoc.removeEventListener("keydown", onKeyDown);
+                    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                } catch (err) { console.log(SPRK_REG_LOG, "Cleanup error:", err); }
+            }
+
+            targetDoc.addEventListener("keydown", onKeyDown);
+            targetDoc.body.appendChild(overlay);
+            select.focus();
+
+        } catch (domError) {
+            // Fallback: use default environment if DOM manipulation fails
+            console.log(SPRK_REG_LOG, "Environment picker DOM failed, using default:", domError);
+            resolve(null); // null = server uses default
+        }
+    });
+}
+
+// ============================================================================
 // APPROVE FUNCTIONS
 // ============================================================================
 
@@ -349,9 +439,16 @@ async function approveRequest(gridControl) {
             names.push(item.Name || item.name || ("Request " + (i + 1)));
         }
 
+        // Prompt for environment selection
+        var selectedEnvironment = await _sprkReg_promptForEnvironment();
+        if (selectedEnvironment === null) {
+            console.log(SPRK_REG_LOG, "Approval cancelled by user (environment selection)");
+            return;
+        }
+
         var confirmText = selectedItems.length === 1
-            ? "Approve demo access for " + names[0] + "?\n\nThis will provision their demo account."
-            : "Approve demo access for " + selectedItems.length + " requests?\n\n" + names.join("\n") + "\n\nThis will provision demo accounts for all selected requests.";
+            ? "Approve demo access for " + names[0] + " in " + selectedEnvironment + "?\n\nThis will provision their demo account."
+            : "Approve demo access for " + selectedItems.length + " requests in " + selectedEnvironment + "?\n\n" + names.join("\n") + "\n\nThis will provision demo accounts for all selected requests.";
 
         // Show confirmation dialog
         var confirmResult = await Xrm.Navigation.openConfirmDialog({
@@ -384,11 +481,12 @@ async function approveRequest(gridControl) {
                 "Approving request " + (j + 1) + " of " + selectedItems.length + ": " + requestName + "..."
             );
 
-            console.log(SPRK_REG_LOG, "Approving:", requestId, requestName);
+            console.log(SPRK_REG_LOG, "Approving:", requestId, requestName, "Environment:", selectedEnvironment);
 
             var result = await _sprkReg_callBffApi(
                 "POST",
-                "/api/registration/requests/" + requestId + "/approve"
+                "/api/registration/requests/" + requestId + "/approve",
+                { environment: selectedEnvironment }
             );
 
             if (result.ok) {
@@ -475,10 +573,17 @@ async function approveRequestFromForm(formContext) {
         console.log(SPRK_REG_LOG, "Record ID:", recordId);
         console.log(SPRK_REG_LOG, "Record Name:", recordName);
 
+        // Prompt for environment selection
+        var selectedEnvironment = await _sprkReg_promptForEnvironment();
+        if (selectedEnvironment === null) {
+            console.log(SPRK_REG_LOG, "Approval cancelled by user (environment selection)");
+            return;
+        }
+
         // Confirm
         var confirmResult = await Xrm.Navigation.openConfirmDialog({
             title: "Approve Demo Access",
-            text: "Approve demo access for " + recordName + "?\n\nThis will provision their demo account.",
+            text: "Approve demo access for " + recordName + " in " + selectedEnvironment + "?\n\nThis will provision their demo account.",
             confirmButtonLabel: "Approve",
             cancelButtonLabel: "Cancel"
         });
@@ -488,11 +593,12 @@ async function approveRequestFromForm(formContext) {
             return;
         }
 
-        Xrm.Utility.showProgressIndicator("Provisioning demo account...");
+        Xrm.Utility.showProgressIndicator("Provisioning demo account in " + selectedEnvironment + "...");
 
         var result = await _sprkReg_callBffApi(
             "POST",
-            "/api/registration/requests/" + recordId + "/approve"
+            "/api/registration/requests/" + recordId + "/approve",
+            { environment: selectedEnvironment }
         );
 
         Xrm.Utility.closeProgressIndicator();

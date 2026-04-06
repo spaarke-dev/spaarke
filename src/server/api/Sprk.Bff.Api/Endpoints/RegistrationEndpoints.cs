@@ -173,6 +173,10 @@ public static class RegistrationEndpoints
             _ = SendAdminNotificationAsync(
                 emailService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier);
 
+            // Send acknowledgement email to applicant (fire-and-forget)
+            _ = SendAcknowledgementEmailAsync(
+                emailService, trackingId, request, logger, httpContext.TraceIdentifier);
+
             return Results.Accepted(
                 uri: null,
                 value: new DemoRequestResponse
@@ -201,6 +205,7 @@ public static class RegistrationEndpoints
     /// </summary>
     private static async Task<IResult> ApproveRequest(
         Guid id,
+        ApproveRequestDto? approveRequest,
         RegistrationDataverseService dataverseService,
         DemoProvisioningService provisioningService,
         IOptions<DemoProvisioningOptions> options,
@@ -233,15 +238,26 @@ public static class RegistrationEndpoints
 
         try
         {
-            logger.LogInformation(
-                "Approving registration request {RequestId} for {Email}, TraceId={TraceId}",
-                id, existingRequest.Email, httpContext.TraceIdentifier);
-
-            // Resolve the default demo environment for provisioning
+            // Resolve environment: use admin-specified or fall back to default
             var provisioningOptions = options.Value;
+            var environmentName = approveRequest?.Environment ?? provisioningOptions.DefaultEnvironment;
+
             var environment = provisioningOptions.Environments
-                .FirstOrDefault(e => e.Name == provisioningOptions.DefaultEnvironment)
-                ?? provisioningOptions.Environments.First();
+                .FirstOrDefault(e => string.Equals(e.Name, environmentName, StringComparison.OrdinalIgnoreCase));
+
+            if (environment == null)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Bad Request",
+                    detail: $"Environment '{environmentName}' is not configured. Available environments: {string.Join(", ", provisioningOptions.Environments.Select(e => e.Name))}.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                    extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            }
+
+            logger.LogInformation(
+                "Approving registration request {RequestId} for {Email}, Environment={Environment}, TraceId={TraceId}",
+                id, existingRequest.Email, environment.Name, httpContext.TraceIdentifier);
 
             var provisionResult = await provisioningService.ProvisionDemoAccessAsync(
                 existingRequest, environment, cancellationToken);
@@ -409,6 +425,38 @@ public static class RegistrationEndpoints
                 ex,
                 "Failed to send admin notification for TrackingId={TrackingId}, TraceId={TraceId} — {ErrorMessage}",
                 trackingId, traceIdentifier, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Sends acknowledgement email to applicant as fire-and-forget (must not block the HTTP response).
+    /// </summary>
+    private static async Task SendAcknowledgementEmailAsync(
+        RegistrationEmailService emailService,
+        string trackingId,
+        DemoRequestDto request,
+        ILogger logger,
+        string traceIdentifier)
+    {
+        try
+        {
+            await emailService.SendAcknowledgementEmailAsync(
+                recipientEmail: request.Email,
+                firstName: request.FirstName,
+                lastName: request.LastName,
+                organization: request.Organization,
+                trackingId: trackingId);
+
+            logger.LogInformation(
+                "Acknowledgement email sent for TrackingId={TrackingId}, Recipient={Recipient}, TraceId={TraceId}",
+                trackingId, request.Email, traceIdentifier);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Failed to send acknowledgement email for TrackingId={TrackingId}, Recipient={Recipient}, TraceId={TraceId} — {ErrorMessage}",
+                trackingId, request.Email, traceIdentifier, ex.Message);
         }
     }
 
