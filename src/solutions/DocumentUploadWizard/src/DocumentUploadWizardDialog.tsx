@@ -32,7 +32,7 @@ import {
     tokens,
 } from "@fluentui/react-components";
 
-import { getAuthProvider, authenticatedFetch } from "@spaarke/auth";
+import { getAuthProvider, authenticatedFetch, resolveTenantIdSync } from "@spaarke/auth";
 
 import { WizardShell } from "@spaarke/ui-components/components/Wizard";
 import type {
@@ -338,6 +338,15 @@ export function DocumentUploadWizardDialog({
         try {
             const dataverseClient = createCodePageDataverseClient();
 
+            // Resolve tenantId for RAG indexing (Phase 4).
+            // resolveTenantIdSync reads from cached JWT tid claim — fast, synchronous.
+            let tenantId = '';
+            try {
+                tenantId = resolveTenantIdSync() || getAuthProvider().getCachedTenantId();
+            } catch {
+                // Auth may not be initialized; tenantId will be empty and Phase 4 will log a warning
+            }
+
             const result = await orchestrateUpload(
                 nativeFiles,
                 {
@@ -351,6 +360,7 @@ export function DocumentUploadWizardDialog({
                         containerId: effectiveContainerId,
                         parentDisplayName: effectiveParentEntityName,
                     },
+                    tenantId,
                     onUnauthorized: () => {
                         try {
                             getAuthProvider().clearCache();
