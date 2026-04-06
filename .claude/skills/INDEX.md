@@ -42,8 +42,8 @@
 | [ci-cd](ci-cd/SKILL.md) | GitHub Actions CI/CD pipeline status and workflow management | No | `/ci-cd`, "check CI", "build status", "workflow failed" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [conflict-check](conflict-check/SKILL.md) | Detect file conflicts between active PRs and current work | No | `/conflict-check`, "check conflicts", "file overlap" |
-| [dataverse-create-schema](dataverse-create-schema/SKILL.md) | Create/update Dataverse entities, attributes, relationships via Web API | No | "create entity", "add column", "dataverse schema" |
-| [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, plugins, web resources to Dataverse | No | "deploy to dataverse", "deploy solution" |
+| [dataverse-create-schema](dataverse-create-schema/SKILL.md) | Create/update Dataverse entities, attributes, relationships via Web API. Use MCP `describe_table` for schema discovery first. | No | "create entity", "add column", "dataverse schema" |
+| [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, plugins, web resources to Dataverse. Use MCP `describe_table` for post-deployment verification. | No | "deploy to dataverse", "deploy solution" |
 | [pcf-deploy](pcf-deploy/SKILL.md) | Build, pack, and deploy PCF controls via solution ZIP import | No | "deploy pcf", "build and deploy pcf", "pcf solution import" |
 | [code-page-deploy](code-page-deploy/SKILL.md) | Build and deploy React Code Page web resources to Dataverse | No | "deploy code page", "deploy web resource", "build webresource" |
 | [power-page-deploy](power-page-deploy/SKILL.md) | Build and deploy Vite/React SPA to Dataverse as a Power Pages web resource | No | `/power-page-deploy`, "deploy power pages", "deploy spa", "deploy external workspace" |

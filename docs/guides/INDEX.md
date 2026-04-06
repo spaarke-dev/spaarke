@@ -126,6 +126,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
 | [DATAVERSE-AUTHENTICATION-GUIDE.md](DATAVERSE-AUTHENTICATION-GUIDE.md) | Definitive guide for Dataverse authentication | 2026-03-09 | — | — |
+| [DATAVERSE-MCP-INTEGRATION-GUIDE.md](DATAVERSE-MCP-INTEGRATION-GUIDE.md) | Dataverse MCP server setup, 12 tools, usage patterns, troubleshooting | 2026-04-06 | 2026-04-06 | Current |
 | [DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md](DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md) | Creating and updating Dataverse schema | 2026-04-05 | — | — |
 | [HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md](HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md) | SPE container type and container provisioning | 2026-04-05 | — | — |
 | [EVENT-TYPE-CONFIGURATION.md](EVENT-TYPE-CONFIGURATION.md) | Event type configuration | 2026-04-05 | — | — |

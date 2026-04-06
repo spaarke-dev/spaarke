@@ -201,23 +201,42 @@ claude -p "build and test" --dangerously-skip-permissions --output-format json
 
 ### MCP Server Integration
 
-Claude Code can connect to [MCP servers](https://code.claude.com/docs/en/mcp) for external tool access. Configure in settings:
+Claude Code connects to the **Dataverse MCP server** via a local stdio proxy (`@microsoft/dataverse` npm package). Configuration is in `.mcp.json` at the repository root:
 
 ```json
 {
   "mcpServers": {
     "dataverse": {
-      "command": "node",
-      "args": ["mcp-servers/dataverse-server.js"],
-      "env": {
-        "DATAVERSE_URL": "https://spaarkedev1.crm.dynamics.com"
-      }
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@microsoft/dataverse", "mcp", "https://spaarkedev1.crm.dynamics.com"],
+      "env": {}
     }
   }
 }
 ```
 
-MCP tools appear as regular tools and work with permission rules: `mcp__dataverse__query`.
+MCP tools appear as regular tools and work with permission rules. **12 tools available:**
+
+| Tool | Purpose |
+|------|---------|
+| `mcp__dataverse__list_tables` | List all tables (filter by scope) |
+| `mcp__dataverse__describe_table` | T-SQL schema definition |
+| `mcp__dataverse__read_query` | SELECT queries |
+| `mcp__dataverse__create_record` | Insert row |
+| `mcp__dataverse__update_record` | Update row |
+| `mcp__dataverse__delete_record` | Delete row |
+| `mcp__dataverse__search` | Keyword search |
+| `mcp__dataverse__fetch` | Full record by ID |
+| `mcp__dataverse__create_table` | Create table |
+| `mcp__dataverse__update_table` | Add columns |
+| `mcp__dataverse__delete_table` | Delete table |
+| `mcp__dataverse__list_apps` | List model-driven apps |
+
+**When to use MCP tools**: Schema inspection, ad-hoc queries, test data creation, post-deployment verification.
+**When NOT to use**: Bulk operations (use BFF API), solution deployment (use `pac` CLI), runtime data access (use BFF API).
+
+**Setup guide**: [`docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md`](docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md)
 
 ### Session Management
 
@@ -725,6 +744,9 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Starting new project from master | Run `merge-to-master` in audit mode to check for stranded branches |
 | Completing final task in a project | Prompt user to run `merge-to-master` to merge branch into master |
 | Working in a worktree and user says "sync", "update", or "make sure we have everything" | Run `worktree-sync` to guarantee full synchronization |
+| Inspecting Dataverse table structure or querying data | Use `mcp__dataverse__*` tools directly (no skill required) |
+| Exploring entity relationships or field definitions before coding | Use `mcp__dataverse__describe_table` for current schema state |
+| Creating or verifying Dataverse schema during development | Use MCP tools for inspection; `dataverse-create-schema` skill for scripted creation |
 
 ### Always-Apply Skills
 
@@ -864,6 +886,7 @@ We evaluated automated hooks (`PostToolUse` for format-on-edit, `PreToolUse` for
 | Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
 | Document Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
 | Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
+| Dataverse MCP | `https://spaarkedev1.crm.dynamics.com/api/mcp` (via stdio proxy in `.mcp.json`) |
 
 ### Resource Documentation
 

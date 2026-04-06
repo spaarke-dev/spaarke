@@ -244,6 +244,52 @@ run /doc-drift-audit on changes since {commit-or-branch}
 
 ---
 
+## Dataverse Operations (via MCP)
+
+### Scenario: I need to inspect a Dataverse table schema
+
+```
+describe the sprk_matter table
+```
+
+**What happens**: Claude uses `mcp__dataverse__describe_table` to show T-SQL schema — columns, types, lookups, option sets. No manual Web API calls needed.
+
+### Scenario: I need to query Dataverse data
+
+```
+show me all active matters with their assigned attorneys
+```
+
+**What happens**: Claude uses `mcp__dataverse__read_query` to execute a SELECT query directly against Dataverse and returns results.
+
+### Scenario: I need to verify a deployment changed the schema correctly
+
+```
+verify that sprk_workassignment has the new priority field after deployment
+```
+
+**What happens**: Claude uses `mcp__dataverse__describe_table` to confirm the column exists with the correct type.
+
+### Scenario: I need to create test data
+
+```
+create a test matter named "MCP Test" with status Draft
+```
+
+**What happens**: Claude uses `mcp__dataverse__create_record` to insert a row. Requires user confirmation for write operations.
+
+### Scenario: I want to discover what tables exist
+
+```
+list all sprk_ tables in Dataverse
+```
+
+**What happens**: Claude uses `mcp__dataverse__list_tables` and filters to custom tables.
+
+**Setup**: MCP tools are pre-configured in `.mcp.json`. New developers need one-time auth setup — see [`docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md`](../guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md).
+
+---
+
 ## Periodic Maintenance
 
 ### Scenario: I want to check that our docs are accurate
