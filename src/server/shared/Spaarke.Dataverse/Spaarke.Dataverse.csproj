@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.Core" Version="1.50.0" />
+    <PackageReference Include="Azure.Core" Version="1.52.0" />
     <PackageReference Include="Azure.Identity" Version="1.17.1" />
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
@@ -21,7 +21,7 @@
     <!-- CVE-2024-38095 (HIGH): System.Formats.Asn1 6.0.0 → 8.0.1 -->
     <PackageReference Include="System.Formats.Asn1" Version="8.0.1" />
     <!-- CVE-2024-30105 (HIGH): System.Text.Json 7.0.3 → 8.0.5 -->
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.Text.Json" Version="10.0.3" />
     <!-- CVE-2023-29331 (HIGH): System.Security.Cryptography.Pkcs 6.0.1 → 8.0.1 -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
     <!-- CVE-2019-0820 (HIGH): System.Text.RegularExpressions 4.3.0 → 4.3.1 -->
