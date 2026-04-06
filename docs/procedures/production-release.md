@@ -14,13 +14,24 @@
 
 ## Overview
 
-This procedure deploys a Spaarke release to one or more **existing** production environments. It covers building all client components, preparing the dev environment, exporting the SpaarkeMaster solution, deploying the BFF API, importing the solution to target environments, and validating the deployment.
+This procedure deploys a Spaarke release to one or more **existing** production environments. A release has three deployment tracks that together constitute the full platform update.
 
 **Key Distinction**:
 - `Provision-Customer.ps1` = **new environment** (creates infrastructure, Dataverse org, etc.)
 - `Deploy-Release.ps1` = **update existing** (deploys code and solutions to environments that already exist)
 
-Both share the same sub-scripts for solution import, web resource deployment, and validation.
+### Deployment Tracks
+
+A production release deploys across three tracks:
+
+| Track | What | Deployed Via | When |
+|-------|------|-------------|------|
+| **Track 1: Dataverse** | SpaarkeMaster solution (schema, web resources, PCFs, security roles, env vars, MDA app) | `pac solution export` → `pac solution import` | Every release |
+| **Track 2: Azure** | BFF API (.NET 8), Office Add-ins | `Deploy-BffApi.ps1`, `Deploy-OfficeAddins.ps1` | Every release (BFF); if changed (Add-ins) |
+| **Track 2.5: Reference Data** | Playbook definitions, chat context mappings, Copilot agent config | `Deploy-NotificationPlaybooks.ps1`, `Deploy-ChatContextMappings.ps1`, `Deploy-CopilotAgent.ps1` | Every release (idempotent upserts) |
+| **Track 3: Infrastructure** | Azure resources (App Service, OpenAI, AI Search, Key Vault, Power BI) | `Deploy-Platform.ps1`, Bicep templates, `Deploy-ReportingReports.ps1` | Only when infra changes |
+
+**Track 1 assumption**: SpaarkeMaster in dev is production-ready — all web resources and PCF controls contain the latest built code artifacts. No code is built or uploaded during the release itself.
 
 ### Release Phase Diagram
 
@@ -28,10 +39,7 @@ Both share the same sub-scripts for solution import, web resource deployment, an
 Phase 0: Pre-flight (git clean, CI green, auth configured)
          │
          ▼ ─── GATE ───
-Phase 1: Build & prepare dev (build all code, upload to dev, publish)
-         │
-         ▼ ─── GATE ───
-Phase 1.5: Export SpaarkeMaster from dev
+Phase 1: Export SpaarkeMaster from dev
          │  (pac solution export --name SpaarkeMaster)
          │
          ▼ ─── GATE ───
@@ -39,14 +47,15 @@ Phase 1.5: Export SpaarkeMaster from dev
          │  FOR EACH target environment (sequential):  │
          │                                             │
          │  Phase 2: BFF API (Deploy-BffApi.ps1)       │
+         │           + Office Add-ins (if changed)     │
          │           │                                 │
          │           ▼                                 │
          │  Phase 3: Import SpaarkeMaster              │
          │           (pac solution import)             │
          │           │                                 │
          │           ▼                                 │
-         │  Phase 4: Publish customizations            │
-         │           (pac org publish)                 │
+         │  Phase 4: Reference Data + Publish          │
+         │           (playbooks, chat context, publish) │
          │           │                                 │
          │           ▼                                 │
          │  Phase 5: Validation                        │
@@ -88,7 +97,7 @@ Target: Production Dataverse (one or more environments)
 
 ### Component Inventory
 
-SpaarkeMaster contains **375 confirmed components** across these categories:
+SpaarkeMaster contains **386 confirmed components** across these categories:
 
 #### Entities (91)
 
@@ -153,12 +162,13 @@ AssociationResolver, EventAutoAssociate, UniversalDocumentUpload, ScopeConfigEdi
 | Type | Count | Notes |
 |------|-------|-------|
 | Global Option Sets | 24 | All `sprk_*` global choices; entity-level choices come with entities |
+| MDA App Module Components | 14 | Navigation components for the Corporate Counsel app |
 | Security Roles | 7 | Spaarke Basic User, Office Add In User, Reporting (Author/Viewer/Admin), AI Analysis (User/Admin) |
 | Environment Variable Definitions | 21 | All `sprk_*` env vars (BFF URL, tenant ID, AI endpoints, feature flags, etc.) |
 | Environment Variable Values | 9 | Current values (environment-specific — overridden per target) |
 | Entity Relationships | 4 | M2M junction tables (included as relationship components) |
-| Site Maps | 4 | App navigation |
-| Plugin Types | 1 | Dataverse plugin registration |
+| MDA App | 1 | `sprk_MatterManagement` (Corporate Counsel) — the main model-driven app |
+| Site Map | 1 | `sprk_MatterManagement` app navigation (3 legacy sitemaps excluded as tech debt) |
 
 ### Building the SpaarkeMaster Solution
 
@@ -175,33 +185,38 @@ The SpaarkeMaster solution in dev is built programmatically using the Dataverse 
 **What's NOT included**:
 - Canvas apps, PowerApps settings, PowerApps components (not migrating SPAs via solution)
 - Managed solutions (Creator Kit, Dataverse Accelerator — installed separately)
-- The `email` standard entity
-- 12 orphaned PCF controls
+- The `email` standard entity (not using sprk_ customizations on email)
+- 12 orphaned PCF controls (registered but not bound to any active form/view)
+- 3 legacy sitemaps (sprk_DocumentManagement, sprk_LawFirmCaseManagement, sprk_CorporateMatterManagement — tech debt from removed MDA apps)
+- Reference data (playbook definitions, chat context mappings — deployed separately via Track 2.5)
 
-### Pre-Release: Preparing Dev for Export
+### Pre-Release Assumption
 
-Before exporting SpaarkeMaster, ensure all deployable artifacts are in the dev environment:
+SpaarkeMaster in dev is assumed to be **production-ready** at the time of release. All web resources contain the latest built code, all PCF controls are at the correct version, and all schema changes are complete. This means:
 
-1. **Build all client code** (shared libs → Vite solutions → code pages → PCFs)
-2. **Upload built web resources** to dev Dataverse (via deploy scripts)
-3. **Deploy PCF controls** to dev (via `pac pcf push` or solution import)
-4. **Publish all customizations** in dev
-5. **Verify** SpaarkeMaster component count matches expected (currently 375)
+- Development workflow (build code → upload to dev → iterate) happens **before** the release process starts
+- The release process starts at **export** — not at build
+- No code is compiled, bundled, or uploaded during the release itself
 
-Then export:
+**Pre-release verification**:
 ```powershell
-pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
+# Verify SpaarkeMaster component count (expected: 386)
+pac solution list  # Should show SpaarkeMaster v1.0.0.0
+
+# Publish all customizations in dev before export
+pac org publish
 ```
 
-### Future: Build-SpaarkeMaster.ps1 (V2)
+### Build-SpaarkeMaster.ps1
 
-A `Build-SpaarkeMaster.ps1` script will automate the solution composition:
-- Create/recreate SpaarkeMaster solution in dev
-- Add all components programmatically using the identification logic above
-- Verify component count
-- Export to ZIP
+The `Build-SpaarkeMaster.ps1` script automates solution composition using independent discovery:
+- Creates/recreates the SpaarkeMaster solution in dev
+- Adds all components programmatically using the identification logic above
+- Verifies component count matches expected (386)
 
-This eliminates manual solution management and ensures reproducible builds.
+Run this when: new entities/PCFs/web resources are added, or to rebuild the solution from scratch.
+
+See `scripts/Build-SpaarkeMaster.ps1` for implementation.
 
 ---
 
@@ -294,141 +309,34 @@ git diff v1.0.0..HEAD --name-only -- src/solutions/        # Solution changes
 
 ---
 
-## Phase 1: Build All Client Components
+## Phase 1: Export SpaarkeMaster from Dev
 
-Build all client-side components in dependency order. The build phase runs **once** regardless of how many environments will be deployed.
+Export the production-ready SpaarkeMaster solution from the dev environment. No code is built during this phase — the assumption is that all web resources and PCF controls in dev already contain the latest built artifacts.
 
-### Build Dependency Order
-
-```
-1. Shared Libraries (must build first — all downstream depends on these):
-   ├── @spaarke/auth          (src/client/shared/Spaarke.Auth/)
-   ├── @spaarke/sdap-client   (src/client/shared/Spaarke.SdapClient/)
-   └── @spaarke/ui-components (src/client/shared/Spaarke.UI.Components/)
-
-2. Vite Solutions (20 applications):
-   ├── AllDocuments, CalendarSidePane, CreateEventWizard, CreateMatterWizard
-   ├── CreateProjectWizard, CreateTodoWizard, CreateWorkAssignmentWizard
-   ├── DailyBriefing, DocumentUploadWizard, EventDetailSidePane, EventsPage
-   ├── FindSimilarCodePage, LegalWorkspace, PlaybookLibrary, Reporting
-   ├── SmartTodo, SpeAdminApp, SummarizeFilesWizard, TodoDetailSidePane
-   └── WorkspaceLayoutWizard
-
-3. Webpack Code Pages (4 applications):
-   ├── AnalysisWorkspace
-   ├── DocumentRelationshipViewer
-   ├── PlaybookBuilder
-   └── SemanticSearch
-
-4. PCF Controls (14 controls):
-   ├── AIMetadataExtractor, AssociationResolver, DocumentRelationshipViewer
-   ├── DrillThroughWorkspace, EmailProcessingMonitor, RelatedDocumentCount
-   ├── ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer
-   ├── ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate
-   ├── UpdateRelatedButton, VisualHost
-   └── (build from src/client/pcf/ root)
-
-5. External SPA (1 application):
-   └── src/client/external-spa/
-```
-
-### Automated Build (Recommended)
+### Export
 
 ```powershell
-# Build everything in order
-.\scripts\Build-AllClientComponents.ps1
+# Ensure PAC CLI is connected to dev
+pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
 
-# Preview what would be built (no execution)
-.\scripts\Build-AllClientComponents.ps1 -WhatIf
+# Publish all customizations before export
+pac org publish
 
-# Skip shared libs (if unchanged since last build)
-.\scripts\Build-AllClientComponents.ps1 -SkipSharedLibs
-
-# Build only specific components
-.\scripts\Build-AllClientComponents.ps1 -Component "LegalWorkspace","SpeAdminApp"
+# Export SpaarkeMaster
+pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
 ```
 
-### Manual Build (If Script Unavailable)
-
-#### 1. Shared Libraries
+### Verify Export
 
 ```powershell
-# Auth library
-cd src/client/shared/Spaarke.Auth
-npm ci
-npm run build
+# Check ZIP was created
+Test-Path ./deploy/SpaarkeMaster.zip
 
-# SDAP Client (depends on Auth)
-cd ../Spaarke.SdapClient
-npm ci
-npm run build
-
-# UI Components (depends on Auth + SdapClient)
-cd ../Spaarke.UI.Components
-npm ci
-npm run build
+# Check file size is reasonable (should be several MB)
+(Get-Item ./deploy/SpaarkeMaster.zip).Length / 1MB
 ```
 
-#### 2. Vite Solutions
-
-```powershell
-# Each Vite solution builds independently (after shared libs)
-$viteSolutions = Get-ChildItem -Path "src/solutions" -Directory |
-    Where-Object { Test-Path "$($_.FullName)/vite.config.ts" }
-
-foreach ($solution in $viteSolutions) {
-    Write-Host "Building $($solution.Name)..." -ForegroundColor Cyan
-    Push-Location $solution.FullName
-    npm ci
-    npm run build
-    Pop-Location
-}
-```
-
-#### 3. Webpack Code Pages
-
-```powershell
-$codePages = @("AnalysisWorkspace", "DocumentRelationshipViewer", "PlaybookBuilder", "SemanticSearch")
-
-foreach ($page in $codePages) {
-    Write-Host "Building $page..." -ForegroundColor Cyan
-    Push-Location "src/client/code-pages/$page"
-    npm ci
-    npm run build
-    Pop-Location
-}
-```
-
-#### 4. PCF Controls
-
-```powershell
-cd src/client/pcf
-npm ci
-npm run build
-```
-
-#### 5. External SPA
-
-```powershell
-cd src/client/external-spa
-npm ci
-npm run build
-```
-
-### Build Verification
-
-After building, verify all build artifacts exist:
-
-```powershell
-# Spot-check key artifacts
-Test-Path "src/solutions/LegalWorkspace/dist/corporateworkspace.html"     # Corporate workspace
-Test-Path "src/solutions/SpeAdminApp/dist/speadmin.html"                   # SPE Admin
-Test-Path "src/solutions/EventsPage/dist/index.html"                       # Events page
-Test-Path "src/client/external-spa/dist/index.html"                        # External SPA
-Test-Path "src/client/pcf/out/controls/UniversalQuickCreate/bundle.js"     # PCF bundle
-```
-
-**GATE**: All builds must succeed. Any build failure is a hard stop — fix the issue before proceeding to deployment.
+**GATE**: Export must succeed and produce a valid ZIP. If SpaarkeMaster solution doesn't exist in dev, run `Build-SpaarkeMaster.ps1` first.
 
 ---
 
@@ -556,27 +464,44 @@ A single import of SpaarkeMaster deploys:
 
 ---
 
-## Phase 4: Publish Customizations
+## Phase 4: Reference Data + Publish
 
-With SpaarkeMaster imported, all web resources, PCF controls, and schema changes are already in the target environment. This phase ensures all changes are published and visible to users.
+With SpaarkeMaster imported, all schema, web resources, and PCF controls are in the target environment. This phase deploys **reference data** (records that the platform requires to function) and publishes all customizations.
 
-### Publish All
+### 4.1 Deploy Reference Data
+
+Reference data scripts are idempotent (safe to re-run every release):
+
+```powershell
+# Playbook definitions (7 notification playbooks with nodes and relationships)
+.\scripts\Deploy-NotificationPlaybooks.ps1 `
+    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+
+# Chat context mappings (AI chat configuration seed data)
+.\scripts\Deploy-ChatContextMappings.ps1 `
+    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+
+# Copilot agent configuration (entity descriptions + glossary)
+.\scripts\Deploy-CopilotAgent.ps1 `
+    -DataverseUrl "https://spaarke-demo.crm.dynamics.com"
+```
+
+### 4.2 Publish All Customizations
 
 ```powershell
 # Publish all customizations in the target environment
 pac org publish --async
 ```
 
-### Verify Web Resources
+### 4.3 Verify Import
 
-Spot-check that key web resources were imported correctly:
+Spot-check that key components were imported correctly:
 
 ```powershell
-# Use the Dataverse Web API to verify a few key web resources exist
 $token = az account get-access-token --resource "https://spaarke-demo.crm.dynamics.com" --query accessToken -o tsv
 $headers = @{ "Authorization" = "Bearer $token"; "OData-Version" = "4.0" }
 
-# Check corporate workspace
+# Check corporate workspace web resource
 Invoke-RestMethod -Uri "https://spaarke-demo.crm.dynamics.com/api/data/v9.2/webresourceset?`$filter=name eq 'sprk_corporateworkspace'&`$select=name,displayname" -Headers $headers
 
 # Check a PCF control
@@ -598,7 +523,7 @@ During development, individual web resources can be updated without re-exporting
 
 These are **development iteration tools**, not part of the production release flow. For production releases, all web resources are included in the SpaarkeMaster solution import.
 
-**GATE**: `pac org publish` must complete without errors.
+**GATE**: All reference data scripts and `pac org publish` must complete without errors.
 
 ---
 
