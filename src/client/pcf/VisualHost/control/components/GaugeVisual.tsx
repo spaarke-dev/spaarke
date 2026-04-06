@@ -404,13 +404,16 @@ export const GaugeVisual: React.FC<IGaugeVisualProps> = ({
   // Wrapper min-height from height prop
   const wrapperStyle: React.CSSProperties = height ? { minHeight: `${height}px` } : {};
 
-  // No-data state
-  if (count === 0) {
+  // No-data state — either no data points at all, or all source fields are null/undefined.
+  // Distinguishes "no data available" from "real zero values" so gauges don't misleadingly
+  // show F grades or empty arcs for missing source data.
+  const allNull = count > 0 && sortedPoints.every(dp => dp.isNull === true);
+  if (count === 0 || allNull) {
     return (
       <div className={styles.wrapper} style={wrapperStyle}>
         {showTitle && title && <Text className={styles.title}>{title}</Text>}
         <div className={styles.noDataWrapper}>
-          <Text className={styles.noDataText}>Not yet assessed</Text>
+          <Text className={styles.noDataText}>No data available for this measure</Text>
         </div>
       </div>
     );

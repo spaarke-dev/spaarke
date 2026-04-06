@@ -150,6 +150,13 @@ export interface IAggregatedDataPoint {
   sortOrder?: number;
   /** Per-data-point value format override (e.g., from field pivot config) */
   valueFormat?: ValueFormatType;
+  /**
+   * True when the underlying source field was null/undefined (not a real 0).
+   * Used by visual components to distinguish "no data" from "real zero value"
+   * and render a "No data available for this measure" placeholder instead.
+   * Populated by FieldPivotService from the raw record value.
+   */
+  isNull?: boolean;
 }
 
 /**

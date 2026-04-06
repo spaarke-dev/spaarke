@@ -89,9 +89,10 @@ export async function fetchAndPivot(
   // Map each configured field to a data point
   const dataPoints: IAggregatedDataPoint[] = pivotConfig.fields.map((entry, index) => {
     const rawValue = record[entry.field];
+    const isNull = rawValue === null || rawValue === undefined;
     const numericValue = typeof rawValue === 'number' ? rawValue : 0;
 
-    if (rawValue === null || rawValue === undefined) {
+    if (isNull) {
       logger.warn(TAG, `Field "${entry.field}" is null/undefined on record`);
     }
 
@@ -101,6 +102,7 @@ export async function fetchAndPivot(
       fieldValue: entry.fieldValue ?? entry.label,
       sortOrder: entry.sortOrder ?? index,
       valueFormat: entry.valueFormat,
+      isNull,
     };
   });
 

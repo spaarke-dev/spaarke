@@ -154,12 +154,16 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
   const styles = useStyles();
 
   // --- No-data state ---
-  if (!dataPoints || dataPoints.length === 0) {
+  // Either no data points at all, or all source fields are null/undefined.
+  // Distinguishes "no data available" from "real zero values" so the bar doesn't
+  // misleadingly show "$0 spent" for missing source data.
+  const allNull = !!dataPoints && dataPoints.length > 0 && dataPoints.every(dp => dp.isNull === true);
+  if (!dataPoints || dataPoints.length === 0 || allNull) {
     return (
       <div className={styles.container}>
         {title && <Text className={styles.title}>{title}</Text>}
         <div className={styles.placeholder}>
-          <Text>No data available</Text>
+          <Text>No data available for this measure</Text>
         </div>
       </div>
     );
