@@ -4,22 +4,29 @@ import { AuthError } from './errors';
 import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
 import { BridgeStrategy } from './strategies/BridgeStrategy';
 import { CacheStrategy } from './strategies/CacheStrategy';
+import { SessionStorageStrategy } from './strategies/SessionStorageStrategy';
 import { XrmStrategy } from './strategies/XrmStrategy';
 import { MsalSilentStrategy } from './strategies/MsalSilentStrategy';
 import { MsalPopupStrategy } from './strategies/MsalPopupStrategy';
 import { publishToken } from './tokenBridge';
 
 /**
- * Core auth provider — chains 5 token acquisition strategies:
- *   1. Parent/window bridge (~0.1ms)
- *   2. In-memory cache (~0.1ms)
- *   3. Xrm platform with frame-walk
- *   4. MSAL acquireTokenSilent / ssoSilent
- *   5. MSAL popup (interactive fallback)
+ * Core auth provider — chains 6 token acquisition strategies:
+ *   1. In-memory cache (~0.1ms, per-instance)
+ *   2. sessionStorage cache (~0.1ms, shared across ALL same-origin iframes)
+ *   3. Bridge token from parent frame walk (~0.1ms)
+ *   4. Xrm platform with frame-walk
+ *   5. MSAL acquireTokenSilent / ssoSilent
+ *   6. MSAL popup (interactive fallback)
+ *
+ * On success, the token is written to ALL fast caches (in-memory + sessionStorage + bridge)
+ * so that subsequent components on the same page or in child iframes get instant access
+ * without triggering MSAL.
  */
 export class SpaarkeAuthProvider {
   private readonly _config: Required<IAuthConfig>;
   private readonly _cacheStrategy: CacheStrategy;
+  private readonly _sessionStorageStrategy: SessionStorageStrategy;
   private readonly _bridgeStrategy: BridgeStrategy;
   private readonly _xrmStrategy: XrmStrategy;
   private readonly _msalSilentStrategy: MsalSilentStrategy;
@@ -53,6 +60,7 @@ export class SpaarkeAuthProvider {
     };
 
     this._cacheStrategy = new CacheStrategy();
+    this._sessionStorageStrategy = new SessionStorageStrategy();
     this._bridgeStrategy = new BridgeStrategy();
     this._xrmStrategy = new XrmStrategy(this._config.bffApiScope);
     this._msalSilentStrategy = new MsalSilentStrategy(msalConfig, this._config.bffApiScope);
@@ -67,13 +75,24 @@ export class SpaarkeAuthProvider {
     }
   }
 
-  /** Acquire a token using the 5-strategy cascade. */
+  /** Acquire a token using the 6-strategy cascade. */
   async getAccessToken(): Promise<string> {
-    // 1. In-memory cache (fastest)
+    // 1. In-memory cache (fastest, per-instance)
     const cached = await this._cacheStrategy.tryAcquireToken();
     if (cached) return cached.accessToken;
 
-    // 2. Bridge (parent/window global)
+    // 2. sessionStorage cache (shared across ALL same-origin iframes)
+    // This is the key strategy for eliminating cross-iframe auth failures.
+    // When ANY component on this Dataverse org acquires a token, it writes
+    // to sessionStorage. Every subsequent component reads it instantly.
+    const sessionCached = await this._sessionStorageStrategy.tryAcquireToken();
+    if (sessionCached) {
+      console.info('[SpaarkeAuth] Token acquired via sessionStorage (cross-iframe cache)');
+      this._cacheAndPublish(sessionCached);
+      return sessionCached.accessToken;
+    }
+
+    // 3. Bridge (parent/ancestor frame walk)
     const bridged = await this._bridgeStrategy.tryAcquireToken();
     if (bridged) {
       console.info('[SpaarkeAuth] Token acquired via bridge');
@@ -81,7 +100,7 @@ export class SpaarkeAuthProvider {
       return bridged.accessToken;
     }
 
-    // 3. Xrm platform (frame-walk)
+    // 4. Xrm platform (frame-walk)
     const xrmToken = await this._xrmStrategy.tryAcquireToken();
     if (xrmToken) {
       console.info('[SpaarkeAuth] Token acquired via Xrm');
@@ -89,7 +108,7 @@ export class SpaarkeAuthProvider {
       return xrmToken.accessToken;
     }
 
-    // 4. MSAL silent
+    // 5. MSAL silent (acquireTokenSilent + ssoSilent with loginHint)
     try {
       const msalToken = await this._msalSilentStrategy.tryAcquireToken();
       if (msalToken) {
@@ -102,7 +121,7 @@ export class SpaarkeAuthProvider {
       console.warn('[SpaarkeAuth] MSAL silent failed:', err);
     }
 
-    // 5. MSAL popup (interactive)
+    // 6. MSAL popup (interactive — last resort)
     try {
       const popupToken = await this._msalPopupStrategy.tryAcquireToken();
       if (popupToken) {
@@ -116,7 +135,7 @@ export class SpaarkeAuthProvider {
     }
 
     // All strategies exhausted
-    console.error('[SpaarkeAuth] All 5 token strategies failed. Config:', {
+    console.error('[SpaarkeAuth] All 6 token strategies failed. Config:', {
       clientId: this._config.clientId?.substring(0, 8) + '...',
       bffApiScope: this._config.bffApiScope,
       authority: this._config.authority,
@@ -125,9 +144,10 @@ export class SpaarkeAuthProvider {
     return '';
   }
 
-  /** Clear the in-memory cache. Call on 401 to force re-acquisition. */
+  /** Clear all token caches. Call on 401 to force re-acquisition. */
   clearCache(): void {
     this._cacheStrategy.clear();
+    this._sessionStorageStrategy.clear();
   }
 
   /** Whether a cached token is currently available (synchronous check). */
@@ -252,7 +272,12 @@ export class SpaarkeAuthProvider {
   }
 
   private _cacheAndPublish(result: ITokenResult): void {
+    // Write to ALL fast caches so that every component gets instant access:
+    // 1. In-memory (per-instance, fastest read)
     this._cacheStrategy.store(result.accessToken, result.expiresOn);
+    // 2. sessionStorage (shared across ALL same-origin iframes — the key sharing mechanism)
+    this._sessionStorageStrategy.store(result.accessToken, result.expiresOn);
+    // 3. Bridge (window global for direct parent-child reads)
     publishToken(result.accessToken);
   }
 
