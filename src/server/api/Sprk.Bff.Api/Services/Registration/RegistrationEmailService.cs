@@ -77,7 +77,7 @@ public sealed class RegistrationEmailService
 
     /// <summary>
     /// Sends an acknowledgement email to the applicant confirming their request was received.
-    /// CC: demo@demo.spaarke.com for record keeping.
+    /// BCC: demo@demo.spaarke.com for record keeping (BCC avoids Graph self-CC issues when sender == CC).
     /// </summary>
     public async Task SendAcknowledgementEmailAsync(
         string recipientEmail,
@@ -100,7 +100,7 @@ public sealed class RegistrationEmailService
         var request = new SendCommunicationRequest
         {
             To = [recipientEmail],
-            Cc = [FromMailbox], // CC demo@demo.spaarke.com for record keeping
+            Bcc = [FromMailbox], // BCC demo@demo.spaarke.com — BCC avoids Graph issues when sender == recipient
             Subject = "We Received Your Spaarke Demo Request",
             Body = body,
             BodyFormat = BodyFormat.HTML,
@@ -146,7 +146,7 @@ public sealed class RegistrationEmailService
         var request = new SendCommunicationRequest
         {
             To = [recipientEmail],
-            Cc = [FromMailbox], // CC demo@demo.spaarke.com for record keeping
+            Bcc = [FromMailbox], // BCC demo@demo.spaarke.com for record keeping
             Subject = "Your Spaarke Demo Access is Ready!",
             Body = body,
             BodyFormat = BodyFormat.HTML,
