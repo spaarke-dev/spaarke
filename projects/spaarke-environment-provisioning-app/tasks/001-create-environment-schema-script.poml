@@ -1,0 +1,66 @@
+<task id="001" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Create DataverseEnvironment Schema Script</title>
+    <phase>1</phase>
+    <tags>dataverse, schema, script</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create a PowerShell script `Create-DataverseEnvironmentSchema.ps1` that creates the `sprk_dataverseenvironment` entity with all 16 columns via Dataverse Web API.</goal>
+    <context>Follow the exact pattern from `scripts/Create-RegistrationRequestSchema.ps1`. The entity is OrganizationOwned. See spec.md for the complete data model with all column types and constraints.</context>
+    <constraints>
+      - Lookup columns MUST be created via RelationshipDefinitions endpoint, not Attributes
+      - Integer attributes MUST NOT include DefaultValue (causes API error)
+      - Script must be idempotent (exit early if entity already exists)
+      - Follow the 6-phase deployment order from DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md
+      - Auth via `az account get-access-token`
+      - Accept -EnvironmentDomain parameter
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>scripts/Create-RegistrationRequestSchema.ps1</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read Create-RegistrationRequestSchema.ps1 to understand the exact pattern</step>
+    <step>Read DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md for API constraints</step>
+    <step>Create scripts/Create-DataverseEnvironmentSchema.ps1 with -EnvironmentDomain param</step>
+    <step>Add entity creation (sprk_dataverseenvironment, OrganizationOwned)</step>
+    <step>Add string columns: sprk_name (primary), sprk_appid, sprk_accountdomain, sprk_businessunitname, sprk_teamname, sprk_specontainerid, sprk_securitygroupid</step>
+    <step>Add URL column: sprk_dataverseurl</step>
+    <step>Add memo columns: sprk_description, sprk_licenseconfigjson, sprk_adminemails</step>
+    <step>Add choice columns: sprk_environmenttype (7 options), sprk_setupstatus (4 options)</step>
+    <step>Add boolean columns: sprk_isactive (default Yes), sprk_isdefault (default No)</step>
+    <step>Add integer column: sprk_defaultdurationdays (no DefaultValue!)</step>
+    <step>Add PublishAllXml step at the end</step>
+    <step>Verify script syntax with PowerShell parser</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>scripts/Create-DataverseEnvironmentSchema.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Script follows same structure as Create-RegistrationRequestSchema.ps1</criterion>
+    <criterion>All 16 columns from spec data model are created</criterion>
+    <criterion>No lookup columns created via Attributes endpoint</criterion>
+    <criterion>No DefaultValue on integer attributes</criterion>
+    <criterion>Script is idempotent</criterion>
+    <criterion>PowerShell syntax is valid</criterion>
+  </acceptance-criteria>
+</task>

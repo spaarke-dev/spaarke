@@ -1,0 +1,58 @@
+<task id="031" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Refactor RegistrationDataverseService URL Resolution</title>
+    <phase>4</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <dependencies>030</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Refactor RegistrationDataverseService so it can operate against different Dataverse URLs per environment instead of being hardwired to the default environment URL at construction time.</goal>
+    <context>Currently the service reads DefaultEnvironment's DataverseUrl at construction and uses it for all operations. After this refactor, methods that operate on per-environment data (like creating system users, adding team membership) should accept the target Dataverse URL or environment config.</context>
+    <constraints>
+      - The service's own operations (CRUD on sprk_registrationrequest) target the admin Dataverse (spaarkedev1)
+      - Per-environment operations (create system user, add to team) target the environment's Dataverse URL
+      - May need separate HttpClient or token per target URL
+      - Keep thread safety with semaphore pattern
+      - This is a significant refactor — be careful with existing functionality
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read RegistrationDataverseService.cs fully</step>
+    <step>Identify which methods target admin Dataverse vs per-environment Dataverse</step>
+    <step>Design approach: separate base URLs, or accept URL parameter</step>
+    <step>Implement URL resolution changes</step>
+    <step>Update token management for multiple Dataverse URLs</step>
+    <step>Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service can operate against different Dataverse URLs</criterion>
+    <criterion>Admin operations still target spaarkedev1</criterion>
+    <criterion>Per-environment operations use correct URL</criterion>
+    <criterion>Thread safety maintained</criterion>
+    <criterion>Build passes</criterion>
+  </acceptance-criteria>
+</task>

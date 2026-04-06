@@ -1,0 +1,48 @@
+<task id="012" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Register DataverseEnvironmentService in DI</title>
+    <phase>2</phase>
+    <tags>bff-api, di</tags>
+    <estimate>15m</estimate>
+    <status>pending</status>
+    <dependencies>011</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Register `DataverseEnvironmentService` as a singleton in `RegistrationModule.cs`.</goal>
+    <context>ADR-010: Concrete type, no interface. Add to existing AddRegistrationModule method. Keep total DI registrations ≤15.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read RegistrationModule.cs</step>
+    <step>Add services.AddSingleton&lt;DataverseEnvironmentService&gt;()</step>
+    <step>Verify total registration count stays ≤15</step>
+    <step>Build: dotnet build src/server/api/Sprk.Bff.Api/</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DataverseEnvironmentService registered as singleton</criterion>
+    <criterion>No interface created</criterion>
+    <criterion>Total DI registrations ≤15</criterion>
+    <criterion>Build passes</criterion>
+  </acceptance-criteria>
+</task>

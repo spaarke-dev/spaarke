@@ -1,0 +1,49 @@
+<task id="004" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Create Environment Entity Views</title>
+    <phase>1</phase>
+    <tags>dataverse, views</tags>
+    <estimate>45m</estimate>
+    <status>pending</status>
+    <dependencies>002</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create three views for sprk_dataverseenvironment: Active Environments, All Environments, Ready for Provisioning.</goal>
+    <context>See FR-03 in spec.md. Standard Dataverse saved queries.</context>
+    <constraints>
+      - Active: filter sprk_isactive = true, show Name, Type, URL, Status
+      - All: no filter, show Name, Type, URL, Active, Status
+      - Ready for Provisioning: filter sprk_setupstatus = Ready AND sprk_isactive = true
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create Active Environments view via Web API</step>
+    <step>Create All Environments view via Web API</step>
+    <step>Create Ready for Provisioning view via Web API</step>
+    <step>Publish customizations</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>mcp__dataverse__fetch</tool>
+  </tools>
+
+  <outputs>
+    <output>Three saved queries for sprk_dataverseenvironment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Active Environments shows only active records</criterion>
+    <criterion>All Environments shows all records</criterion>
+    <criterion>Ready for Provisioning filters by status=Ready AND active=true</criterion>
+  </acceptance-criteria>
+</task>

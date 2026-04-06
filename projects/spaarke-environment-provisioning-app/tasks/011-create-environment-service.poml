@@ -1,0 +1,63 @@
+<task id="011" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Create DataverseEnvironmentService</title>
+    <phase>2</phase>
+    <tags>bff-api, service</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <dependencies>010</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create `DataverseEnvironmentService` that reads environment records from Dataverse via Web API. Follow the exact pattern from RegistrationDataverseService.</goal>
+    <context>FR-10: Service returns full environment config by record ID. NFR-01: No caching — read fresh from Dataverse on each call. Uses ClientSecretCredential + SemaphoreSlim double-check token pattern.</context>
+    <constraints>
+      - Follow RegistrationDataverseService pattern exactly (HttpClient, token management)
+      - Concrete class, no interface (ADR-010)
+      - Singleton (stateless, thread-safe with semaphore)
+      - GetByIdAsync(Guid environmentId) → DataverseEnvironmentRecord?
+      - GetActiveEnvironmentsAsync() → List of DataverseEnvironmentRecord
+      - No caching (NFR-01)
+      - Target Dataverse URL: read from config (the environment service's own Dataverse, not per-record)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read RegistrationDataverseService.cs for the complete Web API pattern</step>
+    <step>Create DataverseEnvironmentService.cs in Services/Registration/</step>
+    <step>Implement auth: ClientSecretCredential + SemaphoreSlim double-check token refresh</step>
+    <step>Implement GetByIdAsync: GET sprk_dataverseenvironments({id}) with $select</step>
+    <step>Implement GetActiveEnvironmentsAsync: GET with $filter=sprk_isactive eq true</step>
+    <step>Add OData JSON → DataverseEnvironmentRecord mapping</step>
+    <step>Verify builds</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Follows RegistrationDataverseService pattern</criterion>
+    <criterion>GetByIdAsync returns full environment config</criterion>
+    <criterion>GetActiveEnvironmentsAsync returns active environments</criterion>
+    <criterion>No caching — fresh read on each call</criterion>
+    <criterion>Thread-safe token management</criterion>
+    <criterion>Project builds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,54 @@
+<task id="032" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Update Registration and Azure Setup Documentation</title>
+    <phase>4</phase>
+    <tags>docs</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <dependencies>031</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Update SPAARKE-SELF-SERVICE-USER-REGISTRATION.md and AZURE-SETUP-SELF-SERVICE-REGISTRATION.md to reflect the new environment entity and approval workflow.</goal>
+    <context>Documentation must reflect that environments are now managed as Dataverse records, lookup replaces text field, environment picker dialog is removed, and config is read from Dataverse at approval time.</context>
+    <constraints>
+      - Update entity schema section with new lookup field
+      - Update admin workflow section (select environment via lookup, not dialog)
+      - Add sprk_dataverseenvironment entity documentation
+      - Update Azure setup guide to include environment record creation
+      - Remove references to DemoProvisioning__Environments appsettings
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/SPAARKE-SELF-SERVICE-USER-REGISTRATION.md</file>
+      <file>docs/guides/AZURE-SETUP-SELF-SERVICE-REGISTRATION.md</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read both documentation files</step>
+    <step>Update registration guide with new workflow</step>
+    <step>Update Azure setup guide with environment entity setup</step>
+    <step>Remove outdated config references</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+  </tools>
+
+  <outputs>
+    <output>docs/guides/SPAARKE-SELF-SERVICE-USER-REGISTRATION.md (modified)</output>
+    <output>docs/guides/AZURE-SETUP-SELF-SERVICE-REGISTRATION.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Documentation reflects new environment entity workflow</criterion>
+    <criterion>No references to removed config</criterion>
+    <criterion>Azure setup guide includes environment record creation steps</criterion>
+  </acceptance-criteria>
+</task>

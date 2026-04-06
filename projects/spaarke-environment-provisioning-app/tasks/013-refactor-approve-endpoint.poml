@@ -1,0 +1,63 @@
+<task id="013" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Refactor ApproveRequest to Read Environment from Dataverse</title>
+    <phase>2</phase>
+    <tags>bff-api, api, refactor</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <dependencies>012</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Refactor the ApproveRequest handler in RegistrationEndpoints.cs to read environment config from Dataverse via the lookup on the registration request, instead of from DemoProvisioningOptions.</goal>
+    <context>Currently: ApproveRequest resolves environment name from request body or default → looks up DemoEnvironmentConfig from options. New: Read the registration request → get sprk_dataverseenvironmentid lookup value → call DataverseEnvironmentService.GetByIdAsync() → pass config to provisioning.</context>
+    <constraints>
+      - FR-08: Read environment config from Dataverse using lookup ID
+      - FR-09: Return 400 ProblemDetails if no environment linked
+      - ADR-019: ProblemDetails with correlationId
+      - Remove environment from ApproveRequestDto (no longer sent by client)
+      - Inject DataverseEnvironmentService into handler
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read RegistrationEndpoints.cs ApproveRequest handler</step>
+    <step>Add DataverseEnvironmentService as parameter injection</step>
+    <step>After fetching registration request, extract sprk_dataverseenvironmentid</step>
+    <step>Return 400 ProblemDetails if environment ID is null/empty</step>
+    <step>Call DataverseEnvironmentService.GetByIdAsync(environmentId)</step>
+    <step>Return 400 if environment not found or inactive</step>
+    <step>Map DataverseEnvironmentRecord → DemoEnvironmentConfig (or pass directly)</step>
+    <step>Remove environment from ApproveRequestDto</step>
+    <step>Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Approve reads environment from Dataverse lookup, not config</criterion>
+    <criterion>400 returned when no environment linked</criterion>
+    <criterion>ProblemDetails with correlationId for all errors</criterion>
+    <criterion>No environment in request body</criterion>
+    <criterion>Build passes</criterion>
+  </acceptance-criteria>
+</task>

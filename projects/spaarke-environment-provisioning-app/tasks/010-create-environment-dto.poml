@@ -1,0 +1,58 @@
+<task id="010" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Create DataverseEnvironmentRecord DTO</title>
+    <phase>2</phase>
+    <tags>bff-api, model</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create `DataverseEnvironmentRecord` DTO class matching the sprk_dataverseenvironment entity schema, plus a `LicenseConfig` model for deserialized license JSON.</goal>
+    <context>Follow the `RegistrationRequestRecord` pattern in RegistrationDataverseService.cs. The DTO maps Dataverse columns to C# properties. Include a static `AllColumns` array for OData `$select`.</context>
+    <constraints>
+      - Place in Services/Registration/ alongside existing models
+      - Include all 16 entity columns as properties
+      - Add LicenseConfig class for JSON deserialization of sprk_licenseconfigjson
+      - Include static MapToRecord method for OData JSON → DTO mapping
+      - ADR-010: No interface, concrete class
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read RegistrationDataverseService.cs for RegistrationRequestRecord pattern</step>
+    <step>Create DataverseEnvironmentRecord.cs with all properties</step>
+    <step>Add LicenseConfig class</step>
+    <step>Add static AllColumns array</step>
+    <step>Add MapToRecord static method</step>
+    <step>Verify builds: dotnet build src/server/api/Sprk.Bff.Api/</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 16 entity columns mapped to properties</criterion>
+    <criterion>LicenseConfig class handles JSON deserialization</criterion>
+    <criterion>AllColumns array matches entity schema</criterion>
+    <criterion>MapToRecord correctly maps OData JSON</criterion>
+    <criterion>Project builds successfully</criterion>
+  </acceptance-criteria>
+</task>

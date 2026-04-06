@@ -1,0 +1,51 @@
+<task id="003" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Create Environment Entity Form</title>
+    <phase>1</phase>
+    <tags>dataverse, form</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <dependencies>002</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create an MDA form for sprk_dataverseenvironment with 4 tabs: General, Connection, Provisioning, Notifications.</goal>
+    <context>Use Dataverse Web API or MCP tools to create the form. See FR-02 in spec.md.</context>
+    <constraints>
+      - General tab: Name, Environment Type, Description, Active, Default, Setup Status
+      - Connection tab: Dataverse URL, App ID, Account Domain
+      - Provisioning tab: Business Unit, Security Team, SPE Container ID, Security Group, Default Duration Days, License Config JSON
+      - Notifications tab: Admin Emails
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Design FormXml with 4 tabs and column placement</step>
+    <step>Create form via Dataverse Web API or MCP</step>
+    <step>Publish customizations</step>
+    <step>Verify form renders in MDA</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>mcp__dataverse__fetch</tool>
+  </tools>
+
+  <outputs>
+    <output>MDA form for sprk_dataverseenvironment with 4 tabs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Form has General, Connection, Provisioning, Notifications tabs</criterion>
+    <criterion>All columns are placed on correct tabs</criterion>
+    <criterion>Admin can create/edit environment records from the MDA</criterion>
+  </acceptance-criteria>
+</task>

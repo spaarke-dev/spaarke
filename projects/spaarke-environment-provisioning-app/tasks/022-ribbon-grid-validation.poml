@@ -1,0 +1,52 @@
+<task id="022" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Add Per-Record Validation for Grid Approve</title>
+    <phase>3</phase>
+    <tags>client, ribbon, js</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>020</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>In the grid approveRequest function, check each selected record for environment lookup. Records without environment set should fail individually with message (FR-07).</goal>
+    <context>FR-07: Per-record error: "{Name}: No target environment selected". Grid approve iterates selected records. Records with environment proceed; records without show error but don't block others.</context>
+    <constraints>
+      - Check sprk_dataverseenvironmentid on each record before calling API
+      - Error message per record: "{Name}: No target environment selected"
+      - Records with environment still get approved
+      - Use Xrm.WebApi.retrieveRecord to get lookup value if not in grid columns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/webresources/js/sprk_registrationribbon.js</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read grid approveRequest function</step>
+    <step>Before calling API for each record, check if environment lookup is set</step>
+    <step>If not set: add to error list with "{Name}: No target environment selected"</step>
+    <step>If set: proceed with approve API call</step>
+    <step>After all records: show summary of errors if any</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/webresources/js/sprk_registrationribbon.js (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Records without environment fail individually</criterion>
+    <criterion>Error message includes record name</criterion>
+    <criterion>Records with environment still get approved</criterion>
+  </acceptance-criteria>
+</task>

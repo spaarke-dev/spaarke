@@ -1,0 +1,49 @@
+<task id="021" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Add Lookup Validation for Form Approve</title>
+    <phase>3</phase>
+    <tags>client, ribbon, js</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>020</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>In approveRequestFromForm, validate that the sprk_dataverseenvironmentid lookup is set before calling the approve API. Show alert if not set (FR-06).</goal>
+    <context>FR-06: "Please select a Target Environment before approving" alert if lookup is empty.</context>
+    <constraints>
+      - Use Xrm.Page or formContext to read lookup value
+      - Alert message: "Please select a Target Environment before approving"
+      - Stop execution if lookup is empty
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/webresources/js/sprk_registrationribbon.js</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add lookup value check at start of approveRequestFromForm</step>
+    <step>If null/empty: Xrm.Navigation.openAlertDialog with message, return</step>
+    <step>If set: proceed with approve call</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/webresources/js/sprk_registrationribbon.js (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Alert shown when lookup is empty</criterion>
+    <criterion>Approve proceeds when lookup is set</criterion>
+    <criterion>Alert message matches FR-06</criterion>
+  </acceptance-criteria>
+</task>

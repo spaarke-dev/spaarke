@@ -1,0 +1,53 @@
+<task id="014" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Handle Malformed License JSON</title>
+    <phase>2</phase>
+    <tags>bff-api, validation</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>013</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Add validation for sprk_licenseconfigjson deserialization. If malformed JSON, return ProblemDetails with "Invalid license configuration" detail (FR-12).</goal>
+    <context>License config is stored as JSON string in Dataverse. Must be deserialized to LicenseConfig before passing to provisioning. JsonException → clear error, not silent failure.</context>
+    <constraints>
+      - FR-12: No silent failures
+      - ADR-019: ProblemDetails with clear message
+      - Catch JsonException specifically
+      - Include environment name in error message for context
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Add try/catch around license JSON deserialization in approve flow</step>
+    <step>Catch JsonException → return 400 ProblemDetails</step>
+    <step>Include "Invalid license configuration for environment: {name}" detail</step>
+    <step>Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Malformed JSON returns 400 with clear error message</criterion>
+    <criterion>No silent failures</criterion>
+    <criterion>ProblemDetails format with correlationId</criterion>
+  </acceptance-criteria>
+</task>
