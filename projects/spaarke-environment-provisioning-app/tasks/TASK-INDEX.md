@@ -8,12 +8,12 @@
 | # | Title | Phase | Status | Dependencies |
 |---|-------|-------|--------|-------------|
 | 001 | Create DataverseEnvironment Schema Script | 1 | ✅ | — |
-| 002 | Run Schema Script Against Dev | 1 | 🔲 | 001 |
-| 003 | Create Environment Entity Form | 1 | 🔲 | 002 |
-| 004 | Create Environment Entity Views | 1 | 🔲 | 002 |
+| 002 | Run Schema Script Against Dev | 1 | ✅ | 001 |
+| 003 | Create Environment Entity Form | 1 | ✅ | 002 |
+| 004 | Create Environment Entity Views | 1 | ✅ | 002 |
 | 005 | Add Sitemap Entry | 1 | 🔲 | 002 |
-| 006 | Add Environment Lookup to Registration | 1 | 🔲 | 002 |
-| 007 | Seed Dev and Demo 1 Records | 1 | 🔲 | 002 |
+| 006 | Add Environment Lookup to Registration | 1 | ✅ | 002 |
+| 007 | Seed Dev and Demo 1 Records | 1 | ✅ | 002 |
 | 010 | Create DataverseEnvironmentRecord DTO | 2 | ✅ | — |
 | 011 | Create DataverseEnvironmentService | 2 | ✅ | 010 |
 | 012 | Register Service in DI | 2 | ✅ | 011 |
@@ -26,7 +26,7 @@
 | 022 | Add Per-Record Validation for Grid Approve | 3 | ✅ | 020 |
 | 030 | Remove Environments from Options | 4 | ✅ | 016 |
 | 031 | Refactor RegistrationDataverseService URL | 4 | ✅ | 030 |
-| 032 | Update Documentation | 4 | 🔲 | 031 |
+| 032 | Update Documentation | 4 | ✅ | 031 |
 | 040 | E2E Testing Checklist | 5 | 🔲 | 032 |
 | 090 | Project Wrap-Up | 5 | 🔲 | 040 |
 
