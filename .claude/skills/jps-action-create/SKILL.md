@@ -246,7 +246,7 @@ REPORT: "Scope index refreshed — new action {ACT-XXX} now available for playbo
 IF called from within jps-playbook-design:
   → SKIP commit (parent skill handles it)
 ELSE:
-  → git add docs/ai-knowledge/catalogs/scope-model-index.json
+  → git add .claude/catalogs/scope-model-index.json
   → git commit -m "chore(ai): refresh scope-model-index after adding {action-name}"
 ```
 

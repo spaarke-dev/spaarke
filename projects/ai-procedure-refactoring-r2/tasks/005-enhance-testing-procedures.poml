@@ -1,0 +1,65 @@
+<task id="005" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Enhance testing-and-code-quality.md</title>
+    <phase>1</phase>
+    <tags>procedures, documentation, testing, code-quality</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Enhance docs/procedures/testing-and-code-quality.md — add module-specific test guidance, coverage targets, and test selection rules</goal>
+    <context>The existing testing-and-code-quality.md provides general guidance but lacks module-specific instructions. Claude does not know which tests to run when modifying specific modules (AI pipeline, PCF controls, BFF endpoints, plugins) or what coverage targets to aim for. This enhancement adds actionable, module-specific test procedures.</context>
+    <constraints>
+      - Use /docs-procedures skill structure
+      - Preserve all existing content — this is an enhancement, not a rewrite
+      - Add module-specific sections: AI pipeline, PCF controls, BFF endpoints, Dataverse plugins, shared libraries
+      - Each module section must include: which test projects to run, how to run them, what coverage target applies
+      - Include a "test selection matrix" — given a changed file, which tests to execute
+      - Source test project paths and commands from actual tests/ directory structure
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-procedures/SKILL.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <directories>
+      <directory>tests/</directory>
+      <directory>src/server/api/Sprk.Bff.Api/</directory>
+      <directory>src/client/pcf/</directory>
+    </directories>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-procedures/SKILL.md for mandatory structure</step>
+    <step>Read existing docs/procedures/testing-and-code-quality.md to understand current content</step>
+    <step>Scan tests/ directory to catalog all test projects and their scope</step>
+    <step>Map test projects to source modules (which tests cover which source code)</step>
+    <step>Read CLAUDE.md Commands section for test commands</step>
+    <step>Add module-specific test sections (AI pipeline, PCF, BFF, plugins, shared)</step>
+    <step>Add test selection matrix: changed file pattern → required test projects</step>
+    <step>Add coverage targets per module</step>
+    <step>Write updated docs/procedures/testing-and-code-quality.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-procedures)</tool>
+  </tools>
+  <outputs>
+    <output>docs/procedures/testing-and-code-quality.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-procedures skill structure</criterion>
+    <criterion>All existing content preserved</criterion>
+    <criterion>Module-specific sections added for: AI pipeline, PCF, BFF endpoints, plugins, shared libraries</criterion>
+    <criterion>Each module section includes: test projects, run commands, coverage targets</criterion>
+    <criterion>Test selection matrix maps file patterns to required test projects</criterion>
+    <criterion>Test paths and commands sourced from actual repository structure</criterion>
+  </acceptance-criteria>
+</task>

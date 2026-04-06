@@ -1,0 +1,63 @@
+<task id="038" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create wizard-framework-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, wizard, ui-framework, ai-prefill</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/wizard-framework-architecture.md — document the shared wizard framework, its 7 solution implementations, step management, and AI pre-fill integration</goal>
+    <context>The Spaarke platform uses a shared wizard framework (WizardDialog component) that provides multi-step form workflows across 7 different solutions. The framework supports step navigation, validation, AI-assisted pre-fill of form fields, and customizable layouts. No architecture document captures this framework end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent wizard features
+      - Document the shared WizardDialog component API and step management
+      - Inventory all 7 solution-specific wizard implementations
+      - Map AI pre-fill integration: how AI populates wizard fields from document analysis
+      - Document step lifecycle: mount, validate, navigate, submit
+      - Cite source files for framework and every implementation
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Wizard/</file>
+      <file>src/solutions/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read shared Wizard component in Spaarke.UI.Components/src/components/Wizard/</step>
+    <step>Search for WizardDialog and wizard-related imports across src/ to find all 7 implementations</step>
+    <step>Read each solution-specific wizard to document its purpose and step configuration</step>
+    <step>Identify AI pre-fill integration points (how AI analysis populates wizard fields)</step>
+    <step>Document step lifecycle: mount, validate, navigate, submit</step>
+    <step>Map the WizardDialog component API (props, events, customization points)</step>
+    <step>Draft wizard-framework-architecture.md following skill structure</step>
+    <step>Verify framework and every implementation cites its source file</step>
+    <step>Write to docs/architecture/wizard-framework-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/wizard-framework-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Shared WizardDialog component API fully documented</criterion>
+    <criterion>All 7 solution-specific wizard implementations inventoried</criterion>
+    <criterion>AI pre-fill integration mapped (document analysis → field population)</criterion>
+    <criterion>Step lifecycle documented (mount, validate, navigate, submit)</criterion>
+    <criterion>Framework and every implementation cites its source file</criterion>
+    <criterion>No invented features — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

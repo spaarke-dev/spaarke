@@ -2,7 +2,10 @@
 
 > **Purpose**: Developer guide for the complete CI/CD pipeline — from local commits through automated testing, pull request workflow, and deployment to staging/production.
 >
-> **Last Updated**: March 13, 2026
+> **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 
 ---
 
@@ -25,13 +28,14 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 2. [Local Development Workflow](#local-development-workflow)
 3. [Commit Conventions](#commit-conventions)
 4. [Pull Request Workflow](#pull-request-workflow)
-5. [GitHub Actions Workflows](#github-actions-workflows)
-6. [Nightly Quality Workflow](#nightly-quality-workflow)
-7. [Automated Code Review (AI)](#automated-code-review-ai)
-8. [Weekly Quality Summary](#weekly-quality-summary)
-9. [Deployment Pipeline](#deployment-pipeline)
-10. [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
-11. [Quick Reference](#quick-reference)
+5. [Pre-Merge Checklist](#pre-merge-checklist)
+6. [GitHub Actions Workflows](#github-actions-workflows)
+7. [Nightly Quality Workflow](#nightly-quality-workflow)
+8. [Automated Code Review (AI)](#automated-code-review-ai)
+9. [Weekly Quality Summary](#weekly-quality-summary)
+10. [Deployment Pipeline](#deployment-pipeline)
+11. [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
+12. [Quick Reference](#quick-reference)
 
 ---
 
@@ -117,11 +121,36 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 |-------|---------|----------|----------|
 | Pre-commit Hooks | Auto (git commit) | ~5-10s | Yes (local) |
 | Local Quality | Manual | ~30s | Yes (recommended) |
-| CI Pipeline | Auto (push/PR) | ~5-8 min | Yes |
-| Nightly Quality | Scheduled (weeknights 6 AM UTC) | ~10-15 min | No (advisory) |
-| Weekly Summary | Scheduled (Monday 8 AM UTC) | ~2 min | No (advisory) |
-| Staging Deploy | Auto (master merge) | ~3-5 min | No |
-| Production Deploy | Manual | ~5-10 min | N/A |
+| CI Pipeline (`sdap-ci.yml`) | Auto (push/PR) | ~5-8 min | Yes |
+| Claude Code Review (`claude-code-review.yml`) | Auto (PR events) | ~3 min | No (advisory) |
+| Nightly Quality (`nightly-quality.yml`) | Scheduled (weeknights 6 AM UTC) | ~10-15 min | No (advisory) |
+| Weekly Summary (`weekly-quality.yml`) | Scheduled (Friday 10 PM UTC) | ~10 min | No (advisory) |
+| ADR Audit (`adr-audit.yml`) | Scheduled (Monday 9 AM UTC) | ~5 min | No (advisory) |
+| BFF API Deploy (`deploy-bff-api.yml`) | Auto (master push + API changes) or manual | ~5-10 min | N/A |
+| Environment Promotion (`deploy-promote.yml`) | Auto (after CI on master) or manual | ~10-15 min | N/A |
+| Slot Swap (`deploy-slot-swap.yml`) | Auto (after CI on master) or manual | ~10-15 min | N/A |
+| Bicep Infrastructure (`deploy-infrastructure.yml`) | PR/push with Bicep changes or manual | ~5-10 min | N/A |
+| Platform Infrastructure (`deploy-platform.yml`) | Manual only | ~5-10 min | N/A |
+| Office Add-ins (`deploy-office-addins.yml`) | Auto (master push + add-in changes) or manual | ~2-3 min | N/A |
+| Customer Provisioning (`provision-customer.yml`) | Manual only | ~5-15 min | N/A |
+
+### Complete Workflow Inventory
+
+| File | Name | Purpose |
+|------|------|---------|
+| `sdap-ci.yml` | SDAP CI | Build, test, quality, security scan |
+| `claude-code-review.yml` | Claude Code Architecture Review | AI-powered advisory PR review |
+| `nightly-quality.yml` | Nightly Quality | Deep analysis: coverage, SonarCloud, AI review, dependency audit |
+| `weekly-quality.yml` | Weekly Quality Summary | Aggregate weekly trends from nightly runs |
+| `adr-audit.yml` | ADR Architecture Audit | Full ADR compliance scan with tracking issue |
+| `deploy-bff-api.yml` | Deploy BFF API | Staging slot swap deployment with auto-rollback |
+| `deploy-infrastructure.yml` | Deploy Bicep Infrastructure | Validate, what-if, deploy Bicep templates |
+| `deploy-platform.yml` | Deploy Platform Infrastructure | Shared platform resources via `Deploy-Platform.ps1` |
+| `deploy-promote.yml` | Environment Promotion | Cascade deployment: dev -> staging -> prod |
+| `deploy-slot-swap.yml` | Deploy via Slot Swap | Zero-downtime slot swap deployment |
+| `deploy-office-addins.yml` | Deploy Office Add-ins | Build and deploy to Azure Static Web App |
+| `provision-customer.yml` | Provision Customer | End-to-end customer environment provisioning |
+| `auto-add-to-project.yml` | Auto-add to Project | Add issues to Spaarke Core project board |
 
 ---
 
@@ -395,6 +424,47 @@ gh pr merge --merge
 
 ---
 
+## Pre-Merge Checklist
+
+Before merging any PR to master, verify all of the following:
+
+### Automated Checks (Must Pass)
+
+- [ ] **CI pipeline green** — `gh pr checks` shows all jobs passing
+- [ ] **Security scan** — No new critical/high vulnerabilities from Trivy
+- [ ] **Build succeeds** — Both Debug and Release configurations compile without warnings (`-warnaserror`)
+- [ ] **Tests pass** — All unit tests pass with coverage collected
+- [ ] **Client quality** — Prettier format check and ESLint strict (`--max-warnings 0`) pass
+- [ ] **Code quality** — `dotnet format --verify-no-changes` passes; ADR architecture tests pass; plugin size under 1MB
+
+### Manual Checks (Reviewer Responsibility)
+
+- [ ] **ADR compliance** — Review any ADR violation comments posted by `adr-pr-comment` job or Claude Code review; address critical findings
+- [ ] **No secrets committed** — Verify no `.env`, credentials, API keys, or connection strings in changed files
+- [ ] **Conventional commit messages** — All commits follow `type(scope): description` format
+- [ ] **Branch up-to-date** — No merge conflicts with master
+- [ ] **Documentation updated** — If behavior changed, relevant docs/guides updated
+- [ ] **Breaking changes flagged** — If API contracts, DB schema, or config keys changed, commit message includes `BREAKING CHANGE:`
+
+### Component-Specific Checks
+
+**If API endpoints changed:**
+- [ ] Endpoints return `ProblemDetails` for errors
+- [ ] Auth filters applied (`.AddEndpointFilter<>().RequireAuthorization()`)
+- [ ] CORS origins verified for new domains
+
+**If PCF control changed:**
+- [ ] Version bumped in all 5 locations (see `pcf-deploy` skill)
+- [ ] Shared library `dist/` recompiled if shared components modified
+- [ ] Bundle size verified (< 500KB with platform libraries)
+
+**If infrastructure changed:**
+- [ ] Bicep lint passes (`az bicep lint`)
+- [ ] Parameter files exist for all target environments
+- [ ] What-if preview reviewed (posted as PR comment by `deploy-infrastructure.yml`)
+
+---
+
 ## GitHub Actions Workflows
 
 ### CI Pipeline: `sdap-ci.yml`
@@ -443,27 +513,113 @@ integration-readiness:
   • Depends on: security-scan, build-test, code-quality, client-quality
 ```
 
-### Staging Deployment: `deploy-staging.yml`
+### BFF API Deployment: `deploy-bff-api.yml`
 
-**Triggers**: Auto after CI succeeds on master, Manual
+**Triggers**: Push to `master` when `src/server/api/**` changes, Manual dispatch
 
-| Job | Purpose |
-|-----|---------|
-| `deploy-api` | Deploy API to staging App Service |
-| `deploy-plugins` | Deploy Dataverse plugins via PAC CLI |
-| `integration-tests` | Run integration tests against staging |
-| `notify` | Deployment summary |
-
-### Production Deployment: `deploy-to-azure.yml`
-
-**Triggers**: Manual only
+**Pipeline**: build -> test -> deploy staging slot -> verify staging -> swap to production -> verify production -> (rollback on failure)
 
 | Job | Purpose |
 |-----|---------|
-| `deploy-infrastructure` | Deploy Bicep templates |
-| `deploy-api` | Deploy API to production App Service |
-| `smoke-test` | Verify `/ping` endpoint |
-| `notify` | Deployment summary |
+| `build` | Build and publish API (`dotnet publish`) |
+| `test` | Run unit tests (`tests/unit/Sprk.Bff.Api.Tests/`); skippable for emergency deploys |
+| `deploy-staging` | Deploy zip to staging slot (`spaarke-bff-prod-staging`) |
+| `verify-staging` | Health check `/healthz` + smoke test `/ping` on staging slot |
+| `swap-production` | Swap staging -> production (requires `production` environment approval) |
+| `verify-production` | Health check `/healthz` + smoke test `/ping` on production (`https://api.spaarke.com`) |
+| `rollback` | Auto swap-back if production health check fails |
+| `summary` | Deployment summary with job results |
+
+**Key features**: Zero-downtime via staging slot swap (NFR-02). Automatic rollback on production health check failure (NFR-06). Concurrency group prevents overlapping deploys.
+
+### Bicep Infrastructure Deployment: `deploy-infrastructure.yml`
+
+**Triggers**: PR or push to `master` when `infrastructure/bicep/**` changes, Manual dispatch
+
+| Job | Purpose |
+|-----|---------|
+| `validate` | Lint and build all Bicep templates, verify parameter files |
+| `what-if` | What-if preview (PR: posted as comment; Manual: step summary) |
+| `deploy` | Deploy infrastructure (manual dispatch only with `deploy: true`) |
+| `summary` | Pipeline summary |
+
+**Supports**: Model 1 (shared multi-tenant) and Model 2 (customer-dedicated) stacks. PR triggers only validate (no deployment).
+
+### Platform Infrastructure Deployment: `deploy-platform.yml`
+
+**Triggers**: Manual dispatch only
+
+| Job | Purpose |
+|-----|---------|
+| `what-if` | What-if preview via `Deploy-Platform.ps1 -WhatIf` |
+| `deploy` | Deploy platform infrastructure (requires environment approval) |
+| `verify` | Verify resource group, App Service health, Key Vault access |
+
+### Environment Promotion: `deploy-promote.yml`
+
+**Triggers**: Automatic after successful SDAP CI on master, Manual dispatch
+
+**Pipeline**: dev -> staging -> prod (with manual approval gate for production)
+
+| Job | Purpose |
+|-----|---------|
+| `plan` | Determine promotion path and artifact source |
+| `deploy-dev` | Deploy to dev + smoke tests (`/ping`, `/healthz`) |
+| `deploy-staging` | Deploy to staging + smoke tests + CORS integration check |
+| `deploy-prod` | Deploy to production (requires `prod` environment reviewer approval) |
+| `summary` | Promotion summary with path and per-environment results |
+
+**Key features**: Automatic trigger after CI; cascading deployment (dev must pass before staging); production gate via GitHub environment protection rules.
+
+### Slot Swap Deployment: `deploy-slot-swap.yml`
+
+**Triggers**: Automatic after successful SDAP CI on master, Manual dispatch
+
+| Job | Purpose |
+|-----|---------|
+| `build` | Build, test, and publish API |
+| `resolve-config` | Map environment to App Service name, resource group, URLs |
+| `deploy-to-slot` | Deploy to staging slot + warm-up wait |
+| `health-check` | `/healthz` and `/ping` checks on staging slot |
+| `swap-to-production` | Swap staging -> production (requires `production` environment approval) |
+| `summary` | Pipeline summary with all job statuses |
+
+### Office Add-ins Deployment: `deploy-office-addins.yml`
+
+**Triggers**: Push to `master` or `work/SDAP-outlook-office-add-in` when `src/client/office-addins/**` changes, Manual dispatch
+
+| Job | Purpose |
+|-----|---------|
+| `build_and_deploy` | Build webpack bundle + deploy to Azure Static Web App |
+
+### Customer Provisioning: `provision-customer.yml`
+
+**Triggers**: Manual dispatch only
+
+| Job | Purpose |
+|-----|---------|
+| `validate-inputs` | Validate customer ID format (lowercase alphanumeric, 3-10 chars) |
+| `provision` | Run `Provision-Customer.ps1` with Azure OIDC auth; supports dry run |
+| `verify` | Post-provisioning verification via `Test-Deployment.ps1` |
+| `summary` | Provisioning summary with resource names |
+
+**Key features**: Requires `production` environment approval. Logs uploaded as artifacts (90-day retention) for audit trail.
+
+### Claude Code Architecture Review: `claude-code-review.yml`
+
+**Triggers**: Pull request events (opened, synchronize, reopened)
+
+| Job | Purpose |
+|-----|---------|
+| `architecture-review` | Advisory architecture review using Claude Code Action (Sonnet 4.5); checks ADR compliance |
+
+**Advisory only**: Never blocks PR merges (`continue-on-error: true`). Skips draft PRs and Dependabot PRs.
+
+### Auto-Add to Project: `auto-add-to-project.yml`
+
+**Triggers**: Issues opened or reopened
+
+Automatically adds new issues to the Spaarke Core GitHub project board.
 
 ### ADR Audit: `adr-audit.yml`
 
@@ -472,7 +628,7 @@ integration-readiness:
 | Action | Purpose |
 |--------|---------|
 | Run NetArchTest | Full ADR compliance scan |
-| Create/Update Issue | Track violations with `architecture` label |
+| Create/Update Issue | Track violations with `architecture` and `adr-audit` labels |
 | Auto-close | When all violations resolved |
 
 ---
@@ -904,4 +1060,4 @@ No secrets required - runs in read-only mode.
 
 ---
 
-*Last updated: March 13, 2026*
+*Last updated: April 5, 2026*

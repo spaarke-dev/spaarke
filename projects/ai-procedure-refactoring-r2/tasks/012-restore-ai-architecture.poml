@@ -1,0 +1,72 @@
+<task id="012" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Restore AI Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, ai, over-trimmed</tags>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Restore depth to docs/architecture/AI-ARCHITECTURE.md — tool framework, handler registry, execution context, streaming paths, scope resolution</goal>
+    <context>The AI architecture doc was over-trimmed, losing critical detail about the AI Tool Framework internals, handler registry pattern, execution context lifecycle, streaming response paths, and scope resolution mechanism. This is the primary reference for all AI feature work.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — read ~100 AI service files before writing
+      - Recover trimmed content via git log -p where possible
+      - Must include Known Pitfalls section
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    </files>
+    <globs>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Ai/*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Ai/**/*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Api/**/AiTool*.cs</glob>
+    </globs>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/AI-ARCHITECTURE.md to understand what remains</step>
+    <step>Run git log -p -- docs/architecture/AI-ARCHITECTURE.md to recover trimmed content</step>
+    <step>Read AnalysisOrchestrationService.cs for orchestration flow</step>
+    <step>Read all files in Services/Ai/ to catalog tool handlers, execution context, and streaming paths</step>
+    <step>Read AI endpoint registrations for streaming and enqueue paths</step>
+    <step>Document the tool framework: IAiToolHandler interface, handler registry, tool discovery</step>
+    <step>Document execution context lifecycle and scope resolution</step>
+    <step>Document streaming response architecture (SSE, chunked transfer)</step>
+    <step>Draft restored document following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section covering handler registration misses, scope resolution failures, streaming connection drops</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write restored doc to docs/architecture/AI-ARCHITECTURE.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash(git log)</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/AI-ARCHITECTURE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Tool framework is fully documented: IAiToolHandler, handler registry, tool discovery</criterion>
+    <criterion>Execution context lifecycle is described end-to-end</criterion>
+    <criterion>Streaming response paths (SSE, chunked) are documented</criterion>
+    <criterion>Scope resolution mechanism is explained</criterion>
+    <criterion>Known Pitfalls section is present and substantive</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,9 +1,12 @@
 # AI Azure Resources
 
-> **Last Updated**: January 20, 2026
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (config section name corrected: `Ai:*` → `DocumentIntelligence:*`)
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
-> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16), Semantic Search R1 (2026-01-20)
+> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16), Semantic Search R1 (2026-01-20), Config keys re-verified (2026-04-05)
 
 ---
 
@@ -83,24 +86,24 @@ The App Service (`spe-api-dev-67e2xz`) needs `Key Vault Secrets User` role to ac
 
 ## App Service Configuration
 
-Settings configured in `spe-api-dev-67e2xz`:
+Settings configured in `spe-api-dev-67e2xz`. The BFF binds `DocumentIntelligenceOptions` from the configuration section `DocumentIntelligence` (see `src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs`: `public const string SectionName = "DocumentIntelligence";`). App Service environment variables use `__` as the hierarchy separator:
 
 | Setting | Value | Notes |
 |---------|-------|-------|
-| `Ai__Enabled` | `true` | Master switch for AI features |
-| `Ai__OpenAiEndpoint` | `https://spaarke-openai-dev.openai.azure.com/` | Can use Key Vault reference |
-| `Ai__OpenAiKey` | (configured) | Should use Key Vault reference in production |
-| `Ai__SummarizeModel` | `gpt-4o-mini` | Deployment name, not model name |
-| `Ai__DocIntelEndpoint` | `https://westus2.api.cognitive.microsoft.com/` | Document Intelligence endpoint |
-| `Ai__DocIntelKey` | (configured) | Should use Key Vault reference in production |
+| `DocumentIntelligence__Enabled` | `true` | Master switch for AI features |
+| `DocumentIntelligence__OpenAiEndpoint` | `https://spaarke-openai-dev.openai.azure.com/` | Can use Key Vault reference |
+| `DocumentIntelligence__OpenAiKey` | (configured) | Should use Key Vault reference in production |
+| `DocumentIntelligence__SummarizeModel` | `gpt-4o-mini` | Deployment name, not model name |
+| `DocumentIntelligence__DocIntelEndpoint` | `https://westus2.api.cognitive.microsoft.com/` | Document Intelligence endpoint |
+| `DocumentIntelligence__DocIntelKey` | (configured) | Should use Key Vault reference in production |
 
 ### Key Vault Reference Format (Production)
 
 ```
-Ai__OpenAiEndpoint=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-openai-endpoint/)
-Ai__OpenAiKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-openai-key/)
-Ai__DocIntelEndpoint=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-docintel-endpoint/)
-Ai__DocIntelKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-docintel-key/)
+DocumentIntelligence__OpenAiEndpoint=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-openai-endpoint/)
+DocumentIntelligence__OpenAiKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-openai-key/)
+DocumentIntelligence__DocIntelEndpoint=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-docintel-endpoint/)
+DocumentIntelligence__DocIntelKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-docintel-key/)
 ```
 
 ---

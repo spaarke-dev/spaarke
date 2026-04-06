@@ -324,7 +324,30 @@ FOR each phase:
       <parallel-safe>false</parallel-safe>
       <parallel-reason>{why: shared files, sequential logic, etc.}</parallel-reason>
 
-  DOCUMENT in TASK-INDEX.md "Parallel Execution Groups" section
+  **AUTO-DEMOTION RULE — `.claude/` permission boundary:**
+    IF any file in <relevant-files> starts with `.claude/`:
+      → FORCE <parallel-safe>false</parallel-safe>
+      → SET <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+      → This is NON-NEGOTIABLE. Sub-agents cannot write to .claude/.
+      → See CLAUDE.md "Sub-Agent Write Boundary" section.
+
+  **AUTO-DEMOTION RULE — file overlap check:**
+    WITHIN each proposed parallel group:
+      FOR each pair of tasks (A, B) in the group:
+        IF intersection(A.relevant-files, B.relevant-files) is non-empty:
+          → SPLIT: move one task to a different group
+          → OR mark both <parallel-safe>false</parallel-safe>
+          → Add <parallel-reason>file-overlap with task {other-id}</parallel-reason>
+
+  DOCUMENT in TASK-INDEX.md "Parallel Execution Groups" section with wave structure:
+    ```
+    ## Parallel Execution Plan
+
+    Phase 1:
+      Wave 1 (parallel, 4 agents): 010, 011, 012, 013
+      Wave 2 (parallel, 3 agents): 020, 021, 022 — prereq: Wave 1
+      Wave 3 (sequential): 030 — touches .claude/, main-session-only
+    ```
 
 WHY THIS MATTERS:
   - The project-pipeline executes parallel groups CONCURRENTLY by default

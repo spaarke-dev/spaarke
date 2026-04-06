@@ -1,5 +1,9 @@
 # On-Behalf-Of (OBO) Flow Pattern — Graph API
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Implementing or debugging user-delegated Graph API access from the BFF API.
 

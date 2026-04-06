@@ -1,5 +1,9 @@
 # Graph Webhook / Subscription Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Implementing or modifying Graph change notification subscriptions (e.g., email inbox monitoring).
 

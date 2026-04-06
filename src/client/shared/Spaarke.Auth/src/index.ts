@@ -20,6 +20,9 @@ export { SpaarkeAuthProvider } from './SpaarkeAuthProvider';
 // Authenticated fetch
 export { authenticatedFetch } from './authenticatedFetch';
 
+// BFF URL builder (use this for ALL BFF API URLs — never hand-concat template literals)
+export { buildBffApiUrl } from './buildBffApiUrl';
+
 // Public init API
 export { initAuth, getAuthProvider } from './initAuth';
 

@@ -2,7 +2,10 @@
 
 > **Domain**: AI Features, Azure OpenAI, Document Intelligence
 > **Source ADRs**: ADR-013, ADR-014, ADR-015, ADR-016
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (pattern file links corrected)
 
 ---
 
@@ -116,10 +119,11 @@ var key = DistributedCacheExtensions.CreateKey(
 
 ## Pattern Files (Complete Examples)
 
-- [AI Endpoint Pattern](../patterns/ai/endpoint-registration.md)
-- [AI Caching Pattern](../patterns/ai/caching.md)
-- [AI Logging Pattern](../patterns/ai/logging.md)
-- [AI Rate Limiting Pattern](../patterns/ai/rate-limiting.md)
+- [Analysis Scopes Pattern](../patterns/ai/analysis-scopes.md)
+- [Streaming Endpoints Pattern](../patterns/ai/streaming-endpoints.md)
+- [Text Extraction Pattern](../patterns/ai/text-extraction.md)
+- [Distributed Cache Pattern](../patterns/caching/distributed-cache.md)
+- [API Resilience Pattern](../patterns/api/resilience.md)
 
 ---
 
@@ -128,9 +132,9 @@ var key = DistributedCacheExtensions.CreateKey(
 | ADR | Focus | When to Load |
 |-----|-------|--------------|
 | [ADR-013](../adr/ADR-013-ai-architecture.md) | AI architecture | New AI features |
-| [ADR-014](../adr/ADR-014-ai-caching.md) | AI caching | Cache implementation |
+| [ADR-014](../adr/ADR-014-ai-caching-and-reuse-policy.md) | AI caching | Cache implementation |
 | [ADR-015](../adr/ADR-015-ai-data-governance.md) | Data governance | Logging, persistence |
-| [ADR-016](../adr/ADR-016-ai-rate-limits.md) | Rate limiting | Throttling implementation |
+| [ADR-016](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md) | Rate limiting | Throttling implementation |
 
 ---
 

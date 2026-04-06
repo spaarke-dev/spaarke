@@ -46,7 +46,7 @@ ELSE:
 ### Step 2: Load Repository Standards
 
 ```
-READ: docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md
+READ: docs/guides/REPOSITORY-NAVIGATION-GUIDE.md
 EXTRACT:
   - Valid directory patterns
   - Naming conventions
@@ -92,7 +92,7 @@ SCAN: All directories not matching known patterns
 FLAG: Directories that are:
   - Empty (except for .gitkeep)
   - Not referenced in Spaarke.sln (for .NET projects)
-  - Not documented in SPAARKE-REPOSITORY-ARCHITECTURE.md
+  - Not documented in docs/guides/REPOSITORY-NAVIGATION-GUIDE.md
   - Named inconsistently (e.g., mixed case, spaces)
 ```
 
@@ -345,7 +345,7 @@ When a project is complete:
 
 | Resource | Purpose |
 |----------|---------|
-| `docs/architecture/SPAARKE-REPOSITORY-ARCHITECTURE.md` | Structure standards |
+| `docs/guides/REPOSITORY-NAVIGATION-GUIDE.md` | Structure standards |
 | `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` | Naming standards |
 | `.gitignore` | Files that should be ignored |
 

@@ -1,0 +1,70 @@
+<task id="002" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create ANTI-PATTERNS.md</title>
+    <phase>1</phase>
+    <tags>standards, documentation, anti-patterns</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/standards/ANTI-PATTERNS.md — top 20 anti-patterns sourced from deploy skills, ADRs, and incident history</goal>
+    <context>Anti-patterns are scattered across deploy skill troubleshooting tables, ADR DON'T rules, and CLAUDE.md warnings. Claude repeatedly hits the same pitfalls because there is no consolidated anti-pattern reference. This document provides a single lookup for "what NOT to do" with explanations and correct alternatives.</context>
+    <constraints>
+      - Use /docs-standards skill structure
+      - Source ALL anti-patterns from existing deploy skills, ADRs, and CLAUDE.md — do not invent
+      - Format each entry as: Anti-Pattern → Why It's Wrong → Correct Approach → Source Reference
+      - Target exactly 20 anti-patterns covering deployment, coding, architecture, and security concerns
+      - Prioritize anti-patterns that cause production incidents or repeated CI failures
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-standards/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-002-thin-dataverse-plugins.md</file>
+      <file>.claude/adr/ADR-006-anti-legacy-js.md</file>
+      <file>.claude/adr/ADR-007-spe-filestore-facade.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters-for-auth.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-standards/SKILL.md for mandatory structure</step>
+    <step>Read all deploy skills (bff-deploy, pcf-deploy, code-page-deploy, dataverse-deploy, azure-deploy) and extract troubleshooting tables and warnings</step>
+    <step>Read all ADRs and extract every DON'T rule and negative constraint</step>
+    <step>Read CLAUDE.md and extract all "DON'T" and "WRONG" examples</step>
+    <step>Rank anti-patterns by severity and frequency, select top 20</step>
+    <step>Draft ANTI-PATTERNS.md with consistent format: Anti-Pattern → Why Wrong → Correct Approach → Source</step>
+    <step>Verify every anti-pattern cites its source document</step>
+    <step>Write to docs/standards/ANTI-PATTERNS.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-standards)</tool>
+  </tools>
+  <outputs>
+    <output>docs/standards/ANTI-PATTERNS.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-standards skill structure</criterion>
+    <criterion>Contains exactly 20 anti-patterns</criterion>
+    <criterion>Each entry includes: anti-pattern description, why it's wrong, correct approach, and source reference</criterion>
+    <criterion>Covers deployment, coding, architecture, and security categories</criterion>
+    <criterion>All anti-patterns sourced from existing materials — none invented</criterion>
+  </acceptance-criteria>
+</task>

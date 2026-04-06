@@ -1,13 +1,17 @@
 # Testing Patterns Index
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 > Pointer-based pattern files for unit tests, integration tests, and mocking.
 > Each file points to canonical source code — read the code, not descriptions.
 
-| Pattern | When to Load |
-|---------|-------------|
-| [unit-test-structure.md](unit-test-structure.md) | Writing xUnit unit tests (AAA, naming, assertions) |
-| [mocking-patterns.md](mocking-patterns.md) | Setting up Moq, WireMock, or custom fakes |
-| [integration-tests.md](integration-tests.md) | WebApplicationFactory E2E tests, arch compliance tests |
+| Pattern | When to Load | Last Reviewed | Status |
+|---------|-------------|---------------|--------|
+| [unit-test-structure.md](unit-test-structure.md) | Writing xUnit unit tests (AAA, naming, assertions) | 2026-04-05 | Verified |
+| [mocking-patterns.md](mocking-patterns.md) | Setting up Moq, WireMock, or custom fakes | 2026-04-05 | Verified |
+| [integration-tests.md](integration-tests.md) | WebApplicationFactory E2E tests, arch compliance tests | 2026-04-05 | Verified |
 
 ## Test Structure
 ```

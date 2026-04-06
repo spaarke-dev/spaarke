@@ -856,7 +856,7 @@ Default actions (summarize, simplify, expand, fact-check, ask) are always availa
 
 ## Cross-References
 
-- [AI Chat Strategy: M365 Copilot + SprkChat](../../docs/architecture/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) — Two-plane strategy and contextual component model
+- [AI Chat Strategy: M365 Copilot + SprkChat](../../docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) — Two-plane strategy and contextual component model
 - [SprkChat Extensibility Design](../ai-sprk-chat-extensibility-r1/design.md) — Quick-action chips (Phase 2), slash commands (Phase 1), plan preview (Phase 3), rich responses (Phase 4), and market research. Parts B6-B9 of this companion design integrate the Analysis Workspace-relevant portions of the extensibility design.
 - [AI Architecture](../../docs/architecture/AI-ARCHITECTURE.md) — AI Tool Framework
 - [Side Pane Platform Architecture](../../docs/architecture/SIDE-PANE-PLATFORM-ARCHITECTURE.md) — Side pane design

@@ -1,0 +1,68 @@
+<task id="039" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create workspace-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, workspace, layout, panel-composition</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/workspace-architecture.md — document the workspace layout system, panel composition, and configuration-driven UI</goal>
+    <context>The Spaarke platform uses workspace pages (LegalWorkspace, WorkspaceLayoutWizard) that provide configurable multi-panel layouts. These workspaces use panel splitters, configuration-driven composition, and dynamic panel loading. No architecture document captures this workspace system end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent workspace features
+      - Document the workspace layout system (shell, panels, splitters)
+      - Map panel composition: how panels are configured and composed
+      - Document configuration-driven UI: how workspace config drives panel selection and layout
+      - Include WorkspaceLayoutWizard: how users configure their workspace
+      - Cite source files for every component
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/solutions/LegalWorkspace/src/</file>
+      <file>src/solutions/LegalWorkspace/src/components/Shell/</file>
+      <file>src/solutions/LegalWorkspace/src/config/</file>
+      <file>src/solutions/LegalWorkspace/src/hooks/</file>
+      <file>src/solutions/WorkspaceLayoutWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read LegalWorkspace shell component for overall layout structure</step>
+    <step>Read LegalWorkspace config/ for configuration-driven panel definitions</step>
+    <step>Read LegalWorkspace hooks/ for dynamic panel loading and state management</step>
+    <step>Read PanelSplitter component for panel resizing behavior</step>
+    <step>Read WorkspaceLayoutWizard for user-facing configuration UI</step>
+    <step>Search for other workspace implementations across src/solutions/</step>
+    <step>Map the composition flow: config → shell → panels → content</step>
+    <step>Draft workspace-architecture.md following skill structure</step>
+    <step>Verify every component cites its source file</step>
+    <step>Write to docs/architecture/workspace-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/workspace-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Workspace layout system documented (shell, panels, splitters)</criterion>
+    <criterion>Panel composition and configuration-driven UI mapped</criterion>
+    <criterion>WorkspaceLayoutWizard user configuration flow documented</criterion>
+    <criterion>All workspace implementations inventoried</criterion>
+    <criterion>Every component cites its source file</criterion>
+    <criterion>No invented features — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

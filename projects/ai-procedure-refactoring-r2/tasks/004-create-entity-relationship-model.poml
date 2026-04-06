@@ -1,0 +1,62 @@
+<task id="004" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create entity-relationship-model.md</title>
+    <phase>1</phase>
+    <tags>data-model, documentation, entities, relationships</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/data-model/entity-relationship-model.md — master ERD with relationships, cascade behaviors, and polymorphic lookups</goal>
+    <context>Entity documentation exists per-entity in docs/data-model/ but there is no master document showing how entities relate to each other. Claude needs to understand cascade behaviors, polymorphic lookups, and relationship cardinality when implementing features that span multiple entities.</context>
+    <constraints>
+      - Use /docs-data-model skill structure
+      - Source ALL relationships from existing entity docs and C# entity classes — do not invent
+      - Include cascade behavior for every relationship (Restrict, Cascade, RemoveLink, etc.)
+      - Document all polymorphic lookups with their target entity sets
+      - Use Mermaid ERD syntax for visual relationship diagram
+      - Organize entities by domain area (Core, Documents, AI, Security)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <directories>
+      <directory>docs/data-model/</directory>
+      <directory>src/server/shared/Spaarke.Core/Entities/</directory>
+    </directories>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-data-model/SKILL.md for mandatory structure</step>
+    <step>Read all existing entity documentation in docs/data-model/</step>
+    <step>Read C# entity classes in src/server/shared/Spaarke.Core/Entities/ for relationship definitions</step>
+    <step>Build a complete relationship map: entity → related entity, cardinality, cascade behavior</step>
+    <step>Identify all polymorphic lookups and document their target entity sets</step>
+    <step>Create Mermaid ERD diagram showing all relationships</step>
+    <step>Organize entities by domain area with relationship tables</step>
+    <step>Write to docs/data-model/entity-relationship-model.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-data-model)</tool>
+  </tools>
+  <outputs>
+    <output>docs/data-model/entity-relationship-model.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-data-model skill structure</criterion>
+    <criterion>Includes Mermaid ERD diagram covering all entities</criterion>
+    <criterion>Every relationship includes cardinality and cascade behavior</criterion>
+    <criterion>All polymorphic lookups documented with target entity sets</criterion>
+    <criterion>Entities organized by domain area</criterion>
+    <criterion>All relationships sourced from existing code and docs — none invented</criterion>
+  </acceptance-criteria>
+</task>

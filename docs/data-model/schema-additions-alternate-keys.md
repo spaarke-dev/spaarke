@@ -1,155 +1,195 @@
-# Schema Additions: Alternate Keys for SaaS Portability
+# Alternate Keys for SaaS Portability
 
-**Date**: 2026-02-11
-**Purpose**: Add alternate key fields to support multi-environment deployments without hardcoded GUIDs
+> **Last Updated**: April 5, 2026
+> **Original Date**: 2026-02-11
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
+> **Purpose**: Reference document for alternate key definitions, their usage in code, and the multi-environment deployment pattern they enable.
 
 ---
 
 ## Problem Statement
 
-Primary key GUIDs (`sprk_playbookid`, `sprk_invoiceid`, etc.) change when solutions deploy to new environments (DEV → QA → PROD). This breaks hardcoded GUID references in code.
+Primary key GUIDs (`sprk_analysisplaybookid`, `sprk_invoiceid`, etc.) change when solutions deploy to new environments (DEV -> QA -> PROD). This breaks hardcoded GUID references in code.
 
 **Example**:
-- DEV: Playbook "Invoice Analysis" has GUID `1e657651-9308-f111-8407-7c1e520aa4df`
-- QA: Same playbook has GUID `9a8b7c6d-1234-5678-abcd-ef0123456789`
-- PROD: Same playbook has GUID `4f5e6d7c-8901-2345-bcde-123456789abc`
+- DEV: Playbook "Invoice Analysis" -> GUID `1e657651-9308-f111-8407-7c1e520aa4df`
+- QA: Same playbook -> GUID `9a8b7c6d-1234-5678-abcd-ef0123456789`
+- PROD: Same playbook -> GUID `4f5e6d7c-8901-2345-bcde-123456789abc`
 
-Code using hardcoded GUID only works in one environment.
-
----
-
-## Solution: Alternate Keys
-
-Add **alternate key fields** (string) that remain stable across all environments. These provide logical, portable identifiers.
+**Solution**: Add **alternate key fields** (string) that remain stable across all environments, providing logical, portable identifiers.
 
 ---
 
-## Schema Changes
+## Alternate Keys Catalog
 
-### 1. sprk_analysisplaybook Entity
+### Reference / Configuration Entities
 
-**New Field**: `sprk_playbookcode`
+These alternate keys enable code to reference configuration records without hardcoded GUIDs.
 
-| Property | Value |
-|----------|-------|
-| **Display Name** | Playbook Code |
-| **Schema Name** | sprk_playbookcode |
-| **Type** | Single Line of Text |
-| **Max Length** | 50 |
-| **Required** | Business Required |
-| **Unique** | Yes (Alternate Key) |
-| **Format** | `PB-{NNN}` (e.g., `PB-013`) |
-| **Description** | Unique code for playbook - stable across all environments |
+| Entity | Alternate Key Field(s) | Key Name | Format | Purpose |
+|---|---|---|---|---|
+| `sprk_analysisplaybook` | `sprk_playbookcode` | `sprk_playbookcode_key` | `PB-{NNN}` (e.g., `PB-013`) | Cross-environment playbook lookup |
+| `sprk_analysisaction` | `sprk_actioncode` | `sprk_actioncode_key` | (TBD) | Cross-environment action lookup |
+| `sprk_analysisskill` | `sprk_skillcode` | `sprk_skillcode_key` | (TBD) | Cross-environment skill lookup |
+| `sprk_analysistool` | `sprk_toolcode` | `sprk_toolcode_key` | (TBD) | Cross-environment tool lookup |
 
-**Alternate Key Definition**:
-- **Name**: `sprk_playbookcode_key`
-- **Fields**: `sprk_playbookcode`
-- **Purpose**: Enable lookup by code instead of GUID
+### Idempotency / Upsert Entities
 
-**Migration**:
-- Backfill existing playbooks with codes based on their order/purpose
-- Example codes:
-  - `PB-001`: Document Classification
-  - `PB-002`: Document Profile
-  - `PB-013`: Invoice Analysis (Finance)
+These alternate keys are composite keys used for idempotent upsert operations. Re-running a job should not create duplicates.
+
+| Entity | Alternate Key Fields | Purpose |
+|---|---|---|
+| `sprk_billingevent` | `sprk_invoice` + `sprk_linesequence` | Idempotent invoice line re-extraction |
+| `sprk_spendsnapshot` | `sprk_matter` + `sprk_periodtype` + `sprk_periodkey` + `sprk_bucketkey` + `sprk_visibilityfilter` (matter-scoped) | Idempotent snapshot regeneration |
+| `sprk_spendsnapshot` | `sprk_project` + `sprk_periodtype` + `sprk_periodkey` + `sprk_bucketkey` + `sprk_visibilityfilter` (project-scoped) | Idempotent snapshot regeneration |
+| Processing Job entity | `sprk_idempotencykey` | Idempotency key for background jobs |
 
 ---
 
-### 2. Future Entities (Not MVP, but recommended pattern)
+## Service Usage Map
 
-#### sprk_invoice
-**New Field**: `sprk_invoicecode`
-- Format: `INV-{YYYYMMDD}-{SEQUENCE}` (e.g., `INV-20260211-001`)
-- Use case: Cross-reference invoices across environments for testing
+Which BFF services use each alternate key:
 
-#### sprk_matter
-**New Field**: `sprk_mattercode`
-- Format: Client-provided matter number (e.g., `M-2024-1234`)
-- Use case: Lookup matters by business identifier instead of GUID
+| Alternate Key | Service / File | Method | Call Site |
+|---|---|---|---|
+| `sprk_playbookcode` | `PlaybookLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs` |
+| `sprk_playbookcode` | `InvoiceExtractionJobHandler` | `_playbookLookup.GetByCodeAsync("PB-013")` | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs:310` |
+| `sprk_actioncode` | `ActionLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/ActionLookupService.cs` |
+| `sprk_skillcode` | `SkillLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/SkillLookupService.cs` |
+| `sprk_toolcode` | `ToolLookupService` | `GetByCodeAsync(string)` | `src/server/api/Sprk.Bff.Api/Services/Ai/ToolLookupService.cs` |
+| SpendSnapshot 5-field | `SpendSnapshotService` | `CreateSnapshotEntityForMatter()`, `CreateSnapshotEntityForProject()` | `src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs` |
+| SpendSnapshot 5-field | `SpendSnapshotGenerationJobHandler` | Upserts via `SpendSnapshotService` | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/SpendSnapshotGenerationJobHandler.cs` |
+| `sprk_idempotencykey` | `IProcessingJobService` | `GetProcessingJobByIdempotencyKeyAsync(string)` | `src/server/shared/Spaarke.Dataverse/IProcessingJobService.cs` |
 
 ---
 
-## Implementation Steps
+## Core Infrastructure
 
-### Step 1: Add Field to Dataverse (Manual)
+All alternate key lookups go through a single interface in `Spaarke.Dataverse`:
 
-1. Open [Power Apps Maker Portal](https://make.powerapps.com)
-2. Navigate to **Solutions** → **Spaarke**
-3. Open **sprk_analysisplaybook** entity
-4. Add new field:
-   - Display Name: `Playbook Code`
-   - Schema Name: `sprk_playbookcode`
-   - Type: Single Line of Text
-   - Max Length: 50
-   - Required: Business Required
-5. **Create Alternate Key**:
-   - Go to **Keys** tab
-   - Click **+ New Key**
-   - Name: `sprk_playbookcode_key`
-   - Select field: `sprk_playbookcode`
-   - Save
-6. **Publish customizations**
+```csharp
+// IGenericEntityService.cs
+Task<Entity> RetrieveByAlternateKeyAsync(
+    string entityLogicalName,
+    KeyAttributeCollection alternateKeyValues,
+    string[]? columns = null,
+    CancellationToken ct = default);
+```
 
-### Step 2: Backfill Existing Records
+**Implementation**:
+- `DataverseServiceClientImpl.RetrieveByAlternateKeyAsync()` (line 1805) -- **primary implementation**, uses `RetrieveRequest` with `KeyAttributes` via ServiceClient
+- `DataverseWebApiService.RetrieveByAlternateKeyAsync()` (line 2121) -- **not implemented**, throws `NotImplementedException` directing callers to the ServiceClient implementation
 
-Run this in **Power Apps Tools** or via Web API:
+**Caveat**: Alternate key lookups require ServiceClient mode. The Web API path is not currently supported for this operation.
 
-```javascript
-// Backfill playbook codes
-const playbooks = [
-  { id: "1e657651-9308-f111-8407-7c1e520aa4df", code: "PB-013" } // Invoice Analysis
-  // Add other playbooks as needed
-];
+---
 
-for (const playbook of playbooks) {
-  await Xrm.WebApi.updateRecord("sprk_analysisplaybook", playbook.id, {
-    sprk_playbookcode: playbook.code
-  });
+## Canonical Usage Pattern: Playbook Lookup
+
+```csharp
+// 1. Inject the lookup service
+public class InvoiceExtractionJobHandler
+{
+    private readonly IPlaybookLookupService _playbookLookup;
+
+    public InvoiceExtractionJobHandler(IPlaybookLookupService playbookLookup)
+    {
+        _playbookLookup = playbookLookup;
+    }
+
+    public async Task HandleAsync(CancellationToken ct)
+    {
+        // 2. Lookup by stable code, not GUID
+        var playbook = await _playbookLookup.GetByCodeAsync("PB-013", ct);
+
+        // 3. Use the resolved playbook
+        // ... orchestration logic
+    }
 }
 ```
 
-### Step 3: Update Code (This Implementation)
+**Under the hood** (`PlaybookLookupService.GetByCodeAsync`):
 
-- Add `RetrieveByAlternateKeyAsync` to IDataverseService
-- Create `IPlaybookLookupService` with caching
-- Update `InvoiceExtractionJobHandler` to use lookup service
+```csharp
+var alternateKeyValues = new KeyAttributeCollection
+{
+    { "sprk_playbookcode", playbookCode }
+};
+
+var entity = await _genericEntityService.RetrieveByAlternateKeyAsync(
+    "sprk_analysisplaybook",
+    alternateKeyValues,
+    columns: new[] { "sprk_analysisplaybookid", "sprk_name", "sprk_playbookcode", /* ... */ },
+    ct);
+```
 
 ---
 
-## Alternate Key Lookup Performance
+## Canonical Usage Pattern: SpendSnapshot Upsert
+
+`SpendSnapshotService` creates snapshot entities with a 5-field alternate key for idempotent regeneration:
+
+```csharp
+// Matter-scoped snapshot
+var keyAttributes = new KeyAttributeCollection
+{
+    { "sprk_matter", matterId },
+    { "sprk_periodtype", periodType },     // OptionSet: Month | ToDate
+    { "sprk_periodkey", periodKey },       // e.g. "2026-02"
+    { "sprk_bucketkey", DefaultBucketKey }, // "TOTAL" for MVP
+    { "sprk_visibilityfilter", DefaultVisibilityFilter }
+};
+
+var snapshot = new Entity("sprk_spendsnapshot", keyAttributes);
+// ... populate fields ...
+await _genericEntityService.UpsertAsync(snapshot, ct);
+```
+
+**Note**: The actual field names in code differ from the originally-documented names in earlier versions of this doc. The authoritative field names are:
+- `sprk_periodtype` (Choice: Month / ToDate) -- NOT `sprk_snapshotperiod`
+- `sprk_periodkey` (Text: e.g. `2026-02`) -- NOT `sprk_periodvalue`
+- `sprk_bucketkey` (Text: default `TOTAL`)
+- `sprk_visibilityfilter` (Text)
+
+---
+
+## Caching Strategy
+
+Lookups via alternate key benefit significantly from caching since configuration records change rarely:
 
 **Without caching**:
 - Each lookup: 1 Dataverse query (~50-100ms)
-- 1000 invoices/hour = 1000 queries = significant load
+- High-volume scenarios (1000 invoices/hour = 1000 queries)
 
-**With IMemoryCache (1-hour TTL)**:
+**With `IMemoryCache` (1-hour TTL)**:
 - First lookup: 1 Dataverse query + cache write
 - Subsequent lookups: In-memory (< 1ms)
-- Cache expires after 1 hour, refreshes on next access
-- Memory usage: ~1KB per cached playbook (negligible)
+- Memory footprint: ~1KB per cached playbook (negligible)
 
-**Recommendation**: Always use caching for alternate key lookups in high-volume scenarios.
+**Recommendation**: Always use caching for configuration alternate key lookups (playbook, action, skill, tool). Do NOT cache idempotency-style lookups (they must hit Dataverse to detect concurrent upserts).
+
+`PlaybookLookupService`, `ActionLookupService`, `SkillLookupService`, and `ToolLookupService` all implement memory-cached reads per `FinanceModule.cs` DI registration comments.
 
 ---
 
 ## Multi-Environment Deployment Flow
 
 ### DEV Environment (Initial Setup)
-1. Create playbook "Invoice Analysis" → Gets GUID `1e657651-9308-...`
+1. Create playbook "Invoice Analysis" -> Gets GUID `1e657651-9308-...`
 2. Set `sprk_playbookcode = "PB-013"`
 3. Deploy code using `GetByCodeAsync("PB-013")`
 
 ### QA Environment (Solution Import)
-1. Import solution → Playbook gets NEW GUID `9a8b7c6d-...`
+1. Import solution -> Playbook gets NEW GUID `9a8b7c6d-...`
 2. Solution import preserves `sprk_playbookcode = "PB-013"`
-3. **Same code works without changes** ✅
+3. **Same code works without changes**
 
 ### PROD Environment (Solution Import)
-1. Import solution → Playbook gets NEW GUID `4f5e6d7c-...`
+1. Import solution -> Playbook gets NEW GUID `4f5e6d7c-...`
 2. Solution import preserves `sprk_playbookcode = "PB-013"`
-3. **Same code works without changes** ✅
-
-**Result**: One codebase works in all environments without config changes.
+3. **Same code works without changes**
 
 ---
 
@@ -157,19 +197,34 @@ for (const playbook of playbooks) {
 
 | Approach | Portability | Performance | Maintenance | Verdict |
 |----------|-------------|-------------|-------------|---------|
-| **Hardcoded GUID** | ❌ Breaks in new environments | ✅ Direct | ❌ Config per environment | ❌ Not SaaS-ready |
-| **Config file** | ⚠️ Requires config per environment | ✅ Direct | ❌ Manual mapping | ⚠️ Fragile |
-| **Lookup by name** | ✅ Portable | ❌ Slow (no index) | ⚠️ Name changes break code | ⚠️ Risky |
-| **Alternate keys** | ✅ Portable | ✅ Indexed | ✅ Self-documenting | ✅ **RECOMMENDED** |
-| **Configuration entity** | ✅ Portable | ⚠️ Extra query | ❌ Additional complexity | ⚠️ Overkill for MVP |
+| Hardcoded GUID | Breaks in new environments | Direct | Config per environment | Not SaaS-ready |
+| Config file | Requires config per environment | Direct | Manual mapping | Fragile |
+| Lookup by name | Portable | Slow (no index) | Name changes break code | Risky |
+| **Alternate keys** | **Portable** | **Indexed** | **Self-documenting** | **RECOMMENDED** |
+| Configuration entity | Portable | Extra query | Additional complexity | Overkill for MVP |
 
 ---
 
-## Testing Plan
+## Entities Currently Without Alternate Keys
+
+These entities do NOT have alternate keys defined (consider adding where deployment portability is needed):
+
+- `sprk_invoice` (future: `sprk_invoicecode` format `INV-{YYYYMMDD}-{SEQUENCE}`)
+- `sprk_matter` (future: `sprk_mattercode` = client-provided matter number)
+- `sprk_budget` / `sprk_budgetbucket`
+- `sprk_spendsignal`
+- `sprk_kpiassessment`
+- `sprk_communication`
+- `sprk_workassignment`
+- `sprk_document` (uses `sprk_driveitemid` as natural uniqueness, but not a formal alternate key)
+
+---
+
+## Testing
 
 ### Unit Tests
-- Verify `RetrieveByAlternateKeyAsync` calls correct Web API endpoint
-- Verify cache hit/miss behavior
+- Verify `RetrieveByAlternateKeyAsync` calls correct Dataverse API with proper `KeyAttributeCollection`
+- Verify cache hit/miss behavior for cached lookup services
 - Verify cache expiration after TTL
 
 ### Integration Tests
@@ -197,13 +252,15 @@ GET /api/data/v9.2/sprk_analysisplaybooks(sprk_playbookcode='PB-013')
 
 ---
 
-## Future Enhancements (Post-MVP)
+## Related Documentation
 
-1. **Auto-generate playbook codes** on creation (plugin or Power Automate)
-2. **Add alternate keys to other entities** (invoice, matter, document)
-3. **Build admin UI** for managing playbook codes
-4. **Audit trail** for code changes (prevent breaking references)
+| Document | Path |
+|---|---|
+| Field Mapping Reference | `docs/data-model/field-mapping-reference.md` |
+| Schema Corrections | `docs/data-model/schema-corrections.md` |
+| Entity Relationship Model | `docs/data-model/entity-relationship-model.md` |
+| JSON Field Schemas | `docs/data-model/json-field-schemas.md` |
 
 ---
 
-*This schema change is foundational for multi-tenant SaaS deployments.*
+*This schema pattern is foundational for multi-tenant SaaS deployments.*

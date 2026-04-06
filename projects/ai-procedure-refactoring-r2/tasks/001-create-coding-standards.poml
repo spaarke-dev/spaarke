@@ -1,0 +1,61 @@
+<task id="001" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create CODING-STANDARDS.md</title>
+    <phase>1</phase>
+    <tags>standards, documentation, coding-conventions</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/standards/CODING-STANDARDS.md — consolidated coding standards for C# and TypeScript</goal>
+    <context>No consolidated coding standards document exists. Conventions are scattered across CLAUDE.md, spaarke-conventions skill, and ADR constraints. Claude needs a single reference when implementing code.</context>
+    <constraints>
+      - Use /docs-standards skill structure
+      - Source ALL standards from existing ADRs, CLAUDE.md, and skills — do not invent
+      - Organize by language (C# / TypeScript) and concern (naming, error handling, logging, DI)
+      - Every rule must cite its source (ADR number, skill name, or CLAUDE.md section)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-standards/SKILL.md</file>
+      <file>.claude/skills/spaarke-conventions/SKILL.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-006-anti-legacy-js.md</file>
+      <file>.claude/adr/ADR-007-spe-filestore-facade.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters-for-auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-standards/SKILL.md for mandatory structure</step>
+    <step>Read CLAUDE.md "Coding Standards" section</step>
+    <step>Read spaarke-conventions skill for naming/patterns</step>
+    <step>Read all referenced ADRs for constraints</step>
+    <step>Draft CODING-STANDARDS.md following skill structure</step>
+    <step>Verify every rule cites its source</step>
+    <step>Write to docs/standards/CODING-STANDARDS.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-standards)</tool>
+  </tools>
+  <outputs>
+    <output>docs/standards/CODING-STANDARDS.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-standards skill structure</criterion>
+    <criterion>Covers C# and TypeScript conventions</criterion>
+    <criterion>Every rule cites ADR, skill, or CLAUDE.md as source</criterion>
+    <criterion>No invented conventions — all sourced from existing materials</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,9 +1,15 @@
 # Universal Dataset Grid Architecture
 
-> **Status**: Draft
+> **Status**: Current
 > **Created**: 2026-02-05
 > **Domain**: UI Components / PCF / React Code Pages
 > **Related ADRs**: [ADR-012](../adr/ADR-012-shared-components.md), [ADR-021](../adr/ADR-021-fluent-ui-design-system.md), [ADR-022](../adr/ADR-022-pcf-platform-libraries.md)
+
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (updated)
+>
+> Verified against code: `src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/` contains `UniversalDatasetGrid.tsx`, `ViewSelector.tsx`, `GridView.tsx`, `ListView.tsx`, `CardView.tsx`, `VirtualizedGridView.tsx`, `VirtualizedListView.tsx`. Shared services present: `FetchXmlService.ts`, `ViewService.ts`, `ConfigurationService.ts`. Type definitions `FetchXmlTypes.ts` and `ConfigurationTypes.ts` present. Production PCF consumer: `src/client/pcf/UniversalDatasetGrid/` (UniversalDatasetGridRoot.tsx). Code Page consumer: `SemanticSearch`. Status moved from Draft → Current given active production use. Updated the "React 16 API only" section to reflect the actual dual-entry-point model (`pcf-safe.ts` for PCF, main barrel for React 18/19 Code Pages).
 
 ---
 
@@ -39,15 +45,16 @@ This document defines the architecture for **universal dataset grid components**
 
 ## Design Decisions
 
-### Shared Library with React 16 API Compatibility
+### Shared Library with Dual Entry Points (PCF-safe + Main)
 
-The shared library (`@spaarke/ui-components`) uses **React 16 API only** to support both PCF controls (platform-provided React 16/17, per ADR-022) and Custom Pages (bundled React 18). Using React 18 APIs in the shared library would break PCF controls.
+The shared library (`@spaarke/ui-components`) supports both PCF controls (platform-provided React 16/17, per ADR-022) and Code Pages (bundled React 18/19) via **two entry points**:
 
-**APIs used (React 16 compatible)**: `useState`, `useEffect`, `useMemo`, `useCallback`, `ReactDOM.render()`, `unmountComponentAtNode()`.
+- **`src/pcf-safe.ts`** — PCF-only barrel. Exports ONLY components and services verified compatible with React 16/17 (`React.createElement` / `ReactDOM.render` patterns). Excludes anything that depends on React 18+ APIs (`useId`, `useSyncExternalStore`, `use()`, `createRoot`) or Lexical.
+- **`src/index.ts`** — Main barrel used by Code Pages. May include React 18/19 components (e.g., `SprkChat`, `WizardShell`, rich-text editors backed by Lexical).
 
-**APIs avoided (React 18 only)**: `createRoot()`, `useId`, `useSyncExternalStore`, `startTransition`, Suspense for data.
+PCF controls import from `@spaarke/ui-components/src/pcf-safe`. Code Pages import from `@spaarke/ui-components`. The `peerDependency` declares `"react": ">=16.14.0"` so a single package publish serves both consumers.
 
-PCF controls reference the shared library's React 16 declarations; Custom Pages use their own bundled React 18.
+Grid components in `src/components/DatasetGrid/` use only stable cross-version hooks (`useState`, `useEffect`, `useMemo`, `useCallback`) so they render identically in both worlds.
 
 ### Config-Driven Views via sprk_gridconfiguration
 

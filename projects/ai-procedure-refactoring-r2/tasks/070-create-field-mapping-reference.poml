@@ -1,0 +1,56 @@
+<task id="070" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create field-mapping-reference.md</title>
+    <phase>6</phase>
+    <tags>data-model, documentation, field-mappings, consolidation</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/data-model/field-mapping-reference.md — consolidate field mappings from scattered entity files into a single reference</goal>
+    <context>Field mappings between Dataverse entities and C# models are documented across many individual entity files in docs/data-model/. No consolidated reference exists for cross-entity field lookup.</context>
+    <constraints>
+      - Use /docs-data-model skill structure
+      - Source ALL field mappings from existing entity documentation files
+      - Organize by entity, with cross-references for related entities
+      - Include Dataverse logical name, display name, C# property name, and data type
+      - Cite source entity doc file for every mapping
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-data-model/SKILL.md for mandatory structure</step>
+    <step>Inventory all entity documentation files in docs/data-model/</step>
+    <step>Read each sprk_*.md file to extract field mappings</step>
+    <step>Consolidate field mappings into a unified reference table</step>
+    <step>Add cross-references for related entities (lookups, relationships)</step>
+    <step>Verify field names against C# model classes where possible</step>
+    <step>Draft field-mapping-reference.md following skill structure</step>
+    <step>Write to docs/data-model/field-mapping-reference.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-data-model)</tool>
+  </tools>
+  <outputs>
+    <output>docs/data-model/field-mapping-reference.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-data-model skill structure</criterion>
+    <criterion>All entity field mappings consolidated from individual docs</criterion>
+    <criterion>Cross-references included for related entities</criterion>
+    <criterion>Dataverse logical name, display name, C# property, and type included per field</criterion>
+    <criterion>Every mapping cites its source entity doc file</criterion>
+  </acceptance-criteria>
+</task>

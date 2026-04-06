@@ -1,0 +1,70 @@
+<task id="010" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Restore BFF API Patterns Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, bff-api, over-trimmed</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Restore depth to docs/architecture/sdap-bff-api-patterns.md — 22 startup modules, endpoint map, DI module system</goal>
+    <context>The BFF API patterns doc was over-trimmed during a previous refactoring pass. Critical details about the 22 startup modules, full endpoint map, and DI module system were removed. This doc is essential for Claude to understand the API layer architecture when implementing new endpoints or modifying existing ones.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — read all Program.cs, *Module.cs, and endpoint files before writing
+      - Recover trimmed content via git log -p where possible
+      - Must include Known Pitfalls section (missing DI registration, endpoint filter ordering)
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/sdap-bff-api-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+    <globs>
+      <glob>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/*Module*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Infrastructure/Startup/*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Api/**/*Endpoints*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Api/**/*.cs</glob>
+    </globs>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/sdap-bff-api-patterns.md to understand what remains</step>
+    <step>Run git log -p -- docs/architecture/sdap-bff-api-patterns.md to recover trimmed content</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Program.cs for startup pipeline and module registration</step>
+    <step>Read all *Module.cs files in Infrastructure/Startup/ to catalog the 22 startup modules</step>
+    <step>Read all endpoint registration files in Api/ to build the full endpoint map</step>
+    <step>Read DI registrations across modules to document the DI module system</step>
+    <step>Draft restored document following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section: missing DI registration symptoms, endpoint filter ordering gotchas, module initialization order dependencies</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write restored doc to docs/architecture/sdap-bff-api-patterns.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash(git log)</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/sdap-bff-api-patterns.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All 22 startup modules are cataloged with purpose and registration order</criterion>
+    <criterion>Full endpoint map is present with route, method, filter, and handler</criterion>
+    <criterion>DI module system is documented with registration pattern and module boundaries</criterion>
+    <criterion>Known Pitfalls section covers missing DI registration and endpoint filter ordering</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

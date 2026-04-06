@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Card, Text, Spinner, Button, Badge, mergeClasses } from '@fluentui/react-components';
+import { makeStyles, tokens, Card, Text, Spinner, Button, mergeClasses } from '@fluentui/react-components';
 import { Open16Regular, ArrowSync20Regular, Warning20Regular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
@@ -221,7 +221,7 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
           <div className={styles.graphPreviewContainer}>{graphPreview}</div>
         </div>
       ) : (
-        /* No-graph layout: count + badge inline */
+        /* No-graph layout: count only */
         <div className={styles.body}>
           <div className={styles.countContainer}>
             <Text className={mergeClasses(styles.count, isZero && styles.zeroCount)}>{count}</Text>
@@ -229,11 +229,6 @@ export const RelationshipCountCard: React.FC<IRelationshipCountCardProps> = ({
               <Text size={200} className={styles.zeroLabel}>
                 No related documents found
               </Text>
-            )}
-            {!isZero && (
-              <Badge appearance="filled" color="brand" size="small">
-                found
-              </Badge>
             )}
           </div>
         </div>

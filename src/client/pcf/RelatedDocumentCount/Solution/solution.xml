@@ -11,7 +11,7 @@
     <Descriptions>
       <Description description="PCF control displaying a count of semantically related documents with drill-through to full viewer" languagecode="1033" />
     </Descriptions>
-    <Version>1.20.5</Version>
+    <Version>1.20.9</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

@@ -6,6 +6,32 @@
 > **Purpose**: Architecture decisions for persistent, context-aware side panes in Spaarke model-driven apps
 > **Related ADRs**: ADR-006 (PCF + Code Pages), ADR-012 (Shared library), ADR-013 (AI Architecture), ADR-021 (Fluent UI v9)
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: **SUPERSEDED** — see note below
+
+> ⚠️ **SUPERSEDED BY SPRKCHAT EMBEDDED PANEL PATTERN**
+>
+> The `SidePaneManager` global auto-injection pattern described in this document was removed during project `ai-sprk-chat-workspace-companion` (completed March 2026). SprkChat is no longer a global always-available side pane registered via a SidePaneManager web resource. Instead, SprkChat is now an **embedded panel inside `AnalysisWorkspace`** (a Code Page), launched contextually via `openSprkChatPane.ts`.
+>
+> **What no longer exists in code**:
+> - `SidePaneManager.ts` / `sprk_SidePaneManager` web resource (deleted)
+> - `contextService.ts` polling service in `@spaarke/ui-components` (deleted)
+> - Global auto-injection snippet in `EventsPage/index.html` and `SpeAdminApp/index.html` (removed by task 003 of that project)
+> - The hidden `Mscrm.GlobalTab` ribbon trigger pattern
+>
+> **What still exists and is current**:
+> - `SprkChatBridge.ts` (BroadcastChannel) in `src/client/shared/Spaarke.UI.Components/src/services/` — used for cross-frame events
+> - Individual side pane Code Pages (`CalendarSidePane`, `EventDetailSidePane`, `TodoDetailSidePane`) — these are per-entity side panes, not a global SprkChat host
+> - `SidePaneShell` component in `@spaarke/ui-components/src/components/SidePane/` — reusable shell for the above
+>
+> **See instead**:
+> - `projects/ai-sprk-chat-workspace-companion/spec.md` for the contextual-launch design
+> - `src/client/code-pages/SprkChatPane/launcher/openSprkChatPane.ts` for the current launcher
+> - `docs/architecture/shared-ui-components-architecture.md` for the current shared component model
+>
+> This document is retained for historical context only. Do not use it to guide implementation.
+
 ---
 
 ## Executive Summary

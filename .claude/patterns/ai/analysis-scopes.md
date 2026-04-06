@@ -1,5 +1,9 @@
 # Analysis Scopes Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Use when building prompts for AI analysis — combining an action (required), skills (optional behavioral instructions), and knowledge (optional grounding context).
 

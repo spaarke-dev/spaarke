@@ -1,0 +1,60 @@
+<task id="067" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify WORKSPACE-ENTITY-CREATION-GUIDE.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, workspace, dataverse</tags>
+    <estimate>1.5h</estimate>
+    <status>completed</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md — verify file paths, entity references, and procedures</goal>
+    <context>The workspace entity creation guide documents how to create and configure workspace entities in Dataverse. File paths and procedures may be outdated.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against source code
+      - Check all file paths resolve to actual files
+      - Verify entity schema references match current Dataverse data model docs
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md</file>
+      <file>docs/data-model/</file>
+      <file>src/solutions/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md</step>
+    <step>Extract all file paths referenced in the guide</step>
+    <step>Verify each file path resolves to an actual file in the repository</step>
+    <step>Verify entity schema references against docs/data-model/ files</step>
+    <step>Check workspace creation procedures against current solution structure</step>
+    <step>Identify discrepancies and broken file path references</step>
+    <step>Update docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md with corrections</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All file paths verified against actual repository files</criterion>
+    <criterion>Entity schema references match current data model documentation</criterion>
+    <criterion>Workspace creation procedures verified against current code</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+  </acceptance-criteria>
+</task>

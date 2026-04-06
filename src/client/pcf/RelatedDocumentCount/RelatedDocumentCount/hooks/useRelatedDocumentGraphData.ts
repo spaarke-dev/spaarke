@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, buildBffApiUrl } from '@spaarke/auth';
 import type { MiniGraphNode, MiniGraphEdge } from '@spaarke/ui-components/dist/types/MiniGraphTypes';
 
 /** Maximum nodes to include in the mini preview (source + related). */
@@ -130,8 +130,10 @@ export function useRelatedDocumentGraphData(
         setIsLoading(false);
         return;
       }
-      const baseUrl = apiBaseUrl.replace(/\/$/, '');
-      const url = `${baseUrl}/ai/visualization/related/${documentId}?${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
+      // Use buildBffApiUrl helper — idempotent and guarantees correct /api/ prefix.
+      // See .claude/patterns/auth/bff-url-normalization.md
+      const query = `${tenantId ? `tenantId=${encodeURIComponent(tenantId)}&` : ''}limit=20`;
+      const url = buildBffApiUrl(apiBaseUrl, `/ai/visualization/related/${documentId}?${query}`);
 
       console.log('[useRelatedDocumentGraphData] Fetching count + graph:', {
         documentId,

@@ -1,6 +1,6 @@
 # Document Relationship Viewer — Developer Guide
 
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
 > **Code Page**: `src/client/code-pages/DocumentRelationshipViewer/`
 > **Dataverse Web Resource**: `sprk_documentrelationshipviewer`
 > **PCF Companion**: `RelatedDocumentCount` (v1.20.2)

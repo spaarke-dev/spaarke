@@ -1,103 +1,56 @@
-# AI Playbook Node Builder R2 - Enhancement Index
+# Enhancements & Strategy Documents
 
-> **Project**: AI Playbook Node Builder R2
-> **Created**: January 16, 2026
-
----
+> **Purpose**: Feature enhancement proposals, strategy documents, and design specifications that are not yet (or never intended to be) architectural decisions
+> **Audience**: Product and engineering leads, architects, developers
+> **Last Reviewed**: 2026-04-05
 
 ## Overview
 
-This directory contains enhancement design documents for the AI Playbook Node Builder R2 project. Each enhancement addresses specific feature additions or improvements to the playbook builder system.
+This directory contains enhancement proposals, positioning/strategy documents, and pre-implementation designs. Contents here are candidates for implementation or already-adopted strategies. For implemented architecture decisions, see `docs/architecture/`. For formal ADRs, see `docs/adr/`.
 
 ---
 
-## Enhancement List
+## Strategy & Positioning
 
-| ENH | Title | Priority | Status | Effort | Document |
-|-----|-------|----------|--------|--------|----------|
-| **001/002** | Canvas Node Types | High/Medium | Pending | 2-3 weeks | [ENH-001-002-canvas-node-types.md](ENH-001-002-canvas-node-types.md) |
-| **003** | Flexible Input Model | High | Pending | 3-4 weeks | [ENH-003-flexible-input-model.md](ENH-003-flexible-input-model.md) |
-| **004** | Parallel Execution Visualization | Low | Pending | 2-3 days | [ENH-004-parallel-visualization.md](ENH-004-parallel-visualization.md) |
-| **005** | AI-Assisted Playbook Builder | High | Design | 6-7 weeks | [ai-chat-playbook-builder.md](../../projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md) |
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [SPAARKE-AI-STRATEGY-AND-ROADMAP.md](SPAARKE-AI-STRATEGY-AND-ROADMAP.md) | Spaarke AI platform strategy: custom-first approach, Playbook System as product differentiator, 4-tier architecture, Microsoft Foundry adoption plan, phased roadmap, cost model. **For current technical architecture, see [`docs/architecture/AI-ARCHITECTURE.md`](../architecture/AI-ARCHITECTURE.md).** | 2026-04-05 | 2026-04-05 | Strategy / Roadmap |
+| [AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md](AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md) | Two-plane AI strategy: M365 Copilot (general) + SprkChat (contextual). Positioning and roadmap. **For current SprkChat technical architecture, see [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md).** | 2026-04-05 | 2026-04-05 | Active |
 
----
+## Cross-Cutting Enhancements
 
-## Enhancement Summaries
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [ENH-013-ai-authorization-and-service-unification.md](ENH-013-ai-authorization-and-service-unification.md) | AI authorization filter unification and service consolidation | 2026-01-06 | — | Analysis Complete |
 
-### ENH-001 & ENH-002: Canvas Node Types
+## AI Playbook Node Builder R2
 
-**Combined enhancement** covering two related node type additions:
+Enhancement designs for the Playbook Node Builder R2 project:
 
-- **ENH-001: Assemble Output Node Type** - New node type for explicit output consolidation before delivery. Handles selective inclusion, transformation, template mapping, validation, and aggregation.
+| ENH | Title | Priority | Document | Last Updated | Last Reviewed | Status |
+|-----|-------|----------|----------|--------------|---------------|--------|
+| **001/002** | Canvas Node Types | High/Medium | [ENH-001-002-canvas-node-types.md](ENH-001-002-canvas-node-types.md) | 2026-01-19 | — | Pending |
+| **003** | Flexible Input Model | High | [ENH-003-flexible-input-model.md](ENH-003-flexible-input-model.md) | 2026-01-19 | — | Pending |
+| **004** | Parallel Execution Visualization | Low | [ENH-004-parallel-visualization.md](ENH-004-parallel-visualization.md) | 2026-01-19 | — | Pending |
 
-- **ENH-002: Start Node (Implicit)** - Clarification of playbook entry points. Recommends implicit start behavior (nodes with no incoming edges execute first).
+### Enhancement Summaries
 
-### ENH-003: Flexible Input Model
+**ENH-001 & ENH-002: Canvas Node Types** — Combined enhancement covering two related node type additions:
+- **ENH-001: Assemble Output Node Type** — New node type for explicit output consolidation before delivery. Handles selective inclusion, transformation, template mapping, validation, and aggregation.
+- **ENH-002: Start Node (Implicit)** — Clarification of playbook entry points. Recommends implicit start behavior (nodes with no incoming edges execute first).
 
-**Major enhancement** enabling flexible document input patterns:
+**ENH-003: Flexible Input Model** — Enables flexible document input patterns:
+- Pattern A: Subject + Knowledge (RAG-enhanced analysis)
+- Pattern B: Document Comparison (side-by-side)
+- Pattern C: Consolidated Analysis (multi-doc merge)
+- Pattern D: Ad-Hoc File Analysis (temp uploads)
 
-- **Pattern A**: Subject + Knowledge (RAG-enhanced analysis)
-- **Pattern B**: Document Comparison (side-by-side)
-- **Pattern C**: Consolidated Analysis (multi-doc merge)
-- **Pattern D**: Ad-Hoc File Analysis (temp uploads)
-
-Includes unified API design, C# models, and UI dialog concepts.
-
-### ENH-004: Parallel Execution Visualization
-
-**Minor enhancement** adding visual indicators for parallel node execution:
-
-- Shows which nodes execute concurrently vs. sequentially
-- Toggle-based (non-intrusive by default)
-- Helps users optimize playbook performance
-
-### ENH-005: AI-Assisted Playbook Builder
-
-**Major enhancement** - Full design document located in project folder.
-
-Key features:
-- Natural language playbook creation
-- Real-time canvas updates via streaming
-- Intelligent scope management (Save As, Extend, Create New)
-- Test execution modes (Mock, Quick, Production)
-- Unified AI agent framework (PB-BUILDER meta-playbook)
-- Tiered AI model selection for cost optimization
+**ENH-004: Parallel Execution Visualization** — Adds visual indicators for parallel node execution. Shows concurrent vs sequential nodes; toggle-based non-intrusive display.
 
 ---
 
-## Implementation Recommendations
+## Related Resources
 
-### Suggested Project Groupings
-
-Based on dependencies and logical execution order:
-
-**Project Group 1: Foundation (ENH-001/002 + ENH-004)**
-- Canvas node types and visualization
-- ~3 weeks combined
-- No external dependencies
-
-**Project Group 2: Input Flexibility (ENH-003)**
-- Flexible input model with RAG
-- ~3-4 weeks
-- Can run in parallel with Group 1
-
-**Project Group 3: AI Builder (ENH-005)**
-- AI-assisted playbook builder
-- ~6-7 weeks
-- Depends on stable canvas foundation (Group 1)
-
----
-
-## Related Documents
-
-- [Main Design Document](../../projects/ai-playbook-node-builder-r2/design.md)
-- [AI Playbook Architecture](../architecture/AI-PLAYBOOK-ARCHITECTURE.md)
-- [Playbook Real Estate Lease Guide](../guides/PLAYBOOK-REAL-ESTATE-LEASE-ANALYSIS.md)
-
----
-
-## Revision History
-
-| Date | Changes |
-|------|---------|
-| 2026-01-16 | Initial index created |
+- [Architecture Decisions (ADRs)](../adr/INDEX.md) — Formal architectural decisions
+- [Architecture Docs](../architecture/INDEX.md) — Current technical architecture
+- [Playbook Architecture](../architecture/playbook-architecture.md) — Current playbook system architecture

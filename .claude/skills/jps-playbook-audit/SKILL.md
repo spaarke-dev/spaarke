@@ -34,7 +34,7 @@ alwaysApply: false
 
 ```
 LOAD scope-model-index.json:
-  - docs/ai-knowledge/catalogs/scope-model-index.json
+  - .claude/catalogs/scope-model-index.json
 
 EXTRACT:
   - All available actions (codes, names, documentTypes, tags)

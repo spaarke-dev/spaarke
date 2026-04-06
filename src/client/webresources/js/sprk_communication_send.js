@@ -195,7 +195,9 @@ Sprk.Communication.Send._resolveConfig = function () {
         }
 
         // Cache BFF base URL (remove trailing slash)
-        Sprk.Communication.Send._cachedBffBaseUrl = resolved["sprk_BffApiBaseUrl"].replace(/\/+$/, "");
+        // Normalize: strip trailing slashes AND trailing /api to get HOST ONLY.
+        // Prevents the recurring /api/api/ double-prefix bug in legacy JS web resources.
+        Sprk.Communication.Send._cachedBffBaseUrl = resolved["sprk_BffApiBaseUrl"].replace(/\/+$/, "").replace(/\/api$/i, "");
 
         // Build and cache MSAL config
         Sprk.Communication.Send._MSAL_CONFIG = {

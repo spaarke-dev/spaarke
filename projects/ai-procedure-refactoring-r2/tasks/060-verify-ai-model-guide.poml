@@ -1,0 +1,60 @@
+<task id="060" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify AI-MODEL-SELECTION-GUIDE.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, ai, models</tags>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/AI-MODEL-SELECTION-GUIDE.md against current code and Azure OpenAI model deployments</goal>
+    <context>The AI model selection guide may reference outdated model names, deployment names, or usage patterns. It must be verified against current AI service code and Azure OpenAI deployments.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against source code
+      - Check model names, deployment names, and version references against actual code
+      - Verify selection criteria match current AI service implementation
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/AI-MODEL-SELECTION-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/AI-MODEL-SELECTION-GUIDE.md</step>
+    <step>Read AI service classes in src/server/api/Sprk.Bff.Api/Services/Ai/ for model references</step>
+    <step>Read docs/architecture/auth-AI-azure-resources.md for deployment names</step>
+    <step>Search code for model name strings and deployment references</step>
+    <step>Identify discrepancies between guide and current code/deployments</step>
+    <step>Update docs/guides/AI-MODEL-SELECTION-GUIDE.md with corrections</step>
+    <step>Verify all model references resolve to actual deployments or code</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/AI-MODEL-SELECTION-GUIDE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All model names and deployment names verified against current code</criterion>
+    <criterion>Selection criteria match current AI service implementation</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+    <criterion>No invented model names — all verified against actual code and deployments</criterion>
+  </acceptance-criteria>
+</task>

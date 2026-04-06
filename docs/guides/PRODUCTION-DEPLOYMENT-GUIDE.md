@@ -1,6 +1,9 @@
 # Production Deployment Guide
 
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Audience**: Claude Code AI (primary executor) + Human developers (assistant/approver)
 > **Estimated Time**: 2-4 hours (first deployment), 30-60 minutes (subsequent)
 > **Related Guides**: [Customer Onboarding Runbook](./CUSTOMER-ONBOARDING-RUNBOOK.md) | [Incident Response](./INCIDENT-RESPONSE.md) | [Secret Rotation](./SECRET-ROTATION-PROCEDURES.md) | [Monitoring](./MONITORING-AND-ALERTING-GUIDE.md)
@@ -169,7 +172,7 @@ pac auth list   # Verify connection
 
 ### Naming Convention
 
-All resources follow `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` (Adopted v2.0):
+All resources follow `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` (current: v3.0, production deployed under v2 patterns):
 
 | Pattern | Example |
 |---------|---------|
@@ -433,7 +436,7 @@ Or set individually. App settings use the `@Microsoft.KeyVault(...)` pattern —
 | `Dataverse__ClientSecret` | `@Microsoft.KeyVault(VaultName=sprk-platform-prod-kv;SecretName=Dataverse--ClientSecret)` |
 | `Redis__Enabled` | `false` (until per-customer Redis provisioned) |
 
-Full non-secret configuration is in `src/server/api/Sprk.Bff.Api/appsettings.Production.json` (30 Key Vault references, zero plaintext secrets).
+Full non-secret configuration is in `src/server/api/Sprk.Bff.Api/appsettings.Production.json.template` (30 Key Vault references, zero plaintext secrets).
 
 ---
 

@@ -1,0 +1,61 @@
+<task id="031" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create resilience-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, resilience, circuit-breaker, retry</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/resilience-architecture.md — document circuit breakers, retry policies, resilient search client, and error handling infrastructure</goal>
+    <context>The BFF API implements resilience patterns including Polly-based circuit breakers, retry policies with exponential backoff, a resilient Azure AI Search client wrapper, and structured error handling. No architecture document captures these patterns end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent resilience patterns
+      - Document each resilience policy: trigger conditions, backoff strategy, circuit-breaker thresholds
+      - Map error handling flow from exception to ProblemDetails response
+      - Include the resilient search client wrapper and its retry semantics
+      - Cite source files for every policy and handler
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Errors/</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all files in Infrastructure/Resilience/ and Infrastructure/Errors/</step>
+    <step>Read each resilience policy class to extract configuration (thresholds, timeouts, backoff)</step>
+    <step>Read error handling infrastructure (exception handlers, ProblemDetails factories)</step>
+    <step>Search for Polly, AddResiliencePipeline, and HttpClient resilience registrations in Program.cs</step>
+    <step>Identify the resilient search client and its retry/circuit-breaker wrapping</step>
+    <step>Draft resilience-architecture.md following skill structure</step>
+    <step>Verify every policy and handler cites its source file</step>
+    <step>Write to docs/architecture/resilience-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/resilience-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All circuit breaker and retry policies documented with thresholds and backoff</criterion>
+    <criterion>Error handling flow from exception to ProblemDetails response mapped</criterion>
+    <criterion>Resilient search client wrapper documented</criterion>
+    <criterion>Every policy and handler cites its source file</criterion>
+    <criterion>No invented patterns — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

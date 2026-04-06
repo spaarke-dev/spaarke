@@ -1,6 +1,6 @@
 # AI Monitoring Dashboard Guide
 
-> **Last Updated**: December 2025
+> **Last Updated**: 2026-04-05
 > **Applies To**: SDAP AI Document Intelligence features
 
 ---

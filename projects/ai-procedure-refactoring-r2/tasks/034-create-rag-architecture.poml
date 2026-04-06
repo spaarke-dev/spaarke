@@ -1,0 +1,68 @@
+<task id="034" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create rag-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, rag, embeddings, indexing, ai-search</tags>
+    <estimate>4h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/rag-architecture.md — document the RAG pipeline end-to-end including text chunking, embedding generation and cache, Azure AI Search integration, and scheduled indexing</goal>
+    <context>The Spaarke platform implements a Retrieval-Augmented Generation (RAG) pipeline that ingests documents from SharePoint Embedded, chunks text, generates embeddings via Azure OpenAI, indexes into Azure AI Search, and retrieves context for AI tool responses. No architecture document captures this pipeline end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent RAG components
+      - Document the full pipeline: ingest → chunk → embed → index → retrieve → augment
+      - Include text chunking strategy (chunk size, overlap, metadata preservation)
+      - Document embedding generation and caching strategy
+      - Map Azure AI Search index schema and query patterns
+      - Include scheduled indexing jobs and triggers
+      - Cite source files for every pipeline stage
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Search/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Search for RAG, embedding, chunking, and indexing related files across src/server/</step>
+    <step>Read text chunking service to document strategy (size, overlap, metadata)</step>
+    <step>Read embedding generation service and cache layer</step>
+    <step>Read Azure AI Search integration (index schema, query patterns)</step>
+    <step>Read scheduled indexing jobs and their triggers</step>
+    <step>Read retrieval service to understand query augmentation flow</step>
+    <step>Cross-reference with existing AI-ARCHITECTURE.md to avoid duplication</step>
+    <step>Draft rag-architecture.md following skill structure</step>
+    <step>Verify every pipeline stage cites its source file</step>
+    <step>Write to docs/architecture/rag-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/rag-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Full RAG pipeline documented: ingest → chunk → embed → index → retrieve → augment</criterion>
+    <criterion>Text chunking strategy documented (size, overlap, metadata)</criterion>
+    <criterion>Embedding generation and caching strategy documented</criterion>
+    <criterion>Azure AI Search index schema and query patterns mapped</criterion>
+    <criterion>Scheduled indexing jobs and triggers documented</criterion>
+    <criterion>Every pipeline stage cites its source file</criterion>
+    <criterion>No invented components — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,60 @@
+<task id="062" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify RAG-CONFIGURATION.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, rag, configuration</tags>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/RAG-CONFIGURATION.md — check all config keys match current Options classes and AI Search settings</goal>
+    <context>The RAG configuration guide documents Retrieval-Augmented Generation settings. Configuration keys may have changed as Options classes evolved.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against source code
+      - Check every config key against actual Options classes
+      - Verify AI Search index names and settings against current code
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/RAG-CONFIGURATION.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Search/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/RAG-CONFIGURATION.md</step>
+    <step>Read Options classes related to RAG, AI Search, and document intelligence</step>
+    <step>Read AI Search service classes for index names and query patterns</step>
+    <step>Compare every documented config key against actual Options class properties</step>
+    <step>Identify discrepancies: missing keys, renamed properties, changed defaults</step>
+    <step>Update docs/guides/RAG-CONFIGURATION.md with corrections</step>
+    <step>Verify all config keys resolve to actual Options class properties</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/RAG-CONFIGURATION.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All config keys verified against actual Options class properties</criterion>
+    <criterion>AI Search index names and settings verified against current code</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+  </acceptance-criteria>
+</task>

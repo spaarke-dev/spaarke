@@ -4,6 +4,12 @@
 >
 > **Purpose**: Documents the Spaarke UX architecture including the three-layer UI model, service abstractions, shell selection, Code Page wrappers, and workspace layout.
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified (accurate)
+>
+> Verified against `src/client/shared/Spaarke.UI.Components/src/components/` — `WizardShell`, `CreateRecordWizard`, `PlaybookLibraryShell`, `SidePaneShell`, `WorkspaceShell`, and all listed `Create*Wizard` components exist. Service adapters (`createXrmDataService`, `createBffDataService`, `createXrmUploadService`, `createBffUploadService`) verified in `src/client/shared/Spaarke.UI.Components/src/utils/adapters/`. `parseDataParams.ts` verified in `src/utils/`. Code Page wrappers verified in `src/solutions/Create*Wizard/`.
+
 ---
 
 ## UI Architecture: Three-Layer Model

@@ -1,7 +1,7 @@
 # Spaarke Document Intelligence - Customer Deployment Guide
 
 > **Version**: 2.1
-> **Date**: March 2026
+> **Date**: 2026-04-05
 > **Audience**: IT Administrators and Technical Staff
 
 ---

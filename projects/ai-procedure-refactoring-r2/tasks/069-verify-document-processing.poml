@@ -1,0 +1,62 @@
+<task id="069" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify sdap-document-processing-architecture.md</title>
+    <phase>5</phase>
+    <tags>architecture, documentation, verification, document-processing, ai</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify docs/architecture/sdap-document-processing-architecture.md (765 lines) against current document processing code</goal>
+    <context>The document processing architecture document is large (765 lines) and covers the AI-powered document processing pipeline. Given its size, it is likely to have sections that have drifted from the current implementation.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Read the current document first, then systematically verify each section against code
+      - Check document intelligence integration, AI pipeline stages, and storage operations
+      - Verify class names, method signatures, and flow descriptions
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/sdap-document-processing-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/DocumentIntelligence/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/sdap-document-processing-architecture.md (full document)</step>
+    <step>Read document intelligence service classes for current integration patterns</step>
+    <step>Read AI pipeline orchestration classes for processing stages</step>
+    <step>Read SPE storage operation classes for document storage flows</step>
+    <step>Systematically compare each document section against corresponding code</step>
+    <step>Identify discrepancies: changed class names, missing stages, outdated flows</step>
+    <step>Update docs/architecture/sdap-document-processing-architecture.md with corrections</step>
+    <step>Verify all class names and method references resolve to actual code</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/sdap-document-processing-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All document sections verified against corresponding source code</criterion>
+    <criterion>Class names and method signatures match current code</criterion>
+    <criterion>Pipeline stages and flows verified against current implementation</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+  </acceptance-criteria>
+</task>

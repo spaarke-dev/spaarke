@@ -1,0 +1,61 @@
+<task id="068" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify sdap-overview.md</title>
+    <phase>5</phase>
+    <tags>architecture, documentation, verification, sdap, spe</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify docs/architecture/sdap-overview.md against SpeFileStore.cs and SPE operation classes</goal>
+    <context>The SDAP overview architecture document describes the SharePoint Document Access Platform. The SpeFileStore facade and operation classes may have evolved since the document was written.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Read the current document first, then verify against source code
+      - Check SpeFileStore.cs methods match documented operations
+      - Verify operation class inventory matches actual classes
+      - Check architectural diagrams and flow descriptions against code
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/sdap-overview.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/sdap-overview.md</step>
+    <step>Read SpeFileStore.cs for all public methods and operations</step>
+    <step>Inventory all operation classes in Services/Spe/ directory</step>
+    <step>Compare documented operations against actual SpeFileStore methods</step>
+    <step>Verify architectural flow descriptions match code paths</step>
+    <step>Identify discrepancies between document and current code</step>
+    <step>Update docs/architecture/sdap-overview.md with corrections</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/sdap-overview.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>SpeFileStore methods match documented operations</criterion>
+    <criterion>Operation class inventory matches actual classes</criterion>
+    <criterion>Architectural flows verified against code paths</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,60 @@
+<task id="051" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create ci-cd-architecture.md</title>
+    <phase>4</phase>
+    <tags>architecture, documentation, ci-cd, github-workflows</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/ci-cd-architecture.md — document the 9 GitHub workflows, slot-swap deployment strategy, and environment promotion model</goal>
+    <context>The repository uses GitHub Actions for CI/CD with multiple workflows covering build, test, deploy, and promotion. The deployment strategy uses Azure App Service slot-swaps. No architecture document captures the full CI/CD pipeline.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual workflow files — do not invent workflows
+      - Document every workflow file with its trigger, jobs, and purpose
+      - Document the slot-swap deployment strategy
+      - Document the environment promotion model (dev → staging → production)
+      - Cite workflow file paths for every pipeline documented
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>.github/workflows/</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all workflow files in .github/workflows/</step>
+    <step>Read each workflow file to understand triggers, jobs, and dependencies</step>
+    <step>Identify the slot-swap deployment strategy from workflow steps</step>
+    <step>Map the environment promotion model across workflows</step>
+    <step>Read existing docs/procedures/ci-cd-workflow.md for context</step>
+    <step>Draft ci-cd-architecture.md following skill structure</step>
+    <step>Verify every workflow is documented with file path reference</step>
+    <step>Write to docs/architecture/ci-cd-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/ci-cd-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All GitHub workflow files documented with triggers, jobs, and purpose</criterion>
+    <criterion>Slot-swap deployment strategy clearly documented</criterion>
+    <criterion>Environment promotion model mapped end-to-end</criterion>
+    <criterion>Every workflow cites its .github/workflows/ file path</criterion>
+    <criterion>No invented workflows — all sourced from actual files</criterion>
+  </acceptance-criteria>
+</task>

@@ -2,8 +2,13 @@
 # Authentication Performance & Monitoring
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (annotated to distinguish illustrative code from deployed code)
 > **Applies To**: Performance optimization, alerting, observability
+
+> **Code samples in this document are ILLUSTRATIVE**. The `AuthTelemetry` class, Redis-backed `obo:graph:*` cache, and `OBO.Latency.Ms` / `OBO.CacheHit` custom metrics shown below are reference patterns, not current BFF implementation. The deployed OBO cache lives in-memory in `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs` (`ConcurrentDictionary<string, CachedClient> _oboClientCache`) using SHA-256 hashed user tokens as keys. KQL queries against standard Application Insights `requests` / `traces` tables are still accurate.
 
 ---
 

@@ -1,5 +1,9 @@
 # Subgrid Parent Rollup Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 When child records in a subgrid should trigger recalculation of parent record fields (KPI rollups, totals, status aggregation) after Quick Create or edit operations.
 

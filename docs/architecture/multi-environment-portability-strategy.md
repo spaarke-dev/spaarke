@@ -1,7 +1,12 @@
 # Multi-Environment Portability Strategy
 
-**Date**: 2026-02-11
-**Purpose**: Document how Spaarke handles multi-environment deployments (DEV/QA/PROD) for SaaS multi-tenant architecture
+> **Date**: 2026-02-11
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+> **Purpose**: Document how Spaarke handles multi-environment deployments (DEV/QA/PROD) for SaaS multi-tenant architecture
+
+> **Verification note (2026-04-05)**: Confirmed against code — `resolveRuntimeConfig()` in `@spaarke/auth` queries the 7 Dataverse Environment Variables as documented. Alternate key mechanisms match the service usage map in `docs/data-model/schema-additions-alternate-keys.md`.
 
 ---
 

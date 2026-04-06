@@ -4,6 +4,9 @@
 > **Location**: `src/client/shared/Spaarke.UI.Components/`
 > **ADR**: [ADR-012](../adr/ADR-012-shared-component-library.md)
 > **Last Updated**: 2026-03-30
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 
 ---
 
@@ -124,16 +127,19 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 
 | Component | Description | Consumers |
 |-----------|-------------|-----------|
-| **WizardShell** | Multi-step wizard container with stepper and navigation | Code Pages |
-| **WizardStepper** | Step indicator UI for wizards | Code Pages |
-| **WizardSuccessScreen** | Success state after wizard completion | Code Pages |
+| **WizardShell** | Multi-step wizard container with stepper and navigation (in `Wizard/`) | Code Pages |
+| **WizardStepper** | Step indicator UI for wizards (in `Wizard/`) | Code Pages |
+| **WizardSuccessScreen** | Success state after wizard completion (in `Wizard/`) | Code Pages |
 | **CreateRecordWizard** | Record-creation boilerplate (file upload + create + next steps) wrapping WizardShell | Code Pages |
 | **PlaybookLibraryShell** | Playbook browsing, selection, and execution shell | Code Pages, SPA |
-| **SidePaneShell** | Reusable slide-in side panel layout | Code Pages |
+| **Playbook** | Individual playbook rendering component | Code Pages, SPA |
+| **SidePaneShell** | Reusable slide-in side panel layout (in `SidePane/`) | Code Pages |
 | **WorkspaceShell** | Declarative responsive workspace layout container; renders rows of sections from a `WorkspaceConfig` object | Code Pages, SPA |
-| **SectionPanel** | Titled bordered section card with optional toolbar, badge count, and collapsible body | Code Pages, SPA |
-| **ActionCard** / **ActionCardRow** | Square action cards (icon + label) arranged in a wrapping row — "Get Started" pattern | Code Pages, SPA |
-| **MetricCard** / **MetricCardRow** | Square metric cards (value + trend + badge) arranged in a wrapping row — "Quick Summary" pattern | Code Pages, SPA |
+| **SectionPanel** | Titled bordered section card with optional toolbar, badge count, and collapsible body (in `WorkspaceShell/`) | Code Pages, SPA |
+| **ActionCard** / **ActionCardRow** | Square action cards (icon + label) arranged in a wrapping row — "Get Started" pattern (in `WorkspaceShell/`) | Code Pages, SPA |
+| **MetricCard** / **MetricCardRow** | Square metric cards (value + trend + badge) arranged in a wrapping row — "Quick Summary" pattern (in `WorkspaceShell/`) | Code Pages, SPA |
+| **RecordCardShell** | Reusable record card layout for entity detail panels | Code Pages |
+| **PanelSplitter** | Draggable panel splitter for resizable layouts | Code Pages, SPA |
 
 ### Workspace Header Component (`src/solutions/LegalWorkspace/`)
 
@@ -152,6 +158,8 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | **CreateWorkAssignmentWizard** | Work assignment wizard (uses WizardShell directly — different step sequence) | Code Pages |
 | **SummarizeFilesWizard** | File summarization wizard with AI analysis step | Code Pages |
 | **FindSimilarDialog** | Semantic search dialog shell for DocumentRelationshipViewer | PCF, Code Pages |
+| **AssociateToStep** | Wizard step for associating records to parent entities | Code Pages |
+| **EmailStep** | Wizard step for composing and sending email notifications | Code Pages |
 
 ### UI Components (`src/components/`)
 
@@ -160,7 +168,7 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | **SprkButton** | Fluent v9 Button wrapper with optional tooltip | All |
 | **DatasetGrid** | Multi-view dataset container (Grid, Card, List, Virtualized) | PCF, Code Pages |
 | **ViewSelector** | View mode switcher for DatasetGrid | PCF, Code Pages |
-| **CommandToolbar** | Action bar for grids and pages | PCF, Code Pages |
+| **Toolbar** | Action bar for grids and pages (command toolbar) | PCF, Code Pages |
 | **PageChrome** | Page header/chrome (OOB parity) | Code Pages |
 | **RichTextEditor** | Lexical-based WYSIWYG editor | Code Pages only* |
 | **ChoiceDialog** | Simple choice dialog | All |
@@ -170,6 +178,17 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | **LookupField** | Search-as-you-type entity lookup | Code Pages |
 | **SendEmailDialog** | Email composition dialog with To lookup | Code Pages |
 | **AiSummaryPopover** | AI summary popover with lazy fetch and copy | PCF, Code Pages |
+| **AiFieldTag** | "AI" sparkle badge for AI pre-filled form fields | Code Pages |
+| **AiProgressStepper** | Step progress indicator for AI analysis operations | Code Pages |
+| **FileUpload** | Drag-and-drop file upload zone with preview | Code Pages |
+| **FilePreview** | File preview component (thumbnail/icon rendering) | Code Pages |
+| **FindSimilar** | Semantic similarity search results component | PCF, Code Pages |
+| **InlineAiToolbar** | Inline AI action toolbar for text fields | Code Pages |
+| **MiniGraph** | Lightweight inline chart/graph component | Code Pages, SPA |
+| **RelationshipCountCard** | Card displaying entity relationship counts | Code Pages, SPA |
+| **SlashCommandMenu** | Slash-command autocomplete menu for chat/text inputs | Code Pages |
+| **ThemeToggle** | Dark/light theme toggle button | Code Pages, SPA |
+| **TodoDetail** | Todo item detail view/editor | Code Pages |
 
 *\*RichTextEditor uses Lexical which requires `react/jsx-runtime` — not available in PCF React 16.*
 
@@ -187,6 +206,14 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | `useWriteMode` | Write/edit mode toggle |
 | `useSseStream` | Server-Sent Events streaming |
 | `useAiSummary` | AI summary fetch with caching |
+| `useAiPrefill` | AI pre-fill from uploaded documents (configurable extractors and lookup resolvers) |
+| `useDocumentHistory` | Document version history tracking |
+| `useForceSimulation` | D3-style force simulation for graph layouts |
+| `useInlineAiActions` | Inline AI action state management |
+| `useInlineAiToolbar` | Inline AI toolbar visibility and positioning |
+| `useSlashCommands` | Slash-command registration and execution |
+| `useTheme` | Theme detection and switching (dark/light) |
+| `useTwoPanelLayout` | Two-panel resizable layout state management |
 
 ### Services (`src/services/`)
 
@@ -194,12 +221,19 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 |---------|---------|
 | `CommandRegistry` | Register and discover toolbar commands |
 | `CommandExecutor` | Execute registered commands |
+| `CustomCommandFactory` | Create custom command instances from configuration |
 | `FieldMappingService` | Map entity fields to display columns |
+| `FieldSecurityService` | Field-level security privilege checks |
+| `EntityConfigurationService` | Entity-specific grid/form configuration |
+| `EntityCreationService` | Entity-agnostic: SPE upload, document record creation, AI analysis trigger |
 | `EventTypeService` | Event type configuration |
 | `FetchXmlService` | Build FetchXML queries |
+| `PolymorphicResolverService` | Resolve polymorphic lookup display names |
+| `PrivilegeService` | Entity CRUD privilege checks |
 | `ViewService` | Saved view management |
 | `ConfigurationService` | Grid/dataset configuration |
 | `SprkChatBridge` | Chat SSE event bridge |
+| `renderMarkdown` | Markdown-to-HTML rendering utility |
 
 ### Types (`src/types/`)
 
@@ -230,9 +264,12 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | `themeDetection` | Detect Dataverse theme (dark/light) |
 | `themeStorage` | Persist theme preference |
 | `xrmContext` | Resolve Xrm global in various contexts |
-| `adapters/xrmDataServiceAdapter` | `createXrmDataService()`, `createXrmUploadService()`, `createXrmNavigationService()` |
-| `adapters/bffDataServiceAdapter` | `createBffDataService()`, `createBffUploadService()`, `createBffNavigationService()` |
-| `adapters/mockDataServiceAdapter` | `createMockDataService()`, `createMockUploadService()`, `createMockNavigationService()` |
+| `adapters/xrmDataServiceAdapter` | `createXrmDataService()` |
+| `adapters/xrmUploadServiceAdapter` | `createXrmUploadService()` |
+| `adapters/xrmNavigationServiceAdapter` | `createXrmNavigationService()` |
+| `adapters/bffDataServiceAdapter` | `createBffDataService()` |
+| `adapters/bffUploadServiceAdapter` | `createBffUploadService()` |
+| `adapters/bffNavigationServiceAdapter` | `createBffNavigationService()` |
 
 ### Icons (`src/icons/`)
 
@@ -345,9 +382,6 @@ Pre-built adapter factories in `src/utils/adapters/` wire the service interfaces
 | **BFF** | `createBffDataService(authFetch, bffBaseUrl)` | Power Pages SPA (no Xrm, all data via BFF API) |
 | | `createBffUploadService(authFetch, bffBaseUrl)` | File uploads from the SPA |
 | | `createBffNavigationService(navigate?)` | SPA router navigation |
-| **Mock** | `createMockDataService()` | Unit tests with `jest.fn()` stubs |
-| | `createMockUploadService()` | Unit tests |
-| | `createMockNavigationService()` | Unit tests |
 
 ### Example: Wiring Adapters in a Code Page
 
@@ -372,12 +406,19 @@ createRoot(document.getElementById("root")!).render(
 
 ### Example: Wiring Adapters in a Test
 
-```typescript
-import { createMockDataService, createMockUploadService, createMockNavigationService } from "@spaarke/ui-components";
+> **Note**: No pre-built mock adapters are shipped in `@spaarke/ui-components`. Create test stubs manually using `jest.fn()`:
 
-const mockData = createMockDataService();
-const mockUpload = createMockUploadService();
-const mockNav = createMockNavigationService();
+```typescript
+// Create mock services for testing (not shipped — build your own)
+const mockData = {
+  createRecord: jest.fn().mockResolvedValue("mock-id"),
+  retrieveRecord: jest.fn(),
+  retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
+  updateRecord: jest.fn(),
+  deleteRecord: jest.fn(),
+};
+const mockUpload = { uploadFile: jest.fn(), getContainerIdForEntity: jest.fn() };
+const mockNav = { openRecord: jest.fn(), openDialog: jest.fn(), closeDialog: jest.fn() };
 
 render(
     <FluentProvider theme={webLightTheme}>
@@ -558,7 +599,7 @@ The workspace layout wizard automatically picks up the new section from the regi
 |----------|------|
 | ADR-012 (full) | `docs/adr/ADR-012-shared-component-library.md` |
 | ADR-012 (concise) | `.claude/adr/ADR-012-shared-components.md` |
-| ADR-021 (Fluent v9) | `docs/adr/ADR-021-fluent-design-system.md` |
+| ADR-021 (Fluent v9) | `docs/adr/ADR-021-fluent-ui-design-system.md` |
 | ADR-022 (PCF platform libs) | `docs/adr/ADR-022-pcf-platform-libraries.md` |
 | Dialog Patterns | `.claude/patterns/pcf/dialog-patterns.md` |
 | Full-Page Custom Page Template | `.claude/patterns/webresource/full-page-custom-page.md` |
@@ -567,4 +608,4 @@ The workspace layout wizard automatically picks up the new section from the regi
 
 ---
 
-*Last updated: 2026-03-30*
+*Last updated: 2026-04-05*

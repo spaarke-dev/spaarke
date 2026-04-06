@@ -3,6 +3,9 @@
 > **Domain**: PCF Controls & React Code Pages
 > **Source ADRs**: ADR-006, ADR-011, ADR-012, ADR-021, ADR-022
 > **Last Updated**: 2026-02-23
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
 
 ---
 

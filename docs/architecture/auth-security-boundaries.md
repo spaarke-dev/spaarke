@@ -2,7 +2,10 @@
 # Authentication Security Boundaries
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (code snippet updated to match `AddMicrosoftIdentityWebApi`)
 > **Applies To**: Security reviews, compliance audits, threat modeling
 
 ---
@@ -143,22 +146,27 @@ Dataverse Application User permissions apply
 
 ### BFF JWT Validation (Boundary 3)
 
+The BFF uses `Microsoft.Identity.Web`'s `AddMicrosoftIdentityWebApi` to bind validation to the `AzureAd` configuration section. A `PostConfigure<JwtBearerOptions>` hook appends the M365 Copilot audience (when configured) and logs auth failures with token claims for diagnostics.
+
+**Location**: `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs`
+
 ```csharp
-// Program.cs - JWT Bearer validation
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+// AuthorizationModule.cs — AddMicrosoftIdentityWebApi
+services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
+
+// PostConfigure appends additional valid audiences (e.g., Copilot) without
+// overwriting what AddMicrosoftIdentityWebApi already configured.
+services.PostConfigure<JwtBearerOptions>(
+    JwtBearerDefaults.AuthenticationScheme,
+    options =>
     {
-        options.Authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
-        options.Audience = $"api://{apiAppId}";
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true
-        };
+        var copilotAudience = configuration["AgentToken:CopilotAudience"];
+        // ... merges copilotAudience into options.TokenValidationParameters.ValidAudiences
     });
 ```
+
+Issuer/authority, signature validation, lifetime, and the primary audience are all derived from the `AzureAd` section (`TenantId`, `ClientId`, `Audience`) by Microsoft.Identity.Web.
 
 ---
 

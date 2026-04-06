@@ -1,5 +1,9 @@
 # Code Patterns — Pointer-Based Reference
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 > **Format**: Each pattern file is max 25 lines pointing to canonical source code.
 > **Structure**: When (context) → Read These Files (source paths) → Constraints (ADRs) → Key Rules
 > **Principle**: Code is the source of truth — patterns point to it, not describe it.
@@ -8,18 +12,19 @@
 
 ## Pattern Subdirectories
 
-| Directory | Patterns | Domain |
-|-----------|----------|--------|
-| [api/](api/INDEX.md) | 7 | BFF API endpoints, filters, errors, jobs, resilience, DI, email |
-| [auth/](auth/INDEX.md) | 12 | OAuth, OBO, MSAL, scopes, Graph SDK, webhooks, access control |
-| [caching/](caching/INDEX.md) | 3 | Redis distributed cache, request cache, token cache |
-| [dataverse/](dataverse/INDEX.md) | 5 | Plugins, Web API, entity CRUD, relationships, polymorphic resolver |
-| [pcf/](pcf/INDEX.md) | 5 | Control lifecycle, errors, themes, queries, dialogs |
-| [ai/](ai/INDEX.md) | 3 | Streaming endpoints, text extraction, analysis scopes |
-| [testing/](testing/INDEX.md) | 3 | Unit tests, mocking, integration/arch tests |
-| [webresource/](webresource/INDEX.md) | 4+1 | Code Pages, wizard wrappers, custom dialogs, subgrid rollup, choice dialog (ui/) |
+| Directory | Patterns | Domain | Last Reviewed | Status |
+|-----------|----------|--------|---------------|--------|
+| [api/](api/INDEX.md) | 8 | BFF API endpoints, filters, errors, jobs, resilience, DI, email, provisioning | 2026-04-05 | Verified (1 Current) |
+| [auth/](auth/INDEX.md) | 13 | OAuth, OBO, MSAL, scopes, Graph SDK, webhooks, access control, BFF URL | 2026-04-05 | Verified (2 Current) |
+| [caching/](caching/INDEX.md) | 3 | Redis distributed cache, request cache, token cache | 2026-04-05 | Verified |
+| [dataverse/](dataverse/INDEX.md) | 5 | Plugins, Web API, entity CRUD, relationships, polymorphic resolver | 2026-04-05 | Verified |
+| [pcf/](pcf/INDEX.md) | 5 | Control lifecycle, errors, themes, queries, dialogs | 2026-04-05 | Verified |
+| [ai/](ai/INDEX.md) | 3 | Streaming endpoints, text extraction, analysis scopes | 2026-04-05 | Verified |
+| [testing/](testing/INDEX.md) | 3 | Unit tests, mocking, integration/arch tests | 2026-04-05 | Verified |
+| [webresource/](webresource/INDEX.md) | 4 | Code Pages, wizard wrappers, custom dialogs, subgrid rollup | 2026-04-05 | Verified |
+| [ui/](ui/) | 1 | Choice dialog pattern | 2026-04-05 | Verified |
 
-**Total**: 43 pointer files across 8 subdirectories
+**Total**: 45 pointer files across 9 subdirectories (all reviewed 2026-04-05)
 
 ---
 

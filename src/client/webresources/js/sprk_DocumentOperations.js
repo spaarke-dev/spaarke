@@ -158,8 +158,11 @@ Spaarke.Document._resolveEnvironmentConfig = function() {
         var cache = Spaarke.Document._envVarCache;
 
         if (cache.bffApiBaseUrl) {
-            Spaarke.Document.Config.bffApiUrl = cache.bffApiBaseUrl.replace(/\/+$/, "");
-            console.log("[Spaarke.Document] BFF URL from env var:", Spaarke.Document.Config.bffApiUrl);
+            // Normalize: strip trailing slashes AND trailing /api to get HOST ONLY.
+            // All fetch URLs must add /api/ themselves (buildBffApiUrl pattern).
+            // This prevents the recurring /api/api/ double-prefix bug.
+            Spaarke.Document.Config.bffApiUrl = cache.bffApiBaseUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
+            console.log("[Spaarke.Document] BFF URL from env var (normalized):", Spaarke.Document.Config.bffApiUrl);
         } else {
             console.error("[Spaarke.Document] MISSING: sprk_BffApiBaseUrl environment variable not found in Dataverse. Ensure it is defined in Dataverse Environment Variables.");
         }

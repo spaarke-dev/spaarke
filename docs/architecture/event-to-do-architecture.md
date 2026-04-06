@@ -5,6 +5,12 @@
 > **Project**: Smart To Do Kanban R2 — Unified Code Page with Inline Detail Panel
 > **Status**: Implementation Complete
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified (accurate)
+>
+> Already verified substantively in R2 task 076. Spot-checks confirm: `sprk_smarttodo` Code Page at `src/solutions/SmartTodo/` uses React 19 (package.json: `"react": "^19.0.0"`), `TodoDetailSidePane` at `src/solutions/TodoDetailSidePane/`, `TodoDetail` extracted to `src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/`, `PanelSplitter` component present in shared library.
+
 ---
 
 ## Overview

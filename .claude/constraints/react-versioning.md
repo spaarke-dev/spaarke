@@ -1,5 +1,12 @@
 # React Versioning Constraint
 
+> **Domain**: Shared UI Library, PCF vs Code Pages
+> **Source ADRs**: ADR-012, ADR-022
+> **Last Updated**: 2026-03-17
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## Rule
 
 The shared UI library (`@spaarke/ui-components`) serves two consumer tiers with different React versions:

@@ -1,6 +1,6 @@
 # Monitoring and Alerting Setup Guide
 
-> **Last Updated**: March 2026
+> **Last Updated**: 2026-04-05
 >
 > **Scope**: Spaarke production environment monitoring via Azure Application Insights, Log Analytics, and Azure Monitor alerts.
 >

@@ -461,4 +461,4 @@ If issues persist after following this guide:
 
 ---
 
-*Last updated: December 2025*
+*Last updated: 2026-04-05*

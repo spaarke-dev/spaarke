@@ -1,0 +1,66 @@
+<task id="003" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create INTEGRATION-CONTRACTS.md</title>
+    <phase>1</phase>
+    <tags>standards, documentation, integration, contracts</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/standards/INTEGRATION-CONTRACTS.md — interface contracts at every subsystem seam</goal>
+    <context>The Spaarke platform has multiple integration seams (BFF↔PCF, BFF↔Graph, BFF↔ServiceBus, PCF↔Dataverse, BFF↔AI Services) but no single document describes the contract at each boundary. Claude needs to know data formats, auth mechanisms, error handling, and retry behavior at each seam to implement cross-layer features correctly.</context>
+    <constraints>
+      - Use /docs-standards skill structure
+      - Identify ALL integration seams by reading actual code endpoints and client calls
+      - Document each seam's contract: data format, authentication method, error response shape, retry/timeout policy
+      - Include request/response examples sourced from actual code — do not fabricate
+      - Cross-reference ADRs that constrain each seam (e.g., ADR-008 for auth, ADR-007 for Graph facade)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-standards/SKILL.md</file>
+      <file>docs/architecture/sdap-component-interactions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>.claude/adr/ADR-007-spe-filestore-facade.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters-for-auth.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <directories>
+      <directory>src/server/api/Sprk.Bff.Api/Api/</directory>
+      <directory>src/client/pcf/</directory>
+    </directories>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-standards/SKILL.md for mandatory structure</step>
+    <step>Read docs/architecture/sdap-component-interactions.md for existing integration overview</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Program.cs to identify all registered endpoints</step>
+    <step>Scan src/server/api/Sprk.Bff.Api/Api/ to catalog all endpoint groups and their request/response types</step>
+    <step>Identify all integration seams: BFF↔PCF, BFF↔Graph, BFF↔ServiceBus, BFF↔Redis, BFF↔AI Services, PCF↔Dataverse, Code Pages↔BFF</step>
+    <step>For each seam, document: data format, authentication, error handling, retry/timeout policy</step>
+    <step>Cross-reference applicable ADRs for each seam</step>
+    <step>Write to docs/standards/INTEGRATION-CONTRACTS.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-standards)</tool>
+  </tools>
+  <outputs>
+    <output>docs/standards/INTEGRATION-CONTRACTS.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-standards skill structure</criterion>
+    <criterion>Covers all major integration seams (minimum 6 seams documented)</criterion>
+    <criterion>Each seam includes: data format, auth method, error handling, retry policy</criterion>
+    <criterion>Request/response examples sourced from actual code</criterion>
+    <criterion>ADR cross-references included for each constrained seam</criterion>
+  </acceptance-criteria>
+</task>

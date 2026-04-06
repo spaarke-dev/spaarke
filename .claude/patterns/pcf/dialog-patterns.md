@@ -1,5 +1,9 @@
 # Dialog Patterns
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Opening dialogs, side panels, or standalone pages from PCF controls or Dataverse forms.
 

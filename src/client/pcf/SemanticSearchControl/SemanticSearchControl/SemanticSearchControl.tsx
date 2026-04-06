@@ -735,7 +735,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
   return (
     <div className={rootClassName}>
-      {/* Header Region: Search Input */}
+      {/* Header Region: Search Input + Document Count */}
       <div className={styles.header}>
         <SearchInput
           value={queryInput}
@@ -745,6 +745,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           onSearch={handleSearch}
           onAddDocument={handleAddDocument}
         />
+        {hasSearched && !isLoading && totalCount > 0 && (
+          <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '4px' }}>
+            {totalCount} document{totalCount !== 1 ? 's' : ''} found
+          </Text>
+        )}
       </div>
 
       {/* Content Region: Sidebar + Main */}
@@ -791,7 +796,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.27 • Built 2026-04-02</Text>
+        <Text size={100}>v1.1.28 • Built 2026-04-05</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}

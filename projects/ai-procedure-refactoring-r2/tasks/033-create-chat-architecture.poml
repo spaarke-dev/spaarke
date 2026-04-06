@@ -1,0 +1,64 @@
+<task id="033" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create chat-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, chat, ai, intent-routing</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/chat-architecture.md — document SprkChat agent, conversation history, intent routing, and session management</goal>
+    <context>The SprkChat system provides conversational AI within the Spaarke platform, including an agent with tool access, conversation history persistence, intent classification and routing, and session lifecycle management. No architecture document captures this chat subsystem end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent chat features
+      - Document the SprkChat agent lifecycle: session creation, message flow, tool invocation, response streaming
+      - Map intent routing: how user messages are classified and dispatched
+      - Document conversation history storage and retrieval
+      - Include session management: creation, timeout, cleanup
+      - Cite source files for every component
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all files in Services/Ai/Chat/</step>
+    <step>Read the SprkChat agent class to understand lifecycle and tool invocation</step>
+    <step>Read intent routing logic to map classification and dispatch</step>
+    <step>Read conversation history service for storage and retrieval patterns</step>
+    <step>Read session management for creation, timeout, and cleanup</step>
+    <step>Cross-reference with existing AI-ARCHITECTURE.md to avoid duplication</step>
+    <step>Draft chat-architecture.md following skill structure</step>
+    <step>Verify every component cites its source file</step>
+    <step>Write to docs/architecture/chat-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/chat-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>SprkChat agent lifecycle documented: session → message → tools → response</criterion>
+    <criterion>Intent routing classification and dispatch mapped</criterion>
+    <criterion>Conversation history storage and retrieval documented</criterion>
+    <criterion>Session management (creation, timeout, cleanup) documented</criterion>
+    <criterion>Every component cites its source file</criterion>
+    <criterion>No invented features — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

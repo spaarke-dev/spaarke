@@ -1,19 +1,23 @@
 # SDAP Document Processing Architecture
 
-> **Version**: 1.0
-> **Last Updated**: January 2026
-> **Status**: Authoritative Reference
+> **Version**: 1.1
+> **Last Updated**: April 5, 2026
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Supersedes**: `ai-document-summary-architecture.md`, `email-to-document-automation.md`, `sdap-overview.md`, `EMAIL-TO-DOCUMENT-ARCHITECTURE.md`
 
 ## Executive Summary
 
-The SharePoint Document Access Platform (SDAP) provides unified document management with integrated AI processing capabilities. Documents enter the system through three distinct routes, each converging on a common AI processing pipeline that produces summaries, keywords, entity extraction, and search indexing.
+The Spaarke Data & AI Platform (SDAP) provides unified document management with integrated AI processing capabilities. Documents enter the system through three distinct routes, each converging on a common AI processing pipeline that produces summaries, keywords, entity extraction, and search indexing.
 
 **Key Architectural Principles:**
 - **App-only authentication** for background processing (Service Bus jobs)
 - **Delegated (OBO) authentication** for user-initiated requests
 - **Dual pipeline execution** - SPE storage and AI processing run in parallel
-- **Automatic output extraction** - AI outputs derived from handler type, not configuration
+- **Automatic output extraction** - AI outputs derived from handler type (for built-in handlers) or scope definition (for `GenericAnalysisHandler`)
+
+> **Verification Note (April 2026)**: This document was re-verified against source code. Several legacy component references (`EmailToDocumentJobHandler`, `EmailToDocumentService`, `EmailWebhookEndpoints`, `EmailPollingWorker`, `EntityExtractorHandler`, `ContentExtractionService`, `ChunkingService`, `EmbeddingService`, `AiSearchService`, `JobProcessingWorker`, `FileEndpoints`, `AiAnalysisEndpoints`, `OfficeAddInEndpoints`) were removed or renamed during refactoring. Updated references reflect the current code layout where `SpeFileStore` lives under `Infrastructure/Graph/`, endpoints under `Api/` and `Endpoints/`, and job processing uses `ServiceBusJobProcessor`.
 
 ---
 
@@ -69,9 +73,9 @@ The SharePoint Document Access Platform (SDAP) provides unified document managem
 
 **Key Components:**
 - `FileUploadManager` PCF control initiates upload
-- `FileEndpoints.cs` handles file upload via `POST /api/files/upload`
+- `UploadEndpoints.cs` handles file upload via `POST /api/files/upload`
 - `SpeFileStore.UploadFileAsync()` stores in SharePoint Embedded
-- `AiAnalysisEndpoints.cs` handles `POST /api/ai/analyze/document-profile`
+- `AnalysisEndpoints.cs` (in `Api/Ai/`) handles `POST /api/ai/analyze/document-profile`
 - `AnalysisOrchestrationService` executes Document Profile playbook
 - Results streamed via SSE to UI, then persisted to Dataverse
 
@@ -132,13 +136,14 @@ User Token → OBO Exchange → SPE Access Token → Graph API
 ```
 
 **Key Components:**
-- `EmailWebhookEndpoints.cs` receives Graph change notifications
-- `EmailPollingWorker` polls for new emails on schedule
-- `EmailToDocumentJobHandler` processes Service Bus messages
-- `EmailToDocumentService` converts emails to .eml, processes attachments
-- `SpeFileStore.UploadFileAppOnlyAsync()` uploads with app-only auth
+- `EmailEndpoints.cs` (in `Api/`) receives email-related requests
+- `EmailAssociationService` handles email-to-document association logic
+- `EmailAnalysisJobHandler` processes email analysis via Service Bus
+- `SpeFileStore` (in `Infrastructure/Graph/`) uploads with app-only auth via delegated operations
 - `AppOnlyDocumentAnalysisJobHandler` runs Document Profile playbook
 - `RagIndexingJobHandler` indexes documents for AI Search
+
+> **Note**: The earlier `EmailToDocumentJobHandler`, `EmailToDocumentService`, `EmailWebhookEndpoints`, and `EmailPollingWorker` have been removed or consolidated. Email processing now uses `EmailAnalysisJobHandler` and `EmailAssociationService`.
 
 **Authentication Flow:**
 ```
@@ -190,8 +195,8 @@ Graph Webhook → App-only Token (Client Credentials) → SPE Access
 
 **Key Components:**
 - Office Add-in uses Dialog API for authentication
-- `OfficeAddInEndpoints.cs` handles `POST /api/office/upload-file`
-- `UploadFinalizationWorker` monitors pending uploads
+- `OfficeEndpoints.cs` (in `Api/Office/`) handles `POST /api/office/upload-file`
+- `UploadFinalizationWorker` (in `Workers/Office/`) monitors pending uploads
 - Once SPE upload complete, enqueues AI processing jobs
 - Same `AppOnlyDocumentAnalysisJobHandler` and `RagIndexingJobHandler` as email route
 
@@ -243,11 +248,12 @@ All three routes converge on the same AI processing components:
 │                          │                                          │
 │                          ▼                                          │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │ AiAnalysisNodeExecutor                                      │   │
-│  │   • Routes to appropriate IAiToolHandler                    │   │
-│  │   • Handlers: SummaryHandler, EntityExtractorHandler,       │   │
-│  │               DocumentClassifierHandler                     │   │
-│  │   • Calls Azure OpenAI with tool-specific prompts           │   │
+│  │ NodeExecutorRegistry → Specialized Node Executors            │   │
+│  │   • AiAnalysisNodeExecutor (routes to IAiToolHandler)       │   │
+│  │   • ConditionNodeExecutor, CreateTaskNodeExecutor,          │   │
+│  │     DeliverOutputNodeExecutor, QueryDataverseNodeExecutor   │   │
+│  │   • Tool handlers: SummaryHandler, DocumentClassifierHandler│   │
+│  │   • GenericAnalysisHandler for dynamic/custom tools         │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                          │                                          │
 │                          ▼                                          │
@@ -268,10 +274,12 @@ Each handler generates specific output types automatically:
 | Handler | Output Types Generated | Dataverse Fields |
 |---------|----------------------|------------------|
 | `SummaryHandler` | TL;DR, Summary, Keywords | `sprk_filetldr`, `sprk_filesummary`, `sprk_filekeywords` |
-| `EntityExtractorHandler` | Entities | `sprk_entities` (JSON) |
 | `DocumentClassifierHandler` | Document Type | `sprk_documenttype` |
+| `GenericAnalysisHandler` | Dynamic (per scope config) | Varies by tool definition |
 
-**Important**: Output types are derived from the handler type, not from playbook configuration. When a playbook node uses `SummaryHandler`, all three outputs (TL;DR, Summary, Keywords) are generated regardless of what's configured in Output Types.
+> **Note**: `EntityExtractorHandler` no longer exists as a separate handler. Entity extraction is now handled by `GenericAnalysisHandler` using dynamic tool definitions from Dataverse.
+
+**Important**: For built-in handlers like `SummaryHandler`, output types are derived from the handler type, not from playbook configuration. `GenericAnalysisHandler` uses scope-defined prompt templates for custom analysis operations.
 
 ### Playbook Resolution Flow
 
@@ -334,9 +342,10 @@ public class ResolvedScope
 
 | Job Type | Handler | Purpose | Idempotency Key |
 |----------|---------|---------|-----------------|
-| `EmailToDocument` | `EmailToDocumentJobHandler` | Process incoming email | `email-{messageId}` |
 | `AppOnlyDocumentAnalysis` | `AppOnlyDocumentAnalysisJobHandler` | Run Document Profile playbook | `analysis-{documentId}` |
+| `EmailAnalysis` | `EmailAnalysisJobHandler` | Analyze email content | `email-{messageId}` |
 | `RagIndexing` | `RagIndexingJobHandler` | Index document for AI Search | `rag-index-{driveId}-{itemId}` |
+| `AttachmentClassification` | `AttachmentClassificationJobHandler` | Classify attachment types | `attach-{itemId}` |
 
 ### Job Flow Pattern
 
@@ -350,13 +359,13 @@ public class ResolvedScope
 │         └─▶ Sends to Service Bus queue: sdap-jobs                  │
 │                                                                     │
 │  2. Job Received                                                    │
-│     └─▶ JobProcessingWorker (BackgroundService)                    │
+│     └─▶ ServiceBusJobProcessor (Services/Jobs/)                    │
 │         └─▶ Listens on Service Bus queue                           │
 │         └─▶ Deserializes JobContract                               │
 │                                                                     │
 │  3. Handler Resolution                                              │
-│     └─▶ JobHandlerFactory.GetHandler(jobContract.JobType)          │
-│         └─▶ Returns appropriate IJobHandler                        │
+│     └─▶ ServiceBusJobProcessor resolves handler by JobType         │
+│         └─▶ Returns appropriate job handler                        │
 │                                                                     │
 │  4. Idempotency Check                                               │
 │     └─▶ IdempotencyService.IsEventProcessedAsync(key)              │
@@ -376,7 +385,7 @@ public class ResolvedScope
 
 ### Job Payload Structures
 
-**EmailToDocumentJobPayload:**
+**EmailAnalysisJobPayload** (formerly `EmailToDocumentJobPayload`):
 ```csharp
 {
     TenantId: string,
@@ -437,22 +446,22 @@ public class ResolvedScope
 │         └─▶ Downloads file from SPE (app-only auth)                │
 │                                                                     │
 │  3. Text Extraction                                                 │
-│     └─▶ ContentExtractionService                                   │
+│     └─▶ DocumentParserRouter → ITextExtractor implementations      │
 │         └─▶ Native: .txt, .md, .json, .csv, .xml, .html           │
-│         └─▶ Document Intelligence: .pdf, .docx, .doc              │
+│         └─▶ DocumentIntelligenceService: .pdf, .docx, .doc        │
 │                                                                     │
 │  4. Chunking                                                        │
-│     └─▶ ChunkingService.ChunkTextAsync()                           │
+│     └─▶ TextChunkingService (ITextChunkingService)                 │
 │         └─▶ Splits into semantic chunks                            │
 │         └─▶ Preserves metadata per chunk                           │
 │                                                                     │
 │  5. Embedding Generation                                            │
-│     └─▶ EmbeddingService.GenerateEmbeddingsAsync()                 │
+│     └─▶ EmbeddingCache (IEmbeddingCache) → Azure OpenAI           │
 │         └─▶ Azure OpenAI text-embedding-3-large                    │
 │         └─▶ 3072-dimensional vectors                               │
 │                                                                     │
 │  6. Index Upload                                                    │
-│     └─▶ AiSearchService.UploadDocumentsAsync()                     │
+│     └─▶ RagService → Azure AI Search                               │
 │         └─▶ Uploads to Azure AI Search index                       │
 │         └─▶ Index: sprk-knowledge-shared (configurable)            │
 │                                                                     │
@@ -553,11 +562,11 @@ The Azure AI Search index (`sprk-knowledge-shared`) stores:
 │                                                                     │
 │  2. EMAIL PROCESSING                                                │
 │     │                                                               │
-│     ├── EmailToDocumentJobHandler receives job                      │
+│     ├── EmailAnalysisJobHandler receives job                        │
 │     ├── Fetches email via Graph (app-only)                         │
 │     ├── Converts to .eml format                                     │
 │     ├── Extracts attachments (filters signature images)            │
-│     └── Applies filter rules for container/folder selection        │
+│     └── EmailAssociationService links to entities                  │
 │                                                                     │
 │  3. DOCUMENT CREATION                                               │
 │     │                                                               │
@@ -610,47 +619,54 @@ The Azure AI Search index (`sprk-knowledge-shared`) stores:
 |---------|------|---------|
 | `AnalysisOrchestrationService` | `Services/Ai/AnalysisOrchestrationService.cs` | Orchestrates playbook execution |
 | `AppOnlyAnalysisService` | `Services/Ai/AppOnlyAnalysisService.cs` | App-only analysis wrapper |
-| `PlaybookService` | `Services/Ai/PlaybookService.cs` | Playbook/node retrieval |
 | `ScopeResolverService` | `Services/Ai/ScopeResolverService.cs` | Scope resolution from Dataverse |
-| `AiAnalysisNodeExecutor` | `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` | Node execution routing |
-| `SpeFileStore` | `Services/Storage/SpeFileStore.cs` | SPE file operations |
+| `NodeExecutorRegistry` | `Services/Ai/Nodes/NodeExecutorRegistry.cs` | Registry of all node executors |
+| `AiAnalysisNodeExecutor` | `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` | AI analysis node execution |
+| `SpeFileStore` | `Infrastructure/Graph/SpeFileStore.cs` | SPE file operations facade |
 | `FileIndexingService` | `Services/Ai/FileIndexingService.cs` | RAG indexing orchestration |
-| `EmailToDocumentService` | `Services/Email/EmailToDocumentService.cs` | Email processing logic |
+| `EmailAssociationService` | `Services/Email/EmailAssociationService.cs` | Email-to-document association |
+| `TextChunkingService` | `Services/Ai/TextChunkingService.cs` | Text chunking for RAG |
+| `EmbeddingCache` | `Services/Ai/EmbeddingCache.cs` | Embedding generation with caching |
+| `DocumentParserRouter` | `Services/Ai/DocumentParserRouter.cs` | Routes docs to text extractors |
 
 ### Job Handlers
 
 | Handler | File | Job Type |
 |---------|------|----------|
-| `EmailToDocumentJobHandler` | `Services/Jobs/Handlers/EmailToDocumentJobHandler.cs` | `EmailToDocument` |
 | `AppOnlyDocumentAnalysisJobHandler` | `Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` | `AppOnlyDocumentAnalysis` |
+| `EmailAnalysisJobHandler` | `Services/Jobs/Handlers/EmailAnalysisJobHandler.cs` | `EmailAnalysis` |
 | `RagIndexingJobHandler` | `Services/Jobs/Handlers/RagIndexingJobHandler.cs` | `RagIndexing` |
+| `AttachmentClassificationJobHandler` | `Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs` | `AttachmentClassification` |
 
 ### AI Tool Handlers
 
 | Handler | File | Tool ID |
 |---------|------|---------|
-| `SummaryHandler` | `Services/Ai/Tools/SummaryHandler.cs` | `summary` |
-| `EntityExtractorHandler` | `Services/Ai/Tools/EntityExtractorHandler.cs` | `entity-extractor` |
-| `DocumentClassifierHandler` | `Services/Ai/Tools/DocumentClassifierHandler.cs` | `document-classifier` |
+| `SummaryHandler` | `Services/Ai/Tools/SummaryHandler.cs` | `SummaryHandler` |
+| `DocumentClassifierHandler` | `Services/Ai/Tools/DocumentClassifierHandler.cs` | `DocumentClassifierHandler` |
+| `GenericAnalysisHandler` | `Services/Ai/Handlers/GenericAnalysisHandler.cs` | Dynamic (scope-defined) |
+| `DataverseUpdateToolHandler` | `Services/Ai/Tools/DataverseUpdateToolHandler.cs` | Dataverse record updates |
+| `SemanticSearchToolHandler` | `Services/Ai/Tools/SemanticSearchToolHandler.cs` | Semantic search operations |
 
 ### Background Workers
 
 | Worker | File | Purpose |
 |--------|------|---------|
-| `JobProcessingWorker` | `Workers/JobProcessingWorker.cs` | Service Bus job consumer |
-| `UploadFinalizationWorker` | `Workers/UploadFinalizationWorker.cs` | Office add-in upload completion |
-| `EmailPollingWorker` | `Workers/EmailPollingWorker.cs` | Scheduled email polling |
-| `ProfileSummaryWorker` | `Workers/ProfileSummaryWorker.cs` | Profile summary generation |
+| `ServiceBusJobProcessor` | `Services/Jobs/ServiceBusJobProcessor.cs` | Service Bus job consumer and dispatcher |
+| `UploadFinalizationWorker` | `Workers/Office/UploadFinalizationWorker.cs` | Office add-in upload completion |
+| `ProfileSummaryWorker` | `Workers/Office/ProfileSummaryWorker.cs` | Profile summary generation |
 
 ### API Endpoints
 
 | Endpoint | File | Purpose |
 |----------|------|---------|
-| `/api/files/*` | `Endpoints/FileEndpoints.cs` | File upload/download |
-| `/api/ai/analyze/*` | `Endpoints/AiAnalysisEndpoints.cs` | AI analysis (streaming) |
-| `/api/office/*` | `Endpoints/OfficeAddInEndpoints.cs` | Office add-in operations |
-| `/api/email/webhook` | `Endpoints/EmailWebhookEndpoints.cs` | Graph webhook receiver |
-| `/api/rag/*` | `Endpoints/RagEndpoints.cs` | RAG indexing operations |
+| `/api/files/*`, `/api/upload/*` | `Endpoints/UploadEndpoints.cs`, `Endpoints/DocumentsEndpoints.cs` | File upload/download |
+| `/api/ai/analyze/*` | `Api/Ai/AnalysisEndpoints.cs` | AI analysis (streaming) |
+| `/api/office/*` | `Api/Office/OfficeEndpoints.cs` | Office add-in operations |
+| `/api/emails/*` | `Endpoints/EmailEndpoints.cs` | Email operations |
+| `/api/ai/rag/*` | `Api/Ai/RagEndpoints.cs` | RAG indexing operations |
+| `/api/ai/chat/*` | `Api/Ai/ChatEndpoints.cs` | Chat sessions (SSE streaming) |
+| `/api/containers/*` | `Endpoints/SpeAdmin/*.cs` | SPE container management |
 
 ---
 

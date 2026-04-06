@@ -1,0 +1,61 @@
+<task id="032" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create shared-libraries-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, shared-libraries, spaarke-core, spaarke-dataverse</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/shared-libraries-architecture.md — document Spaarke.Core and Spaarke.Dataverse shared .NET libraries</goal>
+    <context>The shared .NET libraries (Spaarke.Core and Spaarke.Dataverse) provide foundational types, utilities, and Dataverse integration used across the BFF API and plugins. No architecture document captures their public API surface, dependency relationships, or design rationale.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent APIs or types
+      - Document public API surface of each library (namespaces, key types, extension methods)
+      - Map dependency graph: which projects reference which shared libraries
+      - Include design rationale for separation between Core and Dataverse
+      - Cite source files for every key type and namespace
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/server/shared/Spaarke.Core/</file>
+      <file>src/server/shared/Spaarke.Dataverse/</file>
+      <file>src/server/shared/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all files and namespaces in Spaarke.Core/</step>
+    <step>Inventory all files and namespaces in Spaarke.Dataverse/</step>
+    <step>Read key types in each library to understand public API surface</step>
+    <step>Search for ProjectReference entries pointing to shared libraries to map consumers</step>
+    <step>Read .csproj files for both libraries to identify dependencies and target framework</step>
+    <step>Draft shared-libraries-architecture.md following skill structure</step>
+    <step>Verify every key type and namespace cites its source file</step>
+    <step>Write to docs/architecture/shared-libraries-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/shared-libraries-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Both Spaarke.Core and Spaarke.Dataverse public API surfaces documented</criterion>
+    <criterion>Dependency graph shows which projects consume each library</criterion>
+    <criterion>Design rationale for Core vs Dataverse separation explained</criterion>
+    <criterion>Every key type and namespace cites its source file</criterion>
+    <criterion>No invented APIs — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

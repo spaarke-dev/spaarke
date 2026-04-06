@@ -1,0 +1,76 @@
+<task id="016" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Merge and Restore Email Processing Architecture Doc</title>
+    <phase>2</phase>
+    <tags>architecture, documentation, email, merge, over-trimmed</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Merge email-to-document-architecture.md + email-to-document-automation.md into single email-processing-architecture.md, then restore depth</goal>
+    <context>Two overlapping email docs exist: email-to-document-architecture.md (structural) and email-to-document-automation.md (behavioral). These should be merged into a single comprehensive email-processing-architecture.md and then restored to full depth. The two source files should be deleted after the merge.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Code is source of truth — read all relevant email processing code before writing
+      - Recover trimmed content from both source files via git log -p
+      - Must include Known Pitfalls section
+      - Delete the two source files after creating the merged doc
+      - Do NOT modify any source code files
+      - Every file path referenced must resolve to a real file
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/email-to-document-architecture.md</file>
+      <file>docs/architecture/email-to-document-automation.md</file>
+    </files>
+    <globs>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Communication/*Email*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Communication/*Document*.cs</glob>
+      <glob>src/server/api/Sprk.Bff.Api/Services/Jobs/*Email*.cs</glob>
+    </globs>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/email-to-document-architecture.md</step>
+    <step>Read current docs/architecture/email-to-document-automation.md</step>
+    <step>Run git log -p -- docs/architecture/email-to-document-architecture.md to recover trimmed content</step>
+    <step>Run git log -p -- docs/architecture/email-to-document-automation.md to recover trimmed content</step>
+    <step>Read all email-related service and job handler files from source code</step>
+    <step>Plan merged document structure: combine architectural and automation content, eliminate overlap</step>
+    <step>Draft merged email-processing-architecture.md following docs-architecture skill structure</step>
+    <step>Add Known Pitfalls section covering attachment extraction failures, large email handling, duplicate document creation</step>
+    <step>Verify all file paths referenced in the doc resolve to real files</step>
+    <step>Write merged doc to docs/architecture/email-processing-architecture.md</step>
+    <step>Delete docs/architecture/email-to-document-architecture.md</step>
+    <step>Delete docs/architecture/email-to-document-automation.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash(git log)</tool>
+    <tool>Bash(rm)</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/email-processing-architecture.md</output>
+    <output>DELETED: docs/architecture/email-to-document-architecture.md</output>
+    <output>DELETED: docs/architecture/email-to-document-automation.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Both source documents are merged without content loss</criterion>
+    <criterion>No overlapping/duplicate content in the merged doc</criterion>
+    <criterion>Email processing pipeline is documented end-to-end</criterion>
+    <criterion>Known Pitfalls section is present and substantive</criterion>
+    <criterion>The two source files (email-to-document-architecture.md, email-to-document-automation.md) are deleted</criterion>
+    <criterion>All file paths referenced resolve to real files in the repository</criterion>
+    <criterion>No source code files were modified</criterion>
+  </acceptance-criteria>
+</task>

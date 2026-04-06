@@ -1,7 +1,7 @@
 # Event Type Configuration Guide
 
 > **Audience**: System Administrators, Power Platform Administrators
-> **Last Updated**: February 2026
+> **Last Updated**: 2026-04-05
 
 ## Overview
 

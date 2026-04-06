@@ -712,4 +712,4 @@ const url = `${normalizedBaseUrl}/api/documents/${documentId}/preview-url`;
 
 ---
 
-*Last updated: January 2026 (R3 Phases 1-5)*
+*Last updated: 2026-04-05 (R3 Phases 1-5)*

@@ -1,0 +1,67 @@
+<task id="006" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Restore sdap-component-interactions.md depth</title>
+    <phase>1</phase>
+    <tags>architecture, documentation, component-interactions, restore</tags>
+    <estimate>3h</estimate>
+    <status>completed</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Restore depth to docs/architecture/sdap-component-interactions.md — rebuild cross-module impact map and add Known Pitfalls section</goal>
+    <context>The sdap-component-interactions.md document was over-trimmed during a previous documentation pass and lost critical cross-module impact information. Claude needs to understand which modules are affected when changes are made to a given component. The document must be restored to full depth using git history to recover trimmed content and current code to verify accuracy.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Recover previously trimmed content using git log -p on the file
+      - Verify all recovered content against current codebase — do not restore stale information
+      - Add a "Cross-Module Impact Map" section: when component X changes, which components Y and Z are affected
+      - Add a "Known Pitfalls" section documenting non-obvious coupling and timing dependencies
+      - Preserve the existing document structure while adding depth
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/sdap-component-interactions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <directories>
+      <directory>src/server/api/Sprk.Bff.Api/Services/</directory>
+      <directory>src/server/api/Sprk.Bff.Api/Api/</directory>
+      <directory>src/client/pcf/</directory>
+    </directories>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Read current docs/architecture/sdap-component-interactions.md to understand existing content</step>
+    <step>Run git log -p on sdap-component-interactions.md to recover trimmed content from previous versions</step>
+    <step>Read key integration points in src/server/api/Sprk.Bff.Api/Services/ and Api/ directories</step>
+    <step>Verify recovered content against current codebase — discard anything stale</step>
+    <step>Restore full cross-module interaction descriptions with verified content</step>
+    <step>Add Cross-Module Impact Map: component → affected components → nature of impact</step>
+    <step>Add Known Pitfalls section: non-obvious coupling, timing dependencies, initialization order</step>
+    <step>Write updated docs/architecture/sdap-component-interactions.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Bash(git log)</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/sdap-component-interactions.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Previously trimmed content recovered and verified against current code</criterion>
+    <criterion>Cross-Module Impact Map included: at least 8 components with their downstream impacts</criterion>
+    <criterion>Known Pitfalls section included with at least 5 documented pitfalls</criterion>
+    <criterion>No stale information — all content verified against current codebase</criterion>
+    <criterion>Existing document structure preserved while adding depth</criterion>
+  </acceptance-criteria>
+</task>

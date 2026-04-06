@@ -1,0 +1,59 @@
+<task id="071" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Enhance JSON field schemas documentation</title>
+    <phase>6</phase>
+    <tags>data-model, documentation, json-fields, enhancement</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Enhance docs/data-model/sprk_event-json-fields.md — expand to cover ALL entities with JSON fields, not just events</goal>
+    <context>The current JSON field schemas doc covers only event entity JSON fields. Other entities also use JSON-serialized fields that need documentation.</context>
+    <constraints>
+      - Use /docs-data-model skill structure
+      - Search ALL entity docs and source code for JSON field usage
+      - Document JSON schema for every entity field that stores serialized JSON
+      - Include field name, parent entity, JSON schema, and example values
+      - Rename or restructure file if needed to reflect broader scope
+      - Cite source files for every JSON field documented
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>docs/data-model/sprk_event-json-fields.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-data-model/SKILL.md for mandatory structure</step>
+    <step>Read current docs/data-model/sprk_event-json-fields.md</step>
+    <step>Search all entity docs in docs/data-model/ for JSON field references</step>
+    <step>Search source code for JSON serialization/deserialization of Dataverse fields</step>
+    <step>Document JSON schema for each discovered JSON field</step>
+    <step>Expand the document to cover all entities with JSON fields</step>
+    <step>Update docs/data-model/sprk_event-json-fields.md (or rename to json-field-schemas.md)</step>
+    <step>Verify all JSON field schemas match actual code usage</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-data-model)</tool>
+  </tools>
+  <outputs>
+    <output>docs/data-model/sprk_event-json-fields.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All entities with JSON fields documented, not just events</criterion>
+    <criterion>JSON schema provided for every documented JSON field</criterion>
+    <criterion>Example values included for each JSON field</criterion>
+    <criterion>Every JSON field cites its source entity and code file</criterion>
+    <criterion>Document follows /docs-data-model skill structure</criterion>
+  </acceptance-criteria>
+</task>

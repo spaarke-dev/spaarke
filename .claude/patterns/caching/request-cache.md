@@ -1,5 +1,9 @@
 # Request Cache Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Collapsing duplicate data loads within a single HTTP request (same data accessed multiple times).
 

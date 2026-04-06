@@ -1,7 +1,7 @@
 # Event Type Field Configuration - Technical Guide
 
 > **Audience**: Developers, Technical Consultants
-> **Last Updated**: February 2026
+> **Last Updated**: 2026-04-05
 > **Related ADR**: ADR-012 (Shared Component Library)
 
 ## Overview

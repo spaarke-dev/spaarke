@@ -94,7 +94,9 @@ Spaarke.Email._resolveConfig = function () {
                     "Ensure the SpaarkeCore solution is imported and the variable has a value."
                 );
             }
-            Spaarke.Email.Config.bffApiUrl = bffUrl.replace(/\/+$/, "");
+            // Normalize: strip trailing slashes AND trailing /api to get HOST ONLY.
+            // Prevents the recurring /api/api/ double-prefix bug in legacy JS web resources.
+            Spaarke.Email.Config.bffApiUrl = bffUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
 
             // BFF App ID (required — used for OAuth scope)
             var bffAppId = envVars["sprk_BffApiAppId"];

@@ -1,0 +1,58 @@
+<task id="054" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Enhance ci-cd-workflow.md</title>
+    <phase>4</phase>
+    <tags>procedures, documentation, ci-cd, enhancement</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Enhance docs/procedures/ci-cd-workflow.md — verify against current GitHub workflows and add pre-merge checklist</goal>
+    <context>The existing CI/CD workflow procedure may be outdated relative to current GitHub workflow files. It needs verification against actual workflows and enhancement with a pre-merge checklist.</context>
+    <constraints>
+      - Use /docs-procedures skill structure
+      - Verify every documented workflow step against actual .github/workflows/ files
+      - Add pre-merge checklist covering all required checks before merging
+      - Update any outdated references to workflow names, steps, or configurations
+      - Preserve existing correct content — only update what's wrong or missing
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-procedures/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.github/workflows/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-procedures/SKILL.md for mandatory structure</step>
+    <step>Read current docs/procedures/ci-cd-workflow.md</step>
+    <step>Inventory all workflow files in .github/workflows/</step>
+    <step>Read each workflow file and compare against documented procedures</step>
+    <step>Identify discrepancies: missing workflows, outdated steps, wrong names</step>
+    <step>Draft pre-merge checklist based on required CI checks</step>
+    <step>Update docs/procedures/ci-cd-workflow.md with corrections and enhancements</step>
+    <step>Verify all workflow references resolve to actual files</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-procedures)</tool>
+  </tools>
+  <outputs>
+    <output>docs/procedures/ci-cd-workflow.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All documented workflows verified against actual .github/workflows/ files</criterion>
+    <criterion>Pre-merge checklist added covering required CI checks</criterion>
+    <criterion>Outdated references corrected</criterion>
+    <criterion>Document follows /docs-procedures skill structure</criterion>
+    <criterion>No invented workflows — all sourced from actual files</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,5 +1,9 @@
 # Xrm.WebApi vs BFF API Authentication
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Deciding whether a Code Page or PCF control needs MSAL/@spaarke/auth bootstrap.
 

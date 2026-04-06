@@ -1,5 +1,9 @@
 # Graph SDK v5 Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Creating or modifying Graph API client setup, authentication modes, or request handling.
 

@@ -351,7 +351,7 @@ pac solution list | grep -i "{SolutionName}"
 # Check footer in browser shows new version
 ```
 
-> **Full Guide**: See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B
+> **Full Guide**: See `docs/guides/PCF-DEPLOYMENT-GUIDE.md`
 
 ## PlaybookBuilderHost Architecture (Special Case)
 

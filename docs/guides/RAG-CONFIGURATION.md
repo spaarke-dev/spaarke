@@ -1,8 +1,11 @@
 # RAG Configuration Reference
 
-> **Version**: 1.3
+> **Version**: 1.4
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-20
+> **Updated**: 2026-04-05
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current
 > **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search Foundation R1
 
 ---
@@ -24,7 +27,7 @@
 
 ## App Service Configuration
 
-> **Authoritative source**: Options classes in `src/server/api/Sprk.Bff.Api/Configuration/`. Key prefixes are set by `SectionName` constants: `DocumentIntelligenceOptions.SectionName = "DocumentIntelligence"`, `ScheduledRagIndexingOptions.SectionName = "ScheduledRagIndexing"`. Verify these classes if the configuration schema changes.
+> **Authoritative source**: Options classes — `DocumentIntelligenceOptions` in `src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs` (`SectionName = "DocumentIntelligence"`), `ScheduledRagIndexingOptions` in `src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledRagIndexingService.cs` (`SectionName = "ScheduledRagIndexing"`), and `AnalysisOptions` in `src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs` (`SectionName = "Analysis"`). Verify these classes if the configuration schema changes.
 
 ### Required Settings
 
@@ -32,19 +35,22 @@ Configure these in Azure App Service > Configuration > Application Settings:
 
 | Setting | Required | Default | Description |
 |---------|----------|---------|-------------|
-| `DocumentIntelligence__Enabled` | Yes | `false` | Enable RAG features |
+| `DocumentIntelligence__Enabled` | Yes | `true` | Enable RAG features (code default is `true`; set explicitly in deployment) |
 | `DocumentIntelligence__AiSearchEndpoint` | Yes | - | Azure AI Search endpoint URL |
 | `DocumentIntelligence__AiSearchKey` | Yes | - | Azure AI Search admin API key |
-| `DocumentIntelligence__AiSearchIndexName` | No | `spaarke-knowledge-index-v2` | Default index name (Shared model) |
+| `DocumentIntelligence__AiSearchIndexName` | No | `spaarke-records-index` | Index for record matching (not RAG knowledge — see `Analysis__SharedIndexName` for RAG) |
 | `DocumentIntelligence__EmbeddingModel` | No | `text-embedding-3-large` | Azure OpenAI embedding model deployment (3072 dims) |
 
 ### AI Services (Required for Embeddings)
 
+OpenAI settings are part of the `DocumentIntelligence` section (not a separate `Ai` section):
+
 | Setting | Required | Default | Description |
 |---------|----------|---------|-------------|
-| `Ai__Enabled` | Yes | `false` | Enable AI features |
-| `Ai__OpenAiEndpoint` | Yes | - | Azure OpenAI endpoint URL |
-| `Ai__OpenAiKey` | Yes | - | Azure OpenAI API key |
+| `DocumentIntelligence__OpenAiEndpoint` | Yes | - | Azure OpenAI endpoint URL |
+| `DocumentIntelligence__OpenAiKey` | Yes | - | Azure OpenAI API key |
+
+> **Note**: There is no separate `Ai` configuration section. All OpenAI settings (endpoint, key, models) are configured under the `DocumentIntelligence` section. Source: `DocumentIntelligenceOptions.cs`.
 
 ### Redis Cache (Required for Embedding Cache)
 
@@ -58,7 +64,7 @@ Configure these in Azure App Service > Configuration > Application Settings:
 | Setting | Required | Default | Description |
 |---------|----------|---------|-------------|
 | `ServiceBus__ConnectionString` | Yes | - | Azure Service Bus connection string |
-| `ServiceBus__QueueName` | No | `sdap-jobs` | Queue name for job processing |
+| `ServiceBus__QueueName` | Yes | (empty — required) | Queue name for job processing (typically `sdap-jobs`) |
 
 **Resource Details (Dev Environment)**:
 - **Namespace**: `spaarke-servicebus-dev`
@@ -182,18 +188,20 @@ Invoke-WebRequest -Uri "$bffApiUrl/api/ai/rag/enqueue-indexing" -Headers $header
 
 ```json
 {
-  "Ai": {
+  "DocumentIntelligence": {
     "Enabled": true,
     "OpenAiEndpoint": "https://spaarke-openai-dev.openai.azure.com/",
     "OpenAiKey": "<from-key-vault>",
-    "SummarizeModel": "gpt-4o-mini"
-  },
-  "DocumentIntelligence": {
-    "Enabled": true,
+    "SummarizeModel": "gpt-4o-mini",
+    "EmbeddingModel": "text-embedding-3-large",
     "AiSearchEndpoint": "https://spaarke-search-dev.search.windows.net",
     "AiSearchKey": "<from-key-vault>",
-    "AiSearchIndexName": "spaarke-knowledge-index-v2",
-    "EmbeddingModel": "text-embedding-3-large"
+    "AiSearchIndexName": "spaarke-records-index"
+  },
+  "Analysis": {
+    "Enabled": true,
+    "SharedIndexName": "spaarke-knowledge-index-v2",
+    "DefaultRagModel": "Shared"
   },
   "Redis": {
     "Enabled": true,
@@ -309,8 +317,8 @@ az rest --method PUT \
 ### Shared Model (Default)
 
 No additional configuration required. The system automatically uses:
-- Index: `spaarke-knowledge-index`
-- Isolation: `tenantId` filter
+- Index: `spaarke-knowledge-index-v2` (from `Analysis:SharedIndexName`, default in `AnalysisOptions`)
+- Isolation: `customerId` filter (from `Analysis:TenantFilterField`)
 
 ### Dedicated Model
 
@@ -672,6 +680,18 @@ public async Task SetupEnterpriseCustomer(string tenantId)
 
 ---
 
+## Verification
+
+After configuring RAG settings, verify the setup:
+
+1. **Health check** — `GET /healthz` returns 200 (confirms BFF API is running with valid configuration)
+2. **DocumentIntelligence enabled** — `GET /api/ai/rag/admin/bulk-index` with `SystemAdmin` auth returns 200 or 401 (not 404, which would indicate disabled endpoints)
+3. **Embedding generation** — upload a test document and check logs for `"Generated embedding for document"` messages
+4. **Index connectivity** — run `az rest --method GET --uri "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2?api-version=2024-07-01" --headers "api-key=<key>"` — should return the index schema
+5. **Semantic search** — `POST /api/ai/search` with a query and `scope=entity` returns results (requires both `DocumentIntelligence:Enabled` and `Analysis:Enabled` to be `true`)
+
+---
+
 ## Related Documentation
 
 | Document | Purpose |
@@ -683,7 +703,7 @@ public async Task SetupEnterpriseCustomer(string tenantId)
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-20*
+*Updated: 2026-04-05*
 *AI Document Intelligence R3 - Phase 1 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
 *Semantic Search Foundation R1 - Complete (configuration section added)*

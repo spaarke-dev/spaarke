@@ -1,0 +1,59 @@
+<task id="061" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Verify SCOPE-CONFIGURATION-GUIDE.md</title>
+    <phase>5</phase>
+    <tags>guides, documentation, verification, scopes, configuration</tags>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Verify and update docs/guides/SCOPE-CONFIGURATION-GUIDE.md — check that procedures match current scope services and configuration</goal>
+    <context>The scope configuration guide documents how to configure AI analysis scopes. Procedures may be outdated if scope services or configuration patterns have changed.</context>
+    <constraints>
+      - Use /docs-guide skill structure
+      - Read the current document first, then verify against source code
+      - Check scope service classes and configuration patterns against documented procedures
+      - Verify scope model references match current Dataverse schema
+      - Update only what is incorrect or missing — preserve correct content
+      - Cite source files for every correction
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Scopes/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-guide/SKILL.md for mandatory structure</step>
+    <step>Read current docs/guides/SCOPE-CONFIGURATION-GUIDE.md</step>
+    <step>Read scope service classes for current implementation</step>
+    <step>Search for scope configuration patterns in Options classes and appsettings</step>
+    <step>Verify scope model references against Dataverse entity documentation</step>
+    <step>Identify discrepancies between guide and current code</step>
+    <step>Update docs/guides/SCOPE-CONFIGURATION-GUIDE.md with corrections</step>
+    <step>Verify all file paths and class references resolve</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-guide)</tool>
+  </tools>
+  <outputs>
+    <output>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All procedures verified against current scope service implementation</criterion>
+    <criterion>Scope model references match current Dataverse schema</criterion>
+    <criterion>Outdated references corrected with source citations</criterion>
+    <criterion>Document follows /docs-guide skill structure</criterion>
+  </acceptance-criteria>
+</task>

@@ -107,6 +107,8 @@ export interface UploadOrchestratorConfig {
     entityConfigResolver: EntityConfigResolver;
     /** Parent context (entity type, ID, container). */
     parentContext: ParentContext;
+    /** Azure AD tenant ID — required for RAG indexing (Phase 4). */
+    tenantId?: string;
     /** Logger implementation. */
     logger?: ILogger;
     /** Callback invoked on 401 to clear token caches. */
@@ -389,20 +391,25 @@ async function kickOffBackgroundTasks(
     for (const record of successfulRecords) {
         if (!record.recordId || !record.itemId) continue;
 
-        // Phase 3: Document Profile playbook (fire-and-forget)
-        tasks.push(
-            triggerDocumentProfile(record.recordId, config, logger)
-                .catch((err) => {
-                    logger.warn("UploadOrchestrator", `Profile trigger failed for ${record.fileName} (non-critical)`, err);
-                }),
-        );
+        // Phase 3: Document Profile — REMOVED.
+        // The legacy /api/ai/tools/document-profile/enqueue endpoint no longer exists.
+        // Document Profile now runs through the AI playbook system and is triggered
+        // by the SummaryStep component (useAiSummary hook) during Step 2 rendering.
+        // No fire-and-forget call needed here.
 
         // Phase 4: RAG indexing (fire-and-forget)
+        // tenantId is required by the BFF /api/ai/rag/index-file endpoint.
+        // Resolve from config or fall back to empty (BFF will reject with 400 if missing).
+        const effectiveTenantId = config.tenantId ?? '';
+        if (!effectiveTenantId) {
+            logger.warn("UploadOrchestrator", `tenantId missing — RAG indexing will fail for ${record.fileName}`);
+        }
         tasks.push(
             triggerRagIndexing(
                 record.driveId ?? config.parentContext.containerId,
                 record.itemId,
                 record.fileName,
+                effectiveTenantId,
                 config,
                 logger,
             ).catch((err) => {
@@ -414,34 +421,10 @@ async function kickOffBackgroundTasks(
     await Promise.allSettled(tasks);
 }
 
-/**
- * Phase 3: Trigger Document Profile playbook via BFF API.
- * POST /api/ai/tools/document-profile/enqueue
- */
-async function triggerDocumentProfile(
-    documentId: string,
-    config: UploadOrchestratorConfig,
-    logger: ILogger,
-): Promise<void> {
-    try {
-        const response = await authenticatedFetch(
-            "/api/ai/tools/document-profile/enqueue",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ documentId }),
-            },
-        );
-
-        if (response.ok) {
-            logger.info("UploadOrchestrator", `Document Profile enqueued for: ${documentId}`);
-        } else {
-            logger.warn("UploadOrchestrator", `Document Profile enqueue returned ${response.status} for: ${documentId}`);
-        }
-    } catch (err) {
-        logger.warn("UploadOrchestrator", `Document Profile trigger failed for: ${documentId}`, err);
-    }
-}
+// Phase 3 (triggerDocumentProfile) REMOVED — the legacy endpoint
+// /api/ai/tools/document-profile/enqueue no longer exists on the BFF.
+// Document Profile is now handled by the AI playbook system via
+// SummaryStep → useAiSummary hook during wizard Step 2 rendering.
 
 /**
  * Phase 4: Trigger RAG indexing via BFF API.
@@ -451,6 +434,7 @@ async function triggerRagIndexing(
     driveId: string,
     itemId: string,
     fileName: string,
+    tenantId: string,
     config: UploadOrchestratorConfig,
     logger: ILogger,
 ): Promise<void> {
@@ -460,7 +444,7 @@ async function triggerRagIndexing(
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ driveId, itemId, fileName }),
+                body: JSON.stringify({ driveId, itemId, fileName, tenantId }),
             },
         );
 

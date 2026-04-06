@@ -66,7 +66,7 @@ import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
 import { getClientUrl } from "../services/nextStepLauncher";
-import { getAuthProvider, authenticatedFetch as spaarkeAuthenticatedFetch } from "@spaarke/auth";
+import { getAuthProvider, authenticatedFetch as spaarkeAuthenticatedFetch, buildBffApiUrl } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -679,7 +679,7 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
             setIsIndexing(true);
             try {
                 const token = await bffTokenProvider();
-                await fetch(`${bffBaseUrl}/ai/rag/index-file`, {
+                await fetch(buildBffApiUrl(bffBaseUrl, '/ai/rag/index-file'), {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",

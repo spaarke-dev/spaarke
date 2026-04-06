@@ -1,5 +1,9 @@
 # Resilience Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Verified
+
 ## When
 Adding HTTP resilience (retry, circuit breaker, timeout) to external service calls.
 

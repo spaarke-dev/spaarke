@@ -1,0 +1,62 @@
+<task id="030" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create configuration-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, configuration, options-pattern</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/configuration-architecture.md — document the 17 options classes, validators, runtime config, and appsettings hierarchy</goal>
+    <context>The BFF API uses the .NET Options pattern extensively with 17+ strongly-typed options classes, FluentValidation-based validators, and a layered appsettings hierarchy (base → environment → local). No architecture document captures this configuration system end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent configuration that doesn't exist
+      - Document every Options class with its section path, properties, and validator
+      - Map the appsettings hierarchy: appsettings.json → appsettings.{env}.json → appsettings.local.json
+      - Include runtime config resolution for client-side (Code Pages, PCF)
+      - Cite source files for every Options class and validator
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all Options classes in src/server/api/Sprk.Bff.Api/Options/ and Configuration/</step>
+    <step>Read Program.cs to find all .Configure&lt;T&gt;() and .AddOptions&lt;T&gt;() registrations</step>
+    <step>Read appsettings.json and any environment-specific variants for hierarchy</step>
+    <step>Identify all IValidateOptions and FluentValidation validators for options</step>
+    <step>Search for runtime config endpoints serving client-side configuration</step>
+    <step>Draft configuration-architecture.md following skill structure</step>
+    <step>Verify every Options class is documented with section path and source file</step>
+    <step>Write to docs/architecture/configuration-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/configuration-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>All 17+ Options classes documented with section path, properties, and validator</criterion>
+    <criterion>Appsettings hierarchy clearly mapped (base → environment → local)</criterion>
+    <criterion>Runtime config resolution for client-side documented</criterion>
+    <criterion>Every Options class cites its source file</criterion>
+    <criterion>No invented configuration — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

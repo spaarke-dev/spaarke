@@ -1,0 +1,63 @@
+<task id="035" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Create scope-architecture.md</title>
+    <phase>3</phase>
+    <tags>architecture, documentation, scopes, inheritance, resolution</tags>
+    <estimate>3h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Create docs/architecture/scope-architecture.md — document scope inheritance, resolution chain, and fallback behavior</goal>
+    <context>The Spaarke platform uses a scope system to control AI behavior, configuration, and feature availability. Scopes form an inheritance hierarchy with resolution chains and fallback behavior. No architecture document captures this scope system end-to-end.</context>
+    <constraints>
+      - Use /docs-architecture skill structure
+      - Source ALL content from actual code — do not invent scope behaviors
+      - Document scope hierarchy: global → organization → matter → document levels
+      - Map the resolution chain: how scope values are resolved with inheritance and override
+      - Document fallback behavior when a scope value is not defined at a level
+      - Include scope storage and retrieval from Dataverse
+      - Cite source files for every component
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Scopes/</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/skills/docs-architecture/SKILL.md for mandatory structure</step>
+    <step>Inventory all files in Services/Scopes/</step>
+    <step>Read scope service classes to understand hierarchy and resolution</step>
+    <step>Read scope model types to document the data structures</step>
+    <step>Search for scope-related Dataverse entity references and queries</step>
+    <step>Map the resolution chain: inheritance, override, and fallback logic</step>
+    <step>Identify all consumers of the scope service across the codebase</step>
+    <step>Draft scope-architecture.md following skill structure</step>
+    <step>Verify every component cites its source file</step>
+    <step>Write to docs/architecture/scope-architecture.md</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Grep</tool>
+    <tool>Glob</tool>
+    <tool>Skill(docs-architecture)</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/scope-architecture.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Document follows /docs-architecture skill structure</criterion>
+    <criterion>Scope hierarchy levels documented (global → organization → matter → document)</criterion>
+    <criterion>Resolution chain with inheritance and override mapped</criterion>
+    <criterion>Fallback behavior documented</criterion>
+    <criterion>Scope storage and Dataverse integration documented</criterion>
+    <criterion>Every component cites its source file</criterion>
+    <criterion>No invented behaviors — all sourced from actual code</criterion>
+  </acceptance-criteria>
+</task>

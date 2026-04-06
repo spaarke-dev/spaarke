@@ -1,0 +1,63 @@
+<task id="081" project="ai-procedure-refactoring-r2">
+  <metadata>
+    <title>Update index files</title>
+    <phase>7</phase>
+    <tags>documentation, index, organization, wrap-up</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>080</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Update all documentation index files to reflect new, enhanced, and verified documents: docs/architecture/INDEX.md, docs/guides/INDEX.md, docs/standards/INDEX.md, docs/data-model/ index, docs/procedures/ index</goal>
+    <context>After creating new documents, enhancing existing ones, and verifying others, all index files need updating to reflect the current state of documentation.</context>
+    <constraints>
+      - Read each index file and compare against actual files in the directory
+      - Add entries for newly created documents
+      - Update descriptions for enhanced or significantly changed documents
+      - Remove entries for deleted documents (if any)
+      - Maintain consistent formatting within each index file
+      - If an index file doesn't exist, create it following the pattern of existing index files
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>docs/architecture/</file>
+      <file>docs/guides/</file>
+      <file>docs/standards/</file>
+      <file>docs/data-model/</file>
+      <file>docs/procedures/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing docs/architecture/INDEX.md (or check if it exists)</step>
+    <step>Inventory all files in docs/architecture/ and update index</step>
+    <step>Read existing docs/guides/INDEX.md and update with new guides</step>
+    <step>Read existing docs/standards/INDEX.md and update with new standards</step>
+    <step>Read existing docs/data-model/ index and update with new/verified data model docs</step>
+    <step>Read existing docs/procedures/ index and update with new procedures</step>
+    <step>Verify every index entry links to an actual file</step>
+    <step>Write updated index files</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Glob</tool>
+  </tools>
+  <outputs>
+    <output>docs/architecture/INDEX.md</output>
+    <output>docs/guides/INDEX.md</output>
+    <output>docs/standards/INDEX.md</output>
+    <output>docs/data-model/INDEX.md (or equivalent)</output>
+    <output>docs/procedures/INDEX.md (or equivalent)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>All index files updated to reflect current document inventory</criterion>
+    <criterion>New documents added to appropriate index</criterion>
+    <criterion>Every index entry links to an actual file</criterion>
+    <criterion>Consistent formatting maintained within each index</criterion>
+    <criterion>No stale entries pointing to non-existent files</criterion>
+  </acceptance-criteria>
+</task>

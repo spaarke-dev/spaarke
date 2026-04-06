@@ -36,7 +36,7 @@ This project integrates Spaarke's AI capabilities into M365 Copilot within Power
 
 **Architecture**:
 - `docs/architecture/AI-ARCHITECTURE.md` — Four-tier AI architecture
-- `docs/architecture/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md` — Copilot vs SprkChat
+- `docs/enhancements/AI-CHAT-STRATEGY-M365-COPILOT-VS-SPRKCHAT.md` — Copilot vs SprkChat
 - `docs/architecture/ai-implementation-reference.md` — BFF code examples
 - `docs/architecture/sdap-auth-patterns.md` — OBO flow patterns
 - `docs/architecture/office-outlook-teams-integration-architecture.md` — Office/Teams auth

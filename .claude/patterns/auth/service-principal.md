@@ -1,5 +1,9 @@
 # Service Principal Authentication Pattern
 
+> **Last Reviewed**: 2026-04-05
+> **Reviewed By**: ai-procedure-refactoring-r2
+> **Status**: Current (corrected Dataverse SDK auth description)
+
 ## When
 Implementing app-only (no user context) access to Graph API or Dataverse.
 
@@ -14,6 +18,6 @@ Implementing app-only (no user context) access to Graph API or Dataverse.
 
 ## Key Rules
 - Graph app-only: `GraphClientFactory.ForApp()` with ClientCredential flow
-- Dataverse SDK: connection string with `AuthType=ClientSecret`
+- Dataverse SDK: `ServiceClient` constructed with `ClientSecretCredential` (not a connection string)
 - Dataverse REST: `DefaultAzureCredential` with `ManagedIdentityClientId`
 - MUST NOT use app-only auth for operations that should respect user permissions
