@@ -25,7 +25,7 @@
 | 021 | Add Lookup Validation for Form Approve | 3 | ✅ | 020 |
 | 022 | Add Per-Record Validation for Grid Approve | 3 | ✅ | 020 |
 | 030 | Remove Environments from Options | 4 | ✅ | 016 |
-| 031 | Refactor RegistrationDataverseService URL | 4 | 🔲 | 030 |
+| 031 | Refactor RegistrationDataverseService URL | 4 | ✅ | 030 |
 | 032 | Update Documentation | 4 | 🔲 | 031 |
 | 040 | E2E Testing Checklist | 5 | 🔲 | 032 |
 | 090 | Project Wrap-Up | 5 | 🔲 | 040 |

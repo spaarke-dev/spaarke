@@ -1,6 +1,6 @@
 # Spaarke Self-Service User Registration — Operations Guide
 
-> **Last Updated**: 2026-04-04
+> **Last Updated**: 2026-04-06
 > **Project Branch**: `work/spaarke-self-service-registration-app`
 > **Status**: Phase 1 — Demo Access via Internal Accounts
 
@@ -58,7 +58,9 @@ The Spaarke Self-Service Registration system automates demo user provisioning. P
 
 5. **Admin opens** the Spaarke Demo MDA, navigates to "Pending Demo Requests" view, selects a request.
 
-6. **Admin clicks "Approve Demo Access"** ribbon button. The JS webresource calls `POST /api/registration/requests/{id}/approve` with an admin bearer token.
+5b. **Admin selects Target Environment** via the `sprk_dataverseenvironmentid` lookup on the registration request form. This lookup points to a `sprk_dataverseenvironment` record containing all environment-specific config (Dataverse URL, business unit, team, SPE container, license SKUs, admin emails). The lookup must be set before approval — there is no default.
+
+6. **Admin clicks "Approve Demo Access"** ribbon button. The JS webresource validates the Target Environment lookup is set (alerts if empty), then calls `POST /api/registration/requests/{id}/approve` with an admin bearer token. No environment name is sent in the request body — the API reads the environment from the Dataverse lookup.
 
 7. **BFF API runs the provisioning pipeline** synchronously (~10-30 seconds):
    - Step 1: Generate unique username (`firstname.lastname@demo.spaarke.com`, collision handling appends number)
@@ -110,22 +112,42 @@ Before the registration system can operate, the following must be in place:
 
 ## Configuration Reference
 
-### appsettings.json — DemoProvisioning Section
+### Environment Configuration — Dataverse Entity
+
+**As of v2.0**, per-environment config is stored in `sprk_dataverseenvironment` records in Dataverse, not in appsettings. Admins manage environments through the MDA form (Settings → Dataverse Environments).
+
+#### `sprk_dataverseenvironment` Entity
+
+| Column | Type | Required | Description |
+|--------|------|----------|-------------|
+| `sprk_name` | Text (200) | Yes | Display name (e.g., "Dev", "Demo 1") |
+| `sprk_environmenttype` | Choice | Yes | Development, Demo, Sandbox, Trial, Partner, Training, Production |
+| `sprk_dataverseurl` | URL | Yes | e.g., `https://spaarke-demo.crm.dynamics.com` |
+| `sprk_appid` | Text (100) | No | MDA app GUID for deep links |
+| `sprk_description` | Multiline (2000) | No | Admin notes |
+| `sprk_isactive` | Boolean | Yes | Default: Yes |
+| `sprk_isdefault` | Boolean | Yes | Default: No (informational, not enforced) |
+| `sprk_setupstatus` | Choice | No | Not Started, In Progress, Ready, Issue |
+| `sprk_accountdomain` | Text (200) | No | UPN domain (e.g., `demo.spaarke.com`) |
+| `sprk_businessunitname` | Text (200) | No | Target Dataverse business unit |
+| `sprk_teamname` | Text (200) | No | Team with inherited security role |
+| `sprk_specontainerid` | Text (500) | No | SharePoint Embedded container ID |
+| `sprk_securitygroupid` | Text (100) | No | Entra ID security group for demo users |
+| `sprk_defaultdurationdays` | Integer | No | Default demo duration (days) |
+| `sprk_licenseconfigjson` | Multiline (4000) | No | JSON: `{"PowerAppsPlan2TrialSkuId":"...","FabricFreeSkuId":"...","PowerAutomateFreeSkuId":"..."}` |
+| `sprk_adminemails` | Multiline (1000) | No | Comma-separated admin email addresses |
+
+#### Registration Request Lookup
+
+The `sprk_registrationrequest` entity has a lookup field `sprk_dataverseenvironmentid` → `sprk_dataverseenvironment`. Admin must select the target environment before approving. The field defaults to blank.
+
+### appsettings.json — DemoProvisioning Section (Tenant-Level)
+
+Per-environment config has moved to Dataverse. The `DemoProvisioning` section now contains only **tenant-level** settings:
 
 ```json
 {
   "DemoProvisioning": {
-    "Environments": [
-      {
-        "Name": "Demo 1",
-        "DataverseUrl": "https://spaarke-demo.crm.dynamics.com",
-        "BusinessUnitName": "Spaarke Demo",
-        "TeamName": "Spaarke Demo Team",
-        "SpeContainerId": "{container-guid}",
-        "DefaultDemoDurationDays": 14
-      }
-    ],
-    "DefaultEnvironment": "Demo 1",
     "AccountDomain": "demo.spaarke.com",
     "DemoUsersGroupId": "745bfdf6-f899-4507-935d-c52de3621536",
     "Licenses": {
@@ -140,24 +162,19 @@ Before the registration system can operate, the following must be in place:
 }
 ```
 
+> **Note**: `Environments` array and `DefaultEnvironment` are deprecated. They are retained temporarily for backward compatibility with `DemoExpirationService` but will be removed in a future update.
+
 ### Configuration Field Reference
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `Environments` | Array | Yes (min 1) | Array of demo environment configurations |
-| `Environments[].Name` | String | Yes | Display name for the environment (e.g., "Demo 1") |
-| `Environments[].DataverseUrl` | URL | Yes | Dataverse environment URL |
-| `Environments[].BusinessUnitName` | String | Yes | Target Business Unit name in Dataverse |
-| `Environments[].TeamName` | String | Yes | Team that inherits demo user security role |
-| `Environments[].SpeContainerId` | String | Yes | SPE container GUID for demo documents |
-| `Environments[].DefaultDemoDurationDays` | Int | No (default 14) | Days of demo access after provisioning |
-| `DefaultEnvironment` | String | Yes | Must match an entry in `Environments[].Name` |
 | `AccountDomain` | String | Yes | UPN domain for demo accounts (e.g., `demo.spaarke.com`) |
 | `DemoUsersGroupId` | String | Yes | Entra ID security group GUID for MFA exclusion |
 | `Licenses.PowerAppsPlan2TrialSkuId` | String | Yes | SKU ID for Power Apps Plan 2 Trial license |
 | `Licenses.FabricFreeSkuId` | String | Yes | SKU ID for Microsoft Fabric (Free) license |
 | `Licenses.PowerAutomateFreeSkuId` | String | Yes | SKU ID for Power Automate (Free) license |
 | `AdminNotificationEmails` | String[] | Yes (min 1) | Admin email addresses for new request notifications |
+| `DATAVERSE_URL` | String | Yes | Admin Dataverse URL (e.g., `https://spaarkedev1.crm.dynamics.com`) |
 
 ### App Service Configuration
 
@@ -168,19 +185,13 @@ az webapp config appsettings set \
   --resource-group spe-infrastructure-westus2 \
   --name spe-api-dev-67e2xz \
   --settings \
-    DemoProvisioning__DefaultEnvironment="Demo 1" \
+    DATAVERSE_URL="https://spaarkedev1.crm.dynamics.com" \
     DemoProvisioning__AccountDomain="demo.spaarke.com" \
     DemoProvisioning__DemoUsersGroupId="745bfdf6-f899-4507-935d-c52de3621536" \
     DemoProvisioning__Licenses__PowerAppsPlan2TrialSkuId="dcb1a3ae-b33f-4487-846a-a640262fadf4" \
     DemoProvisioning__Licenses__FabricFreeSkuId="a403ebcc-fae0-4ca2-8c8c-7a907fd6c235" \
     DemoProvisioning__Licenses__PowerAutomateFreeSkuId="f30db892-07e9-47e9-837c-80727f46fd3d" \
-    DemoProvisioning__AdminNotificationEmails__0="admin@spaarke.com" \
-    DemoProvisioning__Environments__0__Name="Demo 1" \
-    DemoProvisioning__Environments__0__DataverseUrl="https://spaarke-demo.crm.dynamics.com" \
-    DemoProvisioning__Environments__0__BusinessUnitName="Spaarke Demo" \
-    DemoProvisioning__Environments__0__TeamName="Spaarke Demo Team" \
-    DemoProvisioning__Environments__0__SpeContainerId="{container-guid}" \
-    DemoProvisioning__Environments__0__DefaultDemoDurationDays="14"
+    DemoProvisioning__AdminNotificationEmails__0="admin@spaarke.com"
 ```
 
 ---
