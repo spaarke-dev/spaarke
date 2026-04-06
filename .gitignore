@@ -116,3 +116,4 @@ LogFiles/
 
 # Temporary download directories
 tmp-site-download/
+deploy/

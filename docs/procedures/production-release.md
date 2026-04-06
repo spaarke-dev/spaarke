@@ -97,7 +97,7 @@ Target: Production Dataverse (one or more environments)
 
 ### Component Inventory
 
-SpaarkeMaster contains **386 confirmed components** across these categories:
+SpaarkeMaster contains **383 confirmed components** across these categories:
 
 #### Entities (91)
 
@@ -138,7 +138,7 @@ All `sprk_*` prefixed web resources including:
 
 These are built from source code and uploaded to dev before export.
 
-#### PCF Custom Controls (11 confirmed in-use)
+#### PCF Custom Controls (10 confirmed in-use)
 
 | Control | Used On |
 |---------|---------|
@@ -151,11 +151,10 @@ These are built from source code and uploaded to dev before export.
 | UpdateRelatedButton | Views |
 | EmailProcessingMonitor | Forms |
 | ThemeEnforcer | Forms |
-| UniversalDatasetGrid | Subgrids and views |
 | RegardingLink | sprk_event views (dataset binding) |
 
-**Excluded PCFs** (orphaned — registered in system but not bound to any active form/view):
-AssociationResolver, EventAutoAssociate, UniversalDocumentUpload, ScopeConfigEditor, AnalysisBuilder, AnalysisWorkspace, DueDatesWidget, EventCalendarFilter, FieldMappingAdmin, PlaybookBuilderHost, SpaarkeGridCustomizer, LegalWorkspace (PCF).
+**Excluded PCFs**:
+AssociationResolver, EventAutoAssociate, UniversalDocumentUpload, ScopeConfigEditor, AnalysisBuilder, AnalysisWorkspace, DueDatesWidget, EventCalendarFilter, FieldMappingAdmin, PlaybookBuilderHost, SpaarkeGridCustomizer, LegalWorkspace (PCF), UniversalDatasetGrid (broken styles.css web resource reference).
 
 #### Other Components
 
@@ -343,6 +342,14 @@ Test-Path ./deploy/SpaarkeMaster.zip
 ## Phase 2: Deploy BFF API
 
 Deploy the .NET 8 BFF API to Azure App Service. For production environments, **always use staging slot deployment** with zero-downtime swap.
+
+**CRITICAL**: The BFF API must be built and deployed from the **master branch** in the main repository (not a worktree or feature branch). This ensures the deployed API matches the released code.
+
+```powershell
+# Verify you are on master in the main repo
+git branch --show-current  # Must show: master
+git log --oneline -1       # Must match the release commit
+```
 
 ### Production Deployment (Recommended)
 

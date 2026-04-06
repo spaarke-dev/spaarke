@@ -59,7 +59,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$EnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
-    [int]$ExpectedComponentCount = 386,
+    [int]$ExpectedComponentCount = 385,
     [switch]$Force
 )
 
@@ -80,8 +80,8 @@ $IncludedPcfIds = @(
     "a109c074-5cc7-4db7-b958-4a2a3ab2d0a0"  # UpdateRelatedButton
     "d5740853-5442-4fe6-ace5-c40f9a00ac8f"  # EmailProcessingMonitor
     "1027a38f-4bdd-4d6b-9422-61f6dfaea686"  # ThemeEnforcer
-    "88dbb4ef-6d31-4b15-b89b-68c9401b4f84"  # UniversalDatasetGrid
     "d8c352f3-91d7-454f-b258-d85d30136708"  # RegardingLink
+    # EXCLUDED: 88dbb4ef (UniversalDatasetGrid) — broken styles.css web resource reference
 )
 
 # MDA App
