@@ -9,6 +9,12 @@ This directory contains process documentation covering CI/CD, testing, code revi
 
 ## Procedures Index
 
+### AI Coding Procedures (Start Here)
+
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| **[AI-CODING-PROCEDURES-GUIDE.md](AI-CODING-PROCEDURES-GUIDE.md)** | Scenario-based quick reference for all Claude Code skills and workflows — new projects, task execution, code review, documentation, deployment, maintenance | 2026-04-05 | 2026-04-05 | New |
+
 ### CI/CD & Quality
 
 | Document | Description | Last Updated | Last Reviewed | Status |
