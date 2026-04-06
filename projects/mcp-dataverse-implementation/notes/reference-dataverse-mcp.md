@@ -81,18 +81,49 @@ All tools are schema-advertised via the MCP protocol — Claude Code discovers a
 
 ## Configuration for Claude Code
 
+Claude Code connects via a **local proxy** (`@microsoft/dataverse` npm package) using stdio transport. The proxy handles Azure AD authentication (browser-based sign-in) using the pre-registered Dataverse MCP CLI app (`0c412cc3-0dd6-449b-987f-05b053db9457`).
+
+**Setup command:**
+```bash
+claude mcp add dataverse -s project -t stdio -- npx -y @microsoft/dataverse mcp https://spaarkedev1.crm.dynamics.com
+```
+
+**Resulting `.mcp.json`:**
 ```json
-// In .claude/settings.json
 {
   "mcpServers": {
     "dataverse": {
-      "url": "https://spaarkedev1.crm.dynamics.com/api/mcp"
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@microsoft/dataverse", "mcp", "https://spaarkedev1.crm.dynamics.com"],
+      "env": {}
     }
   }
 }
 ```
 
-> **Note**: Exact configuration syntax may vary. Verify against Claude Code MCP documentation for current format (command-based vs URL-based server registration). Tenant admin consent and environment allowlisting must be completed before the endpoint responds.
+**Prerequisites (verified 2026-04-06):**
+1. **Create Dynamics ERP service principal** (one-time, if not already present):
+   ```bash
+   az ad sp create --id 00000015-0000-0000-c000-000000000000
+   ```
+   Without this, auth fails with `AADSTS650052` ("lacks a service principal for Microsoft Dynamics ERP").
+2. **Dataverse MCP CLI** must be enabled in Power Platform Admin Center → Environment → Settings → Features → Active Allowed MCP Clients (app ID `0c412cc3-0dd6-449b-987f-05b053db9457`)
+3. **Create auth profile** (one-time per developer):
+   ```bash
+   npx -y @microsoft/dataverse auth create --environment https://spaarkedev1.crm.dynamics.com
+   ```
+   Opens browser for Azure AD login. Token is cached locally and refreshed automatically.
+4. **Validate** the endpoint:
+   ```bash
+   npx -y @microsoft/dataverse mcp https://spaarkedev1.crm.dynamics.com --validate
+   ```
+5. **Restart Claude Code session** after configuration — MCP servers initialize at session start
+
+> **Note**: Direct HTTP connection to `https://{org}.crm.dynamics.com/api/mcp` does NOT work for Claude Code because Azure AD doesn't support Dynamic Client Registration. The local proxy approach is Microsoft's recommended method for non-Microsoft MCP clients.
+> **Source**: https://learn.microsoft.com/en-us/power-apps/maker/data-platform/data-platform-mcp-other-clients
+>
+> **Note**: The tenant admin consent URL (`/adminconsent?client_id=...`) may not show a consent prompt if the service principal isn't yet provisioned. Use the `az ad sp create` command above first.
 
 ## Go/No-Go Decision Resolution
 
