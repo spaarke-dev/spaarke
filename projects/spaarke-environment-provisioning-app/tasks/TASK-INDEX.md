@@ -7,23 +7,23 @@
 
 | # | Title | Phase | Status | Dependencies |
 |---|-------|-------|--------|-------------|
-| 001 | Create DataverseEnvironment Schema Script | 1 | 🔲 | — |
+| 001 | Create DataverseEnvironment Schema Script | 1 | ✅ | — |
 | 002 | Run Schema Script Against Dev | 1 | 🔲 | 001 |
 | 003 | Create Environment Entity Form | 1 | 🔲 | 002 |
 | 004 | Create Environment Entity Views | 1 | 🔲 | 002 |
 | 005 | Add Sitemap Entry | 1 | 🔲 | 002 |
 | 006 | Add Environment Lookup to Registration | 1 | 🔲 | 002 |
 | 007 | Seed Dev and Demo 1 Records | 1 | 🔲 | 002 |
-| 010 | Create DataverseEnvironmentRecord DTO | 2 | 🔲 | — |
-| 011 | Create DataverseEnvironmentService | 2 | 🔲 | 010 |
-| 012 | Register Service in DI | 2 | 🔲 | 011 |
-| 013 | Refactor ApproveRequest Endpoint | 2 | 🔲 | 012 |
-| 014 | Handle Malformed License JSON | 2 | 🔲 | 013 |
+| 010 | Create DataverseEnvironmentRecord DTO | 2 | ✅ | — |
+| 011 | Create DataverseEnvironmentService | 2 | ✅ | 010 |
+| 012 | Register Service in DI | 2 | ✅ | 011 |
+| 013 | Refactor ApproveRequest Endpoint | 2 | ✅ | 012 |
+| 014 | Handle Malformed License JSON | 2 | ✅ | 013 |
 | 015 | Refactor DemoProvisioningService | 2 | 🔲 | 013 |
 | 016 | Update Admin Email Source | 2 | 🔲 | 015 |
-| 020 | Remove Environment Picker from Ribbon JS | 3 | 🔲 | 013 |
-| 021 | Add Lookup Validation for Form Approve | 3 | 🔲 | 020 |
-| 022 | Add Per-Record Validation for Grid Approve | 3 | 🔲 | 020 |
+| 020 | Remove Environment Picker from Ribbon JS | 3 | ✅ | 013 |
+| 021 | Add Lookup Validation for Form Approve | 3 | ✅ | 020 |
+| 022 | Add Per-Record Validation for Grid Approve | 3 | ✅ | 020 |
 | 030 | Remove Environments from Options | 4 | 🔲 | 016 |
 | 031 | Refactor RegistrationDataverseService URL | 4 | 🔲 | 030 |
 | 032 | Update Documentation | 4 | 🔲 | 031 |

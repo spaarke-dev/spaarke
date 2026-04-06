@@ -205,10 +205,9 @@ public static class RegistrationEndpoints
     /// </summary>
     private static async Task<IResult> ApproveRequest(
         Guid id,
-        ApproveRequestDto? approveRequest,
         RegistrationDataverseService dataverseService,
+        DataverseEnvironmentService environmentService,
         DemoProvisioningService provisioningService,
-        IOptions<DemoProvisioningOptions> options,
         ILogger<RegistrationDataverseService> logger,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -236,31 +235,77 @@ public static class RegistrationEndpoints
                 extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
         }
 
+        // FR-09: Validate environment is linked to the request
+        if (!existingRequest.DataverseEnvironmentId.HasValue)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: "No target environment selected for this registration request. Please select a Target Environment on the request form before approving.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+        }
+
         try
         {
-            // Resolve environment: use admin-specified or fall back to default
-            var provisioningOptions = options.Value;
-            var environmentName = approveRequest?.Environment ?? provisioningOptions.DefaultEnvironment;
-
-            var environment = provisioningOptions.Environments
-                .FirstOrDefault(e => string.Equals(e.Name, environmentName, StringComparison.OrdinalIgnoreCase));
+            // FR-08: Read environment config from Dataverse using the lookup ID
+            var environment = await environmentService.GetByIdAsync(
+                existingRequest.DataverseEnvironmentId.Value, cancellationToken);
 
             if (environment == null)
             {
                 return Results.Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Bad Request",
-                    detail: $"Environment '{environmentName}' is not configured. Available environments: {string.Join(", ", provisioningOptions.Environments.Select(e => e.Name))}.",
+                    detail: "The linked target environment was not found in Dataverse. It may have been deleted.",
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
                     extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
             }
 
+            if (!environment.IsActive)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Bad Request",
+                    detail: $"The target environment '{environment.Name}' is inactive. Please select an active environment.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                    extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            }
+
+            // FR-12: Validate license config JSON (throws JsonException if malformed)
+            Services.Registration.LicenseConfig? licenseConfig = null;
+            try
+            {
+                licenseConfig = environment.ParseLicenseConfig();
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Invalid Configuration",
+                    detail: $"Invalid license configuration for environment '{environment.Name}': {ex.Message}",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                    extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            }
+
+            // Map DataverseEnvironmentRecord → DemoEnvironmentConfig for provisioning service
+            var envConfig = new DemoEnvironmentConfig
+            {
+                Name = environment.Name ?? "Unknown",
+                DataverseUrl = environment.DataverseUrl ?? throw new InvalidOperationException("Environment is missing DataverseUrl"),
+                BusinessUnitName = environment.BusinessUnitName ?? throw new InvalidOperationException("Environment is missing BusinessUnitName"),
+                TeamName = environment.TeamName ?? throw new InvalidOperationException("Environment is missing TeamName"),
+                SpeContainerId = environment.SpeContainerId ?? throw new InvalidOperationException("Environment is missing SpeContainerId"),
+                AppId = environment.AppId,
+                DefaultDemoDurationDays = environment.DefaultDurationDays ?? 14
+            };
+
             logger.LogInformation(
                 "Approving registration request {RequestId} for {Email}, Environment={Environment}, TraceId={TraceId}",
-                id, existingRequest.Email, environment.Name, httpContext.TraceIdentifier);
+                id, existingRequest.Email, envConfig.Name, httpContext.TraceIdentifier);
 
             var provisionResult = await provisioningService.ProvisionDemoAccessAsync(
-                existingRequest, environment, cancellationToken);
+                existingRequest, envConfig, cancellationToken);
 
             logger.LogInformation(
                 "Registration request {RequestId} approved and provisioned: Username={Username}, ExpiresOn={ExpirationDate}, TraceId={TraceId}",

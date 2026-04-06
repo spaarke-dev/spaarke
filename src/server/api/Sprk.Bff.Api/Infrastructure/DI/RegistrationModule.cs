@@ -27,6 +27,7 @@ public static class RegistrationModule
         services.AddSingleton<RegistrationEmailService>();
         services.AddSingleton<DemoProvisioningService>();
         services.AddSingleton<EmailDomainValidator>();
+        services.AddSingleton<DataverseEnvironmentService>();
 
         // Background services (ADR-001: BackgroundService pattern)
         services.AddHostedService<DemoExpirationService>();

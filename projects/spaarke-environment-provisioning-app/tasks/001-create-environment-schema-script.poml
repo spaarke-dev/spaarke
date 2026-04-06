@@ -4,7 +4,7 @@
     <phase>1</phase>
     <tags>dataverse, schema, script</tags>
     <estimate>2h</estimate>
-    <status>pending</status>
+    <status>completed</status>
     <dependencies>none</dependencies>
     <parallel-safe>true</parallel-safe>
   </metadata>

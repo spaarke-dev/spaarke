@@ -446,7 +446,8 @@ public class RegistrationDataverseService : IDisposable
         "sprk_usecase", "sprk_referralsource", "sprk_notes", "sprk_status",
         "sprk_trackingid", "sprk_requestdate", "sprk_reviewdate", "sprk_rejectionreason",
         "sprk_demousername", "sprk_demouserobjectid", "sprk_provisioneddate",
-        "sprk_expirationdate", "sprk_consentaccepted", "sprk_consentdate"
+        "sprk_expirationdate", "sprk_consentaccepted", "sprk_consentdate",
+        "_sprk_dataverseenvironmentid_value"
     };
 
     private static RegistrationRequestRecord MapToRecord(JsonElement json)
@@ -483,6 +484,8 @@ public class RegistrationDataverseService : IDisposable
             ConsentAccepted = json.TryGetProperty("sprk_consentaccepted", out var caProp) && caProp.ValueKind == JsonValueKind.True,
             ConsentDate = json.TryGetProperty("sprk_consentdate", out var cdProp) && cdProp.ValueKind != JsonValueKind.Null
                 ? cdProp.GetDateTimeOffset() : null,
+            DataverseEnvironmentId = json.TryGetProperty("_sprk_dataverseenvironmentid_value", out var envIdProp) && envIdProp.ValueKind == JsonValueKind.String
+                ? Guid.TryParse(envIdProp.GetString(), out var envGuid) ? envGuid : null : null,
         };
     }
 
@@ -582,6 +585,7 @@ public class RegistrationRequestRecord
     public DateTimeOffset? ExpirationDate { get; set; }
     public bool ConsentAccepted { get; set; }
     public DateTimeOffset? ConsentDate { get; set; }
+    public Guid? DataverseEnvironmentId { get; set; }
 }
 
 /// <summary>
