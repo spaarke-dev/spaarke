@@ -40,21 +40,26 @@ Microsoft Dataverse Skills is an open-source toolkit that enables AI agents (Cla
 
 ## Integration with Claude Code
 
-**Installation:**
+**Installation (verified 2026-04-06):**
 ```bash
-/plugin marketplace add microsoft/Dataverse-skills
-/plugin install dataverse@dataverse-skills
+# Step 1: Add the marketplace
+claude plugin marketplace add microsoft/Dataverse-skills
+
+# Step 2: Install the plugin
+claude plugin install dataverse@dataverse-skills
 ```
 
-**Local development:**
+**Installed scope**: user (available in all Claude Code sessions)
+
+**Local development (alternative):**
 ```bash
 claude --plugin-dir "<repo-path>/.github/plugins/dataverse"
 ```
 
 **System Requirements:**
 - Microsoft Dataverse environment
-- Python 3.10+
-- Node.js 18+
+- Python 3.10+ (verified: 3.13.5)
+- Node.js 18+ (verified: 22.14.0)
 
 ## Security Model
 
