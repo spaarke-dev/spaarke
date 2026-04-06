@@ -76,7 +76,49 @@ public sealed class RegistrationEmailService
     }
 
     /// <summary>
+    /// Sends an acknowledgement email to the applicant confirming their request was received.
+    /// CC: demo@demo.spaarke.com for record keeping.
+    /// </summary>
+    public async Task SendAcknowledgementEmailAsync(
+        string recipientEmail,
+        string firstName,
+        string lastName,
+        string organization,
+        string trackingId,
+        CancellationToken cancellationToken = default)
+    {
+        var templateHtml = await LoadTemplateAsync("AcknowledgementTemplate.html");
+
+        var body = templateHtml
+            .Replace("{{FirstName}}", Encode(firstName))
+            .Replace("{{LastName}}", Encode(lastName))
+            .Replace("{{Organization}}", Encode(organization))
+            .Replace("{{TrackingId}}", Encode(trackingId))
+            .Replace("{{SupportEmail}}", SupportEmail)
+            .Replace("{{Year}}", DateTime.UtcNow.Year.ToString());
+
+        var request = new SendCommunicationRequest
+        {
+            To = [recipientEmail],
+            Cc = [FromMailbox], // CC demo@demo.spaarke.com for record keeping
+            Subject = "We Received Your Spaarke Demo Request",
+            Body = body,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = FromMailbox,
+            SendMode = SendMode.SharedMailbox,
+            CorrelationId = $"reg-ack-{trackingId}"
+        };
+
+        _logger.LogInformation(
+            "Sending acknowledgement email | Recipient: {Recipient}, TrackingId: {TrackingId}",
+            recipientEmail, trackingId);
+
+        await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
     /// Sends a welcome email with demo credentials to the user.
+    /// CC: demo@demo.spaarke.com for record keeping.
     /// </summary>
     public async Task SendWelcomeEmailAsync(
         string recipientEmail,
@@ -104,6 +146,7 @@ public sealed class RegistrationEmailService
         var request = new SendCommunicationRequest
         {
             To = [recipientEmail],
+            Cc = [FromMailbox], // CC demo@demo.spaarke.com for record keeping
             Subject = "Your Spaarke Demo Access is Ready!",
             Body = body,
             BodyFormat = BodyFormat.HTML,

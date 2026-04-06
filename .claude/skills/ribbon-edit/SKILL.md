@@ -260,6 +260,51 @@ Library="$webresource:prefix_ScriptName.js"
 </JavaScriptFunction>
 ```
 
+### CrmParameter Reference (CRITICAL)
+
+**Only use values from this table.** Invalid values corrupt the entity's active ribbon — the only fix is deleting and recreating the entity.
+
+| CrmParameter Value | Context | JS Receives | Use For |
+|---------------------|---------|-------------|---------|
+| `PrimaryControl` | Form | `formContext` (Xrm.Controls.FormContext) | Form command bar buttons |
+| `SelectedControl` | Grid/Subgrid | `gridControl` (grid context object) | Grid/subgrid buttons — extract rows via `gridControl.getGrid().getSelectedRows()` |
+| `SelectedControlSelectedItemReferences` | Grid/Subgrid | `selectedItems[]` (array of {Id, Name, TypeId}) | Grid buttons needing item references directly (less common) |
+| `PrimaryItemIds` | Grid | `selectedIds[]` (array of GUIDs) | Bulk operations on IDs only |
+| `FirstPrimaryItemId` | Grid | `firstId` (single GUID string) | Single-selection grid actions |
+| `CommandValueId` | Any | Command value | Advanced scenarios |
+| `OrgName` | Any | Organization name | Multi-org scenarios |
+| `OrgLcid` | Any | Language code | Localization |
+
+**Grid Button Pattern (Recommended)**:
+```xml
+<!-- Command: pass SelectedControl to JS -->
+<JavaScriptFunction Library="$webresource:sprk_script.js" FunctionName="Sprk.Feature.gridAction">
+  <CrmParameter Value="SelectedControl" />
+</JavaScriptFunction>
+
+<!-- Enable Rule: use SelectionCountRule (native XML, no JS needed) -->
+<EnableRule Id="Sprk.Feature.Grid.EnableRule">
+  <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="100" />
+</EnableRule>
+```
+
+**Form Button Pattern (Recommended)**:
+```xml
+<!-- Command: pass PrimaryControl to JS -->
+<JavaScriptFunction Library="$webresource:sprk_script.js" FunctionName="Sprk.Feature.formAction">
+  <CrmParameter Value="PrimaryControl" />
+</JavaScriptFunction>
+
+<!-- Enable Rule: use CustomRule with Default="true" -->
+<EnableRule Id="Sprk.Feature.Form.EnableRule">
+  <CustomRule Library="$webresource:sprk_script.js" FunctionName="Sprk.Feature.enableButton" Default="true">
+    <CrmParameter Value="PrimaryControl" />
+  </CustomRule>
+</EnableRule>
+```
+
+> **WARNING**: `SelectedItemReferences` (without the `SelectedControl` prefix) is **NOT a valid CrmParameter value**. Using it will corrupt the entity ribbon. Always use `SelectedControlSelectedItemReferences` if you need item references, or preferably use `SelectedControl` and extract rows in JS.
+
 ---
 
 ## Resources
@@ -328,6 +373,12 @@ Library="$webresource:prefix_ScriptName.js"
 | **Subgrid button not appearing** | Use `Mscrm.SubGrid.{entity}` location, not `Mscrm.HomepageGrid` |
 | **Subgrid JS error: undefined** | Use `SelectedControl` CrmParameter, not `PrimaryControl` |
 | **HideCustomAction not working** | Verify `HideActionId` matches exact original `<CustomAction>` Id |
+| **Invalid CrmParameter corrupted ribbon** | Entity ribbon is unrecoverable — must delete entity, recreate via script, and reimport clean ribbon solution |
+| **Grid button: "Selected items: undefined"** | JS function received grid context but expected array — use `gridControl.getGrid().getSelectedRows()` to extract items |
+| **Grid refresh error after action** | Use `gridControl.refresh()` not `Xrm.Utility.refreshParentGrid()` |
+| **`SelectedControlSelectedItemReferences` not recognized** | Older Dataverse environments may not support this CrmParameter — use `SelectedControl` instead and extract rows in JS (recommended approach) |
+| **Full solution import locked system** | NEVER import full SpaarkeCore solution for ribbon work — always use a dedicated small solution containing only the entity |
+| **Import hangs / system locked** | Wait for import to complete (can take 10+ minutes for large solutions); cannot cancel mid-import |
 
 ---
 
@@ -353,5 +404,11 @@ Library="$webresource:prefix_ScriptName.js"
 - When duplicating ribbon elements for multiple entities, use pattern: `sprk.{Feature}.{EntityName}.{ElementType}`
 - `TemplateAlias="o1"` is required for buttons to appear in the overflow menu
 - For subgrids, use `SelectedControl` CrmParameter instead of `PrimaryControl`
+- **NEVER use `SelectedItemReferences`** — it is NOT a valid CrmParameter value and will corrupt the entity ribbon
+- **Prefer `SelectedControl` over `SelectedControlSelectedItemReferences`** — `SelectedControlSelectedItemReferences` is not recognized by older Dataverse environments; `SelectedControl` works everywhere
+- **Grid enable rules**: prefer `SelectionCountRule` (native XML) over `CustomRule` (JS-dependent) for grid buttons
+- **NEVER import full SpaarkeCore** for ribbon work — use a dedicated small solution containing only the target entity
+- **Always validate CrmParameter values** against the reference table in this skill before importing
 - Reference `docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md` for HideCustomAction and subgrid details
 - Reference [RIBBON-COMMAND-BAR-MODIFICATIONS.md](../../../docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md) for templates
+- Reference [RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md](../../../docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md) for full button guide with examples
