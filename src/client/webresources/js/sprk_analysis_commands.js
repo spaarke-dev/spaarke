@@ -383,6 +383,9 @@ async function openAnalysisBuilderDialog(params, formContext) {
         apiBaseUrl = "https://spe-api-dev.azurewebsites.net";
         console.log("[Spaarke.Analysis] Using fallback API URL:", apiBaseUrl);
     }
+    // Normalize: strip trailing slashes AND trailing /api to get HOST ONLY.
+    // Prevents the recurring /api/api/ double-prefix bug in legacy JS web resources.
+    apiBaseUrl = apiBaseUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
 
     // Prepare data payload (includes API URL for Custom Page)
     const dataPayload = {
