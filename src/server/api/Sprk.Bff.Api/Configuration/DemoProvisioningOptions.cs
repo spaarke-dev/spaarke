@@ -87,6 +87,11 @@ public class DemoEnvironmentConfig
     public required string SpeContainerId { get; set; }
 
     /// <summary>
+    /// Model-driven app ID for deep links into the Dataverse environment.
+    /// </summary>
+    public string? AppId { get; set; }
+
+    /// <summary>
     /// Default demo access duration in days. Admin can adjust per record.
     /// </summary>
     public int DefaultDemoDurationDays { get; set; } = 14;

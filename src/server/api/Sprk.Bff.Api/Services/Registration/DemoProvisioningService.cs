@@ -201,7 +201,8 @@ public sealed class DemoProvisioningService
                     ["sprk_demousername"] = upn,
                     ["sprk_demouserobjectid"] = entraUserId,
                     ["sprk_provisioneddate"] = DateTimeOffset.UtcNow,
-                    ["sprk_expirationdate"] = expirationDate
+                    ["sprk_expirationdate"] = expirationDate,
+                    ["sprk_environment"] = environment.Name
                 },
                 ct);
 

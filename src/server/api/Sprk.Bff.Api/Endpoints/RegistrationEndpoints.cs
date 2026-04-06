@@ -401,7 +401,8 @@ public static class RegistrationEndpoints
         {
             var defaultEnv = options.Environments.FirstOrDefault(e => e.Name == options.DefaultEnvironment)
                 ?? options.Environments.First();
-            var recordUrl = $"{defaultEnv.DataverseUrl.TrimEnd('/')}/main.aspx?etn=sprk_registrationrequest&id={recordId}&pagetype=entityrecord";
+            var appIdParam = !string.IsNullOrEmpty(defaultEnv.AppId) ? $"appid={defaultEnv.AppId}&" : "";
+            var recordUrl = $"{defaultEnv.DataverseUrl.TrimEnd('/')}/main.aspx?{appIdParam}pagetype=entityrecord&etn=sprk_registrationrequest&id={recordId}";
 
             await emailService.SendAdminNotificationAsync(
                 adminEmails: options.AdminNotificationEmails,
