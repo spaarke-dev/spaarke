@@ -29,6 +29,28 @@ alwaysApply: false
 
 ## Workflow
 
+### Step 0: Quick Schema Check via MCP (Optional, Recommended)
+
+Before running the full refresh, use MCP tools to check what scope entities exist:
+
+```
+QUICK CHECK (fast — no script needed):
+  mcp__dataverse__read_query() — SELECT sprk_name, sprk_code, statecode
+    FROM sprk_analysisskill WHERE statecode = 0
+  mcp__dataverse__read_query() — SELECT sprk_name, sprk_code, statecode
+    FROM sprk_analysistool WHERE statecode = 0
+  mcp__dataverse__read_query() — SELECT sprk_name, sprk_code, statecode
+    FROM sprk_analysisknowledge WHERE statecode = 0
+  mcp__dataverse__read_query() — SELECT sprk_name, sprk_code, statecode
+    FROM sprk_analysisaction WHERE statecode = 0
+
+COMPARE counts against current scope-model-index.json
+  → If counts match: "Index appears current — skip refresh?"
+  → If counts differ: "New scopes detected — proceed with full refresh"
+```
+
+This is useful for a quick sanity check without running the full PowerShell script.
+
 ### Step 1: Run Refresh Script
 
 ```

@@ -37,6 +37,37 @@ alwaysApply: false
 
 ---
 
+## Pre-Validation via MCP (RECOMMENDED)
+
+**Before writing any PowerShell scripts**, use MCP tools to inspect the current schema state. This prevents creating entities/attributes that already exist and catches naming conflicts early.
+
+```
+STEP 0: Schema Discovery (before any script generation)
+
+1. LIST existing tables:
+   → mcp__dataverse__list_tables()
+   → Filter for sprk_* tables relevant to this task
+
+2. DESCRIBE target entities:
+   → mcp__dataverse__describe_table(tablename) for each entity
+   → Note existing columns, types, lookups, option sets
+
+3. COMPARE against task requirements:
+   → Which entities already exist? (skip creation)
+   → Which attributes already exist? (skip addition)
+   → Which attributes need to be added? (generate script)
+   → Any type mismatches? (flag for human review)
+
+4. GENERATE PowerShell script with only the DELTA:
+   → Skip existing entities (Test-EntityExists becomes redundant for known items)
+   → Skip existing attributes (Test-AttributeExists becomes redundant for known items)
+   → Focus script on net-new schema components only
+```
+
+**Why MCP first?** MCP `describe_table` returns a complete T-SQL schema in one call. The PowerShell `Test-EntityExists` / `Test-AttributeExists` functions require one API call per check. For a task creating 5 entities with 20 fields each, MCP pre-validation saves ~100 API calls.
+
+---
+
 ## Prerequisites
 
 ### 1. Azure CLI Authentication
@@ -357,6 +388,21 @@ function Add-EntityAttribute {
 
 ### Check If Entity/Attribute Exists
 
+**Preferred: Use MCP tools** (faster, no token management needed):
+
+```
+# Check entity existence — one call returns full schema
+mcp__dataverse__describe_table(tablename="sprk_myentity")
+→ If it returns schema: entity exists
+→ If it errors: entity does not exist
+
+# Check attribute existence — parse describe_table output
+mcp__dataverse__describe_table(tablename="sprk_myentity")
+→ Look for attribute name in the T-SQL column list
+```
+
+**Fallback: PowerShell** (for use inside deployment scripts where MCP is not available):
+
 ```powershell
 function Test-EntityExists {
     param([string]$Token, [string]$BaseUrl, [string]$LogicalName)
@@ -554,6 +600,31 @@ function Publish-Customizations {
     Write-Host "Customizations published" -ForegroundColor Green
 }
 ```
+
+---
+
+## Post-Deployment Verification via MCP
+
+After running schema deployment scripts and publishing customizations, verify the schema was applied correctly:
+
+```
+VERIFY each entity created/modified:
+  mcp__dataverse__describe_table(tablename="sprk_myentity")
+
+CHECK:
+  - All expected columns present with correct types
+  - Lookup relationships point to correct related tables
+  - Option set columns have correct valid options
+  - Required fields marked correctly
+
+REPORT:
+  "✅ Schema verified via MCP:
+   - sprk_myentity: 12 columns (expected 12) ✓
+   - sprk_myentity.sprk_priority: PICKLIST with 4 options ✓
+   - sprk_myentity.sprk_assignedto: LOOKUP → systemuser ✓"
+```
+
+This catches silent deployment failures where a script ran without errors but a field wasn't created (e.g., due to name collision or type mismatch).
 
 ---
 

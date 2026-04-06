@@ -104,6 +104,27 @@ pac solution list | grep -i "{SolutionName}"
 
 Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
 
+### Step 5.1: Verify Schema via MCP (for solutions with schema changes)
+
+If the deployed solution included entity/attribute changes, verify the schema was applied:
+
+```
+USE MCP tools to confirm deployment:
+  mcp__dataverse__describe_table(tablename="sprk_{entity}")
+
+CHECK:
+  - New columns appear in schema output
+  - Column types match expectations
+  - Lookup relationships point to correct tables
+
+REPORT:
+  "✅ Post-deployment schema verification:
+   - sprk_{entity}: {N} columns confirmed
+   - New fields: {list} ✓"
+```
+
+This catches cases where `pac solution import` succeeds but schema changes are silently dropped (e.g., managed layer conflicts, missing dependencies).
+
 > **⚠️ Why avoid `pac pcf push` for production?** It rebuilds in development mode, ignoring production optimizations. Bundle size increases from ~300KB to 8MB. Tree-shaking is lost. **However**, it is a valid fallback when `pac solution pack` imports an empty solution (see "Solution Imports But Is Empty" in Troubleshooting).
 
 ---

@@ -354,12 +354,25 @@ DISCOVER RESOURCES (Comprehensive):
        - Ribbon work → Export-EntityRibbon.ps1
      - Note scripts for inclusion in task files
 
+  7. VALIDATE Dataverse schema (via MCP tools — if project touches Dataverse entities)
+     - Parse spec.md for Dataverse entity names (sprk_* tables, lookups, option sets)
+     - IF entities referenced in spec:
+       a. Use mcp__dataverse__list_tables() to enumerate existing tables
+       b. Use mcp__dataverse__describe_table() for each referenced entity
+       c. Compare spec's field/relationship requirements against actual schema
+       d. Flag gaps: "Entity sprk_X exists but missing field Y"
+       e. Flag conflicts: "Field Y exists but type differs from spec"
+       f. Flag missing: "Entity sprk_Z does not exist — schema creation task needed"
+     - IF no Dataverse entities in spec: SKIP this step
+     - NOTE: MCP tools are read-only here — schema changes happen in task execution
+
 OUTPUT: Comprehensive resource discovery summary
   - X ADRs loaded (with full content)
   - Y skills applicable (with file paths)
   - Z knowledge docs found (guides + patterns)
   - N canonical implementations identified (from codebase search)
   - M scripts available (for deployment/testing steps)
+  - S schema validations (Dataverse entities checked via MCP, gaps flagged)
 
 ⚠️ **DIFFERENCE from design-to-spec Step 3**:
 - design-to-spec: Preliminary (ADR constraints only for spec enrichment)
