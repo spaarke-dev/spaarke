@@ -144,8 +144,24 @@ export class SpaarkeAuthProvider {
     return '';
   }
 
-  /** Clear all token caches. Call on 401 to force re-acquisition. */
+  /**
+   * Clear the in-memory token cache to force re-acquisition on next call.
+   *
+   * IMPORTANT: Does NOT clear sessionStorage. The sessionStorage token is shared
+   * across all same-origin iframes. Clearing it on a single component's 401 retry
+   * would cascade — every other component would lose its token and trigger MSAL
+   * login prompts. Instead, only the per-instance in-memory cache is cleared,
+   * and the next getAccessToken() call will try sessionStorage (which may still
+   * have a valid token from another component).
+   */
   clearCache(): void {
+    this._cacheStrategy.clear();
+    // sessionStorage is NOT cleared here — see JSDoc above.
+    // To force a full re-auth (e.g., on logout), call clearAllCaches().
+  }
+
+  /** Clear ALL caches including shared sessionStorage. Use only for explicit logout. */
+  clearAllCaches(): void {
     this._cacheStrategy.clear();
     this._sessionStorageStrategy.clear();
   }

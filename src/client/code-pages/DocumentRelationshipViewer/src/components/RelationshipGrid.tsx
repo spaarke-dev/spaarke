@@ -70,13 +70,19 @@ const useStyles = makeStyles({
   },
   grid: {
     width: '100%',
-    tableLayout: 'fixed',
-    '& th, & td': {
-      paddingRight: '12px',
+    // Fluent DataGrid resizable columns: cells must clip content to prevent overlap.
+    // Target both the cell container and its inner content wrapper.
+    '& [role="gridcell"], & [role="columnheader"]': {
+      overflow: 'hidden',
+      boxSizing: 'border-box',
+      minWidth: 0,
+    },
+    // The inner content div inside each cell needs truncation
+    '& [role="gridcell"] > *, & [role="columnheader"] > *': {
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
-      boxSizing: 'border-box',
+      paddingRight: '12px',
     },
   },
   emptyState: {

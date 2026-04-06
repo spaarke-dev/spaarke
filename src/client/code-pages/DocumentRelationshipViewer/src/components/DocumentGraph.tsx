@@ -125,7 +125,17 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
       if (pn.x > maxX) maxX = pn.x;
       if (pn.y < minY) minY = pn.y;
     }
-    const spanX = maxX - minX || 1;
+
+    // Pin source node to upper-left, hub nodes to upper-right.
+    // Use fixed pixel offsets from the bounding box edges so positions
+    // are predictable regardless of force layout randomness.
+    const SOURCE_X = minX - 100;
+    const SOURCE_Y = minY - 100;
+    const HUB_X = maxX + 100;
+    const HUB_START_Y = minY - 100;
+    const HUB_Y_SPACING = 120;
+
+    let hubIndex = 0;
 
     return inputNodes.map(node => {
       const pos = posMap.get(node.id);
@@ -134,16 +144,17 @@ const DocumentGraphInner: React.FC<DocumentGraphProps> = ({
 
       // Pin source node to upper-left corner
       if (node.data.isSource) {
-        x = minX;
-        y = minY;
+        x = SOURCE_X;
+        y = SOURCE_Y;
       }
 
       // Pin parent hub nodes (matter, project, invoice, email) to upper-right
-      // Offset each hub slightly so they don't stack on top of each other
+      // Each hub gets its own vertical slot so they don't overlap
       const hubTypes = ['matter', 'project', 'invoice', 'email'];
       if (node.data.nodeType && hubTypes.includes(node.data.nodeType)) {
-        x = maxX - spanX * 0.05; // slightly inset from right edge
-        y = minY;
+        x = HUB_X;
+        y = HUB_START_Y + hubIndex * HUB_Y_SPACING;
+        hubIndex++;
       }
 
       return {
