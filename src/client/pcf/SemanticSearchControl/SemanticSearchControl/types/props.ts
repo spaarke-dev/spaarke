@@ -27,7 +27,10 @@ export interface ISearchInputProps {
   disabled: boolean;
   onValueChange: (value: string) => void;
   onSearch: () => void;
-  onAddDocument: () => void;
+  /** @deprecated Moved to ResultsList toolbar. Kept optional for backward compat. */
+  onAddDocument?: () => void;
+  /** @deprecated Moved to ResultsList toolbar. Kept optional for backward compat. */
+  onOpenViewer?: () => void;
 }
 
 /**
@@ -98,6 +101,10 @@ export interface IResultsListProps {
   isInWorkspace: (result: SearchResult) => boolean;
   onViewAll: () => void;
   onReload: () => void;
+  /** Add document callback — icon in toolbar header */
+  onAddDocument?: () => void;
+  /** Open full viewer callback — icon in toolbar header */
+  onOpenViewer?: () => void;
   compactMode: boolean;
 }
 

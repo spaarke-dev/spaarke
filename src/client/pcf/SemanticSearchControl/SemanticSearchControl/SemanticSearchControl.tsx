@@ -17,7 +17,7 @@ import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, 
 import { SearchInput, FilterPanel, ResultsList, LoadingState, EmptyState, ErrorState } from './components';
 import { useSemanticSearch, useFilters } from './hooks';
 import { SemanticSearchApiService, NavigationService } from './services';
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, resolveTenantIdSync } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
@@ -483,6 +483,36 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [context.webAPI]
   );
 
+  // Handle Open Viewer — opens DocumentRelationshipViewer via navigateTo
+  const handleOpenViewer = useCallback(() => {
+    // Use the first result's documentId (most recent) or fall back to scopeId
+    const targetDocId = results.length > 0 ? results[0].documentId : null;
+    if (!targetDocId) return;
+
+    try {
+      const clientUrl =
+        (context as unknown as { page?: { getClientUrl?: () => string } }).page?.getClientUrl?.() ??
+        window.location.origin;
+      const theme = isDarkMode ? 'dark' : 'light';
+      const tenantId = resolvedApiBaseUrl ? '' : ''; // tenantId resolved from auth
+      let tid = '';
+      try { tid = resolveTenantIdSync(); } catch { /* */ }
+
+      const data = `documentId=${targetDocId}&tenantId=${encodeURIComponent(tid)}&theme=${theme}`;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
+      if (xrm?.Navigation?.navigateTo) {
+        void xrm.Navigation.navigateTo(
+          { pageType: 'webresource', webresourceName: 'sprk_documentrelationshipviewer', data },
+          { target: 2, width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } }
+        );
+      }
+    } catch (err) {
+      console.error('[SemanticSearchControl] Failed to open viewer:', err);
+    }
+  }, [results, context, isDarkMode, resolvedApiBaseUrl]);
+
   // Handle Add Document — opens DocumentUploadWizard Code Page dialog
   const handleAddDocument = useCallback(() => {
     void navigationService.openAddDocument(scopeId, searchScope !== 'all' ? searchScope : null, () => {
@@ -657,6 +687,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     : '';
 
   // Determine what content to show in main area
+  // Apply "Associated Only" client-side filter at the component level.
+  // When toggled ON, only show documents whose matterId/recordId matches the current scopeId.
+  const filteredResults = useMemo(() => {
+    if (!filters.associatedOnly || !scopeId) return results;
+    const normalizedScopeId = scopeId.replace(/[{}]/g, '').toLowerCase();
+    return results.filter(r => {
+      if (r.matterId && r.matterId.replace(/[{}]/g, '').toLowerCase() === normalizedScopeId) return true;
+      if (r.recordId && r.recordId.replace(/[{}]/g, '').toLowerCase() === normalizedScopeId) return true;
+      return false;
+    });
+  }, [results, filters.associatedOnly, scopeId]);
+  const filteredTotalCount = filters.associatedOnly ? filteredResults.length : totalCount;
+
   const renderMainContent = () => {
     // Auth initializing state
     if (!isAuthInitialized) {
@@ -694,15 +737,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       );
     }
 
-    // Results list
-    if (results.length > 0) {
+    // Results list (uses component-level filteredResults)
+    if (filteredResults.length > 0) {
       return (
         <ResultsList
-          results={results}
+          results={filteredResults}
           isLoading={isLoading}
           isLoadingMore={isLoadingMore}
-          hasMore={hasMore}
-          totalCount={totalCount}
+          hasMore={!filters.associatedOnly && hasMore}
+          totalCount={filteredTotalCount}
           threshold={filters.threshold}
           onLoadMore={loadMore}
           onResultClick={handleResultClick}
@@ -717,6 +760,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           isInWorkspace={isInWorkspace}
           onViewAll={handleViewAll}
           onReload={handleReload}
+          onAddDocument={handleAddDocument}
+          onOpenViewer={handleOpenViewer}
           compactMode={compactMode}
         />
       );
@@ -743,11 +788,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           disabled={isLoading}
           onValueChange={setQueryInput}
           onSearch={handleSearch}
-          onAddDocument={handleAddDocument}
         />
         {hasSearched && !isLoading && totalCount > 0 && (
           <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '4px' }}>
-            {totalCount} document{totalCount !== 1 ? 's' : ''} found
+            {filters.associatedOnly
+              ? `${filteredResults?.length ?? 0} associated document${(filteredResults?.length ?? 0) !== 1 ? 's' : ''}`
+              : `${totalCount} document${totalCount !== 1 ? 's' : ''} found`}
           </Text>
         )}
       </div>
@@ -796,7 +842,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.28 • Built 2026-04-05</Text>
+        <Text size={100}>v1.1.30 • Built 2026-04-05</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}

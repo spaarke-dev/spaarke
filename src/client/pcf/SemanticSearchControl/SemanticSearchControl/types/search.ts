@@ -52,6 +52,8 @@ export interface SearchFilters {
   threshold: number;
   /** Search mode: hybrid (default), vectorOnly, or keywordOnly */
   searchMode: SearchMode;
+  /** When true, only show documents directly associated to the parent record (not semantic matches). */
+  associatedOnly?: boolean;
 }
 
 /**

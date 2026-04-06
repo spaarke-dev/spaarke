@@ -11,7 +11,7 @@
 
 import * as React from 'react';
 import { useCallback } from 'react';
-import { makeStyles, tokens, Button, Divider } from '@fluentui/react-components';
+import { makeStyles, tokens, Button, Divider, Switch, Text } from '@fluentui/react-components';
 import { Dismiss20Regular, ChevronLeft20Regular } from '@fluentui/react-icons';
 import { IFilterPanelProps, SearchFilters, DateRange, SearchMode } from '../types';
 import { FilterDropdown } from './FilterDropdown';
@@ -179,9 +179,23 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
     [filters, onFiltersChange]
   );
 
+  // Handle Associated Only toggle
+  const handleAssociatedOnlyChange = useCallback(
+    (ev: React.ChangeEvent<HTMLInputElement>) => {
+      onFiltersChange({
+        ...filters,
+        associatedOnly: ev.currentTarget.checked,
+      });
+    },
+    [filters, onFiltersChange]
+  );
+
   // Scope-aware visibility: hide Matter Type when on any entity-scoped form
   // Only show when scope is "all" (system-wide) or "custom" (document IDs)
   const showMatterTypeFilter = searchScope === 'all' || searchScope === 'custom';
+
+  // Show "Associated Only" toggle only when on an entity form (not "all" scope)
+  const showAssociatedOnlyToggle = searchScope !== 'all' && searchScope !== 'custom';
 
   return (
     <div className={styles.container}>
@@ -215,17 +229,17 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
 
       <Divider />
 
-      {/* Document Type Filter */}
-      <div className={styles.filterSection}>
-        <FilterDropdown
-          label="Document Type"
-          options={documentTypeOptions}
-          selectedKeys={filters.documentTypes}
-          onSelectionChange={handleDocumentTypesChange}
-          disabled={disabled || optionsLoading}
-          multiSelect
-        />
-      </div>
+      {/* Associated Only Toggle — show only documents directly linked to this record */}
+      {showAssociatedOnlyToggle && (
+        <div className={styles.filterSection}>
+          <Switch
+            label="Associated Only"
+            checked={filters.associatedOnly ?? false}
+            onChange={handleAssociatedOnlyChange}
+            disabled={disabled}
+          />
+        </div>
+      )}
 
       {/* File Type Filter */}
       <div className={styles.filterSection}>

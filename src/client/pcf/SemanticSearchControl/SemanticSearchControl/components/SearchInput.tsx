@@ -1,17 +1,27 @@
 /**
  * SearchInput component
  *
- * Provides the search text input with search button and add document button.
- * Supports placeholder configuration and triggers search on button click or Enter key.
- * Empty query is allowed — returns all documents in scope.
+ * Provides the search text input with search button and info popover.
+ * Toolbar action icons (add, refresh, open) are in the ResultsList header.
  *
  * @see ADR-021 for Fluent UI v9 requirements
  */
 
 import * as React from 'react';
-import { useCallback, KeyboardEvent } from 'react';
-import { makeStyles, tokens, Input, Button, Spinner } from '@fluentui/react-components';
-import { Search20Regular, AddRegular } from '@fluentui/react-icons';
+import { useCallback, KeyboardEvent, useState } from 'react';
+import {
+  makeStyles,
+  tokens,
+  Input,
+  Button,
+  Spinner,
+  Tooltip,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Text,
+} from '@fluentui/react-components';
+import { Search20Regular, Info20Regular } from '@fluentui/react-icons';
 import { ISearchInputProps } from '../types';
 
 const useStyles = makeStyles({
@@ -30,14 +40,7 @@ const useStyles = makeStyles({
 });
 
 /**
- * SearchInput component with text input, search button, and add document button.
- *
- * @param props.value - Current search query value
- * @param props.placeholder - Placeholder text for input
- * @param props.disabled - Whether input is disabled (during search)
- * @param props.onValueChange - Callback when input value changes
- * @param props.onSearch - Callback when search is triggered
- * @param props.onAddDocument - Callback when Add Document is clicked
+ * SearchInput component with text input, search button, and info icon.
  */
 export const SearchInput: React.FC<ISearchInputProps> = ({
   value,
@@ -45,11 +48,10 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
   disabled,
   onValueChange,
   onSearch,
-  onAddDocument,
 }) => {
   const styles = useStyles();
+  const [infoOpen, setInfoOpen] = useState(false);
 
-  // Handle input change
   const handleInputChange = useCallback(
     (ev: React.ChangeEvent<HTMLInputElement>) => {
       onValueChange(ev.target.value);
@@ -57,7 +59,6 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
     [onValueChange]
   );
 
-  // Handle Enter key press — allow search with empty query
   const handleKeyDown = useCallback(
     (ev: KeyboardEvent<HTMLInputElement>) => {
       if (ev.key === 'Enter' && !disabled) {
@@ -67,7 +68,6 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
     [disabled, onSearch]
   );
 
-  // Handle search button click
   const handleSearchClick = useCallback(() => {
     if (!disabled) {
       onSearch();
@@ -96,9 +96,30 @@ export const SearchInput: React.FC<ISearchInputProps> = ({
       >
         {disabled ? 'Searching...' : 'Search'}
       </Button>
-      <Button appearance="secondary" icon={<AddRegular />} onClick={onAddDocument} disabled={disabled}>
-        Add Document
-      </Button>
+      <Popover
+        open={infoOpen}
+        onOpenChange={(_ev, data) => setInfoOpen(data.open)}
+        positioning="below-end"
+        withArrow
+      >
+        <PopoverTrigger disableButtonEnhancement>
+          <Tooltip content="How semantic search works" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Info20Regular />}
+              aria-label="Search info"
+            />
+          </Tooltip>
+        </PopoverTrigger>
+        <PopoverSurface style={{ maxWidth: '300px', padding: tokens.spacingHorizontalM }}>
+          <Text size={200}>
+            Semantic search finds documents by meaning, not just keywords. Results are ranked by
+            similarity to your query. Toggle "Associated Only" in the filter panel to show only
+            documents directly linked to this record.
+          </Text>
+        </PopoverSurface>
+      </Popover>
     </div>
   );
 };
