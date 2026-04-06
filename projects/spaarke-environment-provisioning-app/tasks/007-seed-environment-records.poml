@@ -1,0 +1,55 @@
+<task id="007" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Seed Dev and Demo 1 Environment Records</title>
+    <phase>1</phase>
+    <tags>dataverse, data</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>002</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Create seed records for Dev and Demo 1 environments using current config values from DemoProvisioningOptions/appsettings.</goal>
+    <context>FR-14: Existing provisioning flow must work unchanged after migration. Copy values from current DemoProvisioningOptions.Environments array.</context>
+    <constraints>
+      - Dev environment: spaarkedev1.crm.dynamics.com
+      - Demo 1 environment: spaarke-demo.crm.dynamics.com
+      - Copy BusinessUnitName, TeamName, SpeContainerId, AppId, DefaultDemoDurationDays from current config
+      - Set sprk_isactive = true, sprk_setupstatus = Ready
+      - Include license config JSON matching current LicenseSkuConfig
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read current DemoProvisioningOptions config for Dev and Demo 1 values</step>
+    <step>Read appsettings.json or appsettings.Development.json for actual values</step>
+    <step>Create Dev environment record via MCP or Web API</step>
+    <step>Create Demo 1 environment record via MCP or Web API</step>
+    <step>Verify records exist and are active</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>mcp__dataverse__create_record</tool>
+    <tool>mcp__dataverse__read_query</tool>
+  </tools>
+
+  <outputs>
+    <output>Two environment records in Dev Dataverse: "Dev" and "Demo 1"</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Dev record has correct spaarkedev1 URL and config</criterion>
+    <criterion>Demo 1 record has correct spaarke-demo URL and config</criterion>
+    <criterion>Both records active with Setup Status = Ready</criterion>
+    <criterion>License config JSON matches current LicenseSkuConfig format</criterion>
+  </acceptance-criteria>
+</task>

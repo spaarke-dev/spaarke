@@ -1,0 +1,50 @@
+<task id="002" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Run Schema Script Against Dev Environment</title>
+    <phase>1</phase>
+    <tags>dataverse, deploy</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>001</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Execute Create-DataverseEnvironmentSchema.ps1 against spaarkedev1.crm.dynamics.com to create the entity.</goal>
+    <context>Script was created in task 001. Run it and verify entity exists in Dataverse.</context>
+    <constraints>
+      - Must authenticate via `az account get-access-token`
+      - Verify entity exists after creation using Dataverse MCP or Web API
+      - Fix any errors and re-run
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>scripts/Create-DataverseEnvironmentSchema.ps1</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Authenticate: az login if needed</step>
+    <step>Run: ./scripts/Create-DataverseEnvironmentSchema.ps1 -EnvironmentDomain "spaarkedev1.crm.dynamics.com"</step>
+    <step>Verify entity exists via MCP or describe_table</step>
+    <step>Fix any errors and re-run if needed</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>mcp__dataverse__describe_table</tool>
+    <tool>mcp__dataverse__list_tables</tool>
+  </tools>
+
+  <outputs>
+    <output>Entity sprk_dataverseenvironment created in Dev Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Entity exists in spaarkedev1 with all columns</criterion>
+    <criterion>Column types match spec data model</criterion>
+  </acceptance-criteria>
+</task>

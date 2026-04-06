@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -26,6 +27,10 @@ public class RegistrationDataverseService : IDisposable
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
 
+    // Per-environment token cache for cross-environment operations (systemuser, team)
+    private readonly ConcurrentDictionary<string, AccessToken> _envTokens = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _envTokenSemaphore = new(1, 1);
+
     private const string EntitySetName = "sprk_registrationrequests";
     private const string SystemUserEntitySet = "systemusers";
     private const string TeamEntitySet = "teams";
@@ -41,14 +46,26 @@ public class RegistrationDataverseService : IDisposable
         _options = options.Value;
         _trackingIdGenerator = trackingIdGenerator;
 
-        // Use the default environment's Dataverse URL (Demo environment, not dev)
-        var defaultEnv = _options.Environments.FirstOrDefault(e => e.Name == _options.DefaultEnvironment)
-            ?? _options.Environments.First();
-        var dataverseUrl = defaultEnv.DataverseUrl;
+        // Admin Dataverse URL: prefer DATAVERSE_URL config, fall back to legacy Environments config
+        var dataverseUrl = configuration["DATAVERSE_URL"];
+#pragma warning disable CS0618 // Obsolete — legacy fallback until DemoExpirationService migration
+        if (string.IsNullOrEmpty(dataverseUrl) && _options.Environments.Length > 0)
+        {
+            var defaultEnv = _options.Environments.FirstOrDefault(e => e.Name == _options.DefaultEnvironment)
+                ?? _options.Environments.First();
+            dataverseUrl = defaultEnv.DataverseUrl;
+        }
+#pragma warning restore CS0618
+
+        if (string.IsNullOrEmpty(dataverseUrl))
+        {
+            throw new InvalidOperationException(
+                "RegistrationDataverseService requires DATAVERSE_URL configuration (or legacy DemoProvisioning:Environments).");
+        }
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        // S2S auth using same app registration as dev (client credentials)
+        // S2S auth using same app registration (client credentials — works across all tenant environments)
         var clientId = configuration["API_APP_ID"];
         var clientSecret = configuration["API_CLIENT_SECRET"];
         var tenantId = configuration["TENANT_ID"];
@@ -60,7 +77,7 @@ public class RegistrationDataverseService : IDisposable
         }
 
         _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-        _logger.LogInformation("RegistrationDataverseService targeting Demo Dataverse at {ApiUrl}", _apiUrl);
+        _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         _httpClient = new HttpClient
         {
@@ -105,6 +122,51 @@ public class RegistrationDataverseService : IDisposable
     {
         var token = await GetAccessTokenAsync(ct);
         var request = new HttpRequestMessage(method, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return request;
+    }
+
+    /// <summary>
+    /// Gets an access token for a specific Dataverse environment URL (for cross-environment operations).
+    /// Uses a per-URL token cache with double-check locking.
+    /// </summary>
+    private async Task<string> GetAccessTokenForUrlAsync(string dataverseBaseUrl, CancellationToken ct = default)
+    {
+        var cacheKey = dataverseBaseUrl.TrimEnd('/').ToLowerInvariant();
+
+        if (_envTokens.TryGetValue(cacheKey, out var cached) && cached.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+            return cached.Token;
+
+        if (!await _envTokenSemaphore.WaitAsync(TimeSpan.FromSeconds(30), ct))
+            throw new TimeoutException($"Timed out waiting for Dataverse token refresh for {dataverseBaseUrl}");
+
+        try
+        {
+            if (_envTokens.TryGetValue(cacheKey, out cached) && cached.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+                return cached.Token;
+
+            var scope = $"{dataverseBaseUrl.TrimEnd('/')}/.default";
+            var token = await _credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct);
+            _envTokens[cacheKey] = token;
+            _logger.LogDebug("Refreshed Dataverse access token for {Url}", dataverseBaseUrl);
+            return token.Token;
+        }
+        finally
+        {
+            _envTokenSemaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Creates an authenticated HTTP request targeting a specific Dataverse environment.
+    /// Used for cross-environment operations (systemuser, team membership).
+    /// </summary>
+    private async Task<HttpRequestMessage> CreateAuthenticatedRequestForUrlAsync(
+        HttpMethod method, string dataverseBaseUrl, string relativePath, CancellationToken ct = default)
+    {
+        var token = await GetAccessTokenForUrlAsync(dataverseBaseUrl, ct);
+        var apiUrl = $"{dataverseBaseUrl.TrimEnd('/')}/api/data/v9.2/{relativePath}";
+        var request = new HttpRequestMessage(method, apiUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
     }
@@ -278,19 +340,27 @@ public class RegistrationDataverseService : IDisposable
     #region Systemuser Operations
 
     /// <summary>
-    /// Creates a systemuser in the Demo Dataverse environment.
+    /// Creates a systemuser in a Dataverse environment.
     /// Uses azureactivedirectoryobjectid binding and associates with the configured business unit.
     /// </summary>
+    /// <param name="azureAdObjectId">Entra ID user object ID.</param>
+    /// <param name="firstName">User's first name.</param>
+    /// <param name="lastName">User's last name.</param>
+    /// <param name="email">User's email (UPN).</param>
+    /// <param name="businessUnitName">Target business unit name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
     public async Task<Guid> CreateSystemUserAsync(
         string azureAdObjectId,
         string firstName,
         string lastName,
         string email,
         string businessUnitName,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? targetDataverseUrl = null)
     {
         // First, resolve the business unit ID by name
-        var buId = await ResolveBusinessUnitIdAsync(businessUnitName, ct);
+        var buId = await ResolveBusinessUnitIdAsync(businessUnitName, ct, targetDataverseUrl);
 
         var entity = new Dictionary<string, object?>
         {
@@ -305,12 +375,25 @@ public class RegistrationDataverseService : IDisposable
         };
 
         _logger.LogInformation(
-            "Creating systemuser in Demo Dataverse for AAD object {ObjectId}, BU {BuName}",
-            azureAdObjectId, businessUnitName);
+            "Creating systemuser in Dataverse ({TargetUrl}) for AAD object {ObjectId}, BU {BuName}",
+            targetDataverseUrl ?? _apiUrl, azureAdObjectId, businessUnitName);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, SystemUserEntitySet, ct);
-        request.Content = JsonContent.Create(entity);
-        var response = await _httpClient.SendAsync(request, ct);
+        HttpResponseMessage response;
+        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        {
+            using var request = await CreateAuthenticatedRequestForUrlAsync(
+                HttpMethod.Post, targetDataverseUrl, SystemUserEntitySet, ct);
+            request.Content = JsonContent.Create(entity);
+            using var client = new HttpClient();
+            response = await client.SendAsync(request, ct);
+        }
+        else
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, SystemUserEntitySet, ct);
+            request.Content = JsonContent.Create(entity);
+            response = await _httpClient.SendAsync(request, ct);
+        }
+
         response.EnsureSuccessStatusCode();
 
         var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
@@ -318,7 +401,7 @@ public class RegistrationDataverseService : IDisposable
             throw new InvalidOperationException("Failed to extract systemuser ID from Dataverse response");
 
         var userId = Guid.Parse(entityIdHeader.Split('(', ')')[1]);
-        _logger.LogInformation("Created systemuser {UserId} in Demo Dataverse", userId);
+        _logger.LogInformation("Created systemuser {UserId} in Dataverse", userId);
         return userId;
     }
 
@@ -329,43 +412,80 @@ public class RegistrationDataverseService : IDisposable
     /// <summary>
     /// Adds a systemuser to a team via teammembership_association/$ref.
     /// </summary>
+    /// <param name="teamName">Team name to add the user to.</param>
+    /// <param name="systemUserId">Dataverse systemuser ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
     public async Task AddUserToTeamAsync(
-        string teamName, Guid systemUserId, CancellationToken ct = default)
+        string teamName, Guid systemUserId, CancellationToken ct = default,
+        string? targetDataverseUrl = null)
     {
-        var teamId = await ResolveTeamIdAsync(teamName, ct);
+        var teamId = await ResolveTeamIdAsync(teamName, ct, targetDataverseUrl);
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association/$ref";
+        var targetApiUrl = !string.IsNullOrEmpty(targetDataverseUrl)
+            ? $"{targetDataverseUrl.TrimEnd('/')}/api/data/v9.2"
+            : _apiUrl;
 
         _logger.LogInformation("Adding systemuser {UserId} to team {TeamName}", systemUserId, teamName);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, ct);
         var refBody = new Dictionary<string, string>
         {
-            ["@odata.id"] = $"{_apiUrl}/{SystemUserEntitySet}({systemUserId})"
+            ["@odata.id"] = $"{targetApiUrl}/{SystemUserEntitySet}({systemUserId})"
         };
-        request.Content = JsonContent.Create(refBody);
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 
-        var response = await _httpClient.SendAsync(request, ct);
+        HttpResponseMessage response;
+        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        {
+            using var request = await CreateAuthenticatedRequestForUrlAsync(
+                HttpMethod.Post, targetDataverseUrl, navigationUrl, ct);
+            request.Content = JsonContent.Create(refBody);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using var client = new HttpClient();
+            response = await client.SendAsync(request, ct);
+        }
+        else
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, ct);
+            request.Content = JsonContent.Create(refBody);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            response = await _httpClient.SendAsync(request, ct);
+        }
+
         response.EnsureSuccessStatusCode();
-
         _logger.LogInformation("Added systemuser {UserId} to team {TeamName}", systemUserId, teamName);
     }
 
     /// <summary>
     /// Removes a systemuser from a team via teammembership_association/$ref DELETE.
     /// </summary>
+    /// <param name="teamName">Team name to remove the user from.</param>
+    /// <param name="systemUserId">Dataverse systemuser ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
     public async Task RemoveUserFromTeamAsync(
-        string teamName, Guid systemUserId, CancellationToken ct = default)
+        string teamName, Guid systemUserId, CancellationToken ct = default,
+        string? targetDataverseUrl = null)
     {
-        var teamId = await ResolveTeamIdAsync(teamName, ct);
+        var teamId = await ResolveTeamIdAsync(teamName, ct, targetDataverseUrl);
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association({systemUserId})/$ref";
 
         _logger.LogInformation("Removing systemuser {UserId} from team {TeamName}", systemUserId, teamName);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, navigationUrl, ct);
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        HttpResponseMessage response;
+        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        {
+            using var request = await CreateAuthenticatedRequestForUrlAsync(
+                HttpMethod.Delete, targetDataverseUrl, navigationUrl, ct);
+            using var client = new HttpClient();
+            response = await client.SendAsync(request, ct);
+        }
+        else
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, navigationUrl, ct);
+            response = await _httpClient.SendAsync(request, ct);
+        }
 
+        response.EnsureSuccessStatusCode();
         _logger.LogInformation("Removed systemuser {UserId} from team {TeamName}", systemUserId, teamName);
     }
 
@@ -400,36 +520,62 @@ public class RegistrationDataverseService : IDisposable
 
     #region Helpers
 
-    private async Task<Guid> ResolveBusinessUnitIdAsync(string businessUnitName, CancellationToken ct)
+    private async Task<Guid> ResolveBusinessUnitIdAsync(
+        string businessUnitName, CancellationToken ct, string? targetDataverseUrl = null)
     {
         var filter = $"name eq '{EscapeODataValue(businessUnitName)}'";
-        var url = $"{BusinessUnitEntitySet}?$filter={filter}&$select=businessunitid&$top=1";
+        var relativePath = $"{BusinessUnitEntitySet}?$filter={filter}&$select=businessunitid&$top=1";
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-        var response = await _httpClient.SendAsync(request, ct);
+        HttpResponseMessage response;
+        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        {
+            using var request = await CreateAuthenticatedRequestForUrlAsync(
+                HttpMethod.Get, targetDataverseUrl, relativePath, ct);
+            using var client = new HttpClient();
+            response = await client.SendAsync(request, ct);
+        }
+        else
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, relativePath, ct);
+            response = await _httpClient.SendAsync(request, ct);
+        }
+
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
         var bu = result?.Value?.FirstOrDefault();
         if (bu == null)
-            throw new InvalidOperationException($"Business unit '{businessUnitName}' not found in Demo Dataverse");
+            throw new InvalidOperationException($"Business unit '{businessUnitName}' not found in Dataverse ({targetDataverseUrl ?? _apiUrl})");
 
         return bu.Value.GetProperty("businessunitid").GetGuid();
     }
 
-    private async Task<Guid> ResolveTeamIdAsync(string teamName, CancellationToken ct)
+    private async Task<Guid> ResolveTeamIdAsync(
+        string teamName, CancellationToken ct, string? targetDataverseUrl = null)
     {
         var filter = $"name eq '{EscapeODataValue(teamName)}'";
-        var url = $"{TeamEntitySet}?$filter={filter}&$select=teamid&$top=1";
+        var relativePath = $"{TeamEntitySet}?$filter={filter}&$select=teamid&$top=1";
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-        var response = await _httpClient.SendAsync(request, ct);
+        HttpResponseMessage response;
+        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        {
+            using var request = await CreateAuthenticatedRequestForUrlAsync(
+                HttpMethod.Get, targetDataverseUrl, relativePath, ct);
+            using var client = new HttpClient();
+            response = await client.SendAsync(request, ct);
+        }
+        else
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, relativePath, ct);
+            response = await _httpClient.SendAsync(request, ct);
+        }
+
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
         var team = result?.Value?.FirstOrDefault();
         if (team == null)
-            throw new InvalidOperationException($"Team '{teamName}' not found in Demo Dataverse");
+            throw new InvalidOperationException($"Team '{teamName}' not found in Dataverse ({targetDataverseUrl ?? _apiUrl})");
 
         return team.Value.GetProperty("teamid").GetGuid();
     }
@@ -446,7 +592,8 @@ public class RegistrationDataverseService : IDisposable
         "sprk_usecase", "sprk_referralsource", "sprk_notes", "sprk_status",
         "sprk_trackingid", "sprk_requestdate", "sprk_reviewdate", "sprk_rejectionreason",
         "sprk_demousername", "sprk_demouserobjectid", "sprk_provisioneddate",
-        "sprk_expirationdate", "sprk_consentaccepted", "sprk_consentdate"
+        "sprk_expirationdate", "sprk_consentaccepted", "sprk_consentdate",
+        "_sprk_dataverseenvironmentid_value"
     };
 
     private static RegistrationRequestRecord MapToRecord(JsonElement json)
@@ -483,6 +630,8 @@ public class RegistrationDataverseService : IDisposable
             ConsentAccepted = json.TryGetProperty("sprk_consentaccepted", out var caProp) && caProp.ValueKind == JsonValueKind.True,
             ConsentDate = json.TryGetProperty("sprk_consentdate", out var cdProp) && cdProp.ValueKind != JsonValueKind.Null
                 ? cdProp.GetDateTimeOffset() : null,
+            DataverseEnvironmentId = json.TryGetProperty("_sprk_dataverseenvironmentid_value", out var envIdProp) && envIdProp.ValueKind == JsonValueKind.String
+                ? Guid.TryParse(envIdProp.GetString(), out var envGuid) ? envGuid : null : null,
         };
     }
 
@@ -493,6 +642,7 @@ public class RegistrationDataverseService : IDisposable
     public void Dispose()
     {
         _tokenSemaphore?.Dispose();
+        _envTokenSemaphore?.Dispose();
         _httpClient?.Dispose();
     }
 
@@ -582,6 +732,7 @@ public class RegistrationRequestRecord
     public DateTimeOffset? ExpirationDate { get; set; }
     public bool ConsentAccepted { get; set; }
     public DateTimeOffset? ConsentDate { get; set; }
+    public Guid? DataverseEnvironmentId { get; set; }
 }
 
 /// <summary>

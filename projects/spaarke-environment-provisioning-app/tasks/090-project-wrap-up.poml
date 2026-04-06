@@ -1,0 +1,46 @@
+<task id="090" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>5</phase>
+    <tags>docs, cleanup</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>040</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Update README status to Complete, create lessons-learned.md, archive project artifacts.</goal>
+    <context>Standard project wrap-up per Spaarke conventions.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-environment-provisioning-app/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Update README.md status to Complete, check all graduation criteria</step>
+    <step>Create notes/lessons-learned.md</step>
+    <step>Run /repo-cleanup</step>
+    <step>Final commit</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+  </tools>
+
+  <outputs>
+    <output>projects/spaarke-environment-provisioning-app/README.md (updated)</output>
+    <output>projects/spaarke-environment-provisioning-app/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is Complete</criterion>
+    <criterion>Lessons-learned documented</criterion>
+    <criterion>Repo passes cleanup audit</criterion>
+  </acceptance-criteria>
+</task>

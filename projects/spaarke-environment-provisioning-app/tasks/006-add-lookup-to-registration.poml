@@ -1,0 +1,54 @@
+<task id="006" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Add Environment Lookup to Registration Request</title>
+    <phase>1</phase>
+    <tags>dataverse, schema, lookup</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <dependencies>002</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Add `sprk_dataverseenvironmentid` lookup field on `sprk_registrationrequest` pointing to `sprk_dataverseenvironment`.</goal>
+    <context>CRITICAL: Lookup columns must be created via RelationshipDefinitions endpoint, NOT Attributes. See DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md. Add the lookup to the registration request main form. Default value must be blank (FR-05).</context>
+    <constraints>
+      - Use RelationshipDefinitions endpoint for lookup creation
+      - Lookup defaults to blank — no default environment
+      - Add to registration request form
+      - Publish customizations after
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>scripts/Create-RegistrationRequestSchema.ps1</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create lookup relationship via RelationshipDefinitions Web API</step>
+    <step>Add lookup field to registration request main form</step>
+    <step>Publish customizations</step>
+    <step>Verify lookup appears on form and defaults to blank</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>mcp__dataverse__fetch</tool>
+    <tool>mcp__dataverse__describe_table</tool>
+  </tools>
+
+  <outputs>
+    <output>Lookup field sprk_dataverseenvironmentid on sprk_registrationrequest</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Lookup exists on registration request entity</criterion>
+    <criterion>Lookup appears on registration request form</criterion>
+    <criterion>Default value is blank</criterion>
+    <criterion>Lookup links to sprk_dataverseenvironment entity</criterion>
+  </acceptance-criteria>
+</task>

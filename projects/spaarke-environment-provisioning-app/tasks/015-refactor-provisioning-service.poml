@@ -1,0 +1,59 @@
+<task id="015" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Refactor DemoProvisioningService to Accept Environment Config</title>
+    <phase>2</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>1.5h</estimate>
+    <status>pending</status>
+    <dependencies>013</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Refactor DemoProvisioningService.ProvisionDemoAccessAsync to accept environment config as a parameter instead of reading from IOptions&lt;DemoProvisioningOptions&gt;.</goal>
+    <context>Currently the service resolves environment config internally from options. After refactoring, the caller (RegistrationEndpoints) passes the DataverseEnvironmentRecord directly.</context>
+    <constraints>
+      - Change method signature to accept environment config parameter
+      - Remove internal environment resolution logic
+      - Keep the 9-step provisioning pipeline intact
+      - Keep idempotency check (sprk_demousername)
+      - Keep partial failure tracking (DemoProvisioningException)
+      - Still needs AccountDomain and DemoUsersGroupId from remaining options (tenant-level config)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs</file>
+      <file>.claude/patterns/api/provisioning-pipeline.md</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read DemoProvisioningService.cs fully</step>
+    <step>Change ProvisionDemoAccessAsync signature to accept DataverseEnvironmentRecord</step>
+    <step>Update internal logic to use passed config instead of options lookup</step>
+    <step>Keep tenant-level config (AccountDomain, DemoUsersGroupId) from remaining DemoProvisioningOptions</step>
+    <step>Update RegistrationEndpoints.cs to pass the environment record</step>
+    <step>Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service accepts environment config as parameter</criterion>
+    <criterion>No internal environment resolution from options</criterion>
+    <criterion>9-step pipeline unchanged</criterion>
+    <criterion>Idempotency check preserved</criterion>
+    <criterion>Build passes</criterion>
+  </acceptance-criteria>
+</task>

@@ -281,28 +281,29 @@ This script queries the tenant and outputs the SKU IDs for:
 
 ## BFF API App Service Configuration
 
-For each environment, configure the App Service with the demo provisioning settings. These are set as application settings (environment variables) on the Azure App Service.
+Per-environment configuration (Dataverse URL, business unit, team, SPE container, licenses, admin emails) is now stored in `sprk_dataverseenvironment` records in Dataverse. The App Service only needs **tenant-level** settings.
 
-### Single Environment Example
+### Adding a New Environment
+
+1. **Create a `sprk_dataverseenvironment` record** in the admin Dataverse (Settings → Dataverse Environments → New)
+2. Fill in all fields: Name, Type, Dataverse URL, Business Unit, Team, SPE Container ID, License Config JSON, Admin Emails
+3. Set Setup Status = "Ready" and Active = Yes
+4. The environment is immediately available for selection on registration request forms
+
+### App Service Settings (Tenant-Level Only)
 
 ```bash
 az webapp config appsettings set \
   --resource-group "{resource-group-name}" \
   --name "{app-service-name}" \
   --settings \
-    "DemoProvisioning__DefaultEnvironment={environment-name}" \
+    "DATAVERSE_URL=https://{admin-org}.crm.dynamics.com" \
     "DemoProvisioning__AccountDomain=demo.{your-domain}.com" \
     "DemoProvisioning__DemoUsersGroupId={entra-security-group-object-id}" \
     "DemoProvisioning__AdminNotificationEmails__0={admin-email-address}" \
-    "DemoProvisioning__Licenses__PowerAppsPlan2TrialSkuId={sku-id-from-discovery}" \
-    "DemoProvisioning__Licenses__FabricFreeSkuId={sku-id-from-discovery}" \
-    "DemoProvisioning__Licenses__PowerAutomateFreeSkuId={sku-id-from-discovery}" \
-    "DemoProvisioning__Environments__0__Name={environment-name}" \
-    "DemoProvisioning__Environments__0__DataverseUrl=https://{org}.crm.dynamics.com" \
-    "DemoProvisioning__Environments__0__BusinessUnitName=Spaarke Demo" \
-    "DemoProvisioning__Environments__0__TeamName=Spaarke Demo" \
-    "DemoProvisioning__Environments__0__SpeContainerId={spe-container-guid}" \
-    "DemoProvisioning__Environments__0__DefaultDemoDurationDays=14"
+    "DemoProvisioning__Licenses__PowerAppsPlan2TrialSkuId={sku-id}" \
+    "DemoProvisioning__Licenses__FabricFreeSkuId={sku-id}" \
+    "DemoProvisioning__Licenses__PowerAutomateFreeSkuId={sku-id}"
 ```
 
 ### Concrete Dev Environment Example
@@ -312,37 +313,16 @@ az webapp config appsettings set \
   --resource-group "spe-infrastructure-westus2" \
   --name "spe-api-dev-67e2xz" \
   --settings \
-    "DemoProvisioning__DefaultEnvironment=dev" \
+    "DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com" \
     "DemoProvisioning__AccountDomain=demo.spaarke.com" \
     "DemoProvisioning__DemoUsersGroupId=a1b2c3d4-e5f6-7890-abcd-ef1234567890" \
     "DemoProvisioning__AdminNotificationEmails__0=admin@spaarke.com" \
     "DemoProvisioning__Licenses__PowerAppsPlan2TrialSkuId=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
     "DemoProvisioning__Licenses__FabricFreeSkuId=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
-    "DemoProvisioning__Licenses__PowerAutomateFreeSkuId=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
-    "DemoProvisioning__Environments__0__Name=dev" \
-    "DemoProvisioning__Environments__0__DataverseUrl=https://spaarkedev1.crm.dynamics.com" \
-    "DemoProvisioning__Environments__0__BusinessUnitName=Spaarke Demo" \
-    "DemoProvisioning__Environments__0__TeamName=Spaarke Demo" \
-    "DemoProvisioning__Environments__0__SpeContainerId=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
-    "DemoProvisioning__Environments__0__DefaultDemoDurationDays=14"
+    "DemoProvisioning__Licenses__PowerAutomateFreeSkuId=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
-### Adding a Second Environment
-
-To add a second environment (e.g., "demo"), use index `__1__` for all `Environments` settings:
-
-```bash
-az webapp config appsettings set \
-  --resource-group "{resource-group-name}" \
-  --name "{app-service-name}" \
-  --settings \
-    "DemoProvisioning__Environments__1__Name=demo" \
-    "DemoProvisioning__Environments__1__DataverseUrl=https://{demo-org}.crm.dynamics.com" \
-    "DemoProvisioning__Environments__1__BusinessUnitName=Spaarke Demo" \
-    "DemoProvisioning__Environments__1__TeamName=Spaarke Demo" \
-    "DemoProvisioning__Environments__1__SpeContainerId={demo-spe-container-guid}" \
-    "DemoProvisioning__Environments__1__DefaultDemoDurationDays=14"
-```
+> **Note**: The `DemoProvisioning__Environments__*` settings are deprecated and can be removed once `DemoExpirationService` is migrated to use `DataverseEnvironmentService`.
 
 ### Multiple Admin Notification Emails
 

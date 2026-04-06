@@ -1,0 +1,44 @@
+<task id="040" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>End-to-End Testing Checklist</title>
+    <phase>5</phase>
+    <tags>testing</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <dependencies>032</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Verify all 11 success criteria from spec.md. Create a testing checklist and work through each item.</goal>
+    <context>This is the final verification before project completion. All success criteria must pass.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create testing checklist from spec success criteria</step>
+    <step>Test each criterion in Dev environment</step>
+    <step>Document results in notes/</step>
+    <step>Fix any failures found</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>mcp__dataverse__read_query</tool>
+    <tool>mcp__dataverse__create_record</tool>
+  </tools>
+
+  <outputs>
+    <output>projects/spaarke-environment-provisioning-app/notes/e2e-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 11 success criteria from spec verified</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+</task>

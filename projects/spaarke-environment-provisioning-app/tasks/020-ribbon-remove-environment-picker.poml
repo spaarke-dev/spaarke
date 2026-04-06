@@ -1,0 +1,55 @@
+<task id="020" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Remove Environment Picker from Ribbon JS</title>
+    <phase>3</phase>
+    <tags>client, ribbon, js</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <dependencies>013</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the `_sprkReg_promptForEnvironment()` function, the `SPRK_REG_CONFIG.environments` array, and the environment picker DOM dialog from sprk_registrationribbon.js.</goal>
+    <context>The environment is now selected via lookup field on the form, not a JS dialog. The approve functions no longer need to prompt for environment or send it in the request body.</context>
+    <constraints>
+      - Remove _sprkReg_promptForEnvironment() entirely
+      - Remove SPRK_REG_CONFIG.environments array
+      - Update approveRequest (grid) to not call promptForEnvironment
+      - Update approveRequestFromForm to not call promptForEnvironment
+      - Remove environment from POST body in _sprkReg_callBffApi calls
+      - Keep all other ribbon functionality intact
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/webresources/js/sprk_registrationribbon.js</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read sprk_registrationribbon.js fully</step>
+    <step>Remove _sprkReg_promptForEnvironment function</step>
+    <step>Remove SPRK_REG_CONFIG.environments array</step>
+    <step>Update approveRequest to remove environment prompt and body</step>
+    <step>Update approveRequestFromForm to remove environment prompt and body</step>
+    <step>Verify remaining functions still work logically</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+  </tools>
+
+  <outputs>
+    <output>src/client/webresources/js/sprk_registrationribbon.js (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Environment picker dialog completely removed</criterion>
+    <criterion>No environment sent in approve API call body</criterion>
+    <criterion>All other ribbon functions intact</criterion>
+  </acceptance-criteria>
+</task>

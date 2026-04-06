@@ -1,0 +1,62 @@
+<task id="030" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Remove Environments Array from DemoProvisioningOptions</title>
+    <phase>4</phase>
+    <tags>bff-api, cleanup</tags>
+    <estimate>1h</estimate>
+    <status>pending</status>
+    <dependencies>016</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the Environments array, DefaultEnvironment, and DemoEnvironmentConfig class from DemoProvisioningOptions. Remove corresponding appsettings entries. Keep tenant-level config (AccountDomain, DemoUsersGroupId, Licenses, AdminNotificationEmails for submission fallback).</goal>
+    <context>FR-13: All environment config comes from Dataverse records. DemoProvisioningOptions retains only tenant-level config that doesn't vary per environment.</context>
+    <constraints>
+      - Remove DemoEnvironmentConfig class
+      - Remove Environments array property
+      - Remove DefaultEnvironment property
+      - Keep AccountDomain, DemoUsersGroupId, Licenses (or move licenses to per-env)
+      - Keep AdminNotificationEmails as fallback for submission notifications
+      - Update all references
+      - Remove DemoProvisioning__Environments__* from any appsettings files
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read DemoProvisioningOptions.cs</step>
+    <step>Remove DemoEnvironmentConfig class</step>
+    <step>Remove Environments and DefaultEnvironment properties</step>
+    <step>Keep remaining tenant-level properties</step>
+    <step>Search for all references and update</step>
+    <step>Remove environment entries from appsettings files</step>
+    <step>Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Grep</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs (modified)</output>
+    <output>appsettings files (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No Environments array in options</criterion>
+    <criterion>No DefaultEnvironment in options</criterion>
+    <criterion>Tenant-level config preserved</criterion>
+    <criterion>All references updated</criterion>
+    <criterion>Build passes</criterion>
+  </acceptance-criteria>
+</task>

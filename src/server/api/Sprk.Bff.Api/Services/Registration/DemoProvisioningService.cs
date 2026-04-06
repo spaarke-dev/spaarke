@@ -148,7 +148,8 @@ public sealed class DemoProvisioningService
                 request.LastName!,
                 upn,
                 environment.BusinessUnitName,
-                ct);
+                ct,
+                targetDataverseUrl: environment.DataverseUrl);
             completedSteps.Add("CreateSystemUser");
             _logger.LogInformation("[Step 6/9] Created systemuser {SystemUserId}", dataverseSystemUserId);
 
@@ -156,7 +157,8 @@ public sealed class DemoProvisioningService
             _logger.LogInformation("[Step 7/9] Adding systemuser {SystemUserId} to team {TeamName}",
                 dataverseSystemUserId, environment.TeamName);
             await _dataverseService.AddUserToTeamAsync(
-                environment.TeamName, dataverseSystemUserId.Value, ct);
+                environment.TeamName, dataverseSystemUserId.Value, ct,
+                targetDataverseUrl: environment.DataverseUrl);
             completedSteps.Add("AddToTeam");
             _logger.LogInformation("[Step 7/9] Added to team {TeamName}", environment.TeamName);
 

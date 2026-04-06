@@ -1,0 +1,54 @@
+<task id="016" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Update Admin Email Notification Source</title>
+    <phase>2</phase>
+    <tags>bff-api, refactor</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>015</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Update SubmitDemoRequest and email notification logic to read admin emails from the environment record's sprk_adminemails field instead of DemoProvisioningOptions.AdminNotificationEmails.</goal>
+    <context>Admin notification emails vary per environment. The environment record's sprk_adminemails field stores comma-separated email addresses. For submission (before environment is selected), fall back to a config-level default or skip admin email if no environment is linked yet.</context>
+    <constraints>
+      - Submission happens before environment selection — admin emails at submit time may still come from config or default environment
+      - At approval time, use the selected environment's admin emails
+      - Maintain backward compatibility
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationEmailService.cs</file>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read RegistrationEndpoints.cs SubmitDemoRequest for admin email usage</step>
+    <step>Read RegistrationEmailService.cs for email sending pattern</step>
+    <step>Determine where admin emails are used at submission vs approval</step>
+    <step>Update approval flow to use environment record's admin emails</step>
+    <step>Keep submission flow working (config fallback if needed)</step>
+    <step>Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>Modified endpoint/service files as needed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Approval notifications use environment-specific admin emails</criterion>
+    <criterion>Submission notifications still work</criterion>
+    <criterion>Build passes</criterion>
+  </acceptance-criteria>
+</task>

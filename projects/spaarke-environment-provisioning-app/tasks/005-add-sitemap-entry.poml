@@ -1,0 +1,43 @@
+<task id="005" project="spaarke-environment-provisioning-app">
+  <metadata>
+    <title>Add Sitemap Entry for Environment Entity</title>
+    <phase>1</phase>
+    <tags>dataverse, sitemap</tags>
+    <estimate>30m</estimate>
+    <status>pending</status>
+    <dependencies>002</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    <goal>Add sprk_dataverseenvironment to the MDA sitemap so admins can navigate to it.</goal>
+    <context>Entity must be accessible from the Spaarke MDA app navigation. Place it in the administration area.</context>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-environment-provisioning-app/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Identify existing sitemap structure in the Spaarke MDA app</step>
+    <step>Add sub-area for sprk_dataverseenvironment in the admin group</step>
+    <step>Publish app</step>
+    <step>Verify navigation works</step>
+  </steps>
+
+  <tools>
+    <tool>Bash</tool>
+    <tool>mcp__dataverse__fetch</tool>
+  </tools>
+
+  <outputs>
+    <output>Sitemap entry for Dataverse Environments in admin area</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Environment entity is navigable from MDA sidebar</criterion>
+    <criterion>Clicking shows the Active Environments view by default</criterion>
+  </acceptance-criteria>
+</task>

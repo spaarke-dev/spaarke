@@ -12,16 +12,19 @@ public class DemoProvisioningOptions
     public const string SectionName = "DemoProvisioning";
 
     /// <summary>
-    /// Available demo environments. Add entries to support multiple demo instances.
+    /// Available demo environments. DEPRECATED: Environment config is now stored
+    /// in sprk_dataverseenvironment Dataverse entity. This array is retained for
+    /// backward compatibility with DemoExpirationService and RegistrationDataverseService
+    /// until they are migrated to use DataverseEnvironmentService.
     /// </summary>
-    [Required]
-    [MinLength(1, ErrorMessage = "At least one demo environment must be configured.")]
+    [Obsolete("Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.")]
     public DemoEnvironmentConfig[] Environments { get; set; } = Array.Empty<DemoEnvironmentConfig>();
 
     /// <summary>
-    /// Name of the default environment (must match an entry in Environments).
+    /// Name of the default environment. DEPRECATED: Environment selection is now
+    /// via lookup on sprk_registrationrequest → sprk_dataverseenvironment.
     /// </summary>
-    [Required(ErrorMessage = "DemoProvisioning:DefaultEnvironment is required.")]
+    [Obsolete("Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.")]
     public string DefaultEnvironment { get; set; } = string.Empty;
 
     /// <summary>
