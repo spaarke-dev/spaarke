@@ -193,7 +193,7 @@ Create `deploy-dataverse.yml` GitHub Actions workflow:
 
 ## References
 
-- [Production Deployment Guide](../../docs/guides/PRODUCTION-DEPLOYMENT-GUIDE.md) — Sections 15-18
+- [Spaarke Deployment Guide](../../docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md) — §3 Deployment Models, §7 Dataverse Solutions, §17-18 CI/CD
 - [Customer Onboarding Runbook](../../docs/guides/CUSTOMER-ONBOARDING-RUNBOOK.md)
 - [Azure Resource Naming Convention](../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)
 - [Microsoft Power Platform ALM Guide](https://learn.microsoft.com/en-us/power-platform/alm/)

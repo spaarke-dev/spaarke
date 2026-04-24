@@ -443,7 +443,7 @@ Invoke-RestMethod `
 
 ## Related Documentation
 
-- [PRODUCTION-DEPLOYMENT-GUIDE.md Section 19](./PRODUCTION-DEPLOYMENT-GUIDE.md#19-sharepoint-embedded-spe-setup) — Production SPE setup steps
+- [SPAARKE-DEPLOYMENT-GUIDE.md §9](./SPAARKE-DEPLOYMENT-GUIDE.md#9-phase-6-sharepoint-embedded) — SPE setup steps in context of full deployment
 - [KM-HOW-TO-DEPLOY-TO-DATAVERSE.md](./KM-HOW-TO-DEPLOY-TO-DATAVERSE.md) — PCF deployment guide
 
 ---

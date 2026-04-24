@@ -93,7 +93,7 @@ az account show --query "{Name:name, Id:id}" -o table
 | `redis-connection` | Redis connection string |
 | `appinsights-key` | Application Insights key |
 
-**Full environment reference**: See `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md` → Environment Configuration
+**Full environment reference**: See `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md` → §2 Prerequisites + §4 Azure Infrastructure
 
 ---
 
@@ -273,7 +273,7 @@ az webapp config appsettings set `
 | `DocumentIntelligence__Enabled` | `true` |
 | `DocumentIntelligence__AiSearchEndpoint` | `https://spaarke-search-dev.search.windows.net` |
 
-**Full settings reference**: See [azure-deployment.md](../../constraints/azure-deployment.md) and `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md`
+**Full settings reference**: See [azure-deployment.md](../../constraints/azure-deployment.md) and `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md` → Appendix B
 
 ---
 
@@ -578,7 +578,7 @@ gh run download {run-id}
 
 | Document | Purpose |
 |----------|---------|
-| `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md` | Comprehensive deployment reference |
+| `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md` | Comprehensive deployment reference (consolidated from ENVIRONMENT and PRODUCTION guides) |
 | `docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md` | Customer-facing setup guide |
 | `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` | Naming standards |
 

@@ -487,7 +487,7 @@ Rotate secrets on a regular schedule per your organization's policy. See [Secret
 |----------|-------------|
 | [M365 Copilot User Guide](./M365-COPILOT-USER-GUIDE.md) | End-user guide for using Spaarke AI in Copilot |
 | [AI Deployment Guide](./AI-DEPLOYMENT-GUIDE.md) | General AI infrastructure deployment |
-| [Environment Deployment Guide](./ENVIRONMENT-DEPLOYMENT-GUIDE.md) | Full environment deployment steps |
+| [Spaarke Deployment Guide](./SPAARKE-DEPLOYMENT-GUIDE.md) | Full environment + production deployment steps |
 | [Secret Rotation Procedures](./SECRET-ROTATION-PROCEDURES.md) | Secret rotation runbook |
 | [Monitoring and Alerting Guide](./MONITORING-AND-ALERTING-GUIDE.md) | General monitoring setup |
 | [Incident Response](./INCIDENT-RESPONSE.md) | Incident response procedures |

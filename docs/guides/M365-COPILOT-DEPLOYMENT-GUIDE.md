@@ -501,4 +501,4 @@ curl -X POST "https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/zipdeploy" -u
 | Declarative Agent | `src/solutions/CopilotAgent/declarativeAgent.json` | Agent definition and instructions |
 | API Plugin | `src/solutions/CopilotAgent/spaarke-api-plugin.json` | Plugin with 24 function definitions |
 | AI Deployment Guide | `docs/guides/AI-DEPLOYMENT-GUIDE.md` | General AI services deployment |
-| Environment Deployment | `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md` | Full environment setup |
+| Spaarke Deployment Guide | `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md` | Full environment + production deployment |
