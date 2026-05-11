@@ -19,7 +19,7 @@ public static class WorkersModule
         }
 
         // Register Office workers (upload finalization, profile summary, indexing)
-        services.AddOfficeWorkers();
+        services.AddOfficeWorkers(configuration);
 
 
         // Register idempotency service for event deduplication (ADR-004)

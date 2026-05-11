@@ -56,7 +56,7 @@ builder.Services.AddSpeAdminModule(builder.Configuration);
 
 // Office Service Bus client and workers
 builder.Services.AddOfficeServiceBus(builder.Configuration);
-builder.Services.AddOfficeWorkers();
+builder.Services.AddOfficeWorkers(builder.Configuration);
 
 // Distributed cache (Redis or in-memory)
 builder.Services.AddCacheModule(builder.Configuration, builder.Logging);

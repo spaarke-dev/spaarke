@@ -25,7 +25,7 @@ public static class OfficeWorkersModule
     /// - IndexingWorkerHostedService: RAG indexing via IFileIndexingService
     /// </para>
     /// </remarks>
-    public static IServiceCollection AddOfficeWorkers(this IServiceCollection services)
+    public static IServiceCollection AddOfficeWorkers(this IServiceCollection services, IConfiguration configuration)
     {
         // Register worker dependencies
         services.AddSingleton<IEmailToEmlConverter, EmailToEmlConverter>();
@@ -52,8 +52,14 @@ public static class OfficeWorkersModule
         });
 
         // IndexingWorkerHostedService: Processes office-indexing queue
-        // Integrates with IFileIndexingService for RAG document indexing
-        services.AddHostedService<IndexingWorkerHostedService>();
+        // Integrates with IFileIndexingService for RAG document indexing.
+        // Depends on IFileIndexingService — gated on DocumentIntelligence:Enabled
+        // (see AnalysisServicesModule.AddRagServices). Register conditionally so the host
+        // does not crash at startup when AI is disabled.
+        if (configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
+        {
+            services.AddHostedService<IndexingWorkerHostedService>();
+        }
 
         return services;
     }

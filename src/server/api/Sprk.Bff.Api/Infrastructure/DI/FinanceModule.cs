@@ -29,7 +29,14 @@ public static class FinanceModule
         // Scoped: loads playbook prompts per-request, calls OpenAI structured output
         // Uses IPlaybookService for prompt loading (FinanceClassification, FinanceExtraction)
         // Uses IOpenAiClient.GetStructuredCompletionAsync for constrained JSON output
-        services.AddScoped<IInvoiceAnalysisService, InvoiceAnalysisService>();
+        //
+        // Depends on IOpenAiClient which is only registered when DocumentIntelligence:Enabled=true
+        // (see AnalysisServicesModule). Register conditionally so DI does not fail when AI is disabled.
+        var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
+        if (documentIntelligenceEnabled)
+        {
+            services.AddScoped<IInvoiceAnalysisService, InvoiceAnalysisService>();
+        }
 
         // ============================================================================
         // Signal Evaluation Service (threshold-based signal detection, no AI)
@@ -54,7 +61,12 @@ public static class FinanceModule
         // Generates embeddings via IOpenAiClient (text-embedding-3-large)
         // Hybrid search: vector + semantic reranking for best results
         // Uses SearchIndexClient for accessing spaarke-invoices-dev index
-        services.AddScoped<IInvoiceSearchService, InvoiceSearchService>();
+        //
+        // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
+        if (documentIntelligenceEnabled)
+        {
+            services.AddScoped<IInvoiceSearchService, InvoiceSearchService>();
+        }
 
         // ============================================================================
         // Spend Snapshot Service (deterministic financial aggregation, no AI)
@@ -167,7 +179,14 @@ public static class FinanceModule
         // IdempotencyKey: classify-{documentId}-attachment
         // Writes sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson
         // Sets sprk_invoicereviewstatus=ToReview for InvoiceCandidate and Unknown
-        services.AddScoped<IJobHandler, AttachmentClassificationJobHandler>();
+        //
+        // Depends on IRecordMatchService which is only registered when
+        // DocumentIntelligence:RecordMatchingEnabled=true (see AnalysisServicesModule.AddRecordMatchingServices).
+        // Register conditionally so IJobHandler enumeration does not throw when record matching is disabled.
+        if (configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled"))
+        {
+            services.AddScoped<IJobHandler, AttachmentClassificationJobHandler>();
+        }
 
         // ============================================================================
         // Invoice Extraction Job Handler (ADR-013: AI via BFF, ADR-015: no content logging)
@@ -185,7 +204,12 @@ public static class FinanceModule
         // IdempotencyKey: invoice-index-{invoiceId}
         // Index: spaarke-invoices-dev (per-tenant in production: spaarke-invoices-{tenantId})
         // Embeddings: text-embedding-3-large (3072 dimensions)
-        services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
+        //
+        // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
+        if (documentIntelligenceEnabled)
+        {
+            services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
+        }
 
         // ============================================================================
         // Spend Snapshot Generation Job Handler (deterministic aggregation, no AI)

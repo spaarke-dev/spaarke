@@ -133,28 +133,35 @@ public static class AiModule
         // in AnalysisOrchestrationService.  Stateless and thread-safe.
         services.AddSingleton<RagQueryBuilder>();
 
-        // RagIndexingPipeline — concrete singleton per ADR-010 (AIPL-013).
-        // Orchestrates the full indexing pipeline: chunk → embed → index into both
-        // the knowledge index (512-token) and discovery index (1024-token).
-        // Called by RagIndexingJobHandler (task AIPL-014) via Service Bus.
-        // Requires: ITextChunkingService, IRagService, SearchIndexClient,
-        //           IOpenAiClient, IOptions<AiSearchOptions>.
-        services.AddSingleton<RagIndexingPipeline>();
+        // RagIndexingPipeline, ReferenceIndexingService, ReferenceRetrievalService all depend
+        // on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
+        // Register conditionally so DI does not fail when AI is disabled.
+        var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
+        if (documentIntelligenceEnabled)
+        {
+            // RagIndexingPipeline — concrete singleton per ADR-010 (AIPL-013).
+            // Orchestrates the full indexing pipeline: chunk → embed → index into both
+            // the knowledge index (512-token) and discovery index (1024-token).
+            // Called by RagIndexingJobHandler (task AIPL-014) via Service Bus.
+            // Requires: ITextChunkingService, IRagService, SearchIndexClient,
+            //           IOpenAiClient, IOptions<AiSearchOptions>.
+            services.AddSingleton<RagIndexingPipeline>();
 
-        // ReferenceIndexingService — concrete singleton per ADR-010 (AIRA-011).
-        // Indexes golden reference knowledge sources into spaarke-rag-references index.
-        // 512-token chunks, 100-token overlap, 3072-dim embeddings.
-        // Called by AdminKnowledgeEndpoints (admin-only, not Service Bus).
-        // Requires: ITextChunkingService, SearchIndexClient, IOpenAiClient,
-        //           IScopeResolverService, IOptions<AiSearchOptions>.
-        services.AddSingleton<ReferenceIndexingService>();
+            // ReferenceIndexingService — concrete singleton per ADR-010 (AIRA-011).
+            // Indexes golden reference knowledge sources into spaarke-rag-references index.
+            // 512-token chunks, 100-token overlap, 3072-dim embeddings.
+            // Called by AdminKnowledgeEndpoints (admin-only, not Service Bus).
+            // Requires: ITextChunkingService, SearchIndexClient, IOpenAiClient,
+            //           IScopeResolverService, IOptions<AiSearchOptions>.
+            services.AddSingleton<ReferenceIndexingService>();
 
-        // ReferenceRetrievalService — concrete singleton per ADR-010 (AIRA-013).
-        // Queries spaarke-rag-references index for golden reference knowledge using
-        // hybrid search (keyword + vector + semantic reranking).
-        // Parallel retrieval path to RagService (which queries customer documents).
-        // Requires: SearchIndexClient, IOpenAiClient, IEmbeddingCache, IOptions<AiSearchOptions>.
-        services.AddSingleton<ReferenceRetrievalService>();
+            // ReferenceRetrievalService — concrete singleton per ADR-010 (AIRA-013).
+            // Queries spaarke-rag-references index for golden reference knowledge using
+            // hybrid search (keyword + vector + semantic reranking).
+            // Parallel retrieval path to RagService (which queries customer documents).
+            // Requires: SearchIndexClient, IOpenAiClient, IEmbeddingCache, IOptions<AiSearchOptions>.
+            services.AddSingleton<ReferenceRetrievalService>();
+        }
 
         // SprkChatAgentFactory — singleton per ADR-010 (AIPL-051).
         // Creates SprkChatAgent instances per session.  Singleton is safe because
@@ -214,8 +221,12 @@ public static class AiModule
         // Factory-instantiates PlaybookIndexingService internally (ADR-010: no new DI registration
         // for the service itself). Exposes a static Instance accessor so the trigger endpoint
         // (POST /api/ai/playbooks/{playbookId}/index) can enqueue without DI.
-        // Requires: IPlaybookService, SearchIndexClient, IOpenAiClient (all already registered).
-        services.AddHostedService<PlaybookIndexingBackgroundService>();
+        // Requires: IPlaybookService, SearchIndexClient, IOpenAiClient.
+        // Conditional: SearchIndexClient + IOpenAiClient only registered when DocumentIntelligence:Enabled=true.
+        if (documentIntelligenceEnabled)
+        {
+            services.AddHostedService<PlaybookIndexingBackgroundService>();
+        }
 
         return services;
     }

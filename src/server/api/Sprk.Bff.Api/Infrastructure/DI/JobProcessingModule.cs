@@ -21,13 +21,24 @@ public static class JobProcessingModule
         // Job submission (unified entry point)
         services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>();
 
-        // Job handlers
+        // Job handlers — split by feature gate.
+        // Handlers that depend on AI/RAG services (IFileIndexingService, IOpenAiClient, SearchIndexClient)
+        // must only register when DocumentIntelligence:Enabled=true, since those services are gated
+        // there (see AnalysisServicesModule). Otherwise IJobHandler enumeration fails at startup.
+        var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
+
+        // Unconditional handlers (no AI dependencies)
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailAnalysisJobHandler>();
-        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler>();
-        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.ProfileSummaryJobHandler>();
-        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BulkRagIndexingJobHandler>();
+
+        // AI-dependent handlers (require IFileIndexingService and/or IOpenAiClient)
+        if (documentIntelligenceEnabled)
+        {
+            services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler>();
+            services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.ProfileSummaryJobHandler>();
+            services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BulkRagIndexingJobHandler>();
+        }
 
         // Service Bus client
         var serviceBusConnectionString = configuration.GetConnectionString("ServiceBus");
