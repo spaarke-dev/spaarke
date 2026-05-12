@@ -17,3 +17,4 @@ export * from './useInlineAiActions';
 export * from './useSlashCommands';
 export * from './useTwoPanelLayout';
 export * from './useTheme';
+export * from './useDocumentMultiSelect';

@@ -114,3 +114,9 @@ export * from './RecordCardShell';
 
 // FilePreviewDialog - Shared document preview dialog (iframe + toolbar actions)
 export * from './FilePreview';
+
+// DocumentToolbar - Reusable icon toolbar (reload/add/email/open) for document grids
+export * from './DocumentToolbar';
+
+// DocumentEmailWizard - Multi-select wizard for emailing one or more documents
+export * from './DocumentEmailWizard';

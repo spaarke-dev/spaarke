@@ -52,6 +52,27 @@ export type {
 export { renderMarkdown, SPRK_MARKDOWN_CSS } from './renderMarkdown';
 export type { RenderMarkdownOptions } from './renderMarkdown';
 export { SprkChatBridge } from './SprkChatBridge';
+
+// Shared people/contact lookup helpers (canonical home for new code).
+//
+// NOTE: `searchUsersAsLookup` and `searchContactsAsLookup` are also re-exported
+// from `components/CreateMatterWizard` for historical reasons; to avoid a
+// duplicate-export collision at the top-level barrel we only re-export the
+// NEW combined helper here. Import the individual functions directly from
+// `./userLookup` when needed (e.g. `import { searchUsersAsLookup } from
+// '@spaarke/ui-components/services/userLookup'`).
+export { searchUsersAndContacts, extractEmailKey } from './userLookup';
+
+// Typed wrapper around POST /api/communications/send.
+export { sendCommunication } from './communicationApi';
+export type {
+  SendCommunicationOptions,
+  SendCommunicationResult,
+  ICommunicationApiClientOptions,
+  ICommunicationAssociation,
+  CommunicationBodyFormat,
+  CommunicationSendMode,
+} from './communicationApi';
 export type {
   SprkChatBridgeEventMap,
   SprkChatBridgeEventName,
