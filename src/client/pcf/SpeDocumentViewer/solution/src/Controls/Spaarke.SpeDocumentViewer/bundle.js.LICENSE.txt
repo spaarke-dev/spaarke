@@ -1,0 +1,41 @@
+/*! ../../node_modules/css-loader/dist/runtime/api.js */
+
+/*! ../../node_modules/css-loader/dist/runtime/noSourceMaps.js */
+
+/*! ./cjs/react-dom.production.min.js */
+
+/*! ./cjs/scheduler.production.min.js */
+
+/*! @azure/msal-browser v4.27.0 2025-12-04 */
+
+/*! @azure/msal-common v15.13.3 2025-12-04 */
+
+/*! react */
+
+/*! react-dom */
+
+/*! scheduler */
+
+/*!****************************************!*\
+  !*** ./control/index.ts + 168 modules ***!
+  \****************************************/
+
+/**
+ * @license React
+ * react-dom.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * @license React
+ * scheduler.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
