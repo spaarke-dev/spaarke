@@ -548,6 +548,10 @@ public sealed class SemanticSearchService : ISemanticSearchService
                         CreatedBy = doc.CreatedBy,
                         Summary = doc.Summary,
                         Tldr = doc.Tldr,
+                        // Populate SPE drive + item IDs so the client can invoke AI
+                        // analysis (Document Profile playbook) per result.
+                        DriveId = result.DriveId ?? doc.GraphDriveId,
+                        SpeFileId = result.SpeFileId ?? doc.GraphItemId,
                     });
                 }
                 else
@@ -731,6 +735,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         {
             DocumentId = doc.Id,
             SpeFileId = doc.GraphItemId,
+            DriveId = doc.GraphDriveId,
             Name = doc.Name,
             DocumentType = doc.DocumentType,
             FileType = string.IsNullOrEmpty(fileExt) ? null : fileExt,

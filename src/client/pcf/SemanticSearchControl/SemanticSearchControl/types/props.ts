@@ -105,6 +105,9 @@ export interface IResultsListProps {
   onAddDocument?: () => void;
   /** Open full viewer callback — icon in toolbar header */
   onOpenViewer?: () => void;
+  /** Email selected/visible documents — opens DocumentEmailWizard with the current
+   *  results. Wizard step 1 allows the user to deselect docs they don't want. */
+  onEmailDocuments?: () => void;
   compactMode: boolean;
 }
 

@@ -48,8 +48,16 @@ export class SpaarkeAuthProvider {
         redirectUri: this._config.redirectUri,
       },
       cache: {
-        cacheLocation: 'sessionStorage',
-        storeAuthStateInCookie: false,
+        // localStorage survives tab close + browser restart so MSAL's account
+        // cache + refresh tokens persist. sessionStorage was wiping on every
+        // fresh PCF tab/iframe, forcing re-auth.
+        cacheLocation: 'localStorage',
+        // Cookie-backed auth state lets ssoSilent succeed even when the browser
+        // blocks 3rd-party cookies for iframes (Chrome/Edge tracking protection
+        // default). Without this, ssoSilent silently fails inside Dataverse PCF
+        // iframes and the chain falls through to MsalPopupStrategy — the user
+        // sees a popup on every load.
+        storeAuthStateInCookie: true,
       },
       system: {
         loggerOptions: {

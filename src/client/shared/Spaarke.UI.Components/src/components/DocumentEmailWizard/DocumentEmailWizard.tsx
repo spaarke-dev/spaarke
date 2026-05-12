@@ -30,11 +30,13 @@ import {
   Checkbox,
   MessageBar,
   MessageBarBody,
+  Spinner,
   Text,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
 import { CheckmarkCircleFilled, DismissRegular } from '@fluentui/react-icons';
+import { useAiSummary } from '../../hooks/useAiSummary';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type {
@@ -67,10 +69,22 @@ export interface IDocumentEmailWizardItem {
   name: string;
   /** File size in bytes. Drives the > 25 MB warning when known. */
   fileSizeBytes?: number;
-  /** Long-form AI summary (rendered on the Summary step). */
+  /** Long-form AI summary if already cached (rendered immediately). */
   summary?: string;
   /** Short-form "TL;DR" string (preferred over `summary` when present). */
   tldr?: string;
+  /**
+   * SharePoint Embedded driveId (sprk_graphdriveid). Required to run AI
+   * summarization on demand via the Document Profile playbook. When omitted,
+   * the Summary step falls back to the cached `summary`/`tldr` if present, or
+   * "(no summary available)".
+   */
+  driveId?: string;
+  /**
+   * SharePoint Embedded itemId (sprk_graphitemid). Required alongside driveId
+   * to run AI summarization on demand.
+   */
+  itemId?: string;
 }
 
 /** Props for {@link DocumentEmailWizard}. */
@@ -572,10 +586,64 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   }, [attachFiles, deselect, kept, sendLinks, styles]);
 
   // ---------------------------------------------------------------------
-  // Step 2 — Summary preview
+  // Step 2 — AI Summary (live streaming via the Document Profile playbook,
+  // same as the Summarize Files wizard). Documents with driveId + itemId run
+  // through `useAiSummary`; documents missing those fields fall back to
+  // pre-existing `tldr`/`summary` strings if present.
   // ---------------------------------------------------------------------
+  const aiSummary = useAiSummary({
+    apiBaseUrl: bffBaseUrl ?? '',
+    getToken: async () => {
+      // Use the injected authenticatedFetch to get a token from the auth
+      // provider. Since we don't have a direct token accessor, we make a
+      // dummy authorized call and pull the header back. This is a bit clunky
+      // but avoids needing an additional injected prop just for the token.
+      // The real path: callers should already have @spaarke/auth initialized,
+      // and authenticatedFetch transparently attaches Bearer headers. The
+      // hook needs the raw token string to attach itself, so we read it from
+      // the global auth provider when available.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const provider = w.__SPAARKE_AUTH_PROVIDER__ ?? w.parent?.__SPAARKE_AUTH_PROVIDER__;
+      if (provider?.getAccessToken) {
+        return await provider.getAccessToken();
+      }
+      // Fallback: read from bridge if published there
+      const bridged = w.__SPAARKE_BFF_TOKEN__ ?? w.parent?.__SPAARKE_BFF_TOKEN__;
+      if (bridged) return bridged;
+      return '';
+    },
+    maxConcurrent: 3,
+    autoStart: true,
+  });
+
+  // Seed the AI summary hook when the Summary step becomes active. We only
+  // submit docs that actually have driveId + itemId — others fall back to
+  // their cached tldr/summary text.
+  const summarySeededRef = React.useRef(false);
+  const seedAiSummary = React.useCallback(() => {
+    if (summarySeededRef.current) return;
+    const eligible = kept
+      .filter(d => d.driveId && d.itemId)
+      .map(d => ({
+        documentId: d.documentId,
+        driveId: d.driveId!,
+        itemId: d.itemId!,
+        fileName: d.name,
+      }));
+    if (eligible.length > 0) {
+      aiSummary.addDocuments(eligible);
+    }
+    summarySeededRef.current = true;
+  }, [kept, aiSummary]);
+
   const renderSummaryStep = React.useCallback(() => {
+    // Trigger the hook the first time this step renders.
+    seedAiSummary();
+
     const docs = kept;
+    const stateByDoc = new Map(aiSummary.documents.map(d => [d.documentId, d]));
+
     return (
       <div className={styles.stepRoot}>
         <div className={styles.stepHeader}>
@@ -583,8 +651,8 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
             Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
-            A short summary of each document is shown below. This is informational
-            only — you can compose the email body on the next step.
+            AI-generated summary of each document via the Document Profile playbook.
+            This is informational only — you can compose the email body on the next step.
           </Text>
         </div>
 
@@ -592,19 +660,32 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
           <Text className={styles.emptyState}>No documents selected.</Text>
         ) : (
           docs.map(d => {
-            const text = (d.tldr || d.summary || '').trim();
+            const live = stateByDoc.get(d.documentId);
+            const liveText = live?.summary?.trim();
+            const cachedText = (d.tldr || d.summary || '').trim();
+            const text = liveText || cachedText;
+            const isStreaming = live?.status === 'streaming' || live?.status === 'pending';
+            const hasError = live?.status === 'error';
             return (
               <Card key={d.documentId} className={styles.summaryCard}>
-                <Text size={300} weight="semibold" className={styles.summaryHeader}>
-                  {d.name}
-                </Text>
-                {text ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                  <Text size={300} weight="semibold" className={styles.summaryHeader}>
+                    {d.name}
+                  </Text>
+                  {isStreaming && <Spinner size="extra-tiny" aria-label="Generating summary" />}
+                </div>
+                {hasError && (
+                  <Text size={200} className={styles.summaryEmpty}>
+                    Could not generate summary: {live?.error}
+                  </Text>
+                )}
+                {!hasError && text ? (
                   <Text size={200} className={styles.summaryBody}>
                     {text.length > SUMMARY_PREVIEW_CHAR_CAP
                       ? text.slice(0, SUMMARY_PREVIEW_CHAR_CAP) + '…'
                       : text}
                   </Text>
-                ) : (
+                ) : !hasError && !isStreaming && (
                   <Text size={200} className={styles.summaryEmpty}>
                     (no summary available)
                   </Text>

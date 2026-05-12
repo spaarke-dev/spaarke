@@ -14,10 +14,17 @@ public sealed record SearchResult
     public string? DocumentId { get; init; }
 
     /// <summary>
-    /// SharePoint Embedded file ID.
+    /// SharePoint Embedded file ID (driveItem ID).
     /// </summary>
     [JsonPropertyName("speFileId")]
     public string? SpeFileId { get; init; }
+
+    /// <summary>
+    /// SharePoint Embedded drive ID. Needed (alongside speFileId) to invoke
+    /// AI analysis endpoints like Document Profile / Summarize.
+    /// </summary>
+    [JsonPropertyName("driveId")]
+    public string? DriveId { get; init; }
 
     /// <summary>
     /// Document display name.

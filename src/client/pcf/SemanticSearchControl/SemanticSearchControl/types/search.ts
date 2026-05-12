@@ -96,6 +96,10 @@ export interface SearchResult {
   createdBy: string | null;
   summary: string | null;
   tldr: string | null;
+  /** SPE driveItem ID. Needed alongside driveId to invoke AI analysis. */
+  speFileId?: string;
+  /** SPE drive ID. Needed alongside speFileId to invoke AI analysis. */
+  driveId?: string;
 }
 
 /**

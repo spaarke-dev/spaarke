@@ -22,6 +22,8 @@ import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
+import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
+import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 
 /**
@@ -251,8 +253,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Find Similar dialog state — URL of the web resource to show in the iframe dialog
   const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
-  // Email dialog state
+  // Email dialog state (per-row email — emails ONE document)
   const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
+
+  // Multi-document email wizard state. When open, passes the current results
+  // (top N visible) into the wizard's first step where the user can deselect
+  // any docs they don't want before composing.
+  const [emailWizardOpen, setEmailWizardOpen] = useState(false);
 
   // Filter pane collapse state
   // Sidebar expanded by default so the "Associated Only" toggle (which is now ON
@@ -564,6 +571,54 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     });
   }, [navigationService, scopeId, searchScope, query, search, filters]);
 
+  // Handle Email Documents (multi) — opens the DocumentEmailWizard with all
+  // currently rendered documents. Step 1 of the wizard lets the user deselect
+  // any they don't want before continuing to compose.
+  const handleEmailDocuments = useCallback(() => {
+    setEmailWizardOpen(true);
+  }, []);
+
+  // Adapter from PCF context.webAPI to the shared IDataService contract.
+  // Built once via useMemo so its identity is stable across renders.
+  const dataService: IDataService = useMemo(
+    () => ({
+      createRecord: (entityName, data) =>
+        context.webAPI
+          .createRecord(entityName, data as ComponentFramework.WebApi.Entity)
+          .then(r => r.id),
+      retrieveRecord: (entityName, id, options) =>
+        context.webAPI.retrieveRecord(entityName, id, options ?? '') as Promise<Record<string, unknown>>,
+      retrieveMultipleRecords: (entityName, options) =>
+        context.webAPI
+          .retrieveMultipleRecords(entityName, options ?? '')
+          .then(r => ({ entities: r.entities as Record<string, unknown>[] })),
+      updateRecord: (entityName, id, data) =>
+        context.webAPI
+          .updateRecord(entityName, id, data as ComponentFramework.WebApi.Entity)
+          .then(() => undefined),
+      deleteRecord: (entityName, id) =>
+        context.webAPI.deleteRecord(entityName, id).then(() => undefined),
+    }),
+    [context.webAPI]
+  );
+
+  // Map current results into the wizard's lightweight item shape.
+  // driveId + itemId are required to run AI analysis (Document Profile playbook)
+  // in the wizard's Summary step — without them the wizard falls back to the
+  // cached summary/tldr text.
+  const emailWizardItems: IDocumentEmailWizardItem[] = useMemo(
+    () =>
+      results.map(r => ({
+        documentId: r.documentId ?? '',
+        name: r.name ?? '(untitled)',
+        summary: r.summary ?? undefined,
+        tldr: r.tldr ?? undefined,
+        driveId: r.driveId ?? undefined,
+        itemId: r.speFileId ?? undefined,
+      })),
+    [results]
+  );
+
   // Handle Email Document — opens SendEmailDialog with result context
   const handleEmailDocument = useCallback((result: SearchResult) => {
     setEmailDialogResult(result);
@@ -799,6 +854,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           onReload={handleReload}
           onAddDocument={handleAddDocument}
           onOpenViewer={handleOpenViewer}
+          onEmailDocuments={emailWizardItems.length > 0 ? handleEmailDocuments : undefined}
           compactMode={compactMode}
         />
       );
@@ -917,13 +973,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.37 • Built 2026-05-12</Text>
+        <Text size={100}>v1.1.39 • Built 2026-05-12</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}
       <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
 
-      {/* Send Email Dialog */}
+      {/* Send Email Dialog (single-document, legacy) */}
       <SendEmailDialog
         open={!!emailDialogResult}
         onClose={() => setEmailDialogResult(null)}
@@ -931,6 +987,22 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         defaultBody={emailDefaultBody}
         onSearchUsers={handleSearchUsers}
         onSend={handleSendEmail}
+      />
+
+      {/* Document Email Wizard (multi-document, new) — opens from the toolbar
+          Email icon. Wizard step 1 lets the user prune the selection. */}
+      <DocumentEmailWizard
+        open={emailWizardOpen}
+        onClose={() => setEmailWizardOpen(false)}
+        selectedDocuments={emailWizardItems}
+        parentEntityType={searchScope === 'matter' ? 'sprk_matter'
+          : searchScope === 'project' ? 'sprk_project'
+          : searchScope === 'invoice' ? 'sprk_invoice'
+          : undefined}
+        parentEntityId={scopeId ?? undefined}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={apiBaseUrl}
+        dataService={dataService}
       />
     </div>
   );

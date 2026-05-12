@@ -19,7 +19,7 @@ import {
   Button,
   Tooltip,
 } from '@fluentui/react-components';
-import { ArrowClockwise20Regular, Add20Regular, Open20Regular } from '@fluentui/react-icons';
+import { ArrowClockwise20Regular, Add20Regular, Open20Regular, MailRegular } from '@fluentui/react-icons';
 import { IResultsListProps, SearchResult } from '../types';
 import { ResultCard } from './ResultCard';
 // `useInfiniteScroll` no longer used — "Show more" + sentinel were removed
@@ -136,6 +136,7 @@ export const ResultsList: React.FC<IResultsListProps> = ({
   onReload,
   onAddDocument,
   onOpenViewer,
+  onEmailDocuments,
   compactMode,
 }) => {
   const styles = useStyles();
@@ -227,6 +228,18 @@ export const ResultsList: React.FC<IResultsListProps> = ({
                 icon={<Add20Regular />}
                 aria-label="Add Document"
                 onClick={onAddDocument}
+              />
+            </Tooltip>
+          )}
+          {onEmailDocuments && (
+            <Tooltip content="Email Documents" relationship="label">
+              <Button
+                className={styles.infoButton}
+                appearance="subtle"
+                size="small"
+                icon={<MailRegular />}
+                aria-label="Email Documents"
+                onClick={onEmailDocuments}
               />
             </Tooltip>
           )}
