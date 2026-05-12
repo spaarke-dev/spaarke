@@ -28,6 +28,7 @@ public sealed class CommunicationService
     private readonly ApprovedSenderValidator _senderValidator;
     private readonly ICommunicationDataverseService _communicationService;
     private readonly IGenericEntityService _genericEntityService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly EmlGenerationService _emlGenerationService;
     private readonly SpeFileStore _speFileStore;
     private readonly CommunicationAccountService _accountService;
@@ -40,6 +41,7 @@ public sealed class CommunicationService
         ApprovedSenderValidator senderValidator,
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
+        IDocumentDataverseService documentService,
         EmlGenerationService emlGenerationService,
         SpeFileStore speFileStore,
         CommunicationAccountService accountService,
@@ -51,6 +53,7 @@ public sealed class CommunicationService
         _senderValidator = senderValidator;
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
+        _documentService = documentService;
         _emlGenerationService = emlGenerationService;
         _speFileStore = speFileStore;
         _accountService = accountService;
@@ -1196,30 +1199,81 @@ public sealed class CommunicationService
                 });
         }
 
-        var driveId = _options.ArchiveContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
-        {
-            throw new SdapProblemException(
-                code: "ATTACHMENT_CONFIG_ERROR",
-                title: "Attachment Configuration Error",
-                detail: "ArchiveContainerId is not configured. Cannot download attachments from SPE.",
-                statusCode: 500,
-                extensions: new Dictionary<string, object>
-                {
-                    ["correlationId"] = correlationId
-                });
-        }
-
+        // Each input is a sprk_document GUID. Look it up to get the actual SPE
+        // driveId + itemId. Containers in Spaarke are per Business Unit (not per
+        // matter), so each document carries its own sprk_graphdriveid (BU's
+        // container) and sprk_graphitemid (file in that container).
+        // The legacy _options.ArchiveContainerId is no longer used here.
         var attachments = new List<FileAttachment>(attachmentDocumentIds.Length);
         long totalSize = 0;
 
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
         {
-            var itemId = attachmentDocumentIds[i];
+            var sprkDocumentId = attachmentDocumentIds[i];
+
+            // Resolve sprk_document → (graphdriveid, graphitemid)
+            DocumentEntity? docRecord;
+            try
+            {
+                docRecord = await _documentService.GetDocumentAsync(sprkDocumentId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to load sprk_document {SprkDocumentId} for attachment lookup | CorrelationId: {CorrelationId}",
+                    sprkDocumentId, correlationId);
+
+                throw new SdapProblemException(
+                    code: "ATTACHMENT_LOOKUP_FAILED",
+                    title: "Attachment Lookup Failed",
+                    detail: $"Failed to load Dataverse record for document '{sprkDocumentId}': {ex.Message}",
+                    statusCode: 502,
+                    extensions: new Dictionary<string, object>
+                    {
+                        ["correlationId"] = correlationId,
+                        ["failedDocumentId"] = sprkDocumentId,
+                        ["attachmentIndex"] = i
+                    });
+            }
+
+            if (docRecord is null)
+            {
+                throw new SdapProblemException(
+                    code: "ATTACHMENT_NOT_FOUND",
+                    title: "Document Not Found",
+                    detail: $"sprk_document '{sprkDocumentId}' was not found.",
+                    statusCode: 404,
+                    extensions: new Dictionary<string, object>
+                    {
+                        ["correlationId"] = correlationId,
+                        ["failedDocumentId"] = sprkDocumentId,
+                        ["attachmentIndex"] = i
+                    });
+            }
+
+            var driveId = docRecord.GraphDriveId;
+            var itemId = docRecord.GraphItemId;
+            if (string.IsNullOrWhiteSpace(driveId) || string.IsNullOrWhiteSpace(itemId))
+            {
+                throw new SdapProblemException(
+                    code: "ATTACHMENT_MISSING_SPE_REF",
+                    title: "Document Missing SPE Reference",
+                    detail: $"sprk_document '{sprkDocumentId}' is missing graphdriveid or graphitemid — file is not stored in SPE.",
+                    statusCode: 422,
+                    extensions: new Dictionary<string, object>
+                    {
+                        ["correlationId"] = correlationId,
+                        ["failedDocumentId"] = sprkDocumentId,
+                        ["attachmentIndex"] = i,
+                        ["hasGraphDriveId"] = !string.IsNullOrWhiteSpace(driveId),
+                        ["hasGraphItemId"] = !string.IsNullOrWhiteSpace(itemId)
+                    });
+            }
 
             _logger.LogDebug(
-                "Downloading attachment {Index}/{Total} | ItemId: {ItemId}, CorrelationId: {CorrelationId}",
-                i + 1, attachmentDocumentIds.Length, itemId, correlationId);
+                "Downloading attachment {Index}/{Total} | SprkDocId: {SprkDocumentId}, DriveId: {DriveId}, ItemId: {ItemId}, CorrelationId: {CorrelationId}",
+                i + 1, attachmentDocumentIds.Length, sprkDocumentId, driveId, itemId, correlationId);
 
             // Get file metadata for name and size
             FileHandleDto? metadata;

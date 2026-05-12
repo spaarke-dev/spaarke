@@ -1,0 +1,340 @@
+/**
+ * CreateMatterWizard.tsx
+ * Main exported component for the "Create New Matter" wizard.
+ *
+ * This is a thin wrapper around CreateRecordWizard that provides:
+ *   - AssociateToStep as step 1 (optional, links matter to a Project or Account via N:N)
+ *   - Entity-specific form step (CreateRecordStep)
+ *   - Finish handler (MatterService.createMatter + success screen + N:N association)
+ *   - Search callbacks (contacts, organizations, users)
+ *   - Email template builders
+ *
+ * Step sequence:
+ *   1. Associate To  — optional; links to Project (sprk_project) or Account (account)
+ *   2. Add file(s)   — upload documents for AI pre-fill
+ *   3. Enter Info    — matter form fields
+ *   4. Next Steps    — follow-on action selection
+ *
+ * After matter creation, if a Project association was selected, the N:N
+ * sprk_Project_Matter_nn relationship is established via IDataService.
+ *
+ * All generic wizard mechanics (file upload, follow-on steps, state
+ * management) are handled by the shared CreateRecordWizard component.
+ *
+ * Dependencies are injected via props -- no solution-specific imports.
+ */
+import * as React from 'react';
+import { Button, Text, tokens } from '@fluentui/react-components';
+import { CheckmarkCircleFilled } from '@fluentui/react-icons';
+import { CreateRecordWizard, } from '../CreateRecordWizard';
+import { CreateRecordStep } from './CreateRecordStep';
+import { MatterService, searchContactsAsLookup, searchOrganizationsAsLookup, searchUsersAsLookup, searchMatterTypes, searchPracticeAreas, } from './matterService';
+import { EventService } from '../CreateEventWizard/eventService';
+// ---------------------------------------------------------------------------
+// Association helper
+// ---------------------------------------------------------------------------
+/**
+ * Creates a Dataverse association between the newly created matter and the
+ * record selected in AssociateToStep.
+ *
+ * - sprk_project: uses the N:N relationship sprk_Project_Matter_nn
+ * - account: uses a direct $ref association on the matter's account lookup
+ *
+ * Returns a success/failure result; never throws.
+ */
+async function associateToRecord(dataService, matterId, association) {
+    try {
+        const { entityType, recordId } = association;
+        if (entityType === 'sprk_project') {
+            // N:N association via the relationship collection navigation property.
+            // Dataverse REST API: POST /sprk_projects({projectId})/sprk_Project_Matter_nn/$ref
+            // Body: { "@odata.id": "[base]/sprk_matters({matterId})" }
+            const apiBase = '/api/data/v9.0';
+            const url = `${apiBase}/sprk_projects(${recordId})/sprk_Project_Matter_nn/$ref`;
+            const resp = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json; odata.metadata=minimal' },
+                body: JSON.stringify({ '@odata.id': `${apiBase}/sprk_matters(${matterId})` }),
+            });
+            if (!resp.ok) {
+                const text = await resp.text().catch(() => resp.statusText);
+                console.warn('[CreateMatterWizard] N:N association response not OK:', resp.status, text);
+                return { success: false };
+            }
+            console.info('[CreateMatterWizard] N:N association created:', `sprk_project(${recordId}) <-> sprk_matter(${matterId})`);
+            return { success: true };
+        }
+        if (entityType === 'account') {
+            // For account: update the matter record's account lookup via @odata.bind.
+            // This is a N:1 association on the matter side.
+            await dataService.updateRecord('sprk_matter', matterId, {
+                'sprk_Account@odata.bind': `/accounts(${recordId})`,
+            });
+            console.info('[CreateMatterWizard] Account association set:', `account(${recordId}) -> sprk_matter(${matterId})`);
+            return { success: true };
+        }
+        // Unsupported entity type -- skip silently
+        console.warn('[CreateMatterWizard] Unsupported association entity type:', entityType);
+        return { success: true };
+    }
+    catch (err) {
+        console.warn('[CreateMatterWizard] Association failed:', err instanceof Error ? err.message : err);
+        return { success: false };
+    }
+}
+// ---------------------------------------------------------------------------
+// Empty form state
+// ---------------------------------------------------------------------------
+const EMPTY_FORM_STATE = {
+    matterTypeId: '',
+    matterTypeName: '',
+    practiceAreaId: '',
+    practiceAreaName: '',
+    matterName: '',
+    assignedAttorneyId: '',
+    assignedAttorneyName: '',
+    assignedParalegalId: '',
+    assignedParalegalName: '',
+    assignedOutsideCounselId: '',
+    assignedOutsideCounselName: '',
+    summary: '',
+};
+// ---------------------------------------------------------------------------
+// CreateMatterWizard
+// ---------------------------------------------------------------------------
+export const CreateMatterWizard = ({ open, onClose, dataService, authenticatedFetch, bffBaseUrl, navigationService, embedded, resolveSpeContainerId, }) => {
+    // -- Entity-specific form state --
+    const [step2Valid, setStep2Valid] = React.useState(false);
+    const [step2FormValues, setStep2FormValues] = React.useState(EMPTY_FORM_STATE);
+    const step2FormValuesRef = React.useRef(step2FormValues);
+    step2FormValuesRef.current = step2FormValues;
+    // Reset form state on open
+    React.useEffect(() => {
+        if (open) {
+            setStep2Valid(false);
+            setStep2FormValues(EMPTY_FORM_STATE);
+        }
+    }, [open]);
+    // -- Search callbacks --
+    const handleSearchContacts = React.useCallback((query) => searchContactsAsLookup(dataService, query), [dataService]);
+    const handleSearchOrganizations = React.useCallback((query) => searchOrganizationsAsLookup(dataService, query), [dataService]);
+    const handleSearchUsers = React.useCallback((query) => searchUsersAsLookup(dataService, query), [dataService]);
+    const handleSearchMatterTypes = React.useCallback((query) => searchMatterTypes(dataService, query), [dataService]);
+    const handleSearchPracticeAreas = React.useCallback((query) => searchPracticeAreas(dataService, query), [dataService]);
+    // -- Wizard config --
+    const config = React.useMemo(() => ({
+        title: 'Create New Matter',
+        entityLabel: 'matter',
+        filesStepSubtitle: 'Upload documents for AI analysis. The AI will extract key information to pre-fill the matter form.',
+        finishingLabel: 'Creating matter\u2026',
+        // Associate To step — optional step 1.
+        // Requires navigationService (for the Dataverse lookup dialog).
+        // Allows linking the new matter to a Project or Account before creation.
+        ...(navigationService
+            ? {
+                associateToStep: {
+                    entityTypes: [
+                        { label: 'Project', entityType: 'sprk_project' },
+                        { label: 'Account', entityType: 'account' },
+                    ],
+                    navigationService,
+                },
+            }
+            : {}),
+        infoStep: {
+            id: 'create-record',
+            label: 'Enter Info',
+            canAdvance: () => step2Valid,
+            renderContent: (wizardFiles) => (React.createElement(CreateRecordStep, { dataService: dataService, uploadedFileNames: wizardFiles.map((f) => f.name), uploadedFiles: wizardFiles, onValidChange: setStep2Valid, onSubmit: (values) => setStep2FormValues(values), initialFormValues: step2FormValues, authenticatedFetch: authenticatedFetch, bffBaseUrl: bffBaseUrl, navigationService: navigationService })),
+        },
+        searchContacts: handleSearchContacts,
+        searchOrganizations: handleSearchOrganizations,
+        searchUsers: handleSearchUsers,
+        searchMatterTypes: handleSearchMatterTypes,
+        searchPracticeAreas: handleSearchPracticeAreas,
+        getAssignWorkDefaults: () => ({
+            assignWorkMatterTypeId: step2FormValuesRef.current.matterTypeId,
+            assignWorkMatterTypeName: step2FormValuesRef.current.matterTypeName,
+            assignWorkPracticeAreaId: step2FormValuesRef.current.practiceAreaId,
+            assignWorkPracticeAreaName: step2FormValuesRef.current.practiceAreaName,
+        }),
+        resolveSpeContainerId: resolveSpeContainerId
+            ? resolveSpeContainerId
+            : () => Promise.resolve(''),
+        buildEmailSubject: (entityName) => `New Matter: ${entityName}`,
+        buildEmailBody: (fields) => {
+            const typeStr = fields.matterTypeName ? ` ${fields.matterTypeName.toLowerCase()}` : '';
+            const areaStr = fields.practiceAreaName ? ` (${fields.practiceAreaName})` : '';
+            return (`Dear Client,\n\n` +
+                `We are pleased to confirm that your${typeStr} matter, "${fields.matterName || ''}"${areaStr}, ` +
+                `has been created in our legal management system.\n\n` +
+                `Our team will be in touch shortly to discuss next steps and any actions required from you.\n\n` +
+                `Please do not hesitate to reach out if you have any questions.\n\n` +
+                `Kind regards,\n[Your Name]\n[Firm Name]`);
+        },
+        getEntityName: () => step2FormValuesRef.current.matterName,
+        getFormFields: () => ({
+            matterName: step2FormValuesRef.current.matterName,
+            matterTypeName: step2FormValuesRef.current.matterTypeName,
+            practiceAreaName: step2FormValuesRef.current.practiceAreaName,
+        }),
+        // Provide the data service for the "Create Event" follow-on step
+        // (used by CreateEventStep for event type lookups).
+        eventDataService: dataService,
+        onFinish: async (context) => {
+            const currentFormValues = step2FormValuesRef.current;
+            const mergedFormValues = {
+                ...currentFormValues,
+            };
+            const followOnActions = {};
+            if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim()) {
+                followOnActions.sendEmail = {
+                    to: context.followOn.emailTo.trim(),
+                    subject: context.followOn.emailSubject,
+                    body: context.followOn.emailBody,
+                };
+            }
+            const service = new MatterService(dataService, authenticatedFetch, bffBaseUrl, context.speContainerId || undefined);
+            const result = await service.createMatter(mergedFormValues, context.uploadedFiles, followOnActions);
+            if (result.status === 'error') {
+                throw new Error(result.errorMessage ?? 'An unknown error occurred.');
+            }
+            const matterId = result.matterId;
+            const matterName = result.matterName;
+            // -- Create Work Assignment (sprk_workassignment) --
+            // When the user selected "Assign Work" follow-on and entered a name,
+            // create the work assignment record linked to the matter via N:1.
+            if (context.selectedActions.includes('assign-counsel') && context.followOn.assignWorkName.trim()) {
+                try {
+                    const workAssignmentPayload = {
+                        sprk_name: context.followOn.assignWorkName.trim(),
+                        sprk_priority: context.followOn.assignWorkPriority,
+                    };
+                    if (context.followOn.assignWorkDescription.trim()) {
+                        workAssignmentPayload['sprk_description'] = context.followOn.assignWorkDescription.trim();
+                    }
+                    if (context.followOn.assignWorkResponseDueDate) {
+                        workAssignmentPayload['sprk_responseduedate'] = context.followOn.assignWorkResponseDueDate;
+                    }
+                    // N:1 link to parent matter via relationship
+                    workAssignmentPayload['sprk_workassignment_RegardingMatter_sprk_matter_n1@odata.bind'] =
+                        `/sprk_matters(${matterId})`;
+                    // Classification lookups
+                    if (context.followOn.assignWorkMatterTypeId) {
+                        workAssignmentPayload['sprk_MatterType@odata.bind'] =
+                            `/sprk_mattertype_refs(${context.followOn.assignWorkMatterTypeId})`;
+                    }
+                    if (context.followOn.assignWorkPracticeAreaId) {
+                        workAssignmentPayload['sprk_PracticeArea@odata.bind'] =
+                            `/sprk_practicearea_refs(${context.followOn.assignWorkPracticeAreaId})`;
+                    }
+                    // Resource lookups
+                    if (context.followOn.assignedAttorneyId) {
+                        workAssignmentPayload['sprk_AssignedAttorney@odata.bind'] =
+                            `/contacts(${context.followOn.assignedAttorneyId})`;
+                    }
+                    if (context.followOn.assignedParalegalId) {
+                        workAssignmentPayload['sprk_AssignedParalegal@odata.bind'] =
+                            `/contacts(${context.followOn.assignedParalegalId})`;
+                    }
+                    if (context.followOn.assignedOutsideCounselId) {
+                        workAssignmentPayload['sprk_AssignedOutsideCounsel@odata.bind'] =
+                            `/sprk_organizations(${context.followOn.assignedOutsideCounselId})`;
+                    }
+                    await dataService.createRecord('sprk_workassignment', workAssignmentPayload);
+                    console.info('[CreateMatterWizard] Work assignment created and linked to matter:', matterId);
+                }
+                catch (err) {
+                    const message = err instanceof Error ? err.message : 'Unknown error';
+                    result.warnings.push(`Work assignment could not be created (${message}). ` +
+                        'You can create it manually from the matter record.');
+                }
+            }
+            // -- Create Event (sprk_event) --
+            // When the user selected "Create Event" follow-on and entered an event name,
+            // create the event record linked to the matter via N:1.
+            if (context.selectedActions.includes('create-event') && context.followOn.createEventName.trim()) {
+                try {
+                    const eventService = new EventService(dataService);
+                    const eventFormValues = {
+                        eventName: context.followOn.createEventName.trim(),
+                        eventTypeId: context.followOn.createEventTypeId,
+                        eventTypeName: context.followOn.createEventTypeName,
+                        dueDate: context.followOn.createEventDueDate,
+                        priority: context.followOn.createEventPriority,
+                        description: context.followOn.createEventDescription,
+                        regardingRecordId: matterId,
+                        regardingRecordName: matterName,
+                    };
+                    const eventResult = await eventService.createEvent(eventFormValues, 'sprk_matter');
+                    if (eventResult.success) {
+                        console.info('[CreateMatterWizard] Event created and linked to matter:', matterId);
+                    }
+                    else {
+                        result.warnings.push(`Event could not be created (${eventResult.errorMessage ?? 'unknown error'}). ` +
+                            'You can create it manually from the matter record.');
+                    }
+                }
+                catch (err) {
+                    const message = err instanceof Error ? err.message : 'Unknown error';
+                    result.warnings.push(`Event could not be created (${message}). ` +
+                        'You can create it manually from the matter record.');
+                }
+            }
+            // -- Wire N:N association (sprk_Project_Matter_nn) --
+            // If the user selected an association in step 1, create the link now.
+            // This is a non-blocking operation -- failure produces a warning, not an error.
+            if (context.association?.recordId) {
+                const assocResult = await associateToRecord(dataService, matterId, context.association);
+                if (!assocResult.success) {
+                    result.warnings.push(`Matter created, but could not link to "${context.association.recordName}". ` +
+                        'You can associate them manually from the matter record.');
+                }
+            }
+            const hasWarnings = result.warnings.length > 0;
+            const viewMatter = () => {
+                if (navigationService) {
+                    navigationService.openRecord('sprk_matter', matterId);
+                }
+                onClose();
+            };
+            return {
+                icon: React.createElement(CheckmarkCircleFilled, { fontSize: 64, style: { color: tokens.colorPaletteGreenForeground1 } }),
+                title: hasWarnings ? 'Matter created with warnings' : 'Matter created!',
+                body: (React.createElement(Text, { size: 300, style: { color: tokens.colorNeutralForeground2 } },
+                    React.createElement("span", { style: { color: tokens.colorBrandForeground1, fontWeight: 600 } },
+                        "\u201C",
+                        matterName,
+                        "\u201D"),
+                    ' ',
+                    "has been created",
+                    hasWarnings ? ', though some follow-on actions could not complete. See details below.' : ' and is ready to use.')),
+                actions: (React.createElement(React.Fragment, null,
+                    React.createElement(Button, { appearance: "primary", onClick: viewMatter, "aria-label": `View matter: ${matterName}` }, "View Matter"),
+                    React.createElement(Button, { appearance: "secondary", onClick: onClose }, "Close"))),
+                warnings: result.warnings,
+            };
+        },
+    }), [step2Valid, step2FormValues, dataService, authenticatedFetch, bffBaseUrl, handleSearchContacts, handleSearchOrganizations, handleSearchUsers, handleSearchMatterTypes, handleSearchPracticeAreas, onClose, navigationService, resolveSpeContainerId]);
+    // Adapt IDataService to the IWebApi shape that CreateRecordWizard expects
+    const webApiAdapter = React.useMemo(() => ({
+        createRecord: async (entityName, data) => {
+            const id = await dataService.createRecord(entityName, data);
+            return { id };
+        },
+        retrieveRecord: (entityName, id, options) => dataService.retrieveRecord(entityName, id, options),
+        retrieveMultipleRecords: (entityName, options, maxPageSize) => dataService.retrieveMultipleRecords(entityName, options),
+        updateRecord: async (entityName, id, data) => {
+            await dataService.updateRecord(entityName, id, data);
+            return { id };
+        },
+        deleteRecord: async (entityName, id) => {
+            await dataService.deleteRecord(entityName, id);
+            return { id };
+        },
+    }), [dataService]);
+    return (React.createElement(CreateRecordWizard, { open: open, onClose: onClose, webApi: webApiAdapter, config: config, embedded: embedded }));
+};
+export default CreateMatterWizard;
+//# sourceMappingURL=CreateMatterWizard.js.map

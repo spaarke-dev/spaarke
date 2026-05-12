@@ -1,0 +1,290 @@
+/**
+ * useChatSession - Session lifecycle management hook
+ *
+ * Manages chat session creation, history loading, context switching, and deletion.
+ * All API calls target the ChatEndpoints.cs API contract.
+ *
+ * @see ADR-022 - React 16 APIs only (useState, useEffect, useRef, useCallback)
+ * @see ChatEndpoints.cs - POST /sessions, GET /history, PATCH /context, DELETE /sessions
+ */
+import { useState, useCallback } from 'react';
+/**
+ * Hook for managing chat session lifecycle.
+ *
+ * @param options - API configuration
+ * @returns Session state and management functions
+ *
+ * @example
+ * ```tsx
+ * const {
+ *   session, messages, isLoading, error,
+ *   createSession, loadHistory, switchContext, deleteSession,
+ *   addMessage, updateLastMessage
+ * } = useChatSession({ apiBaseUrl: "https://api.example.com", accessToken: "token" });
+ * ```
+ */
+export function useChatSession(options) {
+    const { apiBaseUrl, accessToken, initialMessages } = options;
+    const [session, setSession] = useState(null);
+    const [messages, setMessages] = useState(() => initialMessages ?? []);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
+    // Normalize: strip trailing slashes.
+    const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+    /**
+     * Make an authenticated API request.
+     */
+    /**
+     * Extract tenant ID from JWT access token for X-Tenant-Id header.
+     * Azure AD tokens include 'tid' claim with the tenant GUID.
+     */
+    const extractTenantId = (token) => {
+        try {
+            const parts = token.split('.');
+            if (parts.length !== 3)
+                return null;
+            const payload = JSON.parse(atob(parts[1]));
+            return payload.tid || null;
+        }
+        catch {
+            return null;
+        }
+    };
+    const apiRequest = useCallback(async (url, init) => {
+        const tenantId = extractTenantId(accessToken);
+        const response = await fetch(url, {
+            ...init,
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${accessToken}`,
+                ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
+                ...(init?.headers || {}),
+            },
+        });
+        return response;
+    }, [accessToken]);
+    /**
+     * Create a new chat session.
+     * POST /api/ai/chat/sessions
+     */
+    const createSession = useCallback(async (documentId, playbookId, hostContext) => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    documentId: documentId || null,
+                    playbookId: playbookId || null,
+                    hostContext: hostContext || null,
+                }),
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to create session (${response.status}): ${errorText}`);
+            }
+            const data = await response.json();
+            const newSession = {
+                sessionId: data.sessionId,
+                createdAt: data.createdAt,
+            };
+            setSession(newSession);
+            setMessages(initialMessages ?? []);
+            return newSession;
+        }
+        catch (err) {
+            const errorObj = err instanceof Error ? err : new Error('Failed to create session');
+            setError(errorObj);
+            return null;
+        }
+        finally {
+            setIsLoading(false);
+        }
+    }, [apiRequest, baseUrl, initialMessages]);
+    /**
+     * Load message history for the current session.
+     * GET /api/ai/chat/sessions/{sessionId}/history
+     */
+    const loadHistory = useCallback(async () => {
+        if (!session) {
+            return;
+        }
+        setIsLoading(true);
+        setError(null);
+        try {
+            const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to load history (${response.status}): ${errorText}`);
+            }
+            const data = await response.json();
+            const historyMessages = (data.messages || []).map((m) => ({
+                role: m.role,
+                content: m.content,
+                timestamp: m.timestamp,
+            }));
+            setMessages(historyMessages);
+        }
+        catch (err) {
+            const errorObj = err instanceof Error ? err : new Error('Failed to load history');
+            setError(errorObj);
+        }
+        finally {
+            setIsLoading(false);
+        }
+    }, [session, apiRequest, baseUrl]);
+    /**
+     * Switch the document/playbook context for the current session.
+     * PATCH /api/ai/chat/sessions/{sessionId}/context
+     *
+     * @param documentId - New primary document ID (null keeps current)
+     * @param playbookId - New playbook ID (null keeps current)
+     * @param hostContext - Optional host context override (null keeps current)
+     * @param additionalDocumentIds - Optional additional document IDs for multi-document context (max 5)
+     */
+    const switchContext = useCallback(async (documentId, playbookId, hostContext, additionalDocumentIds) => {
+        if (!session) {
+            return;
+        }
+        setIsLoading(true);
+        setError(null);
+        try {
+            const body = {
+                documentId: documentId || null,
+                playbookId: playbookId || null,
+                hostContext: hostContext || null,
+            };
+            // Only include additionalDocumentIds when explicitly provided
+            // (undefined = keep current, [] = clear, [...ids] = set new list)
+            if (additionalDocumentIds !== undefined) {
+                body.additionalDocumentIds = additionalDocumentIds;
+            }
+            const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
+                method: 'PATCH',
+                body: JSON.stringify(body),
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to switch context (${response.status}): ${errorText}`);
+            }
+        }
+        catch (err) {
+            const errorObj = err instanceof Error ? err : new Error('Failed to switch context');
+            setError(errorObj);
+        }
+        finally {
+            setIsLoading(false);
+        }
+    }, [session, apiRequest, baseUrl]);
+    /**
+     * Delete the current session.
+     * DELETE /api/ai/chat/sessions/{sessionId}
+     */
+    const deleteSession = useCallback(async () => {
+        if (!session) {
+            return;
+        }
+        setIsLoading(true);
+        setError(null);
+        try {
+            const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, { method: 'DELETE' });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to delete session (${response.status}): ${errorText}`);
+            }
+            setSession(null);
+            setMessages([]);
+        }
+        catch (err) {
+            const errorObj = err instanceof Error ? err : new Error('Failed to delete session');
+            setError(errorObj);
+        }
+        finally {
+            setIsLoading(false);
+        }
+    }, [session, apiRequest, baseUrl]);
+    /**
+     * Add a message to the local history (used when sending/receiving messages).
+     */
+    const addMessage = useCallback((message) => {
+        setMessages(prev => [...prev, message]);
+    }, []);
+    /**
+     * Update the content of the last message in history (used during streaming).
+     */
+    const updateLastMessage = useCallback((content) => {
+        setMessages(prev => {
+            if (prev.length === 0) {
+                return prev;
+            }
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                content,
+            };
+            return updated;
+        });
+    }, []);
+    /**
+     * Update the metadata of the last message in history (Phase 2F).
+     * Used to set plan_preview metadata after a plan_preview SSE event and to update
+     * plan step statuses during plan execution streaming.
+     */
+    const updateLastMessageMetadata = useCallback((metadata) => {
+        setMessages(prev => {
+            if (prev.length === 0) {
+                return prev;
+            }
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                metadata: {
+                    ...updated[updated.length - 1].metadata,
+                    ...metadata,
+                },
+            };
+            return updated;
+        });
+    }, []);
+    /**
+     * Update a specific message's metadata by index (Phase 2F).
+     * Used to update plan step statuses during plan execution streaming when the plan
+     * preview card is not the last message.
+     *
+     * Accepts either a plain metadata object (merged with the existing metadata) or
+     * a function updater `(currentMetadata: IChatMessageMetadata | undefined) => IChatMessageMetadata`
+     * for safe updates that depend on current state (avoids stale closure issues).
+     */
+    const updateMessageMetadataAt = useCallback((index, metadataOrUpdater) => {
+        setMessages(prev => {
+            if (index < 0 || index >= prev.length) {
+                return prev;
+            }
+            const updated = [...prev];
+            const currentMetadata = updated[index].metadata;
+            const newMetadata = typeof metadataOrUpdater === 'function'
+                ? metadataOrUpdater(currentMetadata)
+                : { ...currentMetadata, ...metadataOrUpdater };
+            updated[index] = {
+                ...updated[index],
+                metadata: newMetadata,
+            };
+            return updated;
+        });
+    }, []);
+    return {
+        session,
+        messages,
+        isLoading,
+        error,
+        createSession,
+        loadHistory,
+        switchContext,
+        deleteSession,
+        addMessage,
+        updateLastMessage,
+        updateLastMessageMetadata,
+        updateMessageMetadataAt,
+    };
+}
+//# sourceMappingURL=useChatSession.js.map

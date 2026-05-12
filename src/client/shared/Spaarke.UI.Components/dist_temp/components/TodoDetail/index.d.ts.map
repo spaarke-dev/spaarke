@@ -1,0 +1,1 @@
+{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../../src/components/TodoDetail/index.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,UAAU,EAAE,MAAM,cAAc,CAAC;AAC1C,YAAY,EAAE,gBAAgB,EAAE,MAAM,cAAc,CAAC;AACrD,YAAY,EACV,WAAW,EACX,cAAc,EACd,kBAAkB,EAClB,qBAAqB,EACrB,cAAc,GACf,MAAM,SAAS,CAAC;AACjB,OAAO,EAAE,kBAAkB,EAAE,qBAAqB,EAAE,MAAM,SAAS,CAAC"}

@@ -36,7 +36,6 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { CheckmarkCircleFilled, DismissRegular } from '@fluentui/react-icons';
-import { useAiSummary } from '../../hooks/useAiSummary';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type {
@@ -586,117 +585,183 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   }, [attachFiles, deselect, kept, sendLinks, styles]);
 
   // ---------------------------------------------------------------------
-  // Step 2 — AI Summary (live streaming via the Document Profile playbook,
-  // same as the Summarize Files wizard). Documents with driveId + itemId run
-  // through `useAiSummary`; documents missing those fields fall back to
-  // pre-existing `tldr`/`summary` strings if present.
+  // Step 2 — Combined AI Summary via the Document Profile playbook.
+  // Sends ALL selected documents in a SINGLE call to /api/ai/analysis/execute
+  // (which supports multi-doc when MultiDocumentEnabled is on) and renders
+  // one combined analysis card. Uses the wizard's injected authenticatedFetch
+  // so no separate token plumbing is needed.
   // ---------------------------------------------------------------------
-  const aiSummary = useAiSummary({
-    apiBaseUrl: bffBaseUrl ?? '',
-    getToken: async () => {
-      // Use the injected authenticatedFetch to get a token from the auth
-      // provider. Since we don't have a direct token accessor, we make a
-      // dummy authorized call and pull the header back. This is a bit clunky
-      // but avoids needing an additional injected prop just for the token.
-      // The real path: callers should already have @spaarke/auth initialized,
-      // and authenticatedFetch transparently attaches Bearer headers. The
-      // hook needs the raw token string to attach itself, so we read it from
-      // the global auth provider when available.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w = window as any;
-      const provider = w.__SPAARKE_AUTH_PROVIDER__ ?? w.parent?.__SPAARKE_AUTH_PROVIDER__;
-      if (provider?.getAccessToken) {
-        return await provider.getAccessToken();
-      }
-      // Fallback: read from bridge if published there
-      const bridged = w.__SPAARKE_BFF_TOKEN__ ?? w.parent?.__SPAARKE_BFF_TOKEN__;
-      if (bridged) return bridged;
-      return '';
-    },
-    maxConcurrent: 3,
-    autoStart: true,
-  });
+  type CombinedSummaryStatus = 'idle' | 'running' | 'done' | 'error';
+  const [combinedSummary, setCombinedSummary] = React.useState<string>('');
+  const [summaryStatus, setSummaryStatus] = React.useState<CombinedSummaryStatus>('idle');
+  const [summaryError, setSummaryError] = React.useState<string | null>(null);
+  const summaryAbortRef = React.useRef<AbortController | null>(null);
+  const summaryRanForRef = React.useRef<string>('');
 
-  // Seed the AI summary hook when the Summary step becomes active. We only
-  // submit docs that actually have driveId + itemId — others fall back to
-  // their cached tldr/summary text.
-  const summarySeededRef = React.useRef(false);
-  const seedAiSummary = React.useCallback(() => {
-    if (summarySeededRef.current) return;
-    const eligible = kept
-      .filter(d => d.driveId && d.itemId)
-      .map(d => ({
-        documentId: d.documentId,
-        driveId: d.driveId!,
-        itemId: d.itemId!,
-        fileName: d.name,
-      }));
-    if (eligible.length > 0) {
-      aiSummary.addDocuments(eligible);
+  const runCombinedSummary = React.useCallback(async () => {
+    if (kept.length === 0) return;
+    const key = kept.map(d => d.documentId).sort().join(',');
+    if (summaryRanForRef.current === key) return; // already ran for this selection
+    summaryRanForRef.current = key;
+
+    // Cancel any in-flight stream
+    summaryAbortRef.current?.abort();
+    const abort = new AbortController();
+    summaryAbortRef.current = abort;
+
+    setSummaryStatus('running');
+    setSummaryError(null);
+    setCombinedSummary('');
+
+    try {
+      // 1) Resolve "Summarize New File(s)" playbook ID — same playbook the
+      //    Summarize Files wizard uses (BFF config key Workspace:SummarizePlaybookId,
+      //    default GUID 4a72f99c-a119-f111-8343-7ced8d1dc988). This playbook is
+      //    purpose-built for file summarization and returns a structured result
+      //    (tldr, summary, practice areas, parties, call to action). We were
+      //    previously using Document Profile, which is for individual document
+      //    classification, not multi-doc combined summarization.
+      const playbookUrl = `${bffBaseUrl ?? ''}/api/ai/playbooks/by-name/${encodeURIComponent('Summarize New File(s)')}`;
+      const playbookRes = await authenticatedFetch(playbookUrl, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: abort.signal,
+      });
+      if (!playbookRes.ok) {
+        throw new Error(`Failed to resolve Document Profile playbook (HTTP ${playbookRes.status})`);
+      }
+      const playbook = await playbookRes.json();
+      const playbookId = playbook.playbookId || playbook.id;
+
+      // 2) Execute analysis with ALL documents in one call
+      const execUrl = `${bffBaseUrl ?? ''}/api/ai/analysis/execute`;
+      const execRes = await authenticatedFetch(execUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({
+          documentIds: kept.map(d => d.documentId),
+          playbookId,
+          actionId: null,
+          additionalContext: null,
+        }),
+        signal: abort.signal,
+      });
+      if (!execRes.ok) {
+        const errText = await execRes.text().catch(() => '');
+        throw new Error(errText || `Analysis failed (HTTP ${execRes.status})`);
+      }
+      if (!execRes.body) {
+        throw new Error('Analysis response body not readable');
+      }
+
+      // 3) Read SSE stream and accumulate the summary text
+      const reader = execRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulated = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const event of events) {
+          for (const line of event.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const json = trimmed.slice(5).trim();
+            if (!json || json === '[DONE]') continue;
+            let chunk: { type?: string; content?: string; error?: string; done?: boolean } = {};
+            try {
+              chunk = JSON.parse(json);
+            } catch {
+              continue;
+            }
+            if (chunk.type === 'error' || chunk.error) {
+              throw new Error(chunk.error ?? 'Analysis returned an error');
+            }
+            if (chunk.type === 'chunk' || chunk.content) {
+              accumulated += chunk.content ?? '';
+              setCombinedSummary(accumulated);
+            }
+            if (chunk.type === 'done' || chunk.done) {
+              setSummaryStatus('done');
+              return;
+            }
+          }
+        }
+      }
+      setSummaryStatus('done');
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      const msg = err instanceof Error ? err.message : 'Failed to generate summary';
+      setSummaryError(msg);
+      setSummaryStatus('error');
     }
-    summarySeededRef.current = true;
-  }, [kept, aiSummary]);
+  }, [kept, authenticatedFetch, bffBaseUrl]);
+
+  React.useEffect(() => {
+    return () => summaryAbortRef.current?.abort();
+  }, []);
 
   const renderSummaryStep = React.useCallback(() => {
-    // Trigger the hook the first time this step renders.
-    seedAiSummary();
+    // Trigger the combined-summary call the first time this step renders for
+    // the current selection.
+    void runCombinedSummary();
 
-    const docs = kept;
-    const stateByDoc = new Map(aiSummary.documents.map(d => [d.documentId, d]));
+    const isStreaming = summaryStatus === 'running';
+    const hasError = summaryStatus === 'error';
 
     return (
       <div className={styles.stepRoot}>
         <div className={styles.stepHeader}>
           <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
-            Summary
+            Combined Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
-            AI-generated summary of each document via the Document Profile playbook.
-            This is informational only — you can compose the email body on the next step.
+            One combined AI analysis of {kept.length} document{kept.length === 1 ? '' : 's'}
+            {' '}via the "Summarize New File(s)" playbook. This is informational only — you
+            can compose the email body on the next step.
           </Text>
         </div>
 
-        {docs.length === 0 ? (
+        {kept.length === 0 ? (
           <Text className={styles.emptyState}>No documents selected.</Text>
         ) : (
-          docs.map(d => {
-            const live = stateByDoc.get(d.documentId);
-            const liveText = live?.summary?.trim();
-            const cachedText = (d.tldr || d.summary || '').trim();
-            const text = liveText || cachedText;
-            const isStreaming = live?.status === 'streaming' || live?.status === 'pending';
-            const hasError = live?.status === 'error';
-            return (
-              <Card key={d.documentId} className={styles.summaryCard}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-                  <Text size={300} weight="semibold" className={styles.summaryHeader}>
-                    {d.name}
-                  </Text>
-                  {isStreaming && <Spinner size="extra-tiny" aria-label="Generating summary" />}
-                </div>
-                {hasError && (
-                  <Text size={200} className={styles.summaryEmpty}>
-                    Could not generate summary: {live?.error}
-                  </Text>
-                )}
-                {!hasError && text ? (
-                  <Text size={200} className={styles.summaryBody}>
-                    {text.length > SUMMARY_PREVIEW_CHAR_CAP
-                      ? text.slice(0, SUMMARY_PREVIEW_CHAR_CAP) + '…'
-                      : text}
-                  </Text>
-                ) : !hasError && !isStreaming && (
-                  <Text size={200} className={styles.summaryEmpty}>
-                    (no summary available)
-                  </Text>
-                )}
-              </Card>
-            );
-          })
+          <Card className={styles.summaryCard}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, marginBottom: tokens.spacingVerticalXS }}>
+              <Text size={300} weight="semibold" className={styles.summaryHeader}>
+                Documents: {kept.map(d => d.name).join(', ')}
+              </Text>
+              {isStreaming && <Spinner size="extra-tiny" aria-label="Generating summary" />}
+            </div>
+            {hasError && (
+              <Text size={200} className={styles.summaryEmpty}>
+                Could not generate summary: {summaryError}
+              </Text>
+            )}
+            {!hasError && combinedSummary ? (
+              <Text size={200} className={styles.summaryBody}>
+                {combinedSummary}
+              </Text>
+            ) : !hasError && !isStreaming && (
+              <Text size={200} className={styles.summaryEmpty}>
+                (no summary available)
+              </Text>
+            )}
+            {!hasError && !combinedSummary && isStreaming && (
+              <Text size={200} className={styles.summaryEmpty}>
+                Generating combined summary…
+              </Text>
+            )}
+          </Card>
         )}
       </div>
     );
-  }, [kept, styles]);
+  }, [kept, styles, runCombinedSummary, combinedSummary, summaryStatus, summaryError]);
 
   // ---------------------------------------------------------------------
   // Step 3 — Compose
