@@ -15,7 +15,7 @@ import { SemanticSearchApiService } from '../services';
  * Default search options
  */
 const DEFAULT_OPTIONS: SearchOptions = {
-  limit: 5,
+  limit: 8,
   offset: 0,
   includeHighlights: true,
 };
@@ -102,8 +102,9 @@ export function useSemanticSearch(
     matterTypes: [],
     dateRange: null,
     fileTypes: [],
-    threshold: 0,
+    threshold: 50,
     searchMode: 'hybrid',
+    associatedOnly: true,
   });
 
   // Calculate if more results available

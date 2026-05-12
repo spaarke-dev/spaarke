@@ -12,7 +12,7 @@
 import * as React from 'react';
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { makeStyles, tokens, shorthands, Text, Link, Button, Tooltip } from '@fluentui/react-components';
-import { ChevronRight20Regular } from '@fluentui/react-icons';
+import { ChevronRight20Regular, Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
 import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, SummaryData } from './types';
 import { SearchInput, FilterPanel, ResultsList, LoadingState, EmptyState, ErrorState } from './components';
 import { useSemanticSearch, useFilters } from './hooks';
@@ -112,6 +112,22 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     ...shorthands.padding(tokens.spacingHorizontalL),
+  },
+
+  // Toolbar above empty/initial states — mirrors ResultsList's header so the
+  // action icons (refresh / + Add Document / open viewer) stay in one place
+  // regardless of whether documents are present.
+  emptyStateToolbar: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+  },
+  emptyStateToolbarButton: {
+    minWidth: 'auto',
+    ...shorthands.padding('0px'),
   },
 
   // Version footer (always visible)
@@ -239,7 +255,9 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
 
   // Filter pane collapse state
-  const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(true);
+  // Sidebar expanded by default so the "Associated Only" toggle (which is now ON
+  // by default) and the threshold slider are immediately visible.
+  const [isFilterPaneCollapsed, setIsFilterPaneCollapsed] = useState(false);
   const handleToggleFilterPane = useCallback(() => {
     setIsFilterPaneCollapsed(prev => !prev);
   }, []);
@@ -325,6 +343,29 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     setHasSearched(true);
     void search(queryInput, filters);
   }, [queryInput, filters, search, isAuthInitialized]);
+
+  // Auto-re-search when "Associated Only" flips. This toggle swaps the entire
+  // backend path (Dataverse-direct vs AI Search), so the previous result set
+  // is meaningless — the user expects the grid to update immediately, not to
+  // hunt for an "Apply" button.
+  const associatedOnlyRef = useRef<boolean | undefined>(filters.associatedOnly);
+  useEffect(() => {
+    if (!isAuthInitialized) {
+      console.log('[SemanticSearch] toggle effect skipped — auth not ready');
+      return;
+    }
+    // Skip the very first render — we don't want to fire a search before the
+    // user has interacted with the toggle. Only react to true value CHANGES.
+    if (associatedOnlyRef.current === filters.associatedOnly) return;
+    console.log(
+      '[SemanticSearch] associatedOnly changed: %s → %s — auto-re-searching',
+      associatedOnlyRef.current,
+      filters.associatedOnly
+    );
+    associatedOnlyRef.current = filters.associatedOnly;
+    setHasSearched(true);
+    void search(queryInput, filters);
+  }, [filters.associatedOnly, isAuthInitialized, queryInput, search, filters]);
 
   // Handle filter changes - update filter state only.
   // Search is triggered explicitly via Enter key or Search button click.
@@ -412,11 +453,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     void navigationService.viewAllResults(query, searchScope, scopeId, filters);
   }, [navigationService, query, searchScope, scopeId, filters]);
 
-  // Handle reload — re-run the current search query
+  // Handle reload — re-run the current search query. Empty query is supported
+  // (the hook returns all documents in scope), so this also works in the
+  // initial/empty state where the user hasn't typed anything yet.
   const handleReload = useCallback(() => {
-    if (query) {
-      void search(query, filters);
-    }
+    void search(query || '', filters);
   }, [query, search, filters]);
 
   // Handle Find Similar — opens DocumentRelationshipViewer as an in-page iframe dialog
@@ -513,13 +554,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     }
   }, [results, context, isDarkMode, resolvedApiBaseUrl]);
 
-  // Handle Add Document — opens DocumentUploadWizard Code Page dialog
+  // Handle Add Document — opens DocumentUploadWizard Code Page dialog.
+  // After upload completes, always re-run the search (empty query returns all
+  // documents in scope) so newly uploaded files appear even when the user is
+  // in the initial state and hasn't typed a query.
   const handleAddDocument = useCallback(() => {
     void navigationService.openAddDocument(scopeId, searchScope !== 'all' ? searchScope : null, () => {
-      // Refresh search results after upload completes
-      if (query) {
-        void search(query, filters);
-      }
+      void search(query || '', filters);
     });
   }, [navigationService, scopeId, searchScope, query, search, filters]);
 
@@ -686,19 +727,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || 'No summary available.'}\n\n────\n\nKind regards`
     : '';
 
-  // Determine what content to show in main area
-  // Apply "Associated Only" client-side filter at the component level.
-  // When toggled ON, only show documents whose matterId/recordId matches the current scopeId.
-  const filteredResults = useMemo(() => {
-    if (!filters.associatedOnly || !scopeId) return results;
-    const normalizedScopeId = scopeId.replace(/[{}]/g, '').toLowerCase();
-    return results.filter(r => {
-      if (r.matterId && r.matterId.replace(/[{}]/g, '').toLowerCase() === normalizedScopeId) return true;
-      if (r.recordId && r.recordId.replace(/[{}]/g, '').toLowerCase() === normalizedScopeId) return true;
-      return false;
-    });
-  }, [results, filters.associatedOnly, scopeId]);
-  const filteredTotalCount = filters.associatedOnly ? filteredResults.length : totalCount;
+  // The BFF now handles both associatedOnly filtering (Dataverse-direct query) and
+  // semantic-mode threshold filtering server-side. The PCF just renders what comes
+  // back. The previous client-side filter was imprecise (it inspected matterId on
+  // AI Search hits, which depended on indexing being correct).
+  const filteredResults = results;
+  const filteredTotalCount = totalCount;
 
   const renderMainContent = () => {
     // Auth initializing state
@@ -731,9 +765,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Empty state (after search with no results)
     if (hasSearched && results.length === 0 && !isLoading) {
       return (
-        <div className={styles.centeredState}>
-          <EmptyState query={query} hasFilters={hasActiveFilters} />
-        </div>
+        <>
+          {renderActionsToolbar()}
+          <div className={styles.centeredState}>
+            <EmptyState query={query} hasFilters={hasActiveFilters} />
+          </div>
+        </>
       );
     }
 
@@ -767,13 +804,51 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       );
     }
 
-    // Initial state (before first search)
+    // Initial state (before first search) — show the same actions toolbar so
+    // users on a record with no documents can upload without needing to search.
     return (
-      <div className={styles.centeredState}>
-        <Text>Enter a search query to find documents</Text>
-      </div>
+      <>
+        {renderActionsToolbar()}
+        <div className={styles.centeredState}>
+          <Text>Enter a search query to find documents</Text>
+        </div>
+      </>
     );
   };
+
+  // Renders the actions toolbar (refresh / + Add Document / open viewer) above
+  // empty and initial states so the icons are always reachable, matching the
+  // toolbar rendered inside ResultsList when documents are present.
+  const renderActionsToolbar = () => (
+    <div className={styles.emptyStateToolbar}>
+      <Tooltip content="Reload results" relationship="label">
+        <Button
+          className={styles.emptyStateToolbarButton}
+          appearance="subtle"
+          size="small"
+          icon={<ArrowClockwise20Regular />}
+          aria-label="Reload results"
+          onClick={handleReload}
+        />
+      </Tooltip>
+      {handleAddDocument && (
+        <Tooltip content="Add Document" relationship="label">
+          <Button
+            className={styles.emptyStateToolbarButton}
+            appearance="subtle"
+            size="small"
+            icon={<Add20Regular />}
+            aria-label="Add Document"
+            onClick={handleAddDocument}
+          />
+        </Tooltip>
+      )}
+      {/* "Open full viewer" is intentionally omitted in the empty state.
+          DocumentRelationshipViewer is single-document-centric (requires a
+          documentId) — opening it with no results would just show a
+          "Missing Parameters" error. */}
+    </div>
+  );
 
   // Combine root styles based on mode
   const rootClassName = compactMode ? `${styles.root} ${styles.rootCompact}` : styles.root;
@@ -842,7 +917,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.31 • Built 2026-04-05</Text>
+        <Text size={100}>v1.1.37 • Built 2026-05-12</Text>
       </div>
 
       {/* Find Similar — shared iframe dialog */}

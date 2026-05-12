@@ -33,6 +33,16 @@ public sealed record SearchOptions
     /// </summary>
     [JsonPropertyName("hybridMode")]
     public string HybridMode { get; init; } = HybridSearchMode.Rrf;
+
+    /// <summary>
+    /// Minimum combined relevance score (0.0-1.0). Results below this threshold are
+    /// excluded server-side BEFORE the count is reported, so the UI's "X documents found"
+    /// matches what's actually shown. Ignored when <c>AssociatedOnly=true</c> on the
+    /// request (Dataverse-direct results don't have a score). Default 0.0 (no filter).
+    /// </summary>
+    [Range(0.0, 1.0, ErrorMessage = "MinScore must be between 0.0 and 1.0")]
+    [JsonPropertyName("minScore")]
+    public double MinScore { get; init; } = 0.0;
 }
 
 /// <summary>

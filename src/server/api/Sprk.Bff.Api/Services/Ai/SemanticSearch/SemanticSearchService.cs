@@ -87,6 +87,14 @@ public sealed class SemanticSearchService : ISemanticSearchService
         var limit = request.Options?.Limit ?? 20;
         var offset = request.Options?.Offset ?? 0;
         var includeHighlights = request.Options?.IncludeHighlights ?? true;
+        var minScore = request.Options?.MinScore ?? 0.0;
+
+        // Associated-only mode: bypass Azure AI Search and query Dataverse directly so
+        // just-uploaded documents appear immediately (no indexing lag).
+        if (request.AssociatedOnly)
+        {
+            return await SearchAssociatedOnlyAsync(request, limit, offset, totalStopwatch, cancellationToken);
+        }
 
         _logger.LogDebug(
             "Starting semantic search for tenant {TenantId}, mode={Mode}, query length={QueryLength}",
@@ -161,11 +169,29 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 includeHighlights,
                 cancellationToken);
 
-            // Get total count from response
-            var totalResults = searchResults.TotalCount ?? results.Count;
+            // The raw count from Azure AI Search is the number of CHUNKS matching the
+            // filter (RAG-indexed docs are split into multiple chunks). After
+            // ProcessSearchResultsAsync dedupes by documentId, the meaningful count is
+            // the number of UNIQUE documents — that's what the UI should display.
+            // (Previously: var totalResults = searchResults.TotalCount ?? results.Count
+            //  which reported chunk count and caused "12 found / 2 shown" mismatches.)
+            var totalResults = results.Count;
 
             // Step 7b: Enrich results with Dataverse metadata (createdBy, summary, tldr)
             results = await EnrichResultsWithDataverseMetadataAsync(results, cancellationToken);
+
+            // Step 7c: Apply server-side score threshold so the total count reflects
+            // what the UI will actually show. Before this, the count included low-relevance
+            // hits the user couldn't see, causing the "68 found / 49 shown" mismatch.
+            if (minScore > 0.0)
+            {
+                var beforeCount = results.Count;
+                results = results.Where(r => r.CombinedScore >= minScore).ToList();
+                totalResults = results.Count;
+                _logger.LogDebug(
+                    "Applied MinScore={MinScore} filter: {Before} → {After} results",
+                    minScore, beforeCount, results.Count);
+            }
 
             // Step 8: Build applied filters summary
             var appliedFilters = BuildAppliedFilters(processedRequest, filter);
@@ -543,6 +569,168 @@ public sealed class SemanticSearchService : ISemanticSearchService
             DateRange = request.Filters?.DateRange is not null
             ? new AppliedDateRange { From = request.Filters.DateRange.From, To = request.Filters.DateRange.To }
             : null
+        };
+    }
+
+    #endregion
+
+    #region Associated-Only path (Dataverse-direct, no AI Search)
+
+    /// <summary>
+    /// Queries Dataverse directly for documents associated with the parent record via
+    /// the relevant lookup (<c>_sprk_matter_value</c> / <c>_sprk_project_value</c> /
+    /// <c>_sprk_invoice_value</c>) and returns them as <see cref="SearchResult"/>s.
+    /// </summary>
+    /// <remarks>
+    /// This path bypasses Azure AI Search so just-uploaded documents are visible
+    /// immediately. The optional <c>Query</c> is applied as a case-insensitive substring
+    /// match against the document name. Results carry <c>CombinedScore=0.0</c> because
+    /// there is no semantic relevance to rank by — sort order is recency DESC then name.
+    /// </remarks>
+    private async Task<SemanticSearchResponse> SearchAssociatedOnlyAsync(
+        SemanticSearchRequest request,
+        int limit,
+        int offset,
+        Stopwatch totalStopwatch,
+        CancellationToken cancellationToken)
+    {
+        var queryStopwatch = Stopwatch.StartNew();
+
+        if (string.IsNullOrWhiteSpace(request.EntityType) || string.IsNullOrWhiteSpace(request.EntityId))
+        {
+            throw new ArgumentException(
+                "associatedOnly=true requires scope=entity with valid entityType and entityId.",
+                nameof(request));
+        }
+
+        if (!Guid.TryParse(request.EntityId, out var parentGuid))
+        {
+            throw new ArgumentException($"entityId '{request.EntityId}' is not a valid GUID.", nameof(request));
+        }
+
+        // Dispatch on parent entity type — these are the lookup fields the upload wizard sets.
+        IEnumerable<DocumentEntity> documents = request.EntityType.ToLowerInvariant() switch
+        {
+            "matter"  => await _documentService.GetDocumentsByMatterAsync(parentGuid, null, cancellationToken),
+            "project" => await _documentService.GetDocumentsByProjectAsync(parentGuid, null, cancellationToken),
+            "invoice" => await _documentService.GetDocumentsByInvoiceAsync(parentGuid, null, cancellationToken),
+            _ => throw new ArgumentException(
+                $"associatedOnly is not supported for entityType '{request.EntityType}' " +
+                "(supported: matter, project, invoice).",
+                nameof(request))
+        };
+
+        // Optional client-supplied filters: substring name match, file-type filter, date range.
+        var queryText = request.Query?.Trim();
+        if (!string.IsNullOrEmpty(queryText))
+        {
+            documents = documents.Where(d =>
+                (d.Name?.Contains(queryText, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (d.FileName?.Contains(queryText, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (d.DocumentType?.Contains(queryText, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        if (request.Filters?.FileTypes is { Count: > 0 } fileTypes)
+        {
+            var fileTypeSet = new HashSet<string>(fileTypes, StringComparer.OrdinalIgnoreCase);
+            documents = documents.Where(d => d.FileName is not null
+                && fileTypeSet.Contains(System.IO.Path.GetExtension(d.FileName).TrimStart('.')));
+        }
+
+        if (request.Filters?.DocumentTypes is { Count: > 0 } docTypes)
+        {
+            var docTypeSet = new HashSet<string>(docTypes, StringComparer.OrdinalIgnoreCase);
+            documents = documents.Where(d => d.DocumentType is not null && docTypeSet.Contains(d.DocumentType));
+        }
+
+        if (request.Filters?.DateRange is { } dateRange)
+        {
+            if (dateRange.From is { } from)  documents = documents.Where(d => d.CreatedOn >= from.UtcDateTime);
+            if (dateRange.To   is { } to)    documents = documents.Where(d => d.CreatedOn <= to.UtcDateTime);
+        }
+
+        // Sort: most recent first, then name ascending for stable ordering.
+        var sortedAll = documents
+            .OrderByDescending(d => d.CreatedOn)
+            .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var pageResults = sortedAll
+            .Skip(offset)
+            .Take(limit)
+            .Select(d => MapDocumentEntityToSearchResult(d, request.EntityType!))
+            .ToList();
+
+        queryStopwatch.Stop();
+        totalStopwatch.Stop();
+
+        _logger.LogInformation(
+            "Associated-only search for {EntityType} {EntityId}: {Total} matched, {Returned} returned in {Ms}ms",
+            request.EntityType, request.EntityId, sortedAll.Count, pageResults.Count, totalStopwatch.ElapsedMilliseconds);
+
+        return new SemanticSearchResponse
+        {
+            Results = pageResults,
+            Metadata = new SearchMetadata
+            {
+                TotalResults = sortedAll.Count,
+                ReturnedResults = pageResults.Count,
+                SearchDurationMs = queryStopwatch.ElapsedMilliseconds,
+                EmbeddingDurationMs = 0,
+                ExecutedMode = "associatedOnly",
+                AppliedFilters = new AppliedFilters
+                {
+                    Scope = request.Scope,
+                    EntityType = request.EntityType,
+                    EntityId = request.EntityId,
+                    DocumentTypes = request.Filters?.DocumentTypes,
+                    FileTypes = request.Filters?.FileTypes,
+                    DateRange = request.Filters?.DateRange is not null
+                        ? new AppliedDateRange { From = request.Filters.DateRange.From, To = request.Filters.DateRange.To }
+                        : null
+                },
+                Warnings = null
+            }
+        };
+    }
+
+    /// <summary>
+    /// Maps a Dataverse <see cref="DocumentEntity"/> to a <see cref="SearchResult"/>
+    /// shaped like an AI Search response, so the client can treat both paths uniformly.
+    /// </summary>
+    private static SearchResult MapDocumentEntityToSearchResult(DocumentEntity doc, string parentEntityType)
+    {
+        // Parent lookup — the entity type dictates which property holds the FK.
+        var (parentId, parentName) = parentEntityType.ToLowerInvariant() switch
+        {
+            "matter"  => (doc.MatterId,  doc.MatterName),
+            "project" => (doc.ProjectId, doc.ProjectName),
+            "invoice" => (doc.InvoiceId, doc.InvoiceName),
+            _ => (null, null)
+        };
+
+        var fileExt = doc.FileName is not null
+            ? System.IO.Path.GetExtension(doc.FileName).TrimStart('.').ToLowerInvariant()
+            : null;
+
+        return new SearchResult
+        {
+            DocumentId = doc.Id,
+            SpeFileId = doc.GraphItemId,
+            Name = doc.Name,
+            DocumentType = doc.DocumentType,
+            FileType = string.IsNullOrEmpty(fileExt) ? null : fileExt,
+            // No semantic score on the Dataverse-direct path — the client should hide
+            // any "relevance" UI when ExecutedMode == "associatedOnly".
+            CombinedScore = 0.0,
+            ParentEntityType = parentEntityType,
+            ParentEntityId = parentId,
+            ParentEntityName = parentName,
+            CreatedAt = doc.CreatedOn,
+            UpdatedAt = doc.ModifiedOn,
+            CreatedBy = doc.CreatedBy,
+            Summary = doc.Summary,
+            Tldr = doc.Tldr
         };
     }
 

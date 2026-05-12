@@ -63,6 +63,18 @@ public sealed record SemanticSearchRequest
     /// </summary>
     [JsonPropertyName("options")]
     public SearchOptions? Options { get; init; }
+
+    /// <summary>
+    /// When true, restricts results to documents that are DIRECTLY associated with the
+    /// specified parent record in Dataverse (via <c>_sprk_matter_value</c>,
+    /// <c>_sprk_project_value</c>, or <c>_sprk_invoice_value</c>) — bypassing Azure AI
+    /// Search entirely. Use this when you need "live" associated documents that haven't
+    /// been indexed yet (e.g., just-uploaded files).
+    /// Requires <c>scope=entity</c> with valid <c>entityType</c> and <c>entityId</c>.
+    /// Default false — uses the AI Search path.
+    /// </summary>
+    [JsonPropertyName("associatedOnly")]
+    public bool AssociatedOnly { get; init; }
 }
 
 /// <summary>

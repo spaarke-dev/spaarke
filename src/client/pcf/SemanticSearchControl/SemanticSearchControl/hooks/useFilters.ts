@@ -11,15 +11,20 @@ import { useState, useCallback, useMemo } from 'react';
 import { SearchFilters, DateRange } from '../types';
 
 /**
- * Initial/empty filter state
+ * Initial filter state. Defaults match the user-expected behavior on a record form:
+ * - `associatedOnly: true` — show direct Dataverse-associated docs by default (matches
+ *   what a regular subgrid would show, no indexing lag).
+ * - `threshold: 50` — when the user toggles to semantic mode, hide weak matches by
+ *   default. This is the same floor DocumentRelationshipViewer uses.
  */
 const initialFilters: SearchFilters = {
   documentTypes: [],
   matterTypes: [],
   dateRange: null,
   fileTypes: [],
-  threshold: 0,
+  threshold: 50,
   searchMode: 'hybrid',
+  associatedOnly: true,
 };
 
 /**
@@ -118,15 +123,18 @@ export function useFilters(): UseFiltersResult {
     setFiltersState(initialFilters);
   }, []);
 
-  // Compute whether any filters are active
+  // Compute whether any filters are active. Note: associatedOnly and the 50%
+  // threshold are now defaults, so they don't count as "active filters" for the
+  // purposes of the "Clear filters" affordance.
   const hasActiveFilters = useMemo(() => {
     return (
       filters.documentTypes.length > 0 ||
       filters.matterTypes.length > 0 ||
       filters.fileTypes.length > 0 ||
       filters.dateRange !== null ||
-      filters.threshold > 0 ||
-      filters.searchMode !== 'hybrid'
+      filters.threshold !== 50 ||
+      filters.searchMode !== 'hybrid' ||
+      filters.associatedOnly === false
     );
   }, [filters]);
 

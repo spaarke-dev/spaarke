@@ -9,9 +9,11 @@ alwaysApply: false
 # BFF API Deployment
 
 > **Category**: Operations
-> **Last Updated**: February 2026
+> **Last Updated**: May 12, 2026 (added SHA-256 verification + auto-recover after observing silent deploy failures on Windows App Service)
 
 Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
+
+> 🚨 **CRITICAL — Silent Deploy Failures (May 2026)**: `az webapp deploy --type zip` has been observed to return HTTP 200 + Kudu `status=4 success` while NOT actually replacing the DLLs on disk. The running .NET host holds file locks on the DLLs and Windows refuses overwrites — but the deploy mechanism reports success anyway. **Never trust the success message alone.** Always verify with SHA-256 hash comparison via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically; manual deploys MUST verify (see Manual Verification section below).
 
 ---
 
@@ -156,8 +158,111 @@ When the user wants to deploy manually for fastest iteration:
 | Package size < 40 MB | Incomplete zip (missing DLLs) | Delete `publish/` dir, re-run script |
 | MSB3030 error during publish | Nested `publish/publish/` | Delete `src/server/api/Sprk.Bff.Api/publish/` |
 | Health check passes but endpoints 404 | Incomplete package | Re-deploy with script, verify ~61 MB |
-| Deploy succeeds but old code runs | Azure caching | Restart app: `az webapp restart -g spe-infrastructure-westus2 -n spe-api-dev-67e2xz` |
-| Persistent old code after restart | Deployment didn't register | Use Kudu Zip Push Deploy as fallback (see azure-deploy skill) |
+| Deploy reports success but old code runs (SILENT FILE LOCK FAILURE) | The running .NET host on Windows App Service held file locks on `Sprk.Bff.Api.dll`. `az webapp deploy --type zip` returned 200 and Kudu logged "Deployment successful" but the DLL on disk was never replaced. **First observed May 12, 2026.** | The hardened `Deploy-BffApi.ps1` now compares local + remote SHA-256 hashes for 6 critical files after every deploy and auto-recovers with stop → Kudu zipdeploy → start. If you must deploy manually, always verify: see "Manual verification" below. |
+| Persistent old code after restart | Deployment didn't register | Use Kudu Zip Push Deploy: `curl -X POST "https://{app}.scm.azurewebsites.net/api/zipdeploy?isAsync=true" -H "Authorization: Bearer $(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)" -H "Content-Type: application/zip" --data-binary @publish.zip` — stop the app first if files are locked. |
+
+### Why "deploy succeeded" can be a lie (May 12, 2026)
+
+On Windows App Service, the running .NET host process opens `Sprk.Bff.Api.dll` and other DLLs as memory-mapped files. Windows then refuses to overwrite these locked files. `az webapp deploy --type zip` (via Kudu OneDeploy) is tolerant of partial overwrite failures: it logs *"Clean deploying to C:\home\site\wwwroot"* and *"Deployment successful"* regardless. The HTTP 200 + Kudu `status=4` tells you Kudu RECEIVED and PROCESSED the zip — it does NOT confirm files were replaced.
+
+**This had not been observed before May 2026** despite hundreds of successful BFF deploys between Dec 2025 and Apr 2026. The root cause of the new behavior is not fully understood (likely a Windows App Service platform change in worker process file-handle management). The hardened script's hash-verify + auto-recover is the defensive workaround.
+
+**The reliable test for any BFF deploy: SHA-256 hash of critical files via Kudu VFS API.**
+
+### Manual verification (if not using the hardened script)
+
+```powershell
+$mgmtToken = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv
+$kuduHeaders = @{ Authorization = "Bearer $mgmtToken" }
+$kuduBase = "https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/vfs/site/wwwroot"
+
+foreach ($f in 'Sprk.Bff.Api.dll','Sprk.Bff.Api.deps.json','Spaarke.Core.dll','Spaarke.Dataverse.dll','web.config') {
+    $local = (Get-FileHash -Algorithm SHA256 -Path "deploy/api-publish/$f").Hash
+    $tmp = New-TemporaryFile
+    Invoke-WebRequest -Uri "$kuduBase/$f" -Headers $kuduHeaders -OutFile $tmp -UseBasicParsing
+    $remote = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash
+    Remove-Item $tmp
+    $match = if ($local -eq $remote) { "MATCH" } else { "MISMATCH" }
+    Write-Host "${match}: $f"
+}
+```
+
+If any file shows MISMATCH, the deploy did NOT replace it. Recover with stop → Kudu zipdeploy → start (see auto-recover logic in the hardened script).
+
+---
+
+## Future Migration: WEBSITE_RUN_FROM_PACKAGE (planned, not yet executed)
+
+The current mitigation (hash verify + auto-recover) is reliable but inelegant — every deploy that hits a file lock pays a stop/start cycle. The long-term fix is to migrate the App Service to **Run-From-Package mode**, where the deployed zip is mounted as a read-only filesystem and wwwroot is never written to. File locks become impossible because there are no physical files to lock.
+
+**Status**: queued, not yet performed. The hardened script handles the current pain reliably so there's no urgency, but the migration eliminates the failure class entirely.
+
+### Risk-managed migration procedure
+
+When ready to switch, follow these steps in order. Do NOT skip steps — each catches a class of breakage.
+
+1. **Audit assumptions of mutable wwwroot**:
+   - Search the repo for any code that writes to `wwwroot/`, `/home/site/wwwroot/`, `/site/wwwroot/`, or `D:\home\site\wwwroot`. None should exist in BFF runtime code (the BFF doesn't self-modify), but check.
+   - Search Kudu console history for ad-hoc edits (e.g., someone hand-editing `web.config` or `appsettings.json` in the portal). Document and re-apply those as build-time changes.
+   - Check CI/CD pipelines for assumptions about deploy targets.
+
+2. **Test on a staging slot first** (NOT directly on dev):
+   ```bash
+   # Create a staging slot if it doesn't exist
+   az webapp deployment slot create --name spe-api-dev-67e2xz \
+     --resource-group spe-infrastructure-westus2 --slot staging-rfp-test
+
+   # Enable run-from-package on the staging slot only
+   az webapp config appsettings set --name spe-api-dev-67e2xz \
+     --resource-group spe-infrastructure-westus2 --slot staging-rfp-test \
+     --settings WEBSITE_RUN_FROM_PACKAGE=1
+
+   # Deploy to the staging slot with the hardened script
+   .\scripts\Deploy-BffApi.ps1 -UseSlotDeploy -SlotName staging-rfp-test
+   ```
+
+3. **Smoke test the staging slot for at least one full workday**:
+   - All BFF endpoints respond
+   - Sign-in flow works
+   - File upload + AI processing works end-to-end
+   - Background workers (Service Bus consumers) still process messages
+   - No new errors in Application Insights vs. the production slot baseline
+
+4. **Verify the deploy mechanism itself**:
+   - Make a small text-only change (e.g., a log message)
+   - Re-deploy to the staging slot
+   - Confirm the new code is running (use `/swagger` or a known endpoint that returns the changed text)
+   - The hardened script's hash-verify should still PASS — it just verifies files inside the mounted zip rather than on wwwroot
+
+5. **Cutover**:
+   - Enable `WEBSITE_RUN_FROM_PACKAGE=1` on the production slot
+   - Deploy with the hardened script
+   - Verify hash-match and health endpoints
+   - Monitor Application Insights for 15-30 min for new error patterns
+
+6. **Document in this skill**: once cutover is complete and stable, update this section to note the new mode is live + remove the "future migration" framing. Note any operational quirks discovered.
+
+7. **Rollback path** (keep handy during migration):
+   ```bash
+   # If run-from-package causes problems, disable it and redeploy
+   az webapp config appsettings delete --name spe-api-dev-67e2xz \
+     --resource-group spe-infrastructure-westus2 \
+     --setting-names WEBSITE_RUN_FROM_PACKAGE
+   .\scripts\Deploy-BffApi.ps1
+   ```
+
+### Things that break under Run-From-Package
+
+- Hot-editing files in Kudu console (wwwroot is read-only) — must use proper deploy
+- Anything that writes to `wwwroot/` at runtime (logs, generated files) — should already be writing to `/home/LogFiles/` or `/home/site/logs/`, but verify
+- Diagnostic file uploads via Kudu VFS PUT — read-only
+
+### Things that DON'T break
+
+- `/home/data/`, `/home/LogFiles/`, `/home/site/deployments/` — all remain writable
+- Application Insights, Service Bus, Key Vault — unaffected
+- Slot deploys + swap — fully supported
+- The hardened deploy script — its hash-verify works identically because Kudu VFS transparently reads from the mounted zip
 
 ---
 

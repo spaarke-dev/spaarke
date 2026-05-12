@@ -371,12 +371,23 @@ export class SemanticSearchApiService {
         entityId = request.scopeId ?? undefined;
     }
 
+    // Convert the client's 0-100 threshold into the BFF's 0.0-1.0 MinScore.
+    // Threshold filtering only applies to the semantic path — BFF ignores MinScore
+    // when associatedOnly=true, so we always include it.
+    const minScore =
+      request.filters?.threshold !== undefined && request.filters.threshold > 0
+        ? Math.min(1, Math.max(0, request.filters.threshold / 100))
+        : 0;
+
     // Build API request
     return {
       query: request.query,
       scope: apiScope,
       entityType,
       entityId,
+      // Pass associatedOnly to the BFF so it can branch to the Dataverse-direct path.
+      // The BFF requires scope=entity + entityType + entityId when this is true.
+      associatedOnly: request.filters?.associatedOnly ?? false,
       filters: request.filters
         ? {
             documentTypes: request.filters.documentTypes,
@@ -391,17 +402,16 @@ export class SemanticSearchApiService {
               : undefined,
           }
         : undefined,
-      options: request.options
-        ? {
-            top: request.options.limit,
-            skip: request.options.offset,
-            includeHighlights: request.options.includeHighlights,
-            // Pass search mode (hybrid, vectorOnly, keywordOnly) to BFF
-            ...(request.filters?.searchMode && request.filters.searchMode !== 'hybrid'
-              ? { hybridMode: request.filters.searchMode }
-              : {}),
-          }
-        : undefined,
+      options: {
+        limit: request.options?.limit,
+        offset: request.options?.offset,
+        includeHighlights: request.options?.includeHighlights,
+        minScore,
+        // Pass search mode (hybrid, vectorOnly, keywordOnly) to BFF
+        ...(request.filters?.searchMode && request.filters.searchMode !== 'hybrid'
+          ? { hybridMode: request.filters.searchMode }
+          : {}),
+      },
     };
   }
 }

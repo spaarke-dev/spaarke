@@ -385,9 +385,33 @@ if ($UseSlotDeploy) {
         }
     }
 } else {
-    # Direct deploy (dev workflow)
+    # Direct deploy (dev workflow). The "running process holds DLL file
+    # handles" failure mode where `az webapp deploy` reports success but the
+    # DLLs on disk are never replaced has been observed (May 2026) on Windows
+    # App Service plans. Mitigation: hash the critical files locally BEFORE
+    # deploy and re-fetch them via Kudu VFS AFTER deploy; if any hash mismatches,
+    # auto-recover by stopping the app, redeploying via Kudu zipdeploy, and
+    # starting. Fail loudly if the auto-recover also fails.
     Write-Host "[$stepNum/$totalSteps] Deploying directly to App Service..." -ForegroundColor Yellow
     Write-Host "  This may take 30-60 seconds..."
+
+    # Capture pre-deploy hashes of critical files for post-deploy verification.
+    $criticalFiles = @(
+        'Sprk.Bff.Api.dll',
+        'Sprk.Bff.Api.exe',
+        'Sprk.Bff.Api.deps.json',
+        'Spaarke.Core.dll',
+        'Spaarke.Dataverse.dll',
+        'web.config'
+    )
+    $localHashes = @{}
+    foreach ($f in $criticalFiles) {
+        $localPath = Join-Path $PublishPath $f
+        if (Test-Path $localPath) {
+            $localHashes[$f] = (Get-FileHash -Algorithm SHA256 -Path $localPath).Hash
+        }
+    }
+    Write-Host "  Captured pre-deploy hashes for $($localHashes.Count) critical files" -ForegroundColor Gray
 
     $ErrorActionPreference = "Continue"
     $deployOutput = az webapp deploy `
@@ -403,15 +427,93 @@ if ($UseSlotDeploy) {
         Write-Host $deployOutput
         throw "Deployment failed"
     }
-    Write-Host "  Deployment complete" -ForegroundColor Green
+    Write-Host "  Deployment command returned success" -ForegroundColor Green
 
     # Wait for app to restart
     Write-Host "  Waiting for app restart..." -ForegroundColor Gray
     Start-Sleep -Seconds 10
 
-    # --- Step 4: Verify ---
+    # --- Step 4: Verify file replacement (the bit that az webapp deploy lies about) ---
     $stepNum++
-    Write-Host "[$stepNum/$totalSteps] Verifying deployment..." -ForegroundColor Yellow
+    Write-Host "[$stepNum/$totalSteps] Verifying file replacement on server..." -ForegroundColor Yellow
+
+    $mgmtToken = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv
+    $kuduHeaders = @{ Authorization = "Bearer $mgmtToken" }
+    $kuduBase = "https://$AppServiceName.scm.azurewebsites.net/api/vfs/site/wwwroot"
+
+    $mismatches = @()
+    foreach ($f in $localHashes.Keys) {
+        try {
+            $tmp = New-TemporaryFile
+            Invoke-WebRequest -Uri "$kuduBase/$f" -Headers $kuduHeaders -OutFile $tmp -UseBasicParsing | Out-Null
+            $remoteHash = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash
+            Remove-Item $tmp -Force
+            if ($remoteHash -ne $localHashes[$f]) {
+                $mismatches += $f
+            }
+        } catch {
+            $mismatches += "$f (fetch failed: $($_.Exception.Message.Split([Environment]::NewLine)[0]))"
+        }
+    }
+
+    if ($mismatches.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Deploy reported success BUT $($mismatches.Count) file(s) were not replaced:" -ForegroundColor Red
+        foreach ($m in $mismatches) { Write-Host "    - $m" -ForegroundColor Yellow }
+        Write-Host ""
+        Write-Host "  Auto-recovering: stop -> zipdeploy via Kudu -> start..." -ForegroundColor Yellow
+
+        az webapp stop --name $AppServiceName --resource-group $ResourceGroupName | Out-Null
+        Start-Sleep -Seconds 15
+
+        $publishUrl = "https://$AppServiceName.scm.azurewebsites.net/api/zipdeploy?isAsync=true"
+        Invoke-WebRequest -Uri $publishUrl -Headers $kuduHeaders -Method Post `
+            -InFile $ZipPath -ContentType 'application/zip' -UseBasicParsing | Out-Null
+
+        # Poll Kudu until deployment completes
+        $deployEnd = $false
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 10
+            try {
+                $latest = Invoke-RestMethod -Uri "https://$AppServiceName.scm.azurewebsites.net/api/deployments/latest" -Headers $kuduHeaders
+                if ($latest.complete) { $deployEnd = $true; break }
+            } catch {}
+        }
+
+        az webapp start --name $AppServiceName --resource-group $ResourceGroupName | Out-Null
+
+        # Re-verify
+        Write-Host "  Re-verifying file hashes after auto-recover..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 10
+        $stillMismatched = @()
+        foreach ($f in $localHashes.Keys) {
+            try {
+                $tmp = New-TemporaryFile
+                Invoke-WebRequest -Uri "$kuduBase/$f" -Headers $kuduHeaders -OutFile $tmp -UseBasicParsing | Out-Null
+                $remoteHash = (Get-FileHash -Algorithm SHA256 -Path $tmp).Hash
+                Remove-Item $tmp -Force
+                if ($remoteHash -ne $localHashes[$f]) { $stillMismatched += $f }
+            } catch {
+                $stillMismatched += "$f (fetch failed)"
+            }
+        }
+
+        if ($stillMismatched.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  CRITICAL: Auto-recover did NOT fix the mismatch:" -ForegroundColor Red
+            foreach ($m in $stillMismatched) { Write-Host "    - $m" -ForegroundColor Red }
+            Write-Host "  Manual intervention required. See bff-deploy skill troubleshooting." -ForegroundColor Yellow
+            exit 1
+        }
+
+        Write-Host "  Auto-recover succeeded — all files now match local build" -ForegroundColor Green
+    } else {
+        Write-Host "  All $($localHashes.Count) critical files match local build (SHA-256 verified)" -ForegroundColor Green
+    }
+
+    # --- Step 5: Verify health ---
+    $stepNum++
+    Write-Host "[$stepNum/$totalSteps] Verifying health endpoint..." -ForegroundColor Yellow
 
     $healthy = Test-HealthCheck `
         -Url $ProductionHealthCheckUrl `

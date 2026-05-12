@@ -9,7 +9,7 @@
  */
 
 import * as React from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -22,7 +22,8 @@ import {
 import { ArrowClockwise20Regular, Add20Regular, Open20Regular } from '@fluentui/react-icons';
 import { IResultsListProps, SearchResult } from '../types';
 import { ResultCard } from './ResultCard';
-import { useInfiniteScroll } from '../hooks';
+// `useInfiniteScroll` no longer used — "Show more" + sentinel were removed
+// 2026-05-12. Users access the long-tail via the "Open full viewer" toolbar icon.
 
 const useStyles = makeStyles({
   container: {
@@ -139,48 +140,23 @@ export const ResultsList: React.FC<IResultsListProps> = ({
 }) => {
   const styles = useStyles();
 
-  // After the user clicks "Show more" once, switch to infinite scroll
-  const [infiniteScrollEnabled, setInfiniteScrollEnabled] = useState(false);
-
   // Info popover open state
   const [infoOpen, setInfoOpen] = useState(false);
 
-  // Client-side threshold filtering — hide results below the minimum score
-  const thresholdDecimal = threshold / 100;
-  const filteredResults = useMemo(() => {
-    if (threshold <= 0) return results;
-    return results.filter(r => r.combinedScore >= thresholdDecimal);
-  }, [results, threshold, thresholdDecimal]);
+  // The BFF now applies the score threshold server-side, so the displayed count
+  // matches what the API returned. No client-side threshold filter needed.
+  const filteredResults = results;
 
   // Check if DOM cap reached
   const isDomCapReached = filteredResults.length >= DOM_CAP;
   const displayedCount = Math.min(filteredResults.length, DOM_CAP);
 
-  // Infinite scroll hook - only active after user clicks "Show more"
-  const { sentinelRef } = useInfiniteScroll({
-    onLoadMore,
-    hasMore: infiniteScrollEnabled && hasMore && !isDomCapReached,
-    isLoading: isLoading || isLoadingMore,
-    threshold: 0.1,
-    rootMargin: '100px',
-  });
-
-  // Handle "Show more" click — load next page and enable infinite scroll
-  const handleShowMore = useCallback(() => {
-    setInfiniteScrollEnabled(true);
-    onLoadMore();
-  }, [onLoadMore]);
-
-  // How many were hidden by threshold
-  const hiddenByThreshold = results.length - filteredResults.length;
-
-  // Format result count message
+  // Format result count message. Threshold filtering happens server-side now —
+  // totalCount is the post-threshold count, so the displayed text never claims
+  // "X of Y" with mismatched numbers.
   const getResultCountMessage = () => {
     if (isLoading) return 'Searching...';
     if (totalCount === 0) return 'No results';
-    if (hiddenByThreshold > 0) {
-      return `${filteredResults.length} of ${totalCount} results (${hiddenByThreshold} below ${threshold}% threshold)`;
-    }
     if (isDomCapReached) {
       return `Showing ${displayedCount} of ${totalCount} results`;
     }
@@ -308,19 +284,10 @@ export const ResultsList: React.FC<IResultsListProps> = ({
             </div>
           )}
 
-          {/* Show more link (before infinite scroll is enabled) */}
-          {hasMore && !isDomCapReached && !isLoadingMore && !infiniteScrollEnabled && (
-            <div className={styles.showMoreLink}>
-              <Link onClick={handleShowMore}>
-                Show more results ({filteredResults.length} of {totalCount})
-              </Link>
-            </div>
-          )}
-
-          {/* Sentinel element for intersection observer (after Show more clicked) */}
-          {hasMore && !isDomCapReached && !isLoadingMore && infiniteScrollEnabled && (
-            <div ref={sentinelRef} className={styles.sentinel} />
-          )}
+          {/* "Show more results" link removed (2026-05-12): top-N is the inline
+              experience; users access the full list via the "Open full viewer"
+              toolbar icon. The sentinel-based infinite scroll is therefore also
+              removed — sentinelRef is unused. */}
         </div>
       </div>
     </div>

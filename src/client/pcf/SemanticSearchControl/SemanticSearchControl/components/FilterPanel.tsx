@@ -179,7 +179,10 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
     [filters, onFiltersChange]
   );
 
-  // Handle Associated Only toggle
+  // Handle Associated Only toggle. The parent has a useEffect that detects
+  // this specific flag changing and re-runs the search automatically — this
+  // toggle switches the entire backend path (Dataverse-direct vs AI Search)
+  // so requiring the user to also click Apply would be poor UX.
   const handleAssociatedOnlyChange = useCallback(
     (ev: React.ChangeEvent<HTMLInputElement>) => {
       onFiltersChange({
