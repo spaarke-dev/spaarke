@@ -8,7 +8,7 @@
     2. Creates deployment package (zip)
     3. Deploys to target slot (production direct or staging slot)
     4. Verifies health check on deployed slot
-    5. Swaps staging → production (if using slot deploy)
+    5. Swaps staging -> production (if using slot deploy)
     6. Verifies health check on production after swap
     7. Rolls back via swap-back if post-swap health check fails
 
@@ -420,14 +420,45 @@ if ($UseSlotDeploy) {
         --src-path $ZipPath `
         --type zip `
         --async false 2>&1 | Out-String
+    $deployExitCode = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Deploy command failed:" -ForegroundColor Red
-        Write-Host $deployOutput
-        throw "Deployment failed"
+    # If `az webapp deploy` itself failed (commonly Linux App Service "rsync exit code
+    # 123" file-in-use, or Windows 400 errors), skip straight to the auto-recover
+    # path: stop -> Kudu zipdeploy -> start. The hash-verify after-the-fact will
+    # confirm the result was correct.
+    if ($deployExitCode -ne 0) {
+        Write-Host "  Deploy command failed (exit=$deployExitCode). Trying stop -> Kudu zipdeploy -> start..." -ForegroundColor Yellow
+        Write-Host $deployOutput -ForegroundColor Gray
+
+        $mgmtToken = az account get-access-token --resource https://management.azure.com --query accessToken -o tsv
+        $kuduHeaders = @{ Authorization = "Bearer $mgmtToken" }
+
+        az webapp stop --name $AppServiceName --resource-group $ResourceGroupName | Out-Null
+        Start-Sleep -Seconds 15
+
+        $publishUrl = "https://$AppServiceName.scm.azurewebsites.net/api/zipdeploy?isAsync=true"
+        Invoke-WebRequest -Uri $publishUrl -Headers $kuduHeaders -Method Post `
+            -InFile $ZipPath -ContentType 'application/zip' -UseBasicParsing | Out-Null
+
+        $deployComplete = $false
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 10
+            try {
+                $latest = Invoke-RestMethod -Uri "https://$AppServiceName.scm.azurewebsites.net/api/deployments/latest" -Headers $kuduHeaders
+                if ($latest.complete) { $deployComplete = $true; break }
+            } catch {}
+        }
+
+        az webapp start --name $AppServiceName --resource-group $ResourceGroupName | Out-Null
+
+        if (-not $deployComplete) {
+            throw "Kudu zipdeploy fallback did not complete within 5 minutes"
+        }
+        Write-Host "  Stop -> Kudu zipdeploy -> start completed; will verify hashes" -ForegroundColor Green
+    } else {
+        Write-Host "  Deployment command returned success" -ForegroundColor Green
     }
-    Write-Host "  Deployment command returned success" -ForegroundColor Green
 
     # Wait for app to restart
     Write-Host "  Waiting for app restart..." -ForegroundColor Gray
@@ -506,7 +537,7 @@ if ($UseSlotDeploy) {
             exit 1
         }
 
-        Write-Host "  Auto-recover succeeded — all files now match local build" -ForegroundColor Green
+        Write-Host "  Auto-recover succeeded - all files now match local build" -ForegroundColor Green
     } else {
         Write-Host "  All $($localHashes.Count) critical files match local build (SHA-256 verified)" -ForegroundColor Green
     }

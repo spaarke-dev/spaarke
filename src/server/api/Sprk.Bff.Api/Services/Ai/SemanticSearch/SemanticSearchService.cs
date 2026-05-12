@@ -183,7 +183,15 @@ public sealed class SemanticSearchService : ISemanticSearchService
             // Step 7c: Apply server-side score threshold so the total count reflects
             // what the UI will actually show. Before this, the count included low-relevance
             // hits the user couldn't see, causing the "68 found / 49 shown" mismatch.
-            if (minScore > 0.0)
+            //
+            // IMPORTANT: only apply threshold when there's an actual search query. When the
+            // query is empty (Refresh button / initial load), Azure AI Search returns docs
+            // by filter only and the scores are RRF/BM25 values in the 0.01-0.05 range
+            // (no semantic intent to rank against). Applying a 0.5 threshold to those
+            // wipes EVERYTHING, leaving the user with an empty grid for what should be a
+            // "show me everything in scope" query.
+            var hasQuery = !string.IsNullOrWhiteSpace(processedRequest.Query);
+            if (minScore > 0.0 && hasQuery)
             {
                 var beforeCount = results.Count;
                 results = results.Where(r => r.CombinedScore >= minScore).ToList();
@@ -191,6 +199,12 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 _logger.LogDebug(
                     "Applied MinScore={MinScore} filter: {Before} → {After} results",
                     minScore, beforeCount, results.Count);
+            }
+            else if (minScore > 0.0 && !hasQuery)
+            {
+                _logger.LogDebug(
+                    "Skipping MinScore={MinScore} filter — empty query (no semantic relevance to threshold)",
+                    minScore);
             }
 
             // Step 8: Build applied filters summary
