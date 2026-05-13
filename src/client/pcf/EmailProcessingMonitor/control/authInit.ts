@@ -2,35 +2,52 @@
  * Authentication initialization for EmailProcessingMonitor PCF Control.
  *
  * Uses @spaarke/auth shared library for centralized MSAL token management.
- * This replaces the local AuthService.ts with the shared authenticatedFetch() pattern.
+ * The redirect URI is resolved at runtime from Xrm.Utility.getGlobalContext()
+ * so the same bundle works against any Dataverse environment.
  *
- * @spaarke/auth has NO React dependency — safe for React 16 PCF controls.
+ * Authority is intentionally NOT specified here — @spaarke/auth resolves a
+ * tenant-specific authority via resolveTenantFromXrm() (binding requirement;
+ * see feedback_auth-true-sso-requirement.md).
  *
- * Usage:
- *   import { initializeAuth } from './authInit';
- *   await initializeAuth(tenantId, clientAppId, bffAppId, bffApiUrl);
- *
- * Then use authenticatedFetch() from '@spaarke/auth' for all BFF API calls.
+ * @spaarke/auth has NO React dependency — safe for React 16 virtual PCFs.
  */
 
 import { initAuth } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
 
 /**
- * Initialize @spaarke/auth with PCF-specific configuration.
+ * Frame-walk to read the Dataverse org URL from Xrm.
+ * Throws if Xrm isn't reachable.
+ */
+function resolveClientUrl(): string {
+  if (typeof window === 'undefined') {
+    throw new Error('[authInit] window is undefined — cannot resolve Xrm context');
+  }
+  const frames: Window[] = [window];
+  try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+  try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top); } catch { /* cross-origin */ }
+  for (const frame of frames) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (frame as any).Xrm;
+      const ctx = xrm?.Utility?.getGlobalContext?.();
+      if (ctx && typeof ctx.getClientUrl === 'function') {
+        const url = ctx.getClientUrl() as string;
+        if (url) return url;
+      }
+    } catch { /* cross-origin */ }
+  }
+  throw new Error('[authInit] Xrm.Utility.getGlobalContext().getClientUrl() not available');
+}
+
+/**
+ * Initialize @spaarke/auth for EmailProcessingMonitor.
  *
- * PCF controls require:
- * - Static redirect URI (Dataverse org URL, not window.location.origin)
- * - Named scope format: api://<BFF_APP_ID>/SDAP.Access
- * - Session storage for MSAL cache
- *
- * @param tenantId Azure AD tenant ID
- * @param clientAppId PCF Client Application ID (for MSAL authentication)
- * @param bffAppId BFF Application ID (for scope construction)
- * @param bffApiUrl BFF API base URL
+ * @param clientAppId PCF Client Application ID (from manifest property)
+ * @param bffAppId BFF API Application ID (from manifest property, for scope construction)
+ * @param bffApiUrl BFF API base URL (from manifest property)
  */
 export async function initializeAuth(
-  tenantId: string,
   clientAppId: string,
   bffAppId: string,
   bffApiUrl: string
@@ -39,18 +56,13 @@ export async function initializeAuth(
 
   const config: IAuthConfig = {
     clientId: clientAppId,
-    authority: `https://login.microsoftonline.com/${tenantId}`,
-    // CRITICAL: Static redirect URI matching Azure AD app registration
-    // Must be the Dataverse org URL, NOT window.location.origin
-    redirectUri: 'https://spaarkedev1.crm.dynamics.com',
-    // Named scope: api://<BFF_APP_ID>/SDAP.Access
+    // authority intentionally omitted — @spaarke/auth resolves tenant-specific authority
+    redirectUri: resolveClientUrl(),
     bffApiScope: `api://${bffAppId}/SDAP.Access`,
     bffBaseUrl: bffApiUrl,
-    // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
     proactiveRefresh: true,
   };
 
   await initAuth(config);
-
-  console.info('[authInit] @spaarke/auth initialized successfully for EmailProcessingMonitor');
+  console.info('[authInit] @spaarke/auth initialized for EmailProcessingMonitor');
 }

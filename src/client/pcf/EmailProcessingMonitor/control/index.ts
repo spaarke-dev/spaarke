@@ -1,288 +1,52 @@
 /**
- * Email Processing Monitor PCF Control
+ * EmailProcessingMonitor PCF Control — Virtual Pattern (ADR-022)
  *
- * Admin monitoring control for email-to-document processing statistics.
- * Displays metrics from BFF API including:
- * - Conversion rates (success/failure)
- * - Webhook statistics
- * - Polling statistics
- * - Filter rule hits
- * - Job processing metrics
+ * Migrated from ComponentFramework.StandardControl (imperative ReactDOM.render)
+ * to ComponentFramework.ReactControl. Platform now provides React + Fluent UI
+ * via <platform-library> declarations — the bundle no longer ships React.
  *
- * @version 1.0.0
+ * Per ADR-022 + /pcf-deploy skill's "async init in ReactControl" rule:
+ * @spaarke/auth initialization lives inside `EmailProcessingMonitorHost` via
+ * useState + useEffect — NOT in this PCF class's init(). That guarantees the
+ * component re-renders when auth completes, independent of whether the
+ * framework propagates notifyOutputChanged() back into updateView().
  */
-
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
-import * as ReactDOM from 'react-dom';
-import { initializeAuth } from './authInit';
-import { EmailProcessingDashboard } from './EmailProcessingDashboard';
-import { MonitorState } from './types';
-import {
-  getEffectiveDarkMode,
-  setupThemeListener,
-} from '@spaarke/ui-components/dist/utils/themeStorage';
+import { EmailProcessingMonitorHost } from './EmailProcessingMonitorHost';
 
-export class EmailProcessingMonitor implements ComponentFramework.StandardControl<IInputs, IOutputs> {
-  // PCF container element
-  private container: HTMLDivElement;
+const VERSION = '1.1.0';
 
-  // Track if React has been mounted (for React 16 API)
-  private isReactMounted = false;
-
-  // Whether @spaarke/auth has been initialized
-  private authInitialized = false;
-
-  // Configuration from manifest properties
-  private bffApiUrl = '';
-  private clientAppId = '';
-  private bffAppId = '';
-  private tenantId = '';
-  private refreshIntervalSeconds = 30;
-
-  // State machine for component lifecycle
-  private _state: MonitorState = MonitorState.Loading;
-
-  // PCF notification callback
-  private _notifyOutputChanged: (() => void) | null = null;
-
-  // Current context reference
-  private _context: ComponentFramework.Context<IInputs> | null = null;
-
-  // Error message when in Error state
-  private _errorMessage: string | null = null;
-
-  // Theme listener cleanup function
-  private _cleanupThemeListener: (() => void) | null = null;
-
-  // Control version for footer display
-  private readonly VERSION = '1.0.0';
+export class EmailProcessingMonitor
+  implements ComponentFramework.ReactControl<IInputs, IOutputs>
+{
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  private notifyOutputChanged: () => void = () => undefined;
 
   constructor() {
-    console.log(`[EmailProcessingMonitor] Control instance created. Version: ${this.VERSION}`);
+    console.log(`[EmailProcessingMonitor] Control instance created. Version: ${VERSION}`);
   }
 
-  /**
-   * Initialize the control
-   */
-  public async init(
-    context: ComponentFramework.Context<IInputs>,
+  public init(
+    _context: ComponentFramework.Context<IInputs>,
     notifyOutputChanged: () => void,
-    state: ComponentFramework.Dictionary,
-    container: HTMLDivElement
-  ): Promise<void> {
-    this.container = container;
-    this._notifyOutputChanged = notifyOutputChanged;
-    this._context = context;
-
-    // IMMEDIATELY set state to Loading and render loading UI
-    this.transitionTo(MonitorState.Loading);
-    this.renderBasedOnState();
-
-    // Apply responsive height styling
-    const controlHeight = context.parameters.controlHeight?.raw ?? 400;
-    this.container.style.minHeight = `${controlHeight}px`;
-    this.container.style.height = '100%';
-    this.container.style.display = 'flex';
-    this.container.style.flexDirection = 'column';
-
-    console.log('[EmailProcessingMonitor] Initializing control...');
-
-    try {
-      // Extract configuration from manifest properties
-      this.tenantId = context.parameters.tenantId.raw || '';
-      this.clientAppId = context.parameters.clientAppId.raw || '';
-      this.bffAppId = context.parameters.bffAppId.raw || '';
-      this.bffApiUrl = context.parameters.bffApiUrl.raw || 'https://spe-api-dev-67e2xz.azurewebsites.net';
-      this.refreshIntervalSeconds = context.parameters.refreshIntervalSeconds?.raw ?? 30;
-
-      // Validate configuration
-      if (!this.tenantId || !this.clientAppId || !this.bffAppId) {
-        throw new Error('Missing required configuration: tenantId, clientAppId, and bffAppId must be provided');
-      }
-
-      console.log(`[EmailProcessingMonitor] Configuration:`, {
-        tenantId: this.tenantId,
-        clientAppId: this.clientAppId,
-        bffAppId: this.bffAppId,
-        bffApiUrl: this.bffApiUrl,
-        refreshIntervalSeconds: this.refreshIntervalSeconds,
-      });
-
-      // Initialize @spaarke/auth (replaces local AuthService)
-      await initializeAuth(this.tenantId, this.clientAppId, this.bffAppId, this.bffApiUrl);
-      this.authInitialized = true;
-      console.log('[EmailProcessingMonitor] @spaarke/auth initialized');
-
-      // Set up theme listener for global theme changes
-      this._cleanupThemeListener = setupThemeListener(isDark => {
-        console.log(`[EmailProcessingMonitor] Theme changed: isDark=${isDark}`);
-        if (this._context && this._state === MonitorState.Ready) {
-          this.renderControl(this._context);
-        }
-      }, context);
-      console.log('[EmailProcessingMonitor] Theme listener initialized');
-
-      // Transition to Ready and render React component
-      this.transitionTo(MonitorState.Ready);
-      this.renderBasedOnState();
-    } catch (error) {
-      console.error('[EmailProcessingMonitor] Initialization failed:', error);
-      this._errorMessage = error instanceof Error ? error.message : String(error);
-      this.transitionTo(MonitorState.Error);
-      this.renderBasedOnState();
-    }
+    _state: ComponentFramework.Dictionary
+  ): void {
+    this.notifyOutputChanged = notifyOutputChanged;
   }
 
-  /**
-   * Update view when context changes
-   */
-  public updateView(context: ComponentFramework.Context<IInputs>): void {
-    this._context = context;
-
-    // Only process if in Ready state
-    if (this._state !== MonitorState.Ready) {
-      return;
-    }
-
-    // Re-render React component
-    this.renderControl(context);
+  public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
+    return React.createElement(EmailProcessingMonitorHost, {
+      context: context as ComponentFramework.Context<IInputs>,
+      version: VERSION,
+    });
   }
 
-  /**
-   * Transition to a new state with logging
-   */
-  private transitionTo(newState: MonitorState): void {
-    const previousState = this._state;
-    this._state = newState;
-
-    console.log(`[EmailProcessingMonitor] State: ${previousState} → ${newState}`);
-
-    // Notify PCF framework of state change
-    this._notifyOutputChanged?.();
-  }
-
-  /**
-   * Render UI based on current state
-   */
-  private renderBasedOnState(): void {
-    switch (this._state) {
-      case MonitorState.Loading:
-        this.renderLoading();
-        break;
-      case MonitorState.Ready:
-        if (this._context) {
-          this.renderControl(this._context);
-        }
-        break;
-      case MonitorState.Error:
-        this.renderError(this._errorMessage || 'An unknown error occurred');
-        break;
-    }
-  }
-
-  /**
-   * Render loading overlay with spinner
-   */
-  private renderLoading(): void {
-    const overlay = document.createElement('div');
-    overlay.className = 'email-monitor-loading-overlay';
-    overlay.setAttribute('role', 'status');
-    overlay.setAttribute('aria-busy', 'true');
-    overlay.setAttribute('aria-label', 'Loading email processing statistics');
-
-    const spinner = document.createElement('div');
-    spinner.className = 'email-monitor-loading-spinner';
-
-    const text = document.createElement('span');
-    text.className = 'email-monitor-loading-text';
-    text.textContent = 'Loading statistics...';
-
-    overlay.appendChild(spinner);
-    overlay.appendChild(text);
-
-    this.container.innerHTML = '';
-    this.container.appendChild(overlay);
-  }
-
-  /**
-   * Render the React EmailProcessingDashboard component
-   */
-  private renderControl(context: ComponentFramework.Context<IInputs>): void {
-    if (!this.authInitialized) {
-      console.warn('[EmailProcessingMonitor] Auth not initialized, skipping render');
-      return;
-    }
-
-    // Get effective dark mode from shared theme utilities
-    const isDarkTheme = getEffectiveDarkMode(context);
-
-    console.log(`[EmailProcessingMonitor] Rendering dashboard. Dark mode: ${isDarkTheme}`);
-
-    // React 16 API: Use ReactDOM.render instead of createRoot
-    ReactDOM.render(
-      React.createElement(EmailProcessingDashboard, {
-        bffApiUrl: this.bffApiUrl,
-        isDarkTheme: isDarkTheme,
-        refreshIntervalSeconds: this.refreshIntervalSeconds,
-        version: this.VERSION,
-        onError: (error: string) => {
-          console.error('[EmailProcessingMonitor] Dashboard error:', error);
-        },
-      }),
-      this.container
-    );
-    this.isReactMounted = true;
-  }
-
-  /**
-   * Render error message
-   */
-  private renderError(errorMessage: string): void {
-    this.container.innerHTML = `
-            <div style="padding: 20px; border: 2px solid var(--colorPaletteRedForeground1); background-color: var(--colorPaletteRedBackground1); color: var(--colorPaletteRedForeground1); border-radius: 4px;">
-                <strong>Email Processing Monitor Error</strong>
-                <p>${this.escapeHtml(errorMessage)}</p>
-                <p><small>Version: ${this.VERSION}</small></p>
-            </div>
-        `;
-  }
-
-  /**
-   * Escape HTML to prevent XSS
-   */
-  private escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  /**
-   * No outputs for this control
-   */
   public getOutputs(): IOutputs {
     return {};
   }
 
-  /**
-   * Cleanup when control is removed
-   */
   public destroy(): void {
     console.log('[EmailProcessingMonitor] Destroying control...');
-
-    // Clean up theme listener
-    if (this._cleanupThemeListener) {
-      this._cleanupThemeListener();
-      this._cleanupThemeListener = null;
-    }
-
-    // React 16 API: Use unmountComponentAtNode instead of root.unmount()
-    if (this.isReactMounted && this.container) {
-      ReactDOM.unmountComponentAtNode(this.container);
-      this.isReactMounted = false;
-    }
-
-    // Clear auth state
-    this.authInitialized = false;
   }
 }

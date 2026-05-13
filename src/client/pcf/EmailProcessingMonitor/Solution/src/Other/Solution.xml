@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Admin monitoring control for email-to-document processing statistics. Displays conversion rates, webhook status, filter hits, and job metrics." languagecode="1033" />
     </Descriptions>
-    <Version>1.0.0.0</Version>
+    <Version>1.1.0.0</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
@@ -53,7 +53,9 @@
         </Address>
       </Addresses>
     </Publisher>
-    <RootComponents />
+    <RootComponents>
+      <RootComponent type="66" schemaName="sprk_Spaarke.EmailProcessingMonitor" behavior="0" />
+    </RootComponents>
     <MissingDependencies />
   </SolutionManifest>
 </ImportExportXml>

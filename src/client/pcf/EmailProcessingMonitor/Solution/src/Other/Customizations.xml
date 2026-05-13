@@ -9,7 +9,12 @@
   <EntityRelationships />
   <OrganizationSettings />
   <optionsets />
-  <CustomControls />
+  <CustomControls>
+    <CustomControl>
+      <Name>sprk_Spaarke.EmailProcessingMonitor</Name>
+      <FileName>/Controls/sprk_Spaarke.EmailProcessingMonitor/ControlManifest.xml</FileName>
+    </CustomControl>
+  </CustomControls>
   <Languages>
     <Language>1033</Language>
   </Languages>

@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@eslint/js": "^9.25.1",
     "@fluentui/react-components": "^9.56.0",
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",
