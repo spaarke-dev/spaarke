@@ -27,7 +27,7 @@ import {
 } from '@fluentui/react-components';
 import { initializeAuth } from './authInit';
 import { DocumentViewerApp } from './SpeDocumentViewer';
-import { createLogger } from '@spaarke/ui-components';
+import { createLogger } from '@spaarke/ui-components/dist/utils/logger';
 
 const logger = createLogger('SpeDocumentViewerHost');
 

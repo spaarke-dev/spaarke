@@ -15,7 +15,7 @@
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { createLogger } from '@spaarke/ui-components';
+import { createLogger } from '@spaarke/ui-components/dist/utils/logger';
 import { SpeDocumentViewerHost } from './SpeDocumentViewerHost';
 
 const logger = createLogger('SpeDocumentViewer');
