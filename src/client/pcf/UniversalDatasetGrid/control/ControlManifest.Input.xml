@@ -2,10 +2,10 @@
 <manifest>
   <control namespace="Spaarke.UI.Components"
            constructor="UniversalDatasetGrid"
-           version="2.2.4"
+           version="2.3.0"
            display-name-key="Universal Dataset Grid"
-           description-key="Document management grid with MSAL authentication, SDAP integration and Fluent UI v9 (v2.2.4)"
-           control-type="standard">
+           description-key="Virtual PCF: React/Fluent externalized via platform-library; auth init in React useEffect (v2.3.0)"
+           control-type="virtual">
 
     <external-service-usage enabled="false" />
 
@@ -38,6 +38,8 @@
     <resources>
       <code path="index.ts" order="1" />
       <css path="styles.css" order="2" />
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
     </resources>
 
     <feature-usage>

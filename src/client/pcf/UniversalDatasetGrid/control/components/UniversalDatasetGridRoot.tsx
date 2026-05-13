@@ -541,7 +541,7 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
           zIndex: 1000,
         }}
       >
-        v2.2.3
+        v2.3.0
       </div>
     </div>
   );

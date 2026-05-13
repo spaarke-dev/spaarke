@@ -115,15 +115,12 @@ export async function initializeAuth(
 
   const config: IAuthConfig = {
     clientId,
-    // Multi-tenant authority — no hardcoded tenant ID
-    authority: 'https://login.microsoftonline.com/organizations',
-    // CRITICAL: Static redirect URI matching Azure AD app registration
-    // Must be the Dataverse org URL, NOT window.location.origin
+    // authority intentionally omitted — @spaarke/auth resolves tenant-specific authority
+    // via resolveTenantFromXrm() (binding requirement; see feedback_auth-true-sso-requirement.md)
     redirectUri,
     // Named scope: api://<BFF_APP_ID>/SDAP.Access
     bffApiScope: `api://${bffAppId}/SDAP.Access`,
     bffBaseUrl: bffApiUrl,
-    // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
     proactiveRefresh: true,
   };
 
