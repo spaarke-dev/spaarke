@@ -15,7 +15,7 @@
  *   - Node action bar: open record, view file, expand
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -60,6 +60,12 @@ import { exportToCsv } from './services/CsvExportService';
 import { authenticatedFetch } from './services/authInit';
 import { FilePreviewDialog } from './components/FilePreviewDialog';
 import type { DocumentNode } from './types/graph';
+// Deep import — DRV's webpack alias maps '@spaarke/ui-components' to the dist
+// folder directly, so we drop the '/dist/' prefix here (otherwise we'd resolve
+// to dist/dist/...). Same anti-barrel intent as elsewhere — avoids pulling
+// lexical + the full Fluent icon library (15.8 MB) for one component import.
+import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/components/DocumentEmailWizard';
+import type { IDataService } from '@spaarke/ui-components/types/serviceInterfaces';
 
 /** Inline SVG icon: table/grid view (matches Fluent 20px icon style) */
 const TableViewIcon: React.FC = () => (
@@ -210,6 +216,12 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   const [previewDocumentName, setPreviewDocumentName] = useState<string>('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [previewInWorkspace, setPreviewInWorkspace] = useState(false);
+
+  // Email wizard state — single-document email launched from FilePreviewDialog's
+  // mail icon. The wizard's Step 1 lets the user confirm; Step 2 runs the
+  // "Summarize New File(s)" playbook; Step 3 composes + sends via BFF.
+  const [emailWizardOpen, setEmailWizardOpen] = useState(false);
+  const [emailWizardItems, setEmailWizardItems] = useState<IDocumentEmailWizardItem[]>([]);
 
   // Preview URL cache with TTL — avoids re-fetching on repeated preview of same document.
   // SPE preview URLs expire after ~15 min; we use 10 min TTL to avoid stale URLs.
@@ -409,9 +421,59 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   }, [previewDocumentId]);
 
   const handleEmailDocument = useCallback(() => {
-    // Email not yet implemented in viewer context — stub
-    console.log('[FilePreview] Email not implemented for viewer context');
-  }, []);
+    if (!previewDocumentId) return;
+    // Single-document email path: open the wizard pre-loaded with the currently
+    // previewed document. Wizard Step 1 lets the user confirm (or add more via
+    // the lookup picker once that's wired). Step 2 generates a Document Profile
+    // summary via the BFF AI orchestrator. Step 3 composes + sends.
+    setEmailWizardItems([
+      {
+        documentId: previewDocumentId,
+        name: previewDocumentName || '(untitled)',
+      },
+    ]);
+    setEmailWizardOpen(true);
+  }, [previewDocumentId, previewDocumentName]);
+
+  // IDataService adapter for the email wizard's recipient picker.
+  // Code Pages don't have PCF's context.webAPI, so we frame-walk to the parent
+  // window's Xrm.WebApi (same pattern used by @spaarke/auth's resolveTenantFromXrm).
+  const dataService: IDataService = useMemo(
+    () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const resolveXrm = (): any => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const frames: any[] = [window];
+        try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
+        try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
+        for (const frame of frames) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const xrm = (frame as any).Xrm;
+          if (xrm?.WebApi) return xrm.WebApi;
+        }
+        throw new Error('[DRV] Xrm.WebApi not reachable — cannot run recipient picker queries.');
+      };
+
+      return {
+        createRecord: (entityName, data) =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          resolveXrm().createRecord(entityName, data as any).then((r: any) => r.id),
+        retrieveRecord: (entityName, id, options) =>
+          resolveXrm().retrieveRecord(entityName, id, options ?? '') as Promise<Record<string, unknown>>,
+        retrieveMultipleRecords: (entityName, options) =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          resolveXrm().retrieveMultipleRecords(entityName, options ?? '').then((r: any) => ({
+            entities: r.entities as Record<string, unknown>[],
+          })),
+        updateRecord: (entityName, id, data) =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          resolveXrm().updateRecord(entityName, id, data as any).then(() => undefined),
+        deleteRecord: (entityName, id) =>
+          resolveXrm().deleteRecord(entityName, id).then(() => undefined),
+      };
+    },
+    []
+  );
 
   const handleCopyLink = useCallback(() => {
     if (!previewDocumentId) return;
@@ -755,6 +817,18 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
           isInWorkspace={previewInWorkspace}
         />
       )}
+
+      {/* Email Documents Wizard — launched from the FilePreviewDialog's mail icon.
+          Step 1: confirm selection. Step 2: AI summary via "Summarize New File(s)".
+          Step 3: compose + send via BFF /api/communications/send. */}
+      <DocumentEmailWizard
+        open={emailWizardOpen}
+        onClose={() => setEmailWizardOpen(false)}
+        selectedDocuments={emailWizardItems}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={apiBaseUrl}
+        dataService={dataService}
+      />
     </div>
   );
 };
