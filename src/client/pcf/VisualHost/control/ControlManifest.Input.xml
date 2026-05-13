@@ -2,10 +2,10 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.3.6"
+           version="1.4.0"
            display-name-key="Visual Host"
-           description-key="Configuration-driven visualization control for charts, cards, and calendars"
-           control-type="standard">
+           description-key="Virtual PCF: React/Fluent externalized via platform-library; configuration-driven visualization (v1.4.0)"
+           control-type="virtual">
 
     <external-service-usage enabled="false" />
 
