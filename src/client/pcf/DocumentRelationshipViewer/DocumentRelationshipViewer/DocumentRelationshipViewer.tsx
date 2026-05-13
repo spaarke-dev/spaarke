@@ -27,7 +27,7 @@ import { getApiBaseUrl, getTenantId, getMsalClientId, getBffApiAppId } from '../
 import { initializeAuth } from './authInit';
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = '1.0.34';
+const CONTROL_VERSION = '1.0.35';
 
 /**
  * Props for the DocumentRelationshipViewer component
