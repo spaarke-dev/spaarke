@@ -90,7 +90,11 @@ Theme utilities are imported from `@spaarke/ui-components`.
 
 ### Authentication
 
-Controls that call the BFF API authenticate via MSAL.js with runtime-resolved configuration from Dataverse environment variables (`sprk_BffApiBaseUrl`, `sprk_MsalClientId`, `sprk_BffApiAppId`, `sprk_TenantId`). No hardcoded client IDs in source.
+PCF controls that call the BFF API authenticate via `@spaarke/auth` (NOT direct `PublicClientApplication`). Runtime config is resolved from Dataverse environment variables (`sprk_BffApiBaseUrl`, `sprk_MsalClientId`, `sprk_BffApiAppId`) — `sprk_TenantId` is no longer required since `@spaarke/auth` resolves the tenant from `Xrm.Utility.getGlobalContext().organizationSettings.tenantId` via frame-walk. No hardcoded client IDs or tenant IDs in source.
+
+Token acquisition routes through `SpaarkeAuthProvider`'s 6-strategy chain (Cache, SessionStorage, Bridge, Xrm, MsalSilent, MsalPopup) so neighbor PCFs share tokens silently. MSAL config is binding: `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific `authority`. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) for the full canonical reference.
+
+**Async init pattern** (virtual ReactControl, per ADR-022): the auth init call lives in the React host component's `useEffect`, NOT the PCF class's `init()`. `notifyOutputChanged()` does NOT reliably trigger `updateView()` for read-only controls, so async init must drive its own state.
 
 ### Shared Code
 

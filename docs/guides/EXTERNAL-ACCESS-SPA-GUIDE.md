@@ -131,6 +131,12 @@ MSAL (`@azure/msal-browser` v3) handles the full OAuth 2.0 authorization code + 
 - `redirectUri`: `window.location.origin` (works for both portal and localhost)
 - `cacheLocation`: `"sessionStorage"` — tokens per-tab, not shared across tabs
 
+> **Why this is different from internal Spaarke surfaces (intentional and approved 2026-05-13):**
+>
+> Internal Spaarke PCFs and Code Pages use `cacheLocation: 'localStorage'` + `storeAuthStateInCookie: true` to achieve true SSO across tabs ([canonical reference](../../.claude/patterns/auth/spaarke-sso-binding.md)). The External SPA is intentionally different because it's a B2B portal often accessed from shared/kiosk workstations — per-tab isolation prevents token leakage when a guest closes a tab and a different person opens a new one in the same browser session. The slight UX friction of re-authenticating per-tab is acceptable for the security gain in this context.
+>
+> Do NOT migrate the External SPA to the internal `@spaarke/auth` library or change `cacheLocation` to `localStorage`. The threat models are different.
+
 **`msal-auth.ts`** — `acquireBffToken()`:
 - Tries `acquireTokenSilent` first (uses cached token or refresh token)
 - Falls back to `acquireTokenRedirect` on `InteractionRequiredAuthError` (MFA, consent, session expired)

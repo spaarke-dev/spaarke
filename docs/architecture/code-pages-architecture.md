@@ -56,8 +56,10 @@ Every Code Page follows the same async bootstrap pattern before rendering. The s
 2. **Resolve record context**: Extract entity IDs from URL params, Dataverse form pass-through (`?id=`), or parent Xrm frame-walk
 3. **`resolveRuntimeConfig()`**: Queries Dataverse Environment Variables for BFF base URL, MSAL client ID, and OAuth scope (from `@spaarke/auth`)
 4. **Set window globals**: `window.__SPAARKE_MSAL_CLIENT_ID__` and `window.__SPAARKE_BFF_BASE_URL__` so `@spaarke/auth` internal `resolveConfig()` picks them up
-5. **Initialize MSAL**: Auth provider initialization (timing varies per page -- some initialize before render, others defer to AuthProvider context)
+5. **Initialize MSAL via `@spaarke/auth`**: Calls `initAuth()` with the runtime-resolved config. **DO NOT** instantiate `PublicClientApplication` directly — all Code Pages share `SpaarkeAuthProvider` so tokens flow through the 6-strategy chain (Cache, SessionStorage, Bridge, Xrm, MsalSilent, MsalPopup). MSAL config (binding 2026-05-12): `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific `authority` resolved via `resolveTenantFromXrm()`. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
 6. **`createRoot(container).render(<ThemeRoot />)`**: React 19 render with FluentProvider theme wrapper
+
+> **Bundling reality**: `@spaarke/auth` is bundled at build time into each Code Page's `index.html`. Changes to the library require rebuild + redeploy of every consumer — see canonical doc for the rebuild procedure.
 
 ### Theme Detection
 

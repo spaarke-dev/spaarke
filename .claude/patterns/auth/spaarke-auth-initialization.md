@@ -1,8 +1,9 @@
 # @spaarke/auth Initialization Pattern
 
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current (corrected export/ownership details)
+> **Last Reviewed**: 2026-05-13
+> **Status**: Current
+>
+> **Canonical reference for binding requirements + token chain**: [`spaarke-sso-binding.md`](spaarke-sso-binding.md). This file covers the *order of bootstrap calls*; that file covers *what to configure and why*.
 
 ## When
 Code Pages that call BFF API endpoints need MSAL auth bootstrap. NOT needed for Xrm.WebApi-only pages.

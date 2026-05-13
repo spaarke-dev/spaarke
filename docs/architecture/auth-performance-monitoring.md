@@ -38,8 +38,9 @@ Auth flow adds ~200-400ms latency (Azure AD OBO ~150ms, cold token ~100ms). Cach
 | PCF → BFF API Call | ~50ms | ~50ms |
 | BFF → Azure AD OBO | ~150ms | ~0ms (cached) |
 | BFF → Graph API | ~100-500ms | ~100-500ms |
-| Code Page ssoSilent | ~300-800ms (MSAL init + ssoSilent) | ~5ms (sessionStorage cache) |
-| Code Page with bridge | ~0.1ms (reads parent's token) | ~0.1ms |
+| Code Page MSAL silent | ~300-800ms (MSAL init + `acquireTokenSilent`/`ssoSilent`) | ~5ms (in-memory cache) |
+| Code Page SessionStorage strategy | ~0.5ms (reads same-origin `__spaarke_bff_token_cache__`) | ~0.5ms |
+| Code Page Bridge strategy | ~0.1ms (reads parent frame's `window.__SPAARKE_BFF_TOKEN__`) | ~0.1ms |
 | Dataverse OBO exchange | ~200-500ms (Azure AD token exchange) | ~0ms (cached) |
 | **Total Auth Overhead** | ~300-400ms | ~55ms |
 

@@ -1,21 +1,36 @@
-# MSAL Client Pattern (Legacy)
+# MSAL Client Pattern (DEPRECATED — Use `@spaarke/auth`)
 
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Verified
+> **Last Reviewed**: 2026-05-13
+> **Status**: **Deprecated** — kept only as a reference for historical context
+>
+> **Canonical replacement**: [`spaarke-sso-binding.md`](spaarke-sso-binding.md) — the binding requirements + 6-strategy chain. All new code, and any rebuild of existing code, MUST use `@spaarke/auth` via that pattern.
 
-## When
-Maintaining legacy PCF controls that use direct MSAL singleton for BFF API auth. New code should use `@spaarke/auth`.
+## Why this pattern is deprecated
 
-## Read These Files
-1. `src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts` — Legacy MSAL singleton with token caching
-2. `src/client/pcf/UniversalQuickCreate/control/services/auth/msalConfig.ts` — Scope and client ID config
+The legacy "direct MSAL singleton" pattern (a module-level `PublicClientApplication` + `msalConfig` constant + `acquireTokenPopup` fallback) was found in 2026-05-12 debugging to be the proximate cause of the "Pick an account" popup on every tab open. The defects in this pattern:
 
-## Constraints
-- **ADR-006**: PCF controls use platform-provided React 16 — MSAL must be compatible
-- MUST NOT use this pattern in new Code Pages — use `@spaarke/auth` instead (see spaarke-auth-initialization.md)
+1. **Module-level config** — `msalConfig` runs at import time, before `Xrm.Utility.getGlobalContext().organizationSettings.tenantId` is populated. Forces hardcoded authority or `/organizations`, both of which break `ssoSilent`.
+2. **Per-component singleton** — each PCF/Code Page creates its own MSAL instance. Tokens can't be shared with neighbors via `__spaarke_bff_token_cache__` or the parent-frame bridge. Every neighbor independently re-authenticates.
+3. **`acquireTokenPopup` fallback** — fires the popup whenever silent fails, with no diagnostics to tell us WHICH silent attempt failed and why.
 
-## Key Rules
-- Legacy pattern: module-level `msalConfig` constant + `MsalAuthProvider` singleton
-- New pattern: `@spaarke/auth` bootstrap (resolveRuntimeConfig → setRuntimeConfig → ensureAuthInitialized)
-- See xrm-webapi-vs-bff-auth.md to decide if MSAL is even needed
+`SpaarkeAuthProvider` solves all three (singleton across components via `getAuthProvider()`, runtime-resolved tenant authority, 6-strategy chain with diagnostic logging).
+
+## When you might still touch this pattern
+
+Only when reading a legacy PCF source file that hasn't been migrated yet, to understand what it does before replacing it. The migration target is always the `@spaarke/auth` pattern.
+
+## Migration path (when rebuilding a legacy PCF)
+
+1. Remove `services/auth/MsalAuthProvider.ts` and `services/auth/msalConfig.ts`.
+2. Add `@spaarke/auth` to `devDependencies` (`file:../../shared/Spaarke.Auth`).
+3. Create `control/authInit.ts` calling `initAuth(config)` with the 5 required fields (clientId, redirectUri, bffApiScope, bffBaseUrl, proactiveRefresh). **Omit `authority`** — the library resolves it.
+4. Move the auth init call from the PCF class's `init()` into the React component's `useEffect` (required for virtual ReactControl per ADR-022 + `/pcf-deploy` skill).
+5. Replace direct `acquireTokenSilent/Popup` calls with `authenticatedFetch` from `@spaarke/auth`.
+
+Reference exemplar: `src/client/pcf/SemanticSearchControl/SemanticSearchControl/authInit.ts` + `SemanticSearchControl.tsx`.
+
+## See Also
+
+- [`spaarke-sso-binding.md`](spaarke-sso-binding.md) — canonical binding + token chain
+- [`spaarke-auth-initialization.md`](spaarke-auth-initialization.md) — bootstrap order
+- [`xrm-webapi-vs-bff-auth.md`](xrm-webapi-vs-bff-auth.md) — decide whether you need auth at all

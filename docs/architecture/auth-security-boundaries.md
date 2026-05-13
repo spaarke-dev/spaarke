@@ -70,9 +70,10 @@ SDAP has 7 security trust boundaries: Browser↔Dataverse, Dataverse↔PCF, PCF�
 | Aspect | Detail |
 |--------|--------|
 | **Protocol** | HTTPS + Bearer Token |
-| **Authentication** | MSAL.js acquires token |
+| **Authentication** | `@spaarke/auth` 6-strategy chain (Cache, SessionStorage, Bridge, Xrm, MsalSilent, MsalPopup). See [SSO binding doc](../../.claude/patterns/auth/spaarke-sso-binding.md). |
+| **Token storage** | Internal surfaces: `localStorage` + cookie auth state (survives tab close, enables SSO). External SPA: `sessionStorage` per-tab (kiosk threat model). |
 | **Validation** | BFF validates JWT (aud, iss, exp) |
-| **Risk** | Token theft, MITM (mitigated by HTTPS) |
+| **Risk** | Token theft from `localStorage` on compromised internal device, MITM (mitigated by HTTPS). Acceptable for internal surfaces given the SSO requirement. |
 
 ### Boundary 4: BFF ↔ Azure AD (OBO)
 | Aspect | Detail |

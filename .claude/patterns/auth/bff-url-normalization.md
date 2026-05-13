@@ -101,10 +101,18 @@ Trailing slashes on `baseUrl` are tolerated and stripped.
 
 ## Tenant ID Resolution
 
-Unchanged — see `SpaarkeAuthProvider.getTenantId()`:
+Two distinct flows — keep them separate:
+
+### Post-token: `SpaarkeAuthProvider.getTenantId()` (where to read tid AFTER auth ran)
 
 1. **Cached token JWT `tid` claim** — works for ALL token sources (bridge, MSAL, Xrm)
 2. MSAL accounts (only if MSAL was invoked)
 3. Xrm frame-walk (unreliable on first load)
 
 **Key insight**: In Dataverse web resources, the **bridge strategy** often provides the token (from parent iframe). MSAL never runs, so MSAL accounts are empty. The JWT `tid` extraction (step 1) is the only reliable source in this scenario.
+
+### Pre-token: `resolveTenantFromXrm()` (where to read tid AT BOOTSTRAP to set MSAL `authority`)
+
+When constructing the `authority` URL for MSAL, the tenant ID must be known BEFORE any token has been acquired. `@spaarke/auth/src/config.ts` exports `resolveTenantFromXrm()` which frame-walks to read `Xrm.Utility.getGlobalContext().organizationSettings.tenantId`. The library's `getDefaultAuthority()` uses this to build `https://login.microsoftonline.com/{tenantId}` so consumers that omit the `authority` field get the correct value.
+
+This is a **binding requirement** — using `/organizations` instead causes `ssoSilent` to fail in iframes and forces a popup. See [`spaarke-sso-binding.md`](spaarke-sso-binding.md#required-msal-configuration).

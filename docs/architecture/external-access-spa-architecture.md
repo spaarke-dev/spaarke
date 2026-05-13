@@ -129,7 +129,7 @@ External users are **Azure AD B2B guest accounts** in the main Spaarke workforce
 | Data access path | BFF-only (not Power Pages `/_api/`) | Single auditable path, managed identity auth, no field whitelisting | — |
 | Auth grant type | Authorization code + PKCE (not implicit) | Implicit is deprecated; MSAL handles silent refresh and MFA | — |
 | SPA routing | HashRouter (not BrowserRouter) | Power Pages single-file hosting returns 404 for pushState paths | — |
-| Token storage | sessionStorage (not localStorage) | Per-tab isolation, avoids leakage on shared workstations | — |
+| Token storage | sessionStorage (not localStorage) | **Intentional divergence from internal Spaarke surfaces.** External SPA is a B2B portal often used on shared/kiosk workstations — per-tab isolation eliminates token leakage when one guest closes a tab and another opens it in the same browser session. Internal Spaarke surfaces use `localStorage` to achieve true SSO across tabs (different threat model). See [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) for the internal binding. | — |
 | Auth filter pattern | Per-endpoint filter (not global middleware) | `ExternalCallerAuthorizationFilter` follows ADR-008 | ADR-008 |
 | Participation cache | Redis 60s TTL | Avoids Dataverse query per BFF call; invalidated on grant/revoke/close | ADR-009 |
 
@@ -139,7 +139,7 @@ External users are **Azure AD B2B guest accounts** in the main Spaarke workforce
 
 - **MUST** use HashRouter — BrowserRouter causes 404 on Power Pages
 - **MUST** route all data through BFF API — no direct `/_api/` calls to Dataverse
-- **MUST** use sessionStorage for token cache — per-tab isolation for shared workstations
+- **MUST** use sessionStorage for token cache — per-tab isolation for shared workstations. **Do NOT change this to `localStorage` to match internal surfaces** — the threat model differs (B2B kiosk-shared usage vs internal trusted device).
 - **MUST** enforce access levels server-side in BFF — client-side flags are UX-only
 - **MUST NOT** use Power Pages `/_api/` proxy for data access (single data path through BFF)
 - **MUST NOT** use `pac pages upload-code-site` for deployment (PAC CLI assembly conflict)
