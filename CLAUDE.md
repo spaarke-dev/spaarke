@@ -1098,6 +1098,18 @@ public class ValidationPlugin : IPlugin
 
 **API Endpoints**: `https://localhost:5001` · Health check: `GET /healthz`
 
+### Node Installs: Avoid `npm ci` for Vite Solutions (2026-05-13)
+
+Many `src/solutions/*` Vite projects have **stale `package-lock.json` files** relative to current npm registry transitive dep versions (e.g. fluentui patches, tabster, keyborg). `npm ci` insists on exact lock-file resolution and **fails on ~14 of the 16 solutions**. Until the locks are deploy-verifiably regenerated:
+
+- ✅ **Use** `npm install --legacy-peer-deps --no-audit --no-fund` for fresh installs in `src/solutions/*` and `src/client/pcf/*`
+- ✅ **`Build-AllClientComponents.ps1`** auto-handles this: it skips install if `node_modules` exists, else does `npm install --legacy-peer-deps`
+- ✅ **`Build-ViteSolutionsDirect.ps1`** does the same — use this as a faster alternative for Vite-only builds
+- ❌ **Avoid** `npm ci` directly in Vite solutions until lock regeneration is scheduled
+- ❌ **Don't add `npm ci` to new build scripts** — copy the pattern from `Build-AllClientComponents.ps1`
+
+Regenerating the locks is queued but deferred because each regeneration pulls minor/patch upgrades (some jumpy — `keyborg 2.6.0 → 2.14.1`) that need per-solution deploy + smoke-test to verify no UI regression. Plan: one focused half-day session through all 14 solutions when bandwidth allows.
+
 ## File Naming Conventions
 
 | Type | Convention | Example |

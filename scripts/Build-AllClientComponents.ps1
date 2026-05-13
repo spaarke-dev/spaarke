@@ -126,17 +126,33 @@ function Invoke-ComponentBuild {
         return
     }
 
-    if ($PSCmdlet.ShouldProcess("$Name ($BuildPath)", "npm ci then npm run build")) {
+    if ($PSCmdlet.ShouldProcess("$Name ($BuildPath)", "install then npm run build")) {
         Write-Host "  BUILD $Name" -ForegroundColor Cyan -NoNewline
         Write-Host " - $BuildPath" -ForegroundColor DarkGray
 
         try {
             Push-Location $BuildPath
 
-            # npm ci
-            $ciOutput = & npm ci 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                throw "npm ci failed (exit code $LASTEXITCODE)`n$($ciOutput | Out-String)"
+            # Install dependencies.
+            # NOTE (2026-05-13): Many Vite solutions have drifted package-lock.json
+            # files relative to current registry transitive versions (e.g. fluentui
+            # 9.2.15 -> 9.2.16, tabster 8.7.0 -> 8.8.0). `npm ci` fails on these
+            # because it requires the lock file to exactly satisfy package.json's
+            # caret ranges. Strategy:
+            #   1. If node_modules is missing, run `npm install --legacy-peer-deps`
+            #      (resolves loosely; deterministic-enough for build).
+            #   2. If node_modules exists, skip install entirely and build directly
+            #      (the existing tree is already valid).
+            #   3. Tracked separately: scheduled regeneration of locks once we have
+            #      bandwidth to deploy-verify the transitive upgrades. Until then,
+            #      do NOT call `npm ci` here.
+            $nodeModulesPath = Join-Path $BuildPath "node_modules"
+            if (-not (Test-Path $nodeModulesPath)) {
+                Write-Host "        installing (no node_modules)..." -ForegroundColor DarkGray
+                $installOutput = & npm install --legacy-peer-deps --no-audit --no-fund 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "npm install failed (exit code $LASTEXITCODE)`n$($installOutput | Out-String)"
+                }
             }
 
             # npm run build
