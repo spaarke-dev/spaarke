@@ -33,10 +33,22 @@
 
 ## Pending (Do After Verification)
 
-- [ ] Batch-rebuild remaining ~28 `@spaarke/auth` consumers (full list in CONTEXT.md)
+- [ ] Batch-rebuild remaining ~25 `@spaarke/auth` consumers (full list in CONTEXT.md)
 - [ ] Demo BFF deploy of email attachment fix (deferred yesterday)
 - [ ] Phase C: Wire Email button into DocumentRelationshipViewer
 - [ ] Update `docs/architecture/sdap-auth-patterns.md` with binding requirements + bundling reality
+
+## ⚠️ QUEUED — PCF Virtual-Pattern Refactor (USER-MANDATED 2026-05-13)
+
+User explicitly directed: every actively-used PCF MUST be refactored from `control-type="standard"` → `control-type="virtual"` with `featureconfig.json` for proper platform-library externalization (ADR-022).
+
+**See CONTEXT.md "QUEUED MAJOR WORK" section for the full inventory, refactor procedure, risks, exemplars, and estimated effort (~6-12 hours total).**
+
+P0 (must do): SpeDocumentViewer, UniversalDatasetGrid, EmailProcessingMonitor.
+P1: DrillThroughWorkspace, UniversalQuickCreate, VisualHost.
+P2: AssociationResolver, ThemeEnforcer, UpdateRelatedButton (verify if React-based first).
+
+**Current mitigation**: dev1 `maxuploadfilesize` raised from 25.6 MB → 60 MB (allowed 30 MB SpeDocumentViewer bundle). **DO NOT revert this until ALL standard PCFs are refactored to virtual.**
 
 ## Key Files
 

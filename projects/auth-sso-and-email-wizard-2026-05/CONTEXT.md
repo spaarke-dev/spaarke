@@ -315,6 +315,126 @@ document.cookie.split(';').forEach(c => { document.cookie = c.split('=')[0].trim
 
 ---
 
+---
+
+## ⚠️ QUEUED MAJOR WORK — PCF Virtual Pattern Refactor (User-Mandated 2026-05-13)
+
+**User decision**: every actively-used PCF MUST be refactored to `control-type="virtual"` with `featureconfig.json` to externalize React/Fluent via platform libraries. Standard controls bundle React/Fluent (≥30 MB) → exceeds Dataverse `maxuploadfilesize` and is ADR-022 non-compliant.
+
+**Today's mitigation**: dev1 `maxuploadfilesize` raised from 25.6 MB → 60 MB (PATCH on organizations entity). Restored what was likely the prior state. **Revert this to default** once the refactor is complete.
+
+### PCF Inventory (verified 2026-05-13)
+
+| PCF | Path | control-type | featureconfig.json | Imports @spaarke/auth | Refactor Priority |
+|---|---|---|---|---|---|
+| **SpeDocumentViewer** | `src/client/pcf/SpeDocumentViewer/control/` | standard ❌ | ❌ missing | ✅ | **P0** (30 MB confirmed, user-blocking) |
+| **UniversalDatasetGrid** | `src/client/pcf/UniversalDatasetGrid/control/` | standard ❌ | ✅ has but mismatched | ✅ | **P0** (likely large bundle, uses auth) |
+| **EmailProcessingMonitor** | `src/client/pcf/EmailProcessingMonitor/control/` | standard ❌ | ❌ missing | ✅ | **P0** (uses auth) |
+| **DrillThroughWorkspace** | `src/client/pcf/DrillThroughWorkspace/control/` | standard ❌ | ✅ has | ❓ check | **P1** |
+| **UniversalQuickCreate** | `src/client/pcf/UniversalQuickCreate/control/` | standard ❌ | ✅ has | ❓ check | **P1** |
+| **VisualHost** | `src/client/pcf/VisualHost/control/` | standard ❌ | ✅ has | ❓ check | **P1** |
+| **AssociationResolver** | `src/client/pcf/AssociationResolver/` | standard ❌ | ❌ missing | ❓ check | **P2** (possibly small/non-React) |
+| **ThemeEnforcer** | `src/client/pcf/ThemeEnforcer/` | standard ❌ | ❌ missing | ❓ check | **P2** (possibly small/non-React) |
+| **UpdateRelatedButton** | `src/client/pcf/UpdateRelatedButton/` | standard ❌ | ✅ has | ❓ check | **P2** |
+| ~~SemanticSearchControl~~ | ✅ already virtual | virtual | ✅ | ✅ | **DONE** (reference exemplar) |
+| ~~RelatedDocumentCount~~ | ✅ already virtual | virtual | ✅ | ✅ | **DONE** |
+| ~~DocumentRelationshipViewer (PCF)~~ | ✅ already virtual | virtual | ✅ | ✅ | **DONE** |
+| ~~ScopeConfigEditor~~ | ✅ already virtual | virtual | ✅ | ❓ | **DONE** |
+| ~~SpaarkeGridCustomizer~~ | ✅ already virtual | virtual | ✅ | ❓ | **DONE** |
+
+### Refactor Procedure (per PCF)
+
+Follow this sequence — `SemanticSearchControl` is the reference exemplar.
+
+**Step 1 — Add `featureconfig.json` at PCF project root** (same level as `*.pcfproj`):
+```json
+{
+  "pcfReactPlatformLibraries": "on",
+  "pcfAllowCustomWebpack": "on"
+}
+```
+
+**Step 2 — Update `ControlManifest.Input.xml`**:
+- Change `control-type="standard"` → `control-type="virtual"`
+- Ensure `<resources>` includes:
+  ```xml
+  <platform-library name="React" version="16.14.0"/>
+  <platform-library name="Fluent" version="9.46.2"/>
+  ```
+
+**Step 3 — Refactor `index.ts`**:
+- Change interface: `ComponentFramework.StandardControl<IInputs, IOutputs>` → `ComponentFramework.ReactControl<IInputs, IOutputs>`
+- Remove `ReactDOM.render(...)` and `ReactDOM.unmountComponentAtNode(...)` — virtual controls do NOT render imperatively
+- Change `init(context, notify, state, container): void` → `init(context, notify, state): void` (no container param)
+- Change `updateView(context): void` → `updateView(context): React.ReactElement` (RETURNS the element)
+- `destroy()` becomes a no-op or minimal cleanup (no ReactDOM unmount)
+
+**Step 4 — Move async init from PCF class to React component** (CRITICAL per skill):
+- For ReactControl, `notifyOutputChanged()` does NOT reliably trigger `updateView()`. If the control has no two-way bound field, the framework may ignore the call entirely.
+- **Rule**: Any async init (auth, config fetching) MUST live in `useState` + `useEffect` inside the React component — NOT the PCF class `init()`.
+- Pattern: in the React component, use `const [isAuthInitialized, setIsAuthInitialized] = useState(false)` + `useEffect(() => { initAuth().then(() => setIsAuthInitialized(true)); }, []);`
+- Render a loading state while `!isAuthInitialized`. Render the real UI once it is.
+- See `SemanticSearchControl.tsx` for the canonical pattern.
+
+**Step 5 — Convert imperative DOM placeholders to React conditional renders**:
+- Design-mode placeholder, loading spinner, error states must become JSX in the component, not `container.innerHTML = ...` HTML strings.
+- Move helpers (e.g., `isDesignMode`, `getEffectiveDarkMode`) into the component file or a small helper module.
+
+**Step 6 — Bump version, build, verify**:
+- Bump 5 locations per /pcf-deploy skill (manifest, .tsx footer, Solution.xml, Solution Controls/.../ControlManifest.xml, pack.ps1)
+- `npm run build`
+- **Verify bundle size dropped**: `ls -la out/controls/.../bundle.js` — should be **<5 MB** (target ~500 KB-2 MB; SemanticSearch is the reference at ~10 MB only because of icon library, not framework)
+- Pack via `pack.ps1`
+- Import via `pac solution import` to dev1 + demo
+
+**Step 7 — Post-refactor**: after ALL standard PCFs are converted, revert `maxuploadfilesize` on dev1:
+```bash
+TOKEN=$(az account get-access-token --resource "https://spaarkedev1.crm.dynamics.com" --query accessToken -o tsv)
+ORG_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/organizations?\$select=organizationid" | python -c "import json,sys; print(json.load(sys.stdin)['value'][0]['organizationid'])")
+curl -s -X PATCH "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/organizations($ORG_ID)" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "If-Match: *" \
+  -d '{"maxuploadfilesize":25600000}'
+```
+
+### Critical Risks of Refactor
+
+1. **Breaking the active control** — SpeDocumentViewer has complex state (loading → ready → error, design-mode detection, theme listener, document ID tracking). Each must be re-implemented as React state without losing behavior. Test the check-out / check-in / discard / delete / download flows after refactor.
+2. **Framework "updateView not called" trap** — if the control is field-bound but the bound field never changes (read-only), the framework may not trigger updateView after notifyOutputChanged. Async auth init MUST be in useEffect inside the component.
+3. **Platform library version mismatch** — `<platform-library name="React" version="16.14.0"/>` must match what the host platform provides. If wrong, runtime errors.
+
+### Reference Exemplars in This Repo (Read These Before Refactoring)
+
+- `src/client/pcf/SemanticSearchControl/SemanticSearchControl/index.ts` — canonical virtual control entry
+- `src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx` — async auth init in useEffect
+- `src/client/pcf/SemanticSearchControl/featureconfig.json` — canonical featureconfig
+- `src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/index.ts` — simpler virtual exemplar
+- `.claude/skills/pcf-deploy/SKILL.md` — official refactor + deploy guidance
+
+### Estimated Effort
+
+- **SpeDocumentViewer (P0)**: ~2 hours — most complex due to state machine + design-mode handling
+- **UniversalDatasetGrid (P0)**: ~1-2 hours — likely complex
+- **EmailProcessingMonitor (P0)**: ~1 hour — moderately complex
+- **DrillThroughWorkspace / UniversalQuickCreate / VisualHost (P1)**: ~30-60 min each
+- **AssociationResolver / ThemeEnforcer / UpdateRelatedButton (P2)**: ~30 min each (if React-based; if vanilla JS, may be N/A)
+- **Total estimated**: 6-12 hours focused work for all 9 PCFs
+
+### Order of Attack (when resuming this work)
+
+1. Audit each P0 PCF to verify it actually uses React (some "standard" controls may be vanilla JS and can stay standard with a feature flag).
+2. Start with SpeDocumentViewer — user-confirmed blocker, biggest bundle savings.
+3. UniversalDatasetGrid next — used in document grids across the app.
+4. EmailProcessingMonitor.
+5. P1 PCFs in priority order based on user usage frequency.
+6. P2 PCFs as time permits — may be deferrable if non-React.
+7. After all standard PCFs converted, revert `maxuploadfilesize` to default and verify all imports still succeed.
+
+### Tracking This Work
+
+Create a focused project folder `projects/pcf-virtual-refactor-2026-05/` when ready to start, with a per-PCF checklist file. Don't try to refactor all 9 in one session.
+
+---
+
 ## If You're Reading This After Compaction
 
 **Do this first**:
@@ -323,3 +443,8 @@ document.cookie.split(';').forEach(c => { document.cookie = c.split('=')[0].trim
 3. Read `feedback_auth-true-sso-requirement.md` for the binding requirements
 4. Check `git log --oneline -10` for recent state
 5. Ask the user to confirm test results from the verification list above before making changes
+
+**Critical context to NOT lose:**
+- Auth fix is in master + propagation is ongoing. ~25 consumers remain.
+- The PCF virtual-pattern refactor (above section) is user-mandated and queued. Do NOT skip it permanently — the maxuploadfilesize bump is a temporary mitigation only.
+- DO NOT revert `maxuploadfilesize` until ALL standard PCFs are refactored to virtual.
