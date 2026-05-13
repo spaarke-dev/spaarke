@@ -1,8 +1,18 @@
 # Active Work — Auth SSO Propagation + Email Documents Wizard
 
 > **Last Updated**: 2026-05-13 (carried over from intensive session 2026-05-12)
-> **Status**: In progress — auth fix partially propagated, email wizard built but unverified end-to-end
-> **Priority**: User is blocked by login popups on every tab open. Auth propagation is top priority.
+> **Status**: SpeDocumentViewer virtual-PCF refactor IN PROGRESS (user picked Option B)
+> **Priority**: SpeDocumentViewer is currently crashing on Document open (dual-React-instance issue with bundled React vs platform-loaded React). Refactor unblocks it.
+
+## 🚀 Post-Compaction Resume Prompt
+
+Paste into the new session:
+```
+Continue the SpeDocumentViewer virtual PCF refactor.
+See projects/auth-sso-and-email-wizard-2026-05/CONTEXT.md
+and current-task.md. Check git log --oneline -10 for
+latest commits before resuming.
+```
 
 ---
 
