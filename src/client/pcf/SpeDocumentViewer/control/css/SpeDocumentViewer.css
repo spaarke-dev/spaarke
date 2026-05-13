@@ -101,6 +101,23 @@
     background-color: var(--colorNeutralBackground1, #ffffff);
 }
 
+/* Hide visual scrollbars on viewer containers but keep scroll functionality.
+ * The scrollbars add no value when previewing an embedded document — the
+ * viewer's own UI (next/prev/zoom) handles navigation. (User request 2026-05-13) */
+.spe-document-viewer-container,
+.spe-document-viewer-preview,
+.spe-document-viewer-iframe {
+    scrollbar-width: none;       /* Firefox */
+    -ms-overflow-style: none;    /* legacy IE / old Edge */
+}
+.spe-document-viewer-container::-webkit-scrollbar,
+.spe-document-viewer-preview::-webkit-scrollbar,
+.spe-document-viewer-iframe::-webkit-scrollbar {
+    display: none;               /* Chromium / WebKit (Edge/Chrome/Safari) */
+    width: 0;
+    height: 0;
+}
+
 .spe-document-viewer-iframe-loading {
     position: absolute;
     top: 0;
