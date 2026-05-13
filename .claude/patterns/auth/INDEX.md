@@ -9,12 +9,13 @@
 ## Authentication
 | Pattern | When to Load | Last Reviewed | Status |
 |---------|-------------|---------------|--------|
+| [spaarke-sso-binding.md](spaarke-sso-binding.md) | **CANONICAL** — binding requirements, 6-strategy chain, bundling reality | 2026-05-13 | Verified |
 | [oauth-scopes.md](oauth-scopes.md) | Configuring OAuth scopes | 2026-04-05 | Verified |
 | [obo-flow.md](obo-flow.md) | Graph API OBO token exchange | 2026-04-05 | Verified |
 | [dataverse-obo.md](dataverse-obo.md) | Dataverse OBO token exchange | 2026-04-05 | Verified |
 | [service-principal.md](service-principal.md) | App-only auth (no user context) | 2026-04-05 | Current |
-| [token-caching.md](token-caching.md) | Token caching (Redis/session) | 2026-04-05 | Verified |
-| [msal-client.md](msal-client.md) | Legacy PCF MSAL singleton | 2026-04-05 | Verified |
+| [token-caching.md](token-caching.md) | Token caching (Redis server + localStorage client) | 2026-05-13 | Verified |
+| [msal-client.md](msal-client.md) | Legacy PCF MSAL singleton (superseded by `@spaarke/auth`) | 2026-04-05 | Legacy |
 | [spaarke-auth-initialization.md](spaarke-auth-initialization.md) | Code Page auth bootstrap | 2026-04-05 | Current |
 | [xrm-webapi-vs-bff-auth.md](xrm-webapi-vs-bff-auth.md) | Decision: Xrm.WebApi vs BFF auth | 2026-04-05 | Verified |
 | [bff-url-normalization.md](bff-url-normalization.md) | **CRITICAL**: BFF URL construction via `buildBffApiUrl()` | 2026-04-05 | Verified |

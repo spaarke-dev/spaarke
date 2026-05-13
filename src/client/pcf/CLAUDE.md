@@ -126,32 +126,46 @@ export const App: React.FC<IAppProps> = ({ context }) => {
 };
 ```
 
-### MSAL Authentication Pattern
+### Authentication Pattern (Use `@spaarke/auth`)
+
+**Never instantiate `PublicClientApplication` directly in a PCF.** All BFF API token acquisition routes through `@spaarke/auth` so every Spaarke surface shares one auth provider and the SSO binding requirements (`localStorage`, cookie state, tenant-specific authority) are guaranteed.
+
+Bootstrap in the React host component's `useEffect` (NOT the PCF class `init()` — see the "Async Init in ReactControl" rule below):
+
 ```typescript
-// services/auth/MsalAuthProvider.ts
-export class MsalAuthProvider {
-    private static instance: MsalAuthProvider;
-    private msalInstance: PublicClientApplication | null = null;
+// authInit.ts — adapt the example from SemanticSearchControl
+import { initAuth, type IAuthConfig } from '@spaarke/auth';
 
-    static getInstance(): MsalAuthProvider {
-        if (!MsalAuthProvider.instance) {
-            MsalAuthProvider.instance = new MsalAuthProvider();
-        }
-        return MsalAuthProvider.instance;
-    }
-
-    async getToken(scopes: string[]): Promise<string> {
-        // Silent token acquisition with fallback to interactive
-        try {
-            const result = await this.msalInstance!.acquireTokenSilent({ scopes });
-            return result.accessToken;
-        } catch {
-            const result = await this.msalInstance!.acquireTokenPopup({ scopes });
-            return result.accessToken;
-        }
-    }
+export async function initializeAuth(
+    clientAppId: string,
+    bffAppId: string,
+    bffApiUrl: string
+): Promise<void> {
+    const config: IAuthConfig = {
+        clientId: clientAppId,
+        // authority intentionally omitted — @spaarke/auth resolves tenant-specific via resolveTenantFromXrm()
+        redirectUri: resolveClientUrlFromXrm(),
+        bffApiScope: `api://${bffAppId}/SDAP.Access`,
+        bffBaseUrl: bffApiUrl,
+        proactiveRefresh: true,
+    };
+    await initAuth(config);
 }
+
+// Then in the React host component:
+const [authReady, setAuthReady] = useState(false);
+useEffect(() => {
+    initializeAuth(clientAppId, bffAppId, bffApiUrl).then(() => setAuthReady(true));
+}, []);
+
+// To call the BFF, use authenticatedFetch (handles token + retry):
+import { authenticatedFetch } from '@spaarke/auth';
+const response = await authenticatedFetch('/ai/search/...'); // relative path; resolver adds /api/
 ```
+
+**Why this matters**: the 6-strategy chain inside `SpaarkeAuthProvider` (Cache → SessionStorage → Bridge → Xrm → MsalSilent → MsalPopup) lets neighbor PCFs and Code Pages share tokens silently. Direct `PublicClientApplication` usage bypasses the chain and fires the "Pick an account" popup on every tab open.
+
+**Canonical reference**: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../../.claude/patterns/auth/spaarke-sso-binding.md)
 
 ### API Client Pattern
 ```typescript

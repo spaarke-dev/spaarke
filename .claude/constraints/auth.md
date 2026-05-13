@@ -2,10 +2,15 @@
 
 > **Domain**: OAuth, OBO, Token Management, Access Control
 > **Source ADRs**: ADR-003, ADR-004, ADR-008, ADR-009
-> **Last Updated**: 2026-03-09
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Updated**: 2026-05-13
+> **Last Reviewed**: 2026-05-13
 > **Status**: Verified
+>
+> **Client-side MSAL binding requirements** for internal Spaarke surfaces are in
+> [`.claude/patterns/auth/spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md) (canonical).
+> The MUST/MUST NOT rules below were updated 2026-05-13 to match. The External
+> Workspace SPA (B2B portal) is out of scope for the internal SSO binding —
+> see [`docs/architecture/external-access-spa-architecture.md`](../../docs/architecture/external-access-spa-architecture.md).
 
 ---
 
@@ -23,16 +28,20 @@ Load when:
 
 ## MUST Rules
 
-### OAuth/OBO Flow (ADR-004, ADR-009)
+### OAuth/OBO Flow (server-side; ADR-004, ADR-009)
 
 - ✅ **MUST** use `.default` scope for OBO token exchange (not individual scopes)
 - ✅ **MUST** use scope format `api://{APP_ID}/user_impersonation` for BFF API
 - ✅ **MUST** cache OBO tokens with 55-minute TTL (5-minute buffer before expiry)
 - ✅ **MUST** hash user tokens (SHA256) before using as cache keys
-- ✅ **MUST** use sessionStorage for client-side token cache (cleared on tab close)
-- ✅ **MUST** try silent token acquisition before popup/redirect
-- ✅ **MUST** use `organizations` authority for Code Page MSAL config (not hardcoded tenant)
-- ✅ **MUST** check parent token bridge (`window.parent.__SPAARKE_BFF_TOKEN__`) before MSAL initialization in child iframes
+
+### Client-side MSAL (internal Spaarke surfaces; binding 2026-05-12)
+
+- ✅ **MUST** use `cacheLocation: 'localStorage'` (NOT `sessionStorage`) — survives tab/browser close
+- ✅ **MUST** use `storeAuthStateInCookie: true` — required for `ssoSilent` when 3rd-party cookies are blocked
+- ✅ **MUST** use tenant-specific authority `https://login.microsoftonline.com/{tenantId}` resolved from `Xrm.Utility.getGlobalContext().organizationSettings.tenantId` via frame-walk. Prefer omitting `authority` so `@spaarke/auth` resolves it via `resolveTenantFromXrm()`.
+- ✅ **MUST** route token acquisition through `SpaarkeAuthProvider`'s 6-strategy chain (Cache → SessionStorage → Bridge → Xrm → MsalSilent → MsalPopup). See [`spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md).
+- ✅ **MUST** rebuild AND redeploy every consumer of `@spaarke/auth` when the library changes — bundles are NOT auto-updated.
 
 ### Authorization Architecture (ADR-003)
 
@@ -45,15 +54,20 @@ Load when:
 
 ## MUST NOT Rules
 
-### OAuth/OBO Flow (ADR-004)
+### OAuth/OBO Flow (server-side; ADR-004)
 
 - ❌ **MUST NOT** use individual Graph scopes in OBO (use `.default` only)
 - ❌ **MUST NOT** store user tokens in plaintext (always hash)
-- ❌ **MUST NOT** use localStorage for tokens (use sessionStorage)
 - ❌ **MUST NOT** skip MSAL initialization step in MSAL v3+
 - ❌ **MUST NOT** use friendly scope names (use `api://{GUID}/scope` format)
-- ❌ **MUST NOT** hardcode tenant ID in Code Page MSAL authority (use `organizations`)
-- ❌ **MUST NOT** initialize MSAL in child iframes without first checking parent token bridge
+
+### Client-side MSAL (internal Spaarke surfaces)
+
+- ❌ **MUST NOT** use `sessionStorage` for the MSAL cache on internal surfaces (it wipes on tab close → popup every new tab)
+- ❌ **MUST NOT** set `storeAuthStateInCookie: false` — needed for `ssoSilent` under 3rd-party cookie blocking
+- ❌ **MUST NOT** use `/organizations` or `/common` as the MSAL authority — `ssoSilent` can't resolve which tenant's session to use inside iframes. Always tenant-specific from Xrm
+- ❌ **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` — every component must reuse `getAuthProvider()`
+- ❌ **MUST NOT** initialize MSAL in child iframes without first checking the parent token bridge (`window.parent.__SPAARKE_BFF_TOKEN__`)
 
 ### Authorization Architecture (ADR-003)
 
@@ -176,10 +190,13 @@ Examples:
 
 ## Pattern Files (Complete Examples)
 
+- [Spaarke SSO Binding](../patterns/auth/spaarke-sso-binding.md) - **Canonical** — binding requirements + 6-strategy chain
 - [OAuth Scopes](../patterns/auth/oauth-scopes.md) - Scope format and configuration
 - [OBO Flow](../patterns/auth/obo-flow.md) - On-Behalf-Of token exchange
 - [Token Caching](../patterns/auth/token-caching.md) - Server & client token caching
 - [MSAL Client](../patterns/auth/msal-client.md) - Client-side MSAL patterns
+- [Spaarke Auth Initialization](../patterns/auth/spaarke-auth-initialization.md) - Bootstrap order in Code Pages
+- [Xrm WebApi vs BFF Auth](../patterns/auth/xrm-webapi-vs-bff-auth.md) - Decision matrix
 
 ---
 

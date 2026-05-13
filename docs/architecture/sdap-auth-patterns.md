@@ -144,16 +144,29 @@ AI analysis services **must use OBO** (`DownloadFileAsUserAsync(httpContext, ...
 
 **Critical bug that was fixed**: After OBO exchange, the token must be explicitly set on the HttpClient (`_httpClient.DefaultRequestHeaders.Authorization = Bearer {oboToken}`). Forgetting this causes subsequent requests to use the old service principal token and return 401.
 
-### Pattern 7: Code Page Dual-Strategy Auth
+### Pattern 7: `SpaarkeAuthProvider` 6-Strategy Chain (Updated 2026-05-12)
 
-Token acquisition priority for React Code Pages:
-1. In-memory cache
-2. Xrm platform strategies (`getGlobalContext().getAccessToken()`, `__crmTokenProvider`, etc.) — works when page opened via `navigateTo`
-3. MSAL `ssoSilent` (hidden iframe using existing Azure AD session cookie) — fallback for embedded iframe mode
+Token acquisition for all internal Spaarke surfaces (PCFs + Code Pages) routes through `SpaarkeAuthProvider.getAccessToken()`, which tries six strategies in order. The first non-expired token wins.
 
-**Authority**: Use `https://login.microsoftonline.com/organizations` for portability. Avoid hardcoding tenant ID (known tech debt in SemanticSearch and DocumentRelationshipViewer — should migrate to `@spaarke/auth`).
+| # | Strategy | Returns | When it succeeds |
+|---|---|---|---|
+| 1 | `CacheStrategy` | In-memory (per provider instance) | Same provider already acquired this session |
+| 2 | `SessionStorageStrategy` | `__spaarke_bff_token_cache__` | Same-origin neighbor (another PCF/iframe) stored a token |
+| 3 | `BridgeStrategy` | Parent frame `window.__SPAARKE_BFF_TOKEN__` | We're an iframe and the host set the bridge |
+| 4 | `XrmStrategy` | Xrm.WebApi token | Dataverse-scoped only — **NEVER for BFF API calls** |
+| 5 | `MsalSilentStrategy` | `acquireTokenSilent` then `ssoSilent` | Fresh refresh token + cookie state present |
+| 6 | `MsalPopupStrategy` | Interactive popup | All silent strategies failed. **Firing this is a regression.** |
+
+**Required MSAL config (binding, 2026-05-12)**:
+- `cacheLocation: 'localStorage'` — must survive tab close so neighbor tabs don't re-prompt
+- `storeAuthStateInCookie: true` — required for `ssoSilent` under 3rd-party cookie blocking
+- `authority: https://login.microsoftonline.com/{tenantId}` resolved at bootstrap from `Xrm.Utility.getGlobalContext().organizationSettings.tenantId` via frame-walk. **NEVER `/organizations` or `/common`** — AAD can't disambiguate which tenant's session cookie to use inside an iframe, so `ssoSilent` fails.
+
+`@spaarke/auth/src/config.ts` exposes `resolveTenantFromXrm()` and `getDefaultAuthority()` so consumers that omit the `authority` field get the correct value automatically. **Prefer omitting `authority`** over passing it explicitly.
 
 **Client IDs**: Code Pages use `170c98e1-d486-4355-bcbe-170454e0207c` (DSM-SPE Dev 2). PCF controls use `5175798e-f23e-41c3-b09b-7a90b9218189`. Both are in `knownClientApplications` on the BFF app.
+
+**Canonical reference**: [`/.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md)
 
 ### Pattern 9: Wizard Code Pages — Tenant ID at Bootstrap
 
@@ -235,8 +248,12 @@ Token acquisition priority for React Code Pages:
 - **MUST** cache OBO tokens in Redis (ADR-009) — 55-min TTL, SHA256-hashed keys
 - **MUST NOT** inject `GraphServiceClient` directly into endpoints — use `SpeFileStore` facade (ADR-007)
 - **MUST NOT** use `RetrievePrincipalAccess` with OBO tokens — use direct query pattern
-- **MUST NOT** hardcode tenant ID in Code Page authority URLs — use `organizations` for portability
+- **MUST** use tenant-specific authority `https://login.microsoftonline.com/{tenantId}` for internal Spaarke surfaces, resolved at runtime via `resolveTenantFromXrm()` (binding 2026-05-12). NEVER `/organizations` or `/common` — `ssoSilent` can't disambiguate which tenant's session to use inside an iframe and falls back to popup.
+- **MUST** use `cacheLocation: 'localStorage'` + `storeAuthStateInCookie: true` for internal MSAL config — `sessionStorage` wipes on tab close (forces popup per tab) and `false` cookie state breaks `ssoSilent` under 3rd-party cookie blocking.
 - **MUST NOT** use `fetch.bind(window)` for authenticated BFF calls in wizard code pages — use `authenticatedFetch` from `@spaarke/auth`
+- **MUST** rebuild AND redeploy every consumer of `@spaarke/auth` when the library changes — bundles are NOT auto-updated. ~30 consumers (PCFs + Code Pages). See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md#bundling-reality-critical).
+
+> **External Workspace SPA** (`src/client/external-spa/`) is a B2B portal with intentionally different auth semantics (per-tab sessionStorage, different consumer scope). The internal SSO binding above does NOT apply — see `external-access-spa-architecture.md`.
 
 ---
 

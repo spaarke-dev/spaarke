@@ -168,17 +168,18 @@ const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.a
 
 ---
 
-## Token Acquisition Strategy (5-Strategy Cascade)
+## Token Acquisition Strategy (6-Strategy Cascade)
 
-`SpaarkeAuthProvider.getAccessToken()` tries these in order:
+`SpaarkeAuthProvider.getAccessToken()` tries these in order (updated 2026-05-12; canonical reference: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md)):
 
 | # | Strategy | Speed | When It Works |
 |---|----------|-------|---------------|
 | 1 | **In-memory cache** | ~0.1ms | Token already acquired this session |
-| 2 | **Bridge token** | ~0.1ms | Parent iframe published a token (dialog scenarios) |
-| 3 | **Xrm platform** | ~10-50ms | Dataverse host exposes token via `getCurrentAppProperties()` |
-| 4 | **MSAL silent** | ~100-200ms | Existing Azure AD session (acquireTokenSilent / ssoSilent) |
-| 5 | **MSAL popup** | ~500-1300ms | Interactive login (last resort) |
+| 2 | **SessionStorage cache** | ~0.5ms | Same-origin neighbor stored `__spaarke_bff_token_cache__` |
+| 3 | **Bridge token** | ~0.1ms | Parent iframe published `window.__SPAARKE_BFF_TOKEN__` (dialog scenarios) |
+| 4 | **Xrm platform** | ~10-50ms | `Xrm.WebApi` token — **Dataverse-scoped only, NOT for BFF API** |
+| 5 | **MSAL silent** | ~100-200ms | Existing Azure AD session (`acquireTokenSilent` / `ssoSilent`); requires `cacheLocation: 'localStorage'` + `storeAuthStateInCookie: true` + tenant-specific authority |
+| 6 | **MSAL popup** | ~500-1300ms | Interactive login (last resort — firing this is a regression) |
 
 If all strategies return null, `getAccessToken()` returns empty string `""`.
 `authenticatedFetch()` will then send a request without a valid Bearer token → BFF returns 401.
@@ -191,7 +192,7 @@ If all strategies return null, `getAccessToken()` returns empty string `""`.
 
 If all strategies fail:
 ```
-[SpaarkeAuth] All 5 token strategies failed. Config: { clientId: "170c98e1...", ... }
+[SpaarkeAuth] All 6 token strategies failed. Config: { clientId: "170c98e1...", authority: "...", ... }
 ```
 
 ---
@@ -259,11 +260,12 @@ await authenticatedFetch('/ai/chat/sessions');
 ### 401 Unauthorized (all retries exhausted)
 **Symptom**: `AuthError: Authentication failed after all retry attempts`
 **Check**:
-1. Console for `[SpaarkeAuth] All 5 token strategies failed` — shows config values
+1. Console for `[SpaarkeAuth] All 6 token strategies failed` — shows config values
 2. Is `bffApiScope` non-empty? (should be `api://<appId>/user_impersonation`)
 3. Is `clientId` correct? (must match Azure AD app registration)
-4. Is MSAL popup blocked by browser? (check popup blocker)
-5. Hard refresh (`Ctrl+Shift+R`) to clear stale sessionStorage
+4. Is the `authority` value tenant-specific? `/organizations` or `/common` means an un-rebuilt consumer is using the old library — rebuild + redeploy that PCF or Code Page
+5. Is MSAL popup blocked by browser? (check popup blocker)
+6. Hard refresh (`Ctrl+Shift+R`) to clear stale localStorage
 
 ### "Missing Parameters — tenantId: (missing)"
 **Symptom**: Dialog opens but tenant ID is empty

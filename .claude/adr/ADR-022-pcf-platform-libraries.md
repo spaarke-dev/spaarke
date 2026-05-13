@@ -1,8 +1,9 @@
 # ADR-022: PCF Platform Libraries (Field-Bound Controls Only) (Concise)
 
-> **Status**: Accepted (Revised 2026-02-23)
+> **Status**: Accepted (Revised 2026-05-13)
 > **Domain**: PCF/Frontend Architecture
-> **Last Updated**: 2026-02-23
+> **Last Updated**: 2026-05-13
+> **Last Verified Against**: [Microsoft Learn — React controls & platform libraries](https://learn.microsoft.com/en-us/power-apps/developer/component-framework/react-controls-platform-libraries) (Microsoft doc updated 2025-10-10)
 
 ---
 
@@ -18,12 +19,16 @@ Use **Dataverse platform-provided libraries** (React 16/17, Fluent UI v9) for PC
 
 ## Runtime Versions (PCF Controls)
 
-| Context | Manifest Version | Actual Runtime Version |
+| Library | Manifest declared | Actual Runtime Version |
 |---------|------------------|------------------------|
-| Model-driven apps | 16.14.0 | **17.0.2** |
-| Canvas apps | 16.14.0 | 16.14.0 |
+| React (Model-driven apps) | `16.14.0` | **17.0.2** |
+| React (Canvas apps) | `16.14.0` | 16.14.0 |
+| `@fluentui/react-components` (v9) | `9.46.2` (top of allowed range `>=9.4.0 <=9.46.2`) | **9.68.0** |
+| `@fluentui/react` (v8) | `8.29.0` or `8.121.1` | matches declaration |
 
-**React 18 is NOT available as a PCF platform library.** For React 18, use a React Code Page instead (see ADR-006).
+**React 18 is NOT available as a PCF platform library** as of May 2026. The Microsoft GA note confirms future React-version upgrades are coming — at that point our manifests will need updating, but `createRoot` migration is opt-in (no automatic break). For React 18 today, use a React Code Page instead (see ADR-006).
+
+**Fluent v9 runtime is newer than declared.** The platform loads `9.68.0` even though manifests pin to `9.46.2`. This is intentional per Microsoft's docs ("the application might load a higher compatible version"). Code that uses APIs newer than `9.46.2` will work at runtime but won't typecheck against our local Fluent install — keep local devDependencies aligned with the declared manifest version, not the runtime version.
 
 ---
 
