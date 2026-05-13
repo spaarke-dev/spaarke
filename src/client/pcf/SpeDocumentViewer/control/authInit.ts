@@ -46,14 +46,20 @@ export async function initializeAuth(
       ? window.location.origin
       : 'https://spaarkedev1.crm.dynamics.com';
 
+  // tenantId parameter is intentionally unused now — @spaarke/auth resolves
+  // tenant-specific authority via resolveTenantFromXrm() (reads
+  // Xrm.Utility.getGlobalContext().organizationSettings.tenantId via frame-walk).
+  // Passing an explicit authority bypasses that resolution and was the cause of
+  // the popup regression on 2026-05-13 when the manifest property was empty.
+  // Kept in signature for now to avoid touching every caller.
+  void tenantId;
+
   const config: IAuthConfig = {
     clientId: clientAppId,
-    authority: `https://login.microsoftonline.com/${tenantId}`,
+    // authority intentionally omitted — see comment above
     redirectUri,
-    // Named scope: api://<BFF_APP_ID>/SDAP.Access
     bffApiScope: `api://${bffAppId}/SDAP.Access`,
     bffBaseUrl: bffApiUrl,
-    // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
     proactiveRefresh: true,
   };
 

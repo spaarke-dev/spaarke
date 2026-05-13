@@ -42,16 +42,22 @@ export async function initializeAuth(
 ): Promise<void> {
   console.info('[authInit] Initializing @spaarke/auth for SemanticSearchControl...');
 
+  // tenantId parameter is intentionally unused now — @spaarke/auth resolves
+  // tenant-specific authority via resolveTenantFromXrm() (reads
+  // Xrm.Utility.getGlobalContext().organizationSettings.tenantId via frame-walk).
+  // Passing an explicit authority bypasses that resolution and was the cause of
+  // the popup regression discovered 2026-05-13. Kept in signature to avoid
+  // touching every caller.
+  void tenantId;
+
   const config: IAuthConfig = {
     clientId: clientAppId,
-    authority: `https://login.microsoftonline.com/${tenantId}`,
+    // authority intentionally omitted — see comment above
     // CRITICAL: Static redirect URI matching Azure AD app registration
     // Resolved at runtime from Xrm.Utility.getGlobalContext().getClientUrl()
     redirectUri: dataverseUrl,
-    // Named scope: api://<BFF_APP_ID>/user_impersonation
     bffApiScope: `api://${bffAppId}/user_impersonation`,
     bffBaseUrl: bffApiUrl,
-    // PCF controls benefit from proactive refresh to avoid token expiry during long sessions
     proactiveRefresh: true,
   };
 

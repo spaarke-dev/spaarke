@@ -89,9 +89,14 @@ export async function initializeAuth(webApi: ComponentFramework.WebApi): Promise
 
   const redirectUri = getClientUrl();
 
+  // authority intentionally omitted — @spaarke/auth resolves tenant-specific
+  // authority via resolveTenantFromXrm() (reads
+  // Xrm.Utility.getGlobalContext().organizationSettings.tenantId via frame-walk).
+  // Passing an explicit authority bypasses that resolution and was the cause of
+  // the popup regression discovered 2026-05-13. The sprk_TenantId env var query
+  // above is kept defensively but is no longer used for MSAL config.
   const config: IAuthConfig = {
     clientId,
-    authority: `https://login.microsoftonline.com/${tenantId}`,
     redirectUri,
     bffApiScope: `api://${bffAppId}/user_impersonation`,
     bffBaseUrl: bffApiUrl,
