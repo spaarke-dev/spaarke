@@ -169,6 +169,12 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
   const enableDelete = ctxAny.parameters?.enableDelete?.raw ?? false;
   const enableDownload = ctxAny.parameters?.enableDownload?.raw ?? true;
   const showToolbar = ctxAny.parameters?.showToolbar?.raw ?? false;
+  // Virtual controls don't get container access in init() — the framework allocates
+  // a host element whose height may not propagate to height:100% children. Read the
+  // controlHeight parameter (default 600) and apply it explicitly to the outer
+  // wrapper so the iframe + document viewer fill the configured area, matching the
+  // old StandardControl behavior.
+  const controlHeight: number = ctxAny.parameters?.controlHeight?.raw ?? 600;
   const designMode = isDesignMode(context);
 
   // Auth init — runs once on mount (skipped in design mode).
@@ -249,7 +255,18 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
   })();
 
   return (
-    <FluentProvider theme={theme} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <FluentProvider
+      theme={theme}
+      style={{
+        width: '100%',
+        height: `${controlHeight}px`,
+        minHeight: `${controlHeight}px`,
+        maxHeight: `${controlHeight}px`,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
       {content}
     </FluentProvider>
   );

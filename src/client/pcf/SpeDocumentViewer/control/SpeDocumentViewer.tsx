@@ -28,9 +28,9 @@ import { DiscardConfirmDialog } from './components/DiscardConfirmDialog';
 import { BffClient } from './BffClient';
 import './css/SpeDocumentViewer.css';
 
-// Control version - update in all 4 locations per PCF-V9-PACKAGING.md
-const CONTROL_VERSION = '1.0.15';
-const BUILD_DATE = '2026-01-15';
+// Control version — keep in sync with ControlManifest.Input.xml (per /pcf-deploy skill)
+const CONTROL_VERSION = '1.0.19';
+const BUILD_DATE = '2026-05-13';
 
 /**
  * DocumentViewerApp - Main React component
