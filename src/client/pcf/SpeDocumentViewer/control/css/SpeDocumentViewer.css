@@ -131,10 +131,15 @@
     z-index: 1;
 }
 
-/* Iframe fills all available space */
+/* Iframe fills all available space.
+ * Width is intentionally calc(100% + 18px) so the iframe's INTERNAL scrollbar
+ * (which lives in Microsoft Graph's embedded preview page and is cross-origin
+ * — we cannot style it directly) sits in the +18px gutter that is hidden by
+ * the parent's overflow:hidden. Net: scroll still works (mouse wheel/keyboard)
+ * but the visible scrollbar is clipped. */
 .spe-document-viewer-iframe {
     flex: 1 1 auto;
-    width: 100%;
+    width: calc(100% + 18px);
     height: 100%;
     border: none;
     background-color: var(--colorNeutralBackground1, #ffffff);

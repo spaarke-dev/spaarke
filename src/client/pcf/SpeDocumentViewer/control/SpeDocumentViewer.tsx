@@ -29,7 +29,7 @@ import { BffClient } from './BffClient';
 import './css/SpeDocumentViewer.css';
 
 // Control version — keep in sync with ControlManifest.Input.xml (per /pcf-deploy skill)
-const CONTROL_VERSION = '1.0.20';
+const CONTROL_VERSION = '1.0.21';
 const BUILD_DATE = '2026-05-13';
 
 /**
