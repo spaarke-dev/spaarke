@@ -1,0 +1,53 @@
+<task id="062" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build scripts/quality/Test-ReferenceExemplars.ps1 exemplar harness</title>
+    <phase>4a</phase>
+    <stream>infrastructure</stream>
+    <tags>validator, exemplar, ci</tags>
+    <estimate>1-2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4a-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>005, 028</dependencies>
+    <writes-to>scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>For each skill with opted-in `exemplar:` frontmatter, rebuild the exemplar with the skill's prescribed command and verify output matches committed reference within 20% tolerance.</goal>
+    <context>Today's bundle regression (SDV 440 KB → 6.7 MB) would have been caught by this. Skills with `exemplar: none-too-volatile` are SKIPPED — that's the opt-out per resolved decision #4.</context>
+    <constraints>
+      - Runtime: variable (depends on # opted-in exemplars and build time). NOT a pre-commit candidate; runs nightly or on PR.
+      - Must NOT run on every commit — too slow for the &lt;30s GHA budget
+      - Reads .claude/skills/*/SKILL.md frontmatter; skips skills without `exemplar:` or with `exemplar: none-too-volatile`
+      - For each opted-in: parse the skill's prescribed build command, run it, compare bundle.js size against committed reference (within 20%)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-SKILLS.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-baseline.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Walk .claude/skills/*/SKILL.md; parse frontmatter for `exemplar:` field</step>
+    <step>For each opted-in: identify the skill's prescribed build command (per its body) + the reference file (the committed bundle.js or equivalent)</step>
+    <step>For each opted-in: run the build (npm run build:prod or similar); capture output file size</step>
+    <step>Compare against committed reference; flag if deviation &gt; 20%</step>
+    <step>Report: PASS/FAIL per skill, with deviation details for FAILs</step>
+    <step>Output JSON report at .claude/QUALITY-EXEMPLAR-LAST.json (consumed by audit skill)</step>
+    <step>Exit non-zero on any FAIL</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Test-ReferenceExemplars.ps1</output>
+    <output>.claude/QUALITY-EXEMPLAR-LAST.json (output produced when run)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Runs successfully against all opted-in exemplars</criterion>
+    <criterion>Skips opted-out exemplars (rationale noted in output)</criterion>
+    <criterion>Test case with deliberately-bloated bundle (run `npm run build` instead of `build:prod` for SDV) returns FAIL with actionable diff</criterion>
+  </acceptance-criteria>
+</task>

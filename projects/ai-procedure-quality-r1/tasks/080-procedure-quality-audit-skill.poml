@@ -1,0 +1,54 @@
+<task id="080" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Create .claude/skills/procedure-quality-audit/SKILL.md</title>
+    <phase>5</phase>
+    <stream>cadence</stream>
+    <tags>skill, audit, cadence</tags>
+    <estimate>45min</estimate>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>060, 061, 062, 063, 064, 011</dependencies>
+    <writes-to>.claude/skills/procedure-quality-audit/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Single-entrypoint skill that runs all 4 validators + reference-exemplar tests + manual spot-check of 3 random opted-out skills + CLAUDE.md line-count check. Produces .claude/QUALITY-AUDIT-&lt;date&gt;.md.</goal>
+    <context>This is the recurring entry point for the monthly cadence. Friction-minimal: one command produces one report.</context>
+    <constraints>
+      - Use the canonical skill template (.claude/skills/_template/SKILL.md)
+      - Must have exemplar: field (likely none-too-volatile — the audit's output is the report itself)
+      - Must have Gotchas section
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/_template/SKILL.md</file>
+      <file>scripts/quality/Validate-ClaudeSettings.ps1</file>
+      <file>scripts/quality/Find-PatternDrift.ps1</file>
+      <file>scripts/quality/Test-ReferenceExemplars.ps1</file>
+      <file>scripts/quality/Check-BundleSizeDrift.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Clone _template into .claude/skills/procedure-quality-audit/</step>
+    <step>Write SKILL.md describing: when to invoke, what it runs, where output goes, how to interpret report</step>
+    <step>Trigger phrases in description: "quality audit", "procedure audit", "run the audit", "monthly audit"</step>
+    <step>What it runs: invokes scripts/quality/Run-ProcedureQualityAudit.ps1 (task 081)</step>
+    <step>Output location: .claude/QUALITY-AUDIT-YYYY-MM-DD.md</step>
+    <step>Gotchas section: known false positives (e.g., bundle-size threshold of 20% may flag legitimate growth), how to suppress</step>
+    <step>References: link to each validator + the cadence doc (task 083)</step>
+    <step>exemplar: none-too-volatile (the audit is meta — testing exemplars but not having its own)</step>
+  </steps>
+
+  <outputs>
+    <output>.claude/skills/procedure-quality-audit/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Skill follows template structure</criterion>
+    <criterion>Invocation produces audit report</criterion>
+    <criterion>Description triggers on intended phrases</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,56 @@
+<task id="013" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Create .claude/FAILURE-MODES.md with 4 inaugural entries</title>
+    <phase>1</phase>
+    <stream>infrastructure</stream>
+    <tags>failure-modes, infrastructure, knowledge</tags>
+    <estimate>30min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+    <writes-to>.claude/FAILURE-MODES.md</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Establish a repo-level catalog of failure modes — cross-cutting patterns that don't belong inside any single skill's Gotchas section. Distinguish "gotchas" (X happens unexpectedly) from "anti-patterns" (X looks helpful but isn't).</goal>
+    <context>This catalog is the load-bearing rationale for this project. Four issues from 2026-05-14 are the inaugural entries. Future entries are added when a session surfaces a cross-cutting failure pattern.</context>
+    <constraints>
+      - parallel-safe: false — main session only
+      - Each entry: title, date, classification (gotcha / anti-pattern), what-happened, root-cause, fix, prevention, evidence (commit SHAs)
+      - Reference from new CLAUDE.md (after Phase 3b)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/spec.md</file>
+      <file>projects/ai-procedure-quality-r1/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create .claude/FAILURE-MODES.md with header explaining purpose + classification scheme</step>
+    <step>Section: "Anti-patterns" (things that look right but aren't)
+      - Entry 1: "Skill says X but X is wrong" — /pcf-deploy "NEVER use build:prod" anti-pattern. Date: 2026-05-14. Evidence: commit c132773c.
+    </step>
+    <step>Section: "Gotchas" (things that happen unexpectedly)
+      - Entry 1: "Settings file schema malformation silently disables permission rules" — Date: 2026-03-14 introduced, 2026-05-14 caught. Evidence: commit 8ca796ab. Hook flat-command vs nested hooks array; TaskCompleted not a real event.
+      - Entry 2: "Default health-check window sized for old behavior" — /bff-deploy 60s window false-failed Linux. Date: 2026-05-14. Evidence: commit 6d7bcf45.
+      - Entry 3: "0-second GHA workflow failures are workflow-startup failures, not test failures" — Date: 2026-05-14. Evidence: 3 workflows fail on every push. Likely cause: action versions don't exist.
+    </step>
+    <step>Section: "How to use this catalog" — every skill execution should mentally cross-reference; sessions hitting a new failure type should append an entry</step>
+    <step>Set up a Markdown table of contents at top for fast navigation</step>
+  </steps>
+
+  <outputs>
+    <output>.claude/FAILURE-MODES.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>4 inaugural entries documented with full structure</criterion>
+    <criterion>Anti-pattern vs gotcha distinction is clear</criterion>
+    <criterion>Each entry has commit-SHA evidence</criterion>
+    <criterion>Reference from FAILURE-MODES → relevant skill is bidirectional (each affected skill has a "see FAILURE-MODES.md#anchor" pointer in its Gotchas section after Phase 2b)</criterion>
+  </acceptance-criteria>
+</task>

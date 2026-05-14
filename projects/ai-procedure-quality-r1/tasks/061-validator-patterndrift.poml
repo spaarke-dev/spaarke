@@ -1,0 +1,50 @@
+<task id="061" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build scripts/quality/Find-PatternDrift.ps1 drift detector</title>
+    <phase>4a</phase>
+    <stream>infrastructure</stream>
+    <tags>validator, patterns, drift, ci</tags>
+    <estimate>1h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4a-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+    <writes-to>scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Walk .claude/patterns/**/*.md, extract referenced code paths, verify each exists. Report missing or moved files. &lt;5s runtime.</goal>
+    <context>.claude/patterns/ files explicitly point at code locations. When code moves, pointers rot silently. Periodic scan catches this before a developer follows a stale pointer.</context>
+    <constraints>
+      - Runtime budget: &lt;5 seconds
+      - Supports -Quiet mode for pre-commit; -Verbose for GHA
+      - Output: JSON report with missing/moved/valid counts + paths
+      - Cross-platform (Windows + Linux GHA)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Find all .md files under .claude/patterns/</step>
+    <step>For each, parse out markdown links and bare-path references (heuristics: lines containing `src/`, `docs/`, `.claude/`, `scripts/`, etc.)</step>
+    <step>For each referenced path, Test-Path; if false, flag</step>
+    <step>For flagged paths, attempt to find a likely-moved location (e.g., basename match elsewhere in repo)</step>
+    <step>Output JSON: { totalRefs: N, validRefs: M, missing: [{pattern-file, missing-path, likely-moved-to}], summary }</step>
+    <step>Exit non-zero if any missing refs</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Find-PatternDrift.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>&lt;5s runtime</criterion>
+    <criterion>Cross-platform</criterion>
+    <criterion>Test case with deliberately-broken pattern reference returns non-zero with actionable output</criterion>
+  </acceptance-criteria>
+</task>

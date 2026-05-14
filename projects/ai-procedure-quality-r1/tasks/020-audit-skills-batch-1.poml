@@ -1,0 +1,51 @@
+<task id="020" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Audit skills batch 1 (skills 1–6 alphabetically)</title>
+    <phase>2a</phase>
+    <stream>audit</stream>
+    <tags>audit, skills, parallel-batch</tags>
+    <estimate>30min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>2a-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001, 011</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Audit 6 skills against the 7 best practices from spec.md. Return findings as structured output; do NOT modify any skill files. Main session writes per-batch findings to notes/audit/batch-1.md.</goal>
+    <context>This batch covers the first 6 skills alphabetically from the inventory produced by task 001. Sub-agents are read-only on .claude/; they return findings, main session writes them out.</context>
+    <constraints>
+      - READ ONLY on .claude/skills/. NO writes to skill files.
+      - Output to projects/ai-procedure-quality-r1/notes/audit/batch-1.md (not into .claude/)
+      - Apply the 7 best practices from spec.md verbatim
+      - For each skill, recommend `exemplar:` value: a real path OR `none-too-volatile` with rationale
+      - Honesty: if a skill is already in good shape, say so. Do not fabricate problems.
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/spec.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/skills.md</file>
+      <file>.claude/skills/_template/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read notes/inventory/skills.md; identify skills 1–6 alphabetically</step>
+    <step>For each skill, read its SKILL.md plus any subdirectory content</step>
+    <step>Evaluate against the 7 best practices; capture per-skill findings: description-quality, body-length, goal-vs-prescriptive, gotchas, overlap, deterministic-rules-to-extract, references-to-verify, recommended-exemplar, recommended-action</step>
+    <step>Write projects/ai-procedure-quality-r1/notes/audit/batch-1.md with one section per skill</step>
+  </steps>
+
+  <outputs>
+    <output>projects/ai-procedure-quality-r1/notes/audit/batch-1.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 6 skills assessed against all 7 best practices</criterion>
+    <criterion>Each skill has a recommended action (refine-in-place / split / merge / remove / leave-alone)</criterion>
+    <criterion>Each skill has a recommended `exemplar:` value</criterion>
+    <criterion>No .claude/ files modified</criterion>
+  </acceptance-criteria>
+</task>

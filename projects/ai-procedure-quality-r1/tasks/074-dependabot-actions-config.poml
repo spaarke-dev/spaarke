@@ -1,0 +1,37 @@
+<task id="074" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Update .github/dependabot.yml for github-actions ecosystem</title>
+    <phase>4b</phase>
+    <stream>github-actions</stream>
+    <tags>dependabot, github-actions</tags>
+    <estimate>20min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>4b-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+    <writes-to>.github/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Add github-actions package-ecosystem to .github/dependabot.yml so SHA-pinned actions get auto-bumped via PR.</goal>
+    <context>Once we pin to SHAs (task 072), they freeze unless we update them. Dependabot does this automatically. Closes the loop.</context>
+    <constraints>parallel-safe: false. Keep existing nuget/npm dependabot config intact.</constraints>
+  </prompt>
+
+  <steps>
+    <step>Read current .github/dependabot.yml</step>
+    <step>Add update block: package-ecosystem: "github-actions", directory: "/", schedule: weekly, open-pull-requests-limit: 5, commit-message: prefix "ci(deps)"</step>
+    <step>Configure to keep SHA pinning style on bump</step>
+    <step>Validate with actionlint or schemastore.org/dependabot-2.0.json</step>
+  </steps>
+
+  <outputs>
+    <output>Updated .github/dependabot.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>github-actions ecosystem entry added</criterion>
+    <criterion>Schedule + limits set reasonably</criterion>
+    <criterion>YAML validates against published Dependabot schema</criterion>
+  </acceptance-criteria>
+</task>

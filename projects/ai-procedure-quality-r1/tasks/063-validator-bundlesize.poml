@@ -1,0 +1,49 @@
+<task id="063" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build scripts/quality/Check-BundleSizeDrift.ps1 bundle-size guard</title>
+    <phase>4a</phase>
+    <stream>infrastructure</stream>
+    <tags>validator, bundle-size, ci</tags>
+    <estimate>45min</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4a-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>005</dependencies>
+    <writes-to>scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Walk every PCF's committed bundle.js, compare current size against baseline. Warn at &gt;20% deviation. Designed to run on PRs that touch any PCF source file.</goal>
+    <context>Cheapest drift detector available. The 2026-05-14 6.7MB-bundle bug would have been caught instantly.</context>
+    <constraints>
+      - Runtime: &lt;3s (just file stats)
+      - Reads baseline from projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-baseline.json
+      - Tolerance: 20% deviation (matches Test-ReferenceExemplars)
+      - Exit non-zero on any out-of-tolerance bundle
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-baseline.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read pcf-bundle-baseline.json for expected sizes</step>
+    <step>For each PCF in baseline: stat its committed bundle.js</step>
+    <step>Calculate deviation %; warn at &gt;20%</step>
+    <step>Output table: PCF, expected-bytes, actual-bytes, deviation%, PASS/WARN/FAIL</step>
+    <step>Exit non-zero on any FAIL</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Check-BundleSizeDrift.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>&lt;3s runtime</criterion>
+    <criterion>Detects deliberately-bloated test case</criterion>
+    <criterion>Passes on current committed bundles (which match baseline)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,38 @@
+<task id="084" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Run inaugural procedure-quality audit; produce first .claude/QUALITY-AUDIT-&lt;date&gt;.md</title>
+    <phase>5</phase>
+    <stream>cadence</stream>
+    <tags>audit, inaugural</tags>
+    <estimate>20min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>083</dependencies>
+    <writes-to>.claude/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>First end-to-end run of the new infrastructure. Confirms everything wired up correctly. Establishes the baseline against which next month's audit will diff.</goal>
+  </prompt>
+
+  <steps>
+    <step>Invoke procedure-quality-audit skill</step>
+    <step>Verify all 4 validators run, 3 spot-checks emitted, CLAUDE.md line-count checked</step>
+    <step>Verify report at .claude/QUALITY-AUDIT-2026-05-14.md (or whenever this runs)</step>
+    <step>Verify .claude/QUALITY-AUDIT-LAST.md copy created</step>
+    <step>Document inaugural run results in projects/ai-procedure-quality-r1/notes/inaugural-audit-summary.md</step>
+  </steps>
+
+  <outputs>
+    <output>.claude/QUALITY-AUDIT-&lt;date&gt;.md</output>
+    <output>.claude/QUALITY-AUDIT-LAST.md</output>
+    <output>projects/ai-procedure-quality-r1/notes/inaugural-audit-summary.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Real audit report produced</criterion>
+    <criterion>All 4 validators ran successfully</criterion>
+    <criterion>3 spot-check prompts emitted</criterion>
+    <criterion>Report is the new baseline for next month</criterion>
+  </acceptance-criteria>
+</task>
