@@ -267,6 +267,10 @@ export class EntityCreationService {
           sprk_graphitemid: file.id,
           sprk_graphdriveid: containerId ?? null,
           sprk_filepath: file.webUrl ?? null,
+          // Upload to SPE succeeded by the time we reach here — mark the file flag.
+          // BFF treats DriveId/ItemId as authoritative, but downstream consumers
+          // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
+          sprk_hasfile: true,
         };
 
         // Add @odata.bind navigation property to link document to parent entity

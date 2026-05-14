@@ -44,23 +44,11 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
                 statusCode: 404);
         }
 
-        // Distinguish "no file attached" from "partial/in-flight upload":
-        // sprk_hasfile=false → user has never attached a file to this record.
-        // sprk_hasfile=true + DriveId/ItemId missing → upload partially completed.
-        if (!document.HasFile)
-        {
-            _logger.LogInformation(
-                "Document {DocumentId} has no file attached (sprk_hasfile=false)",
-                documentId);
-
-            throw new SdapProblemException(
-                code: "no_file_attached",
-                title: "No file attached",
-                detail: "This document record does not have a file attached yet. Upload a file before accessing it.",
-                statusCode: 409);
-        }
-
-        // Extract storage pointers
+        // Extract storage pointers. DriveId/ItemId presence is the source of truth
+        // for whether a file exists in SPE — sprk_hasfile is a Dataverse-side flag
+        // that can be stale (e.g., upload completed but flag never flipped). Use it
+        // only as a hint when DriveId/ItemId is missing, to distinguish "never uploaded"
+        // (HasFile=false) from "partial/failed upload" (HasFile=true).
         var driveId = document.GraphDriveId;
         var itemId = document.GraphItemId;
 
@@ -68,13 +56,22 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
         if (!IsLikelyDriveId(driveId))
         {
             _logger.LogWarning(
-                "Document {DocumentId} has invalid or missing DriveId: {DriveId}",
-                documentId, driveId ?? "(null)");
+                "Document {DocumentId} has invalid or missing DriveId: {DriveId} (HasFile={HasFile})",
+                documentId, driveId ?? "(null)", document.HasFile);
+
+            if (!document.HasFile)
+            {
+                throw new SdapProblemException(
+                    code: "no_file_attached",
+                    title: "No file attached",
+                    detail: "This document record does not have a file attached yet. Upload a file before accessing it.",
+                    statusCode: 409);
+            }
 
             throw new SdapProblemException(
                 code: "mapping_missing_drive",
                 title: "Storage mapping incomplete",
-                detail: "DriveId is not recorded or invalid for this document. The file may still be uploading.",
+                detail: "Document is marked as having a file (sprk_hasfile=true) but the Graph Drive ID is empty. The upload may still be in progress or did not complete successfully.",
                 statusCode: 409);
         }
 
@@ -82,13 +79,22 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
         if (!IsLikelyItemId(itemId))
         {
             _logger.LogWarning(
-                "Document {DocumentId} has invalid or missing ItemId: {ItemId}",
-                documentId, itemId ?? "(null)");
+                "Document {DocumentId} has invalid or missing ItemId: {ItemId} (HasFile={HasFile})",
+                documentId, itemId ?? "(null)", document.HasFile);
+
+            if (!document.HasFile)
+            {
+                throw new SdapProblemException(
+                    code: "no_file_attached",
+                    title: "No file attached",
+                    detail: "This document record does not have a file attached yet. Upload a file before accessing it.",
+                    statusCode: 409);
+            }
 
             throw new SdapProblemException(
                 code: "mapping_missing_item",
                 title: "Storage mapping incomplete",
-                detail: "ItemId is not recorded or invalid for this document. The file may still be uploading.",
+                detail: "Document is marked as having a file (sprk_hasfile=true) but the Graph Item ID is empty. The upload may still be in progress or did not complete successfully.",
                 statusCode: 409);
         }
 

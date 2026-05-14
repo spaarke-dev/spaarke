@@ -828,24 +828,26 @@ public static class FileAccessEndpoints
     /// <summary>
     /// Validates SPE pointer format before calling Graph API.
     /// Throws SdapProblemException for invalid/missing pointers.
-    /// Distinguishes "no file attached" (hasFile=false) from "mapping incomplete" (hasFile=true but DriveId/ItemId missing).
+    /// DriveId/ItemId presence is the source of truth for whether a file exists in SPE.
+    /// sprk_hasfile is a Dataverse-side flag that can be stale (upload completed but flag
+    /// never flipped) — use it only to distinguish "never uploaded" (HasFile=false) from
+    /// "partial/failed upload" (HasFile=true) when DriveId/ItemId is missing.
     /// </summary>
     private static void ValidateSpePointers(string? driveId, string? itemId, string documentId, bool hasFile)
     {
-        // No file uploaded yet — surface a clear error instead of "mapping incomplete"
-        if (!hasFile)
-        {
-            throw new SdapProblemException(
-                "no_file_attached",
-                "No File Attached",
-                $"Document {documentId} has no file attached yet (sprk_hasfile=false). Upload a file before accessing it.",
-                409
-            );
-        }
-
         // Validate driveId exists
         if (string.IsNullOrWhiteSpace(driveId))
         {
+            if (!hasFile)
+            {
+                throw new SdapProblemException(
+                    "no_file_attached",
+                    "No File Attached",
+                    $"Document {documentId} has no file attached yet (sprk_hasfile=false and sprk_graphdriveid is empty). Upload a file before accessing it.",
+                    409
+                );
+            }
+
             throw new SdapProblemException(
                 "mapping_missing_drive",
                 "SPE Drive ID Missing",
@@ -866,14 +868,24 @@ public static class FileAccessEndpoints
             );
         }
 
-        // Validate itemId exists
+        // Validate itemId exists (same hasFile distinction as for DriveId)
         if (string.IsNullOrWhiteSpace(itemId))
         {
+            if (!hasFile)
+            {
+                throw new SdapProblemException(
+                    "no_file_attached",
+                    "No File Attached",
+                    $"Document {documentId} has no file attached yet (sprk_hasfile=false and sprk_graphitemid is empty). Upload a file before accessing it.",
+                    409
+                );
+            }
+
             throw new SdapProblemException(
                 "mapping_missing_item",
                 "SPE Item ID Missing",
-                $"Document {documentId} does not have a Graph Item ID (sprk_graphitemid field is empty). " +
-                $"Ensure the document has been uploaded to SharePoint Embedded.",
+                $"Document {documentId} is marked as having a file (sprk_hasfile=true) but the Graph Item ID is empty. " +
+                $"The upload may still be in progress or did not complete successfully.",
                 409
             );
         }
