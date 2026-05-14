@@ -41,7 +41,7 @@ Read in this order:
 1. **`knowledge/declarative-agents/NOTES.md`** — Spaarke's DA shape and where it diverges from generic samples.
 2. **`knowledge/m365-copilot/NOTES.md`** — Foundation layer (manifest field semantics, knowledge source wiring).
 3. **`knowledge/declarative-agents/declarative-agent-foodbank-mcp/`** — Complete agent with 3 action types: OpenAPI + 2× RemoteMCPServer with OAuthPluginVault auth. Closest pattern to Spaarke's MCP-bound DA.
-4. **`knowledge/declarative-agents/declarative-agent-sharepoint-data-manager/`** — Manifest-level `OnlyAllowedSources` via `behavior_overrides.special_instructions.discourage_model_knowledge`. Plus public Learn MCP with `enable_dynamic_discovery: false`.
+4. **`knowledge/declarative-agents/declarative-agent-only-allowed-sources/`** — Manifest-level `OnlyAllowedSources` via `behavior_overrides.special_instructions.discourage_model_knowledge`. Plus public Learn MCP with `enable_dynamic_discovery: false`.
 5. **`knowledge/declarative-agents/declarative-agent-websearch-scoped/`** — Capability-level `OnlyAllowedSources` via `WebSearch.sites[]`.
 6. **`knowledge/m365-copilot/declarative-agent-onedrive-sharepoint/`** — `OneDriveAndSharePoint` knowledge source config (template for SPE container-type binding).
 7. **`knowledge/declarative-agents/docs/declarative-agent-manifest.md`** — Manifest spec reference (only if you need a specific field's exact schema).
@@ -58,11 +58,12 @@ Default Spaarke DA composition (cite in commit message):
 | **Work IQ MCP** (RemoteMCPServer, when applicable) | Collaboration context — "who's on this matter," "what was discussed" | `knowledge/work-iq/tool-catalog.md` (remote URL pattern) |
 | **Foundry IQ KB** (when available) | Curated golden documents — playbooks, exemplar contracts, legal research | `knowledge/foundry-iq/samples/agent-grounding-wiring/` |
 
-### Step 3: Apply Spaarke contracts (ADR-013, ADR-005, ADR-021)
+### Step 3: Apply Spaarke contracts (ADR-013, ADR-007, ADR-021)
 
 - **ADR-013 (AI Architecture)**: The DA is the *user-facing surface*; the heavy lifting is in BFF tool handlers exposed via Spaarke MCP. Keep instructions clear about delegation.
-- **ADR-005 (Container per client)**: When binding SPE knowledge source, scope to the relevant client's container-type. Multi-tenant DA must NOT cross client boundaries.
+- **ADR-007 (SpeFileStore facade)**: When the DA's SharePoint knowledge source binds to an SPE container-type, the BFF endpoints the DA reaches MUST go through `SpeFileStore` — no direct Graph SDK types above the facade.
 - **ADR-021 (Fluent UI v9)**: Any widgets surfaced by the DA must follow Fluent v9 — load `widget-design` skill before generating widget code.
+- **Operational policy** (not yet ADR): bind the SPE knowledge source to the relevant client's container-type. Multi-tenant DA must NOT cross client boundaries — enforce at the BFF authorization layer.
 
 ### Step 4: Instruction and conversation-starter authoring
 

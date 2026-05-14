@@ -42,13 +42,14 @@ Read in this order:
 3. **`knowledge/sharepoint-embedded/samples/container-crud-typescript/`** — Same operations from a Functions handler + MCP tool style.
 4. **`knowledge/sharepoint-embedded/samples/powershell/`** — Container type registration (`RegisterContainer.ps1`) and minimal create flow (`CreateContainer.ps1`).
 5. **`knowledge/sharepoint-embedded/samples/embedded-chat/`** — `<ChatEmbedded>` reference (boilerplate is non-runnable upstream — annotated snippet is the canonical reference per `SOURCE.md`).
-6. **`knowledge/sharepoint-embedded/docs/overview.md`** + **`docs/containers.md`** — Microsoft Learn snapshots.
+6. **`knowledge/sharepoint-embedded/docs/learn-overview.md`** + **`docs/learn-containers.md`** + **`docs/learn-containertypes.md`** + **`docs/learn-knowledge-source.md`** + **`docs/learn-semantic-index.md`** — Microsoft Learn snapshots (only read the ones relevant to your specific work pattern).
 
 ### Step 2: Apply Spaarke contracts (ADR-007, ADR-005, ADR-001)
 
 - **ADR-007 (SpeFileStore facade)**: **No Graph SDK types in controllers or handlers above the facade.** All Graph calls go through `SpeFileStore` or its helpers in `Sprk.Bff.Api/Infrastructure/Graph/`. If you need a Graph capability the facade doesn't expose, extend the facade — don't bypass it.
-- **ADR-005 (Container per client)**: One container per client. When creating new SPE-backed entities or operations, scope to the relevant client's container. Cross-client operations require explicit authorization at the BFF level — never assume.
+- **ADR-005 (Flat storage in SPE)**: **No folder hierarchies in SPE containers.** Represent hierarchy via Dataverse metadata (`sprk_document` + `sprk_documentassociation`). Evaluate permissions via UAC (not SPE native ACLs). MUST access SPE only via `SpeFileStore`.
 - **ADR-001 (Minimal API)**: SPE operations are exposed via endpoints in `Sprk.Bff.Api`. No separate SPE microservice.
+- **Operational policy** (not yet ADR): one container per client. Scope new SPE-backed operations to the relevant client's container. Cross-client operations require explicit BFF-level authorization — never assume.
 
 ### Step 3: Choose the auth pattern
 
@@ -89,7 +90,8 @@ When onboarding a new tenant or environment:
 ### Step 7: Code review checklist
 
 - [ ] No `GraphServiceClient` injected above `SpeFileStore` (ADR-007)
-- [ ] Container scoping respects ADR-005 (no cross-client leakage)
+- [ ] No folder hierarchies created in SPE (ADR-005); hierarchy lives in Dataverse via `sprk_documentassociation`
+- [ ] Container scoping respects operational policy (one per client; no cross-client leakage)
 - [ ] Auth pattern matches the operation (OBO for user-initiated, app-only for system)
 - [ ] webUrl pattern used for document opens (not download-and-reopen)
 - [ ] Permission filtering applied at the right layer (container ACLs, not just BFF-level)
@@ -111,7 +113,7 @@ When onboarding a new tenant or environment:
 | `knowledge/sharepoint-embedded/NOTES.md` | Spaarke pattern: one-container-per-client, webUrl opens, BFF facade |
 | `knowledge/sharepoint-embedded/samples/container-crud-csharp/` | Container + permission CRUD in C# |
 | `knowledge/sharepoint-embedded/samples/powershell/RegisterContainer.ps1` | Container type tenant registration |
-| `knowledge/sharepoint-embedded/docs/overview.md` | Microsoft Learn SPE overview |
+| `knowledge/sharepoint-embedded/docs/learn-overview.md` | Microsoft Learn SPE overview (also: `learn-containers.md`, `learn-containertypes.md`, `learn-knowledge-source.md`, `learn-semantic-index.md`) |
 
 ## Output
 
