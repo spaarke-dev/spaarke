@@ -14,9 +14,9 @@ Canonical plan: [`SPAARKE-KNOWLEDGE-BASE-SETUP.md`](./SPAARKE-KNOWLEDGE-BASE-SET
 | 1 | Create `knowledge/` skeleton + README + REFRESH-LOG | ✅ | 11 topic dirs with `.gitkeep`; `knowledge/README.md` + `REFRESH-LOG.md` authored |
 | 2 | Populate 11 topic folders (see breakdown below) | ✅ | All 11 topics curated · 2.5 MB total · 11 commits via 4 parallel batches |
 | 3 | Wire 6 new `.claude/skills/*` files | ✅ | 6 SKILL.md files (107–139 lines each); INDEX.md + root CLAUDE.md updated with knowledge/ refs |
-| 4 | Senior-engineer annotation pass on NOTES.md | 🔲 | **Ralph owns** — async after Phase 3 |
-| 5 | Verify each skill influences agent output | 🔲 | 5 representative prompts per skill |
-| 6 | Establish monthly refresh ritual | 🔲 | REFRESH-PROCEDURE.md + owner + calendar |
+| 4 | Senior-engineer annotation pass on NOTES.md | 🔲 | **Ralph owns** — see [`PHASE-4-ANNOTATION-HANDOFF.md`](./PHASE-4-ANNOTATION-HANDOFF.md) for recommended order + quality bar |
+| 5 | Verify each skill influences agent output | ✅ | 6 verification sub-agents (1 prompt per skill) — 3 wired clean (mcp-tool-handler, foundry-agent, widget-design); 1 minor (dataverse-mcp-usage: no ADR refs, non-blocking); 2 had defects fixed in `bd87e019` (declarative-agent + spe-integration: sample dir path + ADR-005 framing + doc filename prefixes) |
+| 6 | Establish monthly refresh ritual | ✅ | [`knowledge/REFRESH-PROCEDURE.md`](../../knowledge/REFRESH-PROCEDURE.md) — owner: Ralph Schroeder, cadence: 1st business day, budget: ~3 hrs |
 
 ## Phase 2 — Topic populate (each = SOURCE.md + curated samples + stub NOTES.md)
 

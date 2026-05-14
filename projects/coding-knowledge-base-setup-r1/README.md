@@ -1,6 +1,6 @@
 # Coding Knowledge Base Setup — R1
 
-> **Status**: Phases 0–1 complete · Phase 2 (topic curation) next
+> **Status**: Phases 0–3, 5, 6 complete · Phase 4 (senior-engineer annotation pass) pending — owned by Ralph; see [`PHASE-4-ANNOTATION-HANDOFF.md`](./PHASE-4-ANNOTATION-HANDOFF.md)
 > **Owner (build)**: Claude Code (this worktree)
 > **Owner (Phase 4 annotation)**: Ralph Schroeder
 > **Branch**: `work/coding-knowledge-base-setup-r1`

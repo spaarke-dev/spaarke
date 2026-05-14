@@ -6,6 +6,20 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 
 ---
 
+## 2026-05-14 — Project complete (Phases 0-3, 5, 6)
+
+All AI-executable phases of `coding-knowledge-base-setup-r1` complete:
+- **Phase 0**: env verified (gh authed, network reachable, no existing `knowledge/`)
+- **Phase 1**: skeleton created (11 topic dirs, README, REFRESH-LOG)
+- **Phase 2**: all 11 topics curated · 2.5 MB · 226 files · 4 parallel batches
+- **Phase 3**: 6 trigger-loadable skills wired (107-139 lines each); INDEX.md + root CLAUDE.md registered
+- **Phase 5**: 6 verification sub-agents (1 representative prompt each) — 3 defects found and fixed in commit `bd87e019`
+- **Phase 6**: `REFRESH-PROCEDURE.md` established; monthly cadence on first business day; owner Ralph
+
+**Phase 4** (senior-engineer annotation pass on stub NOTES.md files) remains — owned by Ralph. See `projects/coding-knowledge-base-setup-r1/PHASE-4-ANNOTATION-HANDOFF.md` for recommended annotation order, quality bar, and per-topic guidance.
+
+The knowledge base is **functional now** — skills load on triggers and read curated samples + provenance. Annotation pass converts honest stubs into substantive Spaarke commentary, dramatically improving agent output on Microsoft platform tasks.
+
 ## 2026-05-14 — Initial setup
 
 - Created `knowledge/` directory skeleton with 11 topic subdirectories.
