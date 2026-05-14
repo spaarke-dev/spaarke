@@ -32,7 +32,7 @@ Or check `[SpaarkeAuth]` console logs at page load — rebuilt consumers log the
 | SemanticSearchControl | ✅ v1.1.40 | ✅ v1.1.40 | First rebuilt — reference exemplar (virtual + auth) |
 | RelatedDocumentCount | ⏳ TBD | ⏳ TBD | Already virtual; needs `@spaarke/auth` rebuild verify |
 | DocumentRelationshipViewer (PCF) | ⏳ TBD | ⏳ TBD | Already virtual; needs rebuild verify |
-| SpeDocumentViewer | ✅ v1.0.16 | ✅ v1.0.16 | Rebuilt 2026-05-12; still standard (P0 virtual-refactor queued) |
+| SpeDocumentViewer | ✅ v1.0.24 | ✅ v1.0.24 | Rebuilt 2026-05-14 to ship new BFF 409 error mapping (no_file_attached etc.). Virtual-control refactor landed in v1.0.22. **Bundle size regression flagged**: 6.7 MB build / 1.1 MB ZIP (vs. v1.0.22's 440 KB build / 111 KB ZIP) — non-deep `@fluentui/react-icons` imports. Follow-up. |
 | EmailProcessingMonitor | ⏳ TBD | ⏳ TBD | Standard control; needs rebuild + P0 virtual-refactor |
 | PlaybookBuilderHost | ⏳ TBD | ⏳ TBD | Special architecture (react-flow); needs rebuild verify |
 | UniversalDatasetGrid | ⏳ TBD | ⏳ TBD | Standard; needs rebuild + P0 virtual-refactor |
