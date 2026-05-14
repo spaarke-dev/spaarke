@@ -1,10 +1,10 @@
 # AI Procedure Quality R1 — Specification
 
-> **Status**: Draft for human review (2026-05-14)
-> **Project Type**: AI-procedure / repo-hygiene (no source-code changes outside `.claude/`, `scripts/quality/`, `projects/`)
+> **Status**: Approved for `/project-pipeline` execution (2026-05-14)
+> **Project Type**: AI-procedure / repo-hygiene + GitHub Actions hardening (no application source-code changes outside `.claude/`, `scripts/quality/`, `projects/`, `.github/`)
 > **Branch (when started)**: `work/ai-procedure-quality-r1`
 > **Expected effort**: ~1 working week of agent execution (split across phases) + ~3 hours of human review
-> **Cadence after launch**: monthly proactive audit; per-commit automated validation; quarterly deep audit
+> **Cadence after launch**: monthly proactive audit; per-commit automated validation (designed for high-volume CI/CD — minimal friction); quarterly deep audit
 
 ---
 
@@ -18,7 +18,7 @@ Spaarke's Claude Code procedure surface (`.claude/skills/`, `.claude/patterns/`,
 
 This project (a) hardens the AI procedure surface against these three problems with concrete automation, (b) executes a one-time audit + refinement pass on skills and CLAUDE.md per the directives from the 2026-05-14 claude.ai consultation, (c) introduces the `researcher` subagent for accumulating external-platform knowledge across sessions, and (d) establishes an ongoing cadence so this work stays valuable rather than decaying back to where it is today.
 
-**Why now**: the 2026-05-14 working session exposed three production-impacting bugs in our own AI procedures within a single afternoon (skill said "NEVER use `build:prod`" → 10× bundle regression; `settings.json` hooks malformed since 2026-03 → permission rules silently disabled and quality-gate hook never fired; `/bff-deploy` skill's 60-second health-check window false-failed on Linux App Service). Each was caught reactively. The cost of NOT having proactive infrastructure is now measurable.
+**Why now**: the 2026-05-14 working session exposed three production-impacting bugs in our own AI procedures within a single afternoon (skill said "NEVER use `build:prod`" → 10× bundle regression; `settings.json` hooks malformed since 2026-03 → permission rules silently disabled and quality-gate hook never fired; `/bff-deploy` skill's 60-second health-check window false-failed on Linux App Service). In the same session a **fourth** issue surfaced: every push to `origin/master` triggers 3 GitHub Actions workflows that fail in 0 seconds (workflow-startup failure, not test failure), and the failure notifications route to a personal email instead of the team `dev@spaarke.com` inbox. Each was caught reactively. The cost of NOT having proactive infrastructure is now measurable.
 
 ---
 
@@ -28,11 +28,12 @@ This project (a) hardens the AI procedure surface against these three problems w
 
 | Area | Specifics |
 |---|---|
-| **One-time audits** | Skills inventory + per-skill audit; `CLAUDE.md` section-by-section audit; reference-exemplar verification for every skill that names a code path |
+| **One-time audits** | Skills inventory + per-skill audit; `CLAUDE.md` section-by-section audit; reference-exemplar verification for every skill that names one |
 | **One-time fixes** | Apply approved refinements from audits; archive (not delete) anything removed; consolidate overlapping skills |
-| **Standing infrastructure** | JSON-schema CI check for `.claude/settings.json` + `.mcp.json`; drift-detector for pattern-file code pointers; bundle-size guard for PCFs; reference-exemplar test harness; failure-mode catalog file |
-| **New artifacts** | `researcher` subagent + memory; `.claude/skills/_template/` canonical skill scaffold; `.claude/CHANGELOG.md` for procedure changes; `.claude/archive/<date>/` for safe retirement |
-| **Recurring cadence** | New skill `procedure-quality-audit` that runs the full audit + reports drift; monthly auto-schedule; quarterly deep review checklist |
+| **GitHub Actions hardening** | Fix 3 workflows failing in 0s; pin actions to SHAs; add `actionlint` pre-commit + GHA gate; re-audit required status checks; document notification routing to `dev@spaarke.com` |
+| **Standing infrastructure** | JSON-schema CI check for `.claude/settings.json` + `.mcp.json`; drift-detector for pattern-file code pointers; bundle-size guard for PCFs; reference-exemplar test harness; failure-mode catalog file; all designed for high-volume CI/CD (sub-3s pre-commit, sub-30s GHA gate) |
+| **New artifacts** | `researcher` subagent + memory (reads from `spaarke/knowledge/` when available); `.claude/skills/_template/` canonical skill scaffold; `.claude/CHANGELOG.md` for procedure changes (forward-looking only); `.claude/archive/<date>/` for safe retirement |
+| **Recurring cadence** | New skill `procedure-quality-audit` that runs the full audit + reports drift; **monthly** auto-schedule (confirmed); quarterly deep review checklist |
 
 ### Out of scope
 
@@ -81,6 +82,20 @@ These are not hypothetical. Each happened during one working session and is the 
 
 **Resolution (already done 2026-05-14)**: Default bumped to 24 retries × 5s = 120s. SKILL.md clarified that hash-verify is the authoritative success signal and healthz timeout after hash-verify success is NOT a real failure. But this fix was reactive.
 
+### Issue 4: GitHub Actions workflows fail in 0s on every push; notifications go to wrong inbox
+
+**What**: Three workflows — `sdap-ci.yml`, `deploy-promote.yml`, `deploy-infrastructure.yml` — show `completed/failure` with `0s` duration on **every** push to `origin/master` for at least the last 2 weeks of commits. The `0s` duration + `gh run view --log-failed` reporting "log not found" is the signature of a **workflow-startup failure** (YAML invalid, action version doesn't exist, missing required configuration) — distinct from a test failure. The actual test/build jobs never run.
+
+Likely cause (to be verified during execution): the workflows reference `actions/checkout@v6`, `actions/upload-artifact@v6`, `actions/cache@v5`, `github/codeql-action/upload-sarif@v4`. Several of these version pins look bumped beyond what exists in the marketplace as of the workflow's last edit. A YAML referencing a non-existent action major version fails at startup with no log.
+
+**Notification routing**: GitHub notifications for these failures route to the developer's personal email, not the team's `dev@spaarke.com`. This is a per-user routing setting at https://github.com/settings/notifications → "Custom routing" → per-organization routing rules. `dev@spaarke.com` must be verified on the GitHub account first.
+
+**Cost**: Every commit triggers a wall of red-X notifications in personal email. The signal-to-noise ratio of "did anything actually break" has collapsed to zero because every push fails the same way. A real CI failure would be invisible in the noise. The team's CI/CD posture is effectively unprotected.
+
+**Generalization**: No mechanism validates GitHub Actions workflow YAML before push. Action version bumps are not pinned to commit SHAs (which `dependabot` would auto-update). Notification routing was set up once for a single developer and hasn't been promoted to a team inbox.
+
+**Volume context (user-supplied 2026-05-14)**: This team makes many commits, PRs, and master merges per day. Solutions to the above MUST minimize friction (fast pre-commit checks, parallel CI jobs, no manual gates on routine work). A heavyweight pre-commit suite that adds 30+ seconds per commit would be rejected.
+
 ---
 
 ## Requirements
@@ -103,7 +118,12 @@ These are not hypothetical. Each happened during one working session and is the 
 | F-12 | Create `.claude/FAILURE-MODES.md` — chronological catalog of things that went wrong + what was learned (anti-patterns + gotchas pulled to project level) | File exists; the three 2026-05-14 issues are the inaugural entries |
 | F-13 | Create new skill `procedure-quality-audit` that runs the full audit (skills inventory, CLAUDE.md inventory, drift detector, schema validation, reference-exemplar tests, hook health smoke test) and produces a single report | Skill exists; invoking it produces `.claude/QUALITY-AUDIT-<date>.md` with PASS/FAIL across all checks |
 | F-14 | Schedule `procedure-quality-audit` to run monthly via a `/loop` or scheduled remote agent; output to be reviewed by human within 1 week | Schedule exists (`scripts/quality/Schedule-MonthlyQualityAudit.ps1` or equivalent) + procedure for handling failed checks |
-| F-15 | Add "Reference Exemplar" requirement to skill template — every skill that prescribes a build/deploy/operation must name a known-good code path that the audit can rebuild against | Template enforces this; existing skills with operations are audited for compliance during Directive 2 |
+| F-15 | Reference Exemplar requirement — every skill that prescribes a build/deploy/operation **and where maintaining a known-good exemplar is realistic** names one in its frontmatter. Skills where the reference would churn too fast (e.g., a skill that runs against many evolving files) are explicitly opted out with a note. The audit harness rebuilds opted-in exemplars; opted-out ones are spot-checked manually quarterly. | Template enforces an `exemplar:` frontmatter field with values `path/to/ref` OR `none-too-volatile`; existing skills with operations are audited and assigned during Directive 2 |
+| F-16 | Diagnose and fix the 3 GHA workflows failing in 0s on every push (`sdap-ci.yml`, `deploy-promote.yml`, `deploy-infrastructure.yml`). Likely action-version pins. Validate every workflow file with `actionlint` or equivalent. Audit all other workflows for similar latent issues. | After fix: green check on next push to master for the affected workflows OR documented decision to disable/archive a workflow that no longer applies |
+| F-17 | Add `actionlint` (or equivalent) workflow-YAML validation as a pre-commit hook AND as a GitHub Action that runs on PRs touching `.github/workflows/**`. Pre-commit must complete in <3s; GHA gate must complete in <30s. High-volume CI/CD posture — fast feedback is non-negotiable. | Pre-commit hook configured; GHA workflow exists; deliberately-broken workflow YAML is caught by both before merge |
+| F-18 | Document the per-user GitHub notification routing to `dev@spaarke.com`. This is a per-user GitHub account setting (not a repo or org-level setting) and cannot be enforced programmatically. Produce `docs/procedures/github-notification-routing.md` with step-by-step instructions: verify `dev@spaarke.com` on the user's GitHub account → Custom routing in notification settings → route `spaarke-dev` org notifications to it. | Doc exists; user has completed the routing on at least one account; doc references where the org-level "default notification email" can also be set if the org plan supports it |
+| F-19 | Branch protection + required status checks tuned for high-volume CI/CD. Required checks should be the minimum that catches breakage (currently the repo claims "3 of 3 required status checks are expected" but those checks don't exist). Re-audit required checks against actual passing workflows. | Required checks list matches workflow job names that actually pass; merge bypass is reserved for procedure-quality-r1 only or removed entirely |
+| F-20 | Pin GitHub Actions to commit SHAs (not version tags) and enroll Dependabot to auto-update them. This prevents the silent action-version-bump-breaks-everything failure mode. | All workflow YAML pins to SHAs; `.github/dependabot.yml` includes `package-ecosystem: github-actions` |
 
 ### Non-functional
 
@@ -141,16 +161,21 @@ The project is **a failure** if it ends with the same kinds of bugs surfacing re
 
 ### Phasing
 
-| Phase | Theme | Gating | Estimated effort |
-|---|---|---|---|
-| **Phase 0** | Inventory + baseline | None | 2–3 hours |
-| **Phase 1** | Additive infrastructure (researcher subagent, skill template, CHANGELOG, FAILURE-MODES, archive convention) | None | 2 hours |
-| **Phase 2** | Skills audit + refinement | Human sign-off on `AUDIT-FINDINGS-SKILLS.md` before Phase 2b refinements | 3–4 hours audit + 2–4 hours refinements |
-| **Phase 3** | CLAUDE.md audit + rewrite | Human sign-off on `AUDIT-FINDINGS-CLAUDEMD.md` target outline before Phase 3b rewrite | 1–2 hours audit + 1–2 hours rewrite |
-| **Phase 4** | Standing infrastructure (CI schema validators, drift detector, exemplar tester, bundle-size guard) | None | 3–4 hours |
-| **Phase 5** | Recurring cadence (audit skill, monthly schedule, recurring review docs) | None | 1–2 hours |
+| Phase | Theme | Gating | Estimated effort | Parallelizable |
+|---|---|---|---|---|
+| **Phase 0** | Inventory + baseline | None | 2–3 hours | Yes (4 inventory streams: skills, CLAUDE.md, workflows, settings) |
+| **Phase 1** | Additive infrastructure (researcher subagent, skill template, CHANGELOG, FAILURE-MODES, archive convention) | None | 2 hours | Yes (each artifact is independent) |
+| **Phase 2** | Skills audit + refinement | Human sign-off on `AUDIT-FINDINGS-SKILLS.md` before refinements | 3–4 hours audit + 2–4 hours refinements | Audit: yes (per-skill agents). Refinements: yes (per-skill agents). |
+| **Phase 3** | CLAUDE.md audit + rewrite | Human sign-off on target outline before rewrite | 1–2 hours audit + 1–2 hours rewrite | Sequential within phase (one file) |
+| **Phase 4a** | Standing infrastructure for `.claude/` (CI schema validators, drift detector, exemplar tester, bundle-size guard) | None | 3–4 hours | Yes (each validator independent) |
+| **Phase 4b** | GitHub Actions hardening (diagnose 3 failing workflows, pin actions to SHAs, add actionlint, re-audit required checks, document notification routing) | None for diagnosis; mention to user before changing branch-protection rules | 2–3 hours | Yes (workflow diagnosis + actionlint setup + notification doc all independent) |
+| **Phase 5** | Recurring cadence (audit skill, monthly schedule, recurring review docs) | None | 1–2 hours | Sequential within phase |
 
-Phases 1 and 4 can run before, after, or alongside Phases 2 and 3 — they're independent. Phases 2 and 3 are sequenced: Phase 2's findings may surface content that should move to CLAUDE.md (or vice versa), so the order matters.
+Phases 1, 4a, and 4b can run before, after, or alongside Phases 2 and 3 — they're independent. Phases 2 and 3 are sequenced: Phase 2's findings may surface content that should move to CLAUDE.md (or vice versa).
+
+**Parallelization strategy**: Each phase uses concurrent Task agents where the items within the phase are independent. Phase 0's four inventory streams run as four parallel agents. Phase 1's five artifacts spawn as parallel agents (researcher subagent, skill template, CHANGELOG, FAILURE-MODES, archive convention). Phase 2's per-skill audit fans out to one agent per skill folder (`.claude/skills/*/SKILL.md`). Phase 4a's four validators are built by four parallel agents. Phase 4b's three streams (workflow diagnosis, actionlint setup, notification doc) run in parallel.
+
+**Autonomy**: This project runs end-to-end under `acceptEdits` mode with the existing permission allowlist. The only gates are the two human sign-off points (Phase 2 refinements, Phase 3 rewrite). All other changes are reversible via `.claude/archive/<date>/`.
 
 ### Architecture decisions
 
@@ -264,15 +289,15 @@ These come from the 2026-05-14 working-session experience plus broader patterns 
 
 ---
 
-## Open Decisions (resolve before `/project-pipeline`)
+## Resolved Decisions (2026-05-14)
 
-These are choices the spec doesn't pre-commit; they should be made before task generation:
+The five open decisions have been answered by the user:
 
-1. **Cadence schedule for `procedure-quality-audit`** — first of the month? aligned with a sprint cycle? on Mondays? Pick one and write it into F-14.
-2. **CI hosting for validators** — GitHub Actions workflow vs pre-commit hook vs both? Pre-commit is faster feedback; GHA is canonical. Recommendation: both, with GHA as authoritative.
-3. **Researcher subagent model** — spec says `model: opus, effort: high`. Confirm this matches the project's overall cost posture. If most main-session work runs Opus, dropping researcher to `medium` effort may be wise.
-4. **Reference-exemplar threshold** — F-9 says ±20% deviation triggers FAIL. Validate this against historical SSC bundle variation; tighten or loosen as evidence supports.
-5. **What goes in `.claude/CHANGELOG.md` back-fill** — back to last R-series project (April 2026)? back to repo origin? Pick a reasonable horizon.
+1. **Cadence**: **Monthly** is sufficient. Run on the 1st of each month (or first business day). The audit produces `.claude/QUALITY-AUDIT-<date>.md`; a human action is expected within 1 week.
+2. **CI hosting**: Both pre-commit and GHA, with GHA as authoritative. **Friction budget is tight** — this team makes many commits, PRs, and master merges per day. Pre-commit checks must complete in **<3 seconds**; GHA validation gates must complete in **<30 seconds**. Anything heavier runs on a schedule (nightly/monthly), not per-commit.
+3. **Researcher subagent**: **`model: opus, effort: high`** — this is important enough to spend the tokens on. The subagent will read from `spaarke/knowledge/` (parallel `coding-knowledge-base-setup-r1` project's deliverable) before searching externally, multiplying the value of that knowledge base.
+4. **Reference exemplar threshold**: **Be selective — only adopt exemplars where maintenance is realistic.** Some skills run against files that change too frequently to make an exemplar useful (the maintenance cost exceeds the value). Each skill explicitly declares either `exemplar: <path>` or `exemplar: none-too-volatile` with a brief rationale. The audit harness only re-builds opted-in exemplars. Quarterly manual spot-check for opted-out skills.
+5. **`.claude/CHANGELOG.md` content**: **Forward-looking only.** No back-fill from earlier history. First entry is this project's deliverables.
 
 ---
 
