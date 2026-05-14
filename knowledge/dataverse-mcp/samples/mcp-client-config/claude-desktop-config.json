@@ -1,0 +1,14 @@
+{
+  "_comment": "Source: https://learn.microsoft.com/en-us/power-apps/maker/data-platform/data-platform-mcp-other-clients (fetched 2026-05-14). Verbatim from the 'Configure the local proxy in Claude desktop' section. Goes in claude_desktop_config.json. Replace <friendly name> and <your org URL>.",
+  "mcpServers": {
+    "<friendly name>": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@microsoft/dataverse",
+        "mcp",
+        "<your org URL>"
+      ]
+    }
+  }
+}
