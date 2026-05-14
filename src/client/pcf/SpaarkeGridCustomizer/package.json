@@ -4,7 +4,7 @@
   "description": "General-purpose Power Apps Grid Control customizer for custom cell rendering",
   "scripts": {
     "build": "pcf-scripts build",
-    "build:prod": "pcf-scripts build -- --mode production",
+    "build:prod": "pcf-scripts build --buildMode production",
     "clean": "pcf-scripts clean",
     "lint": "pcf-scripts lint",
     "lint:fix": "pcf-scripts lint fix",

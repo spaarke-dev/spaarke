@@ -136,10 +136,42 @@ stat -c '%y' src/components/YourChangedComponent/YourChangedComponent.tsx
 - ✅ **MUST** use `pack.ps1` (not `Compress-Archive` — backslashes break import)
 - ✅ **MUST** use unmanaged solution (ADR-022)
 - ✅ **MUST** use publisher `Spaarke` with prefix `sprk_`
-- ❌ **NEVER** use `npm run build:prod` — pcf-scripts does not have a separate production build script; use `npm run build`
+- ✅ **MUST** use `npm run build:prod` for production deploys — runs `pcf-scripts build --buildMode production` which enables tree-shaking + minification. Default `npm run build` runs **development mode** and produces a bundle 10–15× larger because tree-shaking is disabled. See [Bundle Size & Production Mode](#bundle-size--production-mode) below.
 - ❌ **NEVER** use `pac pcf push` — creates temp solutions, rebuilds in dev mode
 - ❌ **NEVER** reuse old solution ZIPs
 - ❌ **NEVER** skip shared lib compilation when shared components were modified — stale `dist/` causes silent failures
+
+### Bundle Size & Production Mode (CRITICAL — verified 2026-05-14)
+
+`pcf-scripts build` defaults to **development mode**. Webpack `mode: 'development'` disables:
+- Tree-shaking — every imported barrel pulls in everything reachable, including `@fluentui/react-icons` chunk files (~500 KB each).
+- Minification — variable names, whitespace, dead code all preserved.
+
+Result: a control that should be 400–600 KB ships as 6–10 MB.
+
+**Always invoke `npm run build:prod`** for any build that will be packed + imported to Dataverse. The script must be:
+```json
+"build:prod": "pcf-scripts build --buildMode production"
+```
+
+**Common malformed variants seen in this repo (DO NOT USE)**:
+- `"pcf-scripts build --production"` — silently ignored, falls through to dev mode
+- `"pcf-scripts build -- --mode production"` — passes `--mode production` as a webpack arg AFTER `--`, but pcf-scripts already configures webpack's mode internally; ignored
+
+**Expected bundle sizes after `build:prod`** (committed reference, May 2026):
+
+| PCF | bundle.js | ZIP |
+|---|---|---|
+| SpeDocumentViewer | 440 KB | 111 KB |
+| SemanticSearchControl | 539 KB | ~140 KB |
+| RelatedDocumentCount | 433 KB | ~110 KB |
+
+If a fresh build comes out >1 MB, the `build:prod` script is almost certainly misconfigured or `npm run build` was used. Verify with:
+```bash
+stat -c '%s bytes' out/controls/{ControlName}/bundle.js
+```
+
+The committed bundle.js sizes in `solution/Controls/.../bundle.js` are authoritative for "known good." If your fresh build dramatically exceeds them, fix the build invocation before packing.
 
 ---
 
@@ -185,10 +217,10 @@ If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, co
 ```bash
 cd src/client/pcf/{ControlName}
 rm -rf out/ bin/
-npm run build
+npm run build:prod         # MUST be build:prod — see Bundle Size & Production Mode
 
-# Verify size (~200-500KB field-based, 1-5MB custom page)
-ls -la out/controls/{ControlName}/bundle.js
+# Verify size (~400-600 KB field-based after build:prod; if >1 MB, build:prod is misconfigured)
+stat -c '%s bytes' out/controls/{ControlName}/bundle.js
 ```
 
 ### Step 3: Copy Build Output to Solution

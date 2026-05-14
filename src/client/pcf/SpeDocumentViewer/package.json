@@ -4,7 +4,7 @@
   "description": "SPE Document Viewer PCF Control with check-out/check-in workflow",
   "scripts": {
     "build": "pcf-scripts build",
-    "build:prod": "pcf-scripts build --production",
+    "build:prod": "pcf-scripts build --buildMode production",
     "clean": "pcf-scripts clean",
     "lint": "pcf-scripts lint",
     "lint:fix": "pcf-scripts lint fix",
