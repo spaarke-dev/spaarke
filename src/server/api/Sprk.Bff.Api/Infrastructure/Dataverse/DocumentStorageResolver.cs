@@ -44,6 +44,22 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
                 statusCode: 404);
         }
 
+        // Distinguish "no file attached" from "partial/in-flight upload":
+        // sprk_hasfile=false → user has never attached a file to this record.
+        // sprk_hasfile=true + DriveId/ItemId missing → upload partially completed.
+        if (!document.HasFile)
+        {
+            _logger.LogInformation(
+                "Document {DocumentId} has no file attached (sprk_hasfile=false)",
+                documentId);
+
+            throw new SdapProblemException(
+                code: "no_file_attached",
+                title: "No file attached",
+                detail: "This document record does not have a file attached yet. Upload a file before accessing it.",
+                statusCode: 409);
+        }
+
         // Extract storage pointers
         var driveId = document.GraphDriveId;
         var itemId = document.GraphItemId;

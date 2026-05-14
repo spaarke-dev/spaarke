@@ -1,10 +1,12 @@
 # SDAP Authentication Patterns Architecture
 
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current
+> **Last Updated**: 2026-05-14
+> **Last Reviewed**: 2026-05-14
+> **Reviewed By**: post-SSO-binding sweep (Opus 4.7)
+> **Status**: Current (reflects 2026-05-12 SSO binding fix + 2026-05-14 CORS hardening)
 > **Purpose**: Nine-pattern authentication taxonomy governing how every component in SDAP acquires tokens and authorizes operations.
+>
+> ⚠️ **Operational note**: `@spaarke/auth` is bundled at build time into every consumer. Changing the library requires rebuilding and redeploying ~30 consumers individually. See [Library Distribution](#library-distribution--bundling-reality) below and the [consumer rebuild tracker](../../projects/auth-sso-and-email-wizard-2026-05/CONSUMER-REBUILD-STATUS.md).
 
 ---
 
@@ -179,6 +181,65 @@ Token acquisition for all internal Spaarke surfaces (PCFs + Code Pages) routes t
 
 ---
 
+## Single Canonical Auth Service — Coverage
+
+Every Spaarke-internal browser surface routes through one library: **`@spaarke/auth`** at [`src/client/shared/Spaarke.Auth`](../../src/client/shared/Spaarke.Auth/). This guarantees the 6-strategy chain and SSO binding requirements (`localStorage` + cookie state + tenant-specific authority) are applied uniformly. Direct `PublicClientApplication` use is **forbidden** on internal surfaces.
+
+| Surface | Components | Auth Source | Status |
+|---|---|---|---|
+| PCF controls (Dataverse forms) | 7 — see consumer tracker | `@spaarke/auth` via `initAuth()` in React `useEffect` | ✅ Canonical |
+| Code Pages (`src/solutions/*`, `src/client/code-pages/*`) | 12 | `@spaarke/auth` via bootstrap (`resolveRuntimeConfig` → `setRuntimeConfig` → `initAuth`) | ✅ Canonical |
+| Office Add-ins (`src/client/office-addins/`) | Outlook + Word add-ins | `@azure/msal-browser` directly | ⚠️ **Documented exception** — no Xrm available; future work to add an `OfficeStrategy` to `SpaarkeAuthProvider` |
+| External Workspace SPA (`src/client/external-spa/`) | B2B portal | Per-tab `sessionStorage` MSAL config | ⚠️ **Intentional exception** — B2B users, different cookie/auth model |
+| Dataverse JS webresources (legacy) | `sprk_DocumentOperations.js` etc. | `Xrm.WebApi` only | ✅ No new ones (ADR-006); existing use Xrm not MSAL |
+| BFF API server-side | `Sprk.Bff.Api` | MSAL.NET `ConfidentialClientApplication` + OBO | N/A — different runtime, see Pattern 2 |
+| Dataverse plugins | `Sprk.Plugins.*` | `IOrganizationService` (built-in plugin identity) | N/A — plugin runtime, no token acquisition |
+
+**Rule for new components**: any new browser-side Spaarke surface that calls the BFF MUST consume `@spaarke/auth`. Exceptions require an ADR.
+
+---
+
+## Library Distribution & Bundling Reality
+
+`@spaarke/auth` is a **TypeScript library bundled at build time** into every consumer's `bundle.js` (PCFs) or `index.html` (Code Pages). It is **not** a runtime-loaded Dataverse web resource.
+
+**Implications:**
+- Changing the library source does **NOT** auto-update consumers
+- Every consumer must be **rebuilt and redeployed individually** to pick up library fixes
+- Mixed-version drift is possible across components in the same Dataverse environment
+- A single popup-firing consumer with the old `/organizations` authority can confuse a user who has otherwise-rebuilt components
+
+**Operational discipline:**
+- When changing `@spaarke/auth`, treat it as a **fan-out release** — track which consumers have been rebuilt
+- Always increment the `@spaarke/auth` `package.json` version to make drift detectable
+- Maintain the [consumer rebuild tracker](../../projects/auth-sso-and-email-wizard-2026-05/CONSUMER-REBUILD-STATUS.md) until propagation is complete
+
+**Future work**: Convert `@spaarke/auth` to a runtime-loaded Dataverse web resource (`sprk_spaarke_auth.js`) so a single library deploy updates all consumers. Requires versioned API contract and consumer migration. Not scheduled.
+
+---
+
+## CORS Preflight — Required Headers (BFF)
+
+Authenticated browser calls from `*.crm.dynamics.com` to the BFF (`api://{BFF-AppId}`) trigger CORS preflight when telemetry headers are auto-injected by Microsoft client libraries. The BFF's allowed-headers list MUST include the telemetry headers below — they are sent by Application Insights JS SDK and MSAL fetch instrumentation without our control.
+
+| Header | Source | Why |
+|---|---|---|
+| `Authorization` | Application | Bearer token from `@spaarke/auth` |
+| `Content-Type`, `Accept` | Application | Standard JSON/multipart |
+| `X-Correlation-Id`, `X-Idempotency-Key`, `X-Requested-With` | Application | Spaarke correlation |
+| `request-id` | App Insights JS SDK | Auto-injected by `@microsoft/applicationinsights-web` |
+| `client-request-id` | App Insights JS SDK | Auto-injected companion |
+| `traceparent` | W3C Trace Context | Auto-injected by modern fetch instrumentation |
+| `tracestate` | W3C Trace Context | Auto-injected companion |
+
+**Configured in**: [`src/server/api/Sprk.Bff.Api/Infrastructure/DI/CorsModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/CorsModule.cs) — hard-coded allowlist (not config-driven). Applied to all endpoints via `AddDefaultPolicy`. **Pipeline ordering**: `UseCors()` runs before `UseAuthentication` / `UseAuthorization` (preflight has no Authorization header).
+
+**Symptom of a missing header**: browser console reports `Request header field {name} is not allowed by Access-Control-Allow-Headers in preflight response.` Actual request is never sent — only OPTIONS preflight. Surface error reads `TypeError: Failed to fetch`.
+
+**Adding a new client telemetry library**: verify what request headers it injects and add them to `CorsModule.cs`. Do NOT switch to `.AllowAnyHeader()` — the strict allowlist is intentional for a credentialed API.
+
+---
+
 ## Known Pitfalls
 
 | Pitfall | Symptom | Root Cause | Fix |
@@ -195,6 +256,9 @@ Token acquisition for all internal Spaarke surfaces (PCFs + Code Pages) routes t
 | HttpContext not propagated to file access | 403 on SPE file download in AI pipeline | OBO requires the original HttpContext to extract the user token | Pass `httpContext` through entire call chain to `ForUserAsync()` |
 | Individual Graph scopes in OBO | AADSTS70011: Invalid scope | OBO requires `.default` scope, not individual permissions | Use `https://graph.microsoft.com/.default` |
 | Stale cached OBO token after permission change | Access persists after revocation | Redis caches tokens for 55 minutes | Token expires naturally; no manual invalidation mechanism |
+| Missing CORS header for telemetry | `TypeError: Failed to fetch` on first BFF call; console shows `Request header field {name} is not allowed by Access-Control-Allow-Headers` | App Insights JS SDK / W3C Trace Context auto-inject `request-id`, `traceparent`, `tracestate` — BFF allowlist missed them | Add the header to `CorsModule.cs` `.WithHeaders(...)`. See [CORS Preflight](#cors-preflight--required-headers-bff) |
+| Drift between rebuilt and un-rebuilt consumers | Some PCFs work silently, others fire popup on same tab | `@spaarke/auth` is bundled, not runtime-loaded; some consumers still ship the old library | Rebuild + redeploy each consumer. Track in [consumer rebuild tracker](../../projects/auth-sso-and-email-wizard-2026-05/CONSUMER-REBUILD-STATUS.md) |
+| New surface uses `@azure/msal-browser` directly | Popup on every tab open for that surface; no token sharing with other Spaarke components | Bypasses `@spaarke/auth` 6-strategy chain | Always consume `@spaarke/auth`. Office Add-ins are the only documented exception |
 
 ---
 
@@ -259,10 +323,13 @@ Token acquisition for all internal Spaarke surfaces (PCFs + Code Pages) routes t
 
 ## Related
 
-- [OBO Flow pattern pointer](../../.claude/patterns/auth/obo-flow.md) — GraphClientFactory code pointers
-- [Token Caching pattern pointer](../../.claude/patterns/auth/token-caching.md) — Redis cache implementation
-- [Dataverse OBO pattern pointer](../../.claude/patterns/auth/dataverse-obo.md) — Dataverse-specific OBO
-- [Spaarke Auth Initialization pattern](../../.claude/patterns/auth/spaarke-auth-initialization.md) — Code Page bootstrap
+- [Spaarke SSO Binding](../../.claude/patterns/auth/spaarke-sso-binding.md) — **Canonical reference** for tenant authority, 6-strategy chain, localStorage + cookie binding (2026-05-13)
+- [Spaarke Auth Initialization](../../.claude/patterns/auth/spaarke-auth-initialization.md) — Code Page bootstrap sequence
+- [Token Caching](../../.claude/patterns/auth/token-caching.md) — Client localStorage + server Redis
+- [OBO Flow](../../.claude/patterns/auth/obo-flow.md) — GraphClientFactory code pointers
+- [Dataverse OBO](../../.claude/patterns/auth/dataverse-obo.md) — Dataverse-specific OBO
+- [Auth Constraints](../../.claude/constraints/auth.md) — MUST/MUST NOT rules
+- [Consumer Rebuild Tracker](../../projects/auth-sso-and-email-wizard-2026-05/CONSUMER-REBUILD-STATUS.md) — Live rebuild status across ~30 consumers
 - [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) — SpeFileStore facade (no Graph SDK leaks)
 - [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) — Endpoint filters for auth
 - [ADR-009](../../.claude/adr/ADR-009-redis-caching.md) — Redis-first caching
@@ -272,4 +339,4 @@ Token acquisition for all internal Spaarke surfaces (PCFs + Code Pages) routes t
 
 ---
 
-*Last Updated: 2026-04-05*
+*Last Updated: 2026-05-14 (post-SSO-binding sweep — added Single Canonical Auth Service, Library Distribution, CORS Preflight, and Office Add-ins exception)*

@@ -7,8 +7,11 @@ namespace Sprk.Bff.Api.Infrastructure.Exceptions;
 /// Stable error codes:
 /// - invalid_id: Parameter is not a GUID
 /// - document_not_found: No Dataverse row for GUID
-/// - mapping_missing_drive: Dataverse row exists, DriveId mapping incomplete
-/// - mapping_missing_item: Dataverse row exists, ItemId mapping incomplete
+/// - no_file_attached: Dataverse row exists, sprk_hasfile=false (no file uploaded yet)
+/// - mapping_missing_drive: Dataverse row has sprk_hasfile=true but DriveId mapping incomplete (partial/in-flight upload)
+/// - mapping_missing_item: Dataverse row has sprk_hasfile=true but ItemId mapping incomplete
+/// - invalid_drive_id: DriveId field is populated but malformed (does not start with "b!")
+/// - invalid_item_id: ItemId field is populated but too short (&lt;20 chars)
 /// - storage_not_found: Graph 404, file removed in storage
 /// - throttled_retry: Transient Graph throttling with backoff
 /// </summary>

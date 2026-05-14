@@ -367,6 +367,16 @@ export class BffClient {
         throw new Error('Invalid document ID format.');
       case 'document_not_found':
         throw new Error('Document not found. It may have been deleted.');
+      case 'no_file_attached':
+        throw new Error('No file is attached to this document yet. Upload a file before opening it.');
+      case 'mapping_missing_drive':
+      case 'mapping_missing_item':
+        throw new Error('File upload is still in progress or did not complete. Please wait a moment and try again.');
+      case 'invalid_drive_id':
+      case 'invalid_item_id':
+        throw new Error('This document has invalid storage references. Please contact support.');
+      case 'storage_not_found':
+        throw new Error('The file could not be found in storage. It may have been removed.');
       case 'document_locked':
         throw new Error('Document is locked by another user.');
       case 'not_checked_out':
@@ -382,7 +392,8 @@ export class BffClient {
           case 404:
             throw new Error('Document not found.');
           case 409:
-            throw new Error('Document is currently locked.');
+            // Generic 409 fallback — server didn't supply a stable code
+            throw new Error('This document cannot be accessed in its current state.');
           case 500:
           case 502:
           case 503:

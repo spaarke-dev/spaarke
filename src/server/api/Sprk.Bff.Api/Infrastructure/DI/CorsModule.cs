@@ -111,7 +111,11 @@ public static class CorsModule
                           "Accept",
                           "X-Requested-With",
                           "X-Correlation-Id",
-                          "X-Idempotency-Key")
+                          "X-Idempotency-Key",
+                          "request-id",
+                          "client-request-id",
+                          "traceparent",
+                          "tracestate")
                       .WithExposedHeaders(
                           "request-id",
                           "client-request-id",

@@ -142,7 +142,7 @@ public static class FileAccessEndpoints
             }
 
             // 3. Validate SPE pointers (driveId, itemId)
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
@@ -283,7 +283,7 @@ public static class FileAccessEndpoints
             }
 
             // 3. Validate SPE pointers
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             // 4. Get preview URL using OBO
             var graphClient = await graphFactory.ForUserAsync(context, ct);
@@ -347,7 +347,7 @@ public static class FileAccessEndpoints
             }
 
             // 3. Validate SPE pointers
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             // 4. Download file content using OBO
             var graphClient = await graphFactory.ForUserAsync(context, ct);
@@ -416,7 +416,7 @@ public static class FileAccessEndpoints
             }
 
             // 3. Validate SPE pointers
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             // 4. Get Office web app URL using OBO
             var graphClient = await graphFactory.ForUserAsync(context, ct);
@@ -496,7 +496,7 @@ public static class FileAccessEndpoints
             }
 
             // 3. Validate SPE pointers (driveId, itemId)
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
@@ -631,7 +631,7 @@ public static class FileAccessEndpoints
             }
 
             // 3. Validate SPE pointers (driveId, itemId)
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
@@ -787,7 +787,7 @@ public static class FileAccessEndpoints
             }
 
             // 3. Validate SPE pointers (driveId, itemId)
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
@@ -828,17 +828,29 @@ public static class FileAccessEndpoints
     /// <summary>
     /// Validates SPE pointer format before calling Graph API.
     /// Throws SdapProblemException for invalid/missing pointers.
+    /// Distinguishes "no file attached" (hasFile=false) from "mapping incomplete" (hasFile=true but DriveId/ItemId missing).
     /// </summary>
-    private static void ValidateSpePointers(string? driveId, string? itemId, string documentId)
+    private static void ValidateSpePointers(string? driveId, string? itemId, string documentId, bool hasFile)
     {
+        // No file uploaded yet — surface a clear error instead of "mapping incomplete"
+        if (!hasFile)
+        {
+            throw new SdapProblemException(
+                "no_file_attached",
+                "No File Attached",
+                $"Document {documentId} has no file attached yet (sprk_hasfile=false). Upload a file before accessing it.",
+                409
+            );
+        }
+
         // Validate driveId exists
         if (string.IsNullOrWhiteSpace(driveId))
         {
             throw new SdapProblemException(
                 "mapping_missing_drive",
                 "SPE Drive ID Missing",
-                $"Document {documentId} does not have a Graph Drive ID (sprk_graphdriveid field is empty). " +
-                $"Ensure the document has been uploaded to SharePoint Embedded.",
+                $"Document {documentId} is marked as having a file (sprk_hasfile=true) but the Graph Drive ID is empty. " +
+                $"The upload may still be in progress or did not complete successfully.",
                 409
             );
         }
