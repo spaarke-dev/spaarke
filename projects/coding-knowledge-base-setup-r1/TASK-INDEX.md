@@ -22,21 +22,24 @@ Canonical plan: [`SPAARKE-KNOWLEDGE-BASE-SETUP.md`](./SPAARKE-KNOWLEDGE-BASE-SET
 
 | Topic | Status | Primary sources | Commit SHA |
 |---|---|---|---|
-| 2.1 `m365-copilot` | 🔲 | OfficeDev/microsoft-365-copilot-samples, microsoft/copilot-camp | — |
+| 2.1 `m365-copilot` | ✅ | **pnp/copilot-pro-dev-samples** (migrated from OfficeDev — see Gaps), microsoft/copilot-camp | pending (batch 1) |
 | 2.2 `mcp-apps` | 🔲 | microsoft/mcp-interactiveUI-samples, modelcontextprotocol/servers | — |
 | 2.3 `declarative-agents` | 🔲 | OfficeDev/microsoft-365-copilot-samples (DA subdirs), microsoft/teams-toolkit, MVP samples | — |
-| 2.4 `agent-framework` | 🔲 | microsoft/agent-framework | — |
+| 2.4 `agent-framework` | ✅ | microsoft/agent-framework (.NET samples only — Spaarke is .NET 8) | pending (batch 1) |
 | 2.5 `foundry-agent-service` | 🔲 | Azure-Samples/azureai-samples, Azure-Samples/azure-ai-foundry, Azure-Samples/openai-end-to-end-baseline | — |
 | 2.6 `foundry-iq` | 🔲 | Azure-Samples/azure-ai-foundry, Azure-Samples/azureai-samples | — |
 | 2.7 `work-iq` | 🔲 | microsoft/copilot-camp (Work IQ MCP labs); docs snapshot (preview surface — gap risk) | — |
 | 2.8 `dataverse-mcp` | 🔲 | microsoft/PowerApps-Samples, microsoft/Dataverse-Web-API-Samples | — |
 | 2.9 `sharepoint-embedded` | 🔲 | microsoft/SharePoint-Embedded-Samples, microsoft/SharePoint-Embedded-VS-Code-Extension | — |
 | 2.10 `azure-ai-search` | 🔲 | Azure/azure-search-vector-samples, Azure-Samples/azure-search-openai-demo, azure-search-openai-demo-csharp | — |
-| 2.11 `github-mcp` | 🔲 | github/github-mcp-server | — |
+| 2.11 `github-mcp` | ✅ | github/github-mcp-server | pending (batch 1) |
 
 ## Gaps / blocks log
 
-(empty — populate as Microsoft URLs 404 or repos move; preview surfaces like Work IQ MCP are highest risk)
+**Batch 1 (2026-05-14):**
+- ⚠️ **Repo migration** — `OfficeDev/microsoft-365-copilot-samples` was migrated by Microsoft on 2026-01-02 to **`pnp/copilot-pro-dev-samples`** and is retiring 2026-01-30. **Affects Phase 2.3 declarative-agents** which lists the same primary source — Batch 3 agent must be redirected to `pnp/copilot-pro-dev-samples`. Recorded in `knowledge/m365-copilot/SOURCE.md`.
+- ⚠️ **404 on Learn doc paths** for Agent Framework concepts (`/concepts/agents`, `/concepts/workflows`) — Microsoft restructured to `/agents/` and `/workflows/`. Substitutions recorded in `knowledge/agent-framework/docs/*.md` frontmatter.
+- ⚠️ **404 on GitHub Copilot "skillsets"** doc — Microsoft folded skillsets into Custom agents / Skills. Logged in `knowledge/github-mcp/SOURCE.md`; next refresh should hunt for canonical replacement.
 
 ---
 
