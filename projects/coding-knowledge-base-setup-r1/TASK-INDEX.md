@@ -13,7 +13,7 @@ Canonical plan: [`SPAARKE-KNOWLEDGE-BASE-SETUP.md`](./SPAARKE-KNOWLEDGE-BASE-SET
 | 0 | Verify environment and prerequisites | ✅ | gh 2.80.0 authed (spaarke-dev); learn.microsoft.com / github.com / raw.githubusercontent.com reachable; no existing `knowledge/` |
 | 1 | Create `knowledge/` skeleton + README + REFRESH-LOG | ✅ | 11 topic dirs with `.gitkeep`; `knowledge/README.md` + `REFRESH-LOG.md` authored |
 | 2 | Populate 11 topic folders (see breakdown below) | ✅ | All 11 topics curated · 2.5 MB total · 11 commits via 4 parallel batches |
-| 3 | Wire 6 new `.claude/skills/*` files | 🔲 | Main session only (write boundary) |
+| 3 | Wire 6 new `.claude/skills/*` files | ✅ | 6 SKILL.md files (107–139 lines each); INDEX.md + root CLAUDE.md updated with knowledge/ refs |
 | 4 | Senior-engineer annotation pass on NOTES.md | 🔲 | **Ralph owns** — async after Phase 3 |
 | 5 | Verify each skill influences agent output | 🔲 | 5 representative prompts per skill |
 | 6 | Establish monthly refresh ritual | 🔲 | REFRESH-PROCEDURE.md + owner + calendar |
@@ -28,10 +28,10 @@ Canonical plan: [`SPAARKE-KNOWLEDGE-BASE-SETUP.md`](./SPAARKE-KNOWLEDGE-BASE-SET
 | 2.4 `agent-framework` | ✅ | microsoft/agent-framework (.NET samples only — Spaarke is .NET 8) | `7db7c758` |
 | 2.5 `foundry-agent-service` | ✅ | Azure-Samples/azureai-samples, **Azure-Samples/ai-foundry-agents-samples** (azure-ai-foundry 404 — see Gaps), Azure/ai-foundry-isv-mcp-agent | `d79c3f78` |
 | 2.6 `foundry-iq` | ✅ | **microsoft/iq-series** (canonical), Azure-Samples/sharepoint-foundryIQ-secure-sync, MSFT-Innovation-Hub-India/FoundryIQ-kb-Sample1, RobertEichenseer/AgenticAI.FoundryIQ. (azure-ai-foundry still 404) | `0437c38f` |
-| 2.7 `work-iq` | ✅ | microsoft/copilot-camp (BAF6 lab fragment). Doc-heavy: 6 Learn snapshots + synthesized tool catalog. **Naming clarified**: Agent 365 = control plane, Work IQ = intelligence layer. | pending (batch 4) |
+| 2.7 `work-iq` | ✅ | microsoft/copilot-camp (BAF6 lab fragment). Doc-heavy: 6 Learn snapshots + synthesized tool catalog. **Naming clarified**: Agent 365 = control plane, Work IQ = intelligence layer. | `873d1a84` |
 | 2.8 `dataverse-mcp` | ✅ | microsoft/PowerApps-Samples (sparse), **microsoft/Dataverse-MCP** + **microsoft/dataverse-business-skills** (Dataverse-Web-API-Samples doesn't exist — see Gaps) | `d79c3f78` |
 | 2.9 `sharepoint-embedded` | ✅ | microsoft/SharePoint-Embedded-Samples (C# + TS); SharePoint-Embedded-VS-Code-Extension (README only — extension, no runnable samples) | `0437c38f` |
-| 2.10 `azure-ai-search` | ✅ | Azure/azure-search-vector-samples, Azure-Samples/azure-search-openai-demo-csharp (Spaarke .NET focus), Azure-Samples/azure-search-openai-demo (Python skillset reference only) | pending (batch 4) |
+| 2.10 `azure-ai-search` | ✅ | Azure/azure-search-vector-samples, Azure-Samples/azure-search-openai-demo-csharp (Spaarke .NET focus), Azure-Samples/azure-search-openai-demo (Python skillset reference only) | `873d1a84` |
 | 2.11 `github-mcp` | ✅ | github/github-mcp-server | `7db7c758` |
 
 ## Gaps / blocks log
@@ -68,9 +68,9 @@ Canonical plan: [`SPAARKE-KNOWLEDGE-BASE-SETUP.md`](./SPAARKE-KNOWLEDGE-BASE-SET
 
 | Skill file | References | Status |
 |---|---|---|
-| `.claude/skills/mcp-tool-handler/SKILL.md` | `knowledge/mcp-apps/`, `knowledge/foundry-agent-service/` | 🔲 |
-| `.claude/skills/declarative-agent/SKILL.md` | `knowledge/declarative-agents/`, `knowledge/m365-copilot/` | 🔲 |
-| `.claude/skills/foundry-agent/SKILL.md` | `knowledge/foundry-agent-service/`, `knowledge/foundry-iq/`, `knowledge/agent-framework/` | 🔲 |
-| `.claude/skills/dataverse-mcp-usage/SKILL.md` | `knowledge/dataverse-mcp/` | 🔲 |
-| `.claude/skills/spe-integration/SKILL.md` | `knowledge/sharepoint-embedded/` | 🔲 |
-| `.claude/skills/widget-design/SKILL.md` | `knowledge/mcp-apps/` | 🔲 |
+| `.claude/skills/mcp-tool-handler/SKILL.md` | `knowledge/mcp-apps/`, `knowledge/foundry-agent-service/` | ✅ (107 lines) |
+| `.claude/skills/declarative-agent/SKILL.md` | `knowledge/declarative-agents/`, `knowledge/m365-copilot/` | ✅ (110 lines) |
+| `.claude/skills/foundry-agent/SKILL.md` | `knowledge/foundry-agent-service/`, `knowledge/foundry-iq/`, `knowledge/agent-framework/` | ✅ (120 lines) |
+| `.claude/skills/dataverse-mcp-usage/SKILL.md` | `knowledge/dataverse-mcp/` | ✅ (121 lines) |
+| `.claude/skills/spe-integration/SKILL.md` | `knowledge/sharepoint-embedded/` | ✅ (122 lines) |
+| `.claude/skills/widget-design/SKILL.md` | `knowledge/mcp-apps/` | ✅ (139 lines) |
