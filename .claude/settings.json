@@ -1,5 +1,5 @@
 {
-  "$schema": "https://code.claude.com/schemas/settings.json",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "model": "opus",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
@@ -8,12 +8,22 @@
     "PostToolUse": [
       {
         "matcher": "Edit",
-        "command": "bash scripts/quality/post-edit-lint.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/quality/post-edit-lint.sh"
+          }
+        ]
       }
     ],
-    "TaskCompleted": [
+    "Stop": [
       {
-        "command": "bash scripts/quality/task-quality-gate.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/quality/task-quality-gate.sh"
+          }
+        ]
       }
     ]
   },
