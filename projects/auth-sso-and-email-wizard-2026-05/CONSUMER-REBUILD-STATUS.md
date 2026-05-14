@@ -32,27 +32,61 @@ Or check `[SpaarkeAuth]` console logs at page load — rebuilt consumers log the
 | SemanticSearchControl | ✅ v1.1.40 | ✅ v1.1.40 | First rebuilt — reference exemplar (virtual + auth) |
 | RelatedDocumentCount | ⏳ TBD | ⏳ TBD | Already virtual; needs `@spaarke/auth` rebuild verify |
 | DocumentRelationshipViewer (PCF) | ⏳ TBD | ⏳ TBD | Already virtual; needs rebuild verify |
-| SpeDocumentViewer | ✅ v1.0.24 | ✅ v1.0.24 | Rebuilt 2026-05-14 to ship new BFF 409 error mapping (no_file_attached etc.). Virtual-control refactor landed in v1.0.22. **Bundle size regression flagged**: 6.7 MB build / 1.1 MB ZIP (vs. v1.0.22's 440 KB build / 111 KB ZIP) — non-deep `@fluentui/react-icons` imports. Follow-up. |
+| SpeDocumentViewer | ✅ v1.0.24 | ✅ v1.0.24 | Rebuilt 2026-05-14 to ship new BFF 409 error mapping (no_file_attached etc.). Virtual-control refactor landed in v1.0.22. **Bundle regression UNRESOLVED**: see follow-up below. |
+
+### SpeDocumentViewer bundle regression — investigation hand-off
+
+**Symptom**: clean `npm run build` produces a 6.7 MB `bundle.js` / 1.1 MB packed ZIP. The previous v1.0.22 / v1.0.23 builds (committed in master at SHA `4e875cb0`) were 440 KB / 111 KB ZIP. Source files haven't changed in a way that would touch the bundle composition — only `control/BffClient.ts` was modified between v1.0.23 and v1.0.24, and that change adds new strings in a switch statement (no new imports).
+
+**Reproduction**:
+```bash
+cd src/client/pcf/SpeDocumentViewer
+rm -rf out/ node_modules/.cache
+npm run build
+ls -la out/controls/control/bundle.js   # observe ~6.7 MB instead of ~440 KB
+```
+
+**Verified non-causes** (already checked):
+- Shared lib deep imports — `index.ts` and `SpeDocumentViewerHost.tsx` correctly use `@spaarke/ui-components/dist/utils/logger` (not the barrel). Unchanged since 4e875cb0.
+- `@fluentui/react-icons` version — installed 2.0.316; SemanticSearchControl uses 2.0.317. Both have `sideEffects: false`. Not version-driven.
+- `featureconfig.json` — `pcfReactPlatformLibraries: on` is set. React/Fluent ARE external (`Reactv16`, `FluentUIReactv940` per webpack stats).
+- Build cache — `rm -rf out/ node_modules/.cache` followed by full build produces the same 6.7 MB output (deterministic, not cache-driven).
+
+**Webpack stats from current build**:
+- `external "Reactv16"` 42 bytes — React platform-loaded ✅
+- `external "FluentUIReactv940"` 42 bytes — Fluent platform-loaded ✅
+- `modules by path ./node_modules/ 4.03 MiB 55 modules` — this 4 MB is the regression. Babel deoptimization warnings name 9 `@fluentui/react-icons/lib/sizedIcons/chunk-N.js` files (each >500 KB). Tree-shaking is failing to eliminate the unused icons.
+
+**Likely root cause**: subtle webpack/babel config drift between when v1.0.22 was built (May 13) and now (May 14) — possibly in pcf-scripts version or a hoisted dependency. Or maybe the 440 KB number was achieved under specific conditions (e.g., the build that produced it was via custom-webpack-on, while the current build resolves differently).
+
+**Investigation path when picking up**:
+1. Run `git worktree add /tmp/sdv-v1022 4e875cb0` and `npm install --legacy-peer-deps && npm run build` there — confirm reproduces 440 KB. If yes → environment difference, not code.
+2. If 440 KB reproduces: `diff` the two `node_modules/` trees (focus on `pcf-scripts`, `@fluentui/react-icons`, `webpack`, `babel-loader`).
+3. If 6.7 MB reproduces in the worktree too: the 440 KB number was wrong / from a stale build. Accept current size and pin it.
+4. Alternative permanent fix: switch icon imports to per-chunk deep paths. Each `@fluentui/react-icons/lib/sizedIcons/chunk-N.js` groups ~200 icons; we'd need to grep each chunk for `LockClosed16Regular`, `Warning24Regular`, `ArrowClockwise24Regular`, etc. and import directly. Brittle (chunk numbers can change across package versions) but bypass-the-tree-shaker certain.
+
+**Impact**: 1.1 MB ZIP is well under Dataverse's 25.6 MB limit. Functionally fine. Cost: extra ~5 MB download per first-load of the control per user. Not blocking.
 | EmailProcessingMonitor | ⏳ TBD | ⏳ TBD | Standard control; needs rebuild + P0 virtual-refactor |
 | PlaybookBuilderHost | ⏳ TBD | ⏳ TBD | Special architecture (react-flow); needs rebuild verify |
 | UniversalDatasetGrid | ⏳ TBD | ⏳ TBD | Standard; needs rebuild + P0 virtual-refactor |
+| UniversalQuickCreate | ⚠️ v3.15.3 BLOCKED | ⚠️ v3.15.3 BLOCKED | Version-bumped 2026-05-14 to ship sprk_hasfile fix. Build blocked by 2 pre-existing issues: (1) `@types/react` 16-vs-18 collision with shared lib, (2) 5+ missing hook type exports from `@spaarke/ui-components/src/hooks` (`UseSseStreamOptions` etc.). Form-bound uploads continue to omit `sprk_hasfile` until rebuilt. Backfill script (`scripts/Backfill-DocumentHasFile.ps1`) covers existing records. Workspace + wizard uploads correctly set the flag now. |
 
 ## Code Pages (rebuild via vite + `pac webresource update`)
 
 | Solution Path | Web Resource | dev1 | demo | Deploy Script |
 |---|---|---|---|---|
-| `src/solutions/LegalWorkspace` | `sprk_corporateworkspace` | ✅ | ✅ | `scripts/Deploy-CorporateWorkspace.ps1` |
+| `src/solutions/LegalWorkspace` | `sprk_corporateworkspace` | ✅ 2026-05-14 (hasfile fix) | ✅ 2026-05-14 (hasfile fix) | `Deploy-WizardCodePages.ps1` |
 | `src/client/code-pages/DailyBriefing` (or wherever it lives) | `sprk_dailyupdate` | ✅ | ✅ | `scripts/Deploy-DailyBriefing.ps1` |
-| `src/solutions/CreateMatterWizard` | `sprk_creatematterwizard` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/CreateProjectWizard` | `sprk_createprojectwizard` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/CreateEventWizard` | `sprk_createeventwizard` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/CreateTodoWizard` | `sprk_createtodowizard` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/CreateWorkAssignmentWizard` | `sprk_createworkassignmentwizard` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/SummarizeFilesWizard` | `sprk_summarizefileswizard` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/FindSimilarCodePage` | `sprk_findsimilar` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/PlaybookLibrary` | `sprk_playbooklibrary` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/DocumentUploadWizard` | `sprk_documentuploadwizard` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
-| `src/solutions/AllDocuments` (if exists) | `sprk_alldocuments` | ⏳ | ⏳ | `scripts/Deploy-WizardCodePages.ps1` |
+| `src/solutions/CreateMatterWizard` | `sprk_creatematterwizard` | ✅ 2026-05-14 (hasfile fix) | ✅ 2026-05-14 (hasfile fix) | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/CreateProjectWizard` | `sprk_createprojectwizard` | ✅ 2026-05-14 (hasfile fix) | ✅ 2026-05-14 (hasfile fix) | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/CreateEventWizard` | `sprk_createeventwizard` | ✅ 2026-05-14 (hasfile fix) | ✅ 2026-05-14 (hasfile fix) | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/CreateTodoWizard` | `sprk_createtodowizard` | ✅ 2026-05-14 (hasfile fix) | ✅ 2026-05-14 (hasfile fix) | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/CreateWorkAssignmentWizard` | `sprk_createworkassignmentwizard` | ✅ 2026-05-14 (hasfile fix) | ✅ 2026-05-14 (hasfile fix) | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/SummarizeFilesWizard` | `sprk_summarizefileswizard` | ⏳ | ⏳ | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/FindSimilarCodePage` | `sprk_findsimilar` | ⏳ | ⏳ | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/PlaybookLibrary` | `sprk_playbooklibrary` | ⏳ | ⏳ | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/DocumentUploadWizard` | `sprk_documentuploadwizard` | ✅ 2026-05-14 (hasfile fix) | ✅ 2026-05-14 (hasfile fix) | `Deploy-WizardCodePages.ps1` |
+| `src/solutions/AllDocuments` (if exists) | `sprk_alldocuments` | ⏳ | ⏳ | `Deploy-WizardCodePages.ps1` |
 | `src/solutions/WorkspaceLayoutWizard` | ? | ⏳ | ⏳ | check vite.config.ts |
 | `src/solutions/Reporting` | ? | ⏳ | ⏳ | check vite.config.ts |
 | `src/solutions/SpeAdminApp` | ? | ⏳ | ⏳ | check vite.config.ts |

@@ -101,7 +101,12 @@ param(
 
     [bool]$RollbackOnFailure = $true,
 
-    [int]$MaxHealthCheckRetries = 12,
+    # Default 24 retries × 5 s = 120 s. Sized for Linux App Service cold start
+    # after a stop -> Kudu zipdeploy -> start cycle (the hardened script's
+    # auto-recover path), which can take 90-120 s before /healthz responds.
+    # Windows direct deploys typically respond in <30 s but pay no penalty
+    # for the longer ceiling.
+    [int]$MaxHealthCheckRetries = 24,
 
     [int]$HealthCheckIntervalSeconds = 5,
 

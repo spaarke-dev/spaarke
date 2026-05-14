@@ -9,11 +9,15 @@ alwaysApply: false
 # BFF API Deployment
 
 > **Category**: Operations
-> **Last Updated**: May 12, 2026 (added SHA-256 verification + auto-recover after observing silent deploy failures on Windows App Service)
+> **Last Updated**: 2026-05-14 (bumped default health-check window to 120 s for Linux cold-start tolerance; clarified the "hash-verify success + healthz timeout" pattern is not a real failure)
 
 Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 
 > 🚨 **CRITICAL — Silent Deploy Failures (May 2026)**: `az webapp deploy --type zip` has been observed to return HTTP 200 + Kudu `status=4 success` while NOT actually replacing the DLLs on disk. The running .NET host holds file locks on the DLLs and Windows refuses overwrites — but the deploy mechanism reports success anyway. **Never trust the success message alone.** Always verify with SHA-256 hash comparison via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically; manual deploys MUST verify (see Manual Verification section below).
+
+> 🟡 **Linux App Service cold-start note (2026-05-14)**: After a `stop → Kudu zipdeploy → start` cycle (the script's auto-recover path), Linux App Service often takes **90–120 seconds** to respond to `/healthz`. Before 2026-05-14 the script's default health window was 60 s and reported a false failure here even though the deploy was successful and hash-verify had passed. The default is now **24 retries × 5 s = 120 s**, overridable via `-MaxHealthCheckRetries`. If hash-verify passes but `/healthz` still times out, the deploy is correct — the app is just still booting. Re-run `curl /healthz` manually after another 30–60 s instead of redeploying.
+
+> ✅ **The two-layer safety net**: (1) **Hash-verify** catches the silent-success-but-not-replaced case (Windows file lock). (2) **Health check** catches the case where files are correct but startup fails. Both run after every deploy. If hash-verify **fails**, the deploy is broken — the script auto-recovers via Kudu zipdeploy. If hash-verify **passes** but health check times out, the deploy is **correct** — the app needs more time to start. Never re-deploy in response to a healthz-only failure when hash-verify succeeded.
 
 ---
 
@@ -107,10 +111,18 @@ Expected output:
 [2/4] Creating deployment package...
   Package created: ~61 MB          # <-- VERIFY: must be 55-65 MB
 [3/4] Deploying to Azure...
-  Deployment complete
-[4/4] Verifying deployment...
-  Health check passed!
+  Deployment complete (or: auto-recovered via Kudu zipdeploy)
+[4/4] Verifying file replacement on server...
+  All 6 critical files match local build (SHA-256 verified)   # <-- the silent-failure guard
+[5/4] Verifying health endpoint...
+  health check passed!                                         # <-- up to 120 s on Linux
 ```
+
+**Reading the output**:
+- "All 6 critical files match" = **deploy is genuinely complete**. The new DLLs are on disk.
+- "health check passed" = the app started up successfully.
+- "All 6 critical files match" + "health check failed after 24 attempts" = **deploy is correct, app is slow to boot**. Wait another 30–60 s and `curl /healthz` manually. Do NOT redeploy.
+- "Hash MISMATCH on file X" = real deploy failure. Script auto-recovers via stop → Kudu zipdeploy → start.
 
 ### Step 3: Verify Endpoints
 
