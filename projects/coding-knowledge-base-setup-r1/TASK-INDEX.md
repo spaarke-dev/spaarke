@@ -23,14 +23,14 @@ Canonical plan: [`SPAARKE-KNOWLEDGE-BASE-SETUP.md`](./SPAARKE-KNOWLEDGE-BASE-SET
 | Topic | Status | Primary sources | Commit SHA |
 |---|---|---|---|
 | 2.1 `m365-copilot` | ✅ | **pnp/copilot-pro-dev-samples** (migrated from OfficeDev — see Gaps), microsoft/copilot-camp | `7db7c758` |
-| 2.2 `mcp-apps` | ✅ | microsoft/mcp-interactiveUI-samples (modelcontextprotocol/servers not needed) | pending (batch 2) |
-| 2.3 `declarative-agents` | 🔲 | OfficeDev/microsoft-365-copilot-samples (DA subdirs), microsoft/teams-toolkit, MVP samples | — |
+| 2.2 `mcp-apps` | ✅ | microsoft/mcp-interactiveUI-samples (modelcontextprotocol/servers not needed) | `d79c3f78` |
+| 2.3 `declarative-agents` | ✅ | **pnp/copilot-pro-dev-samples** (OfficeDev migrated), MCAPSTechConnect26 lab (inspected, not curated). teams-toolkit 404, no MVP DA repos found via gh search. | pending (batch 3) |
 | 2.4 `agent-framework` | ✅ | microsoft/agent-framework (.NET samples only — Spaarke is .NET 8) | `7db7c758` |
-| 2.5 `foundry-agent-service` | ✅ | Azure-Samples/azureai-samples, **Azure-Samples/ai-foundry-agents-samples** (azure-ai-foundry 404 — see Gaps), Azure/ai-foundry-isv-mcp-agent | pending (batch 2) |
-| 2.6 `foundry-iq` | 🔲 | Azure-Samples/azure-ai-foundry, Azure-Samples/azureai-samples | — |
+| 2.5 `foundry-agent-service` | ✅ | Azure-Samples/azureai-samples, **Azure-Samples/ai-foundry-agents-samples** (azure-ai-foundry 404 — see Gaps), Azure/ai-foundry-isv-mcp-agent | `d79c3f78` |
+| 2.6 `foundry-iq` | ✅ | **microsoft/iq-series** (canonical), Azure-Samples/sharepoint-foundryIQ-secure-sync, MSFT-Innovation-Hub-India/FoundryIQ-kb-Sample1, RobertEichenseer/AgenticAI.FoundryIQ. (azure-ai-foundry still 404) | pending (batch 3) |
 | 2.7 `work-iq` | 🔲 | microsoft/copilot-camp (Work IQ MCP labs); docs snapshot (preview surface — gap risk) | — |
-| 2.8 `dataverse-mcp` | ✅ | microsoft/PowerApps-Samples (sparse), **microsoft/Dataverse-MCP** + **microsoft/dataverse-business-skills** (Dataverse-Web-API-Samples doesn't exist — see Gaps) | pending (batch 2) |
-| 2.9 `sharepoint-embedded` | 🔲 | microsoft/SharePoint-Embedded-Samples, microsoft/SharePoint-Embedded-VS-Code-Extension | — |
+| 2.8 `dataverse-mcp` | ✅ | microsoft/PowerApps-Samples (sparse), **microsoft/Dataverse-MCP** + **microsoft/dataverse-business-skills** (Dataverse-Web-API-Samples doesn't exist — see Gaps) | `d79c3f78` |
+| 2.9 `sharepoint-embedded` | ✅ | microsoft/SharePoint-Embedded-Samples (C# + TS); SharePoint-Embedded-VS-Code-Extension (README only — extension, no runnable samples) | pending (batch 3) |
 | 2.10 `azure-ai-search` | 🔲 | Azure/azure-search-vector-samples, Azure-Samples/azure-search-openai-demo, azure-search-openai-demo-csharp | — |
 | 2.11 `github-mcp` | ✅ | github/github-mcp-server | `7db7c758` |
 
@@ -51,9 +51,16 @@ Canonical plan: [`SPAARKE-KNOWLEDGE-BASE-SETUP.md`](./SPAARKE-KNOWLEDGE-BASE-SET
 - ⚠️ **A2A protocol composition + graph-based workflow DSL** — no public Python/.NET sample yet (workflow runtime is UI-first; A2A may be preview-only). Logged as gaps in `foundry-agent-service/SOURCE.md`.
 - ⚠️ **No Microsoft Learn page for "App MCP" as distinct concept** or Business Skill authoring format — only normative source for Business Skills is the example library in `microsoft/dataverse-business-skills`.
 
-**Pre-batch-3 redirections** (will be applied to batch 3 prompts):
-- `2.3 declarative-agents`: use `pnp/copilot-pro-dev-samples` (not `OfficeDev/microsoft-365-copilot-samples`)
-- `2.6 foundry-iq`: use `Azure-Samples/ai-foundry-agents-samples` (not `azure-ai-foundry`); search current `/azure/foundry/` Learn paths
+**Pre-batch-3 redirections applied successfully.**
+
+**Batch 3 (2026-05-14):**
+- ⚠️ **`microsoft/teams-toolkit` 404** — renamed to "M365 Agents Toolkit" VS Code extension; no canonical GitHub repo at the directive's name. No samples lost (declarative-agents had ample sources elsewhere).
+- ⚠️ **MVP declarative-agent repos** — `gh search` did not surface any `declarative-agent`-named repos under bobgerman/garrytrinder/waldekmastykarz at this snapshot. Recorded; next refresh should hunt again.
+- ⚠️ **EmbeddedKnowledge capability** flagged "not yet available" on Microsoft Learn — no sample to curate.
+- ⚠️ **All 3 Foundry IQ Learn URLs 404'd**. Replacements found under **`/azure/foundry/agents/concepts/`** and surprisingly under **`/azure/search/`** for some KB-creation pages (`agentic-retrieval-how-to-create-knowledge-base`, `agentic-knowledge-source-overview`).
+- ⚠️ **SPE Learn URL** `concepts/app-concepts/containers` 404'd — fell back to `development/app-architecture` + `getting-started/containertypes`.
+- ⚠️ **No runnable SPE embedded-chat sample** — the boilerplate's `ChatSidebar.tsx` body is commented out upstream (out-of-registry .tgz). Captured the annotated prompt snippet as next-best reference.
+- ⚠️ **Foundry IQ gaps**: standalone `remoteSharePoint` KS sample, OneLake KS sample, end-to-end retrieval pipeline tutorial, native Purview sensitivity label enforcement — all preview/not-yet-public.
 
 ---
 

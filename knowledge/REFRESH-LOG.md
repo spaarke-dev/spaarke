@@ -13,6 +13,17 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 - Refresh owner: Ralph Schroeder.
 - Curation of topic folders proceeds in Phase 2 of the [`coding-knowledge-base-setup-r1`](../projects/coding-knowledge-base-setup-r1/) project.
 
+## 2026-05-14 — Initial curation (Batch 3: declarative-agents, foundry-iq, sharepoint-embedded)
+
+Additional gaps and platform changes discovered:
+
+- **`microsoft/teams-toolkit` 404.** Renamed to "M365 Agents Toolkit" VS Code extension — no canonical GitHub repo at the directive's name. No samples lost.
+- **MVP declarative-agent repos** — `gh search` did not surface `declarative-agent`-named repos under bobgerman/garrytrinder/waldekmastykarz at this snapshot. Try again next refresh.
+- **EmbeddedKnowledge capability** flagged "not yet available" on Microsoft Learn — no sample exists yet.
+- **All 3 Foundry IQ Learn URLs 404'd.** Knowledge layer pages have moved partly under `/azure/foundry/agents/concepts/` and surprisingly partly under `/azure/search/` (`agentic-retrieval-how-to-create-knowledge-base`, `agentic-knowledge-source-overview`).
+- **SPE Learn URL** `concepts/app-concepts/containers` 404'd — replaced with `development/app-architecture` + `getting-started/containertypes`.
+- **No runnable SPE embedded-chat sample** — boilerplate's `ChatSidebar.tsx` body commented out upstream (out-of-registry .tgz). Annotated prompt snippet captured as next-best reference.
+
 ## 2026-05-14 — Initial curation (Batch 2: mcp-apps, foundry-agent-service, dataverse-mcp)
 
 Additional gaps and platform changes discovered:
