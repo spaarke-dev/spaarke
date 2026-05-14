@@ -16,6 +16,7 @@
 | 003 | Inventory all `.github/workflows/*.yml` (status, triggers, action versions) | 🔲 | 0-A | none | F-16 |
 | 004 | Inventory `.claude/settings.json` + `.mcp.json` against published schemas | 🔲 | 0-A | none | F-7 |
 | 005 | Baseline PCF bundle.js sizes for bundle-size guard | 🔲 | 0-B | 001 | F-10 |
+| 006 | Build skill cross-reference map (7 surfaces) | 🔲 | 0-B | 001, 002, 003, 004 | F-15.2 |
 
 ### Phase 1 — Additive Infrastructure
 
@@ -71,7 +72,9 @@
 | 061 | Build `Find-PatternDrift.ps1` drift detector | 🔲 | 4a-A | 001 | F-8 |
 | 062 | Build `Test-ReferenceExemplars.ps1` exemplar harness | 🔲 | 4a-A | 005, 028 | F-9, F-15 |
 | 063 | Build `Check-BundleSizeDrift.ps1` bundle-size guard | 🔲 | 4a-A | 005 | F-10 |
-| 064 | `.github/workflows/procedure-quality.yml` orchestrating validators (<30s) | 🔲 | 4a-B | 060–063 | F-7 |
+| 064 | `.github/workflows/procedure-quality.yml` orchestrating validators (<30s) | 🔲 | 4a-B | 060–063, 065, 066 | F-7 |
+| 065 | Build `Validate-SkillReferences.ps1` (Light check across all skills) | 🔲 | 4a-A | 001, 006 | F-15.4 |
+| 066 | Build `Find-SkillReferenceDrift.ps1` (7-surface drift detector) | 🔲 | 4a-A | 006 | F-15.4 |
 
 ### Phase 4b — GitHub Actions Hardening
 

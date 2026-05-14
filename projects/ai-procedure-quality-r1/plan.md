@@ -70,6 +70,7 @@ This project does NOT touch application code (`src/`). It modifies the AI proced
 - 003-inventory-workflows
 - 004-inventory-settings
 - 005-baseline-pcf-bundle-sizes
+- 006-build-skill-crossref-map — **NEW** per F-15.2; required input for Phase 2b destructive actions
 
 ---
 
@@ -220,6 +221,8 @@ Reviewer approves target outline + section dispositions. Sign-off via `Reviewer-
 - `scripts/quality/Find-PatternDrift.ps1` — walk `.claude/patterns/**/*.md`, extract referenced code paths, verify they exist. Report missing/moved.
 - `scripts/quality/Test-ReferenceExemplars.ps1` — for each skill with opted-in `exemplar:`, run the skill's prescribed build/deploy and verify output matches committed reference within tolerance.
 - `scripts/quality/Check-BundleSizeDrift.ps1` — walk every PCF's committed `bundle.js`, record expected size in JSON, warn when fresh build deviates >20%.
+- `scripts/quality/Validate-SkillReferences.ps1` — **NEW per F-15.4**. Light check: every file path + URL + referenced skill in every SKILL.md resolves. <10s.
+- `scripts/quality/Find-SkillReferenceDrift.ps1` — **NEW per F-15.4**. Walks 7 cross-reference surfaces; flags broken refs + orphan skills. <10s.
 - `.github/workflows/procedure-quality.yml` — runs validators on PRs that touch `.claude/`, `scripts/quality/`, or any reference exemplar source. <30s total.
 
 **Parallel groups**:
@@ -231,7 +234,9 @@ Reviewer approves target outline + section dispositions. Sign-off via `Reviewer-
 - 061-validator-patterndrift
 - 062-validator-exemplars
 - 063-validator-bundlesize
-- 064-gha-procedure-quality
+- 064-gha-procedure-quality (orchestrates ALL validators in one workflow)
+- 065-validator-skill-references — **NEW** per F-15.4 (Light check across all skills)
+- 066-validator-crossref-drift — **NEW** per F-15.4 (walks 7 cross-reference surfaces)
 
 ---
 
