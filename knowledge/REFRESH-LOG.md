@@ -13,6 +13,18 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 - Refresh owner: Ralph Schroeder.
 - Curation of topic folders proceeds in Phase 2 of the [`coding-knowledge-base-setup-r1`](../projects/coding-knowledge-base-setup-r1/) project.
 
+## 2026-05-14 — Initial curation (Batch 4: work-iq, azure-ai-search) — Phase 2 complete
+
+Final batch gaps and platform changes:
+
+- **Work IQ MCP — naming clarification.** The directive's framing "Work IQ MCP was rebranded from Agent 365 MCP" is partially correct but more nuanced. After research: **Agent 365 = control plane** (admin/governance), **Work IQ = intelligence layer / MCP catalog**. They're distinct products now. Remote server URL pattern: `https://agent365.svc.cloud.microsoft/agents/tenants/{tenantId}/servers/{serverId}`. 9 Work IQ MCP servers + MCP Management Server documented.
+- **Work IQ Learn coverage richer than feared.** Directive expected sparse public docs; in fact Microsoft Learn has full catalog (Mail = 10 tools, Calendar = 11 tools, Teams = 24 tools) plus `.mcp.json` config examples for Claude Code / GitHub Copilot CLI / VS Code. 5 server reference pages (SharePoint, OneDrive, User, Word, Dataverse) remain unfetched — **next-refresh action item**.
+- **No public agent manifest** wires Work IQ MCP in (yet). No Microsoft Mechanics transcript page is curatable.
+- **Original directive Learn URL `work-iq-mcp` 404'd.** Real page is `agent-365/tooling/servers-overview`.
+- **Azure AI Search C# samples** — preferred over Python per Spaarke .NET 8 stack. `azure-search-openai-demo-csharp` curated; Python sibling referenced only.
+- **No first-party C# sample** for Document Intelligence layout-skill chunking — used Python custom-skill sample (platform-side, language-agnostic).
+- **No SPE-specific AI Search indexer** exists (SharePoint Online indexer is the closest; left as `NOTES.md` TODO).
+
 ## 2026-05-14 — Initial curation (Batch 3: declarative-agents, foundry-iq, sharepoint-embedded)
 
 Additional gaps and platform changes discovered:
