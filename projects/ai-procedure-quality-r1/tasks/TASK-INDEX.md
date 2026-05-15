@@ -11,22 +11,22 @@
 
 | ID | Title | Status | Parallel Group | Dependencies | Spec |
 |---|---|---|---|---|---|
-| 001 | Inventory all 49 skills under `.claude/skills/` | 🔲 | 0-A | none | F-1 |
-| 002 | Inventory CLAUDE.md (1190 lines, section breakdown) | 🔲 | 0-A | none | F-2 |
-| 003 | Inventory all `.github/workflows/*.yml` (status, triggers, action versions) | 🔲 | 0-A | none | F-16 |
-| 004 | Inventory `.claude/settings.json` + `.mcp.json` against published schemas | 🔲 | 0-A | none | F-7 |
-| 005 | Baseline PCF bundle.js sizes for bundle-size guard | 🔲 | 0-B | 001 | F-10 |
-| 006 | Build skill cross-reference map (7 surfaces) | 🔲 | 0-B | 001, 002, 003, 004 | F-15.2 |
+| 001 | Inventory all 49 skills under `.claude/skills/` | ✅ | 0-A | none | F-1 |
+| 002 | Inventory CLAUDE.md (1190 lines, section breakdown) | ✅ | 0-A | none | F-2 |
+| 003 | Inventory all `.github/workflows/*.yml` (status, triggers, action versions) | ✅ | 0-A | none | F-16 |
+| 004 | Inventory `.claude/settings.json` + `.mcp.json` against published schemas | ✅ | 0-A | none | F-7 |
+| 005 | Baseline PCF bundle.js sizes for bundle-size guard | ✅ | 0-B | 001 | F-10 |
+| 006 | Build skill cross-reference map (7 surfaces) | ✅ | 0-B | 001, 002, 003, 004 | F-15.2 |
 
 ### Phase 1 — Additive Infrastructure
 
 | ID | Title | Status | Parallel Group | Dependencies | Spec |
 |---|---|---|---|---|---|
-| 010 | Create `.claude/agents/researcher.md` subagent | 🔲 | 1-A | none | F-5 |
-| 011 | Create `.claude/skills/_template/SKILL.md` canonical scaffold | 🔲 | 1-A | none | F-6 |
-| 012 | Create `.claude/CHANGELOG.md` (forward-only) | 🔲 | 1-A | none | F-11 |
-| 013 | Create `.claude/FAILURE-MODES.md` with 4 inaugural entries | 🔲 | 1-A | none | F-12 |
-| 014 | Establish `.claude/archive/` convention | 🔲 | 1-A | none | NF-1 |
+| 010 | Create `.claude/agents/researcher.md` subagent | ✅ | 1-A | none | F-5 |
+| 011 | Create `.claude/skills/_template/SKILL.md` canonical scaffold | ✅ | 1-A | none | F-6 |
+| 012 | Create `.claude/CHANGELOG.md` (forward-only) | ✅ | 1-A | none | F-11 |
+| 013 | Create `.claude/FAILURE-MODES.md` with 4 inaugural entries | ✅ | 1-A | none | F-12 |
+| 014 | Establish `.claude/archive/` convention | ✅ | 1-A | none | NF-1 |
 
 ### Phase 2a — Skills Audit
 
