@@ -2,9 +2,16 @@
 
 # NOTES — github-mcp
 
-Project-specific commentary on the GitHub MCP server and how Spaarke uses it. The headings below are scaffolded from the directive's "NOTES.md guidance" for this topic. Each section is a placeholder until reviewed by a senior engineer who has actually used GitHub MCP in agent loops against the Spaarke codebase.
+Project-specific commentary on github-mcp. Annotate from real Spaarke project experience; don't fabricate. Section structure:
+
+- **§1. How this fits Spaarke's architecture** — when to reach for this, role/composition with other surfaces, what it replaces or composes with, preview/cost/licensing implications, decision criteria
+- **§2. How we build with it** — manifest/code shape, auth wiring, gotchas, Spaarke divergence from canonical samples, code review checklist
+
+Both sections required for "done"; honest TODOs are fine for what isn't yet known. When annotating, remove the `⚠️ STUB` banner above only after both §1 and §2 have substantive content (or honest TODOs).
 
 ---
+
+## 1. How this fits Spaarke's architecture
 
 ## When to reach for GitHub MCP
 
@@ -13,6 +20,17 @@ _TODO: enumerate the specific situations where invoking a GitHub MCP tool is the
 ## When NOT to reach for GitHub MCP
 
 _TODO: define the negative case — what the agent should read from `knowledge/` (curated samples, NOTES.md files, snapshotted Microsoft Learn pages, ADRs) **before** reaching for live GitHub. Establish the rule that "anything covered by the curated reference tree should be read first." Note the specific tasks where GitHub MCP would be redundant or wasteful._
+
+## Open questions / decisions pending
+
+- _TODO: which MCP host(s) does Spaarke standardize on (Claude Code, VS Code agent mode, both)?_
+- _TODO: is GitHub MCP installed locally per-engineer (Docker image / Go binary) or accessed via the remote server at `api.githubcopilot.com`?_
+- _TODO: how does GitHub MCP usage interact with the existing Dataverse MCP setup in `.mcp.json` — do we want both servers active simultaneously?_
+- _TODO: do we surface GitHub MCP behind a Spaarke-specific skill (e.g. `.claude/skills/github-research/`) with explicit triggering rules, or leave it as a generic tool the agent can reach for at will?_
+
+---
+
+## 2. How we build with it
 
 ## Trusted-org scoping for Spaarke
 
@@ -30,12 +48,7 @@ _TODO: choose PAT or OAuth and document why. Classic PAT (`ghp_`) gets automatic
 
 _TODO: write the cost-discipline rules. GitHub MCP calls are individually cheap but agents will overuse them without explicit triggering rules. Concrete rules to consider: require an `org:` or `repo:` qualifier on every `search_code` / `search_issues` query; cap `perPage` at sensible defaults; prefer `get_file_contents` with a pinned `sha` over `ref:` for reproducibility; never read whole directory trees when a `search_code` query would do. Also note that the model can be tempted to chain `search_code` → `get_file_contents` for every match — the prompt or skill wrapper should discourage that._
 
-## Open questions / decisions pending
-
-- _TODO: which MCP host(s) does Spaarke standardize on (Claude Code, VS Code agent mode, both)?_
-- _TODO: is GitHub MCP installed locally per-engineer (Docker image / Go binary) or accessed via the remote server at `api.githubcopilot.com`?_
-- _TODO: how does GitHub MCP usage interact with the existing Dataverse MCP setup in `.mcp.json` — do we want both servers active simultaneously?_
-- _TODO: do we surface GitHub MCP behind a Spaarke-specific skill (e.g. `.claude/skills/github-research/`) with explicit triggering rules, or leave it as a generic tool the agent can reach for at will?_
+---
 
 ## Cross-references
 

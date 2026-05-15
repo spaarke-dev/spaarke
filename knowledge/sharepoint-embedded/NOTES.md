@@ -4,19 +4,16 @@
 
 Project-specific commentary on how Spaarke applies the curated SPE patterns, what to modify, and common pitfalls.
 
----
+Section structure:
 
-## Container type registration
+- **§1. How this fits Spaarke's architecture** — when to reach for this, role/composition with other surfaces, what it replaces or composes with, preview/cost/licensing implications, decision criteria
+- **§2. How we build with it** — manifest/code shape, auth wiring, gotchas, Spaarke divergence from canonical samples, code review checklist
 
-_TODO: Document the one-time bootstrap — owning-app container type creation in the owning tenant, then `RegisterContainer.ps1`-style registration in each consuming tenant. Capture Spaarke's actual container type IDs (dev / prod) and the `FileStorageContainerType.Manage.All` admin consent flow. Note that **standard container types cannot be deleted today** (only trial), so a botched production registration is permanent — call this out loudly._
-
----
-
-## Permission scopes — application vs. delegated
-
-_TODO: When does Spaarke use **app-only** (`FileStorageContainer.Selected` as application permission) vs. **delegated** (OBO from user)? Map the BFF call sites: container provisioning is app-only (no user context at scale-out time), end-user operations (upload, grant share, etc.) are delegated/OBO. The boilerplate's `containers.ts` lines 22-33 (auto-fallback CCA → OBO) is **not** the Spaarke pattern — we choose explicitly based on operation, not availability._
+Both sections required for "done"; honest TODOs are fine for what isn't yet known. When annotating, remove the `⚠️ STUB` banner above only after both §1 and §2 have substantive content (or honest TODOs).
 
 ---
+
+## 1. How this fits Spaarke's architecture
 
 ## Substrate semantic index — what's indexed and what isn't
 
@@ -36,6 +33,29 @@ _TODO: Reference ADR-005 — Spaarke provisions **one SPE container per client (
 
 ---
 
+## BFF for upload and operations, Foundry SharePoint knowledge source for agent grounding
+
+_TODO: Split of responsibilities:_
+- _**BFF (`Sprk.Bff.Api/Services/SpeFileStore`)** — uploads, downloads, metadata writes, permission grants. App-only or OBO as appropriate. See `knowledge/azure-ai-search/` for the parallel AI Search ingestion path._
+- _**Foundry SharePoint knowledge source (preview)** — agent-side grounding for declarative agents and Foundry Agent Service workflows. Configured at the agent level pointing at the SPE container type (see `docs/learn-knowledge-source.md`). Spaarke is not yet wired to this path; AI Search remains primary for now._
+- _Document the decision criteria for "when to add Foundry SPE knowledge source vs. continue with AI Search": Foundry SPE wins on managed-substrate-index reuse (no separate ingestion); AI Search wins on chunking control, hybrid + semantic reranking, and permission-filter granularity._
+
+---
+
+## 2. How we build with it
+
+## Container type registration
+
+_TODO: Document the one-time bootstrap — owning-app container type creation in the owning tenant, then `RegisterContainer.ps1`-style registration in each consuming tenant. Capture Spaarke's actual container type IDs (dev / prod) and the `FileStorageContainerType.Manage.All` admin consent flow. Note that **standard container types cannot be deleted today** (only trial), so a botched production registration is permanent — call this out loudly._
+
+---
+
+## Permission scopes — application vs. delegated
+
+_TODO: When does Spaarke use **app-only** (`FileStorageContainer.Selected` as application permission) vs. **delegated** (OBO from user)? Map the BFF call sites: container provisioning is app-only (no user context at scale-out time), end-user operations (upload, grant share, etc.) are delegated/OBO. The boilerplate's `containers.ts` lines 22-33 (auto-fallback CCA → OBO) is **not** the Spaarke pattern — we choose explicitly based on operation, not availability._
+
+---
+
 ## webUrl-based opens and the "Document opens in Word with Copilot context" pattern
 
 _TODO: Spaarke opens documents in Office (Word / Excel / PowerPoint Web/Desktop) via the container drive item's `webUrl` — **not** by downloading and re-uploading. Capture:_
@@ -43,15 +63,6 @@ _TODO: Spaarke opens documents in Office (Word / Excel / PowerPoint Web/Desktop)
 - _Why this matters for Copilot: when the document opens via webUrl in Office Web, the user's Copilot context picks up the SPE-stored file as if it were a regular SharePoint document — same Copilot ribbon, same grounding._
 - _Contrast with download-and-open: loses Copilot context, breaks co-authoring, doubles storage._
 - _The Spaarke document-record-to-document-open UX: clicking a Dataverse document record triggers `Xrm.Navigation.openUrl(webUrl)` (or a Code Page that does the same). Confirm exact pattern in `src/client/code-pages/SpeDocumentViewer/`._
-
----
-
-## BFF for upload and operations, Foundry SharePoint knowledge source for agent grounding
-
-_TODO: Split of responsibilities:_
-- _**BFF (`Sprk.Bff.Api/Services/SpeFileStore`)** — uploads, downloads, metadata writes, permission grants. App-only or OBO as appropriate. See `knowledge/azure-ai-search/` for the parallel AI Search ingestion path._
-- _**Foundry SharePoint knowledge source (preview)** — agent-side grounding for declarative agents and Foundry Agent Service workflows. Configured at the agent level pointing at the SPE container type (see `docs/learn-knowledge-source.md`). Spaarke is not yet wired to this path; AI Search remains primary for now._
-- _Document the decision criteria for "when to add Foundry SPE knowledge source vs. continue with AI Search": Foundry SPE wins on managed-substrate-index reuse (no separate ingestion); AI Search wins on chunking control, hybrid + semantic reranking, and permission-filter granularity._
 
 ---
 

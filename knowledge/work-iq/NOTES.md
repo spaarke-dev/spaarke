@@ -1,8 +1,19 @@
 > ⚠️ STUB — senior engineer review pending
 
+# NOTES — work-iq
+
+Project-specific commentary on work-iq. Annotate from real Spaarke project experience; don't fabricate. Section structure:
+
+- **§1. How this fits Spaarke's architecture** — when to reach for this, role/composition with other surfaces, what it replaces or composes with, preview/cost/licensing implications, decision criteria
+- **§2. How we build with it** — manifest/code shape, auth wiring, gotchas, Spaarke divergence from canonical samples, code review checklist
+
+Both sections required for "done"; honest TODOs are fine for what isn't yet known. When annotating, remove the `⚠️ STUB` banner above only after both §1 and §2 have substantive content (or honest TODOs).
+
 Curation source-of-truth: `SOURCE.md` + `docs/`. This file is reserved for project-specific commentary that Spaarke engineers add through actual implementation experience. Do **not** fabricate insight. Each section below has a `_TODO_` hint to keep stubs honest.
 
 ---
+
+## 1. How this fits Spaarke's architecture
 
 ## What Work IQ is (and isn't)
 
@@ -95,15 +106,15 @@ _TODO: Sequence rules. Which surface does the agent check first? Cost considerat
 
 _TODO: Citation aggregation. Each surface returns citations in different formats. Document the unification pattern._
 
-## Open questions
+## Open questions (architectural)
 
 _TODO: Add as they come up during implementation. Initial seeds:_
 
 - Can a Foundry agent simultaneously consume both Work IQ MCP servers and a custom Spaarke MCP server? Docs say yes; verify in practice.
-- What's the OBO token lifetime when calling Work IQ MCP via Spaarke's BFF? Does the BFF need a refresh strategy, or does each MCP turn handle its own?
-- Do all Work IQ MCP servers support agent-mode auth (not just delegated)? Some servers may be delegated-only.
-- What happens when the user's M365 Copilot license is removed mid-conversation? Graceful degradation pattern?
-- Tool call observability — what's the actual structure of the Defender Advanced Hunting log entries for Work IQ MCP calls? Useful for our own audit trail?
+
+---
+
+## 2. How we build with it
 
 ## Pitfalls to watch for
 
@@ -112,3 +123,12 @@ _TODO: Populate as we hit them._
 - **`mcp_M365Copilot` is a heavy hammer.** The catalog directive instructs the model to invoke it as a fallback whenever no workload-specific tool fits. This can dramatically increase Copilot consumption. The Spaarke agent's tool selection prompt should prefer workload-specific tools (Mail, Calendar, Teams) and only fall back to the omnibus tool when no workload tool can answer.
 - **MCP server v1 → Work IQ v2 migration is implicit, not automatic.** New code should target `mcp_*` Work IQ servers; do not start on old "Microsoft Teams MCP server" etc.
 - **Preview surface = breaking changes.** Snapshot rules of behavior from the docs **with dates** in case the docs change.
+
+## Open questions (implementation)
+
+_TODO: Add as they come up during implementation. Initial seeds:_
+
+- What's the OBO token lifetime when calling Work IQ MCP via Spaarke's BFF? Does the BFF need a refresh strategy, or does each MCP turn handle its own?
+- Do all Work IQ MCP servers support agent-mode auth (not just delegated)? Some servers may be delegated-only.
+- What happens when the user's M365 Copilot license is removed mid-conversation? Graceful degradation pattern?
+- Tool call observability — what's the actual structure of the Defender Advanced Hunting log entries for Work IQ MCP calls? Useful for our own audit trail?

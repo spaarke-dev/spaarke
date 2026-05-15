@@ -16,22 +16,47 @@ Phase 4 is where that judgment gets externalized.
 
 ---
 
+## Two-section structure — **§1 architecture / §2 build**
+
+Each `knowledge/<topic>/NOTES.md` is now organized into two top-level sections (restructured 2026-05-14):
+
+- **§1. How this fits Spaarke's architecture** — when to reach for this surface, role/composition with other surfaces, what it replaces or composes with, preview/cost/licensing implications, decision criteria. This is the *architectural pass* — answers "should I use this here?"
+- **§2. How we build with it** — manifest/code shape, auth wiring, gotchas, Spaarke divergence from canonical samples, code review checklist. This is the *implementation pass* — answers "how do I make this work?"
+
+The split mirrors how engineers (and the agent) actually think about a platform piece: "does this fit my problem?" precedes "how do I code it?" Aligning the doc to that flow makes annotation easier and lets the agent skip the §2 mechanics when it's doing architectural reasoning (or vice versa).
+
+**Lopsided sections are OK**:
+- `work-iq` is heavily §1 — it's a remote service we call, not something we build. §2 is mostly operational pitfalls.
+- `agent-framework` and `azure-ai-search` are heavily §2 — they're libraries we use directly. §1 is short (when to reach for it vs siblings).
+- Most topics are balanced.
+
 ## How to annotate (per topic)
 
 Each `knowledge/<topic>/NOTES.md` currently has:
-- A required first-line banner: `> ⚠️ STUB — senior engineer review pending`
-- Headings drawn from the directive's "NOTES.md guidance" for that topic
-- `_TODO: <hint>_` placeholders under each heading
+- First-line banner: `> ⚠️ STUB — senior engineer review pending`
+- A short preamble explaining the §1/§2 structure
+- Headings under §1 and §2 with `_TODO: <hint>_` placeholders (some richer than others — many already contain substantive scoping questions, not just blank placeholders)
 
-**For each heading**:
+**For each subsection under §1 and §2**:
 
-1. Replace the TODO placeholder with substantive content. Lead with **what this pattern teaches in practice** — not what it is (the samples show that), but what an engineer actually needs to know.
+1. Replace the TODO with substantive content. Lead with **what this pattern teaches in practice** — not what it is (the samples show that), but what an engineer actually needs to know.
 2. Add **where Spaarke's existing code follows or modifies the pattern** — cite specific files (e.g., `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs`). The agent will Read those references.
 3. Add **specific gotchas, preview limitations, or platform constraints** you've hit. The samples don't show production constraints.
 4. Add **cross-references to ADRs and Spaarke decisions** that intersect — the agent already has ADR loading via `adr-aware`, but explicit links here help.
-5. When done, **remove the `⚠️ STUB` banner** from line 1. That's the signal Phase 4 is complete for that topic.
+5. When **both** §1 and §2 have substantive content (or honest TODOs covering what isn't yet known), **remove the `⚠️ STUB` banner** from line 1. That's the signal Phase 4 is complete for that topic.
 
-**Honest stub policy stays in force**: if you don't have substantive content for a section, leave it as a TODO marked clearly. A NOTES.md mixing real content with honest TODOs is fine. A NOTES.md pretending to have insight it doesn't is worse than the stub.
+## Quality bar (per topic, sharpened)
+
+A topic's `NOTES.md` is "done" when:
+
+- [ ] **§1 answers**: When does Spaarke use this? What does it compose with? What does it replace? What are the cost / preview / licensing implications?
+- [ ] **§2 answers**: What's the code/manifest shape? What auth pattern? Where does Spaarke diverge from canonical samples? What are the production gotchas?
+- [ ] Both sections cite **at least 2 specific Spaarke files** between them (e.g., `src/...`, `.claude/adr/...`)
+- [ ] Both sections cite **at least 1 Spaarke ADR** between them
+- [ ] **No fabricated content** — if you don't know, mark TODO with a scoped question (the existing scaffolding has many of these already; they're a good pattern)
+- [ ] **STUB banner removed** from line 1
+
+**Honest stub policy stays in force**: a NOTES.md mixing real content with honest TODOs is fine. A NOTES.md pretending to have insight it doesn't is worse than the stub. Pre-existing TODO scoping (the curator's well-formed questions) is high-value — leave it in place and just fill it in.
 
 ---
 
@@ -54,17 +79,6 @@ Front-load the topics that affect the most ongoing work. Suggested sequence:
 | 11 | `work-iq` | Preview surface; annotation can wait until naming/positioning stabilizes (Agent 365 vs Work IQ confusion in the wild) |
 
 ---
-
-## Quality bar (per topic)
-
-When a topic's `NOTES.md` is "done" (banner removed):
-
-- [ ] Every section heading has substantive content OR is honestly marked TODO
-- [ ] At least 2 cross-references to specific Spaarke files (e.g., `src/...`)
-- [ ] At least 1 cross-reference to a Spaarke ADR
-- [ ] At least 1 production gotcha or constraint not visible from canonical samples
-- [ ] No fabricated content (if you don't know, mark TODO)
-- [ ] Banner line 1 removed
 
 A "good" `NOTES.md` is ~3–8 KB of dense, opinionated text. Don't pad — agents read better than humans do, but density still matters.
 

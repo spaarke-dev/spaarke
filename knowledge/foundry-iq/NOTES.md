@@ -2,6 +2,13 @@
 
 # NOTES — foundry-iq
 
+Project-specific commentary on foundry-iq. Annotate from real Spaarke project experience; don't fabricate. Section structure:
+
+- **§1. How this fits Spaarke's architecture** — when to reach for this, role/composition with other surfaces, what it replaces or composes with, preview/cost/licensing implications, decision criteria
+- **§2. How we build with it** — manifest/code shape, auth wiring, gotchas, Spaarke divergence from canonical samples, code review checklist
+
+Both sections required for "done"; honest TODOs are fine for what isn't yet known. When annotating, remove the `⚠️ STUB` banner above only after both §1 and §2 have substantive content (or honest TODOs).
+
 This file is a placeholder for senior-engineer annotations on the curated Foundry IQ
 samples. The structure below mirrors the **`NOTES.md` guidance** in
 `projects/coding-knowledge-base-setup-r1/SPAARKE-KNOWLEDGE-BASE-SETUP.md` (Phase 2.6). Each
@@ -12,26 +19,11 @@ project work. Honest stub entries are more valuable than fabricated insight.
 
 ---
 
+## 1. How this fits Spaarke's architecture
+
 ## Indexed sources vs. remote sources — currency vs. control trade-off
 
 _TODO: Explain when Spaarke should choose **indexed** knowledge sources (Azure Blob, AI Search index, OneLake) vs. **remote** sources (Bing web, remote SharePoint via Copilot Retrieval API). Hint: indexed sources give chunking control, vector embeddings, OCR, custom scoring profiles, and low latency, but freshness lags the sync interval. Remote sources give real-time content and skip an indexing layer but lose chunking control, OCR, vector search, and add per-query latency. Reference `samples/kb-with-sharepoint-remote/agentic-retrieval-foundry-iq.md` for the SharePoint-specific decision matrix._
-
-## Hybrid retrieval, semantic reranking, permission filtering
-
-_TODO: Document Spaarke's settings for the three retrieval primitives Foundry IQ exposes:_
-
-- _**Hybrid retrieval**: keyword + vector queries — what's the default in the curated samples, when to override._
-- _**Semantic reranking**: L2 reranking after parallel subquery execution — when is reranking essential vs. when does it add latency without proportional relevance gain._
-- _**Permission filtering**: ACL synchronization for indexed sources + identity propagation via `x-ms-query-source-authorization` for remote SharePoint. How does Spaarke wire its Entra identity through. Cross-reference the three-layer enforcement model in `samples/kb-with-sharepoint-remote/agentic-retrieval-foundry-iq.md` (SharePoint → Purview/RMS intersection → query-time filter)._
-
-## Citation handling in retrieval responses
-
-_TODO: Annotate the citation-handling pattern in `samples/kb-over-ai-search/kb_query_service.py`:_
-
-- _What does the structured response (`answers` / `citations` / `timing` / `activity`) look like for each KS type (`searchIndex`, `web`, `azureBlob`)._
-- _How does Spaarke surface citations to the user — full source URLs, relevance scores, click-through behavior._
-- _The sample includes a `_remove_web_citation_markers` step to strip `[ref_id:N]` markers for web references. Is this the right default for Spaarke's UI, or do we keep web citations and render them differently from indexed-source citations._
-- _Reranker score thresholds — when do we filter low-confidence citations out of the response shown to the user._
 
 ## When to use Foundry IQ vs. direct AI Search
 
@@ -55,6 +47,25 @@ _TODO: Add the routing logic — how does the Spaarke agent decide which surface
 
 ---
 
+## 2. How we build with it
+
+## Hybrid retrieval, semantic reranking, permission filtering
+
+_TODO: Document Spaarke's settings for the three retrieval primitives Foundry IQ exposes:_
+
+- _**Hybrid retrieval**: keyword + vector queries — what's the default in the curated samples, when to override._
+- _**Semantic reranking**: L2 reranking after parallel subquery execution — when is reranking essential vs. when does it add latency without proportional relevance gain._
+- _**Permission filtering**: ACL synchronization for indexed sources + identity propagation via `x-ms-query-source-authorization` for remote SharePoint. How does Spaarke wire its Entra identity through. Cross-reference the three-layer enforcement model in `samples/kb-with-sharepoint-remote/agentic-retrieval-foundry-iq.md` (SharePoint → Purview/RMS intersection → query-time filter)._
+
+## Citation handling in retrieval responses
+
+_TODO: Annotate the citation-handling pattern in `samples/kb-over-ai-search/kb_query_service.py`:_
+
+- _What does the structured response (`answers` / `citations` / `timing` / `activity`) look like for each KS type (`searchIndex`, `web`, `azureBlob`)._
+- _How does Spaarke surface citations to the user — full source URLs, relevance scores, click-through behavior._
+- _The sample includes a `_remove_web_citation_markers` step to strip `[ref_id:N]` markers for web references. Is this the right default for Spaarke's UI, or do we keep web citations and render them differently from indexed-source citations._
+- _Reranker score thresholds — when do we filter low-confidence citations out of the response shown to the user._
+
 ## Common pitfalls
 
 _TODO: Senior engineer to fill in real-world pitfalls hit during early adoption._
@@ -65,6 +76,8 @@ Candidate topics worth checking against actual usage:
 - _Region availability — agentic retrieval requires specific regions (see `search-region-support` in Microsoft Learn)._
 - _Tenant policy blocking key-based access on storage accounts (called out in `samples/kb-over-blob-and-web/README.md`)._
 - _SDK package: `azure-search-documents==11.7.0b2` for preview features. The iq-series samples pin this version._
+
+---
 
 ## Cross-references
 

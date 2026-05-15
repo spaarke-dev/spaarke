@@ -2,9 +2,28 @@
 
 # NOTES — azure-ai-search
 
-Project-specific guidance for using these samples in Spaarke. Curator (AI) produced this stub from the directive in `SPAARKE-KNOWLEDGE-BASE-SETUP.md` Phase 2.10. Each section needs senior-engineer annotation against actual Spaarke code (`Sprk.Bff.Api/Services/Ai/*`, RAG-ARCHITECTURE.md, RAG-CONFIGURATION.md, ADR-009, ADR-013) before it can be trusted by skills.
+Project-specific commentary on azure-ai-search. Annotate from real Spaarke project experience; don't fabricate. Section structure:
+
+- **§1. How this fits Spaarke's architecture** — when to reach for this, role/composition with other surfaces, what it replaces or composes with, preview/cost/licensing implications, decision criteria
+- **§2. How we build with it** — manifest/code shape, auth wiring, gotchas, Spaarke divergence from canonical samples, code review checklist
+
+Both sections required for "done"; honest TODOs are fine for what isn't yet known. When annotating, remove the `⚠️ STUB` banner above only after both §1 and §2 have substantive content (or honest TODOs).
 
 ---
+
+## 1. How this fits Spaarke's architecture
+
+## When to use AI Search directly vs. through Foundry IQ knowledge base
+
+_TODO: Decision rubric. Direct AI Search SDK from the BFF when: we need precise control over retrieval, custom filters from claims, deterministic latency, Redis caching of results (ADR-009). Foundry IQ knowledge source when: we want managed multi-source retrieval, agentic retrieval semantics built into Foundry Agent Service workflows, less code to maintain. Note: Foundry IQ can itself parent an AI Search index as an *indexed knowledge source* — so these aren't always either/or. Reference `knowledge/foundry-iq/NOTES.md` once that's annotated._
+
+## Parallel-ingestion pattern (file -> SPE + AI Search)
+
+_TODO: Document the canonical Spaarke upload path. On file upload: (1) BFF writes the file to SharePoint Embedded for storage and SPE-side permissions, (2) BFF separately enqueues an indexing job that streams the file through Document Intelligence (layout) -> chunking -> Azure OpenAI embedding -> AI Search index. Two indexes co-exist deliberately: SPE holds the canonical bytes and ACL; AI Search holds the retrieval-optimized projection. Note the gotchas: ACL drift between SPE and AI Search (mitigate by re-projecting permission fields when SPE permissions change), and the deletion contract (when SPE deletes, AI Search must also delete or filter out). Reference the actual BFF service that owns this dual write._
+
+---
+
+## 2. How we build with it
 
 ## Spaarke's AI Search index schema and ingestion pipeline
 
@@ -26,14 +45,6 @@ _TODO: This is the critical decision. Document the trade-offs:_
 - _Index-time partitioning by matter/tenant — multiple indexes or filter by `matter` field; coarser, but cheaper at query time and simpler to reason about for tenancy._
 - _Document which Spaarke uses (likely both: tenant/matter at index time, fine-grained ACL at query time) and reference the actual BFF code path that builds the filter._
 - _Note: filter pushdown happens after vector retrieval by default — for high-cardinality ACLs consider `vectorFilterMode=preFilter` (see Azure AI Search docs)._
-
-## When to use AI Search directly vs. through Foundry IQ knowledge base
-
-_TODO: Decision rubric. Direct AI Search SDK from the BFF when: we need precise control over retrieval, custom filters from claims, deterministic latency, Redis caching of results (ADR-009). Foundry IQ knowledge source when: we want managed multi-source retrieval, agentic retrieval semantics built into Foundry Agent Service workflows, less code to maintain. Note: Foundry IQ can itself parent an AI Search index as an *indexed knowledge source* — so these aren't always either/or. Reference `knowledge/foundry-iq/NOTES.md` once that's annotated._
-
-## Parallel-ingestion pattern (file -> SPE + AI Search)
-
-_TODO: Document the canonical Spaarke upload path. On file upload: (1) BFF writes the file to SharePoint Embedded for storage and SPE-side permissions, (2) BFF separately enqueues an indexing job that streams the file through Document Intelligence (layout) -> chunking -> Azure OpenAI embedding -> AI Search index. Two indexes co-exist deliberately: SPE holds the canonical bytes and ACL; AI Search holds the retrieval-optimized projection. Note the gotchas: ACL drift between SPE and AI Search (mitigate by re-projecting permission fields when SPE permissions change), and the deletion contract (when SPE deletes, AI Search must also delete or filter out). Reference the actual BFF service that owns this dual write._
 
 ## ADR-009 cache layer over AI Search results
 
