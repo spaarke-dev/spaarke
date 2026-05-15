@@ -32,15 +32,15 @@
 
 | ID | Title | Status | Parallel Group | Dependencies | Spec |
 |---|---|---|---|---|---|
-| 020 | Audit skills batch 1 (skills 1–6 alphabetically) | 🔲 | 2a-W1 | 001, 011 | F-1 |
-| 021 | Audit skills batch 2 (skills 7–12) | 🔲 | 2a-W2 | 001, 011 | F-1 |
-| 022 | Audit skills batch 3 (skills 13–18) | 🔲 | 2a-W3 | 001, 011 | F-1 |
-| 023 | Audit skills batch 4 (skills 19–24) | 🔲 | 2a-W4 | 001, 011 | F-1 |
-| 024 | Audit skills batch 5 (skills 25–30) | 🔲 | 2a-W5 | 001, 011 | F-1 |
-| 025 | Audit skills batch 6 (skills 31–36) | 🔲 | 2a-W6 | 001, 011 | F-1 |
-| 026 | Audit skills batch 7 (skills 37–42) | 🔲 | 2a-W7 | 001, 011 | F-1 |
-| 027 | Audit skills batch 8 (skills 43–49) | 🔲 | 2a-W8 | 001, 011 | F-1 |
-| 028 | Consolidate batch findings into `.claude/AUDIT-FINDINGS-SKILLS.md` | 🔲 | serial | 020–027 | F-1 |
+| 020 | Audit skills batch 1 (skills 1–6 alphabetically) | ✅ | 2a-W1 | 001, 011 | F-1 |
+| 021 | Audit skills batch 2 (skills 7–12) | ✅ | 2a-W2 | 001, 011 | F-1 |
+| 022 | Audit skills batch 3 (skills 13–18) | ✅ | 2a-W3 | 001, 011 | F-1 |
+| 023 | Audit skills batch 4 (skills 19–24) | ✅ | 2a-W4 | 001, 011 | F-1 |
+| 024 | Audit skills batch 5 (skills 25–30) | ✅ | 2a-W5 | 001, 011 | F-1 |
+| 025 | Audit skills batch 6 (skills 31–36) | ✅ | 2a-W6 | 001, 011 | F-1 |
+| 026 | Audit skills batch 7 (skills 37–42) | ✅ | 2a-W7 | 001, 011 | F-1 |
+| 027 | Audit skills batch 8 (skills 43–44) | ✅ | 2a-W8 | 001, 011 | F-1 |
+| 028 | Consolidate batch findings into `.claude/AUDIT-FINDINGS-SKILLS.md` | ✅ | serial | 020–027 | F-1 |
 
 **🚪 Human Gate 1** — Reviewer signs off on `.claude/AUDIT-FINDINGS-SKILLS.md` before Phase 2b.
 
