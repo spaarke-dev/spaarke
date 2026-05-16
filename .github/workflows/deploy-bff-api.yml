@@ -89,7 +89,7 @@ jobs:
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -o ./publish --no-build
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: bff-api-build
           path: ./publish
@@ -132,7 +132,7 @@ jobs:
             --results-directory ./TestResults
 
       - name: Upload test results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results
