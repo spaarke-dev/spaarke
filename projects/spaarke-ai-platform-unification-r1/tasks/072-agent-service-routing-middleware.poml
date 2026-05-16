@@ -1,0 +1,81 @@
+<task id="AIPU-072" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>AgentServiceRoutingMiddleware — intent-based routing between direct pipeline and Agent Service</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>7</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, api</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-060</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement AgentServiceRoutingMiddleware — a lightweight classifier that sits in the chat pipeline and routes each incoming chat request to either the existing direct AI pipeline or the new Agent Service based on intent signals in the user message. The routing decision MUST complete in under 50ms (NFR-03) so it uses keyword/pattern matching and a scoring heuristic, NOT an LLM call. The middleware must be transparent to consumers via IChatClient (ADR-013) — callers do not know which backend was selected. Add an OpenTelemetry span recording the routing decision and which backend was chosen.
+  </prompt>
+
+  <role>Senior .NET backend developer with middleware pipeline and OpenTelemetry experience</role>
+
+  <goal>
+    AgentServiceRoutingMiddleware placed in the chat pipeline that routes to Agent Service when intent signals match (code analysis, chart generation, legal research, complex multi-step queries) and falls back to direct pipeline otherwise — routing decision always completes in under 50ms, decision recorded in OTEL span — verified by dotnet build.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentServiceRoutingMiddleware.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    <file>docs/architecture/chat-architecture.md</file>
+    <file>docs/architecture/AI-ARCHITECTURE.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="NFR-03">Routing decision MUST complete in under 50ms; this is a hard constraint — MUST use keyword/pattern matching and lightweight scoring, NOT an LLM call, NOT a network call</constraint>
+    <constraint source="ADR-013">Transparent to consumer via IChatClient abstraction; the middleware wraps both backends behind the same interface — callers never see which backend handled the request</constraint>
+    <constraint source="ADR-019">Use ProblemDetails for any routing errors (e.g., Agent Service disabled and no fallback configured)</constraint>
+    <constraint source="ADR-018">If Agent Service is disabled (kill switch), routing must silently fall back to direct pipeline — never surface 503 to user due to routing alone</constraint>
+    <constraint source="ADR-015">Routing decision logging: log only the decision outcome and matched signals, never the message content</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    </files>
+    <patterns>
+      <pattern name="CompoundIntentDetector classifier" location="docs/architecture/chat-architecture.md">
+        Read CompoundIntentDetector in chat-architecture.md for the canonical keyword/pattern matching + scoring approach used in the existing pipeline — replicate this pattern for routing
+      </pattern>
+      <pattern name="IChatClient middleware chain" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/">
+        Read existing chat middleware to understand how DelegatingChatClient or equivalent middleware pattern is implemented; routing middleware must fit into the same chain
+      </pattern>
+      <pattern name="OpenTelemetry spans" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Existing AI services create Activity spans via ActivitySource; replicate for routing decision
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read docs/architecture/chat-architecture.md in full to understand the existing pipeline structure, CompoundIntentDetector pattern, and where middleware fits</step>
+    <step>Read docs/architecture/AI-ARCHITECTURE.md for existing OTEL span patterns and ActivitySource usage</step>
+    <step>Read existing chat middleware files in Services/Ai/Chat/ to understand the IChatClient middleware chain structure</step>
+    <step>Define the routing signal taxonomy as a private static class RoutingSignals with string[] arrays: CodeInterpreterSignals (keywords like "analyze data", "generate chart", "run code", "calculate", "plot"), BingGroundingSignals ("research", "find cases", "legal precedent", "lookup", "case law"), ComplexQuerySignals ("step by step", "multiple factors", "comprehensive analysis"); define score thresholds</step>
+    <step>Implement ClassifyIntent(string message): iterate signals, accumulate scores, return RoutingDecision enum (DirectPipeline, AgentService) with matched signal names for logging</step>
+    <step>Create AgentServiceRoutingMiddleware.cs implementing the chat pipeline middleware pattern (DelegatingChatClient or equivalent): constructor takes AgentServiceClient, IChatClient (direct pipeline), AgentServiceOptions (IOptions&lt;T&gt;), ILogger, ActivitySource</step>
+    <step>In the middleware CompleteAsync/ChatAsync override: start OTEL span "ai.routing.decision"; call ClassifyIntent (synchronous, no awaits); if AgentService and Enabled → route to AgentServiceClient; if AgentService but not Enabled → fall back to direct pipeline silently; if DirectPipeline → pass through to next client; set OTEL span tags: routing.decision, routing.matched_signals (count only), routing.backend</step>
+    <step>Add a Stopwatch in ClassifyIntent to assert routing decision completes in under 5ms average (log warning if over 10ms as a canary, never over 50ms)</step>
+    <step>Register AgentServiceRoutingMiddleware in DI and wire it into the chat pipeline (update AiModule.cs or the chat pipeline builder — additive only)</step>
+    <step>Run dotnet build and confirm zero errors</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>AgentServiceRoutingMiddleware.cs exists and implements the chat pipeline middleware pattern</criterion>
+    <criterion>ClassifyIntent is synchronous keyword/pattern matching with no network calls or LLM invocations</criterion>
+    <criterion>Code Interpreter signals, Bing Grounding signals, and complex query signals are each defined as distinct signal arrays with score thresholds</criterion>
+    <criterion>When Agent Service is disabled (kill switch), routing silently falls back to direct pipeline — no error surfaced to user</criterion>
+    <criterion>OpenTelemetry span created per request with routing.decision, routing.backend tags; no message content in span attributes</criterion>
+    <criterion>Stopwatch canary logs warning if ClassifyIntent exceeds 10ms</criterion>
+    <criterion>Middleware registered in DI and wired into chat pipeline (additive — no existing pipeline code removed)</criterion>
+    <criterion>dotnet build passes with zero errors</criterion>
+  </acceptance-criteria>
+</task>

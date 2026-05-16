@@ -1,0 +1,78 @@
+<task id="AIPU-071" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>LegalResearchTools — research-legal and lookup-case via Foundry Bing Grounding</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>7</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, api, ai-foundry</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-060</dependencies>
+  </metadata>
+
+  <prompt>
+    Create LegalResearchTools wrapping the Azure AI Foundry Bing Grounding capability, exposing two AIFunction tools: research-legal (broad legal topic research) and lookup-case (specific case citation lookup). Follow the WebSearchTools.cs pattern. ADR-015 is CRITICAL here — legal queries may contain client names, matter details, or other PII; the implementation must sanitize queries before sending to Bing and document how that sanitization works. BingGroundingOptions holds the connection name, kill switch, and concurrency settings.
+  </prompt>
+
+  <role>Senior .NET backend developer with legal-domain AI tooling experience and strong data-governance awareness</role>
+
+  <goal>
+    LegalResearchTools with research-legal and lookup-case methods registered via AIFunctionFactory.Create, with BingGroundingOptions kill switch, citation extraction from Bing results registered in CitationContext, and inline data-governance documentation explaining query sanitization — verified by dotnet build.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/LegalResearchTools.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/BingGroundingOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-015">CRITICAL — data governance: legal queries may contain PII (client names, matter references, case numbers); MUST strip or replace identifiers before sending to Bing; implement QuerySanitizer helper that removes patterns matching known PII formats; add inline XML doc comments explaining sanitization logic</constraint>
+    <constraint source="ADR-015">Never log query content; log only query length, result count, and timing</constraint>
+    <constraint source="ADR-016">Rate limiting: SemaphoreSlim with MaxConcurrency from BingGroundingOptions</constraint>
+    <constraint source="ADR-018">Kill switch: BingGroundingOptions.Enabled; return user-readable string when disabled</constraint>
+    <constraint source="project">Citation extraction: parse Bing Grounding response for URL and title; register each as CitationContext entry with Source="BingGrounding"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/tool-registration.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical AI tool pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs">
+        Read WebSearchTools.cs in full: [Description] attributes, SemaphoreSlim, AIFunctionFactory.Create, CitationContext — replicate this structure exactly for LegalResearchTools
+      </pattern>
+      <pattern name="Citation registration" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs">
+        How CitationContext is injected, populated with URL+title, and keyed for deduplication
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read WebSearchTools.cs in full to understand citation registration and the exact AIFunctionFactory pattern to replicate</step>
+    <step>Read AgentServiceClient.cs to understand how Bing Grounding is invoked through the Agents SDK run and how grounding results surface in the run response</step>
+    <step>Create BingGroundingOptions.cs in Services/Ai/Foundry/ with: Enabled (bool), BingConnectionName (string, required), MaxConcurrency (int, default 3), MaxResultsPerQuery (int, default 5)</step>
+    <step>Create LegalResearchTools.cs in Services/Ai/Chat/Tools/ with constructor taking AgentServiceClient, BingGroundingOptions (IOptions&lt;T&gt;), ILogger, CitationContextAccessor, and private SemaphoreSlim</step>
+    <step>Implement private QuerySanitizer.Sanitize(string query): use regex to detect and replace common PII patterns (e.g., sequences matching "Client: [Name]", matter reference numbers, email addresses); add XML doc comment explaining what is stripped and why</step>
+    <step>Implement ResearchLegalAsync([Description("Legal topic or question to research; do not include client names or matter references")] string topic, CancellationToken ct): sanitize query, check Enabled, acquire semaphore, call AgentServiceClient to run agent with Bing Grounding, parse grounding annotations, register citations, return formatted research summary</step>
+    <step>Implement LookupCaseAsync([Description("Case citation in standard format, e.g., 123 F.3d 456 (9th Cir. 2020)")] string citation, CancellationToken ct): sanitize citation string, check Enabled, acquire semaphore, invoke grounding, return case summary with source URL</step>
+    <step>Add AIFunctionFactory.Create registrations following WebSearchTools.cs pattern</step>
+    <step>Add a code comment block at the top of LegalResearchTools.cs documenting data governance decisions: what is sanitized, what is logged, and why Bing Grounding was chosen over direct web search</step>
+    <step>Run dotnet build and confirm zero errors</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>BingGroundingOptions.cs exists with Enabled, BingConnectionName, MaxConcurrency, MaxResultsPerQuery</criterion>
+    <criterion>LegalResearchTools.cs implements ResearchLegalAsync and LookupCaseAsync with [Description] attributes on all parameters</criterion>
+    <criterion>QuerySanitizer (inline or separate class) strips PII patterns before any query leaves the BFF; sanitization logic documented in XML comments</criterion>
+    <criterion>No query content is logged — only query length, result count, and timing</criterion>
+    <criterion>Enabled kill switch returns user-readable string when disabled</criterion>
+    <criterion>Citations extracted from Bing Grounding response and registered in CitationContext with Source="BingGrounding"</criterion>
+    <criterion>Data governance comment block present at top of LegalResearchTools.cs</criterion>
+    <criterion>dotnet build passes with zero errors</criterion>
+  </acceptance-criteria>
+</task>

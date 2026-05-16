@@ -1,0 +1,78 @@
+<task id="AIPU-061" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>AgentServiceNodeExecutor — INodeExecutor implementation for ActionType 60</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>6</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, api, ai-foundry</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-056</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement AgentServiceNodeExecutor, which adapts the Agent Service into the existing playbook node execution framework by implementing INodeExecutor for the new ActionType.AgentService (value 60). This follows the exact same pattern as existing executors such as AiAnalysisNodeExecutor — implement SupportedActionTypes, ExecuteAsync, and Validate; register as a Singleton; and let NodeExecutorRegistry auto-discover it. Also extend the ActionType enum to add AgentService = 60.
+  </prompt>
+
+  <role>Senior .NET backend developer familiar with the Spaarke playbook execution framework</role>
+
+  <goal>
+    AgentServiceNodeExecutor registered as INodeExecutor Singleton, ActionType enum extended with AgentService = 60, and the executor correctly delegates to AgentServiceClient — verified by dotnet build and by NodeExecutorRegistry discovering the executor at startup.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AgentServiceNodeExecutor.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    <file>docs/architecture/playbook-architecture.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-013">Additive only — do NOT modify AiToolService or NodeExecutorRegistry; the new executor must be auto-discovered via the existing INodeExecutor registration scan</constraint>
+    <constraint source="project">ActionType enum value for AgentService MUST be 60 to match playbook JSON schema; adding a new enum value is a non-breaking additive change</constraint>
+    <constraint source="INodeExecutor interface">Must implement: IReadOnlyList&lt;ActionType&gt; SupportedActionTypes { get; }, Task&lt;NodeExecutionResult&gt; ExecuteAsync(NodeExecutionContext, CancellationToken), ValidationResult Validate(PlaybookNode)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/playbook-node-executor.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    </files>
+    <patterns>
+      <pattern name="INodeExecutor implementation" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/">
+        Read an existing executor (e.g., AiAnalysisNodeExecutor.cs) for the exact class shape: constructor injection, SupportedActionTypes property, ExecuteAsync delegation pattern, Validate checking required node parameters
+      </pattern>
+      <pattern name="NodeExecutorRegistry auto-discovery" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Registry scans all INodeExecutor Singletons registered in DI — no manual registration in the registry itself
+      </pattern>
+      <pattern name="ActionType enum" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Enum in same namespace; values are stable contract — do not renumber existing values
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read the INodeExecutor interface definition to confirm exact method signatures and return types</step>
+    <step>Read an existing executor (AiAnalysisNodeExecutor.cs or similar) to understand the full implementation pattern including error handling and result construction</step>
+    <step>Read the ActionType enum file to understand current values and confirm 60 is available</step>
+    <step>Read NodeExecutorRegistry to confirm auto-discovery mechanism (INodeExecutor scan) requires no changes</step>
+    <step>Add AgentService = 60 to the ActionType enum, placing it in numeric order with an XML doc comment: "Routes the playbook node to Azure AI Foundry Agent Service (Phase 2)"</step>
+    <step>Create AgentServiceNodeExecutor.cs implementing INodeExecutor: constructor takes AgentServiceClient and ILogger; SupportedActionTypes returns [ActionType.AgentService]</step>
+    <step>Implement Validate(PlaybookNode): require node.Parameters["tenantId"] and node.Parameters["prompt"] to be non-empty; return ValidationResult.Success or ValidationResult with errors</step>
+    <step>Implement ExecuteAsync(NodeExecutionContext ctx, CancellationToken ct): extract tenantId and prompt from ctx.Node.Parameters; call AgentServiceClient.CreateThreadAsync (or reuse cached thread); call SendMessageAsync; call StreamResponseAsync and collect streamed chunks into NodeExecutionResult.Output; handle ConcurrencyLimitExceededException and FeatureDisabledException with appropriate NodeExecutionResult.Failure responses</step>
+    <step>Verify the executor will be picked up: check AiModule.cs registration scan or add explicit Singleton registration for INodeExecutor / AgentServiceNodeExecutor</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ and confirm zero errors</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ActionType enum contains AgentService = 60 with XML doc comment</criterion>
+    <criterion>AgentServiceNodeExecutor implements INodeExecutor with SupportedActionTypes = [ActionType.AgentService]</criterion>
+    <criterion>Validate method checks for required tenantId and prompt parameters and returns errors when missing</criterion>
+    <criterion>ExecuteAsync delegates to AgentServiceClient and handles concurrency/kill-switch exceptions gracefully</criterion>
+    <criterion>Executor is registered as INodeExecutor Singleton (either via scan or explicit registration in AiModule.cs)</criterion>
+    <criterion>dotnet build passes with zero errors</criterion>
+    <criterion>No changes to NodeExecutorRegistry, AiToolService, or any existing node executor files</criterion>
+  </acceptance-criteria>
+</task>

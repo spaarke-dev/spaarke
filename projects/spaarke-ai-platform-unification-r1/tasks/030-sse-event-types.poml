@@ -1,0 +1,106 @@
+<task id="AIPU-030" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>SSE event types: output_pane, source_pane, source_highlight</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>3</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, api, streaming, backend, ai</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>023</dependencies>
+  </metadata>
+
+  <prompt>
+    Extend the BFF SSE (Server-Sent Events) chat streaming system with three new event types that drive the three-pane layout on the frontend:
+
+    1. output_pane — emitted when the AI determines the primary structured output to display in the center output pane. Payload: widget type (OutputWidgetType string), widget data (JSON object).
+    2. source_pane — emitted when the AI references a source document or external reference. Payload: widget type (SourceWidgetType string), widget data (JSON object), optional citation ID.
+    3. source_highlight — emitted when the AI response references a specific excerpt in the source pane, triggering highlight/scroll in the source viewer. Payload: citation ID (string), source widget ID (string), character offset range (start, end).
+
+    These event types extend the existing ChatSseEventType discriminated union (or equivalent). They are consumed by the frontend SSE client in @spaarke/ai-context (handled in future tasks); this task only adds the server-side event type definitions, serialization, and emission helpers.
+
+    New directory: src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/ — one file per event type plus an index/factory file.
+  </prompt>
+
+  <role>Senior .NET 8 backend developer with expertise in SSE streaming, discriminated unions in C#, and AI tool orchestration</role>
+
+  <goal>
+    Three new SSE event type record types (OutputPaneSseEvent, SourcePaneSseEvent, SourceHighlightSseEvent) integrated into the existing chat SSE serialization pipeline, with emission helpers in the orchestration service. BFF compiles and existing SSE streaming tests still pass.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSseEventType.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatStreamingService.cs</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-013">New event types extend the existing AI streaming pipeline. Do not introduce a separate streaming service. Extend ChatSseEventType (or equivalent discriminated union) and the existing serialization path.</constraint>
+    <constraint source="ADR-019">Terminal error events: if the event type cannot be serialized or the widget data is invalid, emit a terminal error SSE event (type: error) rather than silently dropping the event. Do not swallow exceptions in the SSE stream.</constraint>
+    <constraint source="project">The SseEventTypes/ directory structure: one .cs file per event type (OutputPaneSseEvent.cs, SourcePaneSseEvent.cs, SourceHighlightSseEvent.cs) plus ChatSseEventFactory.cs with static helper methods for constructing each event.</constraint>
+    <constraint source="project">Event type string values (the "event:" field in SSE wire format) must be exactly: "output_pane", "source_pane", "source_highlight". These are the values the frontend SSE client matches on.</constraint>
+    <constraint source="project">Widget data payload is serialized as JSON in the "data:" SSE field. Use System.Text.Json with camelCase naming policy (matching the existing SSE serialization configuration).</constraint>
+    <constraint source="project">OutputPaneSseEvent and SourcePaneSseEvent carry widget data as JsonElement (raw JSON), not a strongly-typed object, because the BFF does not know the frontend widget schema — it just relays the AI tool output verbatim.</constraint>
+    <constraint source="project">source_highlight payload fields: citationId (string), sourceWidgetId (string), highlightStart (int), highlightEnd (int).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing SSE event types" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSseEventType.cs">
+        Read ChatSseEventType to understand the current discriminated union structure (record types, event type string constants, serialization). The three new types must follow the same pattern exactly.
+      </pattern>
+      <pattern name="SSE emission" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">
+        Read how the orchestration service writes SSE events to the response stream. The new event types must be emittable from the same pipeline without additional endpoint changes.
+      </pattern>
+      <pattern name="SSE streaming endpoint" location="src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs">
+        Understand how the streaming endpoint yields events. New event types must be compatible with the existing IAsyncEnumerable&lt;ChatSseEvent&gt; or equivalent emission loop.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSseEventType.cs (or the equivalent file defining SSE event types) in full. Map the current discriminated union structure, record type shapes, and event type string constants.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs to understand how SSE events are constructed and emitted to the response channel or IAsyncEnumerable.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs streaming endpoint to understand the event loop and SSE serialization path.</step>
+    <step>Create directory src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/.</step>
+    <step>Create OutputPaneSseEvent.cs:
+      - Record: OutputPaneSseEvent(string WidgetType, System.Text.Json.JsonElement WidgetData)
+      - EventType constant: "output_pane"
+      - Implements ISseEvent (or inherits ChatSseEventBase — match existing pattern).</step>
+    <step>Create SourcePaneSseEvent.cs:
+      - Record: SourcePaneSseEvent(string WidgetType, System.Text.Json.JsonElement WidgetData, string? CitationId)
+      - EventType constant: "source_pane"
+      - Implements ISseEvent / inherits base type.</step>
+    <step>Create SourceHighlightSseEvent.cs:
+      - Record: SourceHighlightSseEvent(string CitationId, string SourceWidgetId, int HighlightStart, int HighlightEnd)
+      - EventType constant: "source_highlight"
+      - Implements ISseEvent / inherits base type.</step>
+    <step>Create ChatSseEventFactory.cs:
+      - Static class with methods: CreateOutputPaneEvent(string widgetType, object widgetData), CreateSourcePaneEvent(string widgetType, object widgetData, string? citationId), CreateSourceHighlightEvent(string citationId, string sourceWidgetId, int start, int end)
+      - Each method serializes widgetData to JsonElement using JsonSerializer with camelCase naming policy.</step>
+    <step>Integrate into the existing ChatSseEventType discriminated union: add the three new record types as cases. Update the serialization switch/pattern match to handle the new types and emit the correct "event:" header string.</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ to confirm zero compilation errors.</step>
+    <step>Run dotnet test on the existing SSE streaming tests to confirm no regressions. Add at minimum one unit test per new event type: construct via factory, serialize, verify "event:" string and "data:" JSON field.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>SseEventTypes/ directory exists with OutputPaneSseEvent.cs, SourcePaneSseEvent.cs, SourceHighlightSseEvent.cs, and ChatSseEventFactory.cs.</criterion>
+    <criterion>OutputPaneSseEvent serializes to SSE wire format with event type string exactly "output_pane" and data JSON containing widgetType and widgetData fields.</criterion>
+    <criterion>SourcePaneSseEvent serializes to SSE wire format with event type string exactly "source_pane" and data JSON containing widgetType, widgetData, and optional citationId fields.</criterion>
+    <criterion>SourceHighlightSseEvent serializes to SSE wire format with event type string exactly "source_highlight" and data JSON containing citationId, sourceWidgetId, highlightStart, highlightEnd fields (camelCase).</criterion>
+    <criterion>ChatSseEventFactory provides static helper methods for each event type. widgetData is serialized to JsonElement with camelCase naming policy.</criterion>
+    <criterion>All three new event types are integrated into the existing ChatSseEventType discriminated union and handled in the serialization switch.</criterion>
+    <criterion>Invalid/unserializable widget data causes a terminal error SSE event (type: error) to be emitted, not a silent drop or exception propagation to the client connection.</criterion>
+    <criterion>dotnet build passes with zero errors and zero warnings for the BFF project.</criterion>
+    <criterion>Existing SSE streaming tests pass with no regressions. Unit tests for the three new event types (construct + serialize + verify wire format) pass.</criterion>
+  </acceptance-criteria>
+</task>

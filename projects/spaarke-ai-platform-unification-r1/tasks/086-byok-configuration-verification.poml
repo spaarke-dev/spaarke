@@ -1,0 +1,73 @@
+<task id="AIPU-086" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>BYOK configuration verification — all 3 deployment models</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>9</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>testing, configuration</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-085</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify that the AI Platform Unification works correctly across all 3 deployment models: multi-customer (shared infrastructure), dedicated (single-tenant Azure), and customer-tenant (BYOK — customer-provisioned Foundry resources). All Foundry resource IDs, agent IDs, endpoints, and tenant IDs must come from environment variables — no hardcoded values. Create a BYOK checklist documenting every environment variable required and its purpose.
+  </prompt>
+
+  <role>DevOps engineer with multi-tenant deployment and configuration verification experience</role>
+
+  <goal>
+    Verified that switching environment variables to different Foundry endpoints works without code changes, and a comprehensive BYOK checklist documents all required configuration.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/CodeInterpreterOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/BingGroundingOptions.cs</file>
+    <file>docs/guides/BYOK-CONFIGURATION-GUIDE.md</file>
+    <file>config/appsettings.json</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="spec">MUST NOT hardcode any Foundry resource IDs, agent IDs, or tenant IDs</constraint>
+    <constraint source="spec">MUST support all 3 deployment models via env var config only</constraint>
+    <constraint source="ADR-018">All options classes MUST use ValidateDataAnnotations().ValidateOnStart()</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+      <file>.claude/constraints/config.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit all Options classes for hardcoded values — search for string literals that look like resource IDs or endpoints</step>
+    <step order="2">Verify all Options classes have [Required] on mandatory fields and ValidateOnStart in DI registration</step>
+    <step order="3">Create environment variable inventory: list every env var, its purpose, example value, and whether optional/required</step>
+    <step order="4">Test startup with missing required env vars — verify ValidateOnStart catches misconfiguration</step>
+    <step order="5">Test with alternate Foundry endpoint (simulate BYOK) — verify functionality</step>
+    <step order="6">Create docs/guides/BYOK-CONFIGURATION-GUIDE.md with deployment model matrix and env var reference</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Grep</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>Verified no hardcoded resource IDs in all Options classes</output>
+    <output>docs/guides/BYOK-CONFIGURATION-GUIDE.md</output>
+    <output>Environment variable inventory in BYOK guide</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Zero hardcoded Foundry resource IDs, agent IDs, or endpoints in source code</criterion>
+    <criterion>All Options classes have ValidateOnStart</criterion>
+    <criterion>App fails fast with clear error when required env vars are missing</criterion>
+    <criterion>BYOK-CONFIGURATION-GUIDE.md exists with complete env var reference</criterion>
+    <criterion>Verified startup works with alternate Foundry endpoint configuration</criterion>
+  </acceptance-criteria>
+</task>

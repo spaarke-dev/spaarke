@@ -1,0 +1,115 @@
+<task id="AIPU-023" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>BFF StandaloneChatContextProvider + GET /api/ai/chat/context-mappings/standalone endpoint</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>2</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, api, backend, ai</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the BFF-side infrastructure for standalone (non-analysis) AI chat context resolution. The standalone chat context allows any Dataverse entity (matter, contact, account, opportunity, etc.) to be used as the context source for an AI chat session, not just analysis records.
+
+    Deliverables:
+    1. StandaloneChatContextProvider.cs — a service that resolves chat context mappings for standalone entity types. Mirrors AnalysisChatContextResolver.cs in structure.
+    2. StandaloneChatContextEndpoints.cs — endpoint group registering GET /api/ai/chat/context-mappings/standalone with Redis caching, OBO auth filter, and proper ProblemDetails error handling.
+
+    The endpoint accepts: entityType (string, required), entityId (Guid, required), tenantId (from claims, not query string).
+    The endpoint returns: a ChatContextMapping object (list of available context fields and their display names for the given entity type).
+    Cache key: chat-context:{tenantId}:standalone:{entityType}:{entityId}, TTL 30 minutes.
+  </prompt>
+
+  <role>Senior .NET 8 backend developer with expertise in Minimal API endpoint groups, Redis caching, and OBO authentication patterns</role>
+
+  <goal>
+    A working GET /api/ai/chat/context-mappings/standalone endpoint secured by OBO auth endpoint filter, cached in Redis with 30-minute TTL, and returning ChatContextMapping for any supported Dataverse entity type. Service and endpoint both compile and pass unit tests.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Api/Ai/StandaloneChatContextEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/StandaloneChatContextProvider.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/OboAuthEndpointFilter.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Caching/RedisCacheService.cs</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-001">No Azure Functions. This is a Minimal API endpoint group registered in Program.cs.</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filter only — use OboAuthEndpointFilter (or equivalent). No global middleware for resource-level auth. tenantId extracted from authenticated claims, never from query string.</constraint>
+    <constraint source="ADR-009">Cache context mappings in Redis. Cache key pattern: chat-context:{tenantId}:standalone:{entityType}:{entityId}. TTL: 30 minutes. Use RedisCacheService (or IDistributedCache), not in-memory cache.</constraint>
+    <constraint source="ADR-010">DI minimalism: register StandaloneChatContextProvider as a concrete singleton (not behind an interface) unless a test seam is genuinely required. Total project DI registrations must stay at or below 15 non-framework services.</constraint>
+    <constraint source="ADR-013">AI endpoint follows existing AI tool endpoint patterns. No separate Azure service — extends BFF API.</constraint>
+    <constraint source="project">Mirror AnalysisChatContextResolver.cs structure exactly: same constructor pattern, same return type (ChatContextMapping or equivalent), same error handling (throws domain exceptions caught by endpoint filter or exception handler).</constraint>
+    <constraint source="project">entityType must be validated against an allowlist of supported Dataverse entity logical names. Return 400 ProblemDetails for unsupported entity types.</constraint>
+    <constraint source="project">entityId in the query string must be validated as a valid Guid. Return 400 ProblemDetails on parse failure.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/bff-endpoint-group.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/adr/ADR-008-endpoint-filters-for-auth.md</file>
+      <file>docs/adr/ADR-009-redis-first-caching.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="AnalysisChatContextResolver pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs">
+        Mirror this class for StandaloneChatContextProvider: same constructor shape, same method signature (ResolveAsync or equivalent), same exception types. Read before implementing.
+      </pattern>
+      <pattern name="Endpoint group registration" location="src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs">
+        Pattern for MapGroup, AddEndpointFilter, route definition, and ProblemDetails returns. Mirror this for StandaloneChatContextEndpoints.cs.
+      </pattern>
+      <pattern name="Redis cache key + TTL" location="src/server/api/Sprk.Bff.Api/Services/Caching/RedisCacheService.cs">
+        Cache key format and TTL setting. Use the same service/interface already registered in DI.
+      </pattern>
+      <pattern name="OBO auth filter" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/OboAuthEndpointFilter.cs">
+        Read to understand how tenantId is extracted from claims and how the filter is applied to a MapGroup.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs in full. Note constructor parameters, method signatures, return types, and exception handling patterns.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Api/Ai/AiToolEndpoints.cs to understand endpoint group registration pattern, filter application, and ProblemDetails usage.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Infrastructure/Auth/OboAuthEndpointFilter.cs to understand filter interface and claims extraction.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Services/Caching/RedisCacheService.cs (or IDistributedCache usage) to understand cache get/set pattern and TTL configuration.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Program.cs to identify where to register the new endpoint group and the DI registration location for StandaloneChatContextProvider.</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/StandaloneChatContextProvider.cs:
+      - Constructor: inject ILogger&lt;StandaloneChatContextProvider&gt; and any Dataverse/Graph client needed for entity field discovery
+      - Method: Task&lt;ChatContextMapping&gt; ResolveAsync(string entityType, Guid entityId, string tenantId, CancellationToken ct)
+      - Implement allowlist of supported entity logical names (at minimum: contact, account, opportunity, incident, spaarke_matter)
+      - Return 400-equivalent domain exception for unsupported entity types
+      - Resolve context field mappings for the given entity type (field logical name → display label pairs).</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Api/Ai/StandaloneChatContextEndpoints.cs:
+      - MapGroup("/api/ai/chat/context-mappings") with AddEndpointFilter&lt;OboAuthEndpointFilter&gt;()
+      - GET /standalone: validate entityType (allowlist), validate entityId (Guid.TryParse), extract tenantId from claims
+      - Check Redis cache with key chat-context:{tenantId}:standalone:{entityType}:{entityId}
+      - On cache miss: call StandaloneChatContextProvider.ResolveAsync, cache result with 30-min TTL
+      - Return 200 ChatContextMapping on success, 400 ProblemDetails on invalid input, 404 ProblemDetails if entity not found.</step>
+    <step>Register in Program.cs: app.MapStandaloneChatContextEndpoints() (extension method) and services.AddSingleton&lt;StandaloneChatContextProvider&gt;().</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ to confirm zero compilation errors.</step>
+    <step>Write a unit test in tests/ mirroring the AnalysisChatContextResolver test pattern: test cache hit path (returns cached result, no provider call), cache miss path (provider called, result cached), invalid entityType (returns 400), invalid entityId (returns 400).</step>
+    <step>Run dotnet test to confirm tests pass.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>StandaloneChatContextProvider.cs exists with ResolveAsync method taking entityType, entityId, tenantId, and CancellationToken. Mirrors AnalysisChatContextResolver structure.</criterion>
+    <criterion>GET /api/ai/chat/context-mappings/standalone endpoint is registered and secured with OboAuthEndpointFilter. tenantId is extracted from authenticated claims, never from the query string.</criterion>
+    <criterion>Redis cache is checked before calling provider. Cache key follows pattern: chat-context:{tenantId}:standalone:{entityType}:{entityId}. Cache TTL is 30 minutes.</criterion>
+    <criterion>Unsupported entityType values return 400 ProblemDetails with a descriptive error message.</criterion>
+    <criterion>Unparseable entityId (not a valid Guid) returns 400 ProblemDetails.</criterion>
+    <criterion>Entity not found returns 404 ProblemDetails.</criterion>
+    <criterion>New service is registered in Program.cs DI. Total non-framework DI registrations remain at or below 15 (ADR-010).</criterion>
+    <criterion>dotnet build passes with zero errors and zero warnings for the BFF project.</criterion>
+    <criterion>Unit tests cover: cache hit, cache miss + populate, invalid entityType, invalid entityId. All tests pass.</criterion>
+  </acceptance-criteria>
+</task>

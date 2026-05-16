@@ -1,0 +1,69 @@
+<task id="AIPU-003" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Scaffold @spaarke/ai-outputs shared library</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>0</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>shared-library, scaffold, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the @spaarke/ai-outputs shared library at src/client/shared/Spaarke.AI.Outputs/. This library will contain output pane widgets, source pane widgets, and component registries. Follow the @spaarke/ui-components library structure.
+  </prompt>
+
+  <role>Frontend developer with expertise in React 19 shared libraries and Fluent UI v9</role>
+
+  <goal>
+    A buildable @spaarke/ai-outputs library at src/client/shared/Spaarke.AI.Outputs/ with proper package.json, tsconfig, directory structure (output-widgets/, source-widgets/, registry/, cross-pane/, chat-history/), and barrel exports — ready for widget creation in Wave 2.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Outputs/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-012">Shared component library: Fluent v9, semantic tokens, dark mode</constraint>
+    <constraint source="ADR-021">All widgets must use Fluent v9 design tokens, support dark mode</constraint>
+    <constraint source="ADR-020">Start at version 1.0.0</constraint>
+    <constraint source="project">NOT PCF-safe — widgets use React 19</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>.claude/patterns/shared/shared-library-build.md</file>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Library structure" location="src/client/shared/Spaarke.UI.Components/package.json">
+        Package.json with file: refs, build scripts
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read @spaarke/ui-components library structure</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/ directory</step>
+    <step>Create package.json: name @spaarke/ai-outputs, version 1.0.0, peer deps (react ^19, @fluentui/react-components)</step>
+    <step>Create tsconfig.json following ui-components pattern</step>
+    <step>Create directory structure: src/output-widgets/, src/source-widgets/, src/registry/, src/cross-pane/, src/chat-history/, src/types/</step>
+    <step>Create src/index.ts with placeholder barrel exports</step>
+    <step>Create src/types/index.ts with widget type definitions (OutputWidgetType, SourceWidgetType, WidgetRegistryEntry, etc.)</step>
+    <step>Create src/registry/output-registry.ts and src/registry/source-registry.ts with empty registry scaffolds</step>
+    <step>Verify TypeScript compilation succeeds</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>src/client/shared/Spaarke.AI.Outputs/ exists with proper structure</criterion>
+    <criterion>package.json has @spaarke/ai-outputs name, version 1.0.0</criterion>
+    <criterion>Directory structure: output-widgets/, source-widgets/, registry/, cross-pane/, chat-history/, types/</criterion>
+    <criterion>Registry scaffold files exist with type-safe registration pattern</criterion>
+    <criterion>TypeScript compilation succeeds</criterion>
+  </acceptance-criteria>
+</task>

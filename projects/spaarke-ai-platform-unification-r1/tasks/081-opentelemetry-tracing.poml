@@ -1,0 +1,70 @@
+<task id="AIPU-081" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>OpenTelemetry tracing for Agent Service routing and Foundry calls</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>8</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, observability</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-077</dependencies>
+  </metadata>
+
+  <prompt>
+    Add OpenTelemetry tracing spans to the Agent Service request lifecycle: frontend SSE connection, BFF routing decision, AgentServiceClient thread/run operations, and Foundry response streaming. Follow the existing OTEL patterns in the BFF (ActivitySource, Activity.Current). Ensure spans are visible in Application Insights with correct parent-child hierarchy. FR-20 requires the full request lifecycle to be traceable.
+  </prompt>
+
+  <role>Senior .NET backend developer with OpenTelemetry and Application Insights experience</role>
+
+  <goal>
+    OpenTelemetry spans added to AgentServiceClient, AgentServiceRoutingMiddleware, and AgentServiceNodeExecutor — visible in Application Insights with correct span hierarchy (frontend → BFF → routing → Foundry → response). Verified by dotnet build and trace inspection.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentServiceRoutingMiddleware.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AgentServiceNodeExecutor.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Infrastructure/Telemetry/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-015">MUST NOT log chat content or PII in OTEL spans — metadata only (latency, route choice, token counts)</constraint>
+    <constraint source="FR-20">Full request lifecycle traceable: frontend to BFF to Foundry to response</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify existing ActivitySource usage in BFF for pattern consistency</step>
+    <step order="2">Add spans to AgentServiceClient: CreateThread, SendMessage, StreamResponse</step>
+    <step order="3">Add spans to AgentServiceRoutingMiddleware: routing decision with route_chosen tag</step>
+    <step order="4">Add spans to AgentServiceNodeExecutor: ExecuteAsync with action_type=60 tag</step>
+    <step order="5">Verify span hierarchy in Application Insights (dev environment)</step>
+    <step order="6">Run dotnet build to verify compilation</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+    <tool>Grep</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated AgentServiceClient.cs with OTEL spans</output>
+    <output>Updated AgentServiceRoutingMiddleware.cs with OTEL spans</output>
+    <output>Updated AgentServiceNodeExecutor.cs with OTEL spans</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>dotnet build passes with zero errors</criterion>
+    <criterion>ActivitySource spans added to all 3 Agent Service components</criterion>
+    <criterion>No PII or chat content in span attributes</criterion>
+    <criterion>Span hierarchy: routing → client → executor visible in traces</criterion>
+  </acceptance-criteria>
+</task>

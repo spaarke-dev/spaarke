@@ -1,0 +1,74 @@
+<task id="AIPU-062" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Foundry Agent Definition — Spaarke Legal AI Agent with BFF tools registered</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>6</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>infrastructure, ai-foundry</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the Spaarke Legal AI Agent definition for Azure AI Foundry. This is infrastructure-only work: define the agent YAML, register BFF tool function definitions (Code Interpreter and Bing Grounding), and document the deployment commands. No hardcoded resource IDs — all endpoints, agent IDs, and project names must come from environment variables. The agent definition must be BYOK-compatible so it can be deployed to any customer Foundry project.
+  </prompt>
+
+  <role>AI infrastructure engineer with Azure AI Foundry and YAML agent definition experience</role>
+
+  <goal>
+    infrastructure/ai-foundry/agents/ directory exists containing spaarke-legal-agent.yaml and BFF function tool definitions, plus a README with deployment commands — deployable to the dev Foundry project with a single az ai agent create command using only environment variable substitution.
+  </goal>
+
+  <relevant-files>
+    <file>infrastructure/ai-foundry/agents/</file>
+    <file>infrastructure/ai-foundry/README.md</file>
+    <file>docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md</file>
+    <file>docs/architecture/auth-AI-azure-resources.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="project">MUST NOT hardcode resource IDs, subscription IDs, agent IDs, or endpoint URLs; all must be referenced as environment variable placeholders (e.g., ${FOUNDRY_PROJECT_NAME}, ${FOUNDRY_ENDPOINT})</constraint>
+    <constraint source="NFR-05">BYOK-compatible: agent definition must work when pointed at a customer-supplied Foundry project with customer-managed keys; no Spaarke-specific resource names embedded</constraint>
+    <constraint source="ADR-015">Agent system prompt must not request PII; instructions must include data-minimization guidance for the model</constraint>
+    <constraint source="project">Tools to register: Code Interpreter (built-in), Bing Grounding (built-in), plus function definitions matching the BFF endpoints defined in tasks 070 and 071</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-foundry/README.md</file>
+      <file>docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>infrastructure/ai-foundry/evaluation/eval-config.yaml</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Foundry infra layout" location="infrastructure/ai-foundry/">
+        Read existing files in infrastructure/ai-foundry/ for naming conventions, YAML structure, and any existing agent or prompt flow definitions already present
+      </pattern>
+      <pattern name="Env var substitution" location="infrastructure/ai-foundry/">
+        Existing YAML files use ${VAR_NAME} placeholders; deployment scripts use envsubst or PowerShell string replacement before submitting to az CLI
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read infrastructure/ai-foundry/README.md to understand existing Foundry project structure, resource names, and deployment approach</step>
+    <step>Read docs/architecture/auth-AI-azure-resources.md to find the AI Foundry Hub name, Project name, and Azure OpenAI model deployments available in dev</step>
+    <step>Read docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md for the canonical agent definition format and required fields</step>
+    <step>Create the directory infrastructure/ai-foundry/agents/</step>
+    <step>Create spaarke-legal-agent.yaml defining: name ("Spaarke Legal AI Assistant"), model (${FOUNDRY_MODEL_DEPLOYMENT} placeholder), system prompt instructing the agent to assist with legal document analysis using provided tools, data-minimization instructions, response format guidance</step>
+    <step>Add tool registrations to spaarke-legal-agent.yaml: code_interpreter (built-in), bing_grounding (built-in with connection ${FOUNDRY_BING_CONNECTION_NAME})</step>
+    <step>Create bff-function-tools.yaml defining OpenAI function tool schemas for the two BFF-side tools: analyze-data (maps to CodeInterpreterBridge) and research-legal (maps to LegalResearchTools); use JSON Schema for parameter definitions</step>
+    <step>Create agents/README.md (exception: this is infrastructure documentation co-located with the infra files, not a project README) documenting: required environment variables, az ai agent create command with env var substitution, how to retrieve the created agent ID and store it in AgentServiceOptions:AgentId config</step>
+    <step>Verify the YAML files are valid by running yamllint or az CLI dry-run if az is available; otherwise confirm by manual review against Foundry agent schema</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>infrastructure/ai-foundry/agents/ directory exists</criterion>
+    <criterion>spaarke-legal-agent.yaml present with model, system prompt, code_interpreter, and bing_grounding tool registrations</criterion>
+    <criterion>bff-function-tools.yaml present with OpenAI function schemas for analyze-data and research-legal</criterion>
+    <criterion>Zero hardcoded resource IDs, subscription IDs, or endpoint URLs in any YAML file — all are ${VAR} placeholders</criterion>
+    <criterion>agents/README.md documents all required environment variables and the deployment command sequence</criterion>
+    <criterion>YAML files are syntactically valid</criterion>
+  </acceptance-criteria>
+</task>

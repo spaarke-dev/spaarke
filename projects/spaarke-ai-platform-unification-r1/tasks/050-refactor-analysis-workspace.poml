@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU-050" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Refactor AnalysisWorkspace — Import Shared Hooks from @spaarke/ai-context</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <wave>5</wave>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>refactor, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-011, AIPU-012, AIPU-040</dependencies>
+  </metadata>
+
+  <prompt>
+    Refactor the AnalysisWorkspace Code Page so that its AI context and hooks are sourced from the
+    shared @spaarke/ai-context library rather than local duplicates. The goal is to eliminate
+    duplicated hook implementations while maintaining full behavioral compatibility. AnalysisAiContext.tsx
+    becomes a thin wrapper that re-exports or delegates to the shared hooks (useChatSession,
+    useChatContextMapping) from @spaarke/ai-context. All existing AnalysisWorkspace functionality
+    must continue to work without regression — this is a structural refactor, not a feature change.
+  </prompt>
+
+  <role>Frontend developer with React 18 refactoring experience and understanding of context
+  provider patterns and shared library dependency management.</role>
+
+  <goal>AnalysisWorkspace imports useChatSession and useChatContextMapping from @spaarke/ai-context.
+  AnalysisAiContext.tsx becomes a thin shell that composes shared hooks. All existing AnalysisWorkspace
+  tests pass. Zero behavioral regression observable in the running application. The @spaarke/ai-context
+  package is declared as a file: dependency in AnalysisWorkspace's package.json.</goal>
+
+  <relevant-files>
+    <file>src/client/code-pages/AnalysisWorkspace/src/context/AnalysisAiContext.tsx</file>
+    <file>src/client/code-pages/AnalysisWorkspace/src/context/AnalysisAiProvider.tsx</file>
+    <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useChatSession.ts</file>
+    <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useChatContextMapping.ts</file>
+    <file>src/client/code-pages/AnalysisWorkspace/package.json</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/hooks/useChatSession.ts</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/hooks/useChatContextMapping.ts</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/index.ts</file>
+    <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    <file>tests/client/AnalysisWorkspace/</file>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint id="FR-12">MUST NOT break existing AnalysisWorkspace behavior. This is a
+    structural refactor only. All existing features (document analysis, chat, output panel, source
+    panel, matter context) must continue to work identically. Run existing tests to confirm.
+    </constraint>
+    <constraint id="thin-shell">Keep AnalysisAiContext.tsx as a thin shell that imports from
+    @spaarke/ai-context. Do NOT delete AnalysisAiContext.tsx — other components in
+    AnalysisWorkspace import from it. The file should re-export the shared types and delegate
+    hook calls to the shared implementations. The public API surface of AnalysisAiContext must
+    not change.</constraint>
+    <constraint id="no-duplication">After this refactor, useChatSession and useChatContextMapping
+    must not contain duplicated implementation in both the local hooks/ folder and @spaarke/ai-context.
+    Either delete the local files (if all callers are updated to import from @spaarke/ai-context
+    transitively through AnalysisAiContext) or clearly mark them as thin re-exports.</constraint>
+    <constraint id="file-dependency">Add @spaarke/ai-context as a workspace/file: dependency in
+    AnalysisWorkspace/package.json pointing to the relative path of the Spaarke.AI.Context
+    library: "file:../../shared/Spaarke.AI.Context". This follows the same pattern used by
+    @spaarke/ui-components.</constraint>
+    <constraint id="react-versioning">AnalysisWorkspace uses React 18 (bundled). @spaarke/ai-context
+    is also React 18. No version mismatch concerns. Do NOT introduce any React 16 APIs.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/adr/ADR-012.md</file>
+    </files>
+    <patterns>
+      <pattern>File dependency pattern in package.json (from @spaarke/ui-components precedent):
+      "dependencies": { "@spaarke/ai-context": "file:../../shared/Spaarke.AI.Context" }
+      After adding, run npm install --legacy-peer-deps in AnalysisWorkspace/.</pattern>
+      <pattern>Thin shell pattern for AnalysisAiContext.tsx:
+      import { useChatSession, useChatContextMapping, ... } from "@spaarke/ai-context";
+      // Re-export types that downstream components expect unchanged
+      export type { ChatMessage, ChatSession } from "@spaarke/ai-context";
+      // AnalysisAiProvider becomes a thin wrapper calling shared hooks
+      </pattern>
+      <pattern>Verification: after refactoring, grep -r "useChatSession" src/client/code-pages/AnalysisWorkspace/src/
+      to confirm all usages go through AnalysisAiContext (not direct local hook imports).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read the current AnalysisWorkspace context files: AnalysisAiContext.tsx,
+    AnalysisAiProvider.tsx, and the local hooks useChatSession.ts and useChatContextMapping.ts.
+    Read the corresponding shared implementations in Spaarke.AI.Context/src/hooks/ to understand
+    the API surface differences (if any).</step>
+    <step id="2">Read AnalysisWorkspace/package.json and identify current dependency declarations.
+    Add "@spaarke/ai-context": "file:../../shared/Spaarke.AI.Context" to dependencies. Run
+    npm install --legacy-peer-deps in src/client/code-pages/AnalysisWorkspace/ to link the
+    package.</step>
+    <step id="3">Compare the local hook API signatures against the shared library exports. Identify
+    any signature differences that would require adapter logic in the thin shell. Document the
+    differences as inline comments in AnalysisAiContext.tsx if adapters are needed.</step>
+    <step id="4">Update AnalysisAiContext.tsx to import useChatSession and useChatContextMapping
+    from @spaarke/ai-context. If the shared API matches the local API exactly, replace the local
+    calls directly. If there are differences, add a thin adapter layer inside AnalysisAiContext.tsx
+    that maps shared types to the existing AnalysisWorkspace context shape.</step>
+    <step id="5">Update AnalysisAiProvider.tsx if it directly instantiates local hooks — redirect
+    those imports to come through AnalysisAiContext or directly from @spaarke/ai-context.</step>
+    <step id="6">Mark local hook files (src/hooks/useChatSession.ts, useChatContextMapping.ts) as
+    deprecated re-exports if any components still import them directly, or delete them if all
+    usages have been consolidated through AnalysisAiContext. Update any remaining direct imports.
+    </step>
+    <step id="7">Run npm run build in src/client/code-pages/AnalysisWorkspace/ and confirm zero
+    TypeScript errors and successful build output.</step>
+    <step id="8">Run existing AnalysisWorkspace tests in tests/client/AnalysisWorkspace/ and
+    confirm all tests pass. Fix any test failures caused by import path changes (not behavioral
+    changes).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="AC-1">@spaarke/ai-context is declared in AnalysisWorkspace/package.json as a
+    file: dependency and resolves correctly after npm install.</criterion>
+    <criterion id="AC-2">AnalysisAiContext.tsx imports useChatSession and useChatContextMapping
+    from @spaarke/ai-context — not from local hooks/ files.</criterion>
+    <criterion id="AC-3">The public API surface of AnalysisAiContext (exported types and context
+    shape) is unchanged — no breaking changes to consumer components.</criterion>
+    <criterion id="AC-4">npm run build in AnalysisWorkspace/ completes with zero TypeScript
+    errors.</criterion>
+    <criterion id="AC-5">All pre-existing AnalysisWorkspace tests pass without modification to
+    test logic (only import path fixes are acceptable).</criterion>
+    <criterion id="AC-6">No duplicated hook implementation exists: useChatSession and
+    useChatContextMapping logic lives only in @spaarke/ai-context. Any local hook files are
+    either deleted or are pure re-exports with a deprecation comment.</criterion>
+  </acceptance-criteria>
+</task>

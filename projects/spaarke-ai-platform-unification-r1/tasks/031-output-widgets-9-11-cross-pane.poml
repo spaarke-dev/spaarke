@@ -1,0 +1,124 @@
+<task id="AIPU-031" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Output pane widgets 9-11 (StatusSummary, Recommendation, ActionPlan) + CrossPaneLink component</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>3</wave>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>frontend, fluent-ui, output-widgets, cross-pane</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement output pane widgets 9-11 and the cross-pane linking infrastructure for the @spaarke/ai-outputs library.
+
+    Widget deliverables (owned by this task only — do not modify widget files 1-8):
+    1. StatusSummaryWidget.tsx — renders a health/status summary dashboard with category rows, each showing a status icon (success/warning/error/info) and a brief summary text.
+    2. RecommendationWidget.tsx — renders a ranked list of AI recommendations, each with a priority badge, recommendation text, rationale, and an optional "Apply" action button.
+    3. ActionPlanWidget.tsx — renders a multi-step action plan as a checklist-style list where users can mark steps complete. Completion state is local (not persisted) unless an onStepComplete callback is provided.
+
+    Cross-pane linking deliverables (owned by this task, new directory):
+    4. CrossPaneLink.tsx — a wrapper component that makes any inline content (citation reference, footnote marker, document reference) clickable. On click, it emits a source_highlight custom DOM event that the source pane listens to. The event carries: citationId, sourceWidgetId, highlightStart, highlightEnd.
+    5. useCrossPane.ts — React hook that wraps CrossPaneLink event emission and also provides a subscription method for the source pane to listen for incoming highlight events.
+    6. cross-pane-events.ts — typed event definition file: CrossPaneLinkEvent interface, CROSS_PANE_EVENT_NAME constant, helper functions dispatchCrossPaneLink() and subscribeToCrossPaneLinks().
+  </prompt>
+
+  <role>Senior frontend developer with expertise in React 19, Fluent UI v9, custom DOM events, and cross-component communication patterns</role>
+
+  <goal>
+    Three working output widgets (StatusSummary, Recommendation, ActionPlan) and a complete cross-pane linking system (CrossPaneLink, useCrossPane, cross-pane-events) exported from @spaarke/ai-outputs, enabling citation clicks in the output pane to trigger highlights in the source pane without shared state or prop drilling.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/StatusSummaryWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/RecommendationWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/ActionPlanWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/cross-pane/CrossPaneLink.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/cross-pane/useCrossPane.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/cross-pane/cross-pane-events.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/index.ts</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-021">All widgets must use Fluent v9 makeStyles with design tokens only. No hard-coded hex colors. Dark mode must work via FluentProvider theme switching.</constraint>
+    <constraint source="ADR-012">Every public component, hook, and type must be exported from src/index.ts.</constraint>
+    <constraint source="project">NOT PCF-safe. May use React 19 features freely.</constraint>
+    <constraint source="project">Cross-pane communication uses a custom DOM CustomEvent on document (not a shared React context or Redux store). This keeps the output pane and source pane fully decoupled — they may live in different React trees. The CrossPaneLink component dispatches the event; source widgets subscribe via addEventListener in a useEffect cleanup pair.</constraint>
+    <constraint source="project">CrossPaneLink must be keyboard accessible: it renders as an inline &lt;span&gt; with role="button" tabIndex={0} and handles onKeyDown for Enter/Space.</constraint>
+    <constraint source="project">Do NOT modify widget files 1-8 (owned by AIPU-020 and AIPU-021).</constraint>
+    <constraint source="project">ActionPlanWidget: completion state is local (useState). If an onStepComplete?: (stepId: string, completed: boolean) =&gt; void prop is provided, call it on toggle. Do not persist to Dataverse or BFF from within the widget.</constraint>
+    <constraint source="project">RecommendationWidget: "Apply" button must call an optional onApply?: (recommendationId: string) =&gt; void prop if provided. The button is hidden when onApply is not provided. No side effects in the widget itself.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 status icons" location="@fluentui/react-components">
+        Use CheckmarkCircle20Filled (success), Warning20Filled (warning), ErrorCircle20Filled (error), Info20Filled (info) from @fluentui/react-icons. Color via tokens.colorStatusSuccessForeground1, tokens.colorStatusWarningForeground1, tokens.colorStatusDangerForeground1, tokens.colorNeutralForeground2.
+      </pattern>
+      <pattern name="Custom DOM event pattern" location="src/client/shared/Spaarke.AI.Outputs/src/cross-pane/cross-pane-events.ts">
+        CustomEvent with type CROSS_PANE_LINK_EVENT = 'spaarke:cross-pane-link'. detail: CrossPaneLinkEvent. Dispatch on document. Subscribe with document.addEventListener in useEffect, remove in cleanup.
+      </pattern>
+      <pattern name="OutputWidgetProps import" location="src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts">
+        Import OutputWidgetProps from types/widget-types.ts (created by AIPU-020). Do not redefine.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts (from AIPU-020) to confirm OutputWidgetProps is available. Read src/client/shared/Spaarke.AI.Outputs/src/index.ts to understand current exports.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/cross-pane/cross-pane-events.ts:
+      - CROSS_PANE_LINK_EVENT = 'spaarke:cross-pane-link' constant
+      - CrossPaneLinkEvent interface: { citationId: string; sourceWidgetId: string; highlightStart: number; highlightEnd: number }
+      - dispatchCrossPaneLink(event: CrossPaneLinkEvent): void — dispatches CustomEvent on document
+      - subscribeToCrossPaneLinks(handler: (event: CrossPaneLinkEvent) =&gt; void): () =&gt; void — returns unsubscribe function
+      Export all.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/cross-pane/useCrossPane.ts:
+      - useDispatchCrossPaneLink(): (event: CrossPaneLinkEvent) =&gt; void — returns stable callback that calls dispatchCrossPaneLink
+      - useCrossPaneSubscription(handler: (event: CrossPaneLinkEvent) =&gt; void): void — sets up addEventListener in useEffect with cleanup
+      Export both hooks.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/cross-pane/CrossPaneLink.tsx:
+      - Props: { citationId: string; sourceWidgetId: string; highlightStart: number; highlightEnd: number; children: React.ReactNode; className?: string }
+      - Renders: &lt;span role="button" tabIndex={0} onClick={handleClick} onKeyDown={handleKeyDown} ...&gt;{children}&lt;/span&gt;
+      - handleClick and handleKeyDown (Enter/Space) call dispatchCrossPaneLink with the props
+      - makeStyles: cursor pointer, underline decoration, colorBrandForeground1 text, focus ring via Fluent v9 tokens
+      Export CrossPaneLink.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/StatusSummaryWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ title?: string; categories: Array&lt;{ id: string; label: string; status: 'success' | 'warning' | 'error' | 'info'; summary: string }&gt; }&gt;
+      - Render each category as a row: status icon (Fluent v9 react-icons), label (Text semibold), summary (Text)
+      - Use makeStyles. Status colors via Fluent v9 status color tokens.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/RecommendationWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ recommendations: Array&lt;{ id: string; priority: 'high' | 'medium' | 'low'; text: string; rationale?: string }&gt; }&gt; &amp; { onApply?: (id: string) =&gt; void }
+      - Render each recommendation as a Card: priority Badge (high=danger, medium=warning, low=informative), recommendation text, optional rationale in smaller Text, optional Apply button
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/ActionPlanWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ title?: string; steps: Array&lt;{ id: string; label: string; description?: string; completed?: boolean }&gt; }&gt; &amp; { onStepComplete?: (stepId: string, completed: boolean) =&gt; void }
+      - Local state: Record&lt;string, boolean&gt; initialized from steps[].completed
+      - Render as a checklist: Fluent v9 Checkbox for each step, label + optional description
+      - On Checkbox change: update local state, call onStepComplete if provided
+      - Use makeStyles.</step>
+    <step>Update src/client/shared/Spaarke.AI.Outputs/src/index.ts to export: StatusSummaryWidget, RecommendationWidget, ActionPlanWidget, CrossPaneLink, useDispatchCrossPaneLink, useCrossPaneSubscription, dispatchCrossPaneLink, subscribeToCrossPaneLinks, CrossPaneLinkEvent (type), CROSS_PANE_LINK_EVENT.</step>
+    <step>Run TypeScript compilation check: cd src/client/shared/Spaarke.AI.Outputs &amp;&amp; npx tsc --noEmit to confirm zero errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>cross-pane-events.ts exports CROSS_PANE_LINK_EVENT constant, CrossPaneLinkEvent interface, dispatchCrossPaneLink(), and subscribeToCrossPaneLinks() with correct TypeScript types.</criterion>
+    <criterion>useCrossPane.ts exports useDispatchCrossPaneLink and useCrossPaneSubscription hooks. useCrossPaneSubscription cleanup removes the event listener on unmount.</criterion>
+    <criterion>CrossPaneLink renders as an inline span with role="button" tabIndex={0}. Clicking or pressing Enter/Space dispatches a spaarke:cross-pane-link CustomEvent on document with the correct payload.</criterion>
+    <criterion>StatusSummaryWidget renders category rows with Fluent v9 status icons colored via status color tokens (success=green, warning=amber, error=red, info=neutral).</criterion>
+    <criterion>RecommendationWidget renders recommendations as Cards with priority Badge. "Apply" button is present only when onApply prop is provided.</criterion>
+    <criterion>ActionPlanWidget renders steps as Fluent v9 Checkboxes. Toggling a step updates local state and calls onStepComplete if provided.</criterion>
+    <criterion>All three widgets and all cross-pane exports are present in src/index.ts.</criterion>
+    <criterion>All widgets use makeStyles with Fluent v9 design tokens only — no hard-coded hex colors.</criterion>
+    <criterion>Widget files 1-8 are NOT modified or created by this task.</criterion>
+    <criterion>TypeScript compilation passes with zero errors (npx tsc --noEmit).</criterion>
+  </acceptance-criteria>
+</task>

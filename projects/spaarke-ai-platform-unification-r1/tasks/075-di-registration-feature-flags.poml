@@ -1,0 +1,79 @@
+<task id="AIPU-075" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>DI Registrations + Feature Flags for all Phase 2 services</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>7D</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, api, di</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-060, AIPU-061, AIPU-070, AIPU-071, AIPU-072</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire all Phase 2 services into DI in AiModule.cs: AgentServiceClient (Singleton), AgentServiceNodeExecutor (INodeExecutor Singleton), AgentServiceOptions, CodeInterpreterOptions, BingGroundingOptions — each with ValidateDataAnnotations().ValidateOnStart(). Then count ALL non-framework DI registrations in AiModule.cs and confirm the total does not exceed 15 (ADR-010). If it would exceed 15, escalate immediately with a list of candidates to convert from Singleton to factory pattern or to merge.
+  </prompt>
+
+  <role>Senior .NET backend developer with DI architecture experience</role>
+
+  <goal>
+    AiModule.cs updated with all Phase 2 service registrations, all options classes bound with ValidateOnStart, total non-framework registration count verified at or below 15, and dotnet build passing with zero errors.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/CodeInterpreterOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/BingGroundingOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AgentServiceNodeExecutor.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentServiceRoutingMiddleware.cs</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-010">HARD LIMIT: total non-framework DI registrations in AiModule.cs MUST NOT exceed 15; count carefully and report the count in a code comment in AiModule.cs; if adding Phase 2 would breach 15, STOP and escalate to human</constraint>
+    <constraint source="ADR-018">All options classes MUST use .ValidateDataAnnotations().ValidateOnStart() — options that fail validation must crash the app at startup, not at runtime</constraint>
+    <constraint source="ADR-013">Do NOT remove or modify any existing service registrations — this is additive only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+    <patterns>
+      <pattern name="Options registration pattern" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs">
+        Read AiModule.cs to find the existing options registration pattern: services.AddOptions&lt;T&gt;().BindConfiguration(section).ValidateDataAnnotations().ValidateOnStart()
+      </pattern>
+      <pattern name="Registration count tracking" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs">
+        Look for any existing comment tracking the registration count; if absent, add one after completing this task
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read AiModule.cs in full to understand all existing registrations and count current non-framework registrations</step>
+    <step>Document the current count as a baseline — list each registration by service type</step>
+    <step>Calculate how many new Phase 2 registrations will be added: AgentServiceClient (1), AgentServiceNodeExecutor as INodeExecutor (1), AgentServiceOptions (1), CodeInterpreterOptions (1), BingGroundingOptions (1), AgentServiceRoutingMiddleware (1) = up to 6 new; determine if any were already added by earlier tasks in this wave</step>
+    <step>If baseline + new Phase 2 registrations would exceed 15: STOP; create a note in current-task.md listing the breach and candidate services for consolidation; request human decision before proceeding</step>
+    <step>If within limit: add AgentServiceOptions binding — services.AddOptions&lt;AgentServiceOptions&gt;().BindConfiguration("AiServices:AgentService").ValidateDataAnnotations().ValidateOnStart()</step>
+    <step>Add CodeInterpreterOptions binding — services.AddOptions&lt;CodeInterpreterOptions&gt;().BindConfiguration("AiServices:CodeInterpreter").ValidateDataAnnotations().ValidateOnStart()</step>
+    <step>Add BingGroundingOptions binding — services.AddOptions&lt;BingGroundingOptions&gt;().BindConfiguration("AiServices:BingGrounding").ValidateDataAnnotations().ValidateOnStart()</step>
+    <step>Add services.AddSingleton&lt;AgentServiceClient&gt;()</step>
+    <step>Add services.AddSingleton&lt;INodeExecutor, AgentServiceNodeExecutor&gt;()</step>
+    <step>Add AgentServiceRoutingMiddleware to the chat pipeline builder (wherever other middleware is wired — follow existing pattern)</step>
+    <step>Add a comment block at the end of AiModule.cs: // DI Registration Count: [N] / 15 non-framework registrations — listing each one by name</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ and confirm zero errors</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>AiModule.cs contains registrations for AgentServiceOptions, CodeInterpreterOptions, BingGroundingOptions — each with ValidateDataAnnotations().ValidateOnStart()</criterion>
+    <criterion>AgentServiceClient registered as Singleton</criterion>
+    <criterion>AgentServiceNodeExecutor registered as INodeExecutor Singleton</criterion>
+    <criterion>AgentServiceRoutingMiddleware wired into chat pipeline</criterion>
+    <criterion>Comment block at end of AiModule.cs listing all non-framework registrations and total count (N / 15)</criterion>
+    <criterion>Total non-framework registration count is 15 or fewer</criterion>
+    <criterion>No existing registrations removed or modified</criterion>
+    <criterion>dotnet build passes with zero errors</criterion>
+  </acceptance-criteria>
+</task>
