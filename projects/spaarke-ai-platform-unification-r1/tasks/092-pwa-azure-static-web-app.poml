@@ -1,0 +1,90 @@
+<task id="AIPU-092" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>PWA deployment via Azure Static Web App — desktop-like Spaarke AI experience</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>9B</wave>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>infrastructure, frontend, pwa</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-091</dependencies>
+  </metadata>
+
+  <prompt>
+    Deploy the Spaarke AI Code Page as an Azure Static Web App with PWA support, giving
+    users a desktop-like "installed app" experience. The same Vite codebase produces two
+    output targets: (1) single-file HTML for Dataverse web resource (existing), (2) standard
+    SPA with manifest.json + service worker for the Static Web App.
+
+    PWA features:
+    - manifest.json with app name "Spaarke AI", icons, theme color, display: "standalone"
+    - Service worker for shell caching (app shell loads offline, API calls require network)
+    - "Install" prompt on supported browsers
+    - Custom domain: ai.spaarke.com (or customer-specific domain for BYOK)
+
+    Build pipeline:
+    - Vite config: add a second build mode (`npm run build:swa`) that outputs standard SPA
+      (no viteSingleFile — separate JS/CSS chunks for cache efficiency)
+    - Add manifest.json to public/ directory
+    - Add service-worker.js using workbox-webpack-plugin or vite-plugin-pwa
+
+    Auth:
+    - Static Web App has no Xrm context — always uses the /api/config/client fallback (task 091)
+    - MSAL redirect flow in top frame (same as task 091 top-frame path)
+    - BFF API is the same backend — just accessed from a different origin
+    - CORS: add Static Web App domain to BFF CORS allowlist
+
+    Infrastructure:
+    - Azure Static Web App resource (Bicep template)
+    - Custom domain configuration
+    - GitHub Actions deploy (or manual deploy via az staticwebapp)
+
+    Research reference: projects/spaarke-ai-platform-unification-r1/notes/distribution-research.md
+    Key constraint: Service worker MUST NOT cache /api/* requests (NetworkOnly strategy).
+  </prompt>
+
+  <role>Senior frontend/DevOps developer with PWA, Azure Static Web Apps, and Vite experience</role>
+
+  <goal>
+    Users can install "Spaarke AI" as a desktop app (PWA) from a dedicated URL.
+    App shell loads instantly from cache. API calls go to the same BFF.
+    Installable on Windows, macOS, ChromeOS, and mobile.
+  </goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/vite.config.ts</file>
+    <file>src/solutions/SpaarkeAi/package.json</file>
+    <file>src/solutions/SpaarkeAi/index.html</file>
+    <file>infrastructure/</file>
+    <file>projects/spaarke-ai-platform-unification-r1/notes/distribution-research.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="research">Service worker MUST use NetworkOnly for /api/* routes — never cache API responses</constraint>
+    <constraint source="research">Do NOT register a service worker under the Dataverse-hosted URL — CSP blocks it</constraint>
+    <constraint source="project">Same React 19 codebase — single source, two build targets</constraint>
+    <constraint source="ADR-021">PWA theme_color must use Fluent v9 brand color token value</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Research: confirm vite-plugin-pwa compatibility with React 19 + current Vite version</step>
+    <step order="2">Add manifest.json to public/ with Spaarke AI branding and icons</step>
+    <step order="3">Configure vite-plugin-pwa with workbox (NetworkOnly for /api/*, CacheFirst for assets)</step>
+    <step order="4">Add `build:swa` script to package.json (standard SPA output, no singlefile)</step>
+    <step order="5">Create Bicep template for Azure Static Web App resource</step>
+    <step order="6">Add BFF CORS configuration for the Static Web App domain</step>
+    <step order="7">Create deploy script (az staticwebapp deploy or GitHub Actions workflow)</step>
+    <step order="8">Test: install as PWA on desktop, verify offline shell + online API</step>
+    <step order="9">Test: BFF CORS allows requests from Static Web App origin</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>npm run build:swa produces standard SPA with manifest.json + service worker</criterion>
+    <criterion>Azure Static Web App deployed and accessible at configured domain</criterion>
+    <criterion>Browser shows "Install" prompt on supported platforms</criterion>
+    <criterion>Installed PWA opens as standalone window (no browser chrome)</criterion>
+    <criterion>App shell loads from cache when offline; shows "offline" state for API features</criterion>
+    <criterion>API calls work correctly with BFF CORS configured</criterion>
+    <criterion>Existing Dataverse web resource build (npm run build) is unaffected</criterion>
+  </acceptance-criteria>
+</task>
