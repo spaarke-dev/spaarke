@@ -33,12 +33,12 @@ public static class ConfigEndpoints
     /// Registers the anonymous client configuration endpoint.
     /// Called from EndpointMappingExtensions.MapSpaarkeEndpoints().
     /// </summary>
-    public static IEndpointRouteBuilder MapConfigEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapMsalConfigEndpoints(this IEndpointRouteBuilder app)
     {
         // GET /api/config/client — anonymous, returns MSAL client config
         app.MapGet("/api/config/client", GetClientConfig)
             .AllowAnonymous()
-            .WithName("GetClientConfig")
+            .WithName("GetMsalClientConfig")
             .WithTags("Configuration")
             .WithSummary("Get non-sensitive client configuration for MSAL bootstrap")
             .WithDescription(

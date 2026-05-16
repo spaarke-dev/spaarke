@@ -34,7 +34,7 @@ public static class EndpointMappingExtensions
     private static void MapHealthEndpoints(WebApplication app)
     {
         // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
-        app.MapConfigEndpoints();
+        app.MapMsalConfigEndpoints();
 
         app.MapHealthChecks("/healthz").AllowAnonymous();
 
