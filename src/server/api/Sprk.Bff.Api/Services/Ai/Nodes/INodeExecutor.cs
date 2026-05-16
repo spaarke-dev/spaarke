@@ -132,5 +132,8 @@ public enum ActionType
     CreateNotification = 50,
 
     /// <summary>Execute a FetchXML query against Dataverse and return results.</summary>
-    QueryDataverse = 51
+    QueryDataverse = 51,
+
+    /// <summary>Routes the playbook node to Azure AI Foundry Agent Service (Phase 2).</summary>
+    AgentService = 60
 }

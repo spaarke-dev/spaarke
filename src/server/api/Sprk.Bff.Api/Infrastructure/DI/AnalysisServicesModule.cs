@@ -147,6 +147,17 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
+
+        // AgentServiceNodeExecutor — ActionType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
+        // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.AgentServiceClient>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AgentServiceNodeExecutor>();
+
+        // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
+        // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
+        // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory
+        // following the WebSearchTools pattern (ADR-010: no unnecessary DI registrations).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterBridge>();
     }
 
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)

@@ -1,7 +1,7 @@
 <task id="AIPU-072" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>AgentServiceRoutingMiddleware — intent-based routing between direct pipeline and Agent Service</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <wave>7</wave>
     <estimated-effort>3 hours</estimated-effort>

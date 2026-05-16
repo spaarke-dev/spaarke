@@ -1,7 +1,7 @@
 <task id="AIPU-070" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>CodeInterpreterTools — analyze-data and generate-chart tools via Foundry Code Interpreter sandbox</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <wave>7</wave>
     <estimated-effort>4 hours</estimated-effort>

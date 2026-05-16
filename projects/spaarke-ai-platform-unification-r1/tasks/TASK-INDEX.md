@@ -66,16 +66,16 @@
 #### Wave 6: Agent Service Foundation (PARALLEL - 3 agents)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 060 | AgentServiceClient (Azure.AI.Projects SDK) | :white_large_square: | 4h | 056 |
-| 061 | AgentServiceNodeExecutor (AT 60) | :white_large_square: | 3h | 056 |
-| 062 | Agent definition + Foundry infrastructure | :white_large_square: | 2h | none |
+| 060 | AgentServiceClient (Azure.AI.Projects SDK) | ✅ | 4h | 056 |
+| 061 | AgentServiceNodeExecutor (AT 60) | ✅ | 3h | 056 |
+| 062 | Agent definition + Foundry infrastructure | ✅ | 2h | none |
 
 #### Wave 7: Tools + Routing (PARALLEL - 3 agents)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 070 | CodeInterpreterTools.cs + CodeInterpreterBridge | :white_large_square: | 3h | 060 |
+| 070 | CodeInterpreterTools.cs + CodeInterpreterBridge | :white_check_mark: | 3h | 060 |
 | 071 | LegalResearchTools.cs (Bing Grounding) | :white_large_square: | 3h | 060 |
-| 072 | AgentServiceRoutingMiddleware | :white_large_square: | 3h | 060 |
+| 072 | AgentServiceRoutingMiddleware | :white_check_mark: | 3h | 060 |
 
 #### Wave 7D: Phase 2 Integration (SERIAL)
 | # | Task | Status | Est. | Depends |

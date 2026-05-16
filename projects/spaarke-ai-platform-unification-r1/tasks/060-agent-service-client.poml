@@ -1,7 +1,7 @@
 <task id="AIPU-060" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>AgentServiceClient — Azure AI Projects SDK wrapper for thread/run operations</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <wave>6</wave>
     <estimated-effort>4 hours</estimated-effort>

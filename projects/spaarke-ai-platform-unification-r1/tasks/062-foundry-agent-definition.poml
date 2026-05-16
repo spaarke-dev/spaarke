@@ -1,7 +1,7 @@
 <task id="AIPU-062" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Foundry Agent Definition — Spaarke Legal AI Agent with BFF tools registered</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <wave>6</wave>
     <estimated-effort>3 hours</estimated-effort>
