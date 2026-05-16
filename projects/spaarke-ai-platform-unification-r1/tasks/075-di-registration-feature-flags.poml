@@ -1,7 +1,7 @@
 <task id="AIPU-075" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>DI Registrations + Feature Flags for all Phase 2 services</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <wave>7D</wave>
     <estimated-effort>2 hours</estimated-effort>

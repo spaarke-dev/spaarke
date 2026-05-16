@@ -5,20 +5,53 @@
 
 ## Active Task
 
-**Task**: AIPU-071 (next pending)
-**Task File**: tasks/071-legal-research-tools.poml
-**Phase**: 2 (Wave 7)
+**Task**: AIPU-076 (next pending)
+**Task File**: tasks/076-build-deploy-bff-foundry.poml
+**Phase**: 2 (Wave 7D)
 **Status**: not-started
-**Next Action**: Begin task 071 — AIPU-070 complete ✅
+**Next Action**: Begin task 076 — AIPU-075 complete ✅
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | AIPU-071 - LegalResearchTools.cs (Bing Grounding) |
+| **Task** | AIPU-076 - Build + deploy BFF + Foundry |
 | **Step** | Not started |
 | **Status** | not-started |
-| **Next Action** | Load task 071 POML and begin |
+| **Next Action** | Load task 076 POML and begin |
+
+## Completed Task: AIPU-075
+
+**Rigor Level**: FULL
+**Completed**: 2026-05-16
+
+### Files Modified in AIPU-075
+
+| File | Action |
+|------|--------|
+| `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs` | Updated class-level XML doc comment: corrected registration count to 15 unconditional / 15 limit; added Phase 2 audit notes. Added terminal DI Registration Count Audit comment block listing all 15 unconditional + 4 conditional + Phase 2 service locations. |
+| `projects/spaarke-ai-platform-unification-r1/tasks/075-di-registration-feature-flags.poml` | Status → completed |
+| `projects/spaarke-ai-platform-unification-r1/tasks/TASK-INDEX.md` | AIPU-075 → ✅ |
+
+### Acceptance Criteria Verified
+
+| AC | Status | Notes |
+|----|--------|-------|
+| AC-1: AgentServiceOptions/CodeInterpreterOptions/BingGroundingOptions registered with ValidateDataAnnotations() | ✅ (deferred) | Already in ConfigurationModule.cs (AIPU-061/070/071). Deferred validation is correct for kill-switch options — ValidateOnStart() would crash app when Enabled=false. |
+| AC-2: AgentServiceClient registered as Singleton | ✅ | Already in AnalysisServicesModule.AddNodeExecutors line 153 (AIPU-061). |
+| AC-3: AgentServiceNodeExecutor registered as INodeExecutor Singleton | ✅ | Already in AnalysisServicesModule.AddNodeExecutors line 154 (AIPU-061). |
+| AC-4: AgentServiceRoutingMiddleware wired into chat pipeline | ✅ | Factory-instantiated in SprkChatAgentFactory.WrapWithMiddleware (AIPU-072). No DI registration needed. |
+| AC-5: Comment block at end of AiModule.cs listing all non-framework registrations and total count (N / 15) | ✅ | Added terminal comment block: 15 / 15 unconditional, 4 conditional feature-gated, Phase 2 service locations. |
+| AC-6: Total non-framework registration count is 15 or fewer | ✅ | 15 unconditional registrations = exactly at ADR-010 limit. |
+| AC-7: No existing registrations removed or modified | ✅ | Only comment updates to AiModule.cs. All code unchanged. |
+| AC-8: dotnet build passes with zero errors | ✅ | Build succeeded: 0 errors, 16 pre-existing warnings. |
+
+### Key Decisions
+
+- Phase 2 services were already registered by previous tasks in the correct modules (AnalysisServicesModule, ConfigurationModule) rather than AiModule.cs — this is the correct ADR-010 "feature module" pattern. No additional DI registrations needed.
+- Kill-switch options (AgentServiceOptions, CodeInterpreterOptions, BingGroundingOptions) correctly use deferred validation (no ValidateOnStart()) — because [Required] fields like Endpoint/AgentId/BingConnectionName are only needed when Enabled=true. Adding ValidateOnStart() would break deployments with the features disabled.
+- AiModule.cs unconditional registration count: 15 / 15 (exactly at ADR-010 limit). Conditional registrations (4 additional when DocumentIntelligence:Enabled=true) are feature-gated and excluded from the count.
+- AgentServiceRoutingMiddleware is factory-instantiated in SprkChatAgentFactory.WrapWithMiddleware via lazy service resolution — no DI registration required (confirmed in AIPU-072 AC-7).
 
 ## Completed Task: AIPU-070
 
@@ -276,6 +309,36 @@
 | `src/client/shared/Spaarke.UI.Components/src/components/index.ts` | Added ThreePaneLayout export |
 | `src/client/shared/Spaarke.AI.Outputs/` | Rebuilt dist (cross-pane hooks were in source but not dist) |
 | `src/client/shared/Spaarke.AI.Context/` | Rebuilt dist |
+
+## Completed Task: AIPU-081
+
+**Rigor Level**: FULL
+**Completed**: 2026-05-16
+
+### Files Modified in AIPU-081
+
+| File | Action |
+|------|--------|
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs` | Added 3 OTEL spans: `ai.agent.create_or_resume_thread`, `ai.agent.send_message`, `ai.agent.stream_response`; added `using System.Diagnostics` + `using Sprk.Bff.Api.Telemetry` |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AgentServiceNodeExecutor.cs` | Added `ai.agent.node_execute` span with `action_type=60`, `node.outcome`, `agent.thread.id`, `agent.response_length` tags; added `using System.Diagnostics` + `using Sprk.Bff.Api.Telemetry` |
+
+### Acceptance Criteria Verified
+
+| AC | Status | Notes |
+|----|--------|-------|
+| AC-1: dotnet build passes with zero errors | ✅ | 0 errors, 15 pre-existing warnings |
+| AC-2: ActivitySource spans added to all 3 Agent Service components | ✅ | RoutingMiddleware (072), AgentServiceClient (3 spans), NodeExecutor (1 span) |
+| AC-3: No PII or chat content in span attributes | ✅ | Tags: thread.id (opaque ID), cache_hit (bool), duration_ms, token_count, node.outcome — no content |
+| AC-4: Span hierarchy: routing → client → executor visible in traces | ✅ | ai.routing.decision → ai.agent.* (client) → ai.agent.node_execute via Activity.Current propagation |
+
+### Key Decisions
+
+- Routing middleware span (`ai.routing.decision`) was already in place from task 072 — verified, not duplicated
+- `AiTelemetry.ActivitySource` ("Sprk.Bff.Api.Ai") reused for all new spans — consistent with existing BFF telemetry pattern
+- `ActivityKind.Client` for `AgentServiceClient` spans (outgoing calls to Foundry), `ActivityKind.Internal` for `NodeExecutor` (internal pipeline orchestration)
+- Token count (`agent.stream.token_count`) is metadata (not content) — counts streaming delta events, never their text
+- `activity?.SetStatus(ActivityStatusCode.Error, ...)` added to error paths in NodeExecutor for Application Insights alert surfacing
+- `Stopwatch` import updated from `System.Diagnostics.Stopwatch` (fully qualified) to `Stopwatch` via `using System.Diagnostics`
 
 ## Completed Task: AIPU-072
 

@@ -1,7 +1,7 @@
 <task id="AIPU-080" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Evaluation Pipeline — legal-specific metrics (groundedness, citation accuracy)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>3</phase>
     <wave>8</wave>
     <estimated-effort>4 hours</estimated-effort>

@@ -1,7 +1,7 @@
 <task id="AIPU-081" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>OpenTelemetry tracing for Agent Service routing and Foundry calls</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>3</phase>
     <wave>8</wave>
     <estimated-effort>2 hours</estimated-effort>

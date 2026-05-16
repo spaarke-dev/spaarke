@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Foundry;
 
@@ -98,6 +100,12 @@ public sealed class AgentServiceClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         GuardEnabled();
+
+        // OTEL span: ai.agent.create_or_resume_thread
+        // ADR-015: tag only operation metadata — no tenant PII, no content.
+        using var activity = AiTelemetry.ActivitySource.StartActivity(
+            "ai.agent.create_or_resume_thread", ActivityKind.Client);
+
         await AcquireConcurrencyGateAsync(cancellationToken);
         try
         {
@@ -114,11 +122,15 @@ public sealed class AgentServiceClient : IDisposable
 
                 // Refresh sliding expiry on every access.
                 await SetThreadCacheAsync(cacheKey, cachedThreadId, cancellationToken);
+
+                // ADR-015: thread.id is an opaque identifier, not PII or content.
+                activity?.SetTag("agent.thread.id", cachedThreadId);
+                activity?.SetTag("agent.thread.cache_hit", true);
                 return cachedThreadId;
             }
 
             // Cache miss — create a new thread via the SDK.
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
             var response = await _agentsClient.Value
                 .CreateThreadAsync(cancellationToken: cancellationToken);
             sw.Stop();
@@ -129,6 +141,11 @@ public sealed class AgentServiceClient : IDisposable
             _logger.LogInformation(
                 "Created new Foundry thread: tenantId={TenantId}, threadId={ThreadId}, durationMs={DurationMs}",
                 tenantId, threadId, sw.ElapsedMilliseconds);
+
+            // ADR-015: thread.id is an opaque SDK-assigned identifier, not PII.
+            activity?.SetTag("agent.thread.id", threadId);
+            activity?.SetTag("agent.thread.cache_hit", false);
+            activity?.SetTag("agent.thread.created_ms", sw.ElapsedMilliseconds);
 
             await SetThreadCacheAsync(cacheKey, threadId, cancellationToken);
             return threadId;
@@ -155,10 +172,17 @@ public sealed class AgentServiceClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         GuardEnabled();
+
+        // OTEL span: ai.agent.send_message
+        // ADR-015: only thread.id and timing tagged — message content is never recorded.
+        using var activity = AiTelemetry.ActivitySource.StartActivity(
+            "ai.agent.send_message", ActivityKind.Client);
+        activity?.SetTag("agent.thread.id", threadId);
+
         await AcquireConcurrencyGateAsync(cancellationToken);
         try
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
 
             await _agentsClient.Value.CreateMessageAsync(
                 threadId,
@@ -172,6 +196,8 @@ public sealed class AgentServiceClient : IDisposable
             _logger.LogDebug(
                 "Sent user message to Foundry thread: threadId={ThreadId}, durationMs={DurationMs}",
                 threadId, sw.ElapsedMilliseconds);
+
+            activity?.SetTag("agent.send_message.duration_ms", sw.ElapsedMilliseconds);
         }
         finally
         {
@@ -200,12 +226,21 @@ public sealed class AgentServiceClient : IDisposable
     {
         GuardEnabled();
 
+        // OTEL span: ai.agent.stream_response
+        // Span covers the full streaming run lifecycle (thread creation → final token).
+        // ADR-015: only thread.id, run.id, and timing are tagged — token content is never recorded.
+        using var activity = AiTelemetry.ActivitySource.StartActivity(
+            "ai.agent.stream_response", ActivityKind.Client);
+        activity?.SetTag("agent.thread.id", threadId);
+        activity?.SetTag("agent.agent_id", _options.AgentId);
+
         // Acquire the semaphore before entering the streaming loop.
         // Held for the full stream duration to bound concurrent long-running Foundry runs.
         await AcquireConcurrencyGateAsync(cancellationToken);
 
         string? runId = null;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
+        var tokenCount = 0;
 
         try
         {
@@ -227,6 +262,8 @@ public sealed class AgentServiceClient : IDisposable
                 if (runId is null && update is RunUpdate runUpdate)
                 {
                     runId = runUpdate.Value.Id;
+                    // ADR-015: run.id is an opaque SDK-assigned identifier, not PII.
+                    activity?.SetTag("agent.run.id", runId);
                     _logger.LogDebug(
                         "Foundry run started: threadId={ThreadId}, runId={RunId}",
                         threadId, runId);
@@ -238,6 +275,7 @@ public sealed class AgentServiceClient : IDisposable
                     contentUpdate.TextAnnotation is null &&
                     !string.IsNullOrEmpty(contentUpdate.Text))
                 {
+                    tokenCount++;
                     yield return contentUpdate.Text;
                 }
             }
@@ -247,6 +285,11 @@ public sealed class AgentServiceClient : IDisposable
             _logger.LogInformation(
                 "Foundry streaming run completed: threadId={ThreadId}, runId={RunId}, durationMs={DurationMs}",
                 threadId, runId ?? "unknown", sw.ElapsedMilliseconds);
+
+            // ADR-015: token count is metadata (not content); duration is latency telemetry.
+            activity?.SetTag("agent.stream.duration_ms", sw.ElapsedMilliseconds);
+            activity?.SetTag("agent.stream.token_count", tokenCount);
+            activity?.SetTag("agent.stream.status", "completed");
         }
         finally
         {

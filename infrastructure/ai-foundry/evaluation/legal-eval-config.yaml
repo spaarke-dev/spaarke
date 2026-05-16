@@ -1,0 +1,78 @@
+# AI Foundry Evaluation Configuration for Spaarke Legal Domain Analysis
+# Extends the base eval-config.yaml with legal-specific metrics and thresholds.
+# Only legal-specific overrides are defined here; all unlisted base settings apply.
+#
+# ADR-014: Eval results retained 90 days per ADR-014, then purged from Foundry workspace.
+# ADR-015: NEVER log evaluation input/output content to application logs;
+#          results stored only in the designated AI Foundry evaluation results workspace.
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Evaluation.schema.json
+
+name: spaarke-legal-evaluation
+display_name: "Spaarke Legal Domain Quality Evaluation"
+description: "Evaluates the quality of legal analysis outputs with legal-specific metrics: groundedness (source-cited responses) and citation accuracy (correctly formatted case law and statute references). Extends the base analysis evaluation with legal-domain thresholds."
+
+# Legal-domain evaluation dataset (synthetic test cases — no real client data)
+dataset:
+  path: datasets/legal-eval-samples.jsonl
+  description: "Synthetic legal evaluation samples — jurisdiction-neutral, no real client names, matters, or documents"
+
+# Evaluation metrics to compute
+metrics:
+  # Built-in Foundry metric: Groundedness
+  # For legal analysis: measures whether the response cites verifiable sources
+  # and stays grounded in the provided legal context rather than hallucinating.
+  # Legal threshold is higher than the base (3.5/5) given the risk of legal hallucination.
+  - name: groundedness
+    description: "Measures how well the legal analysis is grounded in cited source documents and authoritative legal materials; penalises responses that assert legal conclusions without traceable support"
+    type: gpt
+    model: gpt-4o-mini
+    threshold: 0.85  # Scale 0.0-1.0; minimum 85% groundedness for legal outputs (FR-19)
+
+  # Custom metric: Citation Accuracy
+  # Checks whether cited cases and statutes use correct, recognised citation formats.
+  # Hallucinated or malformed citations undermine the reliability of legal advice.
+  - name: citation_accuracy
+    description: "Checks if cited legal cases (e.g., 347 U.S. 483) and statutes (e.g., 42 U.S.C. § 1983) use recognised, correctly-formatted citation styles; score 1.0 = all valid, 0.5 = partial, 0.0 = expected but absent or all malformed"
+    type: custom
+    script: metrics/citation_accuracy.py
+    threshold: 0.80  # 80% citation accuracy minimum for legal outputs (FR-19)
+
+  # Retain base custom metrics for completeness and format checks
+  - name: format_compliance
+    description: "Checks if output follows requested format (markdown/json)"
+    type: custom
+    script: metrics/format_compliance.py
+    threshold: 0.9
+
+  - name: completeness
+    description: "Checks if all required sections are present"
+    type: custom
+    script: metrics/completeness.py
+    threshold: 0.85
+
+# Aggregation settings — same as base config
+aggregation:
+  method: mean
+  include_variance: true
+  include_range: true
+
+# Alert thresholds — legal analysis uses stricter regression monitoring
+alerts:
+  on_threshold_breach: true
+  on_regression:
+    enabled: true
+    percentage: 5  # Tighter than base (10%) — legal quality regressions must be caught early
+
+# Data governance (ADR-014, ADR-015)
+data_governance:
+  # Evaluation results stored only in designated AI Foundry evaluation results workspace
+  results_workspace: sprkspaarkedev-aif-proj
+  # Retention: 90 days from run date, then automatically purged per ADR-014
+  retention_days: 90
+  # Input/output content is NEVER written to application logs (ADR-015)
+  log_content: false
+
+# Baseline comparison (optional — set after first legal baseline run)
+baseline:
+  path: baselines/legal-v1.0-baseline.json
+  compare_enabled: false  # Enable after first baseline run establishes legal-domain benchmark

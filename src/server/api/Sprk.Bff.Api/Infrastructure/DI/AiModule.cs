@@ -13,14 +13,16 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 /// <remarks>
 /// Baseline DI count before this module: 89 (per ADR-010 tracking comment in CLAUDE.md).
-/// This module adds 12 non-framework singleton/scoped registrations:
-///   1. AddChatClient&lt;IChatClient&gt;                       — ADR-010 (AIPL-050) — Azure OpenAI IChatClient bridge
-///   2. AddSingleton&lt;LlamaParseClient&gt;                  — ADR-010 (AIPL-012)
-///   3. AddSingleton&lt;DocumentIntelligenceService&gt;        — ADR-010 (AIPL-012)
-///   4. AddSingleton&lt;DocumentParserRouter&gt;               — ADR-010 (AIPL-012)
-///   5. AddSingleton&lt;SemanticDocumentChunker&gt;            — ADR-010 (AIPL-011)
-///   6. AddSingleton&lt;RagQueryBuilder&gt;                    — ADR-010 (AIPL-010)
-///   7. AddSingleton&lt;RagIndexingPipeline&gt;               — ADR-010 (AIPL-013)
+/// This module adds non-framework singleton/scoped registrations (ADR-010: ≤15 unconditional):
+///
+/// UNCONDITIONAL (always registered) — 15 total:
+///   1. AddKeyedSingleton&lt;IChatClient&gt;("raw")            — ADR-010 (task 071) — Raw Azure OpenAI client (pre-function-invocation) for compound intent detection
+///   2. AddChatClient&lt;IChatClient&gt;                       — ADR-010 (AIPL-050) — Azure OpenAI IChatClient bridge (UseFunctionInvocation pipeline)
+///   3. AddSingleton&lt;LlamaParseClient&gt;                  — ADR-010 (AIPL-012)
+///   4. AddSingleton&lt;DocumentIntelligenceService&gt;        — ADR-010 (AIPL-012)
+///   5. AddSingleton&lt;DocumentParserRouter&gt;               — ADR-010 (AIPL-012)
+///   6. AddSingleton&lt;SemanticDocumentChunker&gt;            — ADR-010 (AIPL-011)
+///   7. AddSingleton&lt;RagQueryBuilder&gt;                    — ADR-010 (AIPL-010)
 ///   8. AddSingleton&lt;SprkChatAgentFactory&gt;               — ADR-010 (AIPL-051) — Agent factory (singleton: IChatClient is thread-safe)
 ///   9. AddScoped&lt;IChatContextProvider, PlaybookChatContextProvider&gt; — ADR-010 (AIPL-051) — Scoped: resolves Dataverse context per request
 ///  10. AddScoped&lt;IChatDataverseRepository, ChatDataverseRepository&gt; — ADR-010 (AIPL-052) — Scoped: Dataverse persistence for sessions + messages
@@ -28,11 +30,21 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///  12. AddScoped&lt;ChatHistoryManager&gt;                    — ADR-010 (AIPL-052) — Scoped: message history + summarisation
 ///  13. AddScoped&lt;ChatContextMappingService&gt;             — ADR-010 (AIPL-053) — Scoped: context mapping resolution (Redis + Dataverse)
 ///  14. AddScoped&lt;AnalysisChatContextResolver&gt;          — ADR-010 (task 020) — Scoped: analysis context resolution (Redis + Dataverse)
-///  15. AddKeyedSingleton&lt;IChatClient&gt;("raw")            — ADR-010 (task 071) — Raw Azure OpenAI client (pre-function-invocation) for compound intent detection
-///  16. AddScoped&lt;PendingPlanManager&gt;                    — ADR-010 (task 071) — Scoped: pending plan Redis storage (30-min TTL, plan:pending key)
+///  15. AddScoped&lt;PendingPlanManager&gt;                    — ADR-010 (task 071) — Scoped: pending plan Redis storage (30-min TTL, plan:pending key)
+///
+/// CONDITIONAL (DocumentIntelligence:Enabled = true) — 4 additional feature-gated registrations:
+///  16. AddSingleton&lt;RagIndexingPipeline&gt;               — ADR-010 (AIPL-013) — conditional: requires SearchIndexClient + IOpenAiClient
+///  17. AddSingleton&lt;ReferenceIndexingService&gt;          — ADR-010 (AIRA-011) — conditional: golden reference knowledge indexing
+///  18. AddSingleton&lt;ReferenceRetrievalService&gt;         — ADR-010 (AIRA-013) — conditional: reference knowledge retrieval
+///  19. AddHostedService&lt;PlaybookIndexingBackgroundService&gt; — ADR-001 (no Azure Functions) — conditional: hosted service
+///
 /// Plus 1 framework registration: AddHttpClient&lt;LlamaParseClient&gt; (not counted per ADR-010)
 ///
-/// DI count after: 104 (AnalysisChatContextResolver added in task 020; raw IChatClient + PendingPlanManager added in task 071).
+/// Phase 2 services (AgentServiceClient, AgentServiceNodeExecutor, CodeInterpreterBridge, options)
+/// are registered in AnalysisServicesModule and ConfigurationModule per the feature module pattern
+/// (ADR-010) — they are NOT duplicated here (AIPU-075 audit: 2026-05-16).
+///
+/// DI count: 15 unconditional / 15 limit (ADR-010 compliant). See bottom of file for full registration list.
 ///
 /// Prerequisites (must already be registered before calling AddAiModule):
 /// - <c>ITextExtractor</c> — registered in Program.cs when <c>DocumentIntelligence:Enabled = true</c>
@@ -231,3 +243,43 @@ public static class AiModule
         return services;
     }
 }
+
+// =============================================================================
+// DI REGISTRATION COUNT AUDIT — AiModule.cs (AIPU-075, 2026-05-16)
+// ADR-010 Limit: 15 non-framework registrations per module
+// =============================================================================
+// UNCONDITIONAL REGISTRATIONS — 15 / 15
+// -----------------------------------------------------------------------------
+//  1. AddKeyedSingleton<IChatClient>("raw")                — raw OpenAI client (task 071)
+//  2. AddChatClient<IChatClient>                           — OpenAI pipeline client (AIPL-050)
+//  3. AddSingleton<LlamaParseClient>                       — document parser client (AIPL-012)
+//  4. AddSingleton<DocumentIntelligenceService>            — Doc Intel wrapper (AIPL-012)
+//  5. AddSingleton<DocumentParserRouter>                   — parser router (AIPL-012)
+//  6. AddSingleton<SemanticDocumentChunker>                — clause-aware chunker (AIPL-011)
+//  7. AddSingleton<RagQueryBuilder>                        — metadata-aware RAG query builder (AIPL-010)
+//  8. AddSingleton<SprkChatAgentFactory>                   — chat agent factory (AIPL-051)
+//  9. AddScoped<IChatContextProvider, PlaybookChatContextProvider> — playbook context (AIPL-051)
+// 10. AddScoped<IChatDataverseRepository, ChatDataverseRepository> — chat persistence (AIPL-052)
+// 11. AddScoped<ChatSessionManager>                        — session lifecycle (AIPL-052)
+// 12. AddScoped<ChatHistoryManager>                        — message history (AIPL-052)
+// 13. AddScoped<ChatContextMappingService>                 — context mapping (AIPL-053)
+// 14. AddScoped<AnalysisChatContextResolver>               — analysis context (task 020)
+// 15. AddScoped<PendingPlanManager>                        — pending plan Redis storage (task 071)
+// -----------------------------------------------------------------------------
+// CONDITIONAL (DocumentIntelligence:Enabled=true) — feature-gated, excluded from ADR-010 limit
+// -----------------------------------------------------------------------------
+// 16. AddSingleton<RagIndexingPipeline>                    — RAG indexing pipeline (AIPL-013)
+// 17. AddSingleton<ReferenceIndexingService>               — reference knowledge indexing (AIRA-011)
+// 18. AddSingleton<ReferenceRetrievalService>              — reference knowledge retrieval (AIRA-013)
+// 19. AddHostedService<PlaybookIndexingBackgroundService>  — hosted indexing worker (ADR-001)
+// -----------------------------------------------------------------------------
+// PHASE 2 SERVICES — registered in appropriate feature modules, not here (AIPU-075 audit)
+// -----------------------------------------------------------------------------
+// AgentServiceClient          → AnalysisServicesModule.AddNodeExecutors (AIPU-061)
+// AgentServiceNodeExecutor    → AnalysisServicesModule.AddNodeExecutors as INodeExecutor (AIPU-061)
+// CodeInterpreterBridge       → AnalysisServicesModule.AddNodeExecutors (AIPU-070)
+// AgentServiceOptions         → ConfigurationModule (AIPU-061, deferred validation — kill-switch option)
+// CodeInterpreterOptions      → ConfigurationModule (AIPU-070, deferred validation — kill-switch option)
+// BingGroundingOptions        → ConfigurationModule (AIPU-071, deferred validation — kill-switch option)
+// AgentServiceRoutingMiddleware → SprkChatAgentFactory.WrapWithMiddleware, factory-instantiated (AIPU-072)
+// =============================================================================

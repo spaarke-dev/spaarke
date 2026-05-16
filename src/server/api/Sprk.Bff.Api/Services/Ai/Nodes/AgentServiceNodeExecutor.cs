@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Foundry;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -101,6 +103,15 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
     {
         var startedAt = DateTimeOffset.UtcNow;
 
+        // OTEL span: ai.agent.node_execute — executor-level span that is a child of
+        // the routing middleware span (ai.routing.decision) per FR-20 span hierarchy.
+        // ADR-015: only node.id, action_type, and outcome are tagged — no prompt content.
+        using var activity = AiTelemetry.ActivitySource.StartActivity(
+            "ai.agent.node_execute", ActivityKind.Internal);
+        activity?.SetTag("node.id", context.Node.Id.ToString());
+        activity?.SetTag("node.name", context.Node.Name);
+        activity?.SetTag("action_type", 60); // ActionType.AgentService = 60
+
         _logger.LogDebug(
             "Executing AgentService node {NodeId} ({NodeName})",
             context.Node.Id,
@@ -112,6 +123,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
             var validation = Validate(context);
             if (!validation.IsValid)
             {
+                activity?.SetTag("node.outcome", "validation_failed");
                 return NodeOutput.Error(
                     context.Node.Id,
                     context.Node.OutputVariable,
@@ -131,6 +143,9 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
 
             // Create or resume a cached thread for this tenant (ADR-009: Redis-first)
             var threadId = await _agentServiceClient.CreateOrResumeThreadAsync(tenantId, cancellationToken);
+
+            // ADR-015: thread.id is an opaque SDK identifier, not PII.
+            activity?.SetTag("agent.thread.id", threadId);
 
             // Send the user message to the thread
             await _agentServiceClient.SendMessageAsync(threadId, prompt, cancellationToken);
@@ -154,6 +169,10 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 "AgentService node {NodeId} completed — thread {ThreadId}, response length {Length}",
                 context.Node.Id, threadId, responseText.Length);
 
+            // ADR-015: response length is metadata (not content).
+            activity?.SetTag("node.outcome", "success");
+            activity?.SetTag("agent.response_length", responseText.Length);
+
             return NodeOutput.Ok(
                 context.Node.Id,
                 context.Node.OutputVariable,
@@ -167,6 +186,8 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 "AgentService node {NodeId} rejected — concurrency limit exceeded: {Message}",
                 context.Node.Id, ex.Message);
 
+            activity?.SetTag("node.outcome", "concurrency_exceeded");
+            activity?.SetStatus(ActivityStatusCode.Error, "ConcurrencyLimitExceeded");
             return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,
@@ -180,6 +201,8 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 "AgentService node {NodeId} skipped — feature disabled: {Message}",
                 context.Node.Id, ex.Message);
 
+            activity?.SetTag("node.outcome", "feature_disabled");
+            activity?.SetStatus(ActivityStatusCode.Error, "FeatureDisabled");
             return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,
@@ -193,6 +216,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 "AgentService node {NodeId} was cancelled",
                 context.Node.Id);
 
+            activity?.SetTag("node.outcome", "cancelled");
             return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,
@@ -207,6 +231,8 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 "AgentService node {NodeId} failed: {ErrorMessage}",
                 context.Node.Id, ex.Message);
 
+            activity?.SetTag("node.outcome", "error");
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,

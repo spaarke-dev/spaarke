@@ -80,7 +80,7 @@
 #### Wave 7D: Phase 2 Integration (SERIAL)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 075 | DI registration + options classes + feature flags | :white_large_square: | 2h | 060-072 |
+| 075 | DI registration + options classes + feature flags | ✅ | 2h | 060-072 |
 | 076 | Build + deploy BFF + Foundry | :white_large_square: | 2h | 075 |
 | 077 | Phase 2 integration testing (FR-13 to FR-18) | :white_large_square: | 3h | 076 |
 
@@ -89,8 +89,8 @@
 #### Wave 8: Evaluation + Telemetry (PARALLEL - 2 agents)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 080 | Evaluation pipeline with legal metrics | :white_large_square: | 3h | 077 |
-| 081 | OpenTelemetry tracing for Foundry calls | :white_large_square: | 2h | 077 |
+| 080 | Evaluation pipeline with legal metrics | ✅ | 3h | 077 |
+| 081 | OpenTelemetry tracing for Foundry calls | ✅ | 2h | 077 |
 
 #### Wave 9: Final Integration + Wrap-up (SERIAL)
 | # | Task | Status | Est. | Depends |
