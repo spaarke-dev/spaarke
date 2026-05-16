@@ -165,10 +165,12 @@ public sealed class SprkChatAgentFactory
         }
 
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
-        // When no playbook is specified (generic chat mode), use all capabilities as default.
+        // When no playbook is specified (generic/standalone chat mode), use core capabilities only.
+        // This prevents tools with unconfigured dependencies (LegalResearch, CodeInterpreter)
+        // from crashing the entire tool pipeline when their options aren't set.
         var capabilities = playbookId.HasValue
             ? await GetPlaybookCapabilitiesAsync(scope.ServiceProvider, playbookId.Value, cancellationToken)
-            : (IReadOnlySet<string>)new HashSet<string>(PlaybookCapabilities.All);
+            : (IReadOnlySet<string>)new HashSet<string>(PlaybookCapabilities.CoreCapabilities);
 
         // Create a shared CitationContext for search tools to populate with source metadata.
         // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
