@@ -1,12 +1,20 @@
 ---
 description: Clean up local development environment caches (Azure CLI, NuGet, npm, Git credentials) to resolve authentication and performance issues
+tags: [maintenance, cleanup, cache, azure-cli, nuget, npm, git, dev-environment]
+techStack: [powershell, azure-cli, dotnet, npm, git]
+appliesTo: ["clean up dev", "clear caches", "fix auth issues", "azure cli issues", "dev environment cleanup"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # dev-cleanup
 
 > **Category**: Operations / Maintenance
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Cleanup runs against per-machine ephemeral state; no canonical reference applies.
+> **Inventory anomaly #6 RESOLVED**: Frontmatter was minimal (description + alwaysApply only) before 2026-05-16. Tags, techStack, and appliesTo now added.
 
 ---
 
@@ -312,3 +320,15 @@ pac auth create --environment "https://yourorg.crm.dynamics.com"
 - After Azure CLI cleanup, remind user to set their default subscription
 - Package cache cleanup (`-NuGet -Npm`) is safe and doesn't require re-auth
 - Warn user that cleanup will close active Azure sessions
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Azure CLI cleanup completed but `az login` still fails | Active Azure session in another shell window held a lock OR token cache directory permissions broken | Close ALL shells using Azure CLI before cleanup. If permissions broken: `rm -rf ~/.azure` (Linux/macOS) or `Remove-Item -Recurse -Force $env:USERPROFILE\.azure` (Windows), then `az login` fresh. |
+| NuGet cleanup wiped restore caches; `dotnet build` now takes 10 minutes | Expected behavior — cache cleared means re-download. First build pays the cost; subsequent builds are fast | Don't run `-NuGet` cleanup before time-sensitive builds. For incremental cleanup use `dotnet nuget locals temp -c` only (not all caches). |
+| npm cleanup didn't fix the issue — same error returns | Issue isn't in npm cache; it's in `node_modules/` or `package-lock.json` drift | Stop running broader cache cleanups; instead do `rm -rf node_modules package-lock.json && npm install --legacy-peer-deps` (per root CLAUDE.md Vite-solutions note). |
+| Git credential cache cleanup logged user out of every repo | Expected behavior — credential manager wipes all stored creds | Re-authenticate to each remote individually. Document this expectation up front to user when running `-Git`. |
+| User runs cleanup but root cause was upstream (e.g., expired Azure AD password) | Cleanup masked the real issue temporarily | Always diagnose ROOT CAUSE first ("what specific error are you seeing?") before recommending cleanup. Cleanup is a tool, not a diagnosis. |
