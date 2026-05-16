@@ -163,6 +163,7 @@ public static class EndpointMappingExtensions
         }
         app.MapChatWordExportEndpoints();
         app.MapAnalysisChatContextEndpoints();
+        app.MapStandaloneChatContextEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))
