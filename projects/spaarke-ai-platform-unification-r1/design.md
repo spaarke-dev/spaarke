@@ -307,184 +307,229 @@ The user opens a document for deep AI analysis. The three-panel layout stays exa
 
 **No changes here.** SprkChat is embedded via `AnalysisAiContext` with editor integration, streaming write-back, and inline toolbar. This is the "deep work" surface.
 
-#### Surface 2: Standalone Spaarke AI (NEW)
+#### Surface 2: Standalone Spaarke AI — Three-Pane Layout (NEW)
 
-The user opens Spaarke AI from the workspace command bar, a matter form, or a direct link. This is the "quick access" surface — no editor, no document viewer, just full-page conversational AI:
+The standalone app uses the same three-pane pattern as the Analysis Workspace, but the panes serve different roles and are context-adaptive. The three panes are:
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ ⚡ Spaarke AI            Acme Corp Matter ▾     Risk Assessment ▾    │
-│                          [context]               [playbook]    [⋮]  │
-├────────────────────────────┬─────────────────────────────────────────┤
-│                            │                                         │
-│ 📝 Recent Conversations    │  Welcome back, Ralph.                   │
-│ ─────────────────────      │  You're working on the Acme Corp        │
-│ ● Acme Corp risk review    │  matter. What would you like to do?     │
-│   Yesterday, 3:42 PM       │                                         │
-│                            │  ┌─────────┐ ┌───────────┐ ┌─────────┐ │
-│ ● Patent filing research   │  │📄 Search │ │🔍 Analyze │ │📊 Chart │ │
-│   May 13, 10:15 AM        │  │Documents │ │ Document  │ │ Budget  │ │
-│                            │  └─────────┘ └───────────┘ └─────────┘ │
-│ ● Q1 budget analysis       │  ┌─────────┐ ┌───────────┐ ┌─────────┐ │
-│   May 12, 2:30 PM         │  │📋 Run    │ │🔬 Research│ │📎 Upload│ │
-│                            │  │Playbook  │ │ Case Law  │ │Document │ │
-│ ● Similar docs for Smith   │  └─────────┘ └───────────┘ └─────────┘ │
-│   May 10, 9:00 AM         │                                         │
-│                            │  ──────────────────────────────────     │
-│                            │                                         │
-│ [+ New Chat]               │  💬 Ask me anything about your matters, │
-│                            │  documents, or run an AI analysis...     │
-│                            │                                         │
-│                            │  ┌─────────────────────────────────┐    │
-│                            │  │ Type a message...          [📎] │    │
-│                            │  └─────────────────────────────┘ [➤]   │
-│                            │                                         │
-└────────────────────────────┴─────────────────────────────────────────┘
-```
-
-**When the user asks a question with a tool-assisted response:**
+1. **Chat Pane** (left) — conversational AI, always visible
+2. **Output/Work Pane** (center) — rich interactive components matched to the current task
+3. **Research/Source Pane** (right) — reference material, source documents, web research — collapsible
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ ⚡ Spaarke AI            Acme Corp Matter ▾     Risk Assessment ▾    │
-├────────────────────────────┬─────────────────────────────────────────┤
-│ 📝 Recent Conversations    │                                         │
-│ ─────────────────────      │  👤 "Find documents similar to the      │
-│ ● Acme Corp risk review ◄ │       MSA Amendment we reviewed"        │
-│                            │                                         │
-│                            │  🤖 I found 4 documents with high       │
-│                            │  similarity to MSA_Amendment_v3.pdf:    │
-│                            │                                         │
-│                            │  📄 Vendor_Agreement_Globex.pdf   92%  │
-│                            │     Globex Industries matter            │
-│                            │     [Open] [Compare]                    │
-│                            │                                         │
-│                            │  📄 Service_Agreement_Draft.docx  87%  │
-│                            │     Smith IP matter                     │
-│                            │     [Open] [Compare]                    │
-│                            │                                         │
-│                            │  📄 NDA_Template_2025.pdf         84%  │
-│                            │     Template Library                    │
-│                            │     [Open] [Compare]                    │
-│                            │                                         │
-│                            │  📄 Licensing_Agreement.pdf       78%  │
-│                            │     Morrison Estate                     │
-│                            │     [Open] [Compare]                    │
-│                            │                                         │
-│                            │  Would you like me to run a detailed    │
-│                            │  comparison between any of these?       │
-│                            │                                         │
-└────────────────────────────┴─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI       Acme Corp Matter ▾     Risk Assessment ▾      [History] [⋮]  │
+├────────────────────┬───────────────────────────────┬─────────────────────────────┤
+│ CHAT               │ OUTPUT / WORK                 │ RESEARCH / SOURCE      [◀]  │
+│                    │                               │                             │
+│ (always visible)   │ (purpose-built widgets        │ (source documents,          │
+│                    │  matched to current task)     │  web search results,        │
+│                    │                               │  legal library,             │
+│                    │                               │  collapsible)               │
+├────────────────────┼───────────────────────────────┼─────────────────────────────┤
+│ Draggable splitter │ Draggable splitter            │                             │
+└────────────────────┴───────────────────────────────┴─────────────────────────────┘
 ```
 
-**When Code Interpreter generates a chart (Phase 2 — Foundry integration):**
+**Key principles:**
+- All three panes are **reachable by the chat** — the AI can write to the output pane, load a document in the source pane, or update both simultaneously
+- The output pane renders **purpose-built React components** from a registry, not markdown — these are equivalent to MCP App widgets but built natively with Fluent UI v9
+- The research/source pane collapses when not needed (e.g., simple Q&A) and expands when the AI needs to show reference material
+- Panes use the same `PanelSplitter` component from `@spaarke/ui-components` as the Analysis Workspace — draggable, keyboard-accessible, collapsible
+
+**How the panes map across tasks:**
+
+| User Task | Chat Pane | Output Pane | Source Pane |
+|-----------|-----------|-------------|-------------|
+| **General Q&A** | Conversation | (collapsed — not needed) | (collapsed) |
+| **Document analysis** | AI discussion | Analysis output (editable) | Source document viewer |
+| **Contract drafting** | AI drafting assistant | Working document (editable) | Reference documents, templates |
+| **Budget review** | AI narrative + alerts | Budget dashboard, charts | Invoice details, historical data |
+| **Legal research** | AI research discussion | Research report (structured) | Web sources, case law citations |
+| **Document comparison** | AI analysis narrative | Side-by-side diff view | (collapsed — diff IS the output) |
+| **Invoice approval** | AI explanation of items | Approval form (interactive) | Supporting documents |
+| **Playbook execution** | Streaming playbook output | Structured results, export | Source documents used in analysis |
+
+**Example: Document Analysis with all three panes active:**
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ ⚡ Spaarke AI            All Matters ▾           General ▾           │
-├────────────────────────────┬─────────────────────────────────────────┤
-│ 📝 Recent Conversations    │                                         │
-│ ─────────────────────      │  👤 "Show me a budget burndown chart    │
-│ ● Q1 budget analysis ◄    │       for all active matters"           │
-│                            │                                         │
-│                            │  🤖 I've analyzed the budget data       │
-│                            │  across your 8 active matters.          │
-│                            │                                         │
-│                            │  ┌───────────────────────────────────┐  │
-│                            │  │  📊 Budget Burndown — Active      │  │
-│                            │  │                                   │  │
-│                            │  │  $250K ┤ ████                     │  │
-│                            │  │  $200K ┤ ████ ████                │  │
-│                            │  │  $150K ┤ ████ ████ ▓▓▓▓           │  │
-│                            │  │  $100K ┤ ████ ████ ▓▓▓▓ ░░░░     │  │
-│                            │  │   $50K ┤ ████ ████ ▓▓▓▓ ░░░░     │  │
-│                            │  │     $0 ┤─────────────────────     │  │
-│                            │  │        Acme  Smith Globex Morrison │  │
-│                            │  │        ████ Budget  ▓▓▓▓ Spent    │  │
-│                            │  │                     ░░░░ Remaining │  │
-│                            │  └───────────────────────────────────┘  │
-│                            │                                         │
-│                            │  ⚠️ 2 matters are above 80% burn:      │
-│                            │  • Acme Corp ($225K / $250K = 90%)     │
-│                            │  • Smith IP ($180K / $200K = 90%)      │
-│                            │                                         │
-│                            │  [Download Chart] [Export Data]         │
-│                            │                                         │
-└────────────────────────────┴─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI       Acme Corp Matter ▾     Risk Assessment ▾      [History] [⋮]  │
+├────────────────────┬───────────────────────────────┬─────────────────────────────┤
+│                    │                               │                             │
+│  👤 "Analyze the   │  Risk Assessment              │  📄 NDA_Acme_v3.pdf        │
+│  key risks in the │  ─────────────────             │  ─────────────────          │
+│  Acme NDA"        │                               │  Page 4 of 12              │
+│                    │  1. NON-COMPETE CLAUSE        │                             │
+│  🤖 I've analyzed │     The non-compete in        │  ┌─────────────────────┐    │
+│  the NDA and found│     Section 7.2 restricts     │  │ 7.2 Non-Competition │    │
+│  3 key risk areas.│     competition for 24        │  │ During the term of  │    │
+│  The analysis is  │     months post-termination.  │  │ this Agreement and  │    │
+│  in the output    │     Risk: Overly broad        │  │ for 24 months after │    │
+│  pane with source │     geographic scope.         │  │ termination, the    │    │
+│  references.      │     [See source: Section 7.2] │  │ Receiving Party...  │    │
+│                    │                               │  └─────────────────────┘    │
+│  Would you like me│  2. INDEMNIFICATION           │                             │
+│  to suggest       │     Unlimited indemnification │  [Highlight cited text]      │
+│  revisions to the │     in Section 12.1 creates   │                             │
+│  non-compete      │     uncapped liability.       │                             │
+│  clause?          │     [See source: Section 12.1]│                             │
+│                    │                               │                             │
+│  [/revise] [/comp]│  3. GOVERNING LAW             │                             │
+│                    │     Delaware law (Sec 15.3)   │                             │
+│  💬 _____________ │     may conflict with CA ops. │                             │
+│                    │                               │                             │
+│                    │  [Save] [Export] [Copy]       │  [Download] [Open Full]     │
+└────────────────────┴───────────────────────────────┴─────────────────────────────┘
 ```
 
-**When Bing Grounding does legal research (Phase 2):**
+**Example: Budget dashboard (output pane only, source pane collapsed):**
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ ⚡ Spaarke AI            Acme Corp Matter ▾     General ▾            │
-├────────────────────────────┬─────────────────────────────────────────┤
-│ 📝 Recent Conversations    │                                         │
-│ ─────────────────────      │  👤 "Research recent 9th Circuit        │
-│ ● Patent filing research ◄ │       rulings on patent eligibility     │
-│                            │       under Alice"                      │
-│                            │                                         │
-│                            │  🤖 🔬 Research Results                 │
-│                            │                                         │
-│                            │  I found 5 relevant 9th Circuit         │
-│                            │  decisions from 2025-2026 addressing    │
-│                            │  patent eligibility under Alice:        │
-│                            │                                         │
-│                            │  1. TechFlow v. DataSync (2026)        │
-│                            │     Held software patent eligible       │
-│                            │     under "specific technical           │
-│                            │     improvement" test. [1]              │
-│                            │                                         │
-│                            │  2. Innovate Corp v. USPTO (2025)      │
-│                            │     Narrowed abstract idea category     │
-│                            │     for AI/ML patents. [2]             │
-│                            │                                         │
-│                            │  3. [...]                               │
-│                            │                                         │
-│                            │  Key trend: The 9th Circuit is          │
-│                            │  trending toward eligibility for        │
-│                            │  patents claiming specific technical    │
-│                            │  improvements, even in software. [1,2] │
-│                            │                                         │
-│                            │  ─── Sources ───                        │
-│                            │  [1] law.justia.com/cases/...           │
-│                            │  [2] cafc.uscourts.gov/...              │
-│                            │                                         │
-│                            │  ⚠️ AI-generated research. Verify       │
-│                            │  citations before relying in filings.   │
-│                            │                                         │
-└────────────────────────────┴─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI       All Matters ▾              General ▾           [History] [⋮]  │
+├────────────────────┬─────────────────────────────────────────────────────────────┤
+│                    │                                                             │
+│  👤 "Show me a     │  📊 Matter Budget Dashboard                                │
+│  budget dashboard │  ──────────────────────────                                 │
+│  for all active   │                                                             │
+│  matters"         │  [Overview] [By Matter] [Timeline] [Alerts]                 │
+│                    │                                                             │
+│  🤖 Here's your   │  ┌─── Budget vs Spend ────────────────────────────────┐     │
+│  budget dashboard.│  │ Acme Corp    ████████████████████░░░ 90% ($225K)   │     │
+│  2 matters are    │  │ Smith IP     ████████████████████░░░ 90% ($180K)   │     │
+│  above 80% burn.  │  │ Globex       ████████████░░░░░░░░░░ 60% ($90K)    │     │
+│                    │  │ Morrison     ████████░░░░░░░░░░░░░░ 40% ($80K)    │     │
+│  I can drill into │  └────────────────────────────────────────────────────┘     │
+│  any matter or    │                                                             │
+│  show the trend   │  ⚠️ ALERTS                                                  │
+│  over time.       │  ┌──────────────────────────────────────────────────┐       │
+│                    │  │ Acme Corp — 90% burn, 40% work remaining        │       │
+│  💬 _____________ │  │ Smith IP — 90% burn, projected to exceed budget  │       │
+│                    │  └──────────────────────────────────────────────────┘       │
+│                    │                                                             │
+│                    │  [Export PDF] [Download CSV] [Open in Reporting ▶]          │
+│                    │                                                     [▶ src] │
+└────────────────────┴─────────────────────────────────────────────────────────────┘
 ```
 
-#### Surface 3: M365 Copilot (Existing M365 Project — Enhanced in Phase 4)
+Note the `[▶ src]` collapse indicator — the source/research pane is collapsed because this task doesn't need reference material. If the user says "Show me the invoices for Acme Corp", the source pane would expand with the invoice detail list.
 
-The user asks Copilot in the MDA side pane. For simple queries, Copilot answers directly. For complex queries, it hands off to the standalone app or generates enhanced responses via Agent Service:
+**Example: Legal research (all three panes):**
 
 ```
-┌─────────────────────────────────┐
-│ Copilot                    [✕]  │
-│                                 │
-│ 👤 "What's the budget status    │
-│     for my active matters?"     │
-│                                 │
-│ 🤖 Here's a summary of your    │
-│ active matter budgets:          │
-│                                 │
-│ ┌─────────────────────────────┐ │
-│ │ Acme Corp     ████████░░ 90%│ │
-│ │ Smith IP      ████████░░ 90%│ │
-│ │ Globex        ██████░░░░ 60%│ │
-│ │ Morrison      ████░░░░░░ 40%│ │
-│ └─────────────────────────────┘ │
-│                                 │
-│ ⚠️ 2 matters above 80%.        │
-│                                 │
-│ [📊 Detailed Analysis]          │
-│  └── Opens Spaarke AI with      │
-│      full chart + breakdown     │
-│                                 │
-└─────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI       Acme Corp Matter ▾     General ▾               [History] [⋮]  │
+├────────────────────┬───────────────────────────────┬─────────────────────────────┤
+│                    │                               │                             │
+│  👤 "Research 9th  │  🔬 Research Report           │  🌐 Sources                 │
+│  Circuit patent    │  ─────────────────             │  ──────────                 │
+│  eligibility under│                               │                             │
+│  Alice"           │  KEY FINDINGS                 │  [1] TechFlow v. DataSync   │
+│                    │                               │      9th Cir. 2026          │
+│  🤖 I found 5     │  The 9th Circuit is trending  │      law.justia.com/...     │
+│  relevant rulings.│  toward eligibility for       │      [Open] [Save to Docs]  │
+│  The report is in │  software patents that claim  │                             │
+│  the output pane  │  specific technical           │  [2] Innovate v. USPTO      │
+│  with sources on  │  improvements...              │      9th Cir. 2025          │
+│  the right.       │                               │      cafc.uscourts.gov/...  │
+│                    │  CASE SUMMARIES               │      [Open] [Save to Docs]  │
+│  Want me to draft │                               │                             │
+│  a memo applying  │  1. TechFlow v. DataSync [1]  │  [3] PharmaCo v. BioTech    │
+│  these to the     │     Held: Software patent     │      9th Cir. 2025          │
+│  Acme patent?     │     eligible under "specific  │      [Open] [Save to Docs]  │
+│                    │     technical improvement"    │                             │
+│                    │     test. Court distinguished │  📄 Your Documents          │
+│  💬 _____________ │     from Alice abstract idea. │  ──────────────             │
+│                    │                               │  Patent_Filing_Acme.pdf     │
+│                    │  2. Innovate v. USPTO [2]     │  Prior_Art_Analysis.docx    │
+│                    │     Narrowed abstract idea    │                             │
+│                    │     for AI/ML patents...      │                             │
+│                    │                               │                             │
+│                    │  [Save Report] [Export] [Cite]│  [Save All Sources]         │
+└────────────────────┴───────────────────────────────┴─────────────────────────────┘
 ```
+
+**Output Pane Component Registry:**
+
+The output pane renders purpose-built React components matched to the tool/task output type:
+
+```typescript
+// Output component registry — maps tool output types to React components
+const outputRegistry: Record<string, React.ComponentType<OutputPaneProps>> = {
+  // Analysis & Document
+  "analysis-result":       AnalysisResultEditor,    // editable rich text (reuse from AnalysisWorkspace)
+  "document-comparison":   DocumentComparisonView,  // side-by-side diff
+  "document-draft":        DocumentDraftEditor,     // editable draft with AI suggestions
+
+  // Data & Visualization
+  "budget-dashboard":      BudgetDashboard,         // matter budget charts + alerts
+  "chart":                 ChartRenderer,           // Code Interpreter output
+  "data-table":            InteractiveDataTable,    // sortable, filterable, exportable
+  "timeline":              MatterTimeline,          // chronological event view
+
+  // Research
+  "research-report":       ResearchReportView,      // structured findings with citations
+  "search-results":        SearchResultsGrid,       // document search results
+
+  // Action
+  "invoice-approval":      InvoiceApprovalList,     // approve/reject with notes
+  "approval-form":         ApprovalForm,            // generic record approval
+  "playbook-result":       PlaybookResultViewer,    // structured playbook output
+
+  // Preview
+  "document-preview":      DocumentPreview,         // file viewer (PDF, DOCX)
+};
+```
+
+**Source Pane Component Registry:**
+
+```typescript
+const sourceRegistry: Record<string, React.ComponentType<SourcePaneProps>> = {
+  "document-viewer":       DocumentViewer,          // SPE file viewer with highlighting
+  "web-sources":           WebSourceList,           // research citations with links
+  "search-sources":        SearchSourcePanel,       // AI Search results used as context
+  "related-documents":     RelatedDocumentList,     // similar/related docs from matter
+  "invoice-detail":        InvoiceDetailPanel,      // supporting invoice data
+  "template-library":      TemplateSelector,        // document templates for drafting
+};
+```
+
+**SSE events control both panes:**
+
+```typescript
+// Chat stream events (existing)
+{ type: "text_delta", content: "I found 3 key risks..." }
+{ type: "plan_preview", tools: [...] }
+
+// Output pane events (new)
+{ type: "output_pane", component: "analysis-result", data: { ... }, action: "replace" }
+{ type: "output_pane", component: "budget-dashboard", data: { ... }, action: "replace" }
+
+// Source pane events (new)
+{ type: "source_pane", component: "document-viewer", data: { fileId: "...", page: 4 }, action: "open" }
+{ type: "source_pane", component: "web-sources", data: { sources: [...] }, action: "replace" }
+
+// Cross-pane linking (output references source)
+{ type: "source_highlight", sourceRef: "section-7.2", scroll: true }
+```
+
+**Relationship to Analysis Workspace:**
+
+The Analysis Workspace becomes a **specific configuration** of this three-pane pattern:
+
+| Pane | Analysis Workspace (current) | Standalone Spaarke AI (new) |
+|------|-----------------------------|-----------------------------|
+| Left | Rich text editor (fixed) | Chat (fixed) |
+| Center | Document viewer (fixed) | Output pane (dynamic — component registry) |
+| Right | SprkChat (fixed) | Source pane (dynamic — component registry, collapsible) |
+
+In the future, the Analysis Workspace could be **refactored to use the same three-pane shell** with fixed component assignments — but that's an R2 consideration, not R1.
+
+#### Surface 3: M365 Copilot (Separate Declarative Agent — Limited Scope)
+
+M365 Copilot is **not a primary surface** in this release. It exists as a Declarative Agent (from the `ai-m365-copilot-integration-r1` project) with API Plugin access to BFF endpoints. Its role is lightweight lookups and handoff to the standalone app for complex work. Scope is constrained by what Declarative Agents can render (text + Adaptive Cards — no custom widgets).
+
+The primary value of M365 Copilot in this architecture: **handoff**. When a user asks Copilot something complex, it generates a deep-link to open the standalone Spaarke AI with full context.
 
 ### How the Surfaces Connect
 
@@ -637,16 +682,107 @@ User message arrives at BFF ChatEndpoints
 
 ---
 
-## 6. Standalone SprkChat Code Page Design
+## 6. Shared AI Libraries — Separation of Concerns
 
-### Purpose
+The AI platform splits into **three shared libraries** — separating UX components, AI context/services, and AI output widgets:
 
-A full-page AI chat experience that doesn't require the Analysis Workspace. Users can:
-- Ask questions about their matters, projects, documents
-- Upload documents for quick analysis
-- Run playbooks
-- Get AI-assisted research
-- Access all SprkChat capabilities without being in an analysis context
+### Library Architecture
+
+```
+@spaarke/auth (existing — no changes)
+  └── MSAL auth, token acquisition, runtime config
+
+@spaarke/ui-components (existing — keeps SprkChat shell + layout primitives)
+  ├── SprkChat (chat message list, input, streaming, chips, commands)
+  ├── PanelSplitter (draggable, keyboard-accessible splitter)
+  ├── ThreePaneLayout (new — configurable three-pane shell)
+  ├── WizardDialog, SidePanel, DataGrid, etc.
+  └── NO AI service code, NO context providers
+
+@spaarke/ai-context (NEW — AI context providers and service clients)
+  ├── context/
+  │   ├── IAiContextProvider.ts         — interface for all context providers
+  │   ├── StandaloneAiContext.tsx        — standalone (matter/project/doc scope)
+  │   ├── AnalysisAiContext.tsx          — moved from AnalysisWorkspace
+  │   └── useAiContext.ts               — hook to consume active context
+  ├── services/
+  │   ├── chatApiClient.ts              — BFF chat endpoints (create session, send, stream)
+  │   ├── playbackApiClient.ts          — BFF playbook endpoints
+  │   ├── contextMappingClient.ts       — BFF context resolution
+  │   └── documentApiClient.ts          — SPE file operations via BFF
+  ├── hooks/
+  │   ├── useChatSession.ts             — session lifecycle (moved from SprkChat)
+  │   ├── useChatContextMapping.ts      — context resolution (moved from SprkChat)
+  │   ├── useChatPlaybooks.ts           — playbook discovery (moved from SprkChat)
+  │   ├── useOutputPane.ts              — output pane state management
+  │   ├── useSourcePane.ts              — source pane state management
+  │   └── useStreamingResponse.ts       — SSE stream with rich output events
+  └── types/
+      ├── aiContext.ts                  — IAiContext, IToolScope, IEntityContext
+      ├── chatTypes.ts                  — message types, SSE event types
+      └── paneTypes.ts                  — output/source pane event types
+
+@spaarke/ai-outputs (NEW — purpose-built output and source widgets)
+  ├── outputs/                          — Output Pane components
+  │   ├── AnalysisResultEditor.tsx      — editable rich text (reused from AnalysisWorkspace)
+  │   ├── BudgetDashboard.tsx           — matter budget charts + alerts
+  │   ├── ChartRenderer.tsx             — Code Interpreter chart output
+  │   ├── DocumentComparisonView.tsx    — side-by-side diff
+  │   ├── DocumentDraftEditor.tsx       — editable draft with AI suggestions
+  │   ├── InteractiveDataTable.tsx      — sortable, filterable, exportable
+  │   ├── InvoiceApprovalList.tsx       — approve/reject with notes
+  │   ├── MatterTimeline.tsx            — chronological event view
+  │   ├── PlaybookResultViewer.tsx      — structured playbook output
+  │   ├── ResearchReportView.tsx        — structured findings with citations
+  │   └── SearchResultsGrid.tsx         — document search results
+  ├── sources/                          — Source Pane components
+  │   ├── DocumentViewer.tsx            — SPE file viewer with highlighting
+  │   ├── InvoiceDetailPanel.tsx        — supporting invoice data
+  │   ├── RelatedDocumentList.tsx       — similar/related docs
+  │   ├── SearchSourcePanel.tsx         — AI Search results used as context
+  │   ├── TemplateSelector.tsx          — document templates for drafting
+  │   └── WebSourceList.tsx             — research citations with links
+  ├── registry/
+  │   ├── OutputComponentRegistry.ts    — maps output types → React components
+  │   └── SourceComponentRegistry.ts    — maps source types → React components
+  └── types/
+      └── outputTypes.ts                — component prop types, data contracts
+
+```
+
+### Dependency Chain
+
+```
+Code Page (thin shell — 50-100 lines)
+  ├── @spaarke/ai-outputs     (output/source pane widgets)
+  ├── @spaarke/ai-context     (context providers, service clients, hooks)
+  ├── @spaarke/ui-components  (SprkChat shell, PanelSplitter, ThreePaneLayout)
+  └── @spaarke/auth           (token acquisition)
+```
+
+### Why Three Libraries (Not Two)
+
+| Separation | Rationale |
+|-----------|-----------|
+| **`ai-context`** separate from **`ui-components`** | AI services and context providers evolve on a different cadence than UI components. AI context depends on BFF API contracts; UI components depend on Fluent UI. |
+| **`ai-outputs`** separate from **`ai-context`** | Output widgets are visual (React + Fluent UI) while context/services are non-visual (API clients, state management). A BFF change to the chat API shouldn't require rebuilding output widgets. |
+| **`ai-outputs`** separate from **`ui-components`** | Output widgets are AI-specific (chart renderers, research views, approval forms). General UI components (DataGrid, StatusBadge, WizardDialog) don't need AI dependencies. |
+
+### What Moves Where
+
+| Current Location | Moves To | Why |
+|-----------------|----------|-----|
+| `SprkChat/hooks/useChatContextMapping.ts` | `@spaarke/ai-context` | AI service concern, not UI |
+| `SprkChat/hooks/useChatPlaybooks.ts` | `@spaarke/ai-context` | AI service concern |
+| `SprkChat/hooks/useChatSession.ts` | `@spaarke/ai-context` | AI service concern |
+| `AnalysisWorkspace/context/AnalysisAiContext.tsx` | `@spaarke/ai-context` | Shared context provider |
+| `AnalysisWorkspace/components/RichTextEditor` | `@spaarke/ai-outputs` | Output widget |
+| `SprkChat` (shell component) | **Stays** in `@spaarke/ui-components` | It's a UI component |
+| `PanelSplitter` | **Stays** in `@spaarke/ui-components` | Layout primitive |
+
+---
+
+## 7. Standalone Code Page — Three-Pane Architecture
 
 ### Architecture
 
@@ -656,29 +792,29 @@ sprk_spaarkeai Code Page
 ├── FluentProvider (theme from shared themeStorage)
 │
 ├── SpaarkeAiApp.tsx
-│   ├── StandaloneAiContext (new context provider)
-│   │   ├── No editor, no document viewer
-│   │   ├── Entity context from URL params (?matterId=, ?projectId=)
-│   │   ├── Playbook selection dropdown
-│   │   ├── Document upload zone (drag-drop files for quick analysis)
+│   ├── StandaloneAiContext (from @spaarke/ai-context)
+│   │   ├── Entity context from URL params (?matterId=, ?projectId=, ?documentId=)
+│   │   ├── outputPaneRef — chat can push components to output pane
+│   │   ├── sourcePaneRef — chat can load documents/sources in source pane
 │   │   └── Auth token from @spaarke/auth bootstrap
 │   │
-│   ├── ChatHeader
-│   │   ├── Playbook selector dropdown
-│   │   ├── Context indicator (which matter/project)
-│   │   └── New chat / history buttons
+│   ├── AppHeader
+│   │   ├── Context selector (matter/project dropdown)
+│   │   ├── Playbook selector
+│   │   ├── Chat history button
+│   │   └── Settings
 │   │
-│   ├── SprkChat (from @spaarke/ui-components)
-│   │   ├── Full chat experience (messages, streaming, actions)
-│   │   ├── QuickActionChips (playbook-scoped)
-│   │   ├── SlashCommandMenu
-│   │   ├── DocumentUploadZone
-│   │   └── All existing capabilities
+│   ├── ThreePaneLayout (from @spaarke/ui-components)
+│   │   ├── PanelSplitter (existing, reused from Analysis Workspace)
+│   │   ├── Left: ChatPane (always visible)
+│   │   │   └── SprkChat (from @spaarke/ui-components)
+│   │   ├── Center: OutputPane (dynamic component from registry)
+│   │   │   └── Renders purpose-built widget from @spaarke/ai-outputs
+│   │   └── Right: SourcePane (collapsible, dynamic)
+│   │       └── Renders reference material from @spaarke/ai-outputs/sources
 │   │
-│   └── ResultsPanel (optional, slides in for rich results)
-│       ├── Generated charts from Code Interpreter
-│       ├── Document comparison results
-│       └── Research results with citations
+│   └── ChatHistoryDrawer (slide-out from left)
+│       └── Session list with search
 │
 └── Launch points:
     ├── Workspace command bar "Spaarke AI" button
@@ -686,6 +822,48 @@ sprk_spaarkeai Code Page
     ├── M365 Copilot handoff deep-link
     └── Direct URL: sprk_spaarkeai?matterId={id}
 ```
+
+### Pane Interaction Model
+
+The chat drives both output and source panes via SSE events from the BFF:
+
+```
+User: "Analyze the risks in the Acme NDA"
+  │
+  BFF SprkChatAgent processes:
+  │
+  ├── SSE: { type: "text_delta", content: "I found 3 key risks..." }
+  │   └── Chat pane: renders streaming text
+  │
+  ├── SSE: { type: "output_pane", component: "analysis-result", data: {...} }
+  │   └── Output pane: renders AnalysisResultEditor with structured findings
+  │
+  ├── SSE: { type: "source_pane", component: "document-viewer", data: { fileId, page: 4 } }
+  │   └── Source pane: opens NDA PDF at page 4, expands if collapsed
+  │
+  └── SSE: { type: "source_highlight", ref: "section-7.2" }
+      └── Source pane: scrolls to and highlights Section 7.2
+```
+
+The user can also **manually** control panes:
+- Click a citation in the output pane → source pane navigates to that reference
+- Drag splitters to resize
+- Collapse/expand source pane via toggle button
+- Click "Open Full" on any output to expand it to full width
+
+### SPE + AI Search Integration Through Panes
+
+The three-pane layout surfaces SPE documents and AI Search results naturally:
+
+| User Action | Chat Pane | Output Pane | Source Pane | Services Used |
+|-------------|-----------|-------------|-------------|---------------|
+| "Find similar docs" | Narrative results | SearchResultsGrid (ranked list) | DocumentViewer (preview on click) | AI Search (vector similarity), SPE (file content) |
+| "Analyze this contract" | Streaming analysis | AnalysisResultEditor | DocumentViewer (source PDF) | SPE (file retrieval), Azure OpenAI (analysis) |
+| "Compare NDA v2 vs v3" | Diff summary | DocumentComparisonView (side-by-side) | (collapsed — diff IS the output) | SPE (both file versions), Azure OpenAI (diff analysis) |
+| "Upload and classify" | Classification result | InteractiveDataTable (metadata) | DocumentViewer (uploaded file) | SPE (upload), Doc Intelligence (OCR), Azure OpenAI (classification) |
+| "Search for patent filings" | Search narrative | SearchResultsGrid | WebSourceList (external) + RelatedDocumentList (internal) | AI Search (internal), Bing Grounding (external) |
+
+**Key rule**: SPE file content flows through the BFF's `SpeFileStore` (Graph OBO). The source pane's `DocumentViewer` loads files via `GET /api/obo/containers/{id}/files/{fileId}/content` — same endpoint the Analysis Workspace uses today. No new SPE integration needed.
 
 ---
 
