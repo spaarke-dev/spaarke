@@ -7,7 +7,7 @@
  * @see ADR-012 - Shared Component Library
  */
 
-export { useSseStream, parseSseEvent } from './useSseStream';
+export { useSseStream, parseSseEvent, parsePaneEvent } from './useSseStream';
 
 export { useChatSession } from './useChatSession';
 

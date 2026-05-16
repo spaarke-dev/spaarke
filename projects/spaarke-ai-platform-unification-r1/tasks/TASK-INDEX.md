@@ -58,7 +58,7 @@
 #### Wave 5D: Phase 1 Deploy + Test (SERIAL)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 055 | Build + deploy Code Page + BFF | :white_large_square: | 2h | 050, 051 |
+| 055 | Build + deploy Code Page + BFF | ✅ | 2h | 050, 051 |
 | 056 | Phase 1 integration testing (FR-01 to FR-12) | :white_large_square: | 3h | 055 |
 
 ### Phase 2: AI Foundry Agent Service Integration
@@ -96,7 +96,7 @@
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
 | 085 | Phase 3 deploy + end-to-end testing | :white_large_square: | 3h | 080, 081 |
-| 086 | BYOK configuration verification | :white_large_square: | 2h | 085 |
+| 086 | BYOK configuration verification | ✅ | 2h | 085 |
 | 090 | Project wrap-up | :white_large_square: | 1h | 086 |
 
 ## Parallel Execution Groups

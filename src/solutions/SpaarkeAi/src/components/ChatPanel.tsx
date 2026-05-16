@@ -76,6 +76,7 @@ export function ChatPanel(): React.JSX.Element {
     playbookId,
     setPlaybookId,
     entityContext,
+    streaming,
   } = useStandaloneAi();
 
   // Handle session creation — persist new sessionId to context + sessionStorage
@@ -129,6 +130,7 @@ export function ChatPanel(): React.JSX.Element {
                 }
               : undefined
           }
+          onPaneEvent={streaming.onPaneEvent}
         />
       </div>
     </div>

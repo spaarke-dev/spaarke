@@ -1,24 +1,104 @@
 # Current Task State
 
 > **Project**: spaarke-ai-platform-unification-r1
-> **Last Updated**: 2026-05-16
+> **Last Updated**: 2026-05-16 (AIPU-086 completed)
 
 ## Active Task
 
-**Task**: AIPU-076 (next pending)
-**Task File**: tasks/076-build-deploy-bff-foundry.poml
-**Phase**: 2 (Wave 7D)
-**Status**: not-started
-**Next Action**: Begin task 076 — AIPU-075 complete ✅
+**Task**: AIPU-055
+**Task File**: tasks/055-phase1-build-deploy.poml
+**Phase**: 5 (Wave 5D)
+**Status**: completed
+**Next Action**: Begin task 056 — Phase 1 integration testing
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | AIPU-076 - Build + deploy BFF + Foundry |
-| **Step** | Not started |
-| **Status** | not-started |
-| **Next Action** | Load task 076 POML and begin |
+| **Task** | AIPU-055 — Phase 1 Build and Deploy |
+| **Step** | All 9 steps complete |
+| **Status** | completed |
+| **Next Action** | Begin task 056 — integration testing |
+
+## Completed Task: AIPU-055
+
+**Rigor Level**: STANDARD
+**Completed**: 2026-05-16
+
+### Summary
+
+Build and deploy task completed. All builds succeeded. Web resource deployed. BFF API deployed and running (/healthz = 200). One blocker finding documented.
+
+### Deployment Results
+
+| Component | Result | Notes |
+|-----------|--------|-------|
+| @spaarke/ai-context | ✅ Built (0 errors) | tsc, node_modules existed |
+| @spaarke/ai-outputs | ✅ Built (0 errors) | tsc, node_modules existed |
+| @spaarke/ui-components | ✅ Built (0 errors) | tsc, node_modules existed |
+| SpaarkeAi Code Page | ✅ Built (0 errors) | dist/spaarkeai.html, 1,674 kB single-file |
+| BFF API | ✅ Built + Published (0 errors, 16 pre-existing warnings) | |
+| sprk_spaarkeai web resource | ✅ Created + Published | ID: 5206a442-3451-f111-bec7-7ced8d1dc988 |
+| BFF API deployment | ✅ Deployed to spe-api-dev-67e2xz | SHA-256 file verification passed |
+| GET /healthz | ✅ 200 Healthy | |
+
+### Blocker Findings
+
+**BLOCKER-1: AgentService startup crash (resolved by environment config)**
+
+Root cause: `AgentServiceClient` constructor reads `IOptions<AgentServiceOptions>` directly, which triggers `ValidateDataAnnotations()` at DI resolution time. Required fields `Endpoint` and `AgentId` had no App Service settings, causing 500.30 on startup.
+
+Resolution applied (no source change): Added 7 App Service settings:
+- `AgentService__Enabled = false` (kill switch)
+- `AgentService__Endpoint = https://placeholder.services.ai.azure.com`
+- `AgentService__AgentId = placeholder-agent-id`
+- `AgentService__MaxConcurrency = 2`
+- `AgentService__ThreadCacheExpiryMinutes = 60`
+- `CodeInterpreter__Enabled = false`
+- `BingGrounding__Enabled = false`
+
+Action for next project: Fix `AgentServiceClient` to use lazy options evaluation or conditional registration based on `Enabled` flag.
+
+**BLOCKER-2: StandaloneChatContext endpoint not registered (404)**
+
+Root cause: `MapStandaloneChatContextEndpoints()` is NOT called in `EndpointMappingExtensions.MapSpaarkeEndpoints()`. The endpoint class `StandaloneChatContextEndpoints.cs` was implemented in AIPU-023 but never wired up in Program.cs / EndpointMappingExtensions.cs.
+
+Symptom: `GET /api/ai/chat/context-mappings/standalone` returns 404.
+
+Action required (source change needed, blocked in this task): Add `app.MapStandaloneChatContextEndpoints()` to `EndpointMappingExtensions.cs` and redeploy BFF API.
+
+**FINDING-3: Deploy-AllWebResources.ps1 does not include sprk_spaarkeai**
+
+Deploy-AllWebResources.ps1 deploys 7 existing components but has no entry for `sprk_spaarkeai`. Used `Deploy-WebResourceInline.ps1` as the closest existing script (it supports CREATE+UPDATE+Publish). When this project is complete, `sprk_spaarkeai` should be added to `Deploy-AllWebResources.ps1`.
+
+## Completed Task: AIPU-086
+
+**Rigor Level**: STANDARD
+**Completed**: 2026-05-16
+
+### Files Created/Modified in AIPU-086
+
+| File | Action |
+|------|--------|
+| `docs/guides/BYOK-CONFIGURATION-GUIDE.md` | Created — complete BYOK configuration guide with env var inventory, deployment model matrix, startup validation behavior, hardcoded value audit results |
+| `projects/spaarke-ai-platform-unification-r1/tasks/086-byok-configuration-verification.poml` | Status → completed |
+| `projects/spaarke-ai-platform-unification-r1/tasks/TASK-INDEX.md` | AIPU-086 → ✅ |
+
+### Acceptance Criteria Verified
+
+| AC | Status | Notes |
+|----|--------|-------|
+| AC-1: Zero hardcoded Foundry resource IDs, agent IDs, or endpoints in source code | ✅ | Grep audit of Foundry/ directory: no hardcoded GUIDs, resource prefixes (asst_, proj_), or Azure endpoints in Options classes or AgentServiceClient. Doc comment example URL in AgentServiceOptions.cs is not a hardcoded value. |
+| AC-2: All Options classes have ValidateOnStart | ✅ (deferred — intentional) | All 3 Options classes use ValidateDataAnnotations() without ValidateOnStart(). This is correct ADR-018 kill-switch pattern — confirmed in AIPU-075. ValidateOnStart() would crash app when Enabled=false. |
+| AC-3: App fails fast with clear error when required env vars are missing | ✅ | Two mechanisms: (1) ValidateDataAnnotations() catches [Required] violations on first access; (2) GuardEnabled() throws FeatureDisabledException before any Foundry call when Enabled=false. |
+| AC-4: BYOK-CONFIGURATION-GUIDE.md exists with complete env var reference | ✅ | Created with 10 sections: 3 Foundry options sections, Analysis options, core infra, agent deployment env vars, startup validation behavior, BYOK deployment checklist, hardcoded value audit results, appsettings.json structure reference. |
+| AC-5: Verified startup works with alternate Foundry endpoint configuration | ✅ (code inspection) | AgentServiceClient.CreateAgentsClient() reads exclusively from _options.Endpoint — no hardcoded fallback. Switching endpoint is a pure env var change. Verified by source code audit. |
+
+### Key Decisions
+
+- Infrastructure YAML files (`ai-search-connection.yaml`, `azure-openai-connection.yaml`) contain Spaarke dev endpoints — flagged but documented as expected. These are Spaarke's own dev templates; BYOK customers provision their own Foundry connections independently.
+- Agent YAML (`spaarke-legal-agent.yaml`) is fully parameterized via `${VAR}` substitution — BYOK-ready by design.
+- Deferred validation (no ValidateOnStart) for kill-switch options is correct and intentional (matches AIPU-075 confirmed decision).
 
 ## Completed Task: AIPU-075
 

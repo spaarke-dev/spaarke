@@ -87,29 +87,55 @@ public class PlaybookChatContextProvider : IChatContextProvider
             // 6. Append entity metadata enrichment (generic mode)
             defaultPrompt = AppendEntityEnrichment(defaultPrompt, hostContext);
 
-            // Still load document summary for inline context
+            // Still load document summary for inline context (skipped when documentId is null/empty)
             string? defaultDocSummary = null;
             IReadOnlyDictionary<string, string>? defaultMetadata = null;
-            try
+            if (!string.IsNullOrEmpty(documentId))
             {
-                var doc = await _documentService.GetDocumentAsync(documentId, cancellationToken);
-                if (doc != null)
+                try
                 {
-                    defaultDocSummary = doc.Summary ?? doc.Tldr;
-                    var meta = new Dictionary<string, string>();
-                    if (!string.IsNullOrWhiteSpace(doc.DocumentType))
-                        meta["documentType"] = doc.DocumentType;
-                    if (!string.IsNullOrWhiteSpace(doc.Name))
-                        meta["documentName"] = doc.Name;
-                    if (meta.Count > 0)
-                        defaultMetadata = meta;
+                    var doc = await _documentService.GetDocumentAsync(documentId, cancellationToken);
+                    if (doc != null)
+                    {
+                        defaultDocSummary = doc.Summary ?? doc.Tldr;
+                        var meta = new Dictionary<string, string>();
+                        if (!string.IsNullOrWhiteSpace(doc.DocumentType))
+                            meta["documentType"] = doc.DocumentType;
+                        if (!string.IsNullOrWhiteSpace(doc.Name))
+                            meta["documentName"] = doc.Name;
+                        if (meta.Count > 0)
+                            defaultMetadata = meta;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to load document summary for {DocumentId} in generic chat mode; continuing without",
+                        documentId);
                 }
             }
-            catch (Exception ex)
+
+            // Standalone mode: when the chat has no document but has a valid host context
+            // (entityType + entityId), provide a minimal KnowledgeScope so that DocumentSearchTools
+            // can entity-scope its discovery search. RagKnowledgeSourceIds is empty, meaning
+            // SearchDocumentsAsync runs tenant-wide (no knowledge source filter) while
+            // SearchDiscoveryAsync is constrained to the entity boundary via ParentEntityType/Id.
+            ChatKnowledgeScope? defaultKnowledgeScope = null;
+            if (!string.IsNullOrWhiteSpace(hostContext?.EntityType) &&
+                !string.IsNullOrWhiteSpace(hostContext?.EntityId))
             {
-                _logger.LogWarning(ex,
-                    "Failed to load document summary for {DocumentId} in generic chat mode; continuing without",
-                    documentId);
+                _logger.LogInformation(
+                    "Standalone chat mode with host context ({EntityType}/{EntityId}); " +
+                    "building entity-scoped knowledge scope for RAG search",
+                    hostContext.EntityType, hostContext.EntityId);
+
+                defaultKnowledgeScope = new ChatKnowledgeScope(
+                    RagKnowledgeSourceIds: [],
+                    InlineContent: null,
+                    SkillInstructions: null,
+                    ActiveDocumentId: string.IsNullOrEmpty(documentId) ? null : documentId,
+                    ParentEntityType: hostContext.EntityType,
+                    ParentEntityId: hostContext.EntityId);
             }
 
             return new ChatContext(
@@ -117,7 +143,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 DocumentSummary: defaultDocSummary,
                 AnalysisMetadata: defaultMetadata,
                 PlaybookId: null,
-                KnowledgeScope: null);
+                KnowledgeScope: defaultKnowledgeScope);
         }
 
         // 1. Load playbook to get ActionIds

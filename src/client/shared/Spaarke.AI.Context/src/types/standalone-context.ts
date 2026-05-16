@@ -13,7 +13,7 @@
  */
 
 import type { EntityContext } from './entity-context';
-import type { StreamingCallbacks, StreamingState } from './index';
+import type { StreamingCallbacks, StreamingState, AiPaneEvent } from './index';
 
 // ---------------------------------------------------------------------------
 // Session Storage Keys (exported for use by consumers writing to storage)
@@ -100,6 +100,18 @@ export interface StandaloneAiContextValue {
   streaming: StreamingCallbacks;
   /** Current streaming state for UI indicators */
   streamingState: StreamingState;
+
+  // ── Pane SSE Events ──────────────────────────────────────────────────────
+  /**
+   * Subscribe to AI pane-routing SSE events (output_pane / source_pane / source_highlight).
+   *
+   * Call with a handler to receive events; call with null to unsubscribe.
+   * OutputPanel and SourcePanel call this in a useEffect to wire up their widget rendering.
+   * The handler is invoked synchronously from the SprkChat SSE fetch loop.
+   *
+   * At most one subscriber is supported per context instance. The latest call wins.
+   */
+  subscribePaneEvents: (handler: ((event: AiPaneEvent) => void) | null) => void;
 
   // ── Loading Aggregate ────────────────────────────────────────────────────
   /** True when any async operation is in flight (entity resolution OR context mapping) */

@@ -231,6 +231,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   bridge,
   onDocumentStreamEvent: onDocumentStreamEventProp,
   initialMessages,
+  onPaneEvent: onPaneEventProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -317,6 +318,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     clearSuggestions,
     clearPendingActionEvent,
     setOnDocumentStreamEvent,
+    setOnPaneEvent,
   } = sseStream;
 
   // Track current streaming state
@@ -694,6 +696,34 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       setOnDocumentStreamEvent(null);
     };
   }, [bridge, onDocumentStreamEventProp, setOnDocumentStreamEvent]);
+
+  // ── Task 041: Register pane-routing SSE event callback ────────────────────
+  //
+  // Forwards output_pane / source_pane / source_highlight events from the BFF
+  // stream to the onPaneEventProp callback provided by ChatPanel.tsx.
+  // ChatPanel receives it from StandaloneAiContext so OutputPanel and SourcePanel
+  // can subscribe and render the correct widget type from the SSE payload.
+  //
+  // Uses the same synchronous callback ref pattern as the document stream handler
+  // above — events are delivered without React state batching.
+  React.useEffect(() => {
+    if (!onPaneEventProp) {
+      setOnPaneEvent(null);
+      return;
+    }
+
+    setOnPaneEvent(event => {
+      try {
+        onPaneEventProp(event);
+      } catch (err) {
+        console.error('[SprkChat] Failed to forward pane SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnPaneEvent(null);
+    };
+  }, [onPaneEventProp, setOnPaneEvent]);
 
   // Auto-scroll to bottom on new messages
   React.useEffect(() => {

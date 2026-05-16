@@ -1,7 +1,7 @@
 <task id="AIPU-086" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>BYOK configuration verification — all 3 deployment models</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>3</phase>
     <wave>9</wave>
     <estimated-effort>2 hours</estimated-effort>

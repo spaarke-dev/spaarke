@@ -30,6 +30,7 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
+import type { AiPaneEvent } from '../types';
 import { buildBffApiUrl, authenticatedFetch } from '@spaarke/auth';
 import { useEntityResolver } from './useEntityResolver';
 import type {
@@ -206,6 +207,20 @@ export function StandaloneAiProvider({
   });
   const tokenCountRef = useRef<number>(0);
 
+  // Pane event subscriber ref — holds the handler registered by OutputPanel or SourcePanel.
+  // Using a ref (not state) because pane events arrive synchronously from the SprkChat SSE
+  // fetch loop and must not trigger a re-render of StandaloneAiProvider.
+  // At most one subscriber is active at a time (last call wins).
+  const paneEventSubscriberRef = useRef<((event: AiPaneEvent) => void) | null>(null);
+
+  // subscribePaneEvents — stable identity via useCallback (no deps — accesses ref only)
+  const subscribePaneEvents = useCallback(
+    (handler: ((event: AiPaneEvent) => void) | null) => {
+      paneEventSubscriberRef.current = handler;
+    },
+    []
+  );
+
   // Streaming callbacks — zero-serialization path to output pane widget ref
   const streaming: StreamingCallbacks = useMemo(
     () => ({
@@ -235,6 +250,14 @@ export function StandaloneAiProvider({
           operationId,
           tokenCount: tokenCountRef.current,
         });
+      },
+      // Task 041: Forward pane-routing SSE events to the active subscriber.
+      // Called synchronously from SprkChat's SSE fetch loop via ChatPanel's onPaneEvent prop.
+      onPaneEvent: (event: AiPaneEvent) => {
+        const handler = paneEventSubscriberRef.current;
+        if (handler) {
+          handler(event);
+        }
       },
     }),
     []
@@ -273,6 +296,9 @@ export function StandaloneAiProvider({
       streaming,
       streamingState,
 
+      // Pane SSE events
+      subscribePaneEvents,
+
       // Aggregate
       isLoading,
     }),
@@ -290,6 +316,7 @@ export function StandaloneAiProvider({
       setPlaybookId,
       streaming,
       streamingState,
+      subscribePaneEvents,
       isLoading,
     ]
   );

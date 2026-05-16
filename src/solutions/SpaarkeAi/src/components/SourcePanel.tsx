@@ -31,6 +31,7 @@ import {
   useCrossPaneSubscription,
 } from "@spaarke/ai-outputs";
 import { useStandaloneAi } from "@spaarke/ai-context";
+import type { AiPaneEvent } from "@spaarke/ai-context";
 import type { SourceWidgetProps } from "@spaarke/ai-outputs";
 
 // ---------------------------------------------------------------------------
@@ -215,22 +216,27 @@ function ResolvedSourceWidget({ slot, activeSelectionRef }: ResolvedSourceWidget
 // ---------------------------------------------------------------------------
 
 /**
+ * Map an SSE widgetType string to the SourceWidgetType enum value.
+ * Falls back to DocumentViewer for unknown values.
+ */
+function resolveSourceWidgetTypeFromString(raw: string | undefined): SourceWidgetType {
+  if (!raw) return SourceWidgetType.DocumentViewer;
+  const match = Object.values(SourceWidgetType).find((v) => v === raw);
+  return match ?? SourceWidgetType.DocumentViewer;
+}
+
+/**
  * SourcePanel — right pane for the SpaarkeAi three-pane layout.
  *
  * Renders source reference widgets from the @spaarke/ai-outputs registry.
- * Subscribes to cross-pane link events via useCrossPaneSubscription() to
- * react when the output pane dispatches citation links.
+ * Subscribes to:
+ *   - `source_pane` SSE events forwarded by OutputPanel via DOM CustomEvent
+ *     ('sprk-ai-pane-event') to populate slots with the correct SourceWidgetType.
+ *   - `source_highlight` SSE events (same DOM bus) to update the active selection ref.
+ *   - Cross-pane link events via useCrossPaneSubscription() when the OutputPanel
+ *     dispatches a citation link from an output widget.
  *
- * When no source widgets are active, renders an empty state guiding the user
- * to run an AI analysis to populate source materials.
- *
- * SSE routing: When the BFF emits `source_pane` events, SprkChat forwards them
- * via the streaming callbacks in StandaloneAiContext. Full SSE event-driven
- * slot management completes in the next wave (task 041+).
- *
- * Source highlight: When a `source_highlight` SSE event arrives, the panel
- * updates the activeSelectionRef for the relevant slot, triggering the widget
- * to scroll to and highlight the referenced section.
+ * When no source widgets are active, renders an empty state.
  */
 export function SourcePanel(): React.JSX.Element {
   const styles = useStyles();
@@ -239,21 +245,66 @@ export function SourcePanel(): React.JSX.Element {
   // Source widget slots — populated by SSE source_pane events
   const [widgetSlots, setWidgetSlots] = React.useState<SourceWidgetSlot[]>([]);
 
-  // Active selection ref per widget — updated by source_highlight SSE events
-  // and cross-pane link subscriptions
+  // Active selection ref — updated by source_highlight SSE events and cross-pane links
   const [activeSelectionRef, setActiveSelectionRef] = React.useState<string | undefined>();
 
   // Subscribe to cross-pane link events dispatched by OutputPanel widgets
   useCrossPaneSubscription((event) => {
-    // When a cross-pane link fires, update the active selection ref so the
-    // source widget scrolls to the referenced range.
-    // CrossPaneLinkEvent carries citationId, sourceWidgetId, highlightStart, highlightEnd.
-    // We use citationId as the selection ref for the source widget.
     setActiveSelectionRef(event.citationId);
   });
 
-  // When streaming begins, add a loading placeholder slot for the expected source widget.
-  // When streaming ends, finalize the slot. Full SSE type discrimination in task 041+.
+  // Receive source_pane and source_highlight events forwarded by OutputPanel.
+  // OutputPanel owns the single subscribePaneEvents slot and fans out non-output_pane
+  // events via a DOM CustomEvent ('sprk-ai-pane-event'). This avoids the last-write-wins
+  // conflict that would occur if both panels called subscribePaneEvents independently.
+  React.useEffect(() => {
+    const handleSourcePaneEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<AiPaneEvent>;
+      const paneEvent = customEvent.detail;
+
+      if (paneEvent.event === 'source_pane') {
+        const widgetType = resolveSourceWidgetTypeFromString(paneEvent.widgetType);
+        const slotId = `source-${paneEvent.widgetType ?? 'unknown'}-${Date.now()}`;
+
+        setWidgetSlots((prev) => {
+          // Upgrade existing loading placeholder if present
+          const loadingIdx = prev.findIndex((s) => s.isLoading);
+          if (loadingIdx !== -1) {
+            const upgraded = [...prev];
+            upgraded[loadingIdx] = {
+              ...upgraded[loadingIdx],
+              widgetType,
+              data: paneEvent.payload ?? null,
+              sourceRef: paneEvent.sourceRef ?? '',
+              isLoading: false,
+            };
+            return upgraded;
+          }
+          return [
+            ...prev,
+            {
+              id: slotId,
+              widgetType,
+              data: paneEvent.payload ?? null,
+              sourceRef: paneEvent.sourceRef ?? '',
+              isLoading: false,
+            },
+          ];
+        });
+      } else if (paneEvent.event === 'source_highlight') {
+        if (paneEvent.selectionRef) {
+          setActiveSelectionRef(paneEvent.selectionRef);
+        }
+      }
+    };
+
+    document.addEventListener('sprk-ai-pane-event', handleSourcePaneEvent);
+    return () => {
+      document.removeEventListener('sprk-ai-pane-event', handleSourcePaneEvent);
+    };
+  }, []);
+
+  // Track streaming transitions to manage loading placeholder slots.
   const prevIsStreamingRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -265,20 +316,15 @@ export function SourcePanel(): React.JSX.Element {
         ...prev,
         {
           id: `source-${streamingState.operationId ?? Date.now()}`,
-          widgetType: SourceWidgetType.DocumentViewer, // default; SSE type arrives in payload
+          widgetType: SourceWidgetType.DocumentViewer, // placeholder; overwritten by source_pane event
           data: null,
-          sourceRef: "",
+          sourceRef: '',
           isLoading: true,
         },
       ]);
-    } else if (wasStreaming && !nowStreaming && streamingState.operationId) {
-      setWidgetSlots((prev) =>
-        prev.map((slot) =>
-          slot.id === `source-${streamingState.operationId}`
-            ? { ...slot, isLoading: false }
-            : slot
-        )
-      );
+    } else if (wasStreaming && !nowStreaming) {
+      // Remove loading placeholders not upgraded by a source_pane event
+      setWidgetSlots((prev) => prev.filter((s) => !s.isLoading));
     }
 
     prevIsStreamingRef.current = nowStreaming;
