@@ -1,7 +1,7 @@
 <task id="AIPU-091" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Standalone direct URL access — top-frame MSAL auth for bookmarkable Spaarke AI</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <wave>5F</wave>
     <estimated-effort>4 hours</estimated-effort>

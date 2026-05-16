@@ -67,6 +67,11 @@
 | 057 | Welcome experience with guided prompt buttons (no-context launch) | ✅ | 4h | 040 |
 | 058 | Action chip responses — upload, browse, select when context is missing | ✅ | 4h | 057 |
 
+#### Wave 5F: Standalone Direct URL Access
+| # | Task | Status | Est. | Depends |
+|---|------|--------|------|---------|
+| 091 | Standalone direct URL access — top-frame MSAL auth for bookmarkable Spaarke AI | ✅ | 4h | 040 |
+
 ### Phase 2: AI Foundry Agent Service Integration
 
 #### Wave 6: Agent Service Foundation (PARALLEL - 3 agents)

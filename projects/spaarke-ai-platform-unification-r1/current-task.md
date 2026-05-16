@@ -5,20 +5,120 @@
 
 ## Active Task
 
-**Task**: AIPU-056 (next pending)
+**Task**: AIPU-056 (next pending after AIPU-091 completion)
 **Task File**: tasks/056-phase1-integration-testing.poml
 **Phase**: 1 (Wave 5D)
 **Status**: not-started
 **Next Action**: Begin when ready
 
+**Rigor Level**: FULL
+**Reason**: Tags include `frontend`, `auth`; modifies .cs, .tsx files; auth implementation
+
+**Protocol Steps Executed:**
+- [x] Step 0.5: Determined rigor level (FULL)
+- [x] Step 0: Context Recovery — fresh start (AIPU-058 was last completed)
+- [x] Step 1: Load Task File
+- [x] Step 2: Initialize current-task.md
+- [x] Step 3: Context Budget Check (OK)
+- [x] Step 4: Load Knowledge Files (resolveRuntimeConfig.ts, SpaarkeAuthProvider.ts, authInit.ts, runtimeConfig.ts, main.tsx)
+- [x] Step 4a: Load Constraints (auth.md, api.md)
+- [x] Step 4b: Load Patterns (spaarke-auth-initialization.md)
+- [x] Step 5: Load ADR Constraints (ADR-008 — anonymous endpoint AllowAnonymous())
+- [x] Step 8.1: Create BFF GET /api/config/client endpoint (ConfigEndpoints.cs) + register in EndpointMappingExtensions
+- [x] Step 8.2-8.5: Update main.tsx — frame detection, config fallback, MSAL redirect flow, handleRedirectPromise
+- [x] Step 8.6: Create .env with VITE_BFF_BASE_URL and vite-env.d.ts type declarations
+- [x] dotnet build: 0 errors, 15 pre-existing warnings
+- [x] npm run build (Vite): 0 errors, 1,691 kB bundle
+- [ ] Step 9: Verify Acceptance Criteria
+- [ ] Step 9.5: Quality Gates
+- [ ] Step 10: Update Task Status
+
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | AIPU-056 — Phase 1 integration testing (FR-01 to FR-12) |
-| **Step** | Not started |
-| **Status** | not-started |
-| **Next Action** | Begin task-execute for AIPU-056 |
+| **Task** | AIPU-091 — COMPLETED 2026-05-16 |
+| **Step** | All steps complete |
+| **Status** | completed |
+| **Next Action** | Begin AIPU-056 (Phase 1 integration testing) |
+
+## Files Modified This Session
+
+| File | Action |
+|------|--------|
+| `src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.cs` | Created — GET /api/config/client anonymous endpoint |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` | Added MapConfigEndpoints() call |
+| `src/solutions/SpaarkeAi/src/main.tsx` | Updated — frame detection, BFF config fallback, MSAL redirect flow |
+| `src/solutions/SpaarkeAi/.env` | Created — VITE_BFF_BASE_URL dev value |
+| `src/solutions/SpaarkeAi/src/vite-env.d.ts` | Created — ImportMetaEnv type declaration |
+
+## Critical Context
+
+- `resolveRuntimeConfig()` has localStorage fallback — already handles subsequent direct URL visits. Issue is FIRST visit with no localStorage and no Xrm.
+- Need BFF `/api/config/client` (anonymous) as config source for first-visit fallback.
+- Top-frame (direct URL): use `acquireTokenSilent` + redirect fallback. Iframe (navigateTo): silent + popup (existing behavior).
+- BFF URL bootstrap: use `VITE_BFF_BASE_URL` env var embedded at build time (not a secret — public API URL).
+- `initAuth()` in `@spaarke/auth` uses `SpaarkeAuthProvider` which uses `MsalPopupStrategy` as last resort. For top-frame, need redirect strategy instead.
+
+## Decisions Made
+
+- 2026-05-16: Use `VITE_BFF_BASE_URL` (Vite define) to embed BFF URL at build time for fallback config fetch. This is not a secret.
+- 2026-05-16: Frame detection: `window.self === window.top` = top-frame (direct URL), else iframe (navigateTo).
+- 2026-05-16: Top-frame auth: call `handleRedirectPromise()` first, then `acquireTokenSilent`, then `loginRedirect` fallback. Iframe auth: existing `initAuth()` (silent+popup chain).
+- 2026-05-16: The BFF endpoint reads AzureAd:ClientId, AzureAd:TenantId, AzureAd:Instance from IConfiguration — these are already present in appsettings.
+
+## Completed Task: AIPU-091
+
+**Rigor Level:** FULL
+**Reason:** Tags include `frontend`, `auth`; modifies .cs and .tsx files; auth bootstrap implementation
+**Completed**: 2026-05-16
+
+**Protocol Steps Executed:**
+- [x] Step 0.5: Determined rigor level (FULL)
+- [x] Step 0: Context Recovery — fresh start
+- [x] Step 1: Load Task File
+- [x] Step 2: Initialize current-task.md
+- [x] Step 3: Context Budget Check (OK)
+- [x] Step 4: Load Knowledge Files (resolveRuntimeConfig.ts, SpaarkeAuthProvider.ts, MsalSilentStrategy.ts, authInit.ts, runtimeConfig.ts, main.tsx)
+- [x] Step 4a: Load Constraints (auth.md, api.md)
+- [x] Step 4b: Load Patterns (spaarke-auth-initialization.md)
+- [x] Step 5: ADR-008 — anonymous endpoint AllowAnonymous()
+- [x] Step 8: Execute all implementation steps
+- [x] Step 9: Verify Acceptance Criteria (all 5 AC met)
+- [x] Step 9.5: Quality Gates (dotnet build 0 errors, Vite build 0 errors)
+- [x] Step 10: Update Task Status (POML → completed, TASK-INDEX → ✅)
+
+### Files Modified in AIPU-091
+
+| File | Action |
+|------|--------|
+| `src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.cs` | Created — GET /api/config/client anonymous endpoint returning MSAL client config |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` | Added `app.MapConfigEndpoints()` call in MapHealthEndpoints |
+| `src/solutions/SpaarkeAi/src/main.tsx` | Updated — frame detection (`isTopFrame()`), BFF config fallback (`fetchClientConfig()`), MSAL redirect flow (`handleTopFrameAuth()`), `_hasXrmContext()` helper |
+| `src/solutions/SpaarkeAi/.env` | Created — `VITE_BFF_BASE_URL=https://spe-api-dev-67e2xz.azurewebsites.net` |
+| `src/solutions/SpaarkeAi/src/vite-env.d.ts` | Created — `ImportMetaEnv` type declaration for `VITE_BFF_BASE_URL` |
+| `projects/spaarke-ai-platform-unification-r1/tasks/091-standalone-direct-url-access.poml` | Status → completed |
+| `projects/spaarke-ai-platform-unification-r1/tasks/TASK-INDEX.md` | Added Wave 5F with AIPU-091 ✅ |
+
+### Acceptance Criteria Verified
+
+| AC | Status | Notes |
+|----|--------|-------|
+| Direct URL loads and authenticates | ✅ | fetchClientConfig() + handleTopFrameAuth() + loginRedirect() flow |
+| If not authenticated, redirects to Azure AD then returns | ✅ | loginRedirect() → handleRedirectPromise() on return |
+| navigateTo launch still works (no regression) | ✅ | resolveRuntimeConfig() tried first; handleTopFrameAuth only for `inTopFrame && !_hasXrmContext()` |
+| BFF /api/config/client returns correct config anonymously | ✅ | .AllowAnonymous(), reads AzureAd:* config, returns non-sensitive fields only |
+| No sensitive data in /api/config/client response | ✅ | Returns clientId, authority, scopes, bffBaseUrl — no secrets |
+
+### Key Design Decisions
+
+- **Frame detection**: `window.self === window.top` = top-frame. Wrapped in try/catch for cross-origin safety.
+- **Xrm detection**: `_hasXrmContext()` walks frame hierarchy — differentiates "top-frame with Xrm" (MDA sitemap) from "top-frame without Xrm" (direct URL bookmark).
+- **Config fallback order**: (1) resolveRuntimeConfig() — Xrm env vars + localStorage, (2) fetchClientConfig() from BFF — only for first direct URL visit.
+- **MSAL redirect flow**: `handleTopFrameAuth()` — new `PublicClientApplication` instance for redirect-specific logic. Existing `ensureAuthInitialized()` (silent+popup) used for all other cases.
+- **VITE_BFF_BASE_URL**: Baked in at build time via Vite env var. Non-secret public API URL. Override via CI/CD for production.
+- **BFF URL self-discovery**: `GET /api/config/client` returns `bffBaseUrl` derived from `request.Scheme + request.Host` — always correct regardless of environment.
+- **iframe without Xrm/cache**: Re-throws with informative message — popup auth can't recover without config, user must open from MDA.
 
 ## Completed Task: AIPU-058
 
