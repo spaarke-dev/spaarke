@@ -220,6 +220,11 @@ public static class AiModule
         // Scoped: depends on IGenericEntityService (singleton), IDistributedCache (singleton).
         services.AddScoped<AnalysisChatContextResolver>();
 
+        // StandaloneChatContextProvider — scoped (AI Platform Unification R1).
+        // Resolves standalone SprkChat context for sprk_spaarkeai Code Page.
+        // Redis-first with 30-min absolute TTL (ADR-009).
+        services.AddScoped<StandaloneChatContextProvider>();
+
         // PendingPlanManager — scoped per ADR-010 (task 071, Phase 2F).
         // Stores pending plans in Redis at "plan:pending:{tenantId}:{sessionId}" with 30-min TTL.
         // Used by CompoundIntentDetector flow in ChatEndpoints.SendMessageAsync to gate
