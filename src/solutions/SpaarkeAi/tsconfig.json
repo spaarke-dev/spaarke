@@ -18,6 +18,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@spaarke/ai-context": ["../../client/shared/Spaarke.AI.Context/dist/index.d.ts"],
+      "@spaarke/ai-context/*": ["../../client/shared/Spaarke.AI.Context/dist/*"],
+      "@spaarke/ai-outputs": ["../../client/shared/Spaarke.AI.Outputs/dist/index.d.ts"],
+      "@spaarke/ai-outputs/*": ["../../client/shared/Spaarke.AI.Outputs/dist/*"],
       "@spaarke/auth": ["../../client/shared/Spaarke.Auth/src/index.ts"],
       "@spaarke/auth/*": ["../../client/shared/Spaarke.Auth/src/*"],
       "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"],

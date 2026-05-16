@@ -1,92 +1,168 @@
 /**
  * App.tsx — SpaarkeAi root application component.
  *
- * Wraps all UI in FluentProvider with theme detection per ADR-021.
- * Theme is resolved via resolveCodePageTheme() (localStorage -> URL flags -> navbar DOM -> light default)
- * and updated via setupCodePageThemeListener() without any OS prefers-color-scheme.
+ * Provider tree (per ADR-021, ADR-022, task 040):
+ *   FluentProvider (theme detection — resolveCodePageTheme + setupCodePageThemeListener)
+ *     └─ AppWithAuth (acquires BFF token via @spaarke/auth)
+ *          └─ StandaloneAiProvider (from @spaarke/ai-context — entity resolution + chat state)
+ *               └─ AppShell (ThreePaneLayout with all three pane components)
  *
- * This is a placeholder component for Wave 0. The three-pane layout and AI workspace
- * will be integrated in Wave 4 (task 040 — wire up ThreePaneLayout in SpaarkeAi).
+ * Auth pattern: no React AuthProvider component — @spaarke/auth is a class-based
+ * provider initialized in main.tsx (ensureAuthInitialized). App acquires the token
+ * via getAuthProvider().getAccessToken() in a useEffect and passes it down as a prop
+ * to StandaloneAiProvider. This follows the same pattern as AnalysisWorkspace ChatPanel.
  *
  * @see ADR-021 - Fluent v9, dark mode required, semantic tokens only
- * @see .claude/constraints/theme-consistency.md — resolveCodePageTheme pattern
- * @see src/solutions/LegalWorkspace/src/main.tsx — bootstrap pattern
+ * @see ADR-022 - React 19 createRoot for Code Pages
+ * @see ADR-026 - Single-file Vite build for Dataverse web resource
+ * @see StandaloneAiContext.tsx in @spaarke/ai-context — context provider
+ * @see .claude/patterns/auth/spaarke-auth-initialization.md — auth bootstrap
  */
 
 import * as React from "react";
-import {
-  FluentProvider,
-  tokens,
-  makeStyles,
-  Text,
-} from "@fluentui/react-components";
+import { FluentProvider, makeStyles, tokens } from "@fluentui/react-components";
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
+  ThreePaneLayout,
 } from "@spaarke/ui-components";
+import { StandaloneAiProvider } from "@spaarke/ai-context";
+import { getAuthProvider } from "@spaarke/auth";
+import { getBffBaseUrl } from "./config/runtimeConfig";
+import { LeftPane } from "./components/LeftPane";
+import { OutputPanel } from "./components/OutputPanel";
+import { SourcePanel } from "./components/SourcePanel";
 
 // ---------------------------------------------------------------------------
-// Styles
+// Styles — Fluent v9 tokens only (ADR-021)
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  root: {
+  appRoot: {
     display: "flex",
     flexDirection: "column",
-    height: "100%",
-    width: "100%",
-    backgroundColor: tokens.colorNeutralBackground2,
+    width: "100vw",
+    height: "100vh",
+    overflow: "hidden",
+    backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    boxSizing: "border-box",
   },
-  placeholder: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    gap: "8px",
-  },
-  footer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    padding: "4px 16px",
-    minHeight: "24px",
-  },
-  footerVersion: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground4,
+  layoutShell: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
   },
 });
 
-const VERSION = "0.1.0";
-
 // ---------------------------------------------------------------------------
-// AppContent — uses hooks, must be inside FluentProvider
+// AppProps — URL search params parsed by main.tsx
 // ---------------------------------------------------------------------------
 
-const AppContent: React.FC = () => {
-  const styles = useStyles();
+export interface AppProps {
+  /** Entity logical name (e.g. "sprk_matter", "sprk_project") from URL ?entityType= */
+  entityLogicalName?: string;
+  /** Entity record GUID from URL ?entityId= */
+  entityId?: string;
+  /** Matter ID shorthand from URL ?matterId= */
+  matterId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// AppShell — inner shell rendered inside StandaloneAiProvider
+// ---------------------------------------------------------------------------
+
+const useShellStyles = makeStyles({
+  shell: {
+    display: "flex",
+    width: "100%",
+    height: "100%",
+    overflow: "hidden",
+  },
+});
+
+function AppShell(): React.JSX.Element {
+  const styles = useShellStyles();
 
   return (
-    <div className={styles.root}>
-      {/* Placeholder: Three-pane AI workspace will be integrated in task 040 */}
-      <div className={styles.placeholder}>
-        <Text size={500} weight="semibold">
-          SpaarkeAi
-        </Text>
-        <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-          AI Workspace — scaffolded, awaiting Wave 1 components
-        </Text>
-      </div>
-
-      <footer className={styles.footer}>
-        <Text className={styles.footerVersion}>v{VERSION}</Text>
-      </footer>
+    <div className={styles.shell}>
+      <ThreePaneLayout
+        leftPane={<LeftPane />}
+        centerPane={<OutputPanel />}
+        rightPane={<SourcePanel />}
+        storageKey="spaarke-ai-workspace"
+        defaultLeftWidthPx={340}
+        defaultRightWidthPx={400}
+        minLeftWidthPx={240}
+        minRightWidthPx={240}
+        minCenterWidthPx={320}
+        leftPaneCollapseLabel="Show AI Chat"
+        rightPaneCollapseLabel="Show Sources"
+      />
     </div>
   );
-};
+}
+
+// ---------------------------------------------------------------------------
+// AppWithAuth — acquires BFF token, mounts StandaloneAiProvider
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function AppWithAuth(_props: AppProps): React.JSX.Element {
+  const styles = useStyles();
+
+  const [token, setToken] = React.useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = React.useState<boolean>(false);
+
+  // Acquire BFF access token after auth is initialized (non-blocking for render).
+  // StandaloneAiProvider handles partial states (isAuthenticated=false → skips BFF calls).
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const acquireToken = async (): Promise<void> => {
+      try {
+        const provider = getAuthProvider();
+        const accessToken = await provider.getAccessToken();
+        if (!cancelled && accessToken) {
+          setToken(accessToken);
+          setIsAuthenticated(true);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn("[SpaarkeAi] Token acquisition failed:", err);
+          setIsAuthenticated(false);
+        }
+      }
+    };
+
+    void acquireToken();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const bffBaseUrl = (() => {
+    try {
+      return getBffBaseUrl();
+    } catch {
+      return "";
+    }
+  })();
+
+  return (
+    <div className={styles.appRoot}>
+      <div className={styles.layoutShell}>
+        <StandaloneAiProvider
+          bffBaseUrl={bffBaseUrl}
+          token={token}
+          isAuthenticated={isAuthenticated}
+        >
+          <AppShell />
+        </StandaloneAiProvider>
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // App — top-level component that owns theme state
@@ -103,7 +179,7 @@ const AppContent: React.FC = () => {
  *
  * MUST NOT use OS prefers-color-scheme (per theme-consistency.md constraints).
  */
-export const App: React.FC = () => {
+export const App: React.FC<AppProps> = (props) => {
   // resolveCodePageTheme() is the initializer — runs once at mount
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
 
@@ -115,7 +191,7 @@ export const App: React.FC = () => {
 
   return (
     <FluentProvider theme={theme}>
-      <AppContent />
+      <AppWithAuth {...props} />
     </FluentProvider>
   );
 };

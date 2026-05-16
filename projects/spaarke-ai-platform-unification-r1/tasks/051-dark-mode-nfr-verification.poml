@@ -2,7 +2,7 @@
 <task id="AIPU-051" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Dark Mode and NFR Verification for All 17 Output and Source Widgets</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>5</phase>
     <wave>5</wave>
     <estimated-effort>6 hours</estimated-effort>

@@ -46,14 +46,14 @@
 #### Wave 4: Code Page Assembly (PARALLEL - 2 agents)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 040 | Wire SpaarkeAi Code Page with all components | :white_large_square: | 4h | 010-032 |
-| 041 | Launch points (workspace, form, deep-link, M365) | :white_large_square: | 3h | 040 |
+| 040 | Wire SpaarkeAi Code Page with all components | :white_check_mark: | 4h | 010-032 |
+| 041 | Launch points (workspace, form, deep-link, M365) | :white_check_mark: | 3h | 040 |
 
 #### Wave 5: Refactor + Verification (PARALLEL - 2 agents)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 050 | Refactor AnalysisWorkspace to import from @spaarke/ai-context | :white_large_square: | 3h | 011, 012, 040 |
-| 051 | Dark mode verification + NFR compliance | :white_large_square: | 2h | 020-032 |
+| 050 | Refactor AnalysisWorkspace to import from @spaarke/ai-context | :white_check_mark: | 3h | 011, 012, 040 |
+| 051 | Dark mode verification + NFR compliance | :white_check_mark: | 2h | 020-032 |
 
 #### Wave 5D: Phase 1 Deploy + Test (SERIAL)
 | # | Task | Status | Est. | Depends |

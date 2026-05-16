@@ -2,7 +2,7 @@
 <task id="AIPU-050" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Refactor AnalysisWorkspace — Import Shared Hooks from @spaarke/ai-context</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>5</phase>
     <wave>5</wave>
     <estimated-effort>5 hours</estimated-effort>
@@ -131,4 +131,16 @@
     useChatContextMapping logic lives only in @spaarke/ai-context. Any local hook files are
     either deleted or are pure re-exports with a deprecation comment.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note>Completed: 2026-05-16</note>
+    <note>AC-1: @spaarke/ai-context added to AnalysisWorkspace/package.json as file:../../shared/Spaarke.AI.Context. npm install succeeded (829 packages). node_modules/@spaarke/ai-context linked.</note>
+    <note>AC-2: AnalysisAiContext.tsx imports useChatSession and useChatContextMapping from @spaarke/ai-context at lines 29-30.</note>
+    <note>AC-3: AnalysisAiContextValue public API unchanged. chatSessionId: string|null and setChatSessionId remain. contextMapping: IAnalysisChatContextResponse|null added (additive, non-breaking). ChatPanel.tsx consumers unaffected.</note>
+    <note>AC-4: webpack build succeeds (0 errors, 5 pre-existing warnings for react-window/bundle-size). tsc --noEmit shows 0 errors in AnalysisAiContext.tsx (other files have pre-existing errors unrelated to this task).</note>
+    <note>AC-5: No test files existed in tests/client/AnalysisWorkspace/ — vacuously satisfied.</note>
+    <note>AC-6: Local hooks/useChatSession.ts and hooks/useChatContextMapping.ts never existed in AnalysisWorkspace. No duplication — hook implementations live only in @spaarke/ai-context.</note>
+    <note>Key implementation decision: No separate AnalysisAiProvider.tsx exists — it is combined in AnalysisAiContext.tsx. chatSessionId is bridged: useChatSession session?.sessionId (when hook creates sessions) ?? sessionStorage fallback (when SprkChat creates sessions via onSessionCreated callback). useChatContextMapping is called with analysisId and playbookId.</note>
+    <note>webpack.config.js updated: @spaarke/ai-context alias added (source directory, not dist, matching ui-components pattern). Include path added for esbuild-loader.</note>
+  </notes>
 </task>

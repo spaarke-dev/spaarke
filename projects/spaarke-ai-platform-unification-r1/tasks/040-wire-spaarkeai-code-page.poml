@@ -2,7 +2,7 @@
 <task id="AIPU-040" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Wire SpaarkeAi Code Page — ThreePaneLayout, ChatPanel, OutputPanel, SourcePanel</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>4</phase>
     <wave>4</wave>
     <estimated-effort>8 hours</estimated-effort>

@@ -7,7 +7,8 @@
  *   2. Store resolved values via setRuntimeConfig() (sets window globals for auth lib)
  *   3. Eagerly initialize MSAL auth to ensure tenant ID is available synchronously
  *      before first user interaction (avoids "missing tenant ID" errors in AI calls)
- *   4. Render <App /> via React 19 createRoot with FluentProvider + theme detection
+ *   4. Parse URL search params (entityType, entityId, matterId) for entity context
+ *   5. Render <App /> via React 19 createRoot with FluentProvider + theme detection
  *
  * Web resource: sprk_spaarkeai
  *
@@ -64,7 +65,38 @@ async function bootstrap(): Promise<void> {
     console.warn("[SpaarkeAi] Eager auth init failed, will retry on first use:", err);
   }
 
-  // 3. Render the app
+  // 3. Parse URL parameters for entity context.
+  //
+  //    Dataverse passes data to web resources via two mechanisms:
+  //      a) Direct query params: ?entityType=sprk_matter&entityId=<guid>&matterId=<guid>
+  //      b) Encoded data param: ?data=entityType%3Dsprk_matter%26entityId%3D<guid>
+  //
+  //    useEntityResolver (inside StandaloneAiProvider) also resolves entity context
+  //    via Xrm frame-walk as a fallback, so URL params are supplementary hints.
+  const searchParams = new URLSearchParams(window.location.search);
+
+  // Also decode the Dataverse `data` parameter (URL-encoded key=value pairs)
+  const dataParam = searchParams.get("data");
+  const dataParams = new URLSearchParams(
+    dataParam ? decodeURIComponent(dataParam) : ""
+  );
+
+  const entityLogicalName =
+    searchParams.get("entityType") ??
+    dataParams.get("entityType") ??
+    undefined;
+
+  const entityId =
+    searchParams.get("entityId") ??
+    dataParams.get("entityId") ??
+    undefined;
+
+  const matterId =
+    searchParams.get("matterId") ??
+    dataParams.get("matterId") ??
+    undefined;
+
+  // 4. Render the app
   const rootElement = document.getElementById("root");
   if (!rootElement) {
     console.error("[SpaarkeAi] Root element not found");
@@ -74,7 +106,11 @@ async function bootstrap(): Promise<void> {
   const root = createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <App />
+      <App
+        entityLogicalName={entityLogicalName}
+        entityId={entityId}
+        matterId={matterId}
+      />
     </React.StrictMode>
   );
 
