@@ -1,0 +1,84 @@
+<task id="AIPU-057" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Welcome experience with guided prompt buttons for no-context launch</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>5E</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, fluent-ui, ux</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-040</dependencies>
+  </metadata>
+
+  <prompt>
+    When Spaarke AI opens from main navigation with no entity context, the chat pane shows
+    an empty SprkChat with no guidance. Create a welcome experience that helps users
+    understand what they can do and guides them to their first action.
+
+    The welcome state replaces the empty chat when there is no active session and no entity
+    context. It includes:
+    1. A branded header ("Welcome to Spaarke AI")
+    2. Prompt buttons for common workflows: Analyze a Document, Research, Financial Analysis, Draft
+    3. A "Recent" section showing the user's last 3-5 chat sessions (from chat history)
+    4. When the user clicks a prompt button, it injects a structured first message into SprkChat
+       (e.g., clicking "Analyze a Document" sends the message "I want to analyze a document")
+    5. The welcome state disappears once a chat session starts
+
+    Design requirements:
+    - Use Fluent v9 Card components for prompt buttons with icons
+    - Responsive grid layout (2x2 on desktop, single column on narrow)
+    - Dark mode support (ADR-021 — semantic tokens only)
+    - The prompt buttons should be configurable (array of {label, icon, message})
+    - Recent sessions should show title, entity context badge, and relative timestamp
+  </prompt>
+
+  <role>Senior frontend developer with React 19 and Fluent v9 experience</role>
+
+  <goal>
+    When Spaarke AI opens with no context, users see a welcoming guided experience instead
+    of an empty chat. Prompt buttons inject first messages that kick off specific workflows.
+    Recent sessions allow quick resumption.
+  </goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/src/components/ChatPanel.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/components/LeftPane.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/App.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatHistoryPanel.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/providers/StandaloneAiContext.tsx</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-021">All UI must use Fluent v9 semantic tokens — no hardcoded colors</constraint>
+    <constraint source="ADR-021">Dark mode must work without additional CSS</constraint>
+    <constraint source="project">Prompt buttons inject messages into SprkChat — they do NOT call BFF directly</constraint>
+    <constraint source="project">Welcome state must disappear once a session starts (chatSessionId becomes non-null)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create WelcomePanel component with branded header and prompt button grid</step>
+    <step order="2">Define prompt button configuration array with label, icon, and injected message</step>
+    <step order="3">Add recent sessions section using ChatApiClient to fetch last 5 sessions</step>
+    <step order="4">Wire WelcomePanel into LeftPane/ChatPanel — show when no session and no entity context</step>
+    <step order="5">When prompt button clicked, call SprkChat's send message API or set initial message</step>
+    <step order="6">Verify dark mode renders correctly</step>
+    <step order="7">Build and verify: npm run build</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Welcome panel renders when Spaarke AI opens with no entity context</criterion>
+    <criterion>4 prompt buttons visible with icons and labels</criterion>
+    <criterion>Clicking a prompt button starts a chat with the injected message</criterion>
+    <criterion>Recent sessions section shows last 3-5 sessions with metadata</criterion>
+    <criterion>Welcome panel disappears once chat session starts</criterion>
+    <criterion>Dark mode renders correctly</criterion>
+    <criterion>npm run build passes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,76 @@
+<task id="AIPU-058" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Action chip responses — upload, browse, select when context is missing</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>5E</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, frontend, ai</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-057</dependencies>
+  </metadata>
+
+  <prompt>
+    When the user says "analyze a document" but no document is loaded, the AI currently
+    responds with text suggesting they upload a file. Instead, the AI should respond with
+    actionable UI elements (action chips / inline buttons) that let the user take the
+    next step directly from the chat.
+
+    BFF side:
+    1. Create a context-aware intent handler that detects when a user request requires
+       a document/entity but none is present in the session context
+    2. When this gap is detected, emit a `suggestions` SSE event with action chips:
+       - "Upload File" — triggers SprkChat's file upload flow
+       - "Browse Matter Documents" — opens a document picker (output pane widget)
+       - "Select a Matter" — opens matter picker (output pane widget)
+    3. The action chips use the existing SprkChat `suggestions` SSE event format
+
+    Frontend side:
+    4. SprkChat already renders suggestion chips — verify they appear and are clickable
+    5. When "Browse Matter Documents" is clicked, emit an output_pane event with a
+       DocumentBrowser widget (or use existing search results widget with entity filter)
+    6. When "Select a Matter" is clicked, emit an output_pane event with an EntityPicker
+       widget that lets the user search and select a matter
+
+    The key pattern: AI detects missing context → responds with actionable chips →
+    user clicks chip → action resolves the missing context → original intent resumes.
+  </prompt>
+
+  <role>Senior full-stack developer with BFF API and React experience</role>
+
+  <goal>
+    When users request actions that need a document or entity context, the AI responds
+    with clickable action chips instead of passive text instructions. Chips trigger
+    upload flows, document browsers, or entity pickers.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</file>
+    <file>src/solutions/SpaarkeAi/src/components/OutputPanel.tsx</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="project">Use existing SprkChat suggestions SSE event format for action chips</constraint>
+    <constraint source="ADR-013">All AI calls through BFF — frontend never calls AI directly</constraint>
+    <constraint source="project">Action chips must work in both standalone and analysis workspace modes</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Identify the BFF pipeline point where missing-context detection should occur</step>
+    <step order="2">Create context-gap detection logic (intent needs document but session has none)</step>
+    <step order="3">Emit suggestions SSE event with action chips when context gap detected</step>
+    <step order="4">Verify SprkChat renders the action chips correctly</step>
+    <step order="5">Wire chip click handlers to trigger upload/browse/select flows</step>
+    <step order="6">Test end-to-end: "analyze a document" with no document → chips → upload → analysis</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>"Analyze a document" with no document shows Upload/Browse action chips</criterion>
+    <criterion>Clicking "Upload File" chip triggers SprkChat upload flow</criterion>
+    <criterion>Clicking "Browse Matter Documents" shows document search in output pane</criterion>
+    <criterion>After document is provided, original intent resumes automatically</criterion>
+    <criterion>dotnet build and npm run build both pass</criterion>
+  </acceptance-criteria>
+</task>

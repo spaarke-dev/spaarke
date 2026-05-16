@@ -425,10 +425,12 @@ public sealed class SprkChatAgentFactory
 
             var tools = new List<AIFunction>();
 
-            // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering
+            // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering.
+            // sseWriter is forwarded so both search methods can emit output_pane SSE events with
+            // structured SearchResults widget data alongside their text responses (Gap 1 fix).
             if (ragService != null)
             {
-                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope, citationContext);
+                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
                 tools.Add(AIFunctionFactory.Create(
                     documentSearchTools.SearchDocumentsAsync,
                     name: "SearchDocuments",
@@ -461,10 +463,12 @@ public sealed class SprkChatAgentFactory
                 _logger.LogWarning("IAnalysisOrchestrationService not available; AnalysisQueryTools will not be registered");
             }
 
-            // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering
+            // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering.
+            // sseWriter is forwarded so GetKnowledgeSourceAsync can emit source_pane SSE events with
+            // structured DocumentViewer widget data alongside the text response (Gap 1 fix).
             if (ragService != null)
             {
-                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope, citationContext);
+                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
                 tools.Add(AIFunctionFactory.Create(
                     knowledgeRetrievalTools.GetKnowledgeSourceAsync,
                     name: "GetKnowledgeSource",
