@@ -1,12 +1,18 @@
-# jps-validate
-
 ---
 description: Validate a JPS JSON file against schema and test rendering
 tags: [ai, jps, testing, validation, prompt-schema]
 techStack: [azure-openai, aspnet-core]
 appliesTo: ["validate JPS", "check JPS", "test JPS definition", "validate prompt schema"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# jps-validate
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: `none-too-volatile` chosen pending Wave 2b-D Option A move of canonical JPS examples to `.claude/skills/jps-action-create/examples/`. After that move, `exemplar:` will update to `.claude/skills/jps-action-create/examples/document-profiler.json` (the same exemplar `jps-action-create` will use). For now, point at the existing path in the skill body.
 
 ## Purpose
 
@@ -263,3 +269,14 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 - Report ALL issues at once — don't stop at the first failure
 - Offer auto-fix suggestions for every failed check
 - For $choices validation, verify the prefix is one of: `lookup:`, `optionset:`, `multiselect:`, `boolean:`, `downstream:` and the value after the prefix contains exactly one `.` separator (e.g., `entity.field`)
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Schema validator passes but renderer rejects at runtime | `IsJpsFormat()` in `PromptSchemaRenderer.cs` checks more than just the `$schema` field (e.g., requires certain top-level keys) | After schema validation passes, ALWAYS run the render test (Step 6 in Workflow). Schema OK + render OK = ready. |
+| `$choices` reference is syntactically valid but the entity doesn't exist | Reference to `lookup:sprk_<entity>.<field>` where the entity was renamed or deleted | Validate `$choices` prefixes are well-formed (Tip #5), then optionally cross-reference Dataverse via `mcp__dataverse__list_tables()` to confirm the entity exists. |
+| Validator passes but production output has missing fields | JPS structured-output schema lists fields but the AI model doesn't reliably produce all of them | Schema validation can't catch runtime AI behavior. Run a sample render through the actual deployed model BEFORE relying on the JPS in production. |
+| Validator reports false-positive failure | JPS spec evolved; validator wasn't updated | Validators MUST track the schema spec version. If schema version doesn't match validator version, treat as inconclusive (warn-only). |

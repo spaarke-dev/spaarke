@@ -1,12 +1,19 @@
-# jps-playbook-audit
-
 ---
 description: Audit existing playbooks against current scope catalog and standards, then recommend or apply updates
 tags: [ai, jps, playbook, audit, compliance, scope]
 techStack: [azure-openai, dataverse, powershell]
 appliesTo: ["audit playbooks", "review playbooks", "check playbook compliance", "update playbooks"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# jps-playbook-audit
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Audit runs against live Dataverse data and an evolving scope catalog. A frozen exemplar output would not be valuable.
+> **Usage note**: This skill has only 3 inbound references and no see_also from other skills (audit observation, 2026-05-15). If no developer has invoked it in 6+ months, consider archival under NF-1. Reviewer (2026-05-16) opted to keep refined in case future use.
 
 ## Purpose
 
@@ -271,3 +278,14 @@ COMMIT audit report if saved to file:
 - For scope impact mode (`--scope`), show the delta clearly: "3 of 8 contract playbooks already have this skill"
 - Never auto-apply 🔴 ERROR fixes — these may indicate data issues requiring investigation
 - Keep audit reports concise — use tables for multi-playbook summaries
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Audit reports a scope as missing when it actually exists in Dataverse | `scope-model-index.json` is stale relative to live Dataverse | Run `/jps-scope-refresh` BEFORE audit. The scope index is the source of truth for the audit; stale index = false positives. |
+| 🔴 ERROR auto-applied — broke a working playbook | Skill bypassed the "never auto-apply ERROR fixes" rule | Honor the Conventions: ERRORs require human review. Apply only ✅ GREEN suggestions automatically; 🟡 YELLOW with confirmation; 🔴 RED never. |
+| Audit found no issues but production playbook fails at runtime | Audit didn't cover runtime concerns (e.g., model availability, scope record statecode) | Audit is static compliance check only. For runtime validation, run a test playbook execution end-to-end after major scope changes. |
+| Singular/plural Dataverse table-name confusion in audit queries | `sprk_analysisaction` (logical name) vs `sprk_analysisactions` (Web API plural endpoint) | This skill should use plural endpoints (`sprk_analysisactions`) in OData URLs but singular names in references to the logical table. Verify against `mcp__dataverse__list_tables()` if in doubt. |

@@ -4,12 +4,16 @@ tags: [deploy, release, production, operations]
 techStack: [powershell, azure, dataverse, pac-cli]
 appliesTo: ["scripts/Deploy-Release.ps1", "config/environments.json", "deploy new release", "production release", "deploy release"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # Deploy New Release
 
 > **Category**: Operations
-> **Last Updated**: April 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — **leave-alone**: cleanest critical-rules structure in batch; BFF URL gotcha well-surfaced)
+> **Exemplar rationale**: Interactive UX patterns change frequently; the BFF URL host-only rule is the stable contract (recurring production issue prevented).
 > **Procedure**: [`docs/procedures/production-release.md`](../../../docs/procedures/production-release.md)
 
 Interactive Claude Code skill for deploying a Spaarke release to one or more production environments. This skill provides the **operator UX layer** — environment selection, confirmation gates, change reporting, and progress monitoring. The actual deployment is performed by `scripts/Deploy-Release.ps1` and its sub-scripts.
@@ -455,3 +459,14 @@ Environments are defined in `config/environments.json`:
 - **The script handles rollback** for BFF API (slot swap). For solutions and web resources, provide manual rollback guidance referencing the procedure document.
 - **Version suggestion** — auto-suggest patch increment from the last tag. Let the operator override if they want minor or major.
 - **If the operator says "just deploy to demo"** — still run pre-flight checks. The checks protect against silent failures.
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| BFF URL configured with `/api` suffix — production breaks at runtime | Operator entered `https://...azurewebsites.net/api` instead of host-only | **Recurring production issue.** Pre-flight check MUST validate BFF URL is host-only. See `## Critical Rules` MUST/NEVER list — the #1 NEVER rule. If detected post-deploy: stop, fix the env var, redeploy. |
+| Half-deployed release — BFF deployed but solution didn't import | Operator interrupted between phases, OR one phase failed silently | Each phase MUST report ✅/❌ explicitly. If a phase fails, the skill STOPS — operator decides rollback vs continue. Never half-complete silently. |
+| Tag created on wrong commit | Tag step ran before all phases verified | Tag is the FINAL step. If any earlier phase failed, the tag is never created. Recovery: investigate failure, then re-run skill from beginning. |
+| Parallel deployment attempted ("deploy to all 3 environments simultaneously") | Operator unfamiliar with the sequential constraint | Skill rejects parallel deployment requests. Always one environment at a time — explicit Conventions rule. |
