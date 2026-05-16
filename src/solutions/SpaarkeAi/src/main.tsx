@@ -102,103 +102,6 @@ async function fetchClientConfig(): Promise<IRuntimeConfig> {
   return config;
 }
 
-/**
- * Detect whether this page is running in the top-level browser frame.
- *
- * Returns true when:
- *   - Opened via direct URL (bookmark, email link, M365 handoff)
- *   - Opened via navigateTo with target:1 (full-page replacement)
- *
- * Returns false when:
- *   - Opened via navigateTo with target:2 (dialog/panel) — nested iframe
- *   - Embedded in a Dataverse form (nested iframe)
- *
- * WHY THIS MATTERS:
- *   In top-frame: use MSAL loginRedirect (standard SPA pattern, navigates away and back)
- *   In iframe:    use MSAL loginPopup (never redirect — would break the parent MDA frame)
- */
-function isTopFrame(): boolean {
-  try {
-    return window.self === window.top;
-  } catch {
-    // Cross-origin frame check failed — assume nested iframe (safe fallback)
-    return false;
-  }
-}
-
-/**
- * Handle MSAL redirect flow for top-frame (direct URL) access.
- *
- * On every page load, call handleRedirectPromise() to process any pending
- * redirect response from Azure AD (e.g., user returning from login page).
- *
- * If no redirect result and no cached MSAL account → trigger loginRedirect.
- * The browser will navigate to Azure AD, authenticate, and return to this URL.
- *
- * Returns true if the page should continue to render (authenticated or redirect handled).
- * Returns false if loginRedirect was called (page will navigate away — do not render).
- */
-async function handleTopFrameAuth(config: IRuntimeConfig): Promise<boolean> {
-  const { PublicClientApplication } = await import("@azure/msal-browser");
-
-  const msalConfig = {
-    auth: {
-      clientId: config.msalClientId,
-      authority: `https://login.microsoftonline.com/${config.tenantId || "organizations"}`,
-      // Redirect URI = current URL (without query params — for consistency)
-      redirectUri: `${window.location.protocol}//${window.location.host}${window.location.pathname}`,
-    },
-    cache: {
-      // localStorage per auth constraint MUST rule — survives tab/browser close
-      cacheLocation: "localStorage" as const,
-      storeAuthStateInCookie: true,
-    },
-    system: {
-      loggerOptions: {
-        logLevel: 3, // Warning only
-        piiLoggingEnabled: false,
-      },
-    },
-  };
-
-  const msalInstance = new PublicClientApplication(msalConfig);
-  await msalInstance.initialize();
-
-  // Step 1: Process any pending redirect response (post-login return from Azure AD)
-  const redirectResult = await msalInstance.handleRedirectPromise();
-  if (redirectResult?.account) {
-    console.info(
-      "[SpaarkeAi] MSAL redirect response processed — authenticated as:",
-      redirectResult.account.username
-    );
-    // Authenticated — continue to render
-    return true;
-  }
-
-  // Step 2: Check for cached account (returning user with valid session)
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length > 0) {
-    console.info(
-      "[SpaarkeAi] MSAL cached account found:",
-      accounts[0].username
-    );
-    // Cached session — continue to render (ensureAuthInitialized will acquire token)
-    return true;
-  }
-
-  // Step 3: No auth, no cache — initiate redirect to Azure AD login
-  // Page will navigate away; on return, handleRedirectPromise() above will catch it.
-  console.info("[SpaarkeAi] No MSAL account — initiating loginRedirect...");
-  const scope = config.bffOAuthScope;
-  await msalInstance.loginRedirect({
-    scopes: [scope],
-    // prompt: "select_account" can be added for multi-account UX
-  });
-
-  // loginRedirect navigates the page away — this return value is never reached.
-  // Return false to signal "do not render" to the caller.
-  return false;
-}
 
 async function bootstrap(): Promise<void> {
   const t0 = performance.now();
@@ -214,48 +117,51 @@ async function bootstrap(): Promise<void> {
     // Xrm path (in-MDA launch) OR localStorage cache (repeat direct URL visit)
     config = await resolveRuntimeConfig();
   } catch (xrmErr) {
-    // Xrm not available AND no localStorage cache — first direct URL visit
     console.warn(
-      "[SpaarkeAi] resolveRuntimeConfig() failed (Xrm unavailable, no localStorage cache):",
+      "[SpaarkeAi] resolveRuntimeConfig() failed:",
       xrmErr instanceof Error ? xrmErr.message : String(xrmErr)
     );
 
-    if (!isTopFrame()) {
-      // We're in an iframe without Xrm and without localStorage cache.
-      // This is unusual — navigateTo normally runs within a frame where Xrm
-      // is available via frame-walk, or the user has a localStorage cache.
-      // Re-throw to show the error UI; popup auth can't recover config.
-      throw new Error(
-        "[SpaarkeAi] Running in an iframe without Xrm context or cached config. " +
-          "Open SpaarkeAi from within the Dataverse Model-Driven App to initialize the configuration cache."
-      );
+    // Try localStorage cache first (set by a previous successful visit)
+    try {
+      const cached = localStorage.getItem("spaarke-ai-runtime-config");
+      if (cached) {
+        config = JSON.parse(cached) as IRuntimeConfig;
+        console.info("[SpaarkeAi] Using cached runtime config from localStorage");
+      }
+    } catch {
+      // Parse failed or localStorage unavailable — continue to BFF fetch
     }
 
-    // Top-frame: fetch config from BFF anonymous endpoint
-    config = await fetchClientConfig();
+    // @ts-expect-error — config may still be undefined if cache miss
+    if (!config) {
+      // Fetch from BFF anonymous endpoint (works from any origin)
+      console.info("[SpaarkeAi] No cached config — fetching from BFF /api/config/client");
+      config = await fetchClientConfig();
+    }
   }
 
   setRuntimeConfig(config);
 
-  // -------------------------------------------------------------------------
-  // 2. Auth initialization — mode depends on frame context
-  // -------------------------------------------------------------------------
-  const inTopFrame = isTopFrame();
-
-  if (inTopFrame && !_hasXrmContext()) {
-    // Direct URL path: top-frame without Xrm context.
-    // Use MSAL redirect flow — acquireTokenSilent first, loginRedirect fallback.
-    // This must run BEFORE rendering to prevent the app from rendering
-    // unauthenticated and then immediately navigating away.
-    const shouldRender = await handleTopFrameAuth(config);
-    if (!shouldRender) {
-      // loginRedirect was called — page will navigate away. Stop here.
-      return;
-    }
+  // Cache config to localStorage so subsequent visits resolve instantly
+  // without needing Xrm or a BFF fetch.
+  try {
+    localStorage.setItem("spaarke-ai-runtime-config", JSON.stringify(config));
+  } catch {
+    // localStorage may be unavailable (private browsing) — non-fatal
   }
 
-  // Standard auth init (Xrm path OR top-frame after redirect return with cached account)
-  // ensureAuthInitialized uses the silent+popup chain from SpaarkeAuthProvider.
+  // -------------------------------------------------------------------------
+  // 2. Auth initialization — single MSAL instance via @spaarke/auth
+  //
+  //    Uses the existing SpaarkeAuthProvider which manages a single MSAL
+  //    ConfidentialClientApplication with silent + popup fallback.
+  //    This works in ALL contexts (MDA, navigateTo, direct URL, top-frame).
+  //
+  //    IMPORTANT: Do NOT create a separate PublicClientApplication here.
+  //    Multiple MSAL instances with the same clientId and localStorage cache
+  //    cause "interaction_in_progress" errors.
+  // -------------------------------------------------------------------------
   try {
     await ensureAuthInitialized();
 
@@ -334,36 +240,6 @@ async function bootstrap(): Promise<void> {
   console.info(`[SpaarkeAi] Bootstrap complete in ${bootstrapMs}ms`);
 }
 
-/**
- * Check if Xrm context is available in the current frame or parent frames.
- * Used to distinguish "top-frame with Xrm" (MDA sitemap page) from
- * "top-frame without Xrm" (direct URL bookmark).
- */
-function _hasXrmContext(): boolean {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext?.()) return true;
-    } catch {
-      /* cross-origin */
-    }
-  }
-
-  return false;
-}
 
 bootstrap().catch((err) => {
   console.error("[SpaarkeAi] Bootstrap failed:", err);
