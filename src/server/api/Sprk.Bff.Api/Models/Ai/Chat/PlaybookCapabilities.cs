@@ -75,4 +75,19 @@ public static class PlaybookCapabilities
         LegalResearch,
         CodeInterpreter
     ];
+
+    /// <summary>
+    /// Core capabilities available in standalone/generic chat mode (no playbook).
+    /// Includes only tools that have no external dependency configuration requirements.
+    /// Excludes LegalResearch (needs Bing Grounding), CodeInterpreter (needs Foundry agent),
+    /// WebSearch (needs Bing API key), WriteBack (needs analysis context),
+    /// and Reanalyze (needs analysis context).
+    /// </summary>
+    public static readonly IReadOnlyList<string> CoreCapabilities =
+    [
+        Search,
+        Analyze,
+        SelectionRevise,
+        Summarize
+    ];
 }
