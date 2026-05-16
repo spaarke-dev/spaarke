@@ -1,7 +1,7 @@
 <task id="AIPU-030" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>SSE event types: output_pane, source_pane, source_highlight</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>3</phase>
     <wave>3</wave>
     <estimated-effort>3 hours</estimated-effort>

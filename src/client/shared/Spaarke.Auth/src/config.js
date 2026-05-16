@@ -1,0 +1,81 @@
+/** No default client ID — must be resolved from Dataverse env var sprk_MsalClientId. */
+const DEFAULT_CLIENT_ID = undefined;
+/**
+ * Fallback authority used only when no tenant can be discovered from the
+ * surrounding Dataverse / Xrm context. `/organizations` makes MSAL.js'
+ * ssoSilent fail (it can't tell which AAD session cookie to use), forcing a
+ * popup. Prefer the tenant-specific authority returned by
+ * `resolveDefaultAuthority()` below.
+ */
+const FALLBACK_AUTHORITY = 'https://login.microsoftonline.com/organizations';
+/**
+ * Best-effort: read the user's AAD tenant ID from Xrm.organizationSettings so
+ * the MSAL authority is tenant-specific. With a specific tenant, ssoSilent can
+ * use the existing AAD session cookie and avoid the "Pick an account" popup.
+ */
+function resolveTenantFromXrm() {
+    if (typeof window === 'undefined')
+        return undefined;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const frames = [window];
+        try {
+            if (window.parent !== window)
+                frames.push(window.parent);
+        }
+        catch { /* cross-origin */ }
+        try {
+            if (window.top && window.top !== window)
+                frames.push(window.top);
+        }
+        catch { /* cross-origin */ }
+        for (const frame of frames) {
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const xrm = frame.Xrm;
+                const tid = xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId;
+                if (tid && typeof tid === 'string')
+                    return tid;
+            }
+            catch { /* cross-origin */ }
+        }
+    }
+    catch { /* swallow */ }
+    return undefined;
+}
+function resolveDefaultAuthority() {
+    const tenantId = resolveTenantFromXrm();
+    return tenantId ? `https://login.microsoftonline.com/${tenantId}` : FALLBACK_AUTHORITY;
+}
+/** No default BFF scope — must be resolved from Dataverse env var sprk_BffApiAppId. */
+const DEFAULT_BFF_SCOPE = undefined;
+/** Buffer (ms) before token expiry to consider it stale. */
+export const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
+/** Proactive refresh interval (ms). */
+export const PROACTIVE_REFRESH_INTERVAL_MS = 4 * 60 * 1000; // 4 minutes
+/**
+ * Resolve the full config, merging user overrides with defaults and window globals.
+ * Throws if required values (clientId, bffApiScope) are not provided via config, window globals,
+ * or Dataverse environment variables. No silent fallback to dev values.
+ */
+export function resolveConfig(userConfig) {
+    const clientId = userConfig?.clientId ??
+        (typeof window !== 'undefined' ? window.__SPAARKE_MSAL_CLIENT_ID__ : undefined) ??
+        DEFAULT_CLIENT_ID;
+    const bffApiScope = userConfig?.bffApiScope ?? DEFAULT_BFF_SCOPE;
+    const bffBaseUrl = userConfig?.bffBaseUrl ?? (typeof window !== 'undefined' ? window.__SPAARKE_BFF_URL__ : undefined) ?? '';
+    if (!clientId) {
+        throw new Error('MSAL Client ID not configured. Set sprk_MsalClientId environment variable in Dataverse, ' +
+            'or provide clientId via resolveRuntimeConfig() or window.__SPAARKE_MSAL_CLIENT_ID__.');
+    }
+    return {
+        clientId,
+        authority: userConfig?.authority ?? resolveDefaultAuthority(),
+        redirectUri: userConfig?.redirectUri ?? (typeof window !== 'undefined' ? window.location.origin : ''),
+        bffApiScope: bffApiScope ?? '',
+        bffBaseUrl,
+        proactiveRefresh: userConfig?.proactiveRefresh ?? false,
+        requireXrm: userConfig?.requireXrm ?? false,
+    };
+}
+//# sourceMappingURL=config.js.map

@@ -32,15 +32,15 @@
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
 | 020 | Output pane registry + widgets 1-4 | :white_large_square: | 4h | 003 |
-| 021 | Output pane widgets 5-8 | :white_large_square: | 3h | 003, 020 |
+| 021 | Output pane widgets 5-8 | :white_check_mark: | 3h | 003, 020 |
 | 022 | Source pane registry + all 6 widgets | :white_large_square: | 4h | 003 |
 | 023 | BFF StandaloneChatContextProvider + endpoint | :white_large_square: | 3h | none |
 
 #### Wave 3: SSE + Chat History (PARALLEL - 3 agents)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 030 | SSE event types (output_pane, source_pane, source_highlight) | :white_large_square: | 3h | 023 |
-| 031 | Output pane widgets 9-11 + cross-pane linking | :white_large_square: | 3h | 020 |
+| 030 | SSE event types (output_pane, source_pane, source_highlight) | :white_check_mark: | 3h | 023 |
+| 031 | Output pane widgets 9-11 + cross-pane linking | :white_check_mark: | 3h | 020 |
 | 032 | Chat history panel component | :white_large_square: | 2h | 003 |
 
 #### Wave 4: Code Page Assembly (PARALLEL - 2 agents)

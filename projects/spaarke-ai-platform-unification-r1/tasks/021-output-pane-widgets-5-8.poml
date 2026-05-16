@@ -1,7 +1,7 @@
 <task id="AIPU-021" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Output pane widgets 5-8 (Timeline, DocumentCompare, DataTable, Chart)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>2</phase>
     <wave>2</wave>
     <estimated-effort>5 hours</estimated-effort>
