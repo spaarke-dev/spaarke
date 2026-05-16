@@ -1,11 +1,19 @@
 ---
 description: Build and deploy a Vite/React SPA to Power Pages as a Code Site
+tags: [deploy, power-pages, vite, react, spa, code-site]
+techStack: [vite, react, typescript, pac-cli, power-pages]
+appliesTo: ["**/external-spa/**", "deploy power pages", "deploy spa", "deploy external workspace", "deploy code site"]
+alwaysApply: false
+exemplar: src/client/external-spa/
+last-reviewed: 2026-05-16
 ---
 
 # Power Page Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Updated**: March 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — normalized minimal frontmatter)
+> **Exemplar rationale**: `src/client/external-spa/` is the canonical Vite/React 18 SPA deployed to the `sprk-external-workspace` Code Site — named throughout the skill body.
 
 Build and deploy a Vite + React 18 SPA to Power Pages as a **Code Site**. This skill handles the full pipeline: build → `pac pages upload-code-site` → portal update.
 
@@ -272,6 +280,17 @@ npm run dev   # http://localhost:3000 with VITE_DEV_MOCK=true
 | `src/client/external-spa/.env.local` | Local dev overrides (`VITE_DEV_MOCK=true`) |
 | `src/client/external-spa/.env.production.local` | Production build overrides (`VITE_DEV_MOCK=false` + credentials) |
 | `scripts/Deploy-ExternalWorkspaceSpa.ps1` | Deploys to Dataverse web resource (NOT the portal) |
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| **Wrong deploy script run — uploaded to web resource instead of Code Site** | Operator ran `scripts/Deploy-ExternalWorkspaceSpa.ps1` (uploads `sprk_externalworkspace` web resource) thinking it was the Power Pages deploy. They are DIFFERENT targets. | Power Pages Code Site = `scripts/Deploy-PowerPages.ps1` + `pac pages upload-code-site`. Web resource = `Deploy-ExternalWorkspaceSpa.ps1`. The skill's `## Quick Reference` table calls this out — verify the target BEFORE running. |
+| `pac pages upload-code-site` fails with "rootPath not found" | `--rootPath` pointed at `external-spa/` instead of `.site-download/spaarke-external-workspace/` | PAC CLI 2.4.x requires the Power Pages download structure. Use `pac pages download-code-site` first to create `.site-download/...`, then upload using that path. |
+| Build succeeds but portal shows old version | Power Pages CDN cache | After upload, force-refresh the portal: clear CDN via `pac pages` or wait 5-10 min. Verify with hard-refresh in browser (Ctrl+Shift+R). |
+| Env vars missing — page loads but BFF calls fail | `.env.production.local` not present at build time | Verify env vars BEFORE build: `VITE_BFF_API_URL`, `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_BFF_SCOPE`. Prerequisites section in skill body lists these. |
 
 ---
 

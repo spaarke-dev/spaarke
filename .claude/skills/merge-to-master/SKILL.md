@@ -4,12 +4,16 @@ tags: [git, merge, master, branches, reconciliation, operations]
 techStack: [all]
 appliesTo: ["merge to master", "check unmerged branches", "reconcile branches", "sync master"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # merge-to-master
 
 > **Category**: Operations
-> **Last Updated**: February 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Every merge is a snapshot of branch state — no canonical reference holds.
 
 ---
 
@@ -353,6 +357,18 @@ CHECK 4: Build compiles
 - **After full reconciliation**, consider running `dotnet test` if tests exist — build passing doesn't guarantee functional correctness.
 - **Worktree awareness** — if the repo uses worktrees, merged branches may still have active worktrees. Don't delete branches with active worktrees.
 - **The reconciliation branch pattern** (`reconcile/branch-cleanup`) provides a safety net — if anything goes wrong, master is untouched until the final fast-forward.
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Merged to master without building first — broken master | Build verification step skipped because "the branch was already passing" | MANDATORY: `dotnet build src/server/api/Sprk.Bff.Api/` before push to master. CI catches issues post-push but master is broken in the meantime. |
+| Pushed to master with conflict markers still in files | `git merge` produced conflicts; user resolved some but missed others | Run `git diff --check` AFTER merge resolution to catch unresolved markers (`<<<<<<<`, `=======`, `>>>>>>>`). |
+| Force-pushed to master | User reached for `--force` instead of `--force-with-lease` (or worse — pushed master force) | NEVER force-push to master. NEVER use `--force` on shared branches (use `--force-with-lease` on feature branches only). |
+| Deleted branch before verifying CI passed | Cleanup ran too eagerly after merge | Wait for CI green before deleting the source branch. The reconciliation pattern explicitly preserves the branch until verified. |
+| Master diverges from origin after local merge | `git pull --rebase` produced conflicts; user committed without re-pushing | After merge to local master, immediately push. If push fails, fetch + rebase + push again. Don't leave local master ahead/behind silently. |
 
 ---
 
