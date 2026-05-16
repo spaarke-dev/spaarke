@@ -211,6 +211,42 @@ pf evaluation run --config evaluation/eval-config.yaml \
   --workspace sprkspaarkedev-aif-proj
 ```
 
+## Legal Domain Evaluation
+
+The legal evaluation pipeline extends the base evaluation with two legal-specific metrics:
+- **Groundedness** (threshold: 85%): Whether responses cite verifiable legal sources and stay grounded in provided materials
+- **Citation Accuracy** (threshold: 80%): Whether cited cases and statutes use correctly-formatted legal citation styles
+
+### Run Legal Domain Evaluation
+
+```bash
+# Step 1: Run the legal analysis flow against the legal evaluation dataset
+pf run create --flow prompt-flows/analysis-execute \
+  --data evaluation/datasets/legal-eval-samples.jsonl \
+  --workspace sprkspaarkedev-aif-proj \
+  --resource-group spe-infrastructure-westus2 \
+  --name legal-eval-$(date +%Y%m%d)
+
+# Step 2: Run the legal evaluation metrics on the flow output
+pf evaluation run --config evaluation/legal-eval-config.yaml \
+  --run legal-eval-$(date +%Y%m%d) \
+  --workspace sprkspaarkedev-aif-proj \
+  --resource-group spe-infrastructure-westus2
+```
+
+**Data governance** (ADR-014, ADR-015):
+- Evaluation results are retained for 90 days in the AI Foundry workspace, then purged
+- Evaluation input/output content is NEVER written to application logs
+- The `legal-eval-samples.jsonl` dataset contains only synthetic test cases (no real client data)
+
+**Legal Evaluation Metrics**:
+| Metric | Type | Threshold | Purpose |
+|--------|------|-----------|---------|
+| groundedness | gpt (built-in) | 0.85 | Prevents hallucinated legal conclusions |
+| citation_accuracy | custom | 0.80 | Validates case/statute citation format correctness |
+| format_compliance | custom | 0.90 | Ensures markdown/JSON output format |
+| completeness | custom | 0.85 | Verifies all required sections present |
+
 ## Portal Access
 
 - **AI Foundry Studio**: https://ai.azure.com/build/overview?wsid=/subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.MachineLearningServices/workspaces/sprkspaarkedev-aif-proj

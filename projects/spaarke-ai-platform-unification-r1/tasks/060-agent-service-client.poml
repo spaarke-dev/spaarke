@@ -1,0 +1,87 @@
+<task id="AIPU-060" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>AgentServiceClient — Azure AI Projects SDK wrapper for thread/run operations</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <wave>6</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, api, ai-foundry</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-056</dependencies>
+  </metadata>
+
+  <prompt>
+    Create AgentServiceClient and AgentServiceOptions to wrap the Azure.AI.Projects SDK for thread and run operations. This is the foundational Phase 2 service that all Foundry-backed tools depend on. It must honour the kill switch, enforce concurrency limits via SemaphoreSlim, and persist thread IDs via IDistributedCache (Redis-first per ADR-009) so that resumable conversations survive BFF restarts. Do NOT replace the existing direct-pipeline; this is purely additive (ADR-013).
+  </prompt>
+
+  <role>Senior .NET backend developer with Azure AI Foundry and Redis experience</role>
+
+  <goal>
+    A buildable AgentServiceClient registered in DI that can create threads, send messages, and stream responses from Azure AI Foundry Agents SDK, with kill-switch, concurrency gate, and Redis-backed thread ID persistence — verified by dotnet build passing with zero warnings.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+    <file>infrastructure/ai-foundry/README.md</file>
+    <file>docs/architecture/auth-AI-azure-resources.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-001">BackgroundService pattern for async work; no Azure Functions</constraint>
+    <constraint source="ADR-009">IDistributedCache (Redis) for thread ID storage; no in-memory-only fallback in production</constraint>
+    <constraint source="ADR-010">DI minimalism: count registrations; AgentServiceClient + AgentServiceOptions must not push total above 15 non-framework registrations</constraint>
+    <constraint source="ADR-013">Additive only — do NOT modify existing AiToolService or direct-pipeline code paths</constraint>
+    <constraint source="ADR-015">Data governance: NEVER log thread content, user messages, or assistant responses; log only thread IDs, run IDs, timing, and status codes</constraint>
+    <constraint source="ADR-016">Rate limiting and concurrency: use SemaphoreSlim keyed by tenant; MaxConcurrency from AgentServiceOptions; reject with 429 when semaphore times out</constraint>
+    <constraint source="ADR-018">Kill switch: AgentServiceOptions.Enabled must be checked before every operation; throw FeatureDisabledException (or return 503) if false</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-foundry/README.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Redis caching pattern" location="src/server/api/Sprk.Bff.Api/Services/">
+        Existing services use IDistributedCache with JSON serialization, sliding expiry, and tenant-scoped cache keys
+      </pattern>
+      <pattern name="Options + ValidateOnStart" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs">
+        All options classes registered with services.AddOptions&lt;T&gt;().BindConfiguration(section).ValidateDataAnnotations().ValidateOnStart()
+      </pattern>
+      <pattern name="SemaphoreSlim concurrency gate" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Existing AI services use a static or injected SemaphoreSlim with WaitAsync(timeout) returning 429 on timeout
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj to check existing NuGet references and current package versions</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs to understand existing DI registration pattern and current registration count</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs to understand the existing AI pipeline entry point and patterns</step>
+    <step>Add Azure.AI.Projects NuGet package reference to Sprk.Bff.Api.csproj (use latest stable; check docs/architecture/auth-AI-azure-resources.md for approved version)</step>
+    <step>Create AgentServiceOptions.cs in Services/Ai/Foundry/ with properties: Enabled (bool, required), Endpoint (Uri, required), AgentId (string, required), MaxConcurrency (int, default 4), ThreadCacheExpiryMinutes (int, default 60); decorate with [Required] and [Range] data annotations for ValidateOnStart</step>
+    <step>Create AgentServiceClient.cs in Services/Ai/Foundry/ with constructor taking AgentServiceOptions (IOptions&lt;T&gt;), IDistributedCache, ILogger; implement CreateThreadAsync(string tenantId, CancellationToken) returning thread ID; implement SendMessageAsync(string threadId, string message, CancellationToken); implement StreamResponseAsync(string threadId, string runId, CancellationToken) returning IAsyncEnumerable&lt;string&gt;</step>
+    <step>In AgentServiceClient, add a private SemaphoreSlim _concurrencyGate initialized from AgentServiceOptions.MaxConcurrency; wrap all public methods with WaitAsync(TimeSpan.FromSeconds(30)) — on timeout throw a ConcurrencyLimitExceededException with status 429</step>
+    <step>In AgentServiceClient, implement thread ID caching: cache key = $"agent-thread:{tenantId}", serialize as string, sliding expiry from ThreadCacheExpiryMinutes; read before creating new thread (resume if exists), write after creation</step>
+    <step>In AgentServiceClient, add Enabled check at the top of every public method: if (!_options.Enabled) throw new FeatureDisabledException("AgentService is disabled via kill switch")</step>
+    <step>Verify dotnet build src/server/api/Sprk.Bff.Api/ passes with zero errors and zero warnings</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>AgentServiceOptions.cs exists with Enabled, Endpoint, AgentId, MaxConcurrency, ThreadCacheExpiryMinutes properties all decorated with data annotations</criterion>
+    <criterion>AgentServiceClient.cs implements CreateThreadAsync, SendMessageAsync, and StreamResponseAsync</criterion>
+    <criterion>Kill switch: all public methods check AgentServiceOptions.Enabled and throw/return appropriate error when false</criterion>
+    <criterion>SemaphoreSlim concurrency gate present; WaitAsync timeout results in 429-equivalent exception</criterion>
+    <criterion>Thread IDs stored and retrieved from IDistributedCache with tenant-scoped key and sliding expiry</criterion>
+    <criterion>No content (messages, responses) is logged — only IDs, timing, and status</criterion>
+    <criterion>Azure.AI.Projects NuGet reference added to Sprk.Bff.Api.csproj</criterion>
+    <criterion>dotnet build passes with zero errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU-056" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Phase 1 Integration Testing — FR-01 through FR-12 Verification</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <wave>5D</wave>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-055</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute end-to-end integration testing for all 12 Phase 1 functional requirements (FR-01 through
+    FR-12) against the deployed dev environment. Testing covers:
+    - The SpaarkeAi Code Page (sprk_spaarkeai) in the browser.
+    - All four launch points reaching the correct URL with correct parameters.
+    - All 7 tool categories producing output in the output pane.
+    - All output pane widgets and source pane widgets rendering correctly.
+    - Cross-pane linking between output and source widgets.
+    - Chat history session persistence and restoration.
+    - Dark mode rendering across all panes.
+    - Shared library imports working in both SpaarkeAi and AnalysisWorkspace.
+    - AnalysisWorkspace regression (existing behavior unchanged).
+    Document results in a test results report. Any failing requirements are logged as GitHub issues
+    or project task blockers.
+  </prompt>
+
+  <role>QA engineer with experience testing Dataverse web resources, Xrm.Navigation flows, and
+  React single-page applications deployed as Dataverse web resources.</role>
+
+  <goal>All 12 Phase 1 functional requirements are verified against the deployed dev environment.
+  A written test results report documents pass/fail status for each FR with evidence (screenshots
+  or log excerpts where applicable). Any failures are logged with reproduction steps.</goal>
+
+  <relevant-files>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/tasks/TASK-INDEX.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/notes/phase1-test-results.md</file>
+    <file>docs/guides/spaarkeai-launch-points.md</file>
+    <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint id="all-launch-points">All 4 launch points MUST be tested: workspace command bar
+    button, entity form command bar button, direct deep-link URL, and M365 Copilot handoff URL.
+    A partial test covering only some launch points is not acceptable.</constraint>
+    <constraint id="all-tool-categories">All 7 AI tool categories available in standalone mode
+    MUST be exercised: document analysis, timeline, risk summary, clause extraction, comparison,
+    research summary, and compliance check (or the equivalent 7 defined in spec.md). Each must
+    produce at least one output widget in the output pane.</constraint>
+    <constraint id="dark-mode-required">Dark mode rendering MUST be tested for all three panes
+    (chat, output, source) by switching the browser or system theme to dark and verifying no
+    hard-coded colors are visible (i.e., no white panels against dark backgrounds or vice versa).
+    </constraint>
+    <constraint id="regression-required">AnalysisWorkspace regression testing MUST be performed:
+    open a matter record, launch AnalysisWorkspace, verify document analysis still works end-to-end.
+    FR-12 cannot be marked passing without this step.</constraint>
+    <constraint id="evidence">For each FR, record at minimum: PASS or FAIL, one sentence
+    describing what was observed, and the timestamp of the test. For failures, include the exact
+    error message or unexpected behavior description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern>FR-01 test: Navigate to sprk_spaarkeai directly. Verify three-pane layout renders
+      with visible chat pane (left), output pane (center), source pane (right). Check all three
+      panes are non-empty and have correct headings.</pattern>
+      <pattern>FR-02 test: Open sprk_spaarkeai via entity form launch point from a matter record.
+      Verify the matter's name/ID appears in the chat pane header or context banner. Check URL
+      params include entityLogicalName and entityId.</pattern>
+      <pattern>FR-03 test: Send a chat message. Observe BFF API network call in DevTools (should
+      hit /api/ai/standalone/context or equivalent). Verify entity context is included in the
+      request payload.</pattern>
+      <pattern>FR-04 test: Trigger each of the 7 tool categories via chat commands or UI buttons.
+      Verify SSE stream starts and output widget appears in output pane for each tool.</pattern>
+      <pattern>FR-05 test: For each output widget type rendered during FR-04, verify correct widget
+      is used (e.g. TimelineWidget for timeline results, not a generic text widget).</pattern>
+      <pattern>FR-06 test: After FR-04 tool runs, verify source pane populates with source
+      references linked to the output widgets.</pattern>
+      <pattern>FR-07 test: Click a cross-pane link in an output widget. Verify the corresponding
+      source widget in the source pane highlights or scrolls into focus.</pattern>
+      <pattern>FR-08 test: Start a new chat session. Verify previous session appears in
+      ChatHistoryPanel. Click it. Verify the previous conversation is restored.</pattern>
+      <pattern>FR-09 test: Test all 4 launch points as described in constraints above.</pattern>
+      <pattern>FR-10 and FR-11 test: Open browser DevTools network tab. Confirm no requests to
+      local context files — all @spaarke/ai-context imports must be bundled from the shared
+      library (verify by inspecting bundle or checking that AnalysisWorkspace build uses shared
+      hooks).</pattern>
+      <pattern>FR-12 test (regression): Open AnalysisWorkspace from a matter record. Run a
+      document analysis. Verify results appear in the output pane. Verify chat still works.
+      Verify no JavaScript console errors.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read spec.md FR-01 through FR-12 acceptance criteria in full. Prepare a test
+    results table with columns: FR ID, Test Description, Expected Result, Actual Result, Status,
+    Timestamp. Save as projects/spaarke-ai-platform-unification-r1/notes/phase1-test-results.md.
+    </step>
+    <step id="2">Test FR-01 (Three-pane layout): Open sprk_spaarkeai web resource in browser
+    (direct URL). Verify three-pane layout renders: chat pane visible on left, output pane in
+    center, source pane on right. Record result.</step>
+    <step id="3">Test FR-02 (Entity context): Open SpaarkeAi via entity form launch point from a
+    matter record. Verify entity context (matter name or ID) is displayed in the UI. Record result.
+    </step>
+    <step id="4">Test FR-03 (BFF context resolution): Send a test message. Open browser DevTools
+    Network tab. Verify the BFF API receives the standalone context request with entity context
+    payload. Record result.</step>
+    <step id="5">Test FR-04 (Tool categories): Trigger each of the 7 tool categories. For each,
+    verify SSE stream is established and an output widget appears in the output pane. Record
+    pass/fail per tool category.</step>
+    <step id="6">Test FR-05 (Output pane widgets): Inspect each output widget rendered in FR-04.
+    Verify the correct widget type is used for each tool result (not a fallback/generic widget).
+    Record result.</step>
+    <step id="7">Test FR-06 (Source pane): After tool runs, verify source pane populates with
+    source references. Verify source widget renders with document/clause identifiers. Record result.
+    </step>
+    <step id="8">Test FR-07 (Cross-pane linking): Click a linked reference in an output widget.
+    Verify the source pane responds (highlight or scroll). Record result.</step>
+    <step id="9">Test FR-08 (Chat history): Complete a chat session. Start a new session. Open
+    ChatHistoryPanel. Verify previous session is listed. Click it. Verify conversation is restored.
+    Record result.</step>
+    <step id="10">Test FR-09 (Launch points): Test all 4 launch points — workspace button, entity
+    form button, direct deep-link URL, M365 handoff URL. Verify each opens sprk_spaarkeai with
+    correct parameters. Record pass/fail per launch point.</step>
+    <step id="11">Test FR-10 and FR-11 (Shared library imports): Confirm @spaarke/ai-context and
+    @spaarke/ai-outputs are correctly bundled in both SpaarkeAi and AnalysisWorkspace builds.
+    Check for duplicate bundle issues in DevTools. Record result.</step>
+    <step id="12">Test FR-12 (AnalysisWorkspace regression): Open AnalysisWorkspace from a matter
+    record. Run a document analysis. Verify output appears, chat works, no console errors.
+    Record result.</step>
+    <step id="13">Test dark mode (NFR-04): Switch browser/system to dark theme. Reload
+    sprk_spaarkeai. Verify all three panes render correctly without hard-coded color artifacts.
+    Record result.</step>
+    <step id="14">Update phase1-test-results.md with all results. For each failing FR, create a
+    clear failure description with reproduction steps. Add summary section with overall pass rate
+    and list of open issues requiring resolution before Phase 1 sign-off.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="AC-1">phase1-test-results.md exists in projects/spaarke-ai-platform-unification-r1/notes/
+    with a row for each of FR-01 through FR-12 and dark mode.</criterion>
+    <criterion id="AC-2">Each FR row contains: test description, expected result, actual result,
+    PASS or FAIL status, and test timestamp.</criterion>
+    <criterion id="AC-3">All 4 launch points (FR-09) are tested and individually recorded.</criterion>
+    <criterion id="AC-4">All 7 tool categories (FR-04) are exercised and individually recorded.
+    </criterion>
+    <criterion id="AC-5">FR-12 (AnalysisWorkspace regression) test is executed and recorded.
+    </criterion>
+    <criterion id="AC-6">Dark mode test is executed against sprk_spaarkeai and recorded.</criterion>
+    <criterion id="AC-7">Any failing FRs have a clear failure description and reproduction steps
+    documented. Failures are escalated as task blockers or GitHub issues before Phase 1 sign-off.
+    </criterion>
+  </acceptance-criteria>
+</task>

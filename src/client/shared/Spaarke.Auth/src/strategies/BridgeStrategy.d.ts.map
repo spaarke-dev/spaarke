@@ -1,0 +1,1 @@
+{"version":3,"file":"BridgeStrategy.d.ts","sourceRoot":"","sources":["BridgeStrategy.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,YAAY,EAAE,cAAc,EAAE,MAAM,UAAU,CAAC;AAG7D,iEAAiE;AACjE,qBAAa,cAAe,YAAW,cAAc;IACnD,QAAQ,CAAC,IAAI,EAAG,QAAQ,CAAU;IAE5B,eAAe,IAAI,OAAO,CAAC,YAAY,GAAG,IAAI,CAAC;CAUtD"}

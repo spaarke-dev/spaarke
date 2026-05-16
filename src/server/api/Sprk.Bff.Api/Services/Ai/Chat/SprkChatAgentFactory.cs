@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -10,6 +11,7 @@ using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Services.Ai.Foundry;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -88,8 +90,8 @@ public sealed class SprkChatAgentFactory
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
-    /// The returned agent is wrapped with the middleware pipeline (AIPL-057):
-    /// ContentSafety (innermost) -> CostControl -> Telemetry (outermost).
+    /// The returned agent is wrapped with the middleware pipeline (AIPL-057, AIPU-072):
+    /// ContentSafety (innermost) -> CostControl -> Telemetry -> Routing (outermost).
     /// </returns>
     public async Task<ISprkChatAgent> CreateAgentAsync(
         string sessionId,
@@ -202,26 +204,34 @@ public sealed class SprkChatAgentFactory
             new CompoundIntentDetector(intentLogger),
             agentLogger);
 
-        // === Middleware pipeline (AIPL-057) ===
-        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry (outermost).
-        // The outermost middleware executes first on each call and records total latency.
-        agent = WrapWithMiddleware(agent);
+        // === Middleware pipeline (AIPL-057, AIPU-072) ===
+        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry -> Routing (outermost).
+        // The outermost middleware (Routing) executes first on each call and decides which backend
+        // handles the request before the inner pipeline ever sees the message.
+        agent = WrapWithMiddleware(agent, tenantId);
 
         return agent;
     }
 
     /// <summary>
-    /// Wraps the given agent with the middleware pipeline (AIPL-057).
+    /// Wraps the given agent with the middleware pipeline (AIPL-057, AIPU-072).
     ///
     /// Pipeline order (inside-out):
     ///   1. ContentSafety — filters PII from response tokens (innermost)
     ///   2. CostControl   — enforces session token budget
-    ///   3. Telemetry      — logs metadata: latency, token count, playbook (outermost)
+    ///   3. Telemetry      — logs metadata: latency, token count, playbook
+    ///   4. Routing        — classifies intent and routes to Agent Service or direct pipeline (outermost)
     ///
     /// No new DI registrations are added (ADR-010 constraint: middleware is instantiated
     /// directly by the factory, same as tool classes).
+    ///
+    /// Routing middleware is only added when <see cref="AgentServiceClient"/> is resolvable
+    /// from DI (i.e., when Analysis:Enabled = true in AnalysisServicesModule). When unavailable,
+    /// the pipeline is identical to the pre-AIPU-072 pipeline.
     /// </summary>
-    private ISprkChatAgent WrapWithMiddleware(ISprkChatAgent agent)
+    /// <param name="agent">The inner agent to wrap.</param>
+    /// <param name="tenantId">Tenant ID for Agent Service thread scoping (ADR-014).</param>
+    private ISprkChatAgent WrapWithMiddleware(ISprkChatAgent agent, string tenantId)
     {
         // 1. Content safety (innermost — filters before other middleware processes tokens)
         agent = new AgentContentSafetyMiddleware(
@@ -233,10 +243,27 @@ public sealed class SprkChatAgentFactory
             agent,
             _logger);
 
-        // 3. Telemetry (outermost — records total latency including all middleware)
+        // 3. Telemetry (records total latency including all inner middleware)
         agent = new AgentTelemetryMiddleware(
             agent,
             _logger);
+
+        // 4. Routing (outermost — intercepts each message first and decides which backend handles it)
+        // Resolved lazily from IServiceProvider so that the factory remains constructible even
+        // when AgentServiceClient is not registered (Analysis:Enabled = false).
+        // ADR-010: factory-instantiated, no additional DI registration.
+        // ADR-018: kill switch (AgentService:Enabled=false) causes silent fallback inside the middleware.
+        var agentServiceClient = _serviceProvider.GetService<AgentServiceClient>();
+        var agentServiceOptions = _serviceProvider.GetService<IOptions<AgentServiceOptions>>();
+        if (agentServiceClient is not null && agentServiceOptions is not null)
+        {
+            agent = new AgentServiceRoutingMiddleware(
+                agent,
+                agentServiceClient,
+                agentServiceOptions,
+                _logger,
+                tenantId);
+        }
 
         return agent;
     }
@@ -398,10 +425,12 @@ public sealed class SprkChatAgentFactory
 
             var tools = new List<AIFunction>();
 
-            // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering
+            // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering.
+            // sseWriter is forwarded so both search methods can emit output_pane SSE events with
+            // structured SearchResults widget data alongside their text responses (Gap 1 fix).
             if (ragService != null)
             {
-                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope, citationContext);
+                var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
                 tools.Add(AIFunctionFactory.Create(
                     documentSearchTools.SearchDocumentsAsync,
                     name: "SearchDocuments",
@@ -434,10 +463,12 @@ public sealed class SprkChatAgentFactory
                 _logger.LogWarning("IAnalysisOrchestrationService not available; AnalysisQueryTools will not be registered");
             }
 
-            // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering
+            // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering.
+            // sseWriter is forwarded so GetKnowledgeSourceAsync can emit source_pane SSE events with
+            // structured DocumentViewer widget data alongside the text response (Gap 1 fix).
             if (ragService != null)
             {
-                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope, citationContext);
+                var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
                 tools.Add(AIFunctionFactory.Create(
                     knowledgeRetrievalTools.GetKnowledgeSourceAsync,
                     name: "GetKnowledgeSource",
@@ -552,6 +583,83 @@ public sealed class SprkChatAgentFactory
                     webSearchTools.SearchWebAsync,
                     name: "SearchWeb",
                     description: "Search the web for information relevant to the user's query. Use when the question cannot be answered from internal documents alone."));
+            }
+
+            // CodeInterpreterTools — gated behind "code_interpreter" capability (AIPU-070).
+            // Only available when the playbook explicitly enables sandbox code execution.
+            // Data governance (ADR-015): tools only accept caller-supplied data excerpts.
+            // Kill switch (ADR-018): CodeInterpreterOptions.Enabled checked before every invocation.
+            // Rate limiting (ADR-016): static SemaphoreSlim bounded by MaxConcurrency.
+            // Factory-instantiated (ADR-010): CodeInterpreterBridge resolved from DI; no new registration.
+            if (capabilities.Contains(PlaybookCapabilities.CodeInterpreter))
+            {
+                var codeInterpreterBridge = scopedProvider.GetService<CodeInterpreterBridge>();
+                var codeInterpreterOptions = scopedProvider.GetService<IOptions<CodeInterpreterOptions>>();
+                if (codeInterpreterBridge != null && codeInterpreterOptions != null)
+                {
+                    var codeInterpreterTools = new CodeInterpreterTools(
+                        codeInterpreterBridge, codeInterpreterOptions, _logger, citationContext);
+                    tools.Add(AIFunctionFactory.Create(
+                        codeInterpreterTools.AnalyzeDataAsync,
+                        name: "AnalyzeData",
+                        description: "Analyze tabular or CSV data to answer a specific question. Use when the user wants statistics, trends, or comparisons derived from structured data."));
+                    tools.Add(AIFunctionFactory.Create(
+                        codeInterpreterTools.GenerateChartAsync,
+                        name: "GenerateChart",
+                        description: "Generate a chart image (bar, line, or pie) from a JSON data series. Use when the user wants a visual chart from structured data."));
+                }
+                else
+                {
+                    _logger.LogWarning("CodeInterpreterBridge or CodeInterpreterOptions not available; CodeInterpreterTools will not be registered");
+                }
+            }
+
+            // LegalResearchTools — gated behind "legal_research" capability (AIPU-071).
+            // Only available when the playbook explicitly enables legal research. Legal research
+            // tools invoke Azure AI Foundry Bing Grounding (not the Bing Web Search REST API),
+            // requiring both the AgentServiceClient and BingGroundingOptions to be configured.
+            //
+            // ADR-015 CRITICAL: Legal queries may contain client names, matter references, and PII.
+            // QuerySanitizer.Sanitize() is applied inside each tool method before the query is
+            // forwarded to Bing. Only query length, result count, and timing are logged.
+            //
+            // ADR-018: BingGroundingOptions.Enabled kill switch is checked inside each tool method;
+            // when disabled, a user-readable string is returned immediately without any network call.
+            //
+            // Factory-instantiated (ADR-010): no new DI registration; AgentServiceClient and
+            // IOptions<BingGroundingOptions> are resolved from the scoped DI provider.
+            if (capabilities.Contains(PlaybookCapabilities.LegalResearch))
+            {
+                var agentServiceClient = scopedProvider.GetService<AgentServiceClient>();
+                var bingGroundingOptions = scopedProvider.GetService<IOptions<BingGroundingOptions>>();
+
+                if (agentServiceClient != null && bingGroundingOptions != null)
+                {
+                    var legalResearchTools = new LegalResearchTools(
+                        agentServiceClient,
+                        bingGroundingOptions,
+                        _logger,
+                        citationContext);
+
+                    tools.Add(AIFunctionFactory.Create(
+                        legalResearchTools.ResearchLegalAsync,
+                        name: "ResearchLegal",
+                        description: "Research a broad legal topic, doctrine, statute, or regulatory requirement " +
+                                     "using authoritative public legal sources. Do not include client names or matter references."));
+
+                    tools.Add(AIFunctionFactory.Create(
+                        legalResearchTools.LookupCaseAsync,
+                        name: "LookupCase",
+                        description: "Look up a specific legal case by its standard citation (e.g., 123 F.3d 456 " +
+                                     "(9th Cir. 2020)). Returns the case holding and a source URL from an authoritative legal database."));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "LegalResearchTools requires AgentServiceClient and BingGroundingOptions — " +
+                        "one or both are not registered. LegalResearchTools will not be available. " +
+                        "Ensure AgentService and BingGrounding configuration sections are present.");
+                }
             }
 
             _logger.LogDebug("Resolved {ToolCount} AIFunction tools for agent session", tools.Count);

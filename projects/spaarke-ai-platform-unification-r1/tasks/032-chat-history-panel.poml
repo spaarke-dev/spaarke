@@ -1,0 +1,124 @@
+<task id="AIPU-032" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Chat history panel component (session list, search, resume)</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <wave>3</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, fluent-ui, shared-library, chat-history</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the chat history panel component for the @spaarke/ai-outputs library. The chat history panel lives in the left pane of the three-pane layout (or as a slide-out drawer) and lets users browse previous chat sessions, search session titles/summaries, and resume a prior conversation.
+
+    The component is purely presentational with respect to data — it receives session data via props (no BFF API calls inside the component). The calling code page uses useChatSession from @spaarke/ai-context to fetch sessions and passes them down as props.
+
+    Deliverables (all in src/client/shared/Spaarke.AI.Outputs/src/chat-history/):
+    1. ChatHistoryPanel.tsx — the main panel component with session list, search field, and empty state.
+    2. ChatSessionCard.tsx — a single session card showing title, last message preview, timestamp, and entity context badge.
+    3. useChatHistoryFilter.ts — a local hook that takes sessions[] and a search string, returns filtered sessions (client-side, no debounce required beyond a 200ms debounce).
+    4. ChatHistoryPanel.types.ts — TypeScript type definitions for the panel (ChatSession, ChatHistoryPanelProps, ChatSessionCardProps).
+  </prompt>
+
+  <role>Senior frontend developer with expertise in React 19, Fluent UI v9, and shared component library authoring</role>
+
+  <goal>
+    A complete chat history panel (ChatHistoryPanel, ChatSessionCard, useChatHistoryFilter, types) exported from @spaarke/ai-outputs, displaying sessions with search filtering and resume callback, with full dark mode support and TypeScript compilation passing.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatHistoryPanel.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatSessionCard.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/chat-history/useChatHistoryFilter.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatHistoryPanel.types.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/index.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/package.json</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/hooks/useChatSession.ts</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-021">All components must use Fluent v9 makeStyles with design tokens only. No hard-coded hex colors, no inline style color values. Dark mode must work via FluentProvider theme switching.</constraint>
+    <constraint source="ADR-012">Every public component, hook, and type must be exported from src/client/shared/Spaarke.AI.Outputs/src/index.ts.</constraint>
+    <constraint source="project">NOT PCF-safe. May use React 19 features (useTransition for search filtering, etc.) freely.</constraint>
+    <constraint source="project">No BFF API calls inside ChatHistoryPanel or ChatSessionCard. The component receives sessions as a prop. The calling code page is responsible for data fetching via useChatSession from @spaarke/ai-context.</constraint>
+    <constraint source="project">@spaarke/ai-outputs must NOT take a package dependency on @spaarke/ai-context (to avoid circular deps). The ChatSession type is defined locally in ChatHistoryPanel.types.ts. If useChatSession returns the same shape, that is coincidental — no import from ai-context.</constraint>
+    <constraint source="project">useChatHistoryFilter debounce: 200ms debounce on the search string using a useEffect + setTimeout pattern (no lodash.debounce or external debounce library).</constraint>
+    <constraint source="project">ChatHistoryPanel must show an empty state (Fluent v9 EmptyState pattern or equivalent: illustration area + title text + subtitle text) when sessions[] is empty or all sessions are filtered out by search.</constraint>
+    <constraint source="project">ChatSessionCard "Resume" button calls an onResume?: (sessionId: string) =&gt; void prop. Button hidden if onResume not provided.</constraint>
+    <constraint source="project">ChatSessionCard entity context badge: shows entityType and entityName (e.g., "Matter — Acme Corp v Smith"). Uses Fluent v9 Badge component in informative appearance.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 search input" location="@fluentui/react-components">
+        Use SearchBox from @fluentui/react-components (v9) for the session search field. If SearchBox is not available in the installed version, use Input with search icon via contentBefore.
+      </pattern>
+      <pattern name="Fluent v9 Card for session items" location="src/client/shared/Spaarke.UI.Components/src/components/">
+        Use Card, CardHeader, CardPreview from @fluentui/react-components for ChatSessionCard. Refer to any existing Card usage in shared components.
+      </pattern>
+      <pattern name="useChatSession hook shape" location="src/client/shared/Spaarke.AI.Context/src/hooks/useChatSession.ts">
+        Read this file to understand the ChatSession data shape returned by the hook, then mirror the relevant fields in ChatHistoryPanel.types.ts ChatSession interface. Do not import from ai-context — just match the shape.
+      </pattern>
+      <pattern name="Fluent v9 makeStyles" location="src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx">
+        Reference for correct makeStyles import and token usage pattern.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/client/shared/Spaarke.AI.Context/src/hooks/useChatSession.ts to understand the ChatSession data shape (fields: id, title, lastMessagePreview, updatedAt, entityType, entityName, entityId, etc.). Note the shape — do not import from this file.</step>
+    <step>Read src/client/shared/Spaarke.AI.Outputs/src/index.ts to understand current exports and how to append new exports.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatHistoryPanel.types.ts:
+      - ChatSession interface: { id: string; title: string; lastMessagePreview?: string; updatedAt: string; entityType?: string; entityName?: string; entityId?: string }
+      - ChatHistoryPanelProps: { sessions: ChatSession[]; isLoading?: boolean; onResume?: (sessionId: string) =&gt; void; onDelete?: (sessionId: string) =&gt; void; className?: string }
+      - ChatSessionCardProps: { session: ChatSession; onResume?: (sessionId: string) =&gt; void; onDelete?: (sessionId: string) =&gt; void; isActive?: boolean }
+      Export all types.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/chat-history/useChatHistoryFilter.ts:
+      - Signature: useChatHistoryFilter(sessions: ChatSession[], searchQuery: string): ChatSession[]
+      - Implements 200ms debounce on searchQuery using useEffect + setTimeout + clearTimeout cleanup
+      - Filters on title and lastMessagePreview (case-insensitive substring match)
+      - Returns all sessions if debounced query is empty
+      Export useChatHistoryFilter.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatSessionCard.tsx:
+      - Props: ChatSessionCardProps
+      - Render a Fluent v9 Card with:
+        - Title (Text semibold, truncated to 1 line)
+        - lastMessagePreview (Text, truncated to 2 lines, muted color token)
+        - updatedAt formatted as relative time (e.g., "2 hours ago") using Intl.RelativeTimeFormat
+        - Entity badge: Badge informative with "{entityType} — {entityName}" if entityType present
+        - "Resume" Button (primary appearance) — visible only if onResume prop provided
+        - "Delete" Button (subtle appearance, danger icon) — visible only if onDelete prop provided
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatHistoryPanel.tsx:
+      - Props: ChatHistoryPanelProps
+      - Top section: SearchBox (or Input) for search query, bound to local useState
+      - Use useChatHistoryFilter(sessions, searchQuery) for filtered list
+      - If isLoading: render Fluent v9 Spinner centered
+      - If filteredSessions.length === 0 and not loading: render empty state (Fluent v9 Body1 centered: "No conversations found" with appropriate icon)
+      - Otherwise: render a scrollable list of ChatSessionCard components
+      - Use makeStyles for layout (flexbox column, overflow-y auto).</step>
+    <step>Update src/client/shared/Spaarke.AI.Outputs/src/index.ts to export: ChatHistoryPanel, ChatSessionCard, useChatHistoryFilter, and all types from ChatHistoryPanel.types.ts (ChatSession, ChatHistoryPanelProps, ChatSessionCardProps).</step>
+    <step>Run TypeScript compilation check: cd src/client/shared/Spaarke.AI.Outputs &amp;&amp; npx tsc --noEmit to confirm zero errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ChatHistoryPanel.types.ts defines ChatSession, ChatHistoryPanelProps, and ChatSessionCardProps interfaces with correct field types — all exported. No import from @spaarke/ai-context.</criterion>
+    <criterion>useChatHistoryFilter applies a 200ms debounce to the search query and filters sessions by title and lastMessagePreview (case-insensitive). Returns all sessions when query is empty.</criterion>
+    <criterion>ChatSessionCard renders session title (1-line truncation), lastMessagePreview (2-line truncation), relative updatedAt timestamp, entity context Badge (when entityType present), and conditional Resume/Delete buttons.</criterion>
+    <criterion>ChatHistoryPanel renders a SearchBox at the top, a Spinner when isLoading is true, an empty state message when filteredSessions is empty, and a scrollable ChatSessionCard list otherwise.</criterion>
+    <criterion>Empty state is shown both when sessions[] is initially empty and when all sessions are filtered out by search.</criterion>
+    <criterion>All components use makeStyles with Fluent v9 design tokens only — no hard-coded hex colors or inline style color values.</criterion>
+    <criterion>ChatHistoryPanel, ChatSessionCard, useChatHistoryFilter, and all types from ChatHistoryPanel.types.ts are exported from src/client/shared/Spaarke.AI.Outputs/src/index.ts.</criterion>
+    <criterion>@spaarke/ai-outputs package.json does not list @spaarke/ai-context as a dependency or peerDependency.</criterion>
+    <criterion>TypeScript compilation passes with zero errors (npx tsc --noEmit).</criterion>
+  </acceptance-criteria>
+</task>

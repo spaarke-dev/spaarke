@@ -87,29 +87,55 @@ public class PlaybookChatContextProvider : IChatContextProvider
             // 6. Append entity metadata enrichment (generic mode)
             defaultPrompt = AppendEntityEnrichment(defaultPrompt, hostContext);
 
-            // Still load document summary for inline context
+            // Still load document summary for inline context (skipped when documentId is null/empty)
             string? defaultDocSummary = null;
             IReadOnlyDictionary<string, string>? defaultMetadata = null;
-            try
+            if (!string.IsNullOrEmpty(documentId))
             {
-                var doc = await _documentService.GetDocumentAsync(documentId, cancellationToken);
-                if (doc != null)
+                try
                 {
-                    defaultDocSummary = doc.Summary ?? doc.Tldr;
-                    var meta = new Dictionary<string, string>();
-                    if (!string.IsNullOrWhiteSpace(doc.DocumentType))
-                        meta["documentType"] = doc.DocumentType;
-                    if (!string.IsNullOrWhiteSpace(doc.Name))
-                        meta["documentName"] = doc.Name;
-                    if (meta.Count > 0)
-                        defaultMetadata = meta;
+                    var doc = await _documentService.GetDocumentAsync(documentId, cancellationToken);
+                    if (doc != null)
+                    {
+                        defaultDocSummary = doc.Summary ?? doc.Tldr;
+                        var meta = new Dictionary<string, string>();
+                        if (!string.IsNullOrWhiteSpace(doc.DocumentType))
+                            meta["documentType"] = doc.DocumentType;
+                        if (!string.IsNullOrWhiteSpace(doc.Name))
+                            meta["documentName"] = doc.Name;
+                        if (meta.Count > 0)
+                            defaultMetadata = meta;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to load document summary for {DocumentId} in generic chat mode; continuing without",
+                        documentId);
                 }
             }
-            catch (Exception ex)
+
+            // Standalone mode: when the chat has no document but has a valid host context
+            // (entityType + entityId), provide a minimal KnowledgeScope so that DocumentSearchTools
+            // can entity-scope its discovery search. RagKnowledgeSourceIds is empty, meaning
+            // SearchDocumentsAsync runs tenant-wide (no knowledge source filter) while
+            // SearchDiscoveryAsync is constrained to the entity boundary via ParentEntityType/Id.
+            ChatKnowledgeScope? defaultKnowledgeScope = null;
+            if (!string.IsNullOrWhiteSpace(hostContext?.EntityType) &&
+                !string.IsNullOrWhiteSpace(hostContext?.EntityId))
             {
-                _logger.LogWarning(ex,
-                    "Failed to load document summary for {DocumentId} in generic chat mode; continuing without",
-                    documentId);
+                _logger.LogInformation(
+                    "Standalone chat mode with host context ({EntityType}/{EntityId}); " +
+                    "building entity-scoped knowledge scope for RAG search",
+                    hostContext.EntityType, hostContext.EntityId);
+
+                defaultKnowledgeScope = new ChatKnowledgeScope(
+                    RagKnowledgeSourceIds: [],
+                    InlineContent: null,
+                    SkillInstructions: null,
+                    ActiveDocumentId: string.IsNullOrEmpty(documentId) ? null : documentId,
+                    ParentEntityType: hostContext.EntityType,
+                    ParentEntityId: hostContext.EntityId);
             }
 
             return new ChatContext(
@@ -117,7 +143,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 DocumentSummary: defaultDocSummary,
                 AnalysisMetadata: defaultMetadata,
                 PlaybookId: null,
-                KnowledgeScope: null);
+                KnowledgeScope: defaultKnowledgeScope);
         }
 
         // 1. Load playbook to get ActionIds
@@ -487,20 +513,51 @@ public class PlaybookChatContextProvider : IChatContextProvider
     /// </summary>
     private static string BuildDefaultSystemPrompt(string? playbookName)
     {
-        var context = !string.IsNullOrWhiteSpace(playbookName)
-            ? $" configured for the '{playbookName}' workflow"
-            : string.Empty;
+        if (!string.IsNullOrWhiteSpace(playbookName))
+        {
+            return $"""
+                You are an AI assistant configured for the '{playbookName}' workflow, helping users understand and analyze documents.
 
-        return $"""
-            You are an AI assistant{context} helping users understand and analyze documents.
+                ## Instructions
+                - Provide helpful, accurate responses grounded in the document content
+                - If asked to locate specific information, cite relevant sections
+                - Format responses in clear, readable Markdown
+
+                ## Output Format
+                Provide your response in Markdown with appropriate headings and structure.
+                """;
+        }
+
+        // Standalone mode — comprehensive prompt for Spaarke AI without a specific playbook.
+        // This prompt guides the model to use its available tools proactively.
+        return """
+            You are Spaarke AI, an intelligent assistant for legal professionals using the Spaarke platform.
+            You help with document analysis, matter management, legal research, financial analysis, and general questions about the user's work.
+
+            ## Your Capabilities
+            You have access to powerful tools — use them proactively:
+
+            - **SearchDocuments**: Search the document index to find relevant content. Use this when the user asks about documents, contracts, agreements, filings, or any content stored in Spaarke.
+            - **SearchDiscovery**: Broad discovery search across all indexed documents. Use this when the user asks to find matters, projects, documents, or explore what's available.
+            - **GetKnowledgeSource**: Retrieve full content from a specific knowledge source. Use after SearchDocuments identifies a relevant source.
+            - **SearchKnowledgeBase**: Search the knowledge base for reference information, policies, and best practices.
+            - **GetAnalysisResult** / **GetAnalysisSummary**: Retrieve prior analysis results for documents that have been analyzed.
+            - **RefineText**: Help the user improve, rewrite, or restructure text.
 
             ## Instructions
-            - Provide helpful, accurate responses grounded in the document content
-            - If asked to locate specific information, cite relevant sections
-            - Format responses in clear, readable Markdown
+            - When the user asks about their matters, projects, or documents, **always use SearchDiscovery or SearchDocuments first** — don't say you can't access their data.
+            - When you find relevant documents, summarize what you found and offer to analyze further.
+            - If the user asks to analyze a document but none is loaded, suggest they upload one or help them search for it.
+            - Cite sources and document names when referencing search results.
+            - Be proactive — if a search returns relevant results, highlight key findings.
+            - Format responses in clear, readable Markdown with headings and structure.
 
-            ## Output Format
-            Provide your response in Markdown with appropriate headings and structure.
+            ## What You Know About
+            - Legal documents (contracts, agreements, court filings, memos, briefs)
+            - Matter management (case details, timelines, budgets, parties)
+            - Financial data (budgets, invoices, billing, cost analysis)
+            - Document comparison and review workflows
+            - Legal research and case law (when Bing Grounding is available)
             """;
     }
 }

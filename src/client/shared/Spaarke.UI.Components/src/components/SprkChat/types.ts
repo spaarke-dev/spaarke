@@ -121,6 +121,46 @@ export interface IChatSession {
 // SSE Event Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Pane SSE Event Types (output_pane / source_pane / source_highlight)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A raw SSE pane-routing event forwarded from the BFF stream.
+ * These events carry widgetType + payload and are consumed by OutputPanel
+ * and SourcePanel to render the correct widget. They are NOT chat tokens;
+ * SprkChat routes them via the onPaneEvent callback rather than rendering them.
+ *
+ * Mirrors OutputPaneEvent | SourcePaneEvent | SourceHighlightEvent from
+ * @spaarke/ai-outputs types/index.ts, but defined here as a loose shape so
+ * the shared SprkChat library has no dependency on @spaarke/ai-outputs.
+ */
+export interface IAiPaneEvent {
+  /** Discriminates the target pane and event semantics. */
+  event: 'output_pane' | 'source_pane' | 'source_highlight';
+  /**
+   * Widget type string matching OutputWidgetType or SourceWidgetType enum values
+   * (e.g. "AnalysisEditor", "DocumentViewer"). Present on output_pane and source_pane events.
+   */
+  widgetType?: string;
+  /**
+   * Widget-specific data payload (shape is widget-dependent).
+   * Present on output_pane and source_pane events; absent on source_highlight.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload?: any;
+  /**
+   * Source reference identifier for the widget being highlighted.
+   * Present on source_highlight events.
+   */
+  sourceRef?: string;
+  /**
+   * Selection reference within the source widget (e.g. citation ID or range).
+   * Present on source_highlight events.
+   */
+  selectionRef?: string;
+}
+
 /**
  * SSE event types emitted by the streaming endpoints.
  *
@@ -416,6 +456,18 @@ export interface ISprkChatProps {
    * so that prior conversation context is visible when the workspace reopens.
    */
   initialMessages?: IChatMessage[];
+
+  /**
+   * Callback fired for AI pane-routing SSE events (output_pane / source_pane / source_highlight).
+   *
+   * When provided, SprkChat forwards pane-routing events from the BFF stream to this callback.
+   * OutputPanel and SourcePanel subscribe (via StandaloneAiContext) to receive events and render
+   * the correct widget type with the event's payload.
+   *
+   * Uses the same synchronous callback ref pattern as onDocumentStreamEvent — events are
+   * delivered synchronously from the fetch loop without React state batching.
+   */
+  onPaneEvent?: ((event: IAiPaneEvent) => void) | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
@@ -954,6 +1006,19 @@ export interface IUseSseStreamResult {
    * metadata. Auth tokens are NEVER included.
    */
   setOnDocumentStreamEvent: (handler: ((event: IDocumentStreamSseEvent) => void) | null) => void;
+
+  /**
+   * Register a callback for AI pane-routing SSE events (output_pane / source_pane / source_highlight).
+   *
+   * Uses the same synchronous callback ref pattern as setOnDocumentStreamEvent.
+   * Invoked from the fetch loop whenever an event whose top-level `event` field
+   * is "output_pane", "source_pane", or "source_highlight" is received from the BFF.
+   *
+   * OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these
+   * events and render the appropriate widget type with the event's payload.
+   * Pass null to unregister.
+   */
+  setOnPaneEvent: (handler: ((event: IAiPaneEvent) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

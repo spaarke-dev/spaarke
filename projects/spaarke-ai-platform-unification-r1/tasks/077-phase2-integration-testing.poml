@@ -1,0 +1,75 @@
+<task id="AIPU-077" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Phase 2 Integration Testing — FR-13 through FR-18</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>7D</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>testing, integration-test</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-076</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute integration tests for all Phase 2 functional requirements (FR-13 through FR-18) against the deployed dev environment. Tests verify: AgentServiceClient thread operations, ActionType 60 playbook execution, Code Interpreter chart generation, Bing Grounding legal research, routing middleware transparency, and new tool availability via chat commands. Document all test results in notes/phase2-test-results.md.
+  </prompt>
+
+  <role>QA engineer with integration testing experience for AI-backed APIs</role>
+
+  <goal>
+    All FR-13 through FR-18 functional requirements verified against the dev environment with test results documented, any failures triaged and either fixed or recorded as known issues with ticket references.
+  </goal>
+
+  <relevant-files>
+    <file>projects/spaarke-ai-platform-unification-r1/notes/phase2-test-results.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+    <file>tests/</file>
+    <file>infrastructure/ai-foundry/README.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-015">Test data MUST NOT contain real client names, real matter references, or real legal document content; use synthetic/anonymized test data only</constraint>
+    <constraint source="project">All tests run against dev environment (https://spe-api-dev-67e2xz.azurewebsites.net); do NOT test against production</constraint>
+    <constraint source="project">Document results in notes/phase2-test-results.md with pass/fail per FR, response times, and any anomalies observed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+      <file>infrastructure/ai-foundry/README.md</file>
+      <file>tests/</file>
+    </files>
+    <patterns>
+      <pattern name="Functional requirements reference" location="projects/spaarke-ai-platform-unification-r1/spec.md">
+        Read spec.md for the exact FR-13 through FR-18 definitions to know what each requirement mandates; use those definitions as the pass/fail criteria
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read spec.md to extract the exact FR-13, FR-14, FR-15, FR-16, FR-17, and FR-18 definitions and success criteria</step>
+    <step>Create notes/phase2-test-results.md with a table: FR ID, Description, Test Method, Result (Pass/Fail/Partial), Response Time, Notes</step>
+    <step>Test FR-13 (AgentServiceClient thread operations): create a thread via the chat endpoint, send a message, verify a streamed response is returned; verify thread ID is cached (subsequent request reuses same thread ID); record result</step>
+    <step>Test FR-14 (ActionType 60 in playbook): trigger a playbook containing an AT 60 node via the playbook execution endpoint; verify the node runs via Agent Service and returns output in the playbook result; record result</step>
+    <step>Test FR-15 (Code Interpreter chart generation): send a chat message requesting a bar chart from synthetic CSV data; verify response contains chart output or base64 image reference; record result and response time</step>
+    <step>Test FR-16 (Bing Grounding legal research): send a chat message asking for legal research on a generic topic (e.g., "standard of review in contract disputes"); verify response contains grounded citations with source URLs; record result</step>
+    <step>Test FR-17 (routing middleware transparency): send requests that should route to Agent Service (code analysis keywords) and requests that should stay on direct pipeline (simple Q&A); verify both return correct responses; verify neither exposes internal routing details to the caller; record result</step>
+    <step>Test FR-18 (new tools via commands): verify analyze-data and research-legal are discoverable via the tool listing endpoint (if one exists) or via chat command invocation; record result</step>
+    <step>Test kill switches: set AgentServiceOptions.Enabled=false via app config; verify routing falls back to direct pipeline without error; re-enable after test</step>
+    <step>Record all timing observations — flag any response that exceeds 2s for non-streaming or 500ms to first token for streaming</step>
+    <step>Update notes/phase2-test-results.md with final results; for any Fail, add a triage note with probable root cause and recommended fix</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>notes/phase2-test-results.md exists with results for every FR from FR-13 to FR-18</criterion>
+    <criterion>FR-13 (thread operations): thread created, message sent, response streamed, thread ID cached — all Pass</criterion>
+    <criterion>FR-14 (AT 60 playbook): playbook with AT 60 node executes via Agent Service — Pass</criterion>
+    <criterion>FR-15 (Code Interpreter): chart generation request returns chart output — Pass</criterion>
+    <criterion>FR-16 (Bing Grounding): legal research returns cited sources with URLs — Pass</criterion>
+    <criterion>FR-17 (routing transparency): both routing paths work; no internal routing details in responses — Pass</criterion>
+    <criterion>FR-18 (tool discovery): analyze-data and research-legal accessible via chat — Pass</criterion>
+    <criterion>Kill switch test: Agent Service disabled falls back to direct pipeline — Pass</criterion>
+    <criterion>All test data is synthetic — no real client/matter content used</criterion>
+    <criterion>Any failures have triage notes in the results document</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,71 @@
+<task id="AIPU-012" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>StandaloneAiContext provider and entity resolver</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>1</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>shared-library, context-provider, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>002</dependencies>
+  </metadata>
+
+  <prompt>
+    Create StandaloneAiContext — a React context provider for entity-scoped standalone AI sessions. It resolves entity context from URL parameters (?matterId=, ?projectId=, ?documentId=), loads appropriate playbooks/tools, and provides the context to SprkChat and output/source pane widgets.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in React context providers and entity resolution</role>
+
+  <goal>
+    StandaloneAiContext provider exported from @spaarke/ai-context that resolves entity from URL params, loads scoped context via BFF, and provides chat session state, entity context, playbook info, and streaming callbacks to child components.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Context/src/providers/</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/types/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-012">Use abstracted interfaces, not platform APIs</constraint>
+    <constraint source="project">Must resolve entity from URL params: matterId, projectId, documentId</constraint>
+    <constraint source="project">Must call GET /api/ai/chat/context-mappings/standalone for context resolution</constraint>
+    <constraint source="project">Must persist chatSessionId and playbookId to sessionStorage</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Analysis context" location="src/client/code-pages/AnalysisWorkspace/src/context/AnalysisAiContext.tsx">
+        Entity-scoped context: loads analysis state, auth, streaming, session persistence. Model after this but generalized for any entity type.
+      </pattern>
+      <pattern name="URL param resolution" location="src/client/code-pages/AnalysisWorkspace/src/index.tsx">
+        Lines 57-203: resolveAnalysisId, resolveDocumentId, resolveTenantId — URL param -> Xrm frame walk priority chain
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read AnalysisAiContext.tsx to understand the context provider pattern (interface, provider, hook)</step>
+    <step>Read AnalysisWorkspace/src/index.tsx URL parameter resolution (lines 57-203)</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/types/entity-context.ts — EntityContext type (entityType, entityId, matterId?, projectId?, documentId?)</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/types/standalone-context.ts — StandaloneAiContextValue interface</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/providers/useEntityResolver.ts — hook resolving entity from URL params with Xrm frame walk</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/providers/StandaloneAiContext.tsx — context provider with entity resolution, session state, playbook state, streaming callbacks</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/providers/useStandaloneAi.ts — consumer hook</step>
+    <step>Update barrel exports in src/index.ts</step>
+    <step>Verify TypeScript compilation</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>StandaloneAiContext provider exported from @spaarke/ai-context</criterion>
+    <criterion>useStandaloneAi() hook provides entity context, session state, playbook state</criterion>
+    <criterion>Entity resolved from URL params (matterId, projectId, documentId)</criterion>
+    <criterion>chatSessionId and playbookId persisted to sessionStorage</criterion>
+    <criterion>TypeScript compilation succeeds</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,73 @@
+<task id="AIPU-011" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Extract context hooks to @spaarke/ai-context</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>1</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>shared-library, hooks, refactor, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>002</dependencies>
+  </metadata>
+
+  <prompt>
+    Extract the core chat hooks and service clients from SprkChat into the @spaarke/ai-context library. Create reusable hooks (useChatSession, useChatContextMapping, useChatPlaybooks, useSseStream) and service client wrappers that can be consumed by any Code Page surface.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in React hooks and shared library architecture</role>
+
+  <goal>
+    @spaarke/ai-context exports useChatSession, useChatContextMapping, useChatPlaybooks, useSseStream hooks and ChatApiClient service class. All hooks work standalone (not dependent on SprkChat internal state).
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Context/src/hooks/</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/services/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-012">Service clients must use abstracted interfaces, not platform APIs</constraint>
+    <constraint source="project">Must use buildBffApiUrl() from @spaarke/auth for all BFF URL construction</constraint>
+    <constraint source="project">Must use authenticatedFetch from @spaarke/auth for API calls</constraint>
+    <constraint source="project">Hooks must NOT import from SprkChat internals — create standalone implementations</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Chat session hook" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts">
+        Session lifecycle: create, history, switch context, delete. POST/GET/PATCH/DELETE to /api/ai/chat/sessions
+      </pattern>
+      <pattern name="Context mapping hook" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatContextMapping.ts">
+        GET /api/ai/chat/context-mappings. Returns defaultPlaybook and availablePlaybooks
+      </pattern>
+      <pattern name="Playbooks hook" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatPlaybooks.ts">
+        GET /api/ai/chat/playbooks. Discover available playbooks
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read SprkChat internal hooks: useChatSession.ts, useChatContextMapping.ts, useChatPlaybooks.ts, useSseStream.ts</step>
+    <step>Identify which parts are SprkChat-specific vs reusable</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/services/ChatApiClient.ts — wraps BFF API calls using buildBffApiUrl() and authenticatedFetch</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/hooks/useChatSession.ts — standalone session lifecycle hook using ChatApiClient</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/hooks/useChatContextMapping.ts — context mapping resolution</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/hooks/useChatPlaybooks.ts — playbook discovery</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/src/hooks/useSseStream.ts — SSE streaming handler</step>
+    <step>Update src/client/shared/Spaarke.AI.Context/src/index.ts barrel exports</step>
+    <step>Verify TypeScript compilation</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>useChatSession, useChatContextMapping, useChatPlaybooks, useSseStream exported from @spaarke/ai-context</criterion>
+    <criterion>ChatApiClient uses buildBffApiUrl() and authenticatedFetch exclusively</criterion>
+    <criterion>Hooks are standalone — no imports from SprkChat internals</criterion>
+    <criterion>TypeScript compilation succeeds</criterion>
+  </acceptance-criteria>
+</task>

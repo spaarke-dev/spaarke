@@ -1,0 +1,68 @@
+<task id="AIPU-002" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Scaffold @spaarke/ai-context shared library</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>0</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>shared-library, scaffold, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the @spaarke/ai-context shared library at src/client/shared/Spaarke.AI.Context/. This library will contain context providers, service clients, and hooks extracted from SprkChat and AnalysisWorkspace. Follow the @spaarke/ui-components library structure.
+  </prompt>
+
+  <role>Frontend developer with expertise in React 19 shared libraries and TypeScript</role>
+
+  <goal>
+    A buildable @spaarke/ai-context library at src/client/shared/Spaarke.AI.Context/ with proper package.json, tsconfig, directory structure (hooks/, services/, providers/, types/), and barrel exports — ready for hook extraction in Wave 1.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Context/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-012">Shared component library rules: Fluent v9, semantic tokens, TypeScript types exported</constraint>
+    <constraint source="ADR-020">Start at version 1.0.0, SemVer for breaking changes</constraint>
+    <constraint source="project">NOT PCF-safe — this library uses React 19 APIs</constraint>
+    <constraint source="project">Must use buildBffApiUrl() from @spaarke/auth for all BFF URL construction</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-020-versioning-strategy.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/patterns/shared/shared-library-build.md</file>
+      <file>.claude/patterns/shared/component-export.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Library structure" location="src/client/shared/Spaarke.UI.Components/package.json">
+        Package.json with file: refs, peer deps, build scripts
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read @spaarke/ui-components library structure: package.json, tsconfig.json, src/index.ts</step>
+    <step>Create src/client/shared/Spaarke.AI.Context/ directory</step>
+    <step>Create package.json: name @spaarke/ai-context, version 1.0.0, peer deps (react ^19), deps (@spaarke/auth file: ref)</step>
+    <step>Create tsconfig.json following ui-components pattern</step>
+    <step>Create directory structure: src/hooks/, src/services/, src/providers/, src/types/</step>
+    <step>Create src/index.ts with placeholder barrel exports</step>
+    <step>Create src/types/index.ts with core type definitions (ChatSessionContext, EntityContext, etc.)</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>src/client/shared/Spaarke.AI.Context/ exists with proper structure</criterion>
+    <criterion>package.json has @spaarke/ai-context name, version 1.0.0</criterion>
+    <criterion>Directory structure: hooks/, services/, providers/, types/</criterion>
+    <criterion>src/index.ts has barrel exports (placeholder)</criterion>
+    <criterion>TypeScript compilation succeeds</criterion>
+  </acceptance-criteria>
+</task>

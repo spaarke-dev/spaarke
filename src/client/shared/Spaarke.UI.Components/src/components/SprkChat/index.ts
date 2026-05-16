@@ -95,6 +95,7 @@ export type {
   IDocumentStatusMessage,
   IDocumentStatusChatMessage,
   ISprkChatDocumentStatusProps,
+  IAiPaneEvent,
 } from './types';
 export { CROSS_PANE_SELECTION_MAX_PREVIEW, DEFAULT_QUICK_ACTIONS, DOCUMENT_PROCESSING_TIMEOUT_MS } from './types';
 export type { IUseChatPlaybooksResult } from './hooks/useChatPlaybooks';

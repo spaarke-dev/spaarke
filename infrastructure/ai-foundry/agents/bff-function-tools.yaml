@@ -1,0 +1,166 @@
+# Spaarke BFF Function Tool Definitions — Azure AI Foundry Agent
+#
+# These OpenAI function tool schemas describe the BFF-side tools that the
+# Spaarke Legal AI Agent can invoke. The agent calls these functions and the
+# BFF API (AgentServiceClient) executes them against Spaarke data.
+#
+# DEPLOYMENT: Register alongside spaarke-legal-agent.yaml using --functions-file.
+#   See agents/README.md for the full az ai agent create command.
+#
+# BYOK-COMPATIBLE: No hardcoded endpoints. The BFF endpoint is configured on
+#   the agent runtime via ${FOUNDRY_BFF_BASE_URL} (set in AgentServiceOptions).
+#
+# BFF mapping (tasks 070 + 071):
+#   analyze_document_data  → POST /api/agent/tools/analyze-data  (CodeInterpreterBridge)
+#   research_legal_topic   → POST /api/agent/tools/research-legal (LegalResearchTools)
+
+functions:
+  # ─── Tool 1: Analyze Document Data ──────────────────────────────────────────
+  #
+  # Maps to: CodeInterpreterBridge endpoint in BFF (task 070)
+  # Purpose: Retrieve structured data or extracted content from Spaarke documents
+  #          so the agent can process it — optionally via Code Interpreter for
+  #          calculations and transformations.
+  #
+  - name: analyze_document_data
+    description: >
+      Retrieve and analyse structured data from legal documents stored in Spaarke.
+      Use this function when the user asks about specific documents, matters, contracts,
+      or needs data extracted from their Spaarke records. Returns document content,
+      extracted entities, or computed results ready for further analysis. Call this
+      before using Code Interpreter if you need Spaarke document content as input.
+    parameters:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: >
+            Natural-language description of what data to retrieve or what analysis
+            to perform. Be specific: include matter references, document types, date
+            ranges, or contract clause topics when known.
+            Example: "Retrieve all fee entries from matter M-2024-0042 in the last
+            90 days" or "Extract the governing law clause from contract C-2025-0017".
+        matter_id:
+          type: string
+          description: >
+            Optional. The Spaarke matter identifier (e.g. "M-2024-0042") to scope
+            the retrieval to a specific matter. Omit to search across all accessible
+            matters.
+        document_id:
+          type: string
+          description: >
+            Optional. The Spaarke document identifier (e.g. "DOC-0031") when the
+            user refers to a specific document. Takes precedence over matter_id for
+            document-level retrieval.
+        document_type:
+          type: string
+          enum:
+            - contract
+            - invoice
+            - proposal
+            - report
+            - letter
+            - memo
+            - email
+            - agreement
+            - statement
+            - other
+          description: >
+            Optional. Filter results to this document type. Omit to retrieve across
+            all document types within the scope.
+        max_results:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: >
+            Maximum number of documents or records to return. Use lower values when
+            you only need a summary; use higher values for comprehensive reviews.
+        include_full_text:
+          type: boolean
+          default: false
+          description: >
+            When true, return the full extracted document text in addition to
+            structured metadata. Set true only when the user needs to review the
+            actual document language (e.g., for contract clause analysis). Data
+            minimisation: omit unless required.
+
+  # ─── Tool 2: Research Legal Topic ───────────────────────────────────────────
+  #
+  # Maps to: LegalResearchTools endpoint in BFF (task 071)
+  # Purpose: Search for legal precedents, legislation, regulatory guidance,
+  #          or publicly available legal information beyond the user's own documents.
+  #          Combines BFF-side search (AI Search index, knowledge base) with
+  #          optional Bing Grounding for current public sources.
+  #
+  - name: research_legal_topic
+    description: >
+      Search for relevant legal precedents, statutory references, regulatory guidance,
+      or publicly available legal information. Use this when the user needs context
+      beyond their own Spaarke document repository — for example, to check applicable
+      legislation, find analogous cases, or understand regulatory requirements.
+      This tool searches Spaarke's legal knowledge index and may augment results
+      with curated public sources. For real-time web search, use Bing Grounding instead.
+    parameters:
+      type: object
+      required:
+        - topic
+      properties:
+        topic:
+          type: string
+          description: >
+            The legal topic, question, or concept to research. Be precise: include
+            jurisdiction, area of law, and the specific legal issue when known.
+            Example: "enforceability of non-compete clauses in California employment
+            contracts post-2024 legislative changes" or "GDPR Article 17 right to
+            erasure obligations for legal hold documents".
+        jurisdiction:
+          type: string
+          description: >
+            Optional. ISO 3166-1 alpha-2 country code (e.g. "US", "GB", "AU") or
+            a specific US state/territory (e.g. "US-CA", "US-NY") to scope the
+            research to a particular legal system. Omit for multi-jurisdiction queries.
+        practice_area:
+          type: string
+          enum:
+            - corporate
+            - employment
+            - litigation
+            - real_estate
+            - intellectual_property
+            - data_privacy
+            - regulatory_compliance
+            - mergers_and_acquisitions
+            - family
+            - tax
+            - criminal
+            - other
+          description: >
+            Optional. The legal practice area to focus the search on. Helps rank
+            results more relevant to the user's context.
+        recency_months:
+          type: integer
+          minimum: 1
+          maximum: 120
+          default: 24
+          description: >
+            Limit results to content published or updated within this many months.
+            Use lower values (e.g. 6) for fast-changing areas like data privacy or
+            tax; use higher values for foundational common law principles.
+        max_results:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: >
+            Maximum number of research results to return. Fewer results allow
+            deeper synthesis; more results support broader comparative research.
+        include_citations:
+          type: boolean
+          default: true
+          description: >
+            When true, include full citation details (case name, citation number,
+            court, date, statute reference) for each result. Always leave true
+            unless the user only needs a quick topical summary.
