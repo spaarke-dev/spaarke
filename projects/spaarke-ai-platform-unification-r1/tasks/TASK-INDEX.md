@@ -61,6 +61,11 @@
 | 055 | Build + deploy Code Page + BFF | ✅ | 2h | 050, 051 |
 | 056 | Phase 1 integration testing (FR-01 to FR-12) | :white_large_square: | 3h | 055 |
 
+#### Wave 5E: UX Enhancements (PARALLEL)
+| # | Task | Status | Est. | Depends |
+|---|------|--------|------|---------|
+| 057 | Welcome experience with guided prompt buttons (no-context launch) | ✅ | 4h | 040 |
+
 ### Phase 2: AI Foundry Agent Service Integration
 
 #### Wave 6: Agent Service Foundation (PARALLEL - 3 agents)

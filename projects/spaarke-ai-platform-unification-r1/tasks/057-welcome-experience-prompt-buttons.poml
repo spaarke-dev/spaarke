@@ -1,7 +1,7 @@
 <task id="AIPU-057" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Welcome experience with guided prompt buttons for no-context launch</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <wave>5E</wave>
     <estimated-effort>4 hours</estimated-effort>

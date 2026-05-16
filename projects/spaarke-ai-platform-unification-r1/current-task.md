@@ -5,20 +5,55 @@
 
 ## Active Task
 
-**Task**: AIPU-055
-**Task File**: tasks/055-phase1-build-deploy.poml
-**Phase**: 5 (Wave 5D)
+**Task**: AIPU-057
+**Task File**: tasks/057-welcome-experience-prompt-buttons.poml
+**Phase**: 1 (Wave 5E)
 **Status**: completed
-**Next Action**: Begin task 056 — Phase 1 integration testing
+**Next Action**: none — task complete
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | AIPU-055 — Phase 1 Build and Deploy |
-| **Step** | All 9 steps complete |
+| **Task** | AIPU-057 — Welcome experience with guided prompt buttons |
+| **Step** | 7 of 7: All steps complete |
 | **Status** | completed |
-| **Next Action** | Begin task 056 — integration testing |
+| **Next Action** | Task complete. Next pending task per TASK-INDEX.md. |
+
+## Completed Task: AIPU-057
+
+**Rigor Level**: FULL
+**Reason**: Tags include 'frontend', 'fluent-ui'; creates new .tsx files; 7 steps; ADR-021 constraints apply
+**Completed**: 2026-05-16
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx` | Created — branded header + 4 prompt buttons (2×2 grid) + recent conversations section |
+| `src/solutions/SpaarkeAi/src/components/ChatPanel.tsx` | Modified — added WelcomePanel rendering logic + pendingMessage state for prompt injection |
+| `projects/spaarke-ai-platform-unification-r1/tasks/057-welcome-experience-prompt-buttons.poml` | Status → completed |
+| `projects/spaarke-ai-platform-unification-r1/tasks/TASK-INDEX.md` | Added Wave 5E section with AIPU-057 ✅ |
+
+### Acceptance Criteria Verified
+
+| AC | Status | Notes |
+|----|--------|-------|
+| Welcome panel renders when no entity context | ✅ | `showWelcomePanel = chatSessionId === null && entityContext === null && pendingMessage === null` |
+| 4 prompt buttons visible with icons | ✅ | DocumentText, Search, Calculator, FolderSearch icons; 2×2 Fluent v9 Card grid |
+| Clicking prompt button starts chat with injected message | ✅ | Sets pendingMessage → SprkChat mounts with predefinedPrompts containing the message |
+| Recent sessions section shows last 3-5 sessions with metadata | ✅ | Fetches `/ai/chat/sessions?limit=5`; shows title + entity badge + relative timestamp |
+| Welcome panel disappears once chat session starts | ✅ | chatSessionId !== null → showWelcomePanel evaluates false |
+| Dark mode renders correctly | ✅ | All styles use tokens.* semantic tokens only (ADR-021 compliant) |
+| npm run build passes | ✅ | 0 errors, 1,686 kB single-file output |
+
+### Key Design Decisions
+
+- WelcomePanel shown when `chatSessionId === null && entityContext === null && pendingMessage === null`
+- When prompt button clicked: set `pendingMessage` in ChatPanel → hide WelcomePanel → show SprkChat with `predefinedPrompts`
+- Recent sessions: local `useRecentSessions` hook mirrors ChatHistoryPanel.tsx `useSessionHistory` pattern
+- SprkChat receives `predefinedPrompts` with selected message as clickable suggestion (no shared-lib modifications)
+- `handleResumeSession` calls `setChatSessionId()` directly (chatSessionId becomes non-null → panel disappears)
 
 ## Completed Task: AIPU-055
 
