@@ -1,15 +1,20 @@
-# ui-test
-
 ---
 description: Browser-based UI testing using Claude Code Chrome integration for PCF controls and model-driven apps
 tags: [testing, ui, browser, pcf, frontend, visual, chrome]
 techStack: [chrome, pcf-framework, react, fluent-ui, dynamics-365]
 appliesTo: ["pcf", "frontend", "fluent-ui", "visual", "e2e-test"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
+# ui-test
+
 > **Category**: Quality Assurance
-> **Last Updated**: January 6, 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: UI test patterns evolve with Chrome integration capabilities; per-control fixtures are case-specific. The `task-execute` Step 9.7 binding is the stable contract.
+> **External-API binding**: The `## Integration with task-execute` heading is bound by `task-execute` Step 9.7 — DO NOT rename it during refinements.
 
 ---
 
@@ -546,6 +551,18 @@ claude --chrome
 # Enable by default
 # Run /chrome → Select "Enabled by default"
 ```
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Session expires mid-test — Chrome integration loses auth context | Long-running test sequence exceeded Dataverse session timeout (default ~1 hour) | Build tests to complete within 45 minutes. For longer scenarios, build a re-auth step into the test flow. If session expires, the test should explicitly fail with "session expired" — not hang. |
+| Dark-mode test passes but visual differences appear on page reload | Dark-mode toggle does NOT survive page reload — browser session memory is reset | Always test dark-mode in a single page-load session. If multi-page navigation is required, re-toggle dark mode after each navigation. ADR-021 dark-mode checks must include this caveat. |
+| Test reports "pass" but the rendered control doesn't match design | Visual assertion compared structure only, not appearance | Include screenshot capture in the test. Compare against a reference image OR explicitly check semantic-token-derived computed styles (not just DOM presence). |
+| Chrome integration consumes large context budget when running mid-task | Browser-based testing pulls full DOM + console logs into context | ONLY invoke ui-test for tasks that genuinely need UI verification (PCF/frontend/visual tags). For backend changes, use unit/integration tests instead. |
+| Test code references PCF control that's been renamed | Skill doesn't auto-update when a PCF is renamed | After renaming any PCF control, search ALL `<ui-tests>` sections in task POMLs for the old name. `Find-SkillReferenceDrift.ps1` (Phase 4a) will help. |
 
 ---
 

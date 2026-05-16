@@ -1,12 +1,19 @@
-# spaarke-conventions
-
 ---
 description: Apply Spaarke coding standards from CLAUDE.md - naming, structure, file organization, and technology patterns
 tags: [conventions, standards, naming, code-style, patterns]
 techStack: [csharp, typescript, aspnet-core, react]
 appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx"]
 alwaysApply: true
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# spaarke-conventions
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Conventions evolve with the tech stack (Fluent UI v9 supplanted v8; React 18 in Code Pages but 16 in PCF; Redis-first caching per ADR-009). A single frozen exemplar would lag the rules. The conventions themselves are the canonical reference.
+> **Drift-prevention note**: This skill codifies rules from root `CLAUDE.md` Coding Standards section. When `CLAUDE.md` changes, this skill must update in lockstep. `Find-SkillReferenceDrift.ps1` (Phase 4a) will catch missed propagation.
 
 ## Purpose
 
@@ -351,3 +358,16 @@ When generating or reviewing code, automatically check:
 - **code-review**: Uses these conventions for review checklist
 - **adr-check**: Deeper architectural validation
 - **project-init**: Ensures new projects follow structure
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| New code mixes Fluent UI v8 and v9 imports | Author copied snippet from older code or external example | v8 imports are an instant ADR-021 violation. Use `import { ... } from "@fluentui/react-components"` (v9) exclusively. `/adr-check` catches this. |
+| PCF control attempts `createRoot()` from React 18 | Author treated PCF like a Code Page — they're different per ADR-022 | PCF (field-bound) uses React 16 APIs from `ComponentFramework.ReactControl`. Code Pages (standalone dialogs) use React 18 `createRoot`. NEVER mix. The error you'll see: `createRoot is not a function`. |
+| BFF API uses global authorization middleware (`app.UseMiddleware<AuthorizationMiddleware>()`) | Author followed generic ASP.NET tutorial | Per ADR-008: use endpoint filters (`AddEndpointFilter<DocumentAuthorizationFilter>()`), never global middleware for resource authorization. |
+| Code injects `GraphServiceClient` directly into controller | Author bypassed the SpeFileStore facade | Per ADR-007: never let Graph SDK types leak above SpeFileStore. Inject the facade, not the underlying client. |
+| New webresource (`.js` or `.html`) created instead of PCF/Code Page | Author followed legacy Dataverse customization pattern | Per ADR-006: field-bound controls → PCF (`pcf-deploy`); standalone dialogs → React Code Pages (`code-page-deploy`). No new legacy JS webresources. |
+| Project-scoped CLAUDE.md and root CLAUDE.md disagree on a convention | Both updated separately; drift introduced | Root CLAUDE.md is canonical for cross-cutting standards. Project CLAUDE.md may NARROW (add stricter rules) but not RELAX or CONTRADICT. |
