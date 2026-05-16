@@ -66,6 +66,12 @@ export interface ISprkChatUploadZoneProps {
   onUploadError?: (error: string) => void;
   /** Whether the upload zone is disabled (e.g., no active session). */
   disabled?: boolean;
+  /**
+   * Optional pre-selected file to upload immediately on mount.
+   * Used by the "[action:upload]" action chip to trigger upload without drag-and-drop.
+   * When provided, the component skips the drag-waiting phase and begins uploading directly.
+   */
+  initialFile?: File | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,12 +282,15 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
   onUploadComplete,
   onUploadError,
   disabled = false,
+  initialFile,
 }) => {
   const styles = useStyles();
 
   // ── State ──────────────────────────────────────────────────────────────────
 
-  const [phase, setPhase] = React.useState<UploadPhase>('dragging');
+  // When initialFile is provided (chip-triggered upload), start in 'uploading'
+  // phase immediately instead of waiting for a drag event.
+  const [phase, setPhase] = React.useState<UploadPhase>(initialFile ? 'uploading' : 'dragging');
   const [uploadProgress, setUploadProgress] = React.useState<number>(0);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [isDragOverValid, setIsDragOverValid] = React.useState<boolean | null>(null);
@@ -301,6 +310,103 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
       }
     };
   }, []);
+
+  // ── Action chip upload: upload initialFile on mount ────────────────────────
+  //
+  // When the parent provides initialFile (triggered by "[action:upload]" chip),
+  // begin uploading immediately without waiting for a drag-and-drop event.
+  // Runs once on mount; initialFile is intentionally excluded from the dep array
+  // because we only want this to run once (the file reference won't change).
+  React.useEffect(() => {
+    if (!initialFile || disabled) return;
+
+    // Validate file type
+    if (!isAcceptedFileType(initialFile)) {
+      const ext = getExtension(initialFile.name) || initialFile.type || 'unknown';
+      const msg = `Unsupported file type (${ext}). Accepted types: ${ACCEPTED_TYPES_LABEL}`;
+      setPhase('rejected');
+      setErrorMessage(msg);
+      onUploadError?.(msg);
+      return;
+    }
+
+    // Validate file size
+    if (initialFile.size > MAX_FILE_SIZE) {
+      const msg = `File too large (${formatFileSize(initialFile.size)}). Maximum size is 50 MB.`;
+      setPhase('error');
+      setErrorMessage(msg);
+      onUploadError?.(msg);
+      return;
+    }
+
+    setPhase('uploading');
+    setUploadProgress(0);
+    setErrorMessage(null);
+
+    const formData = new FormData();
+    formData.append('file', initialFile);
+
+    const xhr = new XMLHttpRequest();
+    xhrRef.current = xhr;
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) {
+        const pct = Math.round((event.loaded / event.total) * 100);
+        setUploadProgress(pct);
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      xhrRef.current = null;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setPhase('success');
+        try {
+          const response = JSON.parse(xhr.responseText) as UploadedDocument;
+          onUploadComplete?.(response);
+        } catch {
+          onUploadComplete?.({
+            documentId: '',
+            fileName: initialFile.name,
+            fileType: initialFile.type,
+            status: 'processing',
+          });
+        }
+      } else {
+        let msg = `Upload failed (${xhr.status})`;
+        try {
+          const errorBody = JSON.parse(xhr.responseText);
+          if (errorBody?.detail) msg = errorBody.detail;
+          else if (errorBody?.title) msg = errorBody.title;
+        } catch {
+          // Use default message
+        }
+        setPhase('error');
+        setErrorMessage(msg);
+        onUploadError?.(msg);
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      xhrRef.current = null;
+      const msg = 'Network error — upload failed. Please check your connection and try again.';
+      setPhase('error');
+      setErrorMessage(msg);
+      onUploadError?.(msg);
+    });
+
+    xhr.addEventListener('abort', () => {
+      xhrRef.current = null;
+      setPhase('dragging');
+    });
+
+    const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+    const uploadUrl = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`;
+    xhr.open('POST', uploadUrl);
+    xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+    xhr.send(formData);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount only — initialFile is stable from parent state
 
   // ── Drag event handlers ────────────────────────────────────────────────────
 

@@ -65,6 +65,7 @@
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
 | 057 | Welcome experience with guided prompt buttons (no-context launch) | ✅ | 4h | 040 |
+| 058 | Action chip responses — upload, browse, select when context is missing | ✅ | 4h | 057 |
 
 ### Phase 2: AI Foundry Agent Service Integration
 

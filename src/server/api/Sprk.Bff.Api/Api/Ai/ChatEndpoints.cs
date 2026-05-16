@@ -469,12 +469,32 @@ public static class ChatEndpoints
                     citations.Length, sessionId);
             }
 
-            // Generate follow-up suggestions via a focused LLM call (~100 tokens).
-            // Runs after the main response completes so it doesn't delay perceived response time.
-            // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
-            // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
-            await GenerateAndEmitSuggestionsAsync(
-                chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
+            // AIPU-058: Detect missing document/entity context in the AI response.
+            // When the AI signals it needs a document but none is loaded, emit action chips
+            // (upload, browse, select) as the suggestions event so the user can take the
+            // next step directly from the chat without typing a follow-up message.
+            //
+            // Action chip format: "[action:<id>] <display label>"
+            // The frontend (SprkChat.tsx handleSuggestionSelect) routes these specially:
+            //   [action:upload]   → triggers the file input upload flow
+            //   [action:search]   → shows document search in the output pane
+            //   [action:select]   → lets the user search/select a matter
+            //
+            // When action chips are emitted, the standard LLM suggestion generation is
+            // skipped — the two events are mutually exclusive (action chips take priority).
+            var effectiveDocumentId = request.DocumentId ?? session.DocumentId;
+            var actionChipsEmitted = await EmitMissingContextChipsIfNeededAsync(
+                response, effectiveDocumentId, fullResponse.ToString(), logger, sessionId, cancellationToken);
+
+            if (!actionChipsEmitted)
+            {
+                // Generate follow-up suggestions via a focused LLM call (~100 tokens).
+                // Runs after the main response completes so it doesn't delay perceived response time.
+                // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
+                // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
+                await GenerateAndEmitSuggestionsAsync(
+                    chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
+            }
 
             // Write done event
             await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
@@ -1600,6 +1620,136 @@ public static class ChatEndpoints
             logger.LogWarning(ex,
                 "Suggestion generation failed for session={SessionId}; skipping", sessionId);
         }
+    }
+
+    /// <summary>
+    /// Keyword phrases that indicate the AI is asking the user to provide a document.
+    /// Matched case-insensitively against the full assistant response text.
+    ///
+    /// AIPU-058: When the AI signals missing document/entity context AND no document is
+    /// currently loaded in the session, action chips are emitted so the user can resolve
+    /// the gap without typing a follow-up message.
+    /// </summary>
+    private static readonly string[] MissingContextKeywords =
+    [
+        "upload a document",
+        "upload a file",
+        "upload the document",
+        "upload the file",
+        "provide a document",
+        "provide the document",
+        "share a document",
+        "share the document",
+        "attach a document",
+        "attach a file",
+        "please upload",
+        "please provide",
+        "please share",
+        "no document",
+        "no file",
+        "don't have a document",
+        "don't have access to a document",
+        "haven't provided",
+        "haven't shared",
+        "you need to upload",
+        "you need to provide",
+        "you need to share",
+        "to analyze a document",
+        "to review a document",
+        "to compare documents",
+        "to summarize a document",
+        "could not find a document",
+        "couldn't find a document",
+        "you can upload",
+        "you can provide",
+        "please send",
+        "send me the document",
+        "send me the file",
+        "i need a document",
+        "i need the document",
+        "i need a file",
+    ];
+
+    /// <summary>
+    /// Detects whether the AI response indicates that a document or entity context is missing,
+    /// and emits a "suggestions" SSE event with action chips if so.
+    ///
+    /// AIPU-058: Action chip format: "[action:&lt;id&gt;] &lt;display label&gt;"
+    /// The frontend (SprkChat.tsx handleSuggestionSelect) detects the "[action:" prefix and
+    /// routes the click to the appropriate handler instead of sending the text as a message:
+    ///   [action:upload]   → triggers the hidden file input upload flow
+    ///   [action:search]   → shows document search in the output pane
+    ///   [action:select]   → lets the user search and select a matter
+    ///
+    /// Returns true when action chips were emitted (caller should skip LLM suggestion generation).
+    /// Returns false when no missing context is detected (caller proceeds with normal suggestions).
+    ///
+    /// Preconditions for emitting action chips:
+    ///   1. The effective document ID is null or empty (no document loaded in this session)
+    ///   2. The AI response text contains at least one keyword from MissingContextKeywords
+    /// </summary>
+    /// <param name="response">The HTTP response to write SSE frames to.</param>
+    /// <param name="effectiveDocumentId">The active document ID (null or empty when no document is loaded).</param>
+    /// <param name="responseText">The full AI response text to inspect for missing-context keywords.</param>
+    /// <param name="logger">Logger for diagnostic output.</param>
+    /// <param name="sessionId">Session ID for log correlation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if action chips were emitted; false otherwise.</returns>
+    private static async Task<bool> EmitMissingContextChipsIfNeededAsync(
+        HttpResponse response,
+        string? effectiveDocumentId,
+        string responseText,
+        ILogger logger,
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        // Precondition 1: No document loaded
+        if (!string.IsNullOrWhiteSpace(effectiveDocumentId))
+        {
+            return false;
+        }
+
+        // Precondition 2: Response contains missing-context keywords
+        if (string.IsNullOrWhiteSpace(responseText))
+        {
+            return false;
+        }
+
+        var lowerResponse = responseText.ToLowerInvariant();
+        var keywordFound = false;
+        foreach (var keyword in MissingContextKeywords)
+        {
+            if (lowerResponse.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            {
+                keywordFound = true;
+                break;
+            }
+        }
+
+        if (!keywordFound)
+        {
+            return false;
+        }
+
+        // Emit action chips as a suggestions SSE event.
+        // Format: "[action:<id>] <display label>" — parsed by SprkChat.handleSuggestionSelect.
+        var actionChips = new[]
+        {
+            "[action:upload] Upload File",
+            "[action:search] Browse Matter Documents",
+            "[action:select] Select a Matter",
+        };
+
+        await WriteChatSSEAsync(
+            response,
+            new ChatSseEvent("suggestions", null, new ChatSseSuggestionsData(actionChips)),
+            cancellationToken);
+
+        logger.LogInformation(
+            "Missing document context detected — emitted action chips for session={SessionId} (documentId was empty)",
+            sessionId);
+
+        return true;
     }
 
     /// <summary>

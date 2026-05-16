@@ -5,20 +5,72 @@
 
 ## Active Task
 
-**Task**: AIPU-057
-**Task File**: tasks/057-welcome-experience-prompt-buttons.poml
-**Phase**: 1 (Wave 5E)
-**Status**: completed
-**Next Action**: none — task complete
+**Task**: AIPU-056 (next pending)
+**Task File**: tasks/056-phase1-integration-testing.poml
+**Phase**: 1 (Wave 5D)
+**Status**: not-started
+**Next Action**: Begin when ready
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | AIPU-057 — Welcome experience with guided prompt buttons |
-| **Step** | 7 of 7: All steps complete |
-| **Status** | completed |
-| **Next Action** | Task complete. Next pending task per TASK-INDEX.md. |
+| **Task** | AIPU-056 — Phase 1 integration testing (FR-01 to FR-12) |
+| **Step** | Not started |
+| **Status** | not-started |
+| **Next Action** | Begin task-execute for AIPU-056 |
+
+## Completed Task: AIPU-058
+
+**Rigor Level:** FULL
+**Reason:** Tags include 'bff-api', 'frontend', 'ai'; modifies .cs and .tsx files; 6 steps; ADR-013 constraint applies
+**Completed**: 2026-05-16
+
+**Protocol Steps Executed:**
+- [x] Step 0.5: Determined rigor level (FULL)
+- [x] Step 0: Context Recovery — AIPU-057 completed, fresh start
+- [x] Step 1: Load Task File
+- [x] Step 2: Initialize current-task.md
+- [x] Step 3: Context Budget Check (OK)
+- [x] Step 4: Load Knowledge Files (SprkChat types, SSE format, SprkChatUploadZone, ChatEndpoints)
+- [x] Step 5: Load ADR Constraints (ADR-013, ADR-021, ADR-022)
+- [x] Step 8: Execute Task Steps 1-6
+- [x] Step 9: Verify Acceptance Criteria
+- [x] Step 9.5: Quality Gates (dotnet build 0 errors, tsc 0 errors)
+- [x] Step 10: Update Task Status (POML → completed, TASK-INDEX.md updated)
+
+### Files Modified in AIPU-058
+
+| File | Action |
+|------|--------|
+| `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` | Added `MissingContextKeywords[]` static array, `EmitMissingContextChipsIfNeededAsync` method, and `SendMessageAsync` integration to detect missing document context and emit `[action:upload/search/select]` suggestions SSE chips instead of passive text |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx` | Added `fileInputRef`, `actionUploadFile` state, `handleFileInputChange`, updated `handleSuggestionSelect` to route action chip prefixes, updated `handleUploadComplete`/`handleUploadError` to clear `actionUploadFile`, added hidden `<input type="file">` element in JSX, passed `initialFile` to SprkChatUploadZone |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatUploadZone.tsx` | Added `initialFile?: File \| null` prop to `ISprkChatUploadZoneProps`; added `useEffect` to upload `initialFile` on mount (skips drag-and-drop); initial phase is `'uploading'` when `initialFile` is provided |
+| `projects/spaarke-ai-platform-unification-r1/tasks/058-action-chip-responses.poml` | Status → completed |
+| `projects/spaarke-ai-platform-unification-r1/tasks/TASK-INDEX.md` | Added AIPU-058 → ✅ to Wave 5E |
+
+### Acceptance Criteria Verified
+
+| AC | Status | Notes |
+|----|--------|-------|
+| BFF detects missing document context | ✅ | Keyword matching on AI response text + `documentId` empty check in `EmitMissingContextChipsIfNeededAsync` |
+| BFF emits `suggestions` SSE event with 3 action chips | ✅ | `[action:upload] Upload File`, `[action:search] Browse Matter Documents`, `[action:select] Select a Matter` |
+| Action chips are mutually exclusive with LLM suggestions | ✅ | `bool` return from `EmitMissingContextChipsIfNeededAsync` gates `GenerateAndEmitSuggestionsAsync` |
+| SprkChatSuggestions renders action chips (existing component, no changes) | ✅ | `suggestions` array received via SSE stream, rendered by `SprkChatSuggestions` as `InteractionTag` chips |
+| Upload chip triggers OS file picker | ✅ | `handleSuggestionSelect` detects `[action:upload]` prefix → `fileInputRef.current?.click()` |
+| Browse chip sends follow-up message | ✅ | `[action:search]` → `handleSend('Browse and search my documents')` |
+| Select chip sends follow-up message | ✅ | `[action:select]` → `handleSend('Help me select a matter to work with')` |
+| File selected via OS picker uploads via SprkChatUploadZone | ✅ | `handleFileInputChange` sets `actionUploadFile` + `isDragging=true`; `SprkChatUploadZone initialFile` uploads on mount |
+| dotnet build 0 errors | ✅ | 0 errors, 15 pre-existing warnings |
+| npm run build (tsc) 0 errors | ✅ | Clean tsc exit |
+
+### Key Design Decisions
+
+- **Detection strategy**: Two conditions must both be true: (1) `documentId` is empty in session, (2) AI response contains at least one keyword from ~25 keyword phrases. No LLM call — pure string matching.
+- **Action chip format**: `"[action:<id>] <display label>"` prefix. Parsed client-side in `handleSuggestionSelect` without schema changes to the existing `suggestions` SSE event.
+- **Upload path**: Hidden `<input type="file">` ref + `initialFile` prop on `SprkChatUploadZone`. The existing drag-and-drop overlay (XHR upload) handles the actual upload — no duplicate code.
+- **Mutual exclusivity**: `EmitMissingContextChipsIfNeededAsync` returns `bool`; when `true`, `GenerateAndEmitSuggestionsAsync` is skipped. Both cannot appear in the same response.
+- **Browse/Select chips**: Send a text follow-up message for now. Full output pane widget integration (EntityPicker, DocumentBrowser) is deferred to a future task.
 
 ## Completed Task: AIPU-057
 

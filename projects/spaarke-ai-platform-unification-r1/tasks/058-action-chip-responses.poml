@@ -1,7 +1,7 @@
 <task id="AIPU-058" project="spaarke-ai-platform-unification-r1">
   <metadata>
     <title>Action chip responses — upload, browse, select when context is missing</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <wave>5E</wave>
     <estimated-effort>4 hours</estimated-effort>

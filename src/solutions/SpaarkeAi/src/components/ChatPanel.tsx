@@ -215,7 +215,7 @@ export function ChatPanel(): React.JSX.Element {
                 }
               : undefined
           }
-          onPaneEvent={streaming.onPaneEvent}
+          onPaneEvent={streaming?.onPaneEvent ?? undefined}
         />
       </div>
     </div>
