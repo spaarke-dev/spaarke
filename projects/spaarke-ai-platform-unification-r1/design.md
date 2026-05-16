@@ -231,7 +231,295 @@ AI Agent Service hosts the "Spaarke Legal AI Agent"
 
 ---
 
-## 5. Proposed Architecture
+## 5. What We Leverage vs What We Build
+
+### Leverage Matrix (Existing → Reuse)
+
+Every item in this column is **production code that carries forward unchanged**:
+
+| Existing Component | How It's Used in This Project | Changes Needed |
+|-------------------|------------------------------|----------------|
+| **SprkChat React component** | Same component renders in standalone Code Page (Surface 2) | **None** — accepts props, renders chat |
+| **SprkChatAgent + middleware pipeline** | Handles all chat messages, tool dispatch, streaming | **None** — standalone surface calls same BFF endpoints |
+| **7 tool categories** (search, analysis, refinement, etc.) | Available in standalone mode just as they are in Analysis Workspace | **None** — tools are context-scoped by BFF, not by frontend |
+| **PlaybookOrchestrationService** (DAG engine) | Playbook execution from standalone context | **None** — add new node executor, engine unchanged |
+| **ChatSessionManager + ChatHistoryManager** | Session persistence for standalone conversations | **None** — sessions are already surface-agnostic |
+| **DynamicCommandResolver** | Slash commands work in standalone mode | **None** — commands resolve from playbook + context |
+| **CompoundIntentDetector + PendingPlanManager** | Multi-tool approval works in standalone | **None** — approval flow is in BFF, not frontend |
+| **QuickActionChips + SlashCommandMenu** | Render in standalone header area | **None** — driven by context mapping response |
+| **SprkChatUploadZone** | Document upload in standalone | **None** — already a standalone React component |
+| **ChatEndpoints** (SSE streaming) | Frontend calls same endpoints | **None** — surface-agnostic |
+| **`@spaarke/auth` bootstrap** | Auth initialization for standalone Code Page | **None** — same pattern as all other Code Pages |
+| **Playbook Library** | User selects playbook in standalone header | **None** — fetch from existing `/api/ai/playbooks` endpoint |
+| **AI Search semantic index** | Document search from standalone chat | **None** — called via existing DocumentSearchTools |
+| **Azure OpenAI** | LLM calls for chat, analysis, refinement | **None** — IChatClient abstraction unchanged |
+| **Azure AI Foundry Hub + Project** | Already provisioned infrastructure for Agent Service | **None** — add agent definition to existing project |
+
+**Summary**: ~80% of the work is **wiring existing components to new surfaces**, not building new capabilities.
+
+### Build Matrix (New Code)
+
+| New Component | What It Does | Estimated Effort |
+|--------------|-------------|-----------------|
+| **`sprk_spaarkeai` Code Page** | New React Code Page — layout shell, header, context provider | 2-3 days |
+| **`StandaloneAiContext`** | React context provider that resolves entity context from URL params (no editor) | 1-2 days |
+| **`StandaloneChatContextProvider`** | BFF service — resolves playbooks/actions/knowledge for non-analysis context | 2-3 days |
+| **`GET /api/ai/chat/context-mappings/standalone`** | New BFF endpoint — returns context for standalone surface | 1 day |
+| **`AgentServiceClient`** | Wrapper for Azure.AI.Projects SDK | 2-3 days |
+| **`AgentServiceNodeExecutor` (AT 60)** | New playbook node executor — delegates to AI Agent Service | 1-2 days |
+| **`CodeInterpreterBridge`** | Routes data analysis requests to Agent Service code interpreter | 2-3 days |
+| **`CodeInterpreterTools.cs`** | New SprkChat tool — `analyze_data`, `generate_chart` | 1-2 days |
+| **`LegalResearchTools.cs`** | New SprkChat tool — `research_case_law`, `research_company` | 1-2 days |
+| **`AgentServiceRoutingMiddleware`** | Decides when to route to Agent Service vs direct | 2-3 days |
+| **`ResultsPanel` component** | Slide-out panel for rich results (charts, research) | 2-3 days |
+| **`ChatHistoryPanel` component** | Session history list for standalone mode | 1-2 days |
+| **Agent definition + tool mapping** | Deploy Spaarke Legal AI Agent to Foundry | 1-2 days |
+| **Evaluation pipeline** | Foundry evaluation config + legal metrics | 2-3 days |
+| **Tracing integration** | OpenTelemetry spans for agent routing | 1-2 days |
+
+**Total new code**: ~3-4 weeks for Phase 1 (standalone) + ~3-4 weeks for Phase 2 (Foundry integration)
+
+---
+
+## 6. User Experience Vision
+
+### What Does This Look Like?
+
+#### Surface 1: Analysis Workspace (Current — No Change)
+
+The user opens a document for deep AI analysis. The three-panel layout stays exactly as built:
+
+```
+┌──────────────────────────────┬──────────────┬────────────────────────┐
+│ Analysis Editor              │ Document     │ SprkChat               │
+│                              │ Viewer       │                        │
+│ [AI-generated analysis       │              │ "Summarize the key     │
+│  output, editable,           │ [Original    │  risks in this NDA"    │
+│  streaming write target]     │  document    │                        │
+│                              │  reference]  │ 🤖 Based on the NDA,  │
+│ Risk Assessment:             │              │ there are 3 key risks: │
+│ 1. Non-compete clause...     │              │ 1. Non-compete is...   │
+│ 2. Indemnification...        │              │ 2. Indemnification...  │
+│                              │              │                        │
+│ [Save] [Export] [Copy]       │              │ [/search] [/refine]    │
+└──────────────────────────────┴──────────────┴────────────────────────┘
+```
+
+**No changes here.** SprkChat is embedded via `AnalysisAiContext` with editor integration, streaming write-back, and inline toolbar. This is the "deep work" surface.
+
+#### Surface 2: Standalone Spaarke AI (NEW)
+
+The user opens Spaarke AI from the workspace command bar, a matter form, or a direct link. This is the "quick access" surface — no editor, no document viewer, just full-page conversational AI:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI            Acme Corp Matter ▾     Risk Assessment ▾    │
+│                          [context]               [playbook]    [⋮]  │
+├────────────────────────────┬─────────────────────────────────────────┤
+│                            │                                         │
+│ 📝 Recent Conversations    │  Welcome back, Ralph.                   │
+│ ─────────────────────      │  You're working on the Acme Corp        │
+│ ● Acme Corp risk review    │  matter. What would you like to do?     │
+│   Yesterday, 3:42 PM       │                                         │
+│                            │  ┌─────────┐ ┌───────────┐ ┌─────────┐ │
+│ ● Patent filing research   │  │📄 Search │ │🔍 Analyze │ │📊 Chart │ │
+│   May 13, 10:15 AM        │  │Documents │ │ Document  │ │ Budget  │ │
+│                            │  └─────────┘ └───────────┘ └─────────┘ │
+│ ● Q1 budget analysis       │  ┌─────────┐ ┌───────────┐ ┌─────────┐ │
+│   May 12, 2:30 PM         │  │📋 Run    │ │🔬 Research│ │📎 Upload│ │
+│                            │  │Playbook  │ │ Case Law  │ │Document │ │
+│ ● Similar docs for Smith   │  └─────────┘ └───────────┘ └─────────┘ │
+│   May 10, 9:00 AM         │                                         │
+│                            │  ──────────────────────────────────     │
+│                            │                                         │
+│ [+ New Chat]               │  💬 Ask me anything about your matters, │
+│                            │  documents, or run an AI analysis...     │
+│                            │                                         │
+│                            │  ┌─────────────────────────────────┐    │
+│                            │  │ Type a message...          [📎] │    │
+│                            │  └─────────────────────────────┘ [➤]   │
+│                            │                                         │
+└────────────────────────────┴─────────────────────────────────────────┘
+```
+
+**When the user asks a question with a tool-assisted response:**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI            Acme Corp Matter ▾     Risk Assessment ▾    │
+├────────────────────────────┬─────────────────────────────────────────┤
+│ 📝 Recent Conversations    │                                         │
+│ ─────────────────────      │  👤 "Find documents similar to the      │
+│ ● Acme Corp risk review ◄ │       MSA Amendment we reviewed"        │
+│                            │                                         │
+│                            │  🤖 I found 4 documents with high       │
+│                            │  similarity to MSA_Amendment_v3.pdf:    │
+│                            │                                         │
+│                            │  📄 Vendor_Agreement_Globex.pdf   92%  │
+│                            │     Globex Industries matter            │
+│                            │     [Open] [Compare]                    │
+│                            │                                         │
+│                            │  📄 Service_Agreement_Draft.docx  87%  │
+│                            │     Smith IP matter                     │
+│                            │     [Open] [Compare]                    │
+│                            │                                         │
+│                            │  📄 NDA_Template_2025.pdf         84%  │
+│                            │     Template Library                    │
+│                            │     [Open] [Compare]                    │
+│                            │                                         │
+│                            │  📄 Licensing_Agreement.pdf       78%  │
+│                            │     Morrison Estate                     │
+│                            │     [Open] [Compare]                    │
+│                            │                                         │
+│                            │  Would you like me to run a detailed    │
+│                            │  comparison between any of these?       │
+│                            │                                         │
+└────────────────────────────┴─────────────────────────────────────────┘
+```
+
+**When Code Interpreter generates a chart (Phase 2 — Foundry integration):**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI            All Matters ▾           General ▾           │
+├────────────────────────────┬─────────────────────────────────────────┤
+│ 📝 Recent Conversations    │                                         │
+│ ─────────────────────      │  👤 "Show me a budget burndown chart    │
+│ ● Q1 budget analysis ◄    │       for all active matters"           │
+│                            │                                         │
+│                            │  🤖 I've analyzed the budget data       │
+│                            │  across your 8 active matters.          │
+│                            │                                         │
+│                            │  ┌───────────────────────────────────┐  │
+│                            │  │  📊 Budget Burndown — Active      │  │
+│                            │  │                                   │  │
+│                            │  │  $250K ┤ ████                     │  │
+│                            │  │  $200K ┤ ████ ████                │  │
+│                            │  │  $150K ┤ ████ ████ ▓▓▓▓           │  │
+│                            │  │  $100K ┤ ████ ████ ▓▓▓▓ ░░░░     │  │
+│                            │  │   $50K ┤ ████ ████ ▓▓▓▓ ░░░░     │  │
+│                            │  │     $0 ┤─────────────────────     │  │
+│                            │  │        Acme  Smith Globex Morrison │  │
+│                            │  │        ████ Budget  ▓▓▓▓ Spent    │  │
+│                            │  │                     ░░░░ Remaining │  │
+│                            │  └───────────────────────────────────┘  │
+│                            │                                         │
+│                            │  ⚠️ 2 matters are above 80% burn:      │
+│                            │  • Acme Corp ($225K / $250K = 90%)     │
+│                            │  • Smith IP ($180K / $200K = 90%)      │
+│                            │                                         │
+│                            │  [Download Chart] [Export Data]         │
+│                            │                                         │
+└────────────────────────────┴─────────────────────────────────────────┘
+```
+
+**When Bing Grounding does legal research (Phase 2):**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⚡ Spaarke AI            Acme Corp Matter ▾     General ▾            │
+├────────────────────────────┬─────────────────────────────────────────┤
+│ 📝 Recent Conversations    │                                         │
+│ ─────────────────────      │  👤 "Research recent 9th Circuit        │
+│ ● Patent filing research ◄ │       rulings on patent eligibility     │
+│                            │       under Alice"                      │
+│                            │                                         │
+│                            │  🤖 🔬 Research Results                 │
+│                            │                                         │
+│                            │  I found 5 relevant 9th Circuit         │
+│                            │  decisions from 2025-2026 addressing    │
+│                            │  patent eligibility under Alice:        │
+│                            │                                         │
+│                            │  1. TechFlow v. DataSync (2026)        │
+│                            │     Held software patent eligible       │
+│                            │     under "specific technical           │
+│                            │     improvement" test. [1]              │
+│                            │                                         │
+│                            │  2. Innovate Corp v. USPTO (2025)      │
+│                            │     Narrowed abstract idea category     │
+│                            │     for AI/ML patents. [2]             │
+│                            │                                         │
+│                            │  3. [...]                               │
+│                            │                                         │
+│                            │  Key trend: The 9th Circuit is          │
+│                            │  trending toward eligibility for        │
+│                            │  patents claiming specific technical    │
+│                            │  improvements, even in software. [1,2] │
+│                            │                                         │
+│                            │  ─── Sources ───                        │
+│                            │  [1] law.justia.com/cases/...           │
+│                            │  [2] cafc.uscourts.gov/...              │
+│                            │                                         │
+│                            │  ⚠️ AI-generated research. Verify       │
+│                            │  citations before relying in filings.   │
+│                            │                                         │
+└────────────────────────────┴─────────────────────────────────────────┘
+```
+
+#### Surface 3: M365 Copilot (Existing M365 Project — Enhanced in Phase 4)
+
+The user asks Copilot in the MDA side pane. For simple queries, Copilot answers directly. For complex queries, it hands off to the standalone app or generates enhanced responses via Agent Service:
+
+```
+┌─────────────────────────────────┐
+│ Copilot                    [✕]  │
+│                                 │
+│ 👤 "What's the budget status    │
+│     for my active matters?"     │
+│                                 │
+│ 🤖 Here's a summary of your    │
+│ active matter budgets:          │
+│                                 │
+│ ┌─────────────────────────────┐ │
+│ │ Acme Corp     ████████░░ 90%│ │
+│ │ Smith IP      ████████░░ 90%│ │
+│ │ Globex        ██████░░░░ 60%│ │
+│ │ Morrison      ████░░░░░░ 40%│ │
+│ └─────────────────────────────┘ │
+│                                 │
+│ ⚠️ 2 matters above 80%.        │
+│                                 │
+│ [📊 Detailed Analysis]          │
+│  └── Opens Spaarke AI with      │
+│      full chart + breakdown     │
+│                                 │
+└─────────────────────────────────┘
+```
+
+### How the Surfaces Connect
+
+```
+User's journey across surfaces:
+
+1. Workspace → sees notification "NDA uploaded to Acme Corp"
+   │
+2. Clicks "Spaarke AI" button → Standalone AI opens with Acme Corp context
+   │
+3. "Find similar documents" → SprkChat uses existing DocumentSearchTools
+   │
+4. "Run risk assessment on the NDA" → PlaybookOrchestrationService executes
+   │
+5. Result opens in Analysis Workspace → deep editing, inline AI toolbar
+   │
+6. From Analysis Workspace chat: "Research 9th Circuit Alice rulings"
+   │  → Routes to AI Agent Service (Bing Grounding) → citations appear in chat
+   │
+7. Back in M365 Copilot: "Summarize what I worked on today"
+   │  → Custom Engine Agent queries chat history → Adaptive Card summary
+```
+
+Each surface has a natural role:
+
+| Surface | Role | When Users Go There |
+|---------|------|-------------------|
+| **Workspace** | Overview, navigation, launch point | Start of session, matter overview |
+| **Standalone Spaarke AI** | Quick AI interactions, research, queries | "I have a question" moments |
+| **Analysis Workspace** | Deep document analysis, editing, structured output | "I need to produce something" moments |
+| **M365 Copilot** | Quick lookups, status checks, cross-app commands | "Quick answer while I'm working" moments |
+
+---
+
+## 7. Proposed Architecture
 
 ### Layer 1: Unified SprkChat Frontend (Multi-Surface)
 
