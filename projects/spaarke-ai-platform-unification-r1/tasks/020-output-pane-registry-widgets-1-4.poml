@@ -1,0 +1,130 @@
+<task id="AIPU-020" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Output pane registry + widgets 1-4 (BudgetDashboard, SearchResults, AnalysisEditor, ContractComparison)</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>2</wave>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>shared-library, frontend, fluent-ui, output-widgets</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>003</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the output pane widget registry and the first four output widgets for the @spaarke/ai-outputs library. This task owns the registry file and widgets 1-4 only. Widget files 5-8 are owned by task AIPU-021 and widget files 9-11 are owned by AIPU-031 — do not create or modify those files here.
+
+    Deliverables:
+    1. src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts — OutputWidgetType enum, SourceWidgetType enum, and shared interfaces (IOutputWidget, ISourceWidget, WidgetRegistryEntry, OutputWidgetProps, SourceWidgetProps). These types are shared with tasks 021 and 022.
+    2. src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts — lazy registry that maps OutputWidgetType string keys to dynamic import() factories. Exported as outputWidgetRegistry.
+    3. BudgetDashboardWidget.tsx — renders a financial budget summary with spend vs. budget bars using Fluent v9 ProgressBar.
+    4. SearchResultsWidget.tsx — renders a list of ranked search result cards with title, excerpt, and relevance score badge.
+    5. AnalysisEditorWidget.tsx — renders a markdown analysis body with section headings, supports edit mode toggle.
+    6. ContractComparisonWidget.tsx — renders a two-column diff view comparing two contract clauses with highlighted delta lines.
+
+    All widgets receive data via their props (no direct API calls inside widgets). Widget data is passed from the AI streaming response already parsed by the calling code page.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in React 19, Fluent UI v9, and shared component library authoring</role>
+
+  <goal>
+    A fully typed, lazy-loaded output widget registry and four working output widgets (BudgetDashboard, SearchResults, AnalysisEditor, ContractComparison) exported from @spaarke/ai-outputs, with zero hard-coded colors, full dark mode support, and TypeScript compilation passing.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/BudgetDashboardWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/SearchResultsWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/AnalysisEditorWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/ContractComparisonWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/registry/source-registry.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/index.ts</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-021">All widgets must use Fluent v9 makeStyles with design tokens only. No hard-coded hex colors, no inline style={{ color: '#...' }}. Dark mode must work via FluentProvider theme switching without any additional code in widgets.</constraint>
+    <constraint source="ADR-012">@spaarke/ai-outputs is a shared library. Every public component and type must be exported from src/index.ts. Follow the barrel export pattern from @spaarke/ui-components.</constraint>
+    <constraint source="project">NOT PCF-safe. Widgets may use React 19 features (useTransition, etc.) freely. Do not gate on React 16/17 compatibility.</constraint>
+    <constraint source="project">Registry pattern: output-registry.ts maps OutputWidgetType enum values to lazy factories: () => import('./WidgetName'). Registry must not eagerly import any widget module at startup.</constraint>
+    <constraint source="project">Widget props must be typed via OutputWidgetProps&lt;T&gt; generic from widget-types.ts. Each widget defines its own data shape T.</constraint>
+    <constraint source="project">Do not create widget files 5-8 (TimelineWidget, DocumentCompareWidget, DataTableWidget, ChartWidget) — those are owned by task AIPU-021.</constraint>
+    <constraint source="project">Do not create widget files 9-11 (StatusSummaryWidget, RecommendationWidget, ActionPlanWidget) — those are owned by task AIPU-031.</constraint>
+    <constraint source="project">Do not create source widget files — those are owned by task AIPU-022.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>.claude/patterns/shared/shared-library-build.md</file>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared library barrel exports" location="src/client/shared/Spaarke.UI.Components/src/index.ts">
+        All public components and types re-exported from a single index.ts. Follow this pattern for ai-outputs index.ts.
+      </pattern>
+      <pattern name="Fluent v9 makeStyles" location="src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx">
+        Use makeStyles from @fluentui/react-components. Tokens from tokens.colorNeutral*, tokens.spacingHorizontal*, etc. No hard-coded values.
+      </pattern>
+      <pattern name="Lazy registry" location="src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts">
+        Registry shape: Record&lt;OutputWidgetType, () =&gt; Promise&lt;{ default: React.ComponentType&lt;OutputWidgetProps&lt;unknown&gt;&gt; }&gt;&gt;
+        Populated with dynamic import() per widget. No eager imports.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/client/shared/Spaarke.UI.Components/src/index.ts and package.json to understand library export conventions.</step>
+    <step>Read src/client/shared/Spaarke.AI.Outputs/src/types/index.ts (scaffold from task 003) and src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts to understand what already exists.</step>
+    <step>Create or replace src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts:
+      - OutputWidgetType enum: BudgetDashboard, SearchResults, AnalysisEditor, ContractComparison, Timeline, DocumentCompare, DataTable, Chart, StatusSummary, Recommendation, ActionPlan
+      - SourceWidgetType enum: DocumentViewer, WebSource, LegalLibrary, Citation, ImageViewer, CodeViewer
+      - OutputWidgetProps&lt;T&gt;: { data: T; isLoading?: boolean; error?: string; className?: string }
+      - SourceWidgetProps&lt;T&gt;: { data: T; isLoading?: boolean; error?: string; className?: string }
+      - WidgetRegistryEntry&lt;T&gt;: { type: string; label: string; factory: () =&gt; Promise&lt;{ default: React.ComponentType&lt;T&gt; }&gt; }
+      Export all types.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts:
+      - Import OutputWidgetType from types/widget-types.ts
+      - Define outputWidgetRegistry as Record&lt;OutputWidgetType, () =&gt; Promise&lt;...&gt;&gt; using dynamic import() for all 11 widgets
+      - Export outputWidgetRegistry and a helper resolveOutputWidget(type) that calls the factory and returns the default export.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/BudgetDashboardWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ title: string; items: Array&lt;{ label: string; spent: number; budget: number; currency: string }&gt; }&gt;
+      - Render title, then a list of ProgressBar (Fluent v9) rows with spent/budget label
+      - Use makeStyles for layout, tokens for colors.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/SearchResultsWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ query: string; results: Array&lt;{ id: string; title: string; excerpt: string; score: number; url?: string }&gt; }&gt;
+      - Render query header, then Card list. Each card: title as Link (if url), excerpt text, Badge for score percentage.
+      - Use makeStyles. Fluent v9 Card, Badge, Link, Text.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/AnalysisEditorWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ sections: Array&lt;{ heading: string; body: string }&gt;; editable?: boolean }&gt;
+      - Render each section as a Fluent v9 Title3 + Body1 block. If editable and edit mode active, replace body with Textarea.
+      - Toggle edit mode via local useState. Save button calls optional onSave prop.
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/ContractComparisonWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ leftLabel: string; rightLabel: string; clauses: Array&lt;{ id: string; left: string; right: string; hasDelta: boolean }&gt; }&gt;
+      - Render two-column layout (CSS grid 1fr 1fr) with each clause pair. Delta lines highlighted using tokens.colorStatusWarningBackground3.
+      - Use makeStyles.</step>
+    <step>Update src/client/shared/Spaarke.AI.Outputs/src/index.ts to export:
+      - All types from types/widget-types.ts
+      - outputWidgetRegistry and resolveOutputWidget from registry/output-registry.ts
+      - BudgetDashboardWidget, SearchResultsWidget, AnalysisEditorWidget, ContractComparisonWidget (named exports)</step>
+    <step>Run TypeScript compilation check: cd src/client/shared/Spaarke.AI.Outputs &amp;&amp; npx tsc --noEmit to confirm zero errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts exists with OutputWidgetType and SourceWidgetType enums, OutputWidgetProps and SourceWidgetProps generics, and WidgetRegistryEntry type — all exported.</criterion>
+    <criterion>output-registry.ts exports outputWidgetRegistry with lazy dynamic import() factories for all 11 output widget types. No widget module is imported at the top of the file.</criterion>
+    <criterion>BudgetDashboardWidget.tsx renders Fluent v9 ProgressBar rows for each budget line item with spent vs. budget values.</criterion>
+    <criterion>SearchResultsWidget.tsx renders a Card list with title, excerpt, and relevance score Badge for each search result.</criterion>
+    <criterion>AnalysisEditorWidget.tsx renders sections with headings and body text; supports optional edit mode via Textarea.</criterion>
+    <criterion>ContractComparisonWidget.tsx renders two-column clause comparison with delta rows highlighted using Fluent v9 warning color tokens.</criterion>
+    <criterion>All four widgets use makeStyles with Fluent v9 design tokens only — no hard-coded hex colors, no inline style color values.</criterion>
+    <criterion>All four widgets and all exported types are re-exported from src/index.ts.</criterion>
+    <criterion>TypeScript compilation passes with zero errors (npx tsc --noEmit).</criterion>
+    <criterion>Widget files 5-8, 9-11 and all source widgets are NOT created by this task.</criterion>
+  </acceptance-criteria>
+</task>

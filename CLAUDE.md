@@ -219,10 +219,10 @@ Claude's training data has a knowledge cutoff. For rapidly-evolving Microsoft/AI
 
 - **Mechanism**: `.claude/agents/researcher.md` (Opus, effort: high, project memory enabled)
 - **Trigger**: Invoke when external/current technical knowledge is needed that's not in skills, ADRs, or patterns
-- **Behavior**: Consults curated knowledge at `spaarke/knowledge/` FIRST → falls back to Microsoft Learn, official Microsoft GitHub repos, then generic web search
+- **Behavior**: Consults curated knowledge at [`knowledge/`](knowledge/) FIRST → falls back to Microsoft Learn, official Microsoft GitHub repos, then generic web search
 - **Accumulation**: Findings stored in the subagent's `MEMORY.md` (project-scoped) — accumulates Microsoft-platform knowledge across sessions
 
-**Knowledge repo location**: `spaarke/knowledge/` — under construction by parallel project [`projects/coding-knowledge-base-setup-r1/`](projects/coding-knowledge-base-setup-r1/). Until populated, the researcher falls through directly to external sources but still memoizes findings.
+**Knowledge repo location**: [`knowledge/`](knowledge/) at repo root — populated by parallel project `coding-knowledge-base-setup-r1` (merged to master before this rewrite). Currently includes `agent-framework/`, `azure-ai-search/`, refresh procedures, and a refresh log. The researcher consults this BEFORE external search and memoizes findings in its `MEMORY.md`.
 
 ---
 

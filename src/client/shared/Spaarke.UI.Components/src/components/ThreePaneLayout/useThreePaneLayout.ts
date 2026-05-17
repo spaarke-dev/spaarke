@@ -1,0 +1,365 @@
+/**
+ * useThreePaneLayout Hook
+ *
+ * Generalized panel layout hook for three-pane layouts with draggable splitters.
+ *
+ * Extracted and generalized from AnalysisWorkspace/src/hooks/usePanelLayout.ts.
+ *
+ * Features:
+ * - Left pane: fixed pixel width, user-resizable via left splitter, collapsible
+ * - Center pane: flex:1, always fills remaining space
+ * - Right pane: fixed pixel width, user-resizable via right splitter, collapsible
+ * - Keyboard resize: Arrow keys (step), Home/End (expand/collapse to min/max)
+ * - sessionStorage persistence with configurable key prefix
+ * - Double-click on splitter resets that pane to default width
+ *
+ * @see ADR-021 - Fluent UI v9 design system
+ * @see ADR-012 - Shared component library
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { UseThreePaneLayoutResult } from './ThreePaneLayout.types';
+import { SplitterHandlers } from '../../hooks/useTwoPanelLayout';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Width of the splitter grip area in pixels */
+const SPLITTER_WIDTH_PX = 4;
+
+/** Keyboard resize step in pixels */
+const KEYBOARD_STEP_PX = 20;
+
+// ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
+export interface UseThreePaneLayoutOptions {
+  /** Default left pane width in pixels */
+  defaultLeftWidthPx?: number;
+  /** Default right pane width in pixels */
+  defaultRightWidthPx?: number;
+  /** Minimum left pane width in pixels */
+  minLeftWidthPx?: number;
+  /** Minimum right pane width in pixels */
+  minRightWidthPx?: number;
+  /** Minimum center pane width in pixels */
+  minCenterWidthPx?: number;
+  /** sessionStorage key prefix for persistence */
+  storageKey?: string;
+  /** Initial left visibility (overridden by persisted state) */
+  defaultLeftVisible?: boolean;
+  /** Initial right visibility (overridden by persisted state) */
+  defaultRightVisible?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — sessionStorage
+// ---------------------------------------------------------------------------
+
+function safeGetItem(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Silently ignore storage errors
+  }
+}
+
+function loadPersistedWidth(key: string, defaultValue: number, min: number): number {
+  const stored = safeGetItem(key);
+  if (stored !== null) {
+    const v = parseFloat(stored);
+    if (Number.isFinite(v) && v >= min) return v;
+  }
+  return defaultValue;
+}
+
+function persistWidth(key: string, px: number): void {
+  safeSetItem(key, String(Math.round(px)));
+}
+
+interface PanelVisibility {
+  left: boolean;
+  right: boolean;
+}
+
+function loadPersistedVisibility(key: string, defaults: PanelVisibility): PanelVisibility {
+  const stored = safeGetItem(key);
+  if (stored !== null) {
+    try {
+      const parsed = JSON.parse(stored) as Partial<PanelVisibility>;
+      return {
+        left: typeof parsed.left === 'boolean' ? parsed.left : defaults.left,
+        right: typeof parsed.right === 'boolean' ? parsed.right : defaults.right,
+      };
+    } catch {
+      // Fall through to defaults
+    }
+  }
+  return defaults;
+}
+
+function persistVisibility(key: string, v: PanelVisibility): void {
+  safeSetItem(key, JSON.stringify(v));
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): UseThreePaneLayoutResult {
+  const {
+    defaultLeftWidthPx = 280,
+    defaultRightWidthPx = 360,
+    minLeftWidthPx = 180,
+    minRightWidthPx = 200,
+    minCenterWidthPx = 300,
+    storageKey = 'three-pane',
+    defaultLeftVisible = true,
+    defaultRightVisible = true,
+  } = options;
+
+  // Storage keys derived from prefix
+  const leftWidthKey = `${storageKey}-left-width-px`;
+  const rightWidthKey = `${storageKey}-right-width-px`;
+  const visibilityKey = `${storageKey}-visibility`;
+
+  // Refs for drag state (not React state — no re-renders during drag)
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingRef = useRef(false);
+  const activeSplitterRef = useRef<'left' | 'right' | null>(null);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(0);
+
+  // React state
+  const [leftWidthPx, setLeftWidthPx] = useState<number>(() =>
+    loadPersistedWidth(leftWidthKey, defaultLeftWidthPx, minLeftWidthPx)
+  );
+  const [rightWidthPx, setRightWidthPx] = useState<number>(() =>
+    loadPersistedWidth(rightWidthKey, defaultRightWidthPx, minRightWidthPx)
+  );
+  const [visibility, setVisibility] = useState<PanelVisibility>(() =>
+    loadPersistedVisibility(visibilityKey, { left: defaultLeftVisible, right: defaultRightVisible })
+  );
+  const [isDragging, setIsDragging] = useState(false);
+
+  // ------------------------------------------------------------------
+  // Clamping — prevents squeezing panes below their minimums
+  // ------------------------------------------------------------------
+
+  const clampLeftWidth = useCallback(
+    (width: number): number => {
+      const container = containerRef.current;
+      if (!container) return Math.max(minLeftWidthPx, width);
+      const containerWidth = container.getBoundingClientRect().width;
+      const rightOccupied = visibility.right ? rightWidthPx + SPLITTER_WIDTH_PX : 0;
+      const maxLeft = containerWidth - rightOccupied - SPLITTER_WIDTH_PX - minCenterWidthPx;
+      return Math.max(minLeftWidthPx, Math.min(maxLeft, width));
+    },
+    [visibility.right, rightWidthPx, minLeftWidthPx, minCenterWidthPx]
+  );
+
+  const clampRightWidth = useCallback(
+    (width: number): number => {
+      const container = containerRef.current;
+      if (!container) return Math.max(minRightWidthPx, width);
+      const containerWidth = container.getBoundingClientRect().width;
+      const leftOccupied = visibility.left ? leftWidthPx + SPLITTER_WIDTH_PX : 0;
+      const maxRight = containerWidth - leftOccupied - SPLITTER_WIDTH_PX - minCenterWidthPx;
+      return Math.max(minRightWidthPx, Math.min(maxRight, width));
+    },
+    [visibility.left, leftWidthPx, minRightWidthPx, minCenterWidthPx]
+  );
+
+  const updateLeftWidth = useCallback(
+    (width: number) => {
+      const clamped = clampLeftWidth(width);
+      setLeftWidthPx(clamped);
+      persistWidth(leftWidthKey, clamped);
+    },
+    [clampLeftWidth, leftWidthKey]
+  );
+
+  const updateRightWidth = useCallback(
+    (width: number) => {
+      const clamped = clampRightWidth(width);
+      setRightWidthPx(clamped);
+      persistWidth(rightWidthKey, clamped);
+    },
+    [clampRightWidth, rightWidthKey]
+  );
+
+  // ------------------------------------------------------------------
+  // Visibility toggles
+  // ------------------------------------------------------------------
+
+  const toggleLeft = useCallback(() => {
+    setVisibility(prev => {
+      const next = { ...prev, left: !prev.left };
+      persistVisibility(visibilityKey, next);
+      return next;
+    });
+  }, [visibilityKey]);
+
+  const toggleRight = useCallback(() => {
+    setVisibility(prev => {
+      const next = { ...prev, right: !prev.right };
+      persistVisibility(visibilityKey, next);
+      return next;
+    });
+  }, [visibilityKey]);
+
+  // ------------------------------------------------------------------
+  // Mouse drag handlers (global listeners during drag)
+  // ------------------------------------------------------------------
+
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const deltaX = e.clientX - dragStartXRef.current;
+
+      if (activeSplitterRef.current === 'left') {
+        // Left splitter: between left pane and center
+        // Drag right (+delta) → left pane grows
+        // Drag left (-delta) → left pane shrinks
+        updateLeftWidth(dragStartWidthRef.current + deltaX);
+      } else if (activeSplitterRef.current === 'right') {
+        // Right splitter: between center and right pane
+        // Drag right (+delta) → right pane shrinks
+        // Drag left (-delta) → right pane grows
+        updateRightWidth(dragStartWidthRef.current - deltaX);
+      }
+    },
+    [updateLeftWidth, updateRightWidth]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    isDraggingRef.current = false;
+    activeSplitterRef.current = null;
+    setIsDragging(false);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, handleMouseMove, handleMouseUp]);
+
+  // ------------------------------------------------------------------
+  // Splitter mouse-down factory
+  // ------------------------------------------------------------------
+
+  const makeSplitterMouseDown = useCallback(
+    (splitter: 'left' | 'right', currentWidth: number) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      isDraggingRef.current = true;
+      activeSplitterRef.current = splitter;
+      dragStartXRef.current = e.clientX;
+      dragStartWidthRef.current = currentWidth;
+      setIsDragging(true);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    },
+    []
+  );
+
+  // ------------------------------------------------------------------
+  // Keyboard resize
+  // ------------------------------------------------------------------
+
+  const makeKeyDown = useCallback(
+    (splitter: 'left' | 'right', currentWidth: number, update: (w: number) => void) => (e: React.KeyboardEvent) => {
+      let delta = 0;
+      if (splitter === 'left') {
+        // Left splitter: ArrowRight grows left pane, ArrowLeft shrinks
+        if (e.key === 'ArrowRight') delta = KEYBOARD_STEP_PX;
+        else if (e.key === 'ArrowLeft') delta = -KEYBOARD_STEP_PX;
+        else if (e.key === 'End')
+          delta = 9999; // expand left to max
+        else if (e.key === 'Home')
+          delta = -9999; // collapse left to min
+        else return;
+      } else {
+        // Right splitter: ArrowLeft grows right pane, ArrowRight shrinks
+        if (e.key === 'ArrowLeft') delta = KEYBOARD_STEP_PX;
+        else if (e.key === 'ArrowRight') delta = -KEYBOARD_STEP_PX;
+        else if (e.key === 'Home')
+          delta = 9999; // expand right to max
+        else if (e.key === 'End')
+          delta = -9999; // collapse right to min
+        else return;
+      }
+      e.preventDefault();
+      update(currentWidth + delta);
+    },
+    []
+  );
+
+  // ------------------------------------------------------------------
+  // Reset to defaults
+  // ------------------------------------------------------------------
+
+  const resetToDefaults = useCallback(() => {
+    const newVisibility: PanelVisibility = { left: defaultLeftVisible, right: defaultRightVisible };
+    setLeftWidthPx(defaultLeftWidthPx);
+    setRightWidthPx(defaultRightWidthPx);
+    setVisibility(newVisibility);
+    persistWidth(leftWidthKey, defaultLeftWidthPx);
+    persistWidth(rightWidthKey, defaultRightWidthPx);
+    persistVisibility(visibilityKey, newVisibility);
+  }, [
+    defaultLeftWidthPx,
+    defaultRightWidthPx,
+    defaultLeftVisible,
+    defaultRightVisible,
+    leftWidthKey,
+    rightWidthKey,
+    visibilityKey,
+  ]);
+
+  // ------------------------------------------------------------------
+  // Splitter handler objects
+  // ------------------------------------------------------------------
+
+  const leftSplitterHandlers: SplitterHandlers = {
+    onMouseDown: makeSplitterMouseDown('left', leftWidthPx),
+    onKeyDown: makeKeyDown('left', leftWidthPx, updateLeftWidth),
+    onDoubleClick: () => updateLeftWidth(defaultLeftWidthPx),
+  };
+
+  const rightSplitterHandlers: SplitterHandlers = {
+    onMouseDown: makeSplitterMouseDown('right', rightWidthPx),
+    onKeyDown: makeKeyDown('right', rightWidthPx, updateRightWidth),
+    onDoubleClick: () => updateRightWidth(defaultRightWidthPx),
+  };
+
+  return {
+    leftWidthPx,
+    rightWidthPx,
+    isLeftVisible: visibility.left,
+    isRightVisible: visibility.right,
+    toggleLeft,
+    toggleRight,
+    leftSplitterHandlers,
+    rightSplitterHandlers,
+    isDragging,
+    resetToDefaults,
+    containerRef,
+  };
+}

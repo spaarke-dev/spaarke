@@ -1,0 +1,76 @@
+<task id="AIPU-080" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Evaluation Pipeline — legal-specific metrics (groundedness, citation accuracy)</title>
+    <status>completed</status>
+    <phase>3</phase>
+    <wave>8</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>ai-foundry, evaluation</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-077</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the legal-domain evaluation pipeline for Azure AI Foundry. This extends the existing evaluation infrastructure with two legal-specific metrics: groundedness (does the response cite verifiable sources?) and citation accuracy (are cited cases/statutes real and correctly referenced?). Define a legal-eval-config.yaml that references the existing eval dataset pattern and the new custom metric. Implement citation_accuracy.py as a custom Python metric following the existing format_compliance.py pattern.
+  </prompt>
+
+  <role>AI evaluation engineer with Azure AI Foundry evaluation SDK and Python experience</role>
+
+  <goal>
+    infrastructure/ai-foundry/evaluation/legal-eval-config.yaml and infrastructure/ai-foundry/evaluation/metrics/citation_accuracy.py exist and are runnable, extending the existing evaluation pipeline with legal-specific groundedness and citation accuracy scoring.
+  </goal>
+
+  <relevant-files>
+    <file>infrastructure/ai-foundry/evaluation/legal-eval-config.yaml</file>
+    <file>infrastructure/ai-foundry/evaluation/metrics/citation_accuracy.py</file>
+    <file>infrastructure/ai-foundry/evaluation/eval-config.yaml</file>
+    <file>infrastructure/ai-foundry/evaluation/metrics/format_compliance.py</file>
+    <file>infrastructure/ai-foundry/README.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-015">Data governance: NEVER log evaluation input/output content to any persistent store other than the designated AI Foundry evaluation results workspace; eval results must not appear in application logs</constraint>
+    <constraint source="ADR-014">Define retention policy for evaluation results in the config: evaluation results stored in Foundry workspace for 90 days, then purged; document this in the YAML comment</constraint>
+    <constraint source="project">Follow existing eval-config.yaml structure exactly for consistency; only add legal-specific overrides in legal-eval-config.yaml</constraint>
+    <constraint source="project">citation_accuracy.py must follow format_compliance.py class structure: inherit from BaseMetric, implement evaluate(sample) returning a score 0.0-1.0, and include docstring explaining the scoring logic</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-foundry/evaluation/eval-config.yaml</file>
+      <file>infrastructure/ai-foundry/evaluation/metrics/format_compliance.py</file>
+      <file>infrastructure/ai-foundry/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing eval config" location="infrastructure/ai-foundry/evaluation/eval-config.yaml">
+        Read eval-config.yaml in full to understand: dataset references, metric list, threshold configuration, run settings, and any environment variable usage — legal-eval-config.yaml must use the same structure with legal overrides
+      </pattern>
+      <pattern name="Custom metric pattern" location="infrastructure/ai-foundry/evaluation/metrics/format_compliance.py">
+        Read format_compliance.py in full to understand the BaseMetric interface, evaluate() signature, return type, and how the metric is referenced in the eval config YAML
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read infrastructure/ai-foundry/evaluation/eval-config.yaml in full to understand the base configuration structure</step>
+    <step>Read infrastructure/ai-foundry/evaluation/metrics/format_compliance.py in full to understand the custom metric class pattern</step>
+    <step>Read infrastructure/ai-foundry/README.md to understand how evaluations are run and what datasets are available</step>
+    <step>Create infrastructure/ai-foundry/evaluation/metrics/citation_accuracy.py: class CitationAccuracyMetric(BaseMetric) with evaluate(sample) method; scoring logic: check if response citations match known citation formats (regex for case law patterns: "NNN F.Nd NNN", statute references "N U.S.C. § NNN"); score 1.0 if all citations match expected format, 0.5 for partial, 0.0 for no citations when citations were expected; add detailed docstring explaining scoring; include unit test examples in docstring</step>
+    <step>Create infrastructure/ai-foundry/evaluation/legal-eval-config.yaml: inherit all base settings from eval-config.yaml structure; override dataset to use legal-domain test cases; add metrics: groundedness (built-in Foundry metric), citation_accuracy (reference to citation_accuracy.py); set pass thresholds: groundedness >= 0.85, citation_accuracy >= 0.80; add retention comment: "# Eval results retained 90 days per ADR-014, then purged from Foundry workspace"</step>
+    <step>Create a synthetic legal evaluation dataset file infrastructure/ai-foundry/evaluation/datasets/legal-eval-samples.jsonl with 5-10 synthetic test cases (no real client data): each with input (legal question), expected_output_signals (list of strings expected in response), and has_citations (bool)</step>
+    <step>Verify citation_accuracy.py is importable and metric class is correctly defined (python -c "from metrics.citation_accuracy import CitationAccuracyMetric" or equivalent static check)</step>
+    <step>Verify legal-eval-config.yaml is valid YAML (yamllint or manual review)</step>
+    <step>Document how to run the legal evaluation in infrastructure/ai-foundry/README.md — add a "Legal Domain Evaluation" section with the run command</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>infrastructure/ai-foundry/evaluation/metrics/citation_accuracy.py exists, inherits BaseMetric, implements evaluate() returning 0.0-1.0, has detailed docstring</criterion>
+    <criterion>infrastructure/ai-foundry/evaluation/legal-eval-config.yaml exists with groundedness and citation_accuracy metrics, pass thresholds defined, retention comment present</criterion>
+    <criterion>infrastructure/ai-foundry/evaluation/datasets/legal-eval-samples.jsonl exists with synthetic (non-real) test cases only</criterion>
+    <criterion>citation_accuracy.py is syntactically valid Python</criterion>
+    <criterion>legal-eval-config.yaml is valid YAML</criterion>
+    <criterion>Retention policy (90 days) documented in YAML comment per ADR-014</criterion>
+    <criterion>No real client names, matter references, or legal document content in any evaluation file</criterion>
+    <criterion>README.md updated with "Legal Domain Evaluation" run command</criterion>
+  </acceptance-criteria>
+</task>

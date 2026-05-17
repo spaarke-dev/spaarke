@@ -1,0 +1,139 @@
+<task id="AIPU-022" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Source pane registry + all 6 source widgets (DocumentViewer, WebSource, LegalLibrary, Citation, ImageViewer, CodeViewer)</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>2</wave>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>shared-library, frontend, fluent-ui, source-widgets</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the source pane widget registry and all 6 source widgets for the @spaarke/ai-outputs library. Source widgets display reference materials alongside AI analysis — they are the "right pane" or "source pane" content in the three-pane layout.
+
+    This task is parallel-safe with AIPU-020 and AIPU-021 because it owns exclusively:
+    - src/client/shared/Spaarke.AI.Outputs/src/source-widgets/ (all files)
+    - src/client/shared/Spaarke.AI.Outputs/src/registry/source-registry.ts
+
+    NOTE: SourceWidgetType and SourceWidgetProps are defined in widget-types.ts by AIPU-020. If AIPU-020 has not yet completed, define a local types/source-widget-types.ts with the minimal types needed (SourceWidgetProps generic, SourceWidgetType enum) and plan to merge into widget-types.ts when AIPU-020 completes.
+
+    Deliverables:
+    1. source-registry.ts — lazy registry mapping SourceWidgetType to dynamic import() factories.
+    2. DocumentViewerWidget.tsx — renders a SharePoint Embedded document preview using a document URL, with a download button. Uses SpeFileStore facade pattern for URL resolution.
+    3. WebSourceWidget.tsx — renders an iframe-based web page preview with a URL bar showing the source URL and an "Open in browser" link.
+    4. LegalLibraryWidget.tsx — renders a structured legal case or statute citation card with court, date, citation number, and excerpt.
+    5. CitationWidget.tsx — renders an inline footnote/citation reference panel listing all citations from the AI response.
+    6. ImageViewerWidget.tsx — renders an image with pan/zoom controls and optional caption.
+    7. CodeViewerWidget.tsx — renders syntax-highlighted code blocks using a Fluent v9 compatible approach (monospace font, line numbers, token colors via CSS variables tied to Fluent tokens).
+  </prompt>
+
+  <role>Senior frontend developer with expertise in React 19, Fluent UI v9, SharePoint Embedded document viewing, and shared library authoring</role>
+
+  <goal>
+    A fully typed, lazy-loaded source widget registry and all 6 source widgets exported from @spaarke/ai-outputs, with correct SpeFileStore facade integration for DocumentViewerWidget, full dark mode support, and TypeScript compilation passing.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/DocumentViewerWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/WebSourceWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/LegalLibraryWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/CitationWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/ImageViewerWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/CodeViewerWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/registry/source-registry.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/index.ts</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-021">All widgets must use Fluent v9 makeStyles with design tokens only. No hard-coded hex colors. Dark mode must work via FluentProvider theme switching.</constraint>
+    <constraint source="ADR-012">Every public component must be exported from src/index.ts.</constraint>
+    <constraint source="ADR-007">DocumentViewerWidget must NOT use Graph SDK types directly. It receives a pre-resolved document URL (string) as a prop — the calling code page resolves the URL via the BFF API which uses SpeFileStore internally. No Graph SDK imports in the widget.</constraint>
+    <constraint source="project">NOT PCF-safe. Source widgets may use React 19 features freely.</constraint>
+    <constraint source="project">source-registry.ts maps SourceWidgetType enum values to lazy factories: () =&gt; import('./WidgetName'). No eager imports.</constraint>
+    <constraint source="project">CodeViewerWidget: no syntax highlighting libraries (e.g., highlight.js, prism) that add significant bundle weight. Use a minimal CSS-based approach with Fluent v9 monospace token (tokens.fontFamilyMonospace) and neutral background (tokens.colorNeutralBackground3). Line numbers and basic keyword coloring via className matching is acceptable.</constraint>
+    <constraint source="project">WebSourceWidget iframe must use sandbox="allow-scripts allow-same-origin" for security.</constraint>
+    <constraint source="project">ImageViewerWidget pan/zoom: use CSS transform (translate + scale) via useState. No canvas or WebGL.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-007-spe-file-store.md</file>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="SpeFileStore facade" location="src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs">
+        SpeFileStore is a server-side facade. Widgets never call it directly. DocumentViewerWidget receives a pre-resolved URL from the calling code page (which fetched it from BFF). Follow ADR-007: no Graph SDK types leak into frontend components.
+      </pattern>
+      <pattern name="Lazy registry" location="src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts">
+        source-registry.ts follows the same pattern as output-registry.ts: Record&lt;SourceWidgetType, () =&gt; Promise&lt;{ default: React.ComponentType&lt;SourceWidgetProps&lt;unknown&gt;&gt; }&gt;&gt; populated with dynamic import().
+      </pattern>
+      <pattern name="Fluent v9 makeStyles" location="src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx">
+        Reference for correct makeStyles import and token usage pattern.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts if it exists (created by AIPU-020). If missing, create a minimal src/client/shared/Spaarke.AI.Outputs/src/types/source-widget-types.ts with SourceWidgetType enum and SourceWidgetProps&lt;T&gt; generic for use within this task only, noting it must be merged into widget-types.ts later.</step>
+    <step>Read src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts (created by AIPU-020) to understand registry shape, then mirror it for source-registry.ts.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/registry/source-registry.ts:
+      - Import SourceWidgetType from types/widget-types.ts (or types/source-widget-types.ts if AIPU-020 not complete)
+      - sourceWidgetRegistry: Record&lt;SourceWidgetType, () =&gt; Promise&lt;...&gt;&gt; with dynamic import() for all 6 widgets
+      - Export sourceWidgetRegistry and resolveSourceWidget(type) helper.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/source-widgets/DocumentViewerWidget.tsx:
+      - Props: SourceWidgetProps&lt;{ documentUrl: string; fileName: string; mimeType?: string; canDownload?: boolean }&gt;
+      - Render document URL in an iframe with appropriate height, or an &lt;object&gt; fallback for PDFs
+      - Download button (Fluent v9 Button with download icon) if canDownload
+      - NOTE: widget receives pre-resolved URL — no BFF/Graph calls inside this component
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/source-widgets/WebSourceWidget.tsx:
+      - Props: SourceWidgetProps&lt;{ url: string; title?: string }&gt;
+      - Render a URL display bar (Fluent v9 Input, read-only) + "Open in browser" Link + iframe with sandbox="allow-scripts allow-same-origin"
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/source-widgets/LegalLibraryWidget.tsx:
+      - Props: SourceWidgetProps&lt;{ citation: string; court?: string; date?: string; excerpt: string; url?: string }&gt;
+      - Render a structured card: citation number as Title3, court + date as caption, excerpt as body text, optional external link
+      - Use Fluent v9 Card, Text, Link, makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/source-widgets/CitationWidget.tsx:
+      - Props: SourceWidgetProps&lt;{ citations: Array&lt;{ id: string; index: number; text: string; url?: string; sourceType: 'web' | 'document' | 'legal' | 'other' }&gt; }&gt;
+      - Render a numbered list of citations with sourceType icon (Fluent v9 icon) and optional URL Link
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/source-widgets/ImageViewerWidget.tsx:
+      - Props: SourceWidgetProps&lt;{ src: string; alt: string; caption?: string }&gt;
+      - Pan via mouse drag (mousedown/mousemove/mouseup events on container), zoom via mouse wheel
+      - State: scale (1–4), translateX, translateY. Apply via CSS transform on img element.
+      - Zoom In/Out buttons (Fluent v9 Button), Reset button. Caption below.
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/source-widgets/CodeViewerWidget.tsx:
+      - Props: SourceWidgetProps&lt;{ code: string; language?: string; showLineNumbers?: boolean }&gt;
+      - Render code in a &lt;pre&gt;&lt;code&gt; block using tokens.fontFamilyMonospace and tokens.colorNeutralBackground3 background
+      - Line numbers via a separate left column if showLineNumbers
+      - Language label badge at top right (Fluent v9 Badge)
+      - Copy to clipboard button (Fluent v9 Button with copy icon)
+      - Use makeStyles.</step>
+    <step>Update src/client/shared/Spaarke.AI.Outputs/src/index.ts to export: sourceWidgetRegistry, resolveSourceWidget, DocumentViewerWidget, WebSourceWidget, LegalLibraryWidget, CitationWidget, ImageViewerWidget, CodeViewerWidget.</step>
+    <step>Run TypeScript compilation check: cd src/client/shared/Spaarke.AI.Outputs &amp;&amp; npx tsc --noEmit to confirm zero errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>source-registry.ts exports sourceWidgetRegistry with lazy dynamic import() factories for all 6 source widget types. No widget module is eagerly imported.</criterion>
+    <criterion>DocumentViewerWidget renders document URL in an iframe/object element plus optional download button. No Graph SDK types or BFF API calls inside the component.</criterion>
+    <criterion>WebSourceWidget renders a read-only URL bar, "Open in browser" link, and a sandboxed iframe (sandbox="allow-scripts allow-same-origin").</criterion>
+    <criterion>LegalLibraryWidget renders citation, court, date, excerpt, and optional URL as a structured card.</criterion>
+    <criterion>CitationWidget renders a numbered citation list with source type icons and optional URLs.</criterion>
+    <criterion>ImageViewerWidget supports pan (mouse drag) and zoom (wheel + buttons) via CSS transform. Scale clamped to 1–4. Reset button returns to scale 1.</criterion>
+    <criterion>CodeViewerWidget renders code in a monospace block (Fluent token fontFamilyMonospace), with optional line numbers and a copy-to-clipboard button.</criterion>
+    <criterion>All 6 widgets use makeStyles with Fluent v9 design tokens only — no hard-coded hex colors.</criterion>
+    <criterion>All 6 widgets and the source registry are exported from src/client/shared/Spaarke.AI.Outputs/src/index.ts.</criterion>
+    <criterion>TypeScript compilation passes with zero errors (npx tsc --noEmit).</criterion>
+  </acceptance-criteria>
+</task>

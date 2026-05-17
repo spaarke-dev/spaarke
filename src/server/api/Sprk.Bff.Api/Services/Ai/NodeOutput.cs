@@ -291,4 +291,10 @@ public static class NodeErrorCodes
 
     /// <summary>Unexpected internal error.</summary>
     public const string InternalError = "INTERNAL_ERROR";
+
+    /// <summary>Agent Service concurrency limit exceeded (ADR-016 backpressure, HTTP 429 equivalent).</summary>
+    public const string AgentConcurrencyExceeded = "NODE_AGENT_CONCURRENCY_EXCEEDED";
+
+    /// <summary>Agent Service feature is disabled via kill switch (ADR-018, HTTP 503 equivalent).</summary>
+    public const string AgentFeatureDisabled = "NODE_AGENT_FEATURE_DISABLED";
 }

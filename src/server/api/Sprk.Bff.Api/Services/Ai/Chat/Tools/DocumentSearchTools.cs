@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 
@@ -34,12 +36,14 @@ public sealed class DocumentSearchTools
     private readonly string? _parentEntityType;
     private readonly string? _parentEntityId;
     private readonly CitationContext? _citationContext;
+    private readonly Func<ChatSseEvent, CancellationToken, Task>? _sseWriter;
 
     public DocumentSearchTools(
         IRagService ragService,
         string tenantId,
         ChatKnowledgeScope? knowledgeScope = null,
-        CitationContext? citationContext = null)
+        CitationContext? citationContext = null,
+        Func<ChatSseEvent, CancellationToken, Task>? sseWriter = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
         _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -49,6 +53,7 @@ public sealed class DocumentSearchTools
         _parentEntityType = knowledgeScope?.ParentEntityType;
         _parentEntityId = knowledgeScope?.ParentEntityId;
         _citationContext = citationContext;
+        _sseWriter = sseWriter;
     }
 
     /// <summary>
@@ -87,6 +92,9 @@ public sealed class DocumentSearchTools
         sb.AppendLine($"Found {response.Results.Count} relevant document(s) for query: \"{query}\"");
         sb.AppendLine();
 
+        // Build widget data items in parallel with the text response for the output_pane SSE event.
+        var widgetItems = new List<object>(response.Results.Count);
+
         for (var i = 0; i < response.Results.Count; i++)
         {
             var result = response.Results[i];
@@ -106,6 +114,30 @@ public sealed class DocumentSearchTools
             sb.AppendLine($"    Chunk: {result.ChunkIndex + 1}/{result.ChunkCount}, ID: {result.Id}");
             sb.AppendLine($"    {result.Content}");
             sb.AppendLine();
+
+            widgetItems.Add(new
+            {
+                chunkId = result.Id,
+                documentId = result.DocumentId,
+                documentName = result.DocumentName,
+                knowledgeSourceName = result.KnowledgeSourceName,
+                score = result.Score,
+                chunkIndex = result.ChunkIndex,
+                chunkCount = result.ChunkCount,
+                excerpt = result.Content.Length > 400 ? result.Content[..400] + "…" : result.Content,
+                citationMarker = marker
+            });
+        }
+
+        // Emit output_pane SSE event so the frontend SearchResults widget renders structured cards.
+        // This fires alongside the text response — the chat gets the formatted text AND
+        // the output pane gets the structured widget data (Gap 1 fix).
+        if (_sseWriter != null)
+        {
+            var outputPaneEvent = ChatSseEventFactory.CreateOutputPaneEvent(
+                "SearchResults",
+                new { query, results = widgetItems });
+            await _sseWriter(outputPaneEvent, cancellationToken);
         }
 
         return sb.ToString().TrimEnd();
@@ -152,6 +184,9 @@ public sealed class DocumentSearchTools
         sb.AppendLine($"Discovery search found {response.Results.Count} document(s) for: \"{query}\"");
         sb.AppendLine();
 
+        // Build widget data items in parallel with the text response for the output_pane SSE event.
+        var widgetItems = new List<object>(response.Results.Count);
+
         for (var i = 0; i < response.Results.Count; i++)
         {
             var result = response.Results[i];
@@ -174,6 +209,30 @@ public sealed class DocumentSearchTools
             sb.AppendLine($"    Chunk: {result.ChunkIndex + 1}/{result.ChunkCount}, ID: {result.Id}");
             sb.AppendLine($"    {preview}");
             sb.AppendLine();
+
+            widgetItems.Add(new
+            {
+                chunkId = result.Id,
+                documentId = result.DocumentId,
+                documentName = result.DocumentName,
+                knowledgeSourceName = result.KnowledgeSourceName,
+                score = result.Score,
+                chunkIndex = result.ChunkIndex,
+                chunkCount = result.ChunkCount,
+                excerpt = preview,
+                citationMarker = marker
+            });
+        }
+
+        // Emit output_pane SSE event so the frontend SearchResults widget renders structured cards.
+        // Discovery results use the same SearchResults widget type as targeted search,
+        // distinguished by the isDiscovery flag in widgetData (Gap 1 fix).
+        if (_sseWriter != null)
+        {
+            var outputPaneEvent = ChatSseEventFactory.CreateOutputPaneEvent(
+                "SearchResults",
+                new { query, results = widgetItems, isDiscovery = true });
+            await _sseWriter(outputPaneEvent, cancellationToken);
         }
 
         return sb.ToString().TrimEnd();

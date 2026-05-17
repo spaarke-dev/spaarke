@@ -1,0 +1,9 @@
+{
+  "_comment": "Source: https://learn.microsoft.com/en-us/power-apps/maker/data-platform/data-platform-mcp-vscode (fetched 2026-05-14). Verbatim from the 'GitHub Copilot CLI - Option 1: Manually add the MCP server' section. Goes in ~/.copilot/mcp-config.json (global) or .mcp/copilot/mcp.json (project). Replace <your org URL>. This config uses the HTTP transport directly against the remote /api/mcp endpoint - no local proxy required for GitHub Copilot (the 'Microsoft GitHub Copilot' MCP client must be allowlisted in PPAC).",
+  "mcpServers": {
+    "DataverseMcp": {
+      "type": "http",
+      "url": "<your org URL>/api/mcp"
+    }
+  }
+}

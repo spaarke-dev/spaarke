@@ -9,7 +9,14 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import { IChatSseEvent, IChatSseEventData, ICitation, IDocumentStreamSseEvent, IUseSseStreamResult } from '../types';
+import {
+  IChatSseEvent,
+  IChatSseEventData,
+  ICitation,
+  IDocumentStreamSseEvent,
+  IAiPaneEvent,
+  IUseSseStreamResult,
+} from '../types';
 
 /**
  * Parse a single SSE data line into a ChatSseEvent.
@@ -30,6 +37,39 @@ export function parseSseEvent(line: string): IChatSseEvent | null {
     const parsed = JSON.parse(jsonStr) as IChatSseEvent;
     if (parsed && typeof parsed.type === 'string') {
       return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a single SSE data line into an IAiPaneEvent.
+ * Pane events use `event` as the discriminator (not `type`), so parseSseEvent()
+ * returns null for them. This parser handles that alternate envelope shape.
+ *
+ * Expected format:
+ *   data: {"event":"output_pane","widgetType":"AnalysisEditor","payload":{...}}
+ *   data: {"event":"source_pane","widgetType":"DocumentViewer","payload":{...}}
+ *   data: {"event":"source_highlight","sourceRef":"doc-1","selectionRef":"cit-3"}
+ */
+export function parsePaneEvent(line: string): IAiPaneEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('data: ')) {
+    return null;
+  }
+
+  const jsonStr = trimmed.substring(6);
+  if (!jsonStr) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    const event = parsed['event'];
+    if (event === 'output_pane' || event === 'source_pane' || event === 'source_highlight') {
+      return parsed as unknown as IAiPaneEvent;
     }
     return null;
   } catch {
@@ -106,6 +146,13 @@ export function useSseStream(): IUseSseStreamResult {
   // SECURITY (ADR-015): Only content tokens and structural metadata are forwarded.
   const onDocumentStreamEventRef = useRef<((event: IDocumentStreamSseEvent) => void) | null>(null);
 
+  // Task 041: Callback ref for AI pane-routing SSE event forwarding.
+  // Handles output_pane / source_pane / source_highlight events from the BFF stream.
+  // Uses a ref (not state) for zero-serialization delivery — pane events may carry
+  // large payloads (widget data) and must not trigger SprkChat re-renders.
+  // OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these.
+  const onPaneEventRef = useRef<((event: IAiPaneEvent) => void) | null>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const cancelStream = useCallback(() => {
@@ -128,12 +175,16 @@ export function useSseStream(): IUseSseStreamResult {
 
   // Task R2-051: Register/unregister the document stream event callback.
   // SprkChat.tsx calls this once during setup to wire bridge forwarding.
-  const setOnDocumentStreamEvent = useCallback(
-    (handler: ((event: IDocumentStreamSseEvent) => void) | null) => {
-      onDocumentStreamEventRef.current = handler;
-    },
-    []
-  );
+  const setOnDocumentStreamEvent = useCallback((handler: ((event: IDocumentStreamSseEvent) => void) | null) => {
+    onDocumentStreamEventRef.current = handler;
+  }, []);
+
+  // Task 041: Register/unregister the AI pane-routing SSE event callback.
+  // ChatPanel.tsx wires this to the StandaloneAiContext onPaneEvent callback so
+  // OutputPanel and SourcePanel can react to output_pane / source_pane / source_highlight events.
+  const setOnPaneEvent = useCallback((handler: ((event: IAiPaneEvent) => void) | null) => {
+    onPaneEventRef.current = handler;
+  }, []);
 
   /**
    * Extract tenant ID from JWT access token for X-Tenant-Id header.
@@ -218,6 +269,17 @@ export function useSseStream(): IUseSseStreamResult {
           for (const part of parts) {
             const lines = part.split('\n');
             for (const line of lines) {
+              // Check for pane-routing events first (output_pane / source_pane / source_highlight).
+              // These use `event` as discriminator rather than `type`, so parseSseEvent returns null.
+              const paneEvent = parsePaneEvent(line);
+              if (paneEvent) {
+                const paneHandler = onPaneEventRef.current;
+                if (paneHandler) {
+                  paneHandler(paneEvent);
+                }
+                continue;
+              }
+
               const event = parseSseEvent(line);
               if (!event) {
                 continue;
@@ -257,7 +319,12 @@ export function useSseStream(): IUseSseStreamResult {
                 // SprkChat watches pendingActionEvent and dispatches to the appropriate handler
                 // (confirmation dialog, toast, Code Page navigateTo, or Xrm navigation).
                 setPendingActionEvent({
-                  type: event.type as 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate',
+                  type: event.type as
+                    | 'action_confirmation'
+                    | 'action_success'
+                    | 'action_error'
+                    | 'dialog_open'
+                    | 'navigate',
                   data: event.data || {},
                 });
               } else if (
@@ -314,6 +381,16 @@ export function useSseStream(): IUseSseStreamResult {
         if (buffer.trim()) {
           const lines = buffer.split('\n');
           for (const line of lines) {
+            // Check for pane-routing events in the trailing buffer too.
+            const paneEvent = parsePaneEvent(line);
+            if (paneEvent) {
+              const paneHandler = onPaneEventRef.current;
+              if (paneHandler) {
+                paneHandler(paneEvent);
+              }
+              continue;
+            }
+
             const event = parseSseEvent(line);
             if (!event) {
               continue;
@@ -346,7 +423,12 @@ export function useSseStream(): IUseSseStreamResult {
               // Task R2-052: Store action/dialog/navigate event for SprkChat to handle via useEffect.
               // Mirrors the main SSE parser block (R2-039/R2-052) — must include 'navigate'.
               setPendingActionEvent({
-                type: event.type as 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate',
+                type: event.type as
+                  | 'action_confirmation'
+                  | 'action_success'
+                  | 'action_error'
+                  | 'dialog_open'
+                  | 'navigate',
                 data: event.data || {},
               });
             } else if (
@@ -429,6 +511,7 @@ export function useSseStream(): IUseSseStreamResult {
     clearPendingActionEvent,
     clearPendingDocumentStreamEvent: () => {}, // No-op: callback pattern doesn't need clearing
     setOnDocumentStreamEvent,
+    setOnPaneEvent,
   };
 }
 

@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat.Tools;
 
@@ -31,12 +33,14 @@ public sealed class KnowledgeRetrievalTools
     private readonly string _tenantId;
     private readonly IReadOnlyList<string>? _knowledgeSourceIds;
     private readonly CitationContext? _citationContext;
+    private readonly Func<ChatSseEvent, CancellationToken, Task>? _sseWriter;
 
     public KnowledgeRetrievalTools(
         IRagService ragService,
         string tenantId,
         ChatKnowledgeScope? knowledgeScope = null,
-        CitationContext? citationContext = null)
+        CitationContext? citationContext = null,
+        Func<ChatSseEvent, CancellationToken, Task>? sseWriter = null)
     {
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
         _tenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
@@ -44,6 +48,7 @@ public sealed class KnowledgeRetrievalTools
             ? knowledgeScope.RagKnowledgeSourceIds
             : null;
         _citationContext = citationContext;
+        _sseWriter = sseWriter;
     }
 
     /// <summary>
@@ -82,6 +87,9 @@ public sealed class KnowledgeRetrievalTools
         sb.AppendLine($"Knowledge source '{knowledgeSourceId}' contains {response.Results.Count} chunk(s):");
         sb.AppendLine();
 
+        // Capture document name from the first result for the source_pane widget header.
+        var documentName = response.Results.Count > 0 ? response.Results[0].DocumentName : knowledgeSourceId;
+
         for (var i = 0; i < response.Results.Count; i++)
         {
             var result = response.Results[i];
@@ -101,6 +109,22 @@ public sealed class KnowledgeRetrievalTools
         if (response.TotalCount > response.Results.Count)
         {
             sb.AppendLine($"Note: Showing {response.Results.Count} of {response.TotalCount} total chunks.");
+        }
+
+        // Emit source_pane SSE event so the frontend DocumentViewer widget renders this knowledge
+        // source in the right-side pane alongside the chat text response (Gap 1 fix).
+        if (_sseWriter != null)
+        {
+            var sourcePaneEvent = ChatSseEventFactory.CreateSourcePaneEvent(
+                "DocumentViewer",
+                new
+                {
+                    knowledgeSourceId,
+                    documentName,
+                    chunkCount = response.Results.Count,
+                    totalCount = response.TotalCount
+                });
+            await _sseWriter(sourcePaneEvent, cancellationToken);
         }
 
         return sb.ToString().TrimEnd();

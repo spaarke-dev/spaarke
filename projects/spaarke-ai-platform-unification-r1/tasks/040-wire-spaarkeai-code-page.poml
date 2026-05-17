@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU-040" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Wire SpaarkeAi Code Page — ThreePaneLayout, ChatPanel, OutputPanel, SourcePanel</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <wave>4</wave>
+    <estimated-effort>8 hours</estimated-effort>
+    <tags>code-page, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-010, AIPU-011, AIPU-012, AIPU-020, AIPU-022, AIPU-030, AIPU-031, AIPU-032</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the SpaarkeAi Code Page so it renders a fully functional three-pane layout with all panels
+    connected to shared state. The Code Page (sprk_spaarkeai web resource) must compose:
+    ThreePaneLayout (left chat pane, center output pane, right source pane) with a collapsible
+    ChatHistoryPanel. All panels consume StandaloneAiContext from @spaarke/ai-context. SSE events
+    emitted by the BFF standalone context endpoint must route to the correct pane widgets via context
+    dispatch. SprkChat from @spaarke/ui-components drives the chat pane interaction.
+  </prompt>
+
+  <role>Full-stack frontend developer experienced with React 18 code pages, Fluent UI v9, and the
+  Spaarke AI Tool Framework SSE streaming pattern.</role>
+
+  <goal>SpaarkeAi Code Page (src/solutions/SpaarkeAi/src/) renders a three-pane layout with all
+  panels wired to StandaloneAiContext. SSE tool-result events route to the correct output/source
+  pane widgets. The page builds successfully with npm run build and registers no TypeScript errors.
+  </goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/src/App.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/components/ChatPanel.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/components/OutputPanel.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/components/SourcePanel.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/components/ChatHistoryPanel.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/context/StandaloneAiProvider.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/hooks/useStandaloneAi.ts</file>
+    <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+    <file>src/solutions/SpaarkeAi/package.json</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/ThreePaneLayout/</file>
+    <file>src/client/shared/Spaarke.AI.Context/src/StandaloneAiContext.tsx</file>
+    <file>src/client/code-pages/AnalysisWorkspace/src/App.tsx</file>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint id="ADR-026">Single-file build output required for Dataverse web resource. Vite must
+    produce a single inlined HTML file (sprk_spaarkeai). Verify vite.config.ts uses
+    vitePluginSingleFile or equivalent inlining strategy.</constraint>
+    <constraint id="ADR-021">All UI must use Fluent UI v9 exclusively. No hard-coded colors. Dark
+    mode must be supported via FluentProvider with webDarkTheme/webLightTheme. Use semantic color
+    tokens from @fluentui/react-components throughout.</constraint>
+    <constraint id="ADR-022">Code Pages use React 18 bundled (not platform-provided). Use
+    createRoot from react-dom/client. Do NOT use ReactDOM.render().</constraint>
+    <constraint id="project-context">Use SprkChat from @spaarke/ui-components for chat pane
+    interaction. Use ThreePaneLayout from @spaarke/ui-components for the shell layout. Use
+    StandaloneAiContext and its provider from @spaarke/ai-context — do NOT duplicate context
+    logic locally. Wire SprkChat's onSend callback to the context's sendMessage action.</constraint>
+    <constraint id="sse-routing">SSE tool-result events must be dispatched from
+    StandaloneAiContext and consumed by OutputPanel and SourcePanel through the output registry
+    and source registry respectively. No direct SSE handling in individual panel components.
+    </constraint>
+    <constraint id="auth-bootstrap">Follow the Spaarke auth bootstrap sequence:
+    resolveRuntimeConfig() then setRuntimeConfig() then ensureAuthInitialized() before mounting
+    the React root. See .claude/patterns/auth/spaarke-auth-initialization.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md</file>
+      <file>docs/architecture/code-pages-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern>AnalysisWorkspace/src/App.tsx — canonical provider tree pattern:
+      FluentProvider wraps AuthProvider wraps AnalysisAiProvider (or StandaloneAiProvider) wraps
+      ThreePaneLayout. Mirror this hierarchy in SpaarkeAi/App.tsx substituting
+      StandaloneAiProvider from @spaarke/ai-context.</pattern>
+      <pattern>main.tsx auth bootstrap: import resolveRuntimeConfig, setRuntimeConfig,
+      ensureAuthInitialized from @spaarke/auth; await in sequence before createRoot().render().
+      </pattern>
+      <pattern>ChatPanel: import SprkChat from @spaarke/ui-components; consume messages and
+      sendMessage from useStandaloneAiContext(); pass as props to SprkChat.</pattern>
+      <pattern>OutputPanel: import useOutputRegistry from @spaarke/ai-context; map registry
+      entries to widget components resolved from @spaarke/ai-outputs widget registry.</pattern>
+      <pattern>SourcePanel: import useSourceRegistry from @spaarke/ai-context; same pattern as
+      OutputPanel using source widget registry.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read src/client/code-pages/AnalysisWorkspace/src/App.tsx and src/client/code-pages/AnalysisWorkspace/src/main.tsx to understand the existing provider tree and auth bootstrap pattern. Read src/client/shared/Spaarke.AI.Context/src/ to understand StandaloneAiContext exports.</step>
+    <step id="2">Create or update src/solutions/SpaarkeAi/src/App.tsx with the full provider tree:
+    FluentProvider (with theme from query param or system preference) wraps AuthProvider wraps
+    StandaloneAiProvider (from @spaarke/ai-context, receives entityContext from URL params) wraps
+    ThreePaneLayout (from @spaarke/ui-components). ThreePaneLayout receives ChatPanel, OutputPanel,
+    SourcePanel, and ChatHistoryPanel as slot props.</step>
+    <step id="3">Create src/solutions/SpaarkeAi/src/components/ChatPanel.tsx: imports SprkChat
+    from @spaarke/ui-components; consumes messages, sendMessage, isStreaming from
+    useStandaloneAiContext(); passes them to SprkChat. Handles streaming indicator.</step>
+    <step id="4">Create src/solutions/SpaarkeAi/src/components/OutputPanel.tsx: consumes
+    outputItems from useOutputRegistry() (from @spaarke/ai-context); resolves each item's widget
+    component from the output widget registry (from @spaarke/ai-outputs); renders widget list with
+    cross-pane link handlers that dispatch to source registry.</step>
+    <step id="5">Create src/solutions/SpaarkeAi/src/components/SourcePanel.tsx: consumes
+    sourceItems from useSourceRegistry() (from @spaarke/ai-context); resolves each item's widget
+    component from the source widget registry (from @spaarke/ai-outputs); renders source list.
+    </step>
+    <step id="6">Create src/solutions/SpaarkeAi/src/components/ChatHistoryPanel.tsx: consumes
+    chatHistory from useStandaloneAiContext(); renders session list with click-to-restore behavior.
+    Panel is collapsible (Fluent v9 Drawer or sidebar variant of ThreePaneLayout).</step>
+    <step id="7">Update src/solutions/SpaarkeAi/src/main.tsx: implement auth bootstrap sequence
+    (resolveRuntimeConfig, setRuntimeConfig, ensureAuthInitialized) then createRoot().render(App).
+    Parse URL search params for entityLogicalName, entityId, matterId and pass to App.</step>
+    <step id="8">Run npm run build in src/solutions/SpaarkeAi/ and verify: single-file HTML output,
+    zero TypeScript errors, no missing module errors. Fix any import path or type issues.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="AC-1">npm run build in src/solutions/SpaarkeAi/ completes without errors and
+    produces a single inlined HTML file.</criterion>
+    <criterion id="AC-2">App.tsx provider tree matches: FluentProvider > AuthProvider >
+    StandaloneAiProvider > ThreePaneLayout.</criterion>
+    <criterion id="AC-3">ChatPanel renders SprkChat and wires onSend to context sendMessage.
+    Streaming indicator appears when isStreaming is true.</criterion>
+    <criterion id="AC-4">OutputPanel renders output widgets resolved from @spaarke/ai-outputs
+    output widget registry, driven by useOutputRegistry().</criterion>
+    <criterion id="AC-5">SourcePanel renders source widgets resolved from @spaarke/ai-outputs
+    source widget registry, driven by useSourceRegistry().</criterion>
+    <criterion id="AC-6">ChatHistoryPanel renders session list and is collapsible.</criterion>
+    <criterion id="AC-7">All components use Fluent v9 semantic color tokens — no hard-coded
+    color strings anywhere in src/solutions/SpaarkeAi/src/.</criterion>
+    <criterion id="AC-8">No local context or hook duplication — all AI context consumed from
+    @spaarke/ai-context imports.</criterion>
+  </acceptance-criteria>
+</task>

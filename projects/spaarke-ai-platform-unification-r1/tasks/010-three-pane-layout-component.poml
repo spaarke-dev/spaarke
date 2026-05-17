@@ -1,0 +1,74 @@
+<task id="AIPU-010" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>ThreePaneLayout component in @spaarke/ui-components</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>1</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>shared-library, ui-component, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001, 002, 003</dependencies>
+  </metadata>
+
+  <prompt>
+    Create a reusable ThreePaneLayout component in @spaarke/ui-components that provides a three-pane layout with draggable splitters. Extract and generalize the layout pattern from AnalysisWorkspace App.tsx + usePanelLayout.ts. The component must support: left pane (fixed width), center pane (flex), right pane (collapsible with fixed width). Each pane can be toggled visible/hidden. Use PanelSplitter between panes.
+  </prompt>
+
+  <role>Senior frontend developer with expertise in Fluent UI v9, React 19, and layout components</role>
+
+  <goal>
+    A ThreePaneLayout component exported from @spaarke/ui-components that renders three panes with draggable PanelSplitters, keyboard accessibility, collapse/expand toggles, and sessionStorage persistence. Component is Code Page only (not PCF-safe).
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/ThreePaneLayout/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-012">Shared component library: Fluent v9, semantic tokens, TypeScript types exported</constraint>
+    <constraint source="ADR-021">Fluent v9 makeStyles only, dark mode, no hard-coded colors</constraint>
+    <constraint source="project">NOT PCF-safe — can use React 19 APIs freely</constraint>
+    <constraint source="project">Must reuse existing PanelSplitter component</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Three-panel layout" location="src/client/code-pages/AnalysisWorkspace/src/App.tsx">
+        Lines 510-651: Editor + Source + Chat panel arrangement with splitter
+      </pattern>
+      <pattern name="Panel layout hook" location="src/client/code-pages/AnalysisWorkspace/src/hooks/usePanelLayout.ts">
+        Drag handling, keyboard navigation, sessionStorage persistence, panel visibility toggles
+      </pattern>
+      <pattern name="PanelSplitter" location="src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx">
+        Existing splitter component: role=separator, grip dots, hover/dragging states
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read AnalysisWorkspace/src/App.tsx (lines 510-651) and usePanelLayout.ts to understand current layout</step>
+    <step>Read PanelSplitter component to understand its props interface</step>
+    <step>Create src/client/shared/Spaarke.UI.Components/src/components/ThreePaneLayout/ directory</step>
+    <step>Create ThreePaneLayout.tsx: accepts left/center/right pane content as children/render props, configurable widths (leftWidth, rightWidth defaults), collapse toggles</step>
+    <step>Create useThreePaneLayout.ts hook: generalized from usePanelLayout with configurable storage keys, 2 splitter handlers (left|center, center|right), visibility toggles for left and right panes</step>
+    <step>Create ThreePaneLayout.types.ts with ThreePaneLayoutProps interface</step>
+    <step>Export from @spaarke/ui-components index.ts</step>
+    <step>Verify build succeeds</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ThreePaneLayout renders three panes with PanelSplitters between them</criterion>
+    <criterion>Left and right panes can be toggled visible/hidden</criterion>
+    <criterion>Splitters are draggable with keyboard support (Arrow keys, Home/End)</criterion>
+    <criterion>Panel widths persist to sessionStorage</criterion>
+    <criterion>Component uses makeStyles with Fluent v9 tokens only</criterion>
+    <criterion>Exported from @spaarke/ui-components</criterion>
+  </acceptance-criteria>
+</task>

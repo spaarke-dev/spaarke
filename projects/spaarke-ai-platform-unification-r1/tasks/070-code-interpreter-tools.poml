@@ -1,0 +1,78 @@
+<task id="AIPU-070" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>CodeInterpreterTools — analyze-data and generate-chart tools via Foundry Code Interpreter sandbox</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <wave>7</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>bff-api, api, ai-foundry</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-060</dependencies>
+  </metadata>
+
+  <prompt>
+    Create CodeInterpreterTools and CodeInterpreterBridge to expose the Azure AI Foundry Code Interpreter sandbox as two AIFunction tools: analyze-data and generate-chart. Follow the WebSearchTools.cs pattern exactly — SemaphoreSlim for concurrency, [Description] attributes for the model, AIFunctionFactory.Create for registration, and CitationContext for output attribution. CodeInterpreterOptions holds the kill switch and concurrency settings.
+  </prompt>
+
+  <role>Senior .NET backend developer with Microsoft.Extensions.AI and Azure AI Foundry tooling experience</role>
+
+  <goal>
+    CodeInterpreterTools registered via AIFunctionFactory.Create with two methods (analyze-data, generate-chart), CodeInterpreterBridge wrapping the Foundry Code Interpreter sandbox, and CodeInterpreterOptions with Enabled kill switch — all building cleanly with dotnet build.
+  </goal>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/CodeInterpreterTools.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/CodeInterpreterBridge.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/CodeInterpreterOptions.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-015">Data governance CRITICAL: minimize data sent to Code Interpreter sandbox; strip PII before sending; only send document excerpts relevant to the analysis, never full documents</constraint>
+    <constraint source="ADR-016">Rate limiting: SemaphoreSlim with MaxConcurrency from CodeInterpreterOptions; reject with 429 on timeout</constraint>
+    <constraint source="ADR-018">Kill switch: CodeInterpreterOptions.Enabled checked before every tool invocation; return graceful error string (not exception) so the AI model can report unavailability to the user</constraint>
+    <constraint source="project">Follow WebSearchTools.cs pattern exactly for AIFunctionFactory registration, [Description] attributes, and CitationContext usage</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/tool-registration.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical AI tool pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs">
+        Read WebSearchTools.cs for: class structure, [Description] attribute placement, SemaphoreSlim usage, AIFunctionFactory.Create registration, CitationContext injection, and how tools are wired into the chat pipeline
+      </pattern>
+      <pattern name="AgentServiceClient streaming" location="src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs">
+        Use AgentServiceClient.StreamResponseAsync to retrieve Code Interpreter output; map run status to success/failure
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read WebSearchTools.cs (or equivalent existing tool) in full to understand the exact class structure, attribute usage, and factory registration pattern</step>
+    <step>Read the tool-registration.md pattern file to confirm registration mechanism and any DI wiring required</step>
+    <step>Read AgentServiceClient.cs to understand how to invoke the Code Interpreter sandbox via the Agents SDK</step>
+    <step>Create CodeInterpreterOptions.cs in Services/Ai/Foundry/ with: Enabled (bool), MaxConcurrency (int, default 2), SandboxTimeoutSeconds (int, default 30); all with [Required] or [Range] annotations</step>
+    <step>Create CodeInterpreterBridge.cs in Services/Ai/Foundry/ — thin wrapper around AgentServiceClient that invokes Code Interpreter specifically: InvokeCodeInterpreterAsync(string code, CancellationToken) returning CodeInterpreterResult with Output (string), ChartBase64 (string?), and ExecutionLog (string)</step>
+    <step>Create CodeInterpreterTools.cs in Services/Ai/Chat/Tools/: class taking CodeInterpreterBridge, CodeInterpreterOptions (IOptions&lt;T&gt;), ILogger, and CitationContextAccessor; add private SemaphoreSlim matching MaxConcurrency</step>
+    <step>Implement AnalyzeDataAsync([Description("CSV or tabular data excerpt to analyze")] string data, [Description("Analysis question")] string question, CancellationToken ct): check Enabled, acquire semaphore, invoke bridge, register citation, return formatted result string</step>
+    <step>Implement GenerateChartAsync([Description("Data series as JSON array")] string dataSeries, [Description("Chart type: bar, line, or pie")] string chartType, CancellationToken ct): check Enabled, acquire semaphore, invoke bridge, return base64 chart URI or description string</step>
+    <step>Add AIFunctionFactory.Create registrations following the exact WebSearchTools.cs pattern — verify the tools will be visible to the chat pipeline</step>
+    <step>Run dotnet build and confirm zero errors and zero warnings</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>CodeInterpreterOptions.cs exists with Enabled, MaxConcurrency, SandboxTimeoutSeconds</criterion>
+    <criterion>CodeInterpreterBridge.cs exists and delegates to AgentServiceClient for Code Interpreter invocations</criterion>
+    <criterion>CodeInterpreterTools.cs implements AnalyzeDataAsync and GenerateChartAsync with [Description] attributes on all parameters</criterion>
+    <criterion>Enabled kill switch checked before every tool invocation; disabled state returns a user-readable string, not an exception</criterion>
+    <criterion>SemaphoreSlim concurrency gate present with timeout and 429-equivalent rejection</criterion>
+    <criterion>No raw document content or PII sent to the sandbox — only caller-supplied data excerpts</criterion>
+    <criterion>CitationContext registered for tool outputs following WebSearchTools.cs pattern</criterion>
+    <criterion>dotnet build passes with zero errors</criterion>
+  </acceptance-criteria>
+</task>

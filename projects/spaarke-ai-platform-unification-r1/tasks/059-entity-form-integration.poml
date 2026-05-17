@@ -1,0 +1,81 @@
+<task id="AIPU-059" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Entity form integration — command bar buttons + side panel for Matter and Project</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>5E</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>infrastructure, dataverse, ribbon</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-041</dependencies>
+  </metadata>
+
+  <prompt>
+    Add Spaarke AI launch points to entity forms so users can open Spaarke AI with
+    entity context directly from the record they're working on. Two integration patterns:
+
+    Pattern 1: Command Bar Button (all entity types)
+    - Add a ribbon/command bar button labeled "Spaarke AI" with an AI icon
+    - Button calls EntityFormLaunch.ts (already created in task 041)
+    - Opens Spaarke AI as a modal dialog (target: 2) at 85% width/height
+    - Passes entityType + entityId from the form context
+    - Register for: sprk_matter (main form), sprk_project (main form)
+    - Also register for: contact, account (main form) as secondary entities
+
+    Pattern 2: Side Panel (Matter form only — premium experience)
+    - Add a side pane via Xrm.App.sidePanes.createPane() on the Matter main form
+    - Panel labeled "Spaarke AI" with AI icon
+    - Loads sprk_spaarkeai web resource with matter context
+    - Stays open as user navigates within the form
+    - User can collapse/expand the pane
+    - Register via form OnLoad event handler
+
+    Implementation:
+    - Ribbon buttons: export ribbon XML, add command definitions + button placements
+    - Side panel: create a form OnLoad script that registers the side pane
+    - Both use the existing launch-resolver.ts for URL construction
+    - Follow the ribbon-edit skill pattern for ribbon XML modifications
+  </prompt>
+
+  <role>Dataverse customization developer with ribbon XML and Xrm.App experience</role>
+
+  <goal>
+    Users can open Spaarke AI from Matter and Project forms via command bar button,
+    and Matter forms have an optional AI side panel for persistent access.
+  </goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts</file>
+    <file>src/solutions/SpaarkeAi/src/ribbon/WorkspaceLaunch.ts</file>
+    <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+    <file>docs/guides/spaarkeai-launch-points.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-006">Ribbon scripts contain invocation only — no business logic</constraint>
+    <constraint source="project">Use existing EntityFormLaunch.ts — do not create new launch scripts</constraint>
+    <constraint source="project">Side panel uses Xrm.App.sidePanes API (model-driven apps only)</constraint>
+    <constraint source="project">Ribbon XML must be registered via solution export/import (ribbon-edit skill)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Create side panel registration script (MatterFormOnLoad.ts) using Xrm.App.sidePanes</step>
+    <step order="2">Export ribbon XML for sprk_matter entity</step>
+    <step order="3">Add Spaarke AI command bar button definition to ribbon XML</step>
+    <step order="4">Register EntityFormLaunch.ts as the button's command action</step>
+    <step order="5">Repeat for sprk_project, contact, account entities (button only, no side panel)</step>
+    <step order="6">Import updated ribbon XML via solution import</step>
+    <step order="7">Register MatterFormOnLoad.ts as OnLoad event on Matter main form</step>
+    <step order="8">Test all button clicks and side panel on each entity type</step>
+    <step order="9">Update spaarkeai-launch-points.md with registration details</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Matter main form has "Spaarke AI" command bar button that opens dialog with matter context</criterion>
+    <criterion>Project main form has "Spaarke AI" command bar button with project context</criterion>
+    <criterion>Contact and Account forms have "Spaarke AI" buttons</criterion>
+    <criterion>Matter form has an AI side panel that loads on form open</criterion>
+    <criterion>Side panel stays open as user navigates form tabs</criterion>
+    <criterion>All launches pass correct entityType and entityId to the Code Page</criterion>
+  </acceptance-criteria>
+</task>

@@ -72,6 +72,12 @@
 | [jps-validate](jps-validate/SKILL.md) | Validate JPS JSON against schema and test rendering | No | "validate JPS", "check JPS", "test JPS definition" |
 | [add-reference-to-index](add-reference-to-index/SKILL.md) | Index golden reference documents into AI Search for RAG retrieval | No | "add reference to index", "index reference document", "add golden reference" |
 | [doc-drift-audit](doc-drift-audit/SKILL.md) | Detect documentation drift — stale refs in docs and .claude/ that no longer match code (compact diff-based audit) | No | `/doc-drift-audit`, "audit doc drift", "check for stale docs", "project transition audit", "find stale references" |
+| [mcp-tool-handler](mcp-tool-handler/SKILL.md) | Implement or modify an MCP tool handler for the Spaarke MCP server (reads `knowledge/mcp-apps/`, `knowledge/foundry-agent-service/`) | No | "MCP tool handler", "add tool to Spaarke MCP", "IAiToolHandler" |
+| [declarative-agent](declarative-agent/SKILL.md) | Author or modify a declarative agent — manifest, knowledge sources, action plugins (reads `knowledge/declarative-agents/`, `knowledge/m365-copilot/`) | No | "declarative agent", "DA manifest", "Copilot agent", "Spaarke declarative agent" |
+| [foundry-agent](foundry-agent/SKILL.md) | Design Foundry Agent Service workflow or Agent Framework loop, choose runtime, wire Foundry IQ KB (reads `knowledge/foundry-agent-service/`, `knowledge/foundry-iq/`, `knowledge/agent-framework/`) | No | "Foundry agent", "Foundry workflow", "durable workflow", "HITL gate", "Foundry IQ knowledge base" |
+| [dataverse-mcp-usage](dataverse-mcp-usage/SKILL.md) | Use Dataverse MCP — built-in tools, Business Skills authoring, App MCP custom tools (reads `knowledge/dataverse-mcp/`) | No | "Dataverse MCP", "Business Skill", "App MCP", "custom MCP tool for Dataverse" |
+| [spe-integration](spe-integration/SKILL.md) | Integrate with SharePoint Embedded — containers, permissions, agent grounding, webUrl opens (reads `knowledge/sharepoint-embedded/`) | No | "SharePoint Embedded", "SPE container", "container type", "webUrl document open" |
+| [widget-design](widget-design/SKILL.md) | Design MCP App widget — inline or side-by-side, Fluent v9, sandboxed iframe constraints (reads `knowledge/mcp-apps/`) | No | "MCP App widget", "Copilot widget", "side-by-side widget", "inline widget" |
 
 ## Skill Categories
 
@@ -106,6 +112,14 @@
 
 ### 🔧 Maintenance
 - **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills
+
+### 🧠 Knowledge Base (Microsoft platform — reads `knowledge/`)
+- **mcp-tool-handler** - Implement MCP tool handler in Spaarke BFF (reads `knowledge/mcp-apps/`, `knowledge/foundry-agent-service/`)
+- **declarative-agent** - Author declarative agent manifests (reads `knowledge/declarative-agents/`, `knowledge/m365-copilot/`)
+- **foundry-agent** - Server-side agent runtime choice + Foundry IQ (reads `knowledge/foundry-agent-service/`, `knowledge/foundry-iq/`, `knowledge/agent-framework/`)
+- **dataverse-mcp-usage** - Dataverse MCP, Business Skills, App MCP (reads `knowledge/dataverse-mcp/`)
+- **spe-integration** - SharePoint Embedded ops (reads `knowledge/sharepoint-embedded/`)
+- **widget-design** - MCP App widgets, inline/side-by-side, Fluent v9 (reads `knowledge/mcp-apps/`)
 
 ### ☁️ Azure/Infrastructure
 - **azure-deploy** - Deploy Azure infrastructure, BFF API, App Service configuration
@@ -395,4 +409,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: April 5, 2026 (added doc-drift-audit skill)*
+*Last updated: May 14, 2026 (added 6 knowledge-base skills: mcp-tool-handler, declarative-agent, foundry-agent, dataverse-mcp-usage, spe-integration, widget-design — see `knowledge/` tree)*
