@@ -361,7 +361,186 @@ Header bar link → full model-driven app. Deep-links to active entity if contex
 
 ---
 
-## 8. Technical Debt & Hardening (from R1)
+## 8. Dynamic Capability Orchestration
+
+### 8.1 The Problem
+
+Static playbook selection forces users to know what workflow they need before they start. In practice:
+- Users often don't know which playbook fits their intent
+- Work naturally crosses capability boundaries ("review this contract... now compare those numbers to our budget")
+- Requiring users to manually switch playbooks breaks flow and contradicts the AI-directed vision
+
+### 8.2 Two Operating Modes of SprkChat
+
+| | Mode 1: General Companion | Mode 2: Focused Work |
+|--|--|--|
+| **When** | Default on launch, between tasks | User selects a playbook OR orchestrator auto-loads one |
+| **Behavior** | Answers questions, discovers intent, suggests/triggers playbooks | Domain-specialized conversation + workspace coordination |
+| **Tools** | Core tools + capability discovery | Dynamically composed per user intent |
+| **Transitions** | → Mode 2 when intent matches a known workflow | → Mode 1 when user exits or work completes |
+
+These modes are NOT mutually exclusive. In Mode 2, the user can still ask general questions. The playbook provides focus — it doesn't restrict the AI to only playbook-related responses.
+
+### 8.3 Capability Library (The Real Asset)
+
+Playbooks are pre-composed bundles. The underlying asset is the capability library:
+
+| Type | What It Is | Example | How Activated |
+|------|-----------|---------|---------------|
+| **Action** | A discrete operation the AI can invoke | SearchDocuments, CreateRecord, ExtractClauses | Tool definition injected into prompt |
+| **Tool** | A computational capability (may call external service) | CodeInterpreter, WebSearch, BingGrounding | Tool definition + service connection |
+| **Skill** | Behavioral instructions that change AI approach | "Use plain language", "Cite all sources" | System prompt augmentation |
+| **Knowledge** | Grounding data the AI can reference via retrieval | MatterDocuments, StatuteDatabase, ContractSchemas | RAG scope expanded |
+
+A playbook is just a named combination: "Contract Review" = [SearchDocuments + ExtractClauses + LegalResearch + ContractSchemas + "Cite all sources"].
+
+But the orchestrator can compose ad hoc combinations when the user's needs don't fit a pre-built playbook.
+
+### 8.4 Architecture: Two-Tier Orchestration
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  TIER 1: ORCHESTRATOR (always running, lightweight)             │
+│                                                                 │
+│  Has: Capability INDEX (name + 1-line description, ~500 tokens) │
+│  Can: activate_capabilities(names[]), deactivate_capabilities() │
+│  Decides: "Do my current tools handle this turn?"               │
+│           YES → proceed with current tools                      │
+│           NO  → activate what's needed, then proceed            │
+│                                                                 │
+│  Also knows: pre-built playbooks as "recipes"                   │
+│  Can: recognize a pattern and load a full playbook at once      │
+├─────────────────────────────────────────────────────────────────┤
+│  TIER 2: CAPABILITY LIBRARY (loaded on demand)                  │
+│                                                                 │
+│  Actions: SearchDocuments, ExtractClauses, QueryEntities...     │
+│  Tools: CodeInterpreter, WebSearch, LegalResearch...            │
+│  Skills: CiteAllSources, PlainLanguage, LegalPrecision...      │
+│  Knowledge: MatterDocs, StatuteDB, ContractSchemas...           │
+│  Playbooks: ContractReview, FinancialAnalysis, CaseResearch...  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 8.5 Capability Manifest (Runtime Catalog)
+
+The orchestrator needs a fast, in-memory catalog of what's available. NOT `.claude/catalogs/` (dev-time) and NOT direct Dataverse queries (too slow per-turn).
+
+**Source of truth:** Dataverse (`sprk_analysisplaybook`, `sprk_aichatcontextmap`, scope/action definitions)
+
+**Runtime representation:** In-memory manifest cached in the BFF, refreshed on deployment or periodic interval.
+
+```
+BFF Startup / Refresh:
+  1. Query Dataverse for all active capabilities, playbooks, knowledge sources
+  2. Build CapabilityManifest (compact index)
+  3. Cache in memory (singleton)
+  4. Orchestrator's system prompt includes the index
+
+Manifest structure:
+  capabilities:
+    - name: "SearchDocuments"
+      type: action
+      description: "Find documents in SPE containers by keyword, metadata, or semantic similarity"
+      requires: [authenticated, entity-context]
+    - name: "CodeInterpreter"
+      type: tool
+      description: "Run Python calculations on structured data in Azure sandbox"
+      requires: [authenticated, foundry-enabled]
+    - name: "ContractSchemas"
+      type: knowledge
+      description: "Standard clause taxonomy and contract structure definitions"
+      scope: "spaarke-references-index"
+    ...
+  playbooks:
+    - name: "Contract Review"
+      description: "Review legal documents for risk, compliance, and key terms"
+      capabilities: [SearchDocuments, ExtractClauses, LegalResearch, ContractSchemas, CiteAllSources]
+    ...
+```
+
+### 8.6 Per-Turn Dynamic Tool Injection
+
+The LLM context manages capability loading efficiently:
+
+```
+Layer 1 (always present): Capability INDEX
+  → ~30 capabilities × 1 line each = ~500 tokens
+  → Orchestrator can always "see" what exists and decide what to activate
+
+Layer 2 (dynamic per-turn): Active capability SCHEMAS
+  → Only 5-8 full tool definitions loaded = ~1500 tokens
+  → These are the tools the LLM can actually CALL this turn
+```
+
+**Per-turn flow:**
+```
+Turn 1: User asks "look at the Smith contract for liability issues"
+  → Orchestrator reads index
+  → Activates: [SearchDocuments, ExtractClauses, LegalResearch]
+  → Knowledge: [MatterDocuments, ContractSchemas]
+  → System prompt rebuilt with 3 tool schemas + 2 knowledge scopes
+
+Turn 5: User pivots "compare those indemnity caps to our Q2 budget"
+  → Orchestrator: current tools don't cover financial analysis
+  → Activates: [CodeInterpreter, QueryEntities]
+  → Deactivates: [LegalResearch] (no longer relevant)
+  → Knowledge adds: [FinancialData]
+  → System prompt rebuilt with updated tool set
+
+Turn 8: User asks "what time is my meeting tomorrow?"
+  → Orchestrator: no tool needed, answer conversationally
+  → No capability changes
+```
+
+**Conversation history is preserved** — only the available tool definitions change. The LLM can still reference earlier analysis results; it just can't re-invoke deactivated tools without re-activating them.
+
+### 8.7 The BFF as Gatekeeper
+
+Even though the orchestrator "requests" capabilities, the BFF validates every activation:
+
+| Check | Purpose |
+|-------|---------|
+| User permission | Does this user's role allow this capability? |
+| Kill switch | Is this capability enabled in the environment? |
+| Context compatibility | Does this capability make sense for the current entity/session? |
+| Concurrency limits | Would activating this exceed rate limits? |
+
+The orchestrator proposes; the BFF disposes.
+
+### 8.8 Where Playbooks Fit
+
+Playbooks serve three roles in this model:
+
+| Role | Description |
+|------|-------------|
+| **Accelerator** | User explicitly selects "Contract Review" → loads a proven combination instantly (skip orchestrator discovery) |
+| **Template** | Orchestrator recognizes a pattern and auto-loads the matching playbook ("this looks like contract review work") |
+| **Guardrail** | For regulated/audited workflows where the capability set MUST be fixed (compliance requirement) — playbook is enforced |
+
+The orchestrator is always free to ADD capabilities beyond what a playbook declares (unless the playbook is marked as a guardrail/exclusive). This means mid-workflow pivots ("now do a financial comparison") don't require exiting the playbook — the orchestrator extends the active set.
+
+### 8.9 Implementation Approach
+
+| Component | What | Where |
+|-----------|------|-------|
+| CapabilityManifest | In-memory catalog, refreshed from Dataverse | New: `Services/Ai/Capabilities/CapabilityManifest.cs` |
+| ManifestRefreshService | Background refresh on interval + deployment hook | New: `Services/Ai/Capabilities/ManifestRefreshService.cs` |
+| OrchestratorSystemPrompt | Builds system prompt with index + active schemas | Extend: `SprkChatAgentFactory` |
+| activate_capabilities tool | Meta-tool the orchestrator calls to load capabilities | New: `Tools/CapabilityActivationTool.cs` |
+| Per-turn tool injection | Rebuild tool list based on active set before each LLM call | Extend: `SprkChatAgentFactory.BuildToolsAsync` |
+| Playbook auto-detection | Orchestrator matches intent to known playbook patterns | Extend: `AgentServiceRoutingMiddleware` or new |
+
+### 8.10 Open Design Questions
+
+1. **Manifest refresh frequency** — 15 min polling vs. webhook on Dataverse publish vs. deployment-only?
+2. **Maximum active capabilities per turn** — 8? 12? What's the quality cliff for the LLM?
+3. **Deactivation heuristics** — After N turns without using a tool, auto-deactivate? Or only on explicit orchestrator decision?
+4. **Knowledge scope transitions** — When RAG scope changes mid-conversation, do earlier retrieved chunks stay in context or get invalidated?
+5. **Playbook guardrail enforcement** — How does a regulated playbook prevent the orchestrator from adding capabilities? A simple boolean `exclusive` flag?
+
+---
+
+## 9. Technical Debt & Hardening (from R1)
 
 | Item | Priority | Description |
 |------|----------|-------------|
@@ -372,26 +551,31 @@ Header bar link → full model-driven app. Deep-links to active entity if contex
 
 ---
 
-## 9. Open Questions
+## 10. Open Questions
 
 1. **Pane names**: Are "Conversation", "Workspace", "Context" the right names?
 2. **Mobile**: Three panes don't work on mobile. Chat-only with swipe to Workspace?
 3. **Tab limits**: How many Workspace tabs can be open simultaneously?
-4. **Playbook switching**: Should the AI proactively suggest switching playbooks mid-session?
+4. ~~**Playbook switching**: Should the AI proactively suggest switching playbooks mid-session?~~ → Resolved: orchestrator handles this dynamically (Section 8)
 5. **Collaboration**: Can two users share a session? (Future)
+6. **Orchestrator model**: Should the orchestrator be the same LLM instance as the chat agent, or a separate lightweight classifier that runs before the main LLM call?
+7. **Capability cost**: Some capabilities are expensive (CodeInterpreter, WebSearch). Should the orchestrator confirm before activating costly capabilities, or just activate and explain?
+8. **Tenant customization**: Can tenants disable specific capabilities globally? (e.g., "no web search for our firm")
 
 ---
 
-## 10. Implementation Phases
+## 11. Implementation Phases
 
 ### R2 Scope (This Project)
 
 | Area | Work Items |
 |------|-----------|
+| **Dynamic capability orchestration** | CapabilityManifest, per-turn tool injection, activate_capabilities meta-tool, orchestrator system prompt |
+| **Capability library** | Define all actions/tools/skills/knowledge as catalog entries in Dataverse; build manifest refresh |
 | **Hybrid search** | DataverseQueryTools (OData), spaarke-records-index sync pipeline |
 | **Adaptive Context pane** | ContextWidgetRegistry, playbook gallery → entity info → sources → progress |
 | **Workspace tabs** | Tab management in center pane, multiple active widgets |
-| **Default playbook** | Dataverse record, auto-load in standalone mode |
+| **Default playbook** | Dataverse record, auto-load in standalone mode (accelerator, not gate) |
 | **Work history** | Cosmos DB warm tier, full session persistence, session restore |
 | **Prompt library** | Cosmos DB storage, 4-tier ownership, variable templates |
 | **Interactive widgets** | Action callbacks, edit mode, serialize/restore state |
@@ -400,7 +584,7 @@ Header bar link → full model-driven app. Deep-links to active entity if contex
 | **Pane interaction protocol** | Formal SSE event contract (workspace_widget, context_update, etc.) |
 | **"Open in Spaarke" link** | Header bar deep-link to MDA |
 
-### R3 Scope (Future)
+### R3 Scope (Future — Distribution + Polish)
 
 | Area | Work Items |
 |------|-----------|

@@ -59,7 +59,7 @@
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
 | 055 | Build + deploy Code Page + BFF | ✅ | 2h | 050, 051 |
-| 056 | Phase 1 integration testing (FR-01 to FR-12) | :white_large_square: | 3h | 055 |
+| 056 | Phase 1 integration testing (FR-01 to FR-12) | ⏭️ Deferred to R2 | 3h | 055 |
 
 #### Wave 5E: UX Enhancements (PARALLEL)
 | # | Task | Status | Est. | Depends |
@@ -85,15 +85,15 @@
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
 | 070 | CodeInterpreterTools.cs + CodeInterpreterBridge | :white_check_mark: | 3h | 060 |
-| 071 | LegalResearchTools.cs (Bing Grounding) | :white_large_square: | 3h | 060 |
+| 071 | LegalResearchTools.cs (Bing Grounding) | ⏭️ Deferred to R2 | 3h | 060 |
 | 072 | AgentServiceRoutingMiddleware | :white_check_mark: | 3h | 060 |
 
 #### Wave 7D: Phase 2 Integration (SERIAL)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
 | 075 | DI registration + options classes + feature flags | ✅ | 2h | 060-072 |
-| 076 | Build + deploy BFF + Foundry | :white_large_square: | 2h | 075 |
-| 077 | Phase 2 integration testing (FR-13 to FR-18) | :white_large_square: | 3h | 076 |
+| 076 | Build + deploy BFF + Foundry | ⏭️ Deferred to R2 | 2h | 075 |
+| 077 | Phase 2 integration testing (FR-13 to FR-18) | ⏭️ Deferred to R2 | 3h | 076 |
 
 ### Phase 3: Evaluation & Quality
 
@@ -106,9 +106,9 @@
 #### Wave 9: Final Integration + Wrap-up (SERIAL)
 | # | Task | Status | Est. | Depends |
 |---|------|--------|------|---------|
-| 085 | Phase 3 deploy + end-to-end testing | :white_large_square: | 3h | 080, 081 |
+| 085 | Phase 3 deploy + end-to-end testing | ⏭️ Deferred to R2 | 3h | 080, 081 |
 | 086 | BYOK configuration verification | ✅ | 2h | 085 |
-| 090 | Project wrap-up | :white_large_square: | 1h | 086 |
+| 090 | Project wrap-up (R1 closed — see design-r2.md) | ✅ | 1h | 086 |
 
 ## Parallel Execution Groups
 
