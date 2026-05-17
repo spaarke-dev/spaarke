@@ -41,7 +41,7 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 # Should output: 50000 and 64000
 ```
 
-If not set, see root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
+For full context on adaptive thinking and effort tuning, see root [`CLAUDE.md`](../../../CLAUDE.md). Note: `MAX_THINKING_TOKENS=50000` is **obsolete on Opus 4.6+** — adaptive thinking applies. Only `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` remains load-bearing; invoke this skill on Opus with effort `high` or `max`.
 
 ---
 

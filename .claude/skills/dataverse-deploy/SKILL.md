@@ -769,7 +769,7 @@ gh workflow run deploy-staging.yml -f deploy_plugins=true
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 **🚨 CRITICAL: Control Manifest Version is the Cache Key**
 

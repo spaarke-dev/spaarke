@@ -329,7 +329,7 @@ Output:
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 - **Be proactive** - Don't wait for user to ask; checkpoint after significant work
 - **Keep Quick Recovery minimal** - Recovery should take < 30 seconds to read

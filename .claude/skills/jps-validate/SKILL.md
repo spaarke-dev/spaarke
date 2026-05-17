@@ -4,15 +4,15 @@ tags: [ai, jps, testing, validation, prompt-schema]
 techStack: [azure-openai, aspnet-core]
 appliesTo: ["validate JPS", "check JPS", "test JPS definition", "validate prompt schema"]
 alwaysApply: false
-exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+exemplar: .claude/skills/jps-action-create/examples/document-profiler.json
+last-reviewed: 2026-05-17
 ---
 
 # jps-validate
 
-> **Last Reviewed**: 2026-05-16
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
-> **Exemplar rationale**: `none-too-volatile` chosen pending Wave 2b-D Option A move of canonical JPS examples to `.claude/skills/jps-action-create/examples/`. After that move, `exemplar:` will update to `.claude/skills/jps-action-create/examples/document-profiler.json` (the same exemplar `jps-action-create` will use). For now, point at the existing path in the skill body.
+> **Last Reviewed**: 2026-05-17 (Option A move executed; exemplar path now valid)
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A initial; Wave 2d updated post-move)
+> **Exemplar rationale**: `examples/document-profiler.json` (under `jps-action-create/`) is the canonical "valid JPS" reference — shared with `jps-action-create`. Live, verifiable input for validation tests.
 
 ## Purpose
 
@@ -45,7 +45,7 @@ ELSE IF user provides JPS content in conversation:
   PARSE content directly
 ELSE:
   ASK user for file path or content
-  SUGGEST: "Look in projects/ai-json-prompt-schema-system/notes/jps-conversions/"
+  SUGGEST: "Look in .claude/skills/jps-action-create/examples/"
 ```
 
 ### Step 2: JSON Syntax Validation
@@ -188,7 +188,7 @@ Generate validation report.
 
 **Input:**
 ```
-User: "validate JPS projects/ai-json-prompt-schema-system/notes/jps-conversions/document-profiler.json"
+User: "validate JPS .claude/skills/jps-action-create/examples/document-profiler.json"
 ```
 
 **Output:**
@@ -247,7 +247,7 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 
 | Situation | Response |
 |-----------|----------|
-| File not found | Check path, suggest jps-conversions/ directory |
+| File not found | Check path, suggest examples/ directory |
 | Binary/non-text file | Report error, ask for correct file |
 | Valid JSON but not JPS | Explain JPS requirements, offer to convert |
 | All checks pass | Confirm ready for deployment |
