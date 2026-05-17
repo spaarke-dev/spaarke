@@ -4,12 +4,16 @@ tags: [project, continue, resume, context, pr, merge]
 techStack: [all]
 appliesTo: ["projects/*/", "continue project", "resume project", "pick up where I left off"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # project-continue
 
 > **Category**: Project Lifecycle
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Workflow is generic across projects; no single canonical execution trace.
 
 ---
 
@@ -524,6 +528,18 @@ This is informational only — don't block project continuation, just warn.
 - **Verify PR status** - CI failures should be addressed before adding more code
 - **Use CODE-INVENTORY.md** if available - It provides crucial code-level context
 - **Don't skip ADR loading** - ADR violations are costly to fix later
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Resumed without ADR loading — agent introduces new ADR violation | Step 5 (ADR loading) skipped because "this is just a continuation, not new work" | ALWAYS run Step 5. ADR loading is cheap; violations are costly to fix post-merge. Per `adr-aware` always-apply discipline. |
+| Master is stale — worktree resumed against outdated origin/master | Step 0.5 master staleness check skipped | Pre-flight MUST run `git fetch origin && git rev-list --count HEAD..origin/master`. If > 0, prompt user to pull first. |
+| Loaded wrong project's context — branch mismatch | Multiple worktrees open; agent loaded `current-task.md` for the wrong project | Verify `git branch --show-current` matches the project name in `current-task.md` BEFORE trusting the state. |
+| `current-task.md` says "Step N" but actual work is "Step N+2" | Previous session didn't checkpoint after each step (per root CLAUDE.md proactive checkpointing rules) | Cross-check `current-task.md` step claim against git log for the project's task files. If diff > 0, the checkpoint is stale — investigate before continuing. |
+| Resume invoked but project has no tasks/, README, or CLAUDE.md | Project never went through `/project-pipeline`; user invoked continue prematurely | If artifacts missing, redirect to `/project-pipeline` instead of bluffing context. |
 
 ---
 

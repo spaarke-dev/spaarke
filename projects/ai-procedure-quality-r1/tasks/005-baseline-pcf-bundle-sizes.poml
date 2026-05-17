@@ -1,0 +1,47 @@
+<task id="005" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Baseline committed PCF bundle.js sizes for bundle-size guard</title>
+    <phase>0</phase>
+    <stream>inventory</stream>
+    <tags>inventory, pcf, bundle-size, baseline</tags>
+    <estimate>30min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Record current committed bundle.js size for every PCF solution. This is the "known-good" reference against which task 063 (Check-BundleSizeDrift.ps1) compares fresh builds.</goal>
+    <context>The 2026-05-14 SDV regression (6.7 MB vs 440 KB) was caught only because the user pushed back. With this baseline, future drift triggers a warning automatically.</context>
+    <constraints>Record what is committed today. Do not rebuild — that's the audit's job. The baseline is intentionally a snapshot.</constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SpeDocumentViewer/solution/Controls/sprk_Spaarke.SpeDocumentViewer/bundle.js</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/Controls/sprk_Sprk.SemanticSearchControl/bundle.js</file>
+      <file>src/client/pcf/RelatedDocumentCount/Solution/Controls/sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount/bundle.js</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Walk src/client/pcf/ recursively; find every committed bundle.js under solution/Controls/* or Solution/Controls/*</step>
+    <step>For each: record full path, byte size, SHA-256 hash, last-commit SHA + date</step>
+    <step>Cross-reference each bundle with its source PCF folder; note which produced it (which package.json's `build:prod`)</step>
+    <step>Note any PCF whose `build:prod` script is currently the WRONG variant (-- --mode production or --production) — these were partly fixed in commit c132773c but verify</step>
+    <step>Produce JSON file at projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-baseline.json (machine-readable, task 063 will consume this)</step>
+    <step>Produce human-readable summary at projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-sizes.md</step>
+  </steps>
+
+  <outputs>
+    <output>projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-baseline.json</output>
+    <output>projects/ai-procedure-quality-r1/notes/inventory/pcf-bundle-sizes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every committed PCF bundle.js is in the baseline</criterion>
+    <criterion>JSON format is consumable by Check-BundleSizeDrift.ps1 (record at minimum: path, expected-size-bytes, tolerance-percent: 20)</criterion>
+    <criterion>Any PCF with the wrong build:prod flag is flagged</criterion>
+  </acceptance-criteria>
+</task>

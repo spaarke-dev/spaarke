@@ -1,0 +1,43 @@
+<task id="072" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Pin all .github/workflows/** actions to commit SHAs</title>
+    <phase>4b</phase>
+    <stream>github-actions</stream>
+    <tags>github-actions, security, ci-cd</tags>
+    <estimate>1h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4b-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>070, 071</dependencies>
+    <writes-to>.github/workflows/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Replace every `uses: action@vN` with `uses: action@SHA # vN` so silent action updates can't break CI.</goal>
+    <context>Prevents the 2026-05-14 failure mode (action versions silently bumped). Dependabot (task 074) auto-bumps the SHAs.</context>
+    <constraints>
+      - parallel-safe: false — touches every workflow file
+      - Use pinact, ratchet, or similar tool to do the conversion safely
+      - Add comment with original version tag for human readability
+      - Verify all workflows still pass after pinning
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step>Install pinact or equivalent</step>
+    <step>Run pinact on every .github/workflows/*.yml</step>
+    <step>Verify each uses: line now has format `uses: actor/repo@SHA # vN.M.K`</step>
+    <step>Validate all workflows with actionlint</step>
+    <step>Test on project branch — confirm all workflows still pass</step>
+  </steps>
+
+  <outputs>
+    <output>Every workflow file with all uses: pinned to SHA</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every uses: reference is SHA-pinned with version comment</criterion>
+    <criterion>actionlint passes</criterion>
+    <criterion>All workflows still execute successfully on a test push</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,12 +1,18 @@
-# jps-scope-refresh
-
 ---
 description: Refresh the scope & model index from Dataverse so Claude Code has the latest catalog
 tags: [ai, jps, playbook, scope, index, refresh]
 techStack: [azure-openai, dataverse, powershell]
 appliesTo: ["refresh scope index", "update scope catalog", "sync scope index", "refresh scopes"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# jps-scope-refresh
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: The contract is "run the script, verify counts changed, commit if changed." There is no useful canonical reference output — the catalog content itself changes with every scope addition.
 
 ## Purpose
 
@@ -119,6 +125,15 @@ IF no changes:
 - `dev-cleanup` — Fix auth issues if refresh fails
 
 ---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Refresh succeeds but `scope-model-index.json` shows no new entries | Dataverse query filter excludes records that should be included (e.g., `statecode = 0` misses freshly-created inactive records) | Check the records' `statecode` directly in Dataverse. Either activate them, or temporarily adjust the script's filter. Re-run refresh. |
+| Curated fields (`tags`, `documentTypes`, `compatibleActions`) get wiped on refresh | Refresh logic in `Refresh-ScopeModelIndex.ps1` not preserving curated fields correctly | The script SHOULD merge curated fields from the existing file. If wiped, restore from git history (`git show HEAD~1:.claude/catalogs/scope-model-index.json`) and re-apply curated fields manually. File a bug on the refresh script. |
+| `jps-action-create` references a scope code that's in the index but not in Dataverse | Index drift after a scope was deleted from Dataverse without re-running refresh | Re-run refresh AFTER any scope-record deletion. The index is the source of truth FOR Claude Code; Dataverse is the source of truth FOR runtime — both must agree. |
+| Singular vs plural Dataverse table-name confusion | `sprk_analysisaction` (this skill, singular logical name) vs `sprk_analysisactions` (used elsewhere with plural endpoint suffix) | This skill uses the **singular logical name** (`sprk_analysisaction`) — the Dataverse Web API expects the **plural collection name** (`sprk_analysisactions`) as the endpoint segment. Both are correct in context. Verify against `mcp__dataverse__list_tables()` output if in doubt. |
 
 ## Tips for AI
 

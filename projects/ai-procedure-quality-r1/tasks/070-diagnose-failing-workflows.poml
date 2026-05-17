@@ -1,0 +1,58 @@
+<task id="070" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Diagnose &amp; fix 3 failing workflows (sdap-ci, deploy-promote, deploy-infrastructure)</title>
+    <phase>4b</phase>
+    <stream>github-actions</stream>
+    <tags>github-actions, ci-cd, fix</tags>
+    <estimate>1-2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4b-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>003</dependencies>
+    <writes-to>.github/workflows/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Identify why the 3 workflows fail in 0s on every push since at least 2026-05-01, and fix them. Most likely cause: action versions pinned beyond what exists (actions/checkout@v6, upload-artifact@v6, cache@v5).</goal>
+    <context>The 0s + "log not found" failure pattern is workflow-startup failure. The actual test/build jobs never run. After fix, expect green on next push to master.</context>
+    <constraints>
+      - parallel-safe: false (writes to .github/)
+      - For each workflow, verify the fix with a test push or actionlint validation before claiming complete
+      - If a workflow's purpose has been superseded by another, document and explicitly disable rather than fix
+      - Update notes/inventory/workflows.md with fix details for each
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/workflows.md</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/workflows/deploy-promote.yml</file>
+      <file>.github/workflows/deploy-infrastructure.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>For each of the 3 workflows: gh run view --log-failed on most recent run (may say "log not found" → confirms workflow-startup failure)</step>
+    <step>actionlint .github/workflows/{file}.yml — get specific errors</step>
+    <step>Check each `uses:` reference: does the version tag actually exist in the action's repo? (gh api repos/actions/checkout/tags or similar)</step>
+    <step>For each invalid pin: replace with valid version (currently stable: actions/checkout@v4, actions/setup-dotnet@v4, actions/cache@v4, actions/upload-artifact@v4, github/codeql-action/*@v3)</step>
+    <step>For each fix: validate with actionlint locally before commit</step>
+    <step>If a workflow is genuinely unused / superseded: rename to .disabled or move to .github/workflows/archive/ with rationale in PR description</step>
+    <step>Update notes/inventory/workflows.md with fix details</step>
+    <step>Push and verify on the project branch — confirm green on next push</step>
+  </steps>
+
+  <outputs>
+    <output>Fixed .github/workflows/sdap-ci.yml</output>
+    <output>Fixed .github/workflows/deploy-promote.yml</output>
+    <output>Fixed .github/workflows/deploy-infrastructure.yml</output>
+    <output>Updated projects/ai-procedure-quality-r1/notes/inventory/workflows.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Next push to project branch results in green checks for the 3 previously-failing workflows (or documented disable)</criterion>
+    <criterion>actionlint passes on all 3 fixed files</criterion>
+    <criterion>workflows.md reflects new status</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,12 +1,20 @@
 ---
 description: Commit changes and push to GitHub following Spaarke git conventions
+tags: [git, push, github, pr, commit, operations]
+techStack: [git, gh-cli]
+appliesTo: ["push to github", "create PR", "commit and push", "ready to merge"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # Push to GitHub
 
 > **Category**: Operations
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — normalized minimal frontmatter; extracted PR body template to references/)
+> **Exemplar rationale**: Each push targets ephemeral branch state — no canonical reference holds.
+> **PR body template**: [`references/pr-template.md`](references/pr-template.md)
 
 ---
 
@@ -336,30 +344,11 @@ gh --version
 # Create PR interactively
 gh pr create --title "{commit message}" --body "{PR body}"
 
-# Or with full template
-gh pr create --title "{title}" --body @- << 'EOF'
-## Summary
-{Brief description of changes}
-
-## Related
-- Closes #{issue number} (if applicable)
-- Related to: {link to spec or design doc}
-
-## Changes
-- {Change 1}
-- {Change 2}
-
-## Testing
-- [ ] Unit tests pass
-- [ ] Manual testing completed
-- [ ] ADR compliance verified
-
-## Checklist
-- [ ] Code follows Spaarke conventions
-- [ ] Documentation updated (if needed)
-- [ ] No secrets or sensitive data committed
-EOF
+# Or with full template (see references/pr-template.md for the canonical body content)
+gh pr create --title "{title}" --body-file .claude/skills/push-to-github/references/pr-template.md
 ```
+
+**PR body template**: See [`references/pr-template.md`](references/pr-template.md) for the full Spaarke PR body convention (Summary, Related, Changes, Testing, Checklist) — plus customizations for PCF, BFF deploy, Dataverse schema PRs.
 
 #### Create New PR: Manual (Browser)
 
@@ -532,3 +521,16 @@ gh pr create                            # Create PR (if gh installed)
 - Use `git rev-parse --git-common-dir` to find the main repo path
 - Report both remote AND local sync status to user
 - If user says "merge to master", this means: push to origin/master AND sync main repo
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Untracked files (secrets, build artifacts) committed accidentally | Used `git add .` or `git add -A` blindly | NEVER use `-A` or `.` without first running `git status` and reviewing each untracked file. Step 1.5 of the workflow is the explicit untracked-file check. |
+| Pushed broken code that fails CI | Tests or build not run locally before push | MANDATORY: `dotnet build src/server/api/Sprk.Bff.Api/` AND `dotnet test` BEFORE `git push`. The skill enforces this at Step 6. |
+| PR opened against the wrong base branch | `gh pr create` defaulted to a non-master base | Always pass `--base master` explicitly when creating PRs. Verify before clicking "Create PR" in the web UI. |
+| Force-pushed to a shared branch and overwrote teammate's work | Used `--force` instead of `--force-with-lease` | NEVER `--force` on shared branches. `--force-with-lease` rejects the push if the remote moved since your last fetch. |
+| Worktree merge-to-master succeeded but main repo's local master is stale | Forgot Step 10.3 (sync main repo) | Always run `git rev-parse --git-common-dir` to find main repo path; `cd $MAIN_REPO && git pull origin master`. Skill enforces this when in worktree. |
+| PR description copy-pasted from another PR with wrong issue link | Reused template without updating placeholders | Use `references/pr-template.md` with `--body-file` then EDIT the PR description on GitHub — don't leave placeholder text. |

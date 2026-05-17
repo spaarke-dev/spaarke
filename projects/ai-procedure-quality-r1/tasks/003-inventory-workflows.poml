@@ -1,0 +1,57 @@
+<task id="003" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Inventory .github/workflows/ — status, triggers, action versions</title>
+    <phase>0</phase>
+    <stream>inventory</stream>
+    <tags>inventory, github-actions, baseline, ci-cd</tags>
+    <estimate>45min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Capture every workflow's name, triggers, current pass/fail status, action references with versions, and required-status-check membership. Identify all 0s-failures and likely root causes.</goal>
+    <context>3 workflows (sdap-ci, deploy-promote, deploy-infrastructure) fail in 0s on every push. Pattern is consistent with action-version pins that don't exist (actions/checkout@v6, upload-artifact@v6, cache@v5). This inventory drives Phase 4b diagnosis (task 070).</context>
+    <constraints>READ ONLY (this task does NOT fix anything — that's task 070). Use gh CLI for status queries.</constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/workflows/deploy-promote.yml</file>
+      <file>.github/workflows/deploy-infrastructure.yml</file>
+      <file>.github/workflows/adr-audit.yml</file>
+      <file>.github/workflows/auto-add-to-project.yml</file>
+      <file>.github/workflows/claude-code-review.yml</file>
+      <file>.github/workflows/deploy-bff-api.yml</file>
+      <file>.github/workflows/deploy-office-addins.yml</file>
+      <file>.github/workflows/deploy-platform.yml</file>
+      <file>.github/workflows/deploy-slot-swap.yml</file>
+      <file>.github/workflows/nightly-quality.yml</file>
+      <file>.github/workflows/provision-customer.yml</file>
+      <file>.github/workflows/weekly-quality.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>List all .github/workflows/*.yml files</step>
+    <step>For each: parse `name`, `on:` triggers, jobs and their `runs-on`</step>
+    <step>Extract every `uses: action@version` reference; note the version pin format (tag vs SHA)</step>
+    <step>Query gh run list per workflow to get last 10 runs; classify each as success/failure/cancelled; note 0s failures specifically</step>
+    <step>Query repo for required status checks; cross-reference with workflow job names</step>
+    <step>Write projects/ai-procedure-quality-r1/notes/inventory/workflows.md with: workflow name, triggers, last 10 runs summary, action version table, required-status-check membership, suspected health (✅/⚠️/❌ with reason)</step>
+  </steps>
+
+  <outputs>
+    <output>projects/ai-procedure-quality-r1/notes/inventory/workflows.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every workflow file is represented</criterion>
+    <criterion>0s-failure workflows are flagged with hypothesis about root cause</criterion>
+    <criterion>Action version table shows all SemVer pins (suspect) vs SHA pins (recommended target after F-20)</criterion>
+    <criterion>Required-status-check audit completed</criterion>
+  </acceptance-criteria>
+</task>

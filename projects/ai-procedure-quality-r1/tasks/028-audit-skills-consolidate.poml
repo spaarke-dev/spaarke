@@ -1,0 +1,53 @@
+<task id="028" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Consolidate batch findings into .claude/AUDIT-FINDINGS-SKILLS.md</title>
+    <phase>2a</phase>
+    <stream>audit</stream>
+    <tags>audit, consolidation, skills</tags>
+    <estimate>30min</estimate>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>020, 021, 022, 023, 024, 025, 026, 027</dependencies>
+    <writes-to>.claude/AUDIT-FINDINGS-SKILLS.md</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Merge the 8 per-batch audit notes into a single .claude/AUDIT-FINDINGS-SKILLS.md ready for human review (Human Gate 1).</goal>
+    <context>Main-session-only because it writes to .claude/. Sub-agents return findings; main session consolidates.</context>
+    <constraints>parallel-safe: false. Output to .claude/ (Human Gate 1 then reads it).</constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-1.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-2.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-3.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-4.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-5.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-6.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-7.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/audit/batch-8.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read all 8 batch findings</step>
+    <step>Group by recommended action (refine-in-place / split / merge / remove / leave-alone)</step>
+    <step>Cross-check for overlap claims; verify each claim is bidirectional (if A says it overlaps with B, B should say overlap with A)</step>
+    <step>Identify deterministic rules called out across multiple skills; consolidate into a single section "Deterministic Rules to Extract to settings.json / hooks"</step>
+    <step>Identify references-to-verify across all skills; consolidate into a single section</step>
+    <step>Write .claude/AUDIT-FINDINGS-SKILLS.md with: Summary (counts by action), Per-Skill Sections (alphabetized), Cross-Cutting Findings (deterministic rules + references), Sign-Off Section (empty rows for reviewer)</step>
+    <step>Add a "Reviewer Sign-Off Required Before Phase 2b" notice at the top</step>
+  </steps>
+
+  <outputs>
+    <output>.claude/AUDIT-FINDINGS-SKILLS.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 49 skills represented in the consolidated file</criterion>
+    <criterion>Summary counts match per-batch totals</criterion>
+    <criterion>Cross-cutting findings section exists</criterion>
+    <criterion>Sign-off rows ready for reviewer to mark approved/rejected per skill</criterion>
+  </acceptance-criteria>
+</task>

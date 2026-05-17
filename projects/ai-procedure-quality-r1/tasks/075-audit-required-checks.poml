@@ -1,0 +1,44 @@
+<task id="075" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Audit + align required status checks with passing workflows</title>
+    <phase>4b</phase>
+    <stream>github-actions</stream>
+    <tags>branch-protection, required-checks</tags>
+    <estimate>30min</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4b-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>070</dependencies>
+    <writes-to>(GitHub UI — branch protection settings; no repo file)</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>The repo claims "3 of 3 required status checks are expected" but those checks don't exist (or are the failing ones). Re-audit and align.</goal>
+    <context>Currently merge bypass masks the gap. Need to specify required checks that actually pass on green builds. Per F-19.</context>
+    <constraints>
+      - Branch protection is configured via GitHub UI or API; document the change in CHANGELOG.md
+      - Required checks should be MINIMUM that catches breakage (high-volume CI/CD posture)
+      - Coordinate with user before changing — branch-protection changes are visible
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step>gh api repos/spaarke-dev/spaarke/branches/master/protection → current rules</step>
+    <step>List job names from passing workflows (deploy-bff-api, claude-code-review, adr-audit, nightly-quality, etc.)</step>
+    <step>Determine minimum required set: probably (a) sdap-ci's build-test (after task 070 fix), (b) actionlint (after task 071), (c) procedure-quality (after task 064)</step>
+    <step>Propose the new required-checks list in notes/required-checks-proposal.md</step>
+    <step>BEFORE applying: confirm with user (this affects merge friction for everyone)</step>
+    <step>Apply via gh api or UI; document in CHANGELOG.md</step>
+  </steps>
+
+  <outputs>
+    <output>projects/ai-procedure-quality-r1/notes/required-checks-proposal.md</output>
+    <output>(if approved) updated branch protection on origin/master</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Current required checks documented</criterion>
+    <criterion>Proposed minimum set documented with rationale</criterion>
+    <criterion>User confirms before applying changes</criterion>
+  </acceptance-criteria>
+</task>

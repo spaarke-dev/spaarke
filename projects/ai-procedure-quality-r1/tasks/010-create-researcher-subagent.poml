@@ -1,0 +1,54 @@
+<task id="010" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Create .claude/agents/researcher.md subagent</title>
+    <phase>1</phase>
+    <stream>infrastructure</stream>
+    <tags>subagent, researcher, agents</tags>
+    <estimate>30min</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+    <writes-to>.claude/agents/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Create the researcher subagent per Directive 1 in design.md. Model: opus, effort: high. Reads from spaarke/knowledge/ first; falls back to external search.</goal>
+    <context>This subagent accumulates Microsoft-platform investigation findings across sessions via persistent memory. The parallel project (coding-knowledge-base-setup-r1) is building spaarke/knowledge/; the researcher uses it but doesn't depend on it being complete.</context>
+    <constraints>
+      - parallel-safe: false — sub-agents cannot write to .claude/. Main session executes.
+      - Use the exact content from design.md Directive 1 "The file to create" block as the basis; adapt only where the project's spec differs (e.g., model: opus + effort: high are mandatory per resolved decision #3)
+      - Verify .claude/agents/ directory exists (create if not)
+      - Verify current Claude Code version supports subagent persistent memory (pre-flight before writing)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/design.md</file>
+      <file>projects/ai-procedure-quality-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify Claude Code version (`claude --version`); confirm v2.1.33+ for subagent persistent memory</step>
+    <step>Create .claude/agents/ if absent</step>
+    <step>Write .claude/agents/researcher.md using the design.md Directive 1 content as the basis</step>
+    <step>Ensure frontmatter includes: name=researcher, description=(trigger-first), tools=(Read, Bash, Glob, Grep, WebSearch, WebFetch), model=opus, effort=high, memory=project</step>
+    <step>Test invocation: ask the researcher one simple question (e.g., "What's the current preview status of Microsoft Foundry IQ remote sources?") and verify it operates in isolated context</step>
+    <step>Verify it creates MEMORY.md in the project memory directory</step>
+    <step>Document the test invocation result in projects/ai-procedure-quality-r1/notes/researcher-verification.md</step>
+  </steps>
+
+  <outputs>
+    <output>.claude/agents/researcher.md</output>
+    <output>projects/ai-procedure-quality-r1/notes/researcher-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>.claude/agents/researcher.md exists with correct frontmatter</criterion>
+    <criterion>Test invocation succeeds and produces structured findings</criterion>
+    <criterion>MEMORY.md is created with at least one entry</criterion>
+    <criterion>Subagent's tool use does not pollute main session context</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,232 @@
+{
+  "baseline_date": "2026-05-14",
+  "baseline_branch": "work/ai-procedure-quality-r1",
+  "tolerance_percent_default": 20,
+  "notes": "Sizes captured from the committed bundle.js files in src/client/pcf/*/[Ss]olution/Controls/*. Three PCFs (DocumentRelationshipViewer, EmailProcessingMonitor, ThemeEnforcer) have NO build:prod script — they only define `build` which silently produces a dev-mode bundle. These need a future task to add `build:prod`. UniversalDatasetGrid has TWO committed bundles: the legacy 13.1 MB `Spaarke.Controls.UniversalDatasetGrid` (Feb 2026, stale, candidate for removal) and the current 446 KB `Spaarke.UI.Components.UniversalDatasetGrid` (May 2026).",
+  "bundles": [
+    {
+      "control": "AssociationResolver",
+      "path": "src/client/pcf/AssociationResolver/Solution/Controls/sprk_Spaarke.Controls.AssociationResolver/bundle.js",
+      "expected_size_bytes": 401824,
+      "tolerance_percent": 20,
+      "sha256": "32429bee1c524c3306c384aadf206c7e5183686216d18f850d7eabfd11d67c20",
+      "last_commit_sha": "bc404e98807b9377ab08ca3f2139120d0c729231",
+      "last_commit_date": "2026-05-13T13:39:42-04:00",
+      "source_pcf_folder": "src/client/pcf/AssociationResolver/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true
+    },
+    {
+      "control": "DocumentRelationshipViewer",
+      "path": "src/client/pcf/DocumentRelationshipViewer/Solution/Controls/sprk_Spaarke.Controls.DocumentRelationshipViewer/bundle.js",
+      "expected_size_bytes": 603308,
+      "tolerance_percent": 20,
+      "sha256": "5607c027b4bce6b406f1c1e3642855c350ae60fdbea1744212ff640b2f3c8850",
+      "last_commit_sha": "651b8dd7db05fc2f35f098d9f95c8d1a549f93aa",
+      "last_commit_date": "2026-05-13T11:11:39-04:00",
+      "source_pcf_folder": "src/client/pcf/DocumentRelationshipViewer/",
+      "build_prod_script": "<missing>",
+      "build_prod_correct": false,
+      "build_prod_issue": "No build:prod script defined — only `build` (silently dev mode). Risk: bundle was likely built without --buildMode production. The 603 KB size is on the high side and may shrink significantly once a proper build:prod is added."
+    },
+    {
+      "control": "EmailProcessingMonitor",
+      "path": "src/client/pcf/EmailProcessingMonitor/Solution/Controls/sprk_Spaarke.EmailProcessingMonitor/bundle.js",
+      "expected_size_bytes": 418170,
+      "tolerance_percent": 20,
+      "sha256": "282818cf1d4ed18f46a2be6c580b2dc2b4429c62afbf18c88dd4e9d1525d55b6",
+      "last_commit_sha": "2e2fdd49baeb99de25170af7db3a96094fa8e3b9",
+      "last_commit_date": "2026-05-13T12:35:12-04:00",
+      "source_pcf_folder": "src/client/pcf/EmailProcessingMonitor/",
+      "build_prod_script": "<missing>",
+      "build_prod_correct": false,
+      "build_prod_issue": "No build:prod script defined — only `build` (silently dev mode). Bundle may be larger than necessary."
+    },
+    {
+      "control": "RelatedDocumentCount",
+      "path": "src/client/pcf/RelatedDocumentCount/Solution/Controls/sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount/bundle.js",
+      "expected_size_bytes": 432603,
+      "tolerance_percent": 20,
+      "sha256": "3ca6ca0320e4f13da468aeccab20081961d20b850c5a8e0fcec96c1a9405cdb0",
+      "last_commit_sha": "ef57fc3f35f5091cc207a0d33fa5d423ccf1ffbf",
+      "last_commit_date": "2026-05-13T15:59:02-04:00",
+      "source_pcf_folder": "src/client/pcf/RelatedDocumentCount/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true
+    },
+    {
+      "control": "SemanticSearchControl",
+      "path": "src/client/pcf/SemanticSearchControl/Solution/Controls/sprk_Sprk.SemanticSearchControl/bundle.js",
+      "expected_size_bytes": 539042,
+      "tolerance_percent": 20,
+      "sha256": "eb815e26b16a66d80c0c449ec42af27ba45a952258d0122d3575044d4bf92b51",
+      "last_commit_sha": "ef57fc3f35f5091cc207a0d33fa5d423ccf1ffbf",
+      "last_commit_date": "2026-05-13T15:59:02-04:00",
+      "source_pcf_folder": "src/client/pcf/SemanticSearchControl/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true
+    },
+    {
+      "control": "SpaarkeGridCustomizer",
+      "path": "src/client/pcf/SpaarkeGridCustomizer/Solution/Controls/sprk_Spaarke.Controls.SpaarkeGridCustomizer/bundle.js",
+      "expected_size_bytes": 12160,
+      "tolerance_percent": 20,
+      "sha256": "24f9ab9a07c400537292dec2642c272a723d4a6beb9821c5adcc1ad4a5b964d3",
+      "last_commit_sha": "b3f1681840895b06f1b739b4737e8e25e37389ba",
+      "last_commit_date": "2026-02-03T23:30:23-05:00",
+      "source_pcf_folder": "src/client/pcf/SpaarkeGridCustomizer/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "notes": "Stale (Feb 2026). Tiny 12 KB bundle — possibly an empty/stub control. Verify it is still used before treating drift seriously."
+    },
+    {
+      "control": "SpeDocumentViewer",
+      "path": "src/client/pcf/SpeDocumentViewer/solution/Controls/sprk_Spaarke.SpeDocumentViewer/bundle.js",
+      "expected_size_bytes": 440821,
+      "tolerance_percent": 20,
+      "sha256": "4ccc2bfea9f4d34583971f14d7cfdc9d80bc7736ae117932b3d022db8e7a2423",
+      "last_commit_sha": "c132773c6ef8bb74ad308f888f2307ea834746e1",
+      "last_commit_date": "2026-05-14T13:38:48-04:00",
+      "source_pcf_folder": "src/client/pcf/SpeDocumentViewer/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "notes": "Reference good-build size (the 2026-05-14 regression that motivated this project. Pre-fix bundle was 6.7 MB; this is the post-fix 440 KB baseline)."
+    },
+    {
+      "control": "UniversalDatasetGrid (legacy stale)",
+      "path": "src/client/pcf/UniversalDatasetGrid/Solution/Controls/sprk_Spaarke.Controls.UniversalDatasetGrid/bundle.js",
+      "expected_size_bytes": 13138510,
+      "tolerance_percent": 20,
+      "sha256": "e0ad665a3a3ae8cff259ea2c5a2e314799623559f5c67c142ec271eb809d5bc2",
+      "last_commit_sha": "6366335a35517c4506963336319b698711ba19eb",
+      "last_commit_date": "2026-02-06T10:42:21-05:00",
+      "source_pcf_folder": "src/client/pcf/UniversalDatasetGrid/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "notes": "STALE 13.1 MB bundle from Feb 2026 — legacy `Spaarke.Controls.UniversalDatasetGrid` namespace. Almost certainly dev-mode build. Candidate for REMOVAL (replaced by `Spaarke.UI.Components.UniversalDatasetGrid` below). Do NOT treat as a drift target — flag for cleanup."
+    },
+    {
+      "control": "UniversalDatasetGrid (current)",
+      "path": "src/client/pcf/UniversalDatasetGrid/Solution/Controls/sprk_Spaarke.UI.Components.UniversalDatasetGrid/bundle.js",
+      "expected_size_bytes": 446839,
+      "tolerance_percent": 20,
+      "sha256": "bd20b0de14d37396abc9fa1e9ee36532cf3e2a700766f8f48b44858dd0bd78d1",
+      "last_commit_sha": "3d3df3fbac253080cd8ada37c285fd02a6382156",
+      "last_commit_date": "2026-05-13T11:34:13-04:00",
+      "source_pcf_folder": "src/client/pcf/UniversalDatasetGrid/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "notes": "Current `Spaarke.UI.Components.UniversalDatasetGrid` namespace. This is the active control."
+    },
+    {
+      "control": "UpdateRelatedButton",
+      "path": "src/client/pcf/UpdateRelatedButton/Solution/Controls/sprk_Spaarke.Controls.UpdateRelatedButton/bundle.js",
+      "expected_size_bytes": 1108293,
+      "tolerance_percent": 20,
+      "sha256": "74620a2539a417108a2e412df3af9c0b0b177cf6f992c13fddf66a5cb08d0f7b",
+      "last_commit_sha": "b3f1681840895b06f1b739b4737e8e25e37389ba",
+      "last_commit_date": "2026-02-03T23:30:23-05:00",
+      "source_pcf_folder": "src/client/pcf/UpdateRelatedButton/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "notes": "Stale (Feb 2026). 1.1 MB is on the high side — may have been built before the `--buildMode production` fix landed. Worth a rebuild test under task 063."
+    },
+    {
+      "control": "VisualHost",
+      "path": "src/client/pcf/VisualHost/Solution/Controls/sprk_Spaarke.Visuals.VisualHost/bundle.js",
+      "expected_size_bytes": 546024,
+      "tolerance_percent": 20,
+      "sha256": "46c72801d1f0b0154192f0ee64c40aaee40da60f798860014a94bfc381f39735",
+      "last_commit_sha": "999614ed4ec4cb380aadaeba25f4d1862c3deecf",
+      "last_commit_date": "2026-05-13T13:31:40-04:00",
+      "source_pcf_folder": "src/client/pcf/VisualHost/",
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true
+    }
+  ],
+  "pcf_folders_without_committed_bundle": [
+    {
+      "folder": "src/client/pcf/AIMetadataExtractor/",
+      "has_own_package_json": false,
+      "note": "No own package.json — likely not an independent PCF solution."
+    },
+    {
+      "folder": "src/client/pcf/AnalysisBuilder/",
+      "has_own_package_json": false,
+      "note": "No own package.json — likely not an independent PCF solution."
+    },
+    {
+      "folder": "src/client/pcf/AnalysisWorkspace/",
+      "has_own_package_json": false,
+      "note": "No own package.json — likely not an independent PCF solution."
+    },
+    {
+      "folder": "src/client/pcf/DrillThroughWorkspace/",
+      "has_own_package_json": true,
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "note": "Has package.json with correct build:prod but no committed bundle.js (never deployed yet)."
+    },
+    {
+      "folder": "src/client/pcf/DueDatesWidget/",
+      "has_own_package_json": false,
+      "note": "No own package.json."
+    },
+    {
+      "folder": "src/client/pcf/EventAutoAssociate/",
+      "has_own_package_json": false,
+      "note": "No own package.json."
+    },
+    {
+      "folder": "src/client/pcf/EventCalendarFilter/",
+      "has_own_package_json": false,
+      "note": "No own package.json."
+    },
+    {
+      "folder": "src/client/pcf/EventFormController/",
+      "has_own_package_json": false,
+      "note": "No own package.json."
+    },
+    {
+      "folder": "src/client/pcf/PlaybookBuilderHost/",
+      "has_own_package_json": false,
+      "note": "No own package.json."
+    },
+    {
+      "folder": "src/client/pcf/RegardingLink/",
+      "has_own_package_json": false,
+      "note": "No own package.json."
+    },
+    {
+      "folder": "src/client/pcf/ScopeConfigEditor/",
+      "has_own_package_json": true,
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "note": "Has package.json with correct build:prod but no committed bundle.js (never deployed yet)."
+    },
+    {
+      "folder": "src/client/pcf/SpeFileViewer/",
+      "has_own_package_json": false,
+      "note": "No own package.json."
+    },
+    {
+      "folder": "src/client/pcf/ThemeEnforcer/",
+      "has_own_package_json": true,
+      "build_prod_script": "<missing>",
+      "build_prod_correct": false,
+      "note": "Has package.json but NO build:prod script (only `build`, silently dev mode). No committed bundle.js yet, but when one is built it will be a dev-mode bundle. Fix before first deploy."
+    },
+    {
+      "folder": "src/client/pcf/UniversalQuickCreate/",
+      "has_own_package_json": true,
+      "build_prod_script": "pcf-scripts build --buildMode production",
+      "build_prod_correct": true,
+      "note": "Has package.json with correct build:prod but no committed bundle.js (never deployed yet)."
+    }
+  ],
+  "wrong_build_prod_summary": [
+    "src/client/pcf/DocumentRelationshipViewer/ — missing build:prod (has bundle)",
+    "src/client/pcf/EmailProcessingMonitor/ — missing build:prod (has bundle)",
+    "src/client/pcf/ThemeEnforcer/ — missing build:prod (no bundle yet)"
+  ]
+}

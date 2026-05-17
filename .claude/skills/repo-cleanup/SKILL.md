@@ -1,12 +1,20 @@
 ---
 description: Repository hygiene audit - validates structure compliance and removes ephemeral files after project completion
+tags: [cleanup, repository, hygiene, audit, structure, quality]
+techStack: [git, powershell, dotnet]
+appliesTo: ["repo cleanup", "repository hygiene", "structure audit", "ephemeral files", "project completion"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # repo-cleanup
 
 > **Category**: Quality
-> **Last Updated**: January 6, 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — **hub #4 with 215 refs; additive-only refinement**; normalized minimal frontmatter; fixed stale `docs/ai-knowledge/catalogs/` reference to `.claude/catalogs/` per R2 doc refactor)
+> **Exemplar rationale**: Cleanup reports are per-project ephemeral output — no canonical reference holds.
+> **Audit note (Wave 2b-A)**: The audit reported "3 duplicate `## Repository Cleanup Report` H2 sections" — investigation showed 2 of 3 (lines 394, 425) are inside `Example:` markdown code fences (literal output samples), NOT real H2 sections. Only line 231 is a real section. The fragmentation flagged by grep is rendered-correct in markdown.
 
 ---
 
@@ -63,7 +71,7 @@ required_directories:
   - src/server/api/
   - tests/unit/
   - tests/integration/
-  - docs/ai-knowledge/catalogs/
+  - .claude/catalogs/
   - docs/_archive/
   - infrastructure/bicep/
   - .claude/skills/
@@ -500,3 +508,15 @@ Proceed with cleanup? (y/n)
 - When in doubt about whether to delete, flag for manual review
 - After cleanup, verify build still passes: `dotnet build`
 - Update TASK-INDEX.md if cleaning up a completed project
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Skill prescribes a directory path that doesn't exist anymore (e.g., `docs/ai-knowledge/catalogs/`) | Repo refactor moved/renamed directories; skill's `required_directories` list wasn't updated | **Caught + fixed 2026-05-16**: `docs/ai-knowledge/catalogs/` → `.claude/catalogs/` (per R2 doc refactor). Going forward, every required_directory entry should be verified via `Test-Path` periodically. The Phase 4a `Find-PatternDrift.ps1` validator will mechanize this. |
+| Cleanup deletes files that were actually intentional (e.g., `.gitkeep` placeholders, archived projects under `_archive/`) | Skill applied "ephemeral" heuristic too broadly | NEVER auto-delete from `src/`, `docs/`, `_archive/`, `.claude/archive/` without explicit user approval. Conventions section is explicit about this. |
+| Pre-merge check fails because skill flags legitimate WIP files | Skill ran on a branch mid-development | Pre-merge check should only run when branch is "ready to merge" — not mid-development. Operator should know which mode to invoke. |
+| Cleanup report shows "0 issues" but project clearly has cruft | Skill's required_directories list is out of date — cruft is in dirs the skill doesn't audit | The required_directories list is the skill's audit scope. If a new directory category emerges in the repo, add it to the list. |
+| 215 inbound references — high blast radius for any restructure | This is hub #4 | Refinements must be ADDITIVE ONLY (the constraint applied throughout Wave 2b). No section renames or removals; only stamp updates, frontmatter normalization, and inline data corrections (like the ai-knowledge path fix). |

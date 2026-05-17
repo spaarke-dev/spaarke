@@ -1,12 +1,18 @@
-# add-reference-to-index
-
 ---
 description: Index golden reference documents into the spaarke-rag-references AI Search index
 tags: [ai, rag, knowledge, indexing, ai-search]
 techStack: [powershell, azure-ai-search, azure-openai]
 appliesTo: ["scripts/ai-search/", "add reference", "index reference", "golden reference"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# add-reference-to-index
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: AI Search index is live infrastructure. A known-good rebuild loop would require keeping a stable test document + expected chunk count + expected embedding dimensions in sync with whatever the OpenAI deployment is producing. Maintenance cost would exceed value.
 
 ## Purpose
 
@@ -169,3 +175,12 @@ For each knowledge record:
 - `scripts/seed-data/Deploy-Knowledge.ps1` — Seeds inline knowledge records
 - `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` — BFF API indexing service
 - `infrastructure/ai-search/spaarke-rag-references.json` — Index schema definition
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Re-indexing duplicates chunks instead of replacing them | Script not invoked with `-ReplaceExisting` flag, OR a prior partial-failed run left orphan chunks | Always pass `-ReplaceExisting` for known existing docs. To clean orphans, query the index for the source doc's `parent_id` and delete all matching chunks before re-indexing. |
+| Embeddings are produced but document is unsearchable | Search index `analyzer` setting doesn't match the embedding model's expected tokenization | Verify `infrastructure/ai-search/spaarke-rag-references.json` `analyzer` matches the deployed embedding model. After config change, re-index any documents added BEFORE the analyzer change. |
+| Token count exceeds embedding model context window mid-chunk | Chunk size in script not aligned to model limit; long unbroken text in source doc | Reduce `-ChunkSize` parameter (default 1500 tokens; 1024 safer for `text-embedding-3-small`). Long sections may need manual paragraph splits. |
+| Dataverse catalog record (`sprk_knowledge`) created but search index empty | Script failed AFTER catalog write but BEFORE embedding upload; idempotent re-run skips the catalog step | Delete the orphan `sprk_knowledge` record before re-running, OR pass `-ForceReindex` to bypass the existence check. |

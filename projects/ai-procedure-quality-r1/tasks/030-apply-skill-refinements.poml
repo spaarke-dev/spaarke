@@ -1,0 +1,73 @@
+<task id="030" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Apply approved skill refinements per AUDIT-FINDINGS-SKILLS.md</title>
+    <phase>2b</phase>
+    <stream>refinement</stream>
+    <tags>refinement, skills, archive</tags>
+    <estimate>2-4h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>Human-Gate-1 (sign-off on AUDIT-FINDINGS-SKILLS.md)</dependencies>
+    <writes-to>.claude/skills/, .claude/archive/2026-05-14/skills/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Execute the approved per-skill recommendations from AUDIT-FINDINGS-SKILLS.md. Reversibility: every removal/merge archives the original.</goal>
+    <context>This is the destructive phase. Human Gate 1 must be passed before this runs. Each skill action has been explicitly approved (or rejected) by the reviewer in the sign-off section.</context>
+    <constraints>
+      - parallel-safe: false — main session only (writes to .claude/)
+      - Only execute actions marked ✅ in the sign-off section
+      - For "refine in place": rewrite per audit's recommendations; preserve frontmatter except where audit specified changes
+      - For "split": move detailed content to references/ or examples/ subdirectory; keep SKILL.md body within tiered target (≤200 ideal, ≤400 cap with justification)
+      - For "merge": combine into target; move source skill folder to .claude/archive/2026-05-14/skills/&lt;source-name&gt;/
+      - For "remove": move to .claude/archive/2026-05-14/skills/&lt;name&gt;/
+      - For "leave-alone-justified": no changes; document rationale in the audit findings (line count over target is acceptable because of operational density)
+      - For "needs-substantive-rewrite": no changes in THIS phase — file a follow-up task and skip. Do not attempt content rewrite here.
+      - After all actions: every remaining skill must have Gotchas section, exemplar: field, Last Reviewed: 2026-05-14 stamp
+      - Update .claude/CHANGELOG.md with each significant change
+      - **🚨 Cross-reference integrity (F-15.2)**: BEFORE any split/merge/remove action, consult `notes/inventory/skill-cross-refs.json` to identify every reference to the source skill. AFTER the action, update EVERY referencing surface so no broken references remain. Surfaces to update: source-skill SKILL.md callers, root CLAUDE.md trigger map, settings.json `Skill(*)` patterns, project CLAUDE.md "Applicable Skills" sections, docs/ references, task POML files. Run `scripts/quality/Find-SkillReferenceDrift.ps1` after each batch of refinements to verify zero broken references.
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-SKILLS.md</file>
+      <file>.claude/skills/_template/SKILL.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>.claude/archive/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read AUDIT-FINDINGS-SKILLS.md; build action queue from ✅-marked rows only</step>
+    <step>Group actions: refine-in-place first (safest), then split, then merge, then remove (most destructive)</step>
+    <step>For each split/merge/remove action: BEFORE acting, query skill-cross-refs.json for all references to the source skill — record what will need updating</step>
+    <step>Execute each action; verify file state after each (git diff to confirm)</step>
+    <step>For each split/merge/remove: IMMEDIATELY after the action, update every referencing surface from the pre-action query</step>
+    <step>After every removal/merge, verify the destination exists in .claude/archive/2026-05-14/</step>
+    <step>After each BATCH of refinements (~10 actions), run scripts/quality/Find-SkillReferenceDrift.ps1 — must exit 0 (no broken refs). If it fails, fix before continuing.</step>
+    <step>For each skill modified or removed, append an entry to .claude/CHANGELOG.md under [Unreleased] Changed/Removed</step>
+    <step>Final pass: verify every remaining skill has Gotchas + exemplar + Last Reviewed</step>
+    <step>Update .claude/skills/INDEX.md to reflect the new set</step>
+    <step>Final cross-ref validation: scripts/quality/Find-SkillReferenceDrift.ps1 + scripts/quality/Validate-SkillReferences.ps1 — both must exit 0</step>
+    <step>Verification: start a fresh Claude Code session and run a representative task that should trigger one of the refined skills; verify it loads correctly</step>
+  </steps>
+
+  <outputs>
+    <output>Refined skills under .claude/skills/</output>
+    <output>Archived skills under .claude/archive/2026-05-14/skills/</output>
+    <output>Updated .claude/skills/INDEX.md</output>
+    <output>Updated .claude/CHANGELOG.md</output>
+    <output>projects/ai-procedure-quality-r1/notes/skill-refinement-summary.md (what changed, what archived)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every ✅-marked action in AUDIT-FINDINGS-SKILLS.md has been executed</criterion>
+    <criterion>Every ❌-marked action was NOT executed</criterion>
+    <criterion>All archived skills are in .claude/archive/2026-05-14/skills/, not deleted</criterion>
+    <criterion>Every remaining skill has Gotchas + exemplar + Last Reviewed</criterion>
+    <criterion>INDEX.md reflects new skill set</criterion>
+    <criterion>CHANGELOG.md updated</criterion>
+    <criterion>Verification session confirmed a refined skill loads correctly</criterion>
+  </acceptance-criteria>
+</task>

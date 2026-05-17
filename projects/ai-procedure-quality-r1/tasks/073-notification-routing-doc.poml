@@ -1,0 +1,43 @@
+<task id="073" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Write docs/procedures/github-notification-routing.md</title>
+    <phase>4b</phase>
+    <stream>documentation</stream>
+    <tags>github, notifications, procedure</tags>
+    <estimate>30min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>4b-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>none</dependencies>
+    <writes-to>docs/procedures/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Step-by-step doc for routing GitHub notifications from spaarke-dev org to dev@spaarke.com. This is a per-USER GitHub setting; cannot be enforced org-wide.</goal>
+    <context>User is currently getting CI/CD failure notifications on personal email. Wants them on dev@spaarke.com.</context>
+    <constraints>
+      - Per-user setting, not enforceable. Doc must clearly state this limitation.
+      - Cover: verifying dev@spaarke.com on a GitHub account, custom routing per organization, what to do when multiple maintainers want shared routing
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step>Document prerequisites: verify dev@spaarke.com as a secondary email on the user's GitHub account</step>
+    <step>Document the GitHub settings path: Settings → Notifications → Custom routing</step>
+    <step>Document the per-organization routing: add `spaarke-dev` → dev@spaarke.com</step>
+    <step>Document alternative: if dev@spaarke.com is a Microsoft 365 shared mailbox or distribution list, every maintainer adds it to their GitHub account and configures the same routing</step>
+    <step>Document the org-wide option (if available on the GitHub plan): Org Settings → Notifications → Default notification email</step>
+    <step>Add troubleshooting section: what happens if dev@spaarke.com bounces, how to re-verify, etc.</step>
+    <step>Cross-reference from notes/inventory/workflows.md and CHANGELOG.md</step>
+  </steps>
+
+  <outputs>
+    <output>docs/procedures/github-notification-routing.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Doc exists with step-by-step instructions</criterion>
+    <criterion>At least one user has completed the routing</criterion>
+    <criterion>Org-level option documented even if not yet feasible</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,56 @@
+<task id="066" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build scripts/quality/Find-SkillReferenceDrift.ps1 (7-surface drift detector)</title>
+    <phase>4a</phase>
+    <stream>infrastructure</stream>
+    <tags>validator, cross-references, skills, ci</tags>
+    <estimate>1-2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4a-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>006</dependencies>
+    <writes-to>scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Walk all 7 cross-reference surfaces; flag (a) references to skills that don't exist, (b) skills nobody references (orphans). Catches the silent breakage from a rename/split/merge that didn't propagate. &lt;10s.</goal>
+    <context>Per F-15.4. Complements Validate-SkillReferences.ps1 by checking the inverse: not "do this skill's references resolve?" but "do all references to this skill still find a target?". Catches the "task-execute split into two but project-pipeline still references the original" failure mode.</context>
+    <constraints>
+      - Runtime: &lt;10s
+      - Reads current state of all 7 surfaces (does NOT depend on skill-cross-refs.json from task 006 — it re-scans live so it stays accurate as skills change)
+      - The skill-cross-refs.json from task 006 is the baseline/expected state; this script measures drift from that baseline OR can run baseline-free
+      - Output: JSON + human-readable summary
+      - Exit non-zero on any broken reference (missing target). Orphans are WARN, not FAIL (some orphans are legitimate — skills used directly by users, not invoked by others).
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/skill-cross-refs.json</file>
+      <file>projects/ai-procedure-quality-r1/tasks/006-build-skill-crossref-map.poml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Re-scan all 7 cross-reference surfaces (same logic as task 006 but live)</step>
+    <step>Build a current "references" graph: each edge is (source-file, source-surface, target-skill-name)</step>
+    <step>Get list of currently-existing skills from .claude/skills/*/SKILL.md</step>
+    <step>For each edge: if target-skill-name not in existing-skills → BROKEN-REF</step>
+    <step>For each existing skill: if no edges point to it → ORPHAN (warn)</step>
+    <step>Compare against skill-cross-refs.json baseline (if exists): flag newly-broken refs since baseline</step>
+    <step>Write .claude/QUALITY-CROSSREF-LAST.json with: broken-refs (FAIL), orphans (WARN), summary counts</step>
+    <step>Exit non-zero only on broken-refs. Orphans never fail.</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Find-SkillReferenceDrift.ps1</output>
+    <output>.claude/QUALITY-CROSSREF-LAST.json (output produced on each run)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>&lt;10s runtime</criterion>
+    <criterion>Deliberately-renamed skill (without updating callers) returns non-zero with broken-ref details</criterion>
+    <criterion>Orphan detection works (warn-level, not fail-level)</criterion>
+    <criterion>Baseline diff works when skill-cross-refs.json is present</criterion>
+  </acceptance-criteria>
+</task>

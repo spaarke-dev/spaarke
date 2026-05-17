@@ -1,0 +1,63 @@
+<task id="006" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build skill cross-reference map (7 reference surfaces)</title>
+    <phase>0</phase>
+    <stream>inventory</stream>
+    <tags>inventory, cross-references, skills, baseline</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001, 002, 003, 004</dependencies>
+    <writes-to>projects/ai-procedure-quality-r1/notes/inventory/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Produce a complete who-references-whom map across all 7 cross-reference surfaces. This map is the required input to every destructive Phase 2b action (split / merge / remove) so refinements don't leave dangling references.</goal>
+    <context>Per F-15.2. Without this map, splitting `task-execute` into multiple skills could silently break `/project-pipeline` and every project CLAUDE.md. The map covers every surface where skills are named.</context>
+    <constraints>READ ONLY. Output to notes/inventory/, not into .claude/.</constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/skills.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/claudemd.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/skills/INDEX.md</file>
+      <file>.claude/settings.json</file>
+      <file>.claude/settings.local.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Build list of all skill names from notes/inventory/skills.md</step>
+    <step>For each skill, scan the 7 cross-reference surfaces:
+      (1) **Skill → skill invocations** — grep all SKILL.md bodies for "invoke X", "calls X skill", "uses X skill"
+      (2) **Skill → skill see-also** — grep References / "See also" / "Related" sections in SKILL.md
+      (3) **Root CLAUDE.md trigger map** — parse trigger-phrase table in root CLAUDE.md
+      (4) **Settings.json / settings.local.json** — `Skill(*)` patterns, hook commands referencing skills
+      (5) **Project CLAUDE.md files** — every projects/*/CLAUDE.md "Applicable Skills" section
+      (6) **Docs references** — grep docs/ for "/skill-name" or "use the X skill"
+      (7) **Task POMLs** — grep projects/*/tasks/*.poml for skill names in `<knowledge>` / `<steps>` / `<tools>` sections
+    </step>
+    <step>For each skill, produce a row: name | invocations-from | see-also-from | trigger-map | settings | project-claudemd | docs | task-pomls (each cell lists the source paths)</step>
+    <step>Identify orphans: skills nobody invokes or references (candidates for "remove" recommendation)</step>
+    <step>Identify hubs: skills referenced by many others (changes to these have high blast radius — extra care in Phase 2b)</step>
+    <step>Output: projects/ai-procedure-quality-r1/notes/inventory/skill-cross-refs.md (human-readable matrix)</step>
+    <step>Output: projects/ai-procedure-quality-r1/notes/inventory/skill-cross-refs.json (machine-readable for Phase 4a validators 065 + 066 to consume)</step>
+    <step>Highlight findings: orphans, hubs, broken references (skill mentioned but doesn't exist)</step>
+  </steps>
+
+  <outputs>
+    <output>projects/ai-procedure-quality-r1/notes/inventory/skill-cross-refs.md</output>
+    <output>projects/ai-procedure-quality-r1/notes/inventory/skill-cross-refs.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 49 skills represented in the matrix</criterion>
+    <criterion>All 7 surfaces scanned for each skill</criterion>
+    <criterion>Orphans + hubs flagged explicitly</criterion>
+    <criterion>JSON format consumable by Validate-SkillReferences.ps1 and Find-SkillReferenceDrift.ps1</criterion>
+    <criterion>Any pre-existing broken references (skill mentioned but doesn't exist) are listed for fix in Phase 2b</criterion>
+  </acceptance-criteria>
+</task>

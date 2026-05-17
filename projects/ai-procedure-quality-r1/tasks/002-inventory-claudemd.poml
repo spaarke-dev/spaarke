@@ -1,0 +1,44 @@
+<task id="002" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Inventory root CLAUDE.md section-by-section</title>
+    <phase>0</phase>
+    <stream>inventory</stream>
+    <tags>inventory, claudemd, baseline</tags>
+    <estimate>30min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>Section-by-section inventory of the 1190-line root CLAUDE.md so Phase 3a can classify each section's disposition.</goal>
+    <context>CLAUDE.md is loaded into every session. Each line costs attention. Target after rewrite: <200 lines. This inventory drives the audit.</context>
+    <constraints>READ ONLY. Output to notes/inventory/, not into .claude/.</constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>projects/ai-procedure-quality-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Parse CLAUDE.md by H1/H2/H3 headers; produce a structured outline</step>
+    <step>For each section: capture section title, line count, content category (project-context / load-bearing-principle / location-pointer / workflow-instruction / deterministic-rule / duplication / stale)</step>
+    <step>Identify cross-references in each section and check that each path resolves (skill, ADR, doc, etc.)</step>
+    <step>Flag suspected duplications with content in .claude/skills/* (cross-check using skill inventory once available)</step>
+    <step>Write projects/ai-procedure-quality-r1/notes/inventory/claudemd.md</step>
+  </steps>
+
+  <outputs>
+    <output>projects/ai-procedure-quality-r1/notes/inventory/claudemd.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every section of CLAUDE.md is represented in the inventory</criterion>
+    <criterion>Line count totals match wc -l on the source file</criterion>
+    <criterion>All cross-references checked; broken ones flagged</criterion>
+  </acceptance-criteria>
+</task>

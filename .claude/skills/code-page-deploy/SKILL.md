@@ -4,12 +4,16 @@ tags: [deploy, code-page, webresource, dataverse, react]
 techStack: [react, typescript, webpack, vite, dataverse]
 appliesTo: ["**/code-pages/**", "**/solutions/**", "deploy code page", "deploy web resource", "build webresource", "deploy wizard"]
 alwaysApply: false
+exemplar: src/client/code-pages/DocumentRelationshipViewer/
+last-reviewed: 2026-05-16
 ---
 
 # Code Page Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Updated**: February 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: `DocumentRelationshipViewer` is the canonical Code Page (React 18 standalone dialog) — well-structured, current with the May 2026 auth bootstrap, and named throughout this skill's body.
 
 Build and deploy React Code Page web resources to Dataverse. Code Pages are standalone React 18 dialogs opened via `Xrm.Navigation.navigateTo` — they are NOT PCF controls.
 
@@ -291,6 +295,17 @@ When the user wants to deploy manually for fastest iteration:
 | [ADR-006](../../adr/ADR-006-pcf-over-webresources.md) | Two-tier architecture: PCF for forms, Code Pages for dialogs |
 | [ADR-021](../../adr/ADR-021-fluent-design-system.md) | Fluent UI v9, dark mode, semantic tokens |
 | [ADR-022](../../adr/ADR-022-pcf-platform-libraries.md) | Code Pages bundle React 18 (not platform-provided) |
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Deployed Code Page renders blank in Dataverse | Webpack build emitted dev-mode bundle without minification — Dataverse runtime hits unminified output that exceeds size limit silently | Always use `npm run build` (Vite/webpack production mode); verify bundle size < 5 MB. The `## Anti-Patterns (DO NOT)` section lists the symptom. |
+| Code Page loads but `Xrm.Navigation.navigateTo` returns 404 | Web resource was uploaded with wrong `name` attribute in solution XML | Verify the solution's `<WebResources>` block name matches the `navigateTo({webresourceName: ...})` call EXACTLY (case-sensitive). |
+| Auth bootstrap fails silently — page renders but `useAuth` returns null | Code Page missing the `@spaarke/auth` resolve+set+ensure sequence before render. See [.claude/patterns/auth/spaarke-auth-initialization.md](../../patterns/auth/spaarke-auth-initialization.md) | Follow the canonical bootstrap: `resolveRuntimeConfig()` → `setRuntimeConfig()` → `ensureAuthInitialized()` → `createRoot(...).render()`. The `DocumentRelationshipViewer` exemplar shows this verbatim. |
+| Build cache poisons new bundle (looks identical to previous deploy) | Webpack cache + Vite cache hold stale chunks; clear-build-cache step in workflow not run | The `🚨 Critical: Clear Build Cache Before EVERY Build` section is mandatory — never skip. If poisoned, `rm -rf node_modules/.cache dist out` then rebuild. |
 
 ---
 

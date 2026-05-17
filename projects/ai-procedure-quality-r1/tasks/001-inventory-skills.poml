@@ -1,0 +1,50 @@
+<task id="001" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Inventory all 49 skills under .claude/skills/</title>
+    <phase>0</phase>
+    <stream>inventory</stream>
+    <tags>inventory, skills, baseline</tags>
+    <estimate>1h</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <writes-to>projects/ai-procedure-quality-r1/notes/inventory/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Produce a complete inventory of every file under .claude/skills/ with metadata needed for the Phase 2a audit.</goal>
+    <context>Phase 0 is read-only baseline. No skills are modified here. The output drives the Phase 2a per-skill audit and the Phase 4a validators.</context>
+    <constraints>
+      - READ ONLY — do not modify any skill files
+      - Output goes to projects/ai-procedure-quality-r1/notes/inventory/skills.md (not into .claude/)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/INDEX.md</file>
+      <file>projects/ai-procedure-quality-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Walk .claude/skills/ recursively, collect every SKILL.md path</step>
+    <step>For each skill, parse frontmatter: name, description, tags, techStack, appliesTo, alwaysApply</step>
+    <step>Count body lines (after frontmatter); flag any over 200 lines</step>
+    <step>Detect presence of: "Gotchas" section, "Reference Exemplar" / `exemplar:` field, "Last Reviewed" stamp</step>
+    <step>Enumerate supporting subdirectories (references/, examples/, scripts/, etc.)</step>
+    <step>Write projects/ai-procedure-quality-r1/notes/inventory/skills.md with one row per skill: name, description-first-line, body-lines, has-gotchas, has-exemplar, has-stamp, subdirs</step>
+    <step>Summary at top: total skills, count over 200 lines, count missing Gotchas, count missing exemplar field</step>
+  </steps>
+
+  <outputs>
+    <output>projects/ai-procedure-quality-r1/notes/inventory/skills.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every SKILL.md under .claude/skills/ is represented</criterion>
+    <criterion>Summary counts are present and accurate</criterion>
+    <criterion>No .claude/ file was modified</criterion>
+  </acceptance-criteria>
+</task>

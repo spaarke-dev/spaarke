@@ -1,12 +1,19 @@
 ---
 description: Edit Dataverse ribbon customizations via solution export/import
+tags: [dataverse, ribbon, command-bar, customizations, solution-xml]
+techStack: [dataverse, pac-cli, xml]
+appliesTo: ["edit ribbon", "ribbon customization", "command bar", "RibbonDiffXml", "add ribbon button"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # Ribbon Edit
 
 > **Category**: Development
-> **Last Updated**: December 2025
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — normalized minimal frontmatter)
+> **Exemplar rationale**: Ribbon XML edits are project-specific and platform-dependent (RibbonDiffXml schema varies per entity).
 
 ---
 
@@ -412,3 +419,15 @@ Library="$webresource:prefix_ScriptName.js"
 - Reference `docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md` for HideCustomAction and subgrid details
 - Reference [RIBBON-COMMAND-BAR-MODIFICATIONS.md](../../../docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md) for templates
 - Reference [RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md](../../../docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md) for full button guide with examples
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Imported full SpaarkeCore solution for a ribbon tweak — replaced unrelated customizations | Operator skipped the "use a dedicated small solution" Critical Requirement | NEVER edit ribbons via SpaarkeCore. Create a small solution containing ONLY the target entity. Export, edit, import. |
+| Ribbon import succeeds but button doesn't appear | RibbonDiffXml syntax was accepted but failed to resolve a reference (e.g., wrong `LocId`, `LabelText`, or `CrmParameter`) | Validate CrmParameter values BEFORE import (reference table in this skill). Test in a sandbox environment first. |
+| Button appears but click does nothing | JavaScript function name in `CommandDefinition` doesn't match the actual function in the web resource | After import, hard-refresh browser. If still broken, verify the `FunctionName` attribute matches a real export in your JS web resource (case-sensitive). |
+| Ribbon edit lost on next `pac solution export` | Edits were made in `Customizations.xml` AFTER export but never re-imported | Treat the imported solution as the source of truth. Re-export AFTER importing edits if you want to capture them in your solution folder. |
+| Solution import fails with "RibbonDiffXml syntax error" | XML editor corrupted whitespace, comments, or encoded characters | Use a validating XML editor. Verify well-formedness with `xmllint --noout` before import. |
