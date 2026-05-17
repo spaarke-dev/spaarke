@@ -532,13 +532,114 @@ The orchestrator is always free to ADD capabilities beyond what a playbook decla
 | Per-turn tool injection | Rebuild tool list based on active set before each LLM call | Extend: `SprkChatAgentFactory.BuildToolsAsync` |
 | Playbook auto-detection | Orchestrator matches intent to known playbook patterns | Extend: `AgentServiceRoutingMiddleware` or new |
 
-### 8.10 Open Design Questions
+### 8.10 Latency Budget & Optimization
+
+> Reference: [Azure OpenAI Performance & Latency](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/latency)
+
+**The latency formula:**
+```
+TTLT = TTFT + (TBT × Tokens Generated)
+
+TTFT = Time to First Token (driven by prompt size: system prompt + tools + history)
+TBT  = Time Between Tokens (~15-30ms per token for GPT-4o)
+TTLT = Time to Last Token (total end-to-end response time)
+```
+
+Prompt size directly impacts TTFT. Every token in the system prompt (capability index, tool schemas, conversation history) adds to the time before the user sees the first word.
+
+#### Prompt Token Budget
+
+| Component | Budget | Notes |
+|-----------|--------|-------|
+| Capability index | max 500 tokens | ~30 capabilities × 1 line |
+| Active tool schemas | max 3000 tokens | Limits to 6-8 active tools |
+| System prompt + skills | max 1500 tokens | Persona, behavioral instructions |
+| Conversation history | max 4000 tokens | Summarize beyond this threshold |
+| **Total prompt budget** | **~9000 tokens** | Keeps TTFT under ~1s on GPT-4o |
+
+#### Expected Latency Per Turn Type
+
+| Turn Type | Expected Latency | What Happens |
+|-----------|-----------------|--------------|
+| Simple conversational response | 1-3s | Single LLM call, no tool invocation |
+| Tool call + response | 2-5s | LLM call → tool execution → generation |
+| Capability activation (double-call) | 4-8s | LLM decides activation → tools change → second LLM call with new tools |
+| Playbook load (pre-composed) | 1-3s | Single call — tools pre-loaded, no activation round-trip |
+
+**The double-call penalty is the biggest latency risk in this architecture.** When the orchestrator's current tools don't cover the user's request, it must: (1) decide which capabilities to activate, (2) update the tool set, (3) make a second LLM call with the new tools. This doubles latency on those turns.
+
+#### Mitigation Strategy: Three-Layer Routing
+
+To minimize double-calls, use a three-layer approach where most routing happens WITHOUT an LLM round-trip:
+
+```
+User message arrives
+         │
+         ▼
+Layer 1: KEYWORD CLASSIFIER (0ms, no LLM)
+  • Extends existing AgentServiceRoutingMiddleware
+  • Pattern-matches against capability descriptions
+  • Handles ~60-70% of turns (common patterns)
+  • If confident match → activate tools before LLM call
+  • If uncertain → pass to Layer 2
+         │
+         ▼
+Layer 2: GPT-4o-MINI PRE-CHECK (200-500ms, cheap model)
+  • Lightweight "which capabilities does this need?" call
+  • Receives only: user message + capability index (~600 tokens prompt)
+  • Returns: list of needed capability names
+  • Handles ~20-25% of turns (novel but classifiable)
+  • If classified → activate tools before main LLM call
+  • If ambiguous → pass to Layer 3
+         │
+         ▼
+Layer 3: MAIN MODEL SELF-ACTIVATION (full LLM, rare)
+  • GPT-4o with activate_capabilities meta-tool
+  • Only when Layers 1-2 can't determine needs
+  • Handles ~5-10% of turns (truly novel requests)
+  • This is the double-call path — acceptable at low frequency
+```
+
+**Result:** ~90% of turns avoid the double-call penalty entirely. The 200-500ms GPT-4o-mini pre-check on Layer 2 is far cheaper and faster than a full GPT-4o round-trip.
+
+#### Model Tiering (R2 Scope)
+
+| Task | Model | Rationale |
+|------|-------|-----------|
+| Keyword routing (Layer 1) | No LLM — regex/keyword | 0ms, handles common patterns |
+| Capability pre-classification (Layer 2) | GPT-4o-mini | Fast (~200ms), cheap, sufficient for classification |
+| Session summarization (at token threshold) | GPT-4o-mini | Summarization doesn't need GPT-4o quality |
+| Main conversation + tool calling | GPT-4o | Full capability needed for complex reasoning |
+
+#### Additional Optimizations
+
+| Optimization | Impact | Implementation |
+|-------------|--------|----------------|
+| **Streaming (already in place)** | Reduces perceived TTFT to near-zero | SSE streaming from first token |
+| **Set max_tokens conservatively** | Azure reserves compute for full max_tokens | Set per-call based on expected response type |
+| **Separate deployments by workload** | Prevents short calls waiting on long completions | Routing layer → different Azure OpenAI deployments |
+| **Playbooks as latency accelerators** | Skip activation entirely for known workflows | Pre-composed bundles load in single call |
+| **Deactivate unused tools** | Smaller prompt = faster TTFT | Auto-deactivate after 3 turns without use |
+| **Summarize history proactively** | Cap history growth | GPT-4o-mini summary at 15 messages or 4000 tokens |
+
+#### Monitoring (Azure Monitor Metrics)
+
+| Metric | What It Tells Us | Alert Threshold |
+|--------|-----------------|-----------------|
+| Time to Response (TTFT) | First-token latency — prompt size impact | >1.5s = prompt too large |
+| Time Between Tokens (TBT) | Generation throughput — deployment load | >40ms = capacity pressure |
+| Time to Last Byte (TTLT) | Full response time | Always pair with token count |
+| Generated Completion Tokens | Output volume | TTLT rise without token rise = real regression |
+| Processed Prompt Tokens | Input volume — tracks prompt bloat | Trend >9000 = budget exceeded |
+
+### 8.11 Open Design Questions
 
 1. **Manifest refresh frequency** — 15 min polling vs. webhook on Dataverse publish vs. deployment-only?
-2. **Maximum active capabilities per turn** — 8? 12? What's the quality cliff for the LLM?
-3. **Deactivation heuristics** — After N turns without using a tool, auto-deactivate? Or only on explicit orchestrator decision?
+2. **Maximum active capabilities per turn** — 6-8 recommended to stay within prompt budget. Validate with testing.
+3. **Deactivation heuristics** — Auto-deactivate after 3 turns without use? Or only on explicit orchestrator decision?
 4. **Knowledge scope transitions** — When RAG scope changes mid-conversation, do earlier retrieved chunks stay in context or get invalidated?
 5. **Playbook guardrail enforcement** — How does a regulated playbook prevent the orchestrator from adding capabilities? A simple boolean `exclusive` flag?
+6. **Layer 2 model deployment** — Separate Azure OpenAI deployment for GPT-4o-mini pre-checks? Or share with summarization?
 
 ---
 
@@ -562,7 +663,7 @@ The orchestrator is always free to ADD capabilities beyond what a playbook decla
 | 3 | Workspace tab limit | **3 tabs maximum** |
 | 4 | Playbook switching | **Orchestrator handles dynamically** (Section 8) |
 | 5 | Collaboration | **Out of scope for R2** (future) |
-| 6 | Orchestrator model | **Same LLM instance** as chat agent for simplicity; design for future ability to use a cheaper model if feasible (cost optimization) |
+| 6 | Orchestrator model | **Three-layer routing**: (1) keyword classifier, no LLM; (2) GPT-4o-mini pre-check for classification; (3) GPT-4o main model with self-activation as fallback. Avoids double-call penalty on ~90% of turns. See Section 8.10. |
 | 7 | Capability cost gating | **No explicit confirmation gate** — orchestrator activates as needed without asking user permission |
 | 8 | Tenant customization | **Yes — simple on/off per capability at tenant level**; keep implementation lightweight (boolean flags, not complex rule engine) |
 
@@ -575,6 +676,9 @@ The orchestrator is always free to ADD capabilities beyond what a playbook decla
 | Area | Work Items |
 |------|-----------|
 | **Dynamic capability orchestration** | CapabilityManifest, per-turn tool injection, activate_capabilities meta-tool, orchestrator system prompt |
+| **Three-layer routing** | Keyword classifier (Layer 1), GPT-4o-mini pre-check (Layer 2), GPT-4o self-activation fallback (Layer 3) |
+| **Model tiering** | GPT-4o-mini deployment for classification + summarization; GPT-4o for main conversation |
+| **Latency monitoring** | Azure Monitor metrics: TTFT, TBT, TTLT, prompt token tracking, alert thresholds |
 | **Capability library** | Define all actions/tools/skills/knowledge as catalog entries in Dataverse; build manifest refresh |
 | **Hybrid search** | DataverseQueryTools (OData), spaarke-records-index sync pipeline |
 | **Adaptive Context pane** | ContextWidgetRegistry, playbook gallery → entity info → sources → progress |
@@ -586,6 +690,7 @@ The orchestrator is always free to ADD capabilities beyond what a playbook decla
 | **Embedded wizards** | Adapt WizardDialog for Workspace rendering |
 | **Per-tool error isolation** | Catch per-tool in SprkChatAgentFactory.ResolveTools |
 | **Pane interaction protocol** | Formal SSE event contract (workspace_widget, context_update, etc.) |
+| **Session summarization** | GPT-4o-mini auto-summarization at 15 messages or 4000 history tokens; keeps prompt within budget |
 
 ### R3 Scope (Future — Distribution + Polish)
 
@@ -596,7 +701,6 @@ The orchestrator is always free to ADD capabilities beyond what a playbook decla
 | Command palette | Ctrl+K overlay for power users |
 | Adaptive complexity | Guided vs. expert mode based on usage |
 | Notification integration | Background AI process completion alerts |
-| LLM summarization | Automatic conversation condensation at token threshold |
 
 ---
 

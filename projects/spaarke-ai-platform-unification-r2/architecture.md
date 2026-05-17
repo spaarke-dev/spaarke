@@ -330,11 +330,110 @@ SprkChat SSE handler routes event by type
 
 ---
 
-## 6. Infrastructure Dependencies
+## 6. Latency Architecture
+
+### 6.1 The Three-Layer Routing Pipeline
+
+The core latency optimization: avoid LLM round-trips for capability routing wherever possible.
+
+```
+User message arrives at BFF
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 1: KEYWORD CLASSIFIER (0ms, no LLM)                 │
+│                                                             │
+│  • Extends AgentServiceRoutingMiddleware (already exists)   │
+│  • Pattern matches user message against capability          │
+│    descriptions in CapabilityManifest                       │
+│  • Confidence threshold: if score > 0.8, activate directly  │
+│  • Handles: ~60-70% of turns                               │
+│                                                             │
+│  IF confident → activate capabilities → single LLM call    │
+│  IF uncertain → pass to Layer 2                             │
+└───────────────────────────────┬─────────────────────────────┘
+                                │ (uncertain)
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 2: GPT-4o-MINI PRE-CHECK (200-500ms)                │
+│                                                             │
+│  Prompt (~600 tokens):                                      │
+│    "Given this user message and capability catalog,         │
+│     which capabilities are needed?"                         │
+│    + user message                                           │
+│    + capability index (names + descriptions only)           │
+│                                                             │
+│  Returns: ["CodeInterpreter", "QueryEntities"]              │
+│  Handles: ~20-25% of turns                                  │
+│                                                             │
+│  IF classified → activate capabilities → single LLM call   │
+│  IF ambiguous → pass to Layer 3                             │
+└───────────────────────────────┬─────────────────────────────┘
+                                │ (ambiguous, rare)
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 3: GPT-4o SELF-ACTIVATION (full double-call)         │
+│                                                             │
+│  • Main model receives activate_capabilities as a tool      │
+│  • Decides on its own what to activate                      │
+│  • Requires second LLM call after activation                │
+│  • Handles: ~5-10% of turns (truly novel requests)          │
+│                                                             │
+│  This is the EXPENSIVE path — acceptable at low frequency   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 Latency Budget
+
+```
+TTLT = TTFT + (TBT × Tokens Generated)
+
+Target prompt budget: ~9000 tokens total
+  ├── Capability index:       500 tokens (always present)
+  ├── Active tool schemas:  3000 tokens (6-8 tools max)
+  ├── System prompt/skills: 1500 tokens
+  └── Conversation history: 4000 tokens (summarize beyond)
+
+Expected TTFT at 9000 tokens (GPT-4o): ~800ms-1.2s
+Expected TBT (GPT-4o): ~20-30ms per token
+```
+
+### 6.3 Model Deployment Map
+
+```
+┌──────────────────────────────────────────────────┐
+│  Azure OpenAI Resource: spaarke-openai-dev        │
+│                                                  │
+│  Deployment: "gpt-4o" (main)                     │
+│    • Main conversation + tool calling            │
+│    • ~9000 token prompts                         │
+│    • Streaming enabled                           │
+│                                                  │
+│  Deployment: "gpt-4o-mini" (utility)             │
+│    • Layer 2 capability classification (~600 tok)│
+│    • Session summarization (~4000 tok input)     │
+│    • Separated to avoid workload mixing          │
+│    • Lower cost, lower latency                   │
+└──────────────────────────────────────────────────┘
+```
+
+### 6.4 Prompt Token Management
+
+| Mechanism | Trigger | Action |
+|-----------|---------|--------|
+| History summarization | >15 messages OR >4000 history tokens | GPT-4o-mini summarizes older messages; keep last 10 verbatim |
+| Tool deactivation | Tool unused for 3 consecutive turns | Remove schema from active set (saves ~400 tokens/tool) |
+| Playbook pre-load | User selects playbook OR Layer 1 matches | Load all playbook tools at once (no incremental activation) |
+| max_tokens tuning | Per response type | Conversational: 500, tool-heavy: 1000, analysis: 2000 |
+
+---
+
+## 7. Infrastructure Dependencies
 
 | Service | Purpose | Exists Today? | R2 Changes |
 |---------|---------|---------------|------------|
-| Azure OpenAI (gpt-4o) | Chat completions + tool calling | Yes | Per-turn dynamic tool list |
+| Azure OpenAI (gpt-4o) | Main conversation + tool calling | Yes | Per-turn dynamic tool list |
+| Azure OpenAI (gpt-4o-mini) | Capability pre-classification + summarization | **Deployment exists, new usage** | Layer 2 routing + session summarization |
 | Redis | Hot session cache | Yes | Add active capabilities field |
 | Azure Cosmos DB | Work history + prompt library | **No — NEW** | Provision serverless instance |
 | Azure AI Search | Document + record discovery | Yes | Fix spaarke-records-index sync |
@@ -352,7 +451,7 @@ SprkChat SSE handler routes event by type
 
 ---
 
-## 7. Security Boundaries
+## 8. Security Boundaries
 
 | Boundary | Enforcement | Notes |
 |----------|-------------|-------|
@@ -367,7 +466,7 @@ SprkChat SSE handler routes event by type
 
 ---
 
-## 8. Component Dependency Graph
+## 9. Component Dependency Graph
 
 ```
                     CapabilityManifest
@@ -403,7 +502,7 @@ SprkChat SSE handler routes event by type
 
 ---
 
-## 9. Completeness Checklist
+## 10. Completeness Checklist
 
 | Requirement | Component | Status |
 |-------------|-----------|--------|
@@ -419,6 +518,10 @@ SprkChat SSE handler routes event by type
 | Sessions restore quickly (<500ms) | Cosmos read + LLM summary + widget snapshot | Designed |
 | Prompt library for reuse | Cosmos DB storage, 4-tier ownership | Designed |
 | Capability catalog stays current | ManifestRefreshService (startup + periodic) | Designed |
+| Latency stays acceptable (<3s typical) | Three-layer routing avoids double-call on ~90% of turns | Designed |
+| Model tiering reduces cost + latency | GPT-4o-mini for classification + summarization | Designed |
+| Prompt stays within budget (~9000 tokens) | Token budget per component + auto-summarization + tool deactivation | Designed |
+| Latency is monitored | Azure Monitor: TTFT, TBT, TTLT, prompt token tracking | Designed |
 
 ### Potential Gaps / Items to Confirm
 
@@ -427,9 +530,11 @@ SprkChat SSE handler routes event by type
 | 1 | **Cosmos DB provisioning** — who provisions and when? | Blocks session persistence development |
 | 2 | **spaarke-records-index sync** — how to trigger initial population? | DataverseQueryTools can work without it (OData direct), but discovery is degraded |
 | 3 | **Widget state serialization** — do all R1 widgets already support serialize/restore? | May need widget updates for session restore |
-| 4 | **LLM summarization model** — gpt-4o-mini for cost, or same gpt-4o? | Cost vs quality tradeoff for summarization |
-| 5 | **Deactivation heuristics** — when does the orchestrator unload unused tools? | Context bloat if tools accumulate without cleanup |
-| 6 | **Multi-turn capability activation** — does activation cost an extra LLM round-trip? | Latency impact (one extra call when tools change) |
+| 4 | ~~**LLM summarization model**~~ — **Resolved**: GPT-4o-mini (see design.md Section 8.10) | — |
+| 5 | **Deactivation heuristics** — auto-deactivate after 3 turns without use (proposed). Validate with testing. | Context bloat if tools accumulate without cleanup |
+| 6 | ~~**Multi-turn capability activation**~~ — **Resolved**: Three-layer routing avoids double-call on ~90% of turns (see Section 6) | — |
+| 7 | **Layer 2 latency validation** — is GPT-4o-mini classification truly 200-500ms in practice? Need to benchmark. | If slower, Layer 1 keyword coverage must be broader |
+| 8 | **Separate Azure OpenAI deployments** — should GPT-4o-mini have its own deployment to avoid workload mixing? (Microsoft recommends separation) | Latency degradation from mixed workloads |
 
 ---
 
