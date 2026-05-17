@@ -45,7 +45,7 @@ ELSE IF user provides JPS content in conversation:
   PARSE content directly
 ELSE:
   ASK user for file path or content
-  SUGGEST: "Look in projects/ai-json-prompt-schema-system/notes/jps-conversions/"
+  SUGGEST: "Look in .claude/skills/jps-action-create/examples/"
 ```
 
 ### Step 2: JSON Syntax Validation
@@ -188,7 +188,7 @@ Generate validation report.
 
 **Input:**
 ```
-User: "validate JPS projects/ai-json-prompt-schema-system/notes/jps-conversions/document-profiler.json"
+User: "validate JPS .claude/skills/jps-action-create/examples/document-profiler.json"
 ```
 
 **Output:**
@@ -247,7 +247,7 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 
 | Situation | Response |
 |-----------|----------|
-| File not found | Check path, suggest jps-conversions/ directory |
+| File not found | Check path, suggest examples/ directory |
 | Binary/non-text file | Report error, ask for correct file |
 | Valid JSON but not JPS | Explain JPS requirements, offer to convert |
 | All checks pass | Confirm ready for deployment |

@@ -1,12 +1,20 @@
-# jps-playbook-design
-
 ---
-description: Design and deploy a complete AI playbook — from requirements through Dataverse deployment
+description: Design and deploy a complete AI playbook — from requirements through Dataverse deployment, orchestrating multi-node analysis with JPS-defined actions
 tags: [ai, jps, playbook, architecture, design, deployment]
 techStack: [azure-openai, aspnet-core, dataverse]
 appliesTo: ["design playbook", "create playbook", "new AI playbook", "playbook architecture"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-17
 ---
+
+# jps-playbook-design
+
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — `leave-alone-justified` on body length per dereferencing-reliability concern; flipped frontmatter above H1; added Failure Modes & Recovery)
+> **Exemplar rationale**: Playbook designs are project-specific; the JPS schema + Dataverse table model is the contract.
+> **Justified length** (516 lines): Tier 2 orchestrator chaining `jps-action-create`, `jps-scope-refresh`, `jps-validate`. The 13-step design procedure + scope/model selection logic + ASCII canvas layout must remain inline for the agent executing the design to follow accurately. Splitting risks dereferencing reliability.
+> **Drift note**: The singular `sprk_analysisaction` (logical name) vs plural `sprk_analysisactions` (Web API collection endpoint) — both are correct in their respective contexts. This skill uses plural in OData URLs; `jps-scope-refresh` uses singular as the logical table name.
 
 ## Purpose
 
@@ -51,7 +59,7 @@ LOAD knowledge files:
   - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference, playbook design patterns, scope catalog, model selection)
 
 LOAD example JPS files for pattern matching:
-  - projects/ai-json-prompt-schema-system/notes/jps-conversions/ (all available)
+  - .claude/skills/jps-action-create/examples/ (all available)
 
 PARSE scope-model-index.json:
   - actions[]: Available analysis actions with document types and tags
@@ -398,7 +406,7 @@ INFORM user:
 
 - Playbook designs stored in `projects/{project}/notes/playbook-{name}.md`
 - Playbook definitions stored in `projects/{project}/notes/playbook-definitions/{playbook-name}.json`
-- JPS files stored in `projects/ai-json-prompt-schema-system/notes/jps-conversions/`
+- JPS files stored in `.claude/skills/jps-action-create/examples/`
 - Use consistent `outputVariable` names across the playbook
 - $choices values must use a supported prefix: `lookup:`, `optionset:`, `multiselect:`, `boolean:` (Dataverse-resolved), or `downstream:` (routing). Downstream routing values must exactly match downstream node ConfigJson fieldMappings
 - Shared scopes use $ref (never inline the same content in multiple JPS files)
@@ -503,7 +511,7 @@ Next steps:
 - Always load `scope-model-index.json` in Step 2 — it is the single source of truth for available scopes and model rules
 - Use AskUserQuestion to confirm routing logic before generating $choices
 - Always trace variable flow end-to-end — ensure every `downstream:` $choices has a matching source node, and every `lookup:`/`optionset:`/`multiselect:`/`boolean:` $choices references a valid Dataverse entity and field
-- Reuse existing JPS definitions whenever possible (check jps-conversions/ folder first)
+- Reuse existing JPS definitions whenever possible (check examples/ folder first)
 - Keep playbooks under 8 nodes — larger workflows should be split into sub-playbooks
 - When selecting scopes (Step 4), prefer exact `documentTypes` matches over broad tag matches
 - Do not overload nodes with skills — 2-4 skills per node is the sweet spot
@@ -514,3 +522,16 @@ Next steps:
 - If a scope code is in the index but missing from Dataverse, offer to remove it from the definition or seed the record first
 - Model selection should optimize for cost — use gpt-4o-mini for classification and simple summarization, reserve gpt-4o for deep analysis and legal reasoning
 - Canvas auto-layout: keep 300px horizontal spacing and 150px vertical spacing to avoid overlap
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Designed playbook references scope codes that don't exist in Dataverse | `scope-model-index.json` stale OR designer invented codes | Step 9.5 invokes `jps-scope-refresh` to re-sync. If scope still missing AFTER refresh, scope record was never created — invoke `jps-action-create`. |
+| Deploy-Playbook.ps1 fails pre-flight with "missing model deployment" | Azure OpenAI deployment doesn't exist in target environment | Verify deployments via Azure Portal OR `az cognitiveservices account deployment list`. Either add the deployment OR change the playbook to use an existing model. |
+| Cost runaway — playbook uses gpt-4o for every node | Model selection in Step 5 was lazy ("just use the most capable") | Apply cost optimization: gpt-4o-mini for classification/summarization (~10x cheaper); reserve gpt-4o for deep analysis. Step 5's model-selection logic enforces this. |
+| Canvas layout has overlapping nodes | Auto-layout spacing not followed (300px H, 150px V) | Re-run auto-layout step. If still overlapping, manually adjust positions in canvas JSON. |
+| Playbook deploys but execution errors out at validation | `jps-validate` step in design wasn't run before deploy | ALWAYS run `jps-validate` against each JPS definition BEFORE Deploy-Playbook.ps1. Catches schema errors early. |
+| Scope `sprk_analysisaction` vs `sprk_analysisactions` ambiguity | Logical name (singular) vs Web API endpoint (plural) | Both correct in context. Logical name in references to the table; plural in OData URLs. Verify via `mcp__dataverse__list_tables`. |
