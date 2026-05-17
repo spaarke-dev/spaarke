@@ -1,12 +1,12 @@
 # AI Azure Resources
 
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current (config section name corrected: `Ai:*` → `DocumentIntelligence:*`)
+> **Last Updated**: 2026-05-17
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: spaarke-ai-platform-unification-r2 (AIPU2-003)
+> **Status**: Current — Content Safety resource added (R2 safety perimeter)
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
-> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16), Semantic Search R1 (2026-01-20), Config keys re-verified (2026-04-05)
+> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16), Semantic Search R1 (2026-01-20), Config keys re-verified (2026-04-05), Content Safety provisioned (2026-05-17)
 
 ---
 
@@ -17,6 +17,7 @@
 | Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
 | Document Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
 | Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
+| Azure AI Content Safety | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
 | AI Foundry Studio | [Portal Link](https://ai.azure.com) |
 
 ---
@@ -36,11 +37,29 @@
 
 | Deployment Name | Model | Version | Capacity | Purpose |
 |-----------------|-------|---------|----------|---------|
-| `gpt-4o-mini` | gpt-4o-mini | 2024-07-18 | 10 TPM | Document analysis, chat |
-| `text-embedding-3-small` | text-embedding-3-small | 1 | 120 TPM | Vector embeddings (legacy 1536 dims) - **DEPRECATED** |
-| `text-embedding-3-large` | text-embedding-3-large | 1 | 120 TPM | Vector embeddings for RAG (3072 dims) - **PRIMARY** |
+| `gpt-4o` | gpt-4o | 2024-08-06 | 150K TPM | Complex reasoning, document analysis, scope generation, default fallback |
+| `gpt-4o-mini` | gpt-4o-mini | 2024-07-18 | 200K TPM | General-purpose classification, tool handlers, summarization, explanation |
+| `spaarke-gpt4o-mini` | gpt-4o-mini | 2024-07-18 | 30K TPM | Layer 2 classification workloads: capability routing, safety pre-checks, feedback triage, session summarization (~4K token inputs) — isolated from general mini usage per Microsoft workload-mixing guidance |
+| `text-embedding-3-small` | text-embedding-3-small | 1 | 120K TPM | Vector embeddings (legacy 1536 dims) - **DEPRECATED** |
+| `text-embedding-3-large` | text-embedding-3-large | 1 | 350K TPM | Vector embeddings for RAG (3072 dims) - **PRIMARY** |
 
 **MIGRATION COMPLETE (2026-01-12)**: All RAG documents migrated to 3072-dim vectors via `text-embedding-3-large`. The 1536-dim fields remain for backward compatibility but new indexing uses 3072-dim exclusively.
+
+**R2 DEPLOYMENT (2026-05-17, AIPU2-004)**: `spaarke-gpt4o-mini` added as a dedicated Layer 2 classification deployment. Isolated from the general `gpt-4o-mini` deployment to prevent workload mixing and enable independent TPM accounting for classification traffic.
+
+### Create spaarke-gpt4o-mini Deployment (AIPU2-004)
+
+```bash
+az cognitiveservices account deployment create \
+  --name spaarke-openai-dev \
+  --resource-group spe-infrastructure-westus2 \
+  --deployment-name spaarke-gpt4o-mini \
+  --model-name gpt-4o-mini \
+  --model-version "2024-07-18" \
+  --model-format OpenAI \
+  --sku-capacity 30 \
+  --sku-name Standard
+```
 
 ### Create text-embedding-3-large Deployment
 
@@ -61,7 +80,9 @@ az cognitiveservices account deployment create \
 | Limit Type | Value |
 |------------|-------|
 | Requests per minute | 100 |
-| Tokens per minute | 10,000 (gpt-4o-mini) |
+| Tokens per minute (gpt-4o) | 150,000 |
+| Tokens per minute (gpt-4o-mini) | 200,000 |
+| Tokens per minute (spaarke-gpt4o-mini) | 30,000 — classification workload only |
 
 ---
 
@@ -77,6 +98,7 @@ Secrets are stored in Key Vault: `spaarke-spekvcert` (SharePointEmbedded resourc
 | `ai-docintel-key` | Document Intelligence API key (Key1) | 2025-12-09 |
 | `rag-api-key` | RAG indexing API key for `/api/ai/rag/enqueue-indexing` | 2026-01-17 |
 | `servicebus-connection-string` | Azure Service Bus connection string | 2026-01-17 |
+| `ContentSafety--ApiKey` | Azure AI Content Safety API key (Key1) — R2 safety perimeter | 2026-05-17 |
 
 ### Key Vault Access
 
@@ -138,6 +160,102 @@ az cognitiveservices account keys regenerate \
   --name spaarke-openai-dev \
   --resource-group spe-infrastructure-westus2 \
   --key-name key1
+```
+
+---
+
+## Azure AI Content Safety
+
+> **Added**: 2026-05-17 — AIPU2-003 (Spaarke AI Platform Unification R2)
+> **Purpose**: Safety perimeter for AI inputs and outputs — Prompt Shields (jailbreak + indirect attack detection) and Groundedness Detection (RAG answer validation).
+
+| Property | Value |
+|----------|-------|
+| **Resource Name** | `spaarke-contentsafety-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **SKU** | S0 (Standard) |
+| **Endpoint** | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
+| **Key Vault Secret** | `ContentSafety--ApiKey` in `spaarke-spekvcert` |
+| **Bicep Module** | `infrastructure/bicep/modules/content-safety.bicep` |
+| **Verify Script** | `scripts/Verify-ContentSafetyResource.ps1` |
+
+### API Capabilities
+
+| API | Endpoint Path | API Version | Status |
+|-----|--------------|-------------|--------|
+| Prompt Shields | `/contentsafety/text:shieldPrompt` | `2024-09-01` | Verified |
+| Groundedness Detection | `/contentsafety/text:detectGroundedness` | `2024-09-15-preview` | Verified |
+
+**Prompt Shields** detects two attack classes:
+- `userPromptAttack` — direct jailbreak attempts in the user turn
+- `documentAttack` — indirect prompt injection embedded in retrieved documents (RAG poisoning)
+
+**Groundedness Detection** validates whether an AI-generated answer is supported by the provided grounding sources. Used by the R2 retroactive annotation pipeline to flag ungrounded citations before they are streamed to the client.
+
+### Regional Requirement
+
+Prompt Shields and Groundedness Detection require **West US 2** or **East US 2** (as of 2026). Do not move this resource to another region without first confirming API availability.
+
+### App Service Configuration
+
+Add these settings to `spe-api-dev-67e2xz` for the `AiSafety` configuration section (bound by `AiSafetyOptions` in AIPU2-006):
+
+| Setting | Value |
+|---------|-------|
+| `AiSafety__Enabled` | `true` |
+| `AiSafety__Endpoint` | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
+| `AiSafety__ApiKey` | `@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ContentSafety--ApiKey/)` |
+| `AiSafety__PromptShieldsApiVersion` | `2024-09-01` |
+| `AiSafety__GroundednessApiVersion` | `2024-09-15-preview` |
+
+### Azure CLI Commands
+
+```bash
+# View Content Safety resource
+az cognitiveservices account show \
+  --name spaarke-contentsafety-dev \
+  --resource-group spe-infrastructure-westus2
+
+# Get API keys
+az cognitiveservices account keys list \
+  --name spaarke-contentsafety-dev \
+  --resource-group spe-infrastructure-westus2
+
+# Rotate API key
+az cognitiveservices account keys regenerate \
+  --name spaarke-contentsafety-dev \
+  --resource-group spe-infrastructure-westus2 \
+  --key-name key1
+
+# Store key in Key Vault (use Verify-ContentSafetyResource.ps1 instead for full verification)
+az keyvault secret set \
+  --vault-name spaarke-spekvcert \
+  --name ContentSafety--ApiKey \
+  --value "$(az cognitiveservices account keys list \
+    --name spaarke-contentsafety-dev \
+    --resource-group spe-infrastructure-westus2 \
+    --query key1 --output tsv)"
+
+# One-off provisioning via Bicep module
+az deployment group create \
+  --resource-group spe-infrastructure-westus2 \
+  --template-file infrastructure/bicep/modules/content-safety.bicep \
+  --parameters contentSafetyName=spaarke-contentsafety-dev
+```
+
+### Verification
+
+Run the verification script to confirm both APIs are reachable and sync the key to Key Vault:
+
+```powershell
+./scripts/Verify-ContentSafetyResource.ps1
+```
+
+Run in read-only mode (no Key Vault write):
+
+```powershell
+./scripts/Verify-ContentSafetyResource.ps1 -SkipKeyVault
 ```
 
 ---

@@ -49,6 +49,20 @@ param deployments array = [
     capacity: 200 // Minimum 200 TPM for beta scale (~200 analyses/day)
   }
   {
+    // spaarke-gpt4o-mini: dedicated classification deployment (AIPU2-004)
+    // Separate from gpt-4o-mini to isolate Layer 2 classification workloads
+    // (capability routing, safety pre-checks, feedback triage) from
+    // general-purpose mini usage. Prevents workload mixing per Microsoft
+    // recommendation for stable TPM accounting.
+    // Use cases: ~600-token classification prompts, session summarization
+    //            (~4000 token inputs), intent routing, feedback triage.
+    // 30K TPM is sufficient for classification workload at dev scale.
+    name: 'spaarke-gpt4o-mini'
+    model: 'gpt-4o-mini'
+    version: '2024-07-18'
+    capacity: 30
+  }
+  {
     name: 'text-embedding-3-large'
     model: 'text-embedding-3-large'
     version: '1'

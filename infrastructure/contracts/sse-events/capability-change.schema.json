@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/contracts/sse-events/capability-change.schema.json",
+  "title": "capability_change SSE Event",
+  "description": "Notifies the client that the availability of a specific AI capability has changed. The capability status badge in the SparkAi shell updates in real time based on these events.",
+  "allOf": [
+    { "$ref": "_shared-defs.json#/$defs/SseEnvelope" }
+  ],
+  "required": ["type", "capability", "status"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "capability_change",
+      "description": "Discriminator — always 'capability_change'."
+    },
+    "capability": {
+      "type": "string",
+      "enum": ["search", "summarize", "cite", "memory", "safety", "playbook"],
+      "description": "The AI capability whose status changed."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["available", "degraded", "unavailable"],
+      "description": "New status of the capability."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Optional human-readable reason for the status change (shown in tooltip)."
+    },
+    "retryAfterSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Only present when status='degraded'. Approximate seconds until the capability is expected to recover (for client-side retry timers)."
+    }
+  },
+  "additionalProperties": true,
+  "if": {
+    "properties": { "status": { "const": "degraded" } }
+  },
+  "then": {
+    "properties": {
+      "retryAfterSeconds": { "type": "integer", "minimum": 1 }
+    }
+  }
+}

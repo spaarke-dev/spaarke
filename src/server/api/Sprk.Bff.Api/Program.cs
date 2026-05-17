@@ -67,6 +67,18 @@ builder.Services.AddGraphModule(builder.Configuration);
 // Document Intelligence, Analysis, Playbook, Builder, RAG, and Record Matching services
 builder.Services.AddAnalysisServicesModule(builder.Configuration);
 
+// AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
+builder.Services.AddAiSafetyModule(builder.Configuration);
+
+// AI Platform R2: multi-provider capabilities (search, summarization, citations)
+builder.Services.AddAiCapabilitiesModule(builder.Configuration);
+
+// AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
+builder.Services.AddAiPersistenceModule(builder.Configuration);
+
+// AI Platform R2: agent and chat extensions (ISprkAgent impls, orchestration)
+builder.Services.AddAiChatModule(builder.Configuration);
+
 // Email-to-Document conversion services
 builder.Services.AddEmailServicesModule(builder.Configuration);
 

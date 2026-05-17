@@ -186,16 +186,53 @@ DocumentIntelligence__SummarizeModel=gpt-4o-mini
 
 ---
 
+### Cosmos DB (AI Platform — spaarke-ai)
+
+| Property | Value |
+|----------|-------|
+| **Name** | `spaarke-cosmos-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Capacity Mode** | Serverless |
+| **Endpoint** | `https://spaarke-cosmos-dev.documents.azure.com:443/` |
+| **Database** | `spaarke-ai` |
+| **Bicep Module** | `infrastructure/bicep/modules/cosmos-db.bicep` |
+| **Provisioning Script** | `scripts/Provision-CosmosDb.ps1` |
+
+**Containers**:
+
+| Container | Partition Key | TTL | Notes |
+|-----------|--------------|-----|-------|
+| `sessions` | `/userId` | 90 days (7,776,000 s) | AI conversation sessions |
+| `prompts` | `/sessionId` | 90 days (7,776,000 s) | Individual prompt/completion pairs |
+| `audit` | `/tenantId` | None (-1) | Immutable audit trail; analyticalStorageTtl=-1 |
+| `memory` | `/userId` | 90 days (7,776,000 s) | AI memory snapshots |
+| `feedback` | `/userId` | None (-1) | User feedback on AI responses |
+
+**Access Pattern**: Application code uses `DefaultAzureCredential` (Managed Identity). No connection strings or master keys in app settings. App Service managed identity is granted `Cosmos DB Built-in Data Contributor` (role ID `00000000-0000-0000-0000-000000000002`) scoped to the account.
+
+**Deploy**:
+```powershell
+# Preview changes
+.\scripts\Provision-CosmosDb.ps1 -Environment dev -WhatIf
+
+# Apply
+.\scripts\Provision-CosmosDb.ps1 -Environment dev
+```
+
+---
+
 ### Managed Identity
 
 | Property | Value |
 |----------|-------|
 | **Type** | System-assigned |
 | **Principal** | App Service's identity |
-| **Purpose** | Access Key Vault secrets |
+| **Purpose** | Access Key Vault secrets, Cosmos DB data plane |
 
-**Required Role Assignment**:
+**Required Role Assignments**:
 - Key Vault: `Key Vault Secrets User`
+- Cosmos DB: `Cosmos DB Built-in Data Contributor` (granted by `cosmos-db.bicep`)
 
 ---
 

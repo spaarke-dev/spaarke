@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/contracts/sse-events/safety-annotation.schema.json",
+  "title": "safety_annotation SSE Event",
+  "description": "Carries safety-layer annotations about a model response: groundedness scores, citation verification status, and content-policy actions. Used by the SpaarkeAi safety perimeter (FR-801). The client renders safety badges and may suppress or replace content based on the action field.",
+  "allOf": [
+    { "$ref": "_shared-defs.json#/$defs/SseEnvelope" }
+  ],
+  "required": ["type", "severity", "category", "action", "userMessage"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "safety_annotation",
+      "description": "Discriminator — always 'safety_annotation'."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "warning", "blocked"],
+      "description": "Severity level. 'info' = logged only; 'warning' = displayed to user; 'blocked' = content suppressed."
+    },
+    "category": {
+      "type": "string",
+      "enum": ["jailbreak", "indirect-attack", "groundedness", "content-policy"],
+      "description": "The safety category that triggered this annotation."
+    },
+    "affectedSegment": {
+      "$ref": "_shared-defs.json#/$defs/RangeHighlight",
+      "description": "Optional text segment within the response that triggered the annotation."
+    },
+    "action": {
+      "type": "string",
+      "enum": ["logged", "filtered", "blocked"],
+      "description": "Action taken by the safety layer. 'logged' = no UI change; 'filtered' = segment redacted; 'blocked' = entire response suppressed."
+    },
+    "userMessage": {
+      "type": "string",
+      "description": "Safe, user-facing message to display when action='filtered' or action='blocked'. Must not contain details that could help an attacker refine a jailbreak."
+    },
+    "groundedness": {
+      "type": "object",
+      "description": "Present when category='groundedness'. Contains ungrounded segments and an overall score.",
+      "required": ["score"],
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Overall groundedness score (1.0 = fully grounded in source documents)."
+        },
+        "ungroundedSegments": {
+          "type": "array",
+          "description": "List of response segments that could not be grounded in source documents.",
+          "items": { "$ref": "_shared-defs.json#/$defs/RangeHighlight" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "citations": {
+      "type": "object",
+      "description": "Present when category='groundedness'. Citation verification breakdown.",
+      "properties": {
+        "verified": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Citation IDs that were successfully verified against source documents."
+        },
+        "unverified": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Citation IDs that could not be located in any source document."
+        },
+        "partial": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Citation IDs where only part of the claimed content was found."
+        }
+      },
+      "additionalProperties": false
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "Overall model confidence in this safety assessment."
+    }
+  },
+  "additionalProperties": true
+}
