@@ -1,0 +1,51 @@
+<task id="071" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Add actionlint pre-commit hook + GHA workflow</title>
+    <phase>4b</phase>
+    <stream>github-actions</stream>
+    <tags>actionlint, validator, ci-cd</tags>
+    <estimate>45min</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4b-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>003</dependencies>
+    <writes-to>.github/workflows/, scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>actionlint runs on PRs touching .github/workflows/** (GHA workflow, &lt;30s) AND on commits that include .github/workflows/** changes (pre-commit hook, &lt;3s).</goal>
+    <context>Catches workflow YAML errors before they fail in 0s. Would have caught the current 3 failing workflows.</context>
+    <constraints>
+      - Pre-commit budget: &lt;3s
+      - GHA budget: &lt;30s
+      - Use actionlint Docker image OR binary download — whichever is faster for the budgets
+      - Action versions pinned to SHAs
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/workflows.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Decide on integration method: actionlint as a pre-commit hook script (scripts/quality/Validate-Workflows.ps1) wrapping actionlint binary</step>
+    <step>Write scripts/quality/Validate-Workflows.ps1: downloads actionlint binary on first run (cached), validates all .github/workflows/*.yml, returns non-zero on any error</step>
+    <step>Create .github/workflows/actionlint.yml: triggers on PRs to .github/workflows/**, uses rhysd/actionlint Docker action pinned to SHA</step>
+    <step>Test: introduce a deliberate YAML error in a test workflow, confirm both pre-commit + GHA block it</step>
+    <step>Document: how to bypass for emergency (--no-verify) and when that's acceptable</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Validate-Workflows.ps1</output>
+    <output>.github/workflows/actionlint.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Pre-commit &lt;3s</criterion>
+    <criterion>GHA workflow &lt;30s</criterion>
+    <criterion>Both block a deliberately-broken workflow</criterion>
+    <criterion>Both pass on the current (post-task-070 fix) state</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,113 @@
+<task id="AIPU-021" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Output pane widgets 5-8 (Timeline, DocumentCompare, DataTable, Chart)</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <wave>2</wave>
+    <estimated-effort>5 hours</estimated-effort>
+    <tags>shared-library, frontend, fluent-ui, output-widgets</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>003, 020</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement output pane widgets 5-8 for the @spaarke/ai-outputs library. This task owns ONLY widget files 5-8. Do not touch widget files 1-4 (owned by AIPU-020), widget files 9-11 (owned by AIPU-031), or any source widgets (owned by AIPU-022).
+
+    Task AIPU-020 must be complete before this task starts because this task imports shared types from src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts which is created by AIPU-020.
+
+    Deliverables (widget files only — the registry entry for each widget is pre-populated by AIPU-020's output-registry.ts via dynamic import()):
+    1. TimelineWidget.tsx — renders a vertical timeline of dated events with milestone markers.
+    2. DocumentCompareWidget.tsx — renders a side-by-side or unified diff of two document versions with changed lines highlighted.
+    3. DataTableWidget.tsx — renders a sortable, filterable table of structured data rows using Fluent v9 DataGrid.
+    4. ChartWidget.tsx — renders a simple bar or line chart. Use an SVG-based approach (no third-party charting library) for portability, or use Fluent v9 patterns if a charting primitive is available.
+
+    All widgets receive data via typed props (no API calls inside widgets).
+  </prompt>
+
+  <role>Senior frontend developer with expertise in React 19, Fluent UI v9, and data visualization components</role>
+
+  <goal>
+    Four working output widgets (Timeline, DocumentCompare, DataTable, Chart) added to src/client/shared/Spaarke.AI.Outputs/src/output-widgets/, exported from src/index.ts, with full dark mode support and TypeScript compilation passing.
+  </goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/TimelineWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/DocumentCompareWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/DataTableWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/ChartWidget.tsx</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/index.ts</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-021">All widgets must use Fluent v9 makeStyles with design tokens only. No hard-coded hex colors. Dark mode must work via FluentProvider theme switching.</constraint>
+    <constraint source="ADR-012">Every public component must be exported from src/index.ts. Follow the barrel export pattern from @spaarke/ui-components.</constraint>
+    <constraint source="project">NOT PCF-safe. Widgets may use React 19 features freely.</constraint>
+    <constraint source="project">Import OutputWidgetProps and OutputWidgetType from src/types/widget-types.ts (created by AIPU-020). Do not redefine types already declared there.</constraint>
+    <constraint source="project">Do NOT modify widget files 1-4 (BudgetDashboardWidget, SearchResultsWidget, AnalysisEditorWidget, ContractComparisonWidget).</constraint>
+    <constraint source="project">Do NOT modify output-registry.ts — AIPU-020 already pre-populated registry entries for all 11 widgets including 5-8 via dynamic import().</constraint>
+    <constraint source="project">ChartWidget: no third-party charting libraries (e.g., recharts, d3, chart.js). Use SVG primitives directly or Fluent v9 if charting primitives exist.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 DataGrid" location="src/client/shared/Spaarke.UI.Components/src/components/">
+        Use DataGrid, DataGridBody, DataGridRow, DataGridCell, DataGridHeader, DataGridHeaderCell from @fluentui/react-components for sortable tables.
+      </pattern>
+      <pattern name="Fluent v9 makeStyles" location="src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx">
+        makeStyles pattern with design tokens. Reference for correct import and token usage.
+      </pattern>
+      <pattern name="Widget type imports" location="src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts">
+        Import OutputWidgetProps from this file. Each widget file defines its own data shape T and uses OutputWidgetProps&lt;T&gt;.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read src/client/shared/Spaarke.AI.Outputs/src/types/widget-types.ts to understand OutputWidgetProps and OutputWidgetType (created by AIPU-020). Confirm the file exists before proceeding.</step>
+    <step>Read src/client/shared/Spaarke.AI.Outputs/src/index.ts to understand current exports and how to append new exports.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/TimelineWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ events: Array&lt;{ id: string; date: string; label: string; description?: string; isMilestone?: boolean }&gt; }&gt;
+      - Render a vertical list with a left-aligned date column and a right column for label + description
+      - Milestone events use a distinct accent marker (Fluent v9 tokens.colorBrandBackground)
+      - Use makeStyles for timeline line, dot, and text layout.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/DocumentCompareWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ leftLabel: string; rightLabel: string; lines: Array&lt;{ id: string; leftText: string; rightText: string; changeType: 'added' | 'removed' | 'changed' | 'unchanged' }&gt;; viewMode?: 'side-by-side' | 'unified' }&gt;
+      - Side-by-side: CSS grid two-column layout; unified: single column showing both lines
+      - Added lines: tokens.colorStatusSuccessBackground3; removed lines: tokens.colorStatusDangerBackground3; changed lines: tokens.colorStatusWarningBackground3
+      - Use makeStyles.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/DataTableWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ columns: Array&lt;{ key: string; label: string; sortable?: boolean }&gt;; rows: Array&lt;Record&lt;string, string | number | boolean&gt;&gt; }&gt;
+      - Use Fluent v9 DataGrid with column sorting state managed via useState
+      - Filter via a Search Input at the top filtering rows client-side
+      - Use makeStyles for container and header row.</step>
+    <step>Create src/client/shared/Spaarke.AI.Outputs/src/output-widgets/ChartWidget.tsx:
+      - Props: OutputWidgetProps&lt;{ chartType: 'bar' | 'line'; title: string; xLabel?: string; yLabel?: string; series: Array&lt;{ name: string; color?: string; points: Array&lt;{ x: string | number; y: number }&gt; }&gt; }&gt;
+      - Implement SVG bar chart and line chart using React SVG elements directly (no external lib)
+      - Use Fluent v9 tokens for axis label colors (tokens.colorNeutralForeground2) and default series colors (tokens.colorBrandForeground1, tokens.colorPaletteBlueForeground2, etc.)
+      - Chart must be responsive via a ResizeObserver on the container div
+      - Use makeStyles for wrapper.</step>
+    <step>Update src/client/shared/Spaarke.AI.Outputs/src/index.ts to add named exports for TimelineWidget, DocumentCompareWidget, DataTableWidget, ChartWidget.</step>
+    <step>Run TypeScript compilation check: cd src/client/shared/Spaarke.AI.Outputs &amp;&amp; npx tsc --noEmit to confirm zero errors.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>TimelineWidget.tsx exists and renders a vertical timeline with dated events. Milestone events are visually distinct using Fluent v9 brand color tokens.</criterion>
+    <criterion>DocumentCompareWidget.tsx supports side-by-side and unified view modes with added/removed/changed lines highlighted using Fluent v9 status color tokens.</criterion>
+    <criterion>DataTableWidget.tsx renders a Fluent v9 DataGrid with client-side column sorting and text filtering via a Search Input.</criterion>
+    <criterion>ChartWidget.tsx renders bar and line charts using SVG primitives only (no third-party charting library imported). Chart is responsive via ResizeObserver.</criterion>
+    <criterion>All four widgets use makeStyles with Fluent v9 design tokens only — no hard-coded hex colors.</criterion>
+    <criterion>All four widgets are exported from src/client/shared/Spaarke.AI.Outputs/src/index.ts.</criterion>
+    <criterion>Widget files 1-4, 9-11, and all source widgets are NOT modified or created by this task.</criterion>
+    <criterion>output-registry.ts is NOT modified by this task.</criterion>
+    <criterion>TypeScript compilation passes with zero errors (npx tsc --noEmit).</criterion>
+  </acceptance-criteria>
+</task>

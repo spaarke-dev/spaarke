@@ -1,0 +1,13 @@
+<task id="022" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Audit skills batch 3 (skills 13–18)</title>
+    <phase>2a</phase>
+    <parallel-group>2a-W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001, 011</dependencies>
+  </metadata>
+  <prompt><goal>Same as task 020 for skills 13–18. Output: notes/audit/batch-3.md</goal></prompt>
+  <knowledge><files><file>projects/ai-procedure-quality-r1/tasks/020-audit-skills-batch-1.poml</file></files></knowledge>
+  <outputs><output>projects/ai-procedure-quality-r1/notes/audit/batch-3.md</output></outputs>
+  <acceptance-criteria><criterion>Identical to task 020 acceptance, applied to skills 13–18</criterion></acceptance-criteria>
+</task>

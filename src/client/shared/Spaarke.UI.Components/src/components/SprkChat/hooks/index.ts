@@ -7,7 +7,7 @@
  * @see ADR-012 - Shared Component Library
  */
 
-export { useSseStream, parseSseEvent } from './useSseStream';
+export { useSseStream, parseSseEvent, parsePaneEvent } from './useSseStream';
 
 export { useChatSession } from './useChatSession';
 
@@ -31,7 +31,4 @@ export { useSelectionListener } from './useSelectionListener';
 export type { UseSelectionListenerOptions, IUseSelectionListenerResult } from './useSelectionListener';
 
 export { useDynamicSlashCommands } from './useDynamicSlashCommands';
-export type {
-  UseDynamicSlashCommandsOptions,
-  IUseDynamicSlashCommandsResult,
-} from './useDynamicSlashCommands';
+export type { UseDynamicSlashCommandsOptions, IUseDynamicSlashCommandsResult } from './useDynamicSlashCommands';

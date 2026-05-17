@@ -231,6 +231,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   bridge,
   onDocumentStreamEvent: onDocumentStreamEventProp,
   initialMessages,
+  onPaneEvent: onPaneEventProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -317,6 +318,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     clearSuggestions,
     clearPendingActionEvent,
     setOnDocumentStreamEvent,
+    setOnPaneEvent,
   } = sseStream;
 
   // Track current streaming state
@@ -344,6 +346,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // dragCounter handles nested enter/leave events from child elements.
   const [isDragging, setIsDragging] = React.useState(false);
   const dragCounterRef = React.useRef(0);
+
+  // ── Action chip upload state (AIPU-058: programmatic upload trigger) ──
+  // Hidden file input ref — clicked programmatically when user selects
+  // the "[action:upload] Upload File" action chip from SprkChatSuggestions.
+  // The input's onChange handler reuses the same SprkChatUploadZone flow.
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [actionUploadFile, setActionUploadFile] = React.useState<File | null>(null);
 
   // Additional documents state for multi-document context
   const [additionalDocumentIds, setAdditionalDocumentIds] = React.useState<string[]>([]);
@@ -695,6 +704,34 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     };
   }, [bridge, onDocumentStreamEventProp, setOnDocumentStreamEvent]);
 
+  // ── Task 041: Register pane-routing SSE event callback ────────────────────
+  //
+  // Forwards output_pane / source_pane / source_highlight events from the BFF
+  // stream to the onPaneEventProp callback provided by ChatPanel.tsx.
+  // ChatPanel receives it from StandaloneAiContext so OutputPanel and SourcePanel
+  // can subscribe and render the correct widget type from the SSE payload.
+  //
+  // Uses the same synchronous callback ref pattern as the document stream handler
+  // above — events are delivered without React state batching.
+  React.useEffect(() => {
+    if (!onPaneEventProp) {
+      setOnPaneEvent(null);
+      return;
+    }
+
+    setOnPaneEvent(event => {
+      try {
+        onPaneEventProp(event);
+      } catch (err) {
+        console.error('[SprkChat] Failed to forward pane SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnPaneEvent(null);
+    };
+  }, [onPaneEventProp, setOnPaneEvent]);
+
   // Auto-scroll to bottom on new messages
   React.useEffect(() => {
     if (messageListRef.current) {
@@ -748,13 +785,51 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     [handleSend]
   );
 
-  // Handle follow-up suggestion selection — sends suggestion text as a new user message
+  // Handle follow-up suggestion selection.
+  //
+  // Action chips are prefixed with "[action:<id>]" (AIPU-058) and require
+  // special routing instead of being sent as plain text messages:
+  //   [action:upload]  → trigger the hidden file input to open the OS picker
+  //   [action:search]  → send a search-oriented follow-up message
+  //   [action:select]  → send a matter-selection follow-up message
+  //
+  // Regular suggestion strings (no "[action:" prefix) are sent verbatim as
+  // new user messages, identical to the previous behaviour.
   const handleSuggestionSelect = React.useCallback(
     (suggestion: string) => {
+      if (suggestion.startsWith('[action:upload]')) {
+        // Programmatically open the OS file picker — the hidden <input type="file">
+        // onChange callback will receive the selected file and reuse the upload flow.
+        fileInputRef.current?.click();
+        return;
+      }
+      if (suggestion.startsWith('[action:search]')) {
+        handleSend('Browse and search my documents');
+        return;
+      }
+      if (suggestion.startsWith('[action:select]')) {
+        handleSend('Help me select a matter to work with');
+        return;
+      }
+      // Regular follow-up suggestion — send as a new user message.
       handleSend(suggestion);
     },
     [handleSend]
   );
+
+  // Handle file selected via the hidden file input triggered by "[action:upload]" chip.
+  // Shows the upload overlay (isDragging=true) so SprkChatUploadZone renders and
+  // immediately receives the file, reusing the drag-and-drop upload path.
+  const handleFileInputChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so the same file can be selected again if needed.
+    e.target.value = '';
+    // Store the file in state — SprkChatUploadZone will receive it via the
+    // initialFile prop and begin uploading immediately on mount.
+    setActionUploadFile(file);
+    setIsDragging(true);
+  }, []);
 
   // ── Plan Preview callbacks (Phase 2F) ──────────────────────────────────────
 
@@ -1273,6 +1348,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       // Dismiss the upload overlay after a short delay so the user sees the success state
       setTimeout(() => {
         setIsDragging(false);
+        setActionUploadFile(null);
       }, 1200);
 
       console.debug(
@@ -1307,6 +1383,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       // Dismiss the upload overlay after showing the error briefly
       setTimeout(() => {
         setIsDragging(false);
+        setActionUploadFile(null);
       }, 2000);
     },
     [dispatchToast]
@@ -1929,6 +2006,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             onUploadComplete={handleUploadComplete}
             onUploadError={handleUploadError}
             disabled={!session}
+            initialFile={actionUploadFile}
           />
         )}
       </div>
@@ -1991,6 +2069,20 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       {/* Task R2-039: Fluent v9 Toaster for autonomous action success/error feedback (ADR-021) */}
       <Toaster toasterId={toasterId} position="top-end" />
+
+      {/* AIPU-058: Hidden file input for programmatic upload trigger from "[action:upload]" chip.
+          Clicking fileInputRef.current.click() opens the OS file picker without drag-and-drop.
+          The selected file is stored in actionUploadFile state and passed to SprkChatUploadZone
+          as initialFile, which begins uploading immediately on mount. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.docx,.txt,.md"
+        style={{ display: 'none' }}
+        onChange={handleFileInputChange}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
     </div>
   );
 };

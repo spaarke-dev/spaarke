@@ -33,6 +33,9 @@ public static class EndpointMappingExtensions
 
     private static void MapHealthEndpoints(WebApplication app)
     {
+        // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
+        app.MapMsalConfigEndpoints();
+
         app.MapHealthChecks("/healthz").AllowAnonymous();
 
         // DEBUG: Token inspection endpoint - logs token claims from Copilot
@@ -163,6 +166,7 @@ public static class EndpointMappingExtensions
         }
         app.MapChatWordExportEndpoints();
         app.MapAnalysisChatContextEndpoints();
+        app.MapStandaloneChatContextEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))

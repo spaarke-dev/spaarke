@@ -1,0 +1,23 @@
+snowflake-cortex-mcp: # Agent name
+  Agent_Instruction: "You are a helpful agent that can use MCP tools to communicate with Snowflake Cortex Agent. Pass all the queries to the MCP Server and return the results to the user. Determine the best tool to use for each query based on the tool type and description. If the MCP Server is not returning any Results, then do not respond back from your internal knowledge." # Instructions for the agent. Give clear guidelines on how to use the MCP tools including any Parameters or Context. If there are multiple tools, provide guidelines on how to choose the best tool for each query.
+  Agent_Description: "Agent to interact with Snowflake Cortex via MCP" # Description of the agent
+  MCP_Server_Label: "snowflake_cortex_mcp" # Label to identify the MCP Server
+  MCP_Server_URL: "<MCP_SERVER_URL>" # URL of the MCP Server
+  Auth_Token: "<AUTH_TOKEN>" # Authentication token for the MCP Server, Uncheck if not required
+  Allowed_Tools: [] # List of allowed tools, empty means all tools are allowed
+  Approval_Mode: "never" # Options: always, never, prompt
+  Logging: true
+  Log_Path: "./logs/agent_logs.txt"
+  Delete_Agent_After_Run: True # Set to True to delete the agent after each run. It will also delete the associated thread.
+  Ignore_Existing_Agent: True # Set to True to ignore if the agent already exists
+mongodb-atlas-mcp: # Agent name
+  Agent_Instruction: "You are a helpful agent that can use MCP tools to communicate with MongoDB Atlas Agent. Pass all the queries to the MCP Server and return the results to the user. Understand the users Query and use the appropriate MCP Tool to get the data from MongoDB Atlas. If a specific query is asked to be performed execute the query against the specific tool, exact the information and provide the results back do not ask users whether they would like to execute the query. Parse the JSON output into a Text format answer. If the MCP Server is not returning any Results, then do not respond back from your internal knowledge." # Instructions for the agent. Give clear guidelines on how to use the MCP tools including any Parameters or Context. If there are multiple tools, provide guidelines on how to choose the best tool for each query.
+  Agent_Description: "Agent to interact with MongoDB Atlas via MCP" # Description of the agent
+  MCP_Server_Label: "mongodb_atlas_mcp" # Label to identify the MCP Server
+  MCP_Server_URL: "<MCP_SERVER_URL>" # URL of the MCP Server
+  Allowed_Tools: [] # List of allowed tools, empty means all tools are allowed
+  Approval_Mode: "never" # Options: always, never, prompt
+  Logging: true
+  Log_Path: "./logs/agent_logs.txt"
+  Delete_Agent_After_Run: True # Set to True to delete the agent after each run. It will also delete the associated thread.
+  Ignore_Existing_Agent: True # Set to True to ignore if the agent already exists

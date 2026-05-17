@@ -1,15 +1,19 @@
 ---
 description: Draft or update an architecture document for a Spaarke subsystem
 tags: [documentation, architecture]
-techStack: []
+techStack: [all]
 appliesTo: ["write architecture doc", "update architecture doc", "draft architecture", "docs-architecture"]
 alwaysApply: false
+exemplar: docs/architecture/AI-ARCHITECTURE.md
+last-reviewed: 2026-05-16
 ---
 
 # Architecture Document Skill
 
 > **Category**: Documentation
-> **Last Updated**: April 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: `AI-ARCHITECTURE.md` is a comprehensive architecture doc covering a Spaarke subsystem (AI Tool Framework + AnalysisOrchestrationService + Dual Pipeline) with decisions and rationale — a representative target.
 
 ---
 
@@ -215,6 +219,17 @@ Before finalizing any architecture document:
 **Good**: "Email processing uses a deduplication key (`messageId + mailboxId`) stored in Redis with 24h TTL to prevent reprocessing the same message across polling intervals and webhook notifications."
 
 **Bad**: "```csharp\npublic async Task ProcessEmailAsync(EmailMessage msg) {\n  var key = $\"{msg.MessageId}:{msg.MailboxId}\";\n  ...\n}\n```" (→ this belongs in a pattern pointer or is just code)
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Architecture doc describes implementation that no longer exists | Code was refactored without updating the doc; doc is the lagging indicator | Treat code as source of truth. When the doc-and-code disagree, fix the doc. Add the subsystem to `doc-drift-audit` watch list if frequently modified. |
+| Doc includes inline code samples that drift from real code | Author included copy-paste code in doc instead of pattern pointer | Move code samples to `.claude/patterns/<domain>/<name>.md` (pattern pointer format, ~25 lines) and link from the architecture doc. Keep architecture doc free of inline code. |
+| Architecture doc and ADR contradict | Doc was authored before the ADR was approved (or vice versa) | Designate the ADR as authoritative for the decision; the architecture doc must cite the ADR and not contradict it. |
+| Doc has empty `techStack:` frontmatter or "TBD" sections | Author started the doc but didn't finish | Architecture docs are committed when complete enough to be load-bearing; partial drafts live in `projects/<...>/notes/` until ready to promote to `docs/architecture/`. |
 
 ---
 

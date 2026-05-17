@@ -1,0 +1,66 @@
+<task id="050" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Rewrite CLAUDE.md per approved outline; archive original; move extracted content</title>
+    <phase>3b</phase>
+    <stream>rewrite</stream>
+    <tags>rewrite, claudemd, archive</tags>
+    <estimate>1-2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>Human-Gate-2 (sign-off on AUDIT-FINDINGS-CLAUDEMD.md target outline)</dependencies>
+    <writes-to>CLAUDE.md, .claude/archive/2026-05-14/, .claude/skills/, docs/, .claude/settings.json</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Replace CLAUDE.md with the approved 4-section structure (&lt;200 lines). Move every extracted content piece to its named destination. Verify everything still works in a fresh session.</goal>
+    <context>Most reversible high-impact change in this project. Archive first, then rewrite. Verification session is mandatory — a broken CLAUDE.md affects every future session.</context>
+    <constraints>
+      - parallel-safe: false — main session only
+      - Step 1: archive current CLAUDE.md to .claude/archive/2026-05-14/CLAUDE.md
+      - Step 2: only after archive is committed, write new CLAUDE.md
+      - Every "move-to-X" from approved AUDIT-FINDINGS-CLAUDEMD.md must have a destination created/updated
+      - Final CLAUDE.md must be under 200 lines
+      - All cross-references in new CLAUDE.md must resolve
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-CLAUDEMD.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/archive/README.md</file>
+      <file>.claude/CHANGELOG.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Archive current CLAUDE.md: cp CLAUDE.md .claude/archive/2026-05-14/CLAUDE.md (preserve)</step>
+    <step>Commit archive: git add + commit "chore: archive pre-rewrite CLAUDE.md"</step>
+    <step>For each "move-to-X" disposition in AUDIT-FINDINGS-CLAUDEMD.md:
+      - move-to-skill: add content to named skill's SKILL.md (or create new skill from .claude/skills/_template/)
+      - move-to-settings: update .claude/settings.json
+      - move-to-docs: add to docs/architecture/, docs/guides/, or docs/procedures/
+      - move-to-knowledge: add to spaarke/knowledge/ (coordinate with parallel project)
+    </step>
+    <step>Write new CLAUDE.md following approved outline (4 sections, &lt;200 lines)</step>
+    <step>Verify line count: wc -l CLAUDE.md ≤ 200</step>
+    <step>Verify every cross-reference resolves: extract all markdown links from new CLAUDE.md, test each path exists</step>
+    <step>Update .claude/CHANGELOG.md with: "Changed - CLAUDE.md rewritten from 1190 lines to N lines; content extracted to X, Y, Z"</step>
+    <step>Verification: start fresh Claude Code session; ask "How do I deploy a PCF?" — verify the agent references the right skill (not CLAUDE.md prose). Document result in projects/ai-procedure-quality-r1/notes/claudemd-verification.md</step>
+  </steps>
+
+  <outputs>
+    <output>CLAUDE.md (new, &lt;200 lines)</output>
+    <output>.claude/archive/2026-05-14/CLAUDE.md (preserved original)</output>
+    <output>Updated/new skills, docs, settings per dispositions</output>
+    <output>projects/ai-procedure-quality-r1/notes/claudemd-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Original CLAUDE.md is archived (NOT deleted)</criterion>
+    <criterion>New CLAUDE.md is under 200 lines</criterion>
+    <criterion>Every cross-reference in new CLAUDE.md resolves</criterion>
+    <criterion>Every "move-to-X" disposition has its destination updated</criterion>
+    <criterion>Verification session confirms agent uses new structure correctly</criterion>
+  </acceptance-criteria>
+</task>

@@ -120,3 +120,6 @@ export * from './DocumentToolbar';
 
 // DocumentEmailWizard - Multi-select wizard for emailing one or more documents
 export * from './DocumentEmailWizard';
+
+// ThreePaneLayout - Reusable three-pane shell with draggable splitters (Wave 1, task 010)
+export * from './ThreePaneLayout';

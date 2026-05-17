@@ -18,6 +18,7 @@ module.exports = (env) => {
       extensions: ['.ts', '.tsx', '.js', '.jsx'],
       alias: {
         // Resolve workspace dependency to shared library source for bundling
+        '@spaarke/ai-context': path.resolve(__dirname, '../../shared/Spaarke.AI.Context/src'),
         '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
         '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
         // Force single React instance — shared lib has React 18 in its node_modules,
@@ -51,6 +52,7 @@ module.exports = (env) => {
           ],
           include: [
             path.resolve(__dirname, 'src'),
+            path.resolve(__dirname, '../../shared/Spaarke.AI.Context/src'),
             path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
             path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
           ],

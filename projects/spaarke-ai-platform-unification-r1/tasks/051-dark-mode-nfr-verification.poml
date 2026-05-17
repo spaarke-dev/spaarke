@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU-051" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Dark Mode and NFR Verification for All 17 Output and Source Widgets</title>
+    <status>completed</status>
+    <phase>5</phase>
+    <wave>5</wave>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>testing, fluent-ui</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-020, AIPU-021, AIPU-022, AIPU-031, AIPU-032</dependencies>
+  </metadata>
+
+  <prompt>
+    Write automated tests that verify all 17 output and source widgets (11 output widgets + 6 source
+    widgets) satisfy the dark mode and NFR requirements. Tests focus exclusively on:
+    - NFR-01: Widget renders within 200ms in both light and dark themes.
+    - NFR-04: Widget renders correctly under webDarkTheme without visual breakage.
+    - ADR-021: No hard-coded color strings in widget source files (verified by static analysis).
+    Tests are added as new .test.tsx files in the Spaarke.AI.Outputs library test folder. No
+    production code is modified in this task.
+  </prompt>
+
+  <role>QA/test developer experienced with React Testing Library, Fluent UI v9 FluentProvider
+  theming, and performance timing assertions.</role>
+
+  <goal>All 17 widgets (11 output + 6 source) have corresponding dark mode and render-time tests
+  that pass. A static scan confirms no hard-coded color values exist in widget source files.
+  Test files live in src/client/shared/Spaarke.AI.Outputs/src/**/*.test.tsx.</goal>
+
+  <relevant-files>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/output-widgets/__tests__/</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/src/source-widgets/__tests__/</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/package.json</file>
+    <file>src/client/shared/Spaarke.AI.Outputs/jest.config.ts</file>
+    <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint id="ADR-021">All widget source files must use Fluent v9 semantic color tokens
+    only. Hard-coded color strings (e.g. "#ffffff", "rgb(", "rgba(", named CSS colors not from
+    Fluent tokens) are forbidden. The static scan in this task makes this requirement testable.
+    </constraint>
+    <constraint id="NFR-01">Each widget must render to the DOM within 200ms when given minimal
+    mock props. Measure with performance.now() or Jest fake timers around the render call.
+    </constraint>
+    <constraint id="NFR-04">Each widget must render without throwing errors under webDarkTheme.
+    Verify by wrapping the render in FluentProvider theme={webDarkTheme} and asserting the
+    component mounts successfully and contains expected structural elements.</constraint>
+    <constraint id="test-files-only">This task MUST NOT modify any production widget source files.
+    Only new .test.tsx files and supporting test utilities may be created. If a widget fails a
+    test due to a hard-coded color or theme issue, record the failure — do not fix the widget
+    source in this task (that is a production code change requiring a separate task).</constraint>
+    <constraint id="no-snapshot-sprawl">Do not use snapshot tests. Use targeted assertions:
+    getByRole, getByText, or container.querySelector for structural checks. Snapshot tests create
+    maintenance burden and do not verify semantic correctness.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/ai-assistant-theming.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern>Dark mode test harness pattern:
+      import { render } from "@testing-library/react";
+      import { FluentProvider, webDarkTheme, webLightTheme } from "@fluentui/react-components";
+
+      function renderWithTheme(ui: React.ReactElement, theme = webLightTheme) {
+        return render(&lt;FluentProvider theme={theme}&gt;{ui}&lt;/FluentProvider&gt;);
+      }
+
+      it("renders in dark mode without error", () => {
+        const { container } = renderWithTheme(&lt;MyWidget {...mockProps} /&gt;, webDarkTheme);
+        expect(container.firstChild).toBeTruthy();
+      });
+      </pattern>
+      <pattern>Render time assertion pattern:
+      it("renders within 200ms", () => {
+        const start = performance.now();
+        renderWithTheme(&lt;MyWidget {...mockProps} /&gt;);
+        const elapsed = performance.now() - start;
+        expect(elapsed).toBeLessThan(200);
+      });
+      </pattern>
+      <pattern>Static color scan — run from test or as a separate script:
+      grep -rn --include="*.tsx" --include="*.ts" -E '(#[0-9a-fA-F]{3,6}|rgb\(|rgba\(|color:\s*"[a-z])'
+      src/client/shared/Spaarke.AI.Outputs/src/
+      Any match that is not from a Fluent token import is a violation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step id="1">Read spec.md to identify the full list of 11 output widgets and 6 source widgets
+    with their names and mock prop requirements. Read existing widget source files in
+    src/client/shared/Spaarke.AI.Outputs/src/output-widgets/ and source-widgets/ to understand
+    each widget's props interface.</step>
+    <step id="2">Create a shared test utility file at
+    src/client/shared/Spaarke.AI.Outputs/src/__tests__/test-utils.tsx: export renderWithTheme
+    helper (wraps render in FluentProvider), export mockOutputItem and mockSourceItem factory
+    functions that produce minimal valid props for each widget type.</step>
+    <step id="3">For each of the 11 output widgets, create a test file at
+    src/client/shared/Spaarke.AI.Outputs/src/output-widgets/__tests__/{WidgetName}.test.tsx with:
+    (a) a light theme render test confirming it mounts without error,
+    (b) a dark theme render test (webDarkTheme) confirming it mounts without error,
+    (c) a render time test asserting completion within 200ms.</step>
+    <step id="4">For each of the 6 source widgets, create a test file at
+    src/client/shared/Spaarke.AI.Outputs/src/source-widgets/__tests__/{WidgetName}.test.tsx
+    with the same three test cases as step 3.</step>
+    <step id="5">Create a static color scan test at
+    src/client/shared/Spaarke.AI.Outputs/src/__tests__/no-hardcoded-colors.test.ts: using Node's
+    fs module and a regex pattern, scan all .tsx and .ts files in the output-widgets/ and
+    source-widgets/ directories for hard-coded color strings. The test fails and reports the
+    offending file and line number for each match.</step>
+    <step id="6">Run the full test suite: cd src/client/shared/Spaarke.AI.Outputs &amp;&amp; npx jest.
+    Record which tests pass and which fail. For any failures, note whether the failure is in the
+    test setup (fixable in this task) or in the production widget (record as a finding — do not
+    fix production code).</step>
+    <step id="7">Document all widget test failures (if any) in a findings comment at the top of
+    the relevant test file, formatted as: "FINDING: Widget uses hard-coded color #XXXX at
+    {file}:{line}. Requires production fix in separate task."</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="AC-1">Test files exist for all 17 widgets: 11 in output-widgets/__tests__/
+    and 6 in source-widgets/__tests__/.</criterion>
+    <criterion id="AC-2">Each widget test file contains at minimum 3 tests: light theme render,
+    dark theme render, and render time under 200ms.</criterion>
+    <criterion id="AC-3">The shared test-utils.tsx provides renderWithTheme and mock prop
+    factories used consistently across all widget tests.</criterion>
+    <criterion id="AC-4">The no-hardcoded-colors.test.ts static scan test exists and executes.
+    If it finds violations, they are recorded as FINDING comments in the relevant test files.
+    </criterion>
+    <criterion id="AC-5">npx jest runs to completion (no test infrastructure errors). All test
+    failures are documented as FINDING comments rather than unexplained errors.</criterion>
+    <criterion id="AC-6">No production widget source files (*.tsx outside __tests__/) are
+    modified by this task.</criterion>
+  </acceptance-criteria>
+</task>

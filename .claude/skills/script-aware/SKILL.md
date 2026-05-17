@@ -4,12 +4,16 @@ tags: [scripts, reuse, deployment, testing, automation]
 techStack: [powershell, javascript, dotnet]
 appliesTo: ["deploy", "test", "validate", "diagnose", "setup"]
 alwaysApply: true
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # script-aware
 
 > **Category**: Context Loading (Always-Apply)
-> **Last Updated**: December 2025
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — `leave-alone`: already has gold-pattern Failure Modes section; renamed `## Failure Modes to Avoid` → `## Failure Modes & Recovery` for project-wide canonical heading consistency)
+> **Exemplar rationale**: Script registry changes too frequently for a stable canonical reference.
 
 ---
 
@@ -281,7 +285,7 @@ Claude writes new deployment commands inline...
 
 ---
 
-## Failure Modes to Avoid
+## Failure Modes & Recovery
 
 | Failure | Cause | Prevention |
 |---------|-------|------------|

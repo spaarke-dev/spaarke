@@ -4,12 +4,18 @@ tags: [context, compaction, handoff, state, recovery, checkpoint]
 techStack: [all]
 appliesTo: ["save progress", "context handoff", "before compaction", "checkpoint"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # context-handoff
 
 > **Category**: Operations
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Handoffs are per-session ephemeral state — no canonical reference holds. The contract is "after this skill runs, `current-task.md` alone enables continuation."
+>
+> **Audit note**: The audit flagged a duplicate `## Quick Recovery (READ THIS FIRST)` heading at line 113 + line 176. Investigation: line 176's instance is INSIDE a markdown code fence (`Example:`) — it renders as literal text, not as a heading. The grep counted it as an H2 line because it starts with `## `. This is a grep false positive, not a structural defect. The skill structure is correct as-is.
 
 ---
 
@@ -323,7 +329,7 @@ Output:
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 - **Be proactive** - Don't wait for user to ask; checkpoint after significant work
 - **Keep Quick Recovery minimal** - Recovery should take < 30 seconds to read
@@ -346,6 +352,17 @@ When Claude Code resumes after compaction:
 5. **Load full context** → Via project-continue if needed
 
 This can be automatic if the user's first message is work-related, or explicit via "where was I?".
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Post-compaction agent has stale `current-task.md` but believes it's current | Checkpoint was skipped or interrupted; `Last Updated:` timestamp wasn't refreshed | Always update the `Last Updated:` timestamp during checkpoint. On resume, compare it against `git log -1 --format=%ci current-task.md` — large gap = handoff was incomplete. |
+| Quick Recovery says step N but the work was actually on step N+2 | Checkpoint ran early in a step; agent did 2 more steps before context ran out | Checkpoint after EACH completed step (per root CLAUDE.md proactive checkpointing rules), not just before compaction. Background work between checkpoints is at-risk. |
+| `current-task.md` updated but the relevant project files weren't committed | Checkpoint saved the state file; uncommitted code changes lost across compaction | If "Files Modified This Session" list has uncommitted changes, prompt user to commit BEFORE compaction. Don't silently lose work. |
+| Recovery loads project-continue but `current-task.md` is for a different project | Multiple worktrees, agent loaded wrong project's state | Verify branch name matches expected project before trusting `current-task.md`. If mismatch, the user opened the wrong working directory. |
 
 ---
 

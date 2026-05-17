@@ -1,12 +1,19 @@
 ---
 description: Validate code changes against Architecture Decision Records (ADRs)
+tags: [adr, architecture, validation, quality, code-review]
+techStack: [all]
+appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx", "post-task", "pre-commit"]
 alwaysApply: false
+exemplar: tests/Spaarke.ArchTests/
+last-reviewed: 2026-05-16
 ---
 
 # ADR Check
 
 > **Category**: Quality
-> **Last Updated**: December 24, 2025
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: `tests/Spaarke.ArchTests/` is the NetArchTest project — it IS the canonical "what an ADR check actually enforces." A skill that runs against it is auditable; naming this exemplar gives the skill a verifiable anchor.
 
 ---
 
@@ -260,10 +267,18 @@ gh workflow run adr-audit.yml
 
 ---
 
-## Tips for AI
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Reviewer marks PR "ADR-clean" but production hits the violated rule at runtime | ADR check only ran on diff, not on full reachable code paths from diff | For changes touching API surface or DI registration, expand check to all callers (use `grep -rn` for usages). NetArchTest catches these structurally — run it locally. |
+| Skill flags an ADR violation that's actually approved/grandfathered | ADR has an exception that's not documented in the ADR itself | Update the ADR with the exception explicitly (`Exceptions:` section). Agent should respect documented exceptions. |
+| ADR-jobs or a newer ADR missed during review | ADR added recently but not in this skill's checklist | Run `/ai-procedure-maintenance` to propagate. The validation checklist must always cover every active ADR in `docs/adr/`. |
+| NetArchTest passes but skill reports a violation (or vice versa) | Skill's grep patterns drift from NetArchTest rule definitions | Treat NetArchTest as authoritative (it's mechanical). Update skill grep patterns to match. File a follow-up if a rule needs both forms. |
+
+## Operator Notes
 
 - Be thorough: check all ADRs in the ADR index even when changes seem small
-- Be thorough: check all ADRs in the ADR index, even when changes seem small
 - Be specific: always include file paths and line numbers
 - Be actionable: provide concrete fixes, not just problem descriptions
 - When in doubt, report as warning rather than skipping

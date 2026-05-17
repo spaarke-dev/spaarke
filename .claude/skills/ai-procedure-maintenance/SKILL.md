@@ -1,12 +1,18 @@
-# ai-procedure-maintenance
-
 ---
 description: Maintain and update AI coding procedures when new elements are added
 tags: [maintenance, adr, constraints, patterns, protocols, skills]
 techStack: [all]
 appliesTo: ["new ADR", "new pattern", "new constraint", "new skill", "procedure update"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# ai-procedure-maintenance
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: This skill produces no artifact — it's a propagation checklist. The canonical "use" is "an ADR was added and every cross-reference is now consistent" — verifiable by `Find-SkillReferenceDrift.ps1` (Phase 4a F-15.4) once it exists.
 
 ## Purpose
 
@@ -76,7 +82,7 @@ When creating a new Architecture Decision Record:
 
 □ 6. CREATE pattern file (if ADR introduces code patterns)
    Location: .claude/patterns/{domain}/{pattern-name}.md
-   Content: Pointer format � When/Read/Constraints/Key Rules (~25 lines, no inline code)
+   Content: Pointer format — When/Read/Constraints/Key Rules (~25 lines, no inline code)
 
 □ 7. UPDATE pattern INDEX
    Location: .claude/patterns/{domain}/INDEX.md
@@ -360,4 +366,15 @@ Location: `scripts/Validate-AIProcedures.ps1` (to be created)
 
 ---
 
-*Last updated: December 25, 2025*
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| New ADR added but only `docs/adr/` updated — `.claude/adr/`, `adr-aware` mapping, constraints/ all missed | Author skipped the checklist; ran only manual ADR creation | Always invoke `/ai-procedure-maintenance` after any ADR/skill/pattern/constraint addition. Future state: pre-commit hook will flag this automatically once `Find-SkillReferenceDrift.ps1` (F-15.4) ships. |
+| Skill rename propagates everywhere except inline mentions in OTHER SKILL.md bodies | Cross-skill references in prose aren't caught by tooling that scans only registry files | After rename, `grep -rn "<old-name>" .claude/` catches inline mentions. The Phase 4a validators will mechanize this. |
+| CLAUDE.md trigger map drifts after skill addition — trigger phrases exist for non-existent skill | New skill added but root CLAUDE.md trigger map not updated | Checklist E (this skill, "Add new skill") explicitly mandates root CLAUDE.md update. If skipped, `Find-SkillReferenceDrift.ps1` will catch it. |
+| Multiple cross-reference surfaces give different answers about a skill's existence | Surface-by-surface manual maintenance drifts | Treat `notes/inventory/skill-cross-refs.json` (Phase 0 task 006) as authoritative; rebuild it when in doubt. |
+
+---
+
+*Last updated 2026-05-16 by ai-procedure-quality-r1 Phase 2b Wave 2b-A. Replaces "December 25, 2025" stamp.*

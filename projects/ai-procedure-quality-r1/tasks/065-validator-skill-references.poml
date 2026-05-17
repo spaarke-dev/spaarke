@@ -1,0 +1,58 @@
+<task id="065" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build scripts/quality/Validate-SkillReferences.ps1 (Light reference check)</title>
+    <phase>4a</phase>
+    <stream>infrastructure</stream>
+    <tags>validator, skills, references, ci</tags>
+    <estimate>1h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4a-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001, 006</dependencies>
+    <writes-to>scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Light check applied to every SKILL.md: every file path resolves, every URL resolves (HEAD request), every referenced skill exists. Run in CI on PRs that touch .claude/skills/. &lt;10s budget.</goal>
+    <context>Per F-15.3 Light depth. This is the cheapest layer of substantive review — catches the most common drift (file moved, URL 404'd, skill renamed but reference not updated).</context>
+    <constraints>
+      - Runtime: &lt;10s total across all 49 skills
+      - URL checks: HEAD request with 2s timeout each; tolerate slow networks
+      - File path checks: Test-Path only (no content match — that's Medium check)
+      - Skill name checks: every "X skill" or "/X" reference points to a real skill
+      - Cross-platform (Windows + Linux GHA)
+      - Output: JSON report at .claude/QUALITY-REFCHECK-LAST.json
+      - Exit non-zero on any broken reference
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/skills.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/skill-cross-refs.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Walk .claude/skills/*/SKILL.md (skip _template, _archived)</step>
+    <step>For each SKILL.md, extract: markdown links [text](path), bare paths matching `src/`, `docs/`, `.claude/`, `scripts/`, etc., URLs http(s)://, skill references "/skill-name" or "X skill"</step>
+    <step>For each file path: Test-Path; flag if false. Try basename match across repo for "likely moved" hint.</step>
+    <step>For each URL: HEAD request with 2s timeout; flag any non-2xx response. Note: don't FAIL on URL — warn (URLs flap). Only FAIL on broken file paths and broken skill references.</step>
+    <step>For each skill reference: look up in skill-cross-refs.json; flag if skill doesn't exist.</step>
+    <step>Write .claude/QUALITY-REFCHECK-LAST.json with summary (total-refs, valid, missing-files, broken-urls, broken-skills) and details list.</step>
+    <step>Console output (-Verbose): one line per skill with check counts</step>
+    <step>Exit non-zero if any missing-file or broken-skill found</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Validate-SkillReferences.ps1</output>
+    <output>.claude/QUALITY-REFCHECK-LAST.json (output produced on each run)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>&lt;10s total runtime against all 49 skills</criterion>
+    <criterion>Deliberately-broken test case (introduce missing file path in a SKILL.md) returns non-zero</criterion>
+    <criterion>URL warnings do not FAIL the run (they're noisy/transient)</criterion>
+    <criterion>Output is consumable by the audit report (task 081)</criterion>
+  </acceptance-criteria>
+</task>

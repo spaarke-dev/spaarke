@@ -1,12 +1,19 @@
-# dataverse-create-schema
-
 ---
-description: Create or update Dataverse schema components (entities, attributes, relationships, option sets) via Web API
+description: Create or update Dataverse schema components (entities, attributes, relationships, option sets) via Web API + PowerShell — covers patterns PAC CLI doesn't (no `pac table create` or `pac column create`)
 tags: [dataverse, schema, entities, attributes, relationships, powershell]
 techStack: [dataverse, power-platform, powershell, web-api]
 appliesTo: ["create entity", "add column", "create table", "dataverse schema", "add field", "create relationship"]
 alwaysApply: false
+exemplar: scripts/Deploy-ChartDefinitionEntity.ps1
+last-reviewed: 2026-05-17
 ---
+
+# dataverse-create-schema
+
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — fixed Reference Scripts section per user decision row 12 [lighter rewrite]: pointed at REAL existing scripts; dropped 3 broken refs to non-existent `projects/ai-node-playbook-builder/scripts/*`; kept inline PowerShell examples per dereferencing-reliability concern; marked `leave-alone-justified` on body length)
+> **Exemplar rationale**: `scripts/Deploy-ChartDefinitionEntity.ps1` is a real, complete pattern script showing entity creation with custom fields — verifiably exercisable.
+> **Justified length** (777 lines): heavy PowerShell example density is the value proposition. An agent generating schema-creation scripts needs the patterns inline, not gestured-at. Splitting risks the dereferencing-reliability concern.
 
 ## Purpose
 
@@ -650,33 +657,42 @@ Phase 6: Publish Customizations
 
 ## Reference Scripts
 
-The following scripts in the repository demonstrate these patterns:
+> **Updated 2026-05-17**: This section was rewritten by ai-procedure-quality-r1 Wave 2d. Earlier versions referenced 3 scripts under `projects/ai-node-playbook-builder/scripts/` — that directory does NOT exist in the current repo (archived/never-existed). The scripts below are REAL and EXIST in the repo.
 
-### Main Schema Deployment
+These real scripts in the repository demonstrate the patterns this skill prescribes:
 
-**`projects/ai-node-playbook-builder/scripts/Deploy-PlaybookNodeSchema.ps1`**
-- Complete 5-phase deployment script
-- Creates option sets, entities, attributes, lookups
+### Multi-Entity Schema Deployment (5-phase pattern)
+
+**`scripts/Deploy-ReportingSchema.ps1`**
+- Multi-entity deployment pattern (creates multiple related entities + relationships)
 - Idempotent (checks for existing items before creating)
+- Demonstrates option-set creation before entity creation (Phase 1 → Phase 4)
 
-### Add Missing Attributes
+**`scripts/Deploy-NotificationPlaybooks.ps1`**
+- Similar multi-entity pattern with notification-specific entities
 
-**`projects/ai-node-playbook-builder/scripts/Fix-PlaybookNodeAttributes.ps1`**
-- Pattern for adding attributes to existing entities
-- Focused on a single entity or set of entities
-- Useful for incremental schema updates
+### Single Entity + Custom Fields
 
-### Create N:N Relationships
+**`scripts/Deploy-ChartDefinitionEntity.ps1`** (canonical exemplar)
+- Original entity-with-custom-fields pattern
+- Shows entity creation, attribute additions, publish-customizations
+- Best starting point for "I need to create one new entity"
 
-**`projects/ai-node-playbook-builder/scripts/Create-NNRelationships.ps1`**
-- Pattern for many-to-many relationships
-- Includes boolean attribute creation with OptionSet
+**`scripts/Create-RegistrationRequestSchema.ps1`**
+- Complete schema for a single business entity (sprk_demoregistrationrequest)
+- Includes attribute creation + publish
 
-### Existing Script Pattern Reference
+### Add Attributes to Existing Entities
 
-**`scripts/Deploy-ChartDefinitionEntity.ps1`**
-- Original pattern script
-- Shows entity creation with custom fields
+**`scripts/Create-PlaybookTriggerFields.ps1`**
+- Pattern for adding new attributes to existing entities
+- Useful for incremental schema updates without recreating the entity
+
+### Bulk Trigger Metadata
+
+**`scripts/Seed-PlaybookTriggerMetadata.ps1`**
+- Companion script that populates trigger records after schema is in place
+- Shows the schema-then-data sequencing pattern
 
 ---
 
@@ -774,4 +790,17 @@ Publish-Customizations -Token $token -BaseUrl $baseUrl -EntityLogicalNames @("sp
 
 ---
 
-*Skill created from Task 009 implementation patterns. For questions, see the reference scripts in `projects/ai-node-playbook-builder/scripts/`.*
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Reference Scripts section points at non-existent paths | Earlier version cited scripts under `projects/ai-node-playbook-builder/scripts/` — directory doesn't exist | **Fixed 2026-05-17**: Reference Scripts section now points at REAL existing scripts (`Deploy-ChartDefinitionEntity.ps1`, `Deploy-ReportingSchema.ps1`, `Create-PlaybookTriggerFields.ps1`, `Create-RegistrationRequestSchema.ps1`). |
+| Web API call fails with "LookupAttributeMetadata cannot be created" | Tried to create a lookup via Attributes endpoint | Use RelationshipDefinitions endpoint with OneToManyRelationshipMetadata. Pattern is in Core Patterns section. |
+| Script runs but no entity appears in Dataverse | Forgot Phase 6 (Publish Customizations) | ALWAYS run `Publish-Customizations` after schema changes. The 5-phase model includes Publish as the final step — skipping it leaves changes unpublished. |
+| `pac modelbuilder` or Web API returns 401 | Azure CLI token expired OR token doesn't have Dataverse audience | Refresh with `az account get-access-token --resource <DataverseUrl>`. If still 401, run `/dev-cleanup` and re-login. |
+| Schema deployed to dev but not prod | Each environment requires its own deployment run | Schema scripts ARE the deployment artifacts — run them against each environment's `$baseUrl`. Don't assume dev→prod sync. |
+| Should I use MCP tools instead of this skill? | Confusion between metadata creation (this skill) vs data CRUD (MCP) | This skill = schema/metadata creation patterns (entities, attributes, relationships). MCP `dataverse__*` tools = data record CRUD (create_record, update_record, etc.). For schema work, USE THIS SKILL; for data work, USE MCP TOOLS. |
+
+---
+
+*Skill created from Task 009 implementation patterns. Reference Scripts section updated 2026-05-17 to point at real existing scripts (per ai-procedure-quality-r1 Phase 2b Wave 2d, decision row 12).*

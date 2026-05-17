@@ -1,0 +1,35 @@
+<task id="083" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Write docs/procedures/procedure-quality-cadence.md</title>
+    <phase>5</phase>
+    <stream>documentation</stream>
+    <tags>cadence, procedure, docs</tags>
+    <estimate>30min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>082</dependencies>
+    <writes-to>docs/procedures/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Operational doc: what the monthly audit produces, how to triage findings, who acts within what timeline.</goal>
+  </prompt>
+
+  <steps>
+    <step>Document: monthly audit produces .claude/QUALITY-AUDIT-YYYY-MM-DD.md via auto-PR</step>
+    <step>Triage SLA: human reviewer within 1 week (per F-14)</step>
+    <step>For each finding category (schema fail / drift / exemplar mismatch / line-count exceeded / spot-check needed), document the standard response</step>
+    <step>Escalation: if 2 consecutive monthly reports have the same finding, it's a procedure debt item — file an issue or schedule a focused session</step>
+    <step>Quarterly deep audit: additionally read the consolidated CHANGELOG for the quarter, spot patterns, propose R2</step>
+    <step>Cross-reference from new CLAUDE.md (after Phase 3b)</step>
+  </steps>
+
+  <outputs>
+    <output>docs/procedures/procedure-quality-cadence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Doc clear enough that next month's audit is triaged correctly</criterion>
+    <criterion>Escalation path documented</criterion>
+  </acceptance-criteria>
+</task>

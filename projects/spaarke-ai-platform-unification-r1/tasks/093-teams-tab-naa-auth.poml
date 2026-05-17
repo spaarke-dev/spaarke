@@ -1,0 +1,88 @@
+<task id="AIPU-093" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Teams Tab with Nested App Authentication (NAA) — Spaarke AI in Microsoft Teams</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>9B</wave>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>frontend, auth, teams, infrastructure</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-091</dependencies>
+  </metadata>
+
+  <prompt>
+    Add Spaarke AI as a Microsoft Teams personal tab using Nested App Authentication (NAA).
+    NAA eliminates the traditional OBO token exchange — MSAL.js acquires tokens directly from
+    the Teams auth broker, working without third-party cookies and on iOS.
+
+    Teams app manifest:
+    - Static personal tab pointing to the Spaarke AI Code Page URL
+    - App ID, name "Spaarke AI", description, icons
+    - webApplicationInfo with the BFF client ID and resource scope
+
+    Auth approach (NAA — recommended per research):
+    - Use createNestablePublicClientApplication() from @azure/msal-browser
+    - Register brk-multihub://{domain} redirect URI on the Entra app registration
+    - Detect Teams context via TeamsJS SDK (microsoftTeams.app.getContext())
+    - If in Teams: use NAA path (createNestablePublicClientApplication)
+    - If not in Teams: use standard MSAL path (existing @spaarke/auth flow)
+
+    Implementation:
+    1. Add @microsoft/teams-js (TeamsJS v2.19.0+) to the Code Page
+    2. In main.tsx bootstrap, detect Teams context before initializing MSAL:
+       - If Teams detected: initialize MSAL as nestable app (NAA)
+       - If not Teams: use existing resolveRuntimeConfig or /api/config/client fallback
+    3. Register redirect URI in Entra app registration: brk-multihub://{domain}
+    4. Create teams-manifest.json with static personal tab
+    5. Package and sideload for testing
+    6. Document admin consent requirements
+
+    Research reference: projects/spaarke-ai-platform-unification-r1/notes/distribution-research.md
+    Key finding: NAA is GA as of 2025, works on iOS, no third-party cookies needed.
+  </prompt>
+
+  <role>Senior frontend developer with Microsoft Teams SDK, MSAL.js NAA, and Teams app packaging experience</role>
+
+  <goal>
+    Spaarke AI appears as a personal tab in Microsoft Teams. Auth uses NAA (no OBO,
+    no third-party cookie issues). Users can access Spaarke AI without leaving Teams.
+  </goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/services/authInit.ts</file>
+    <file>src/solutions/SpaarkeAi/package.json</file>
+    <file>projects/spaarke-ai-platform-unification-r1/notes/distribution-research.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="research">MUST use NAA (createNestablePublicClientApplication) — not traditional getAuthToken+OBO</constraint>
+    <constraint source="research">MUST use TeamsJS v2.19.0+ for NAA support</constraint>
+    <constraint source="research">MUST register brk-multihub://{domain} redirect URI in Entra app</constraint>
+    <constraint source="research">MUST gate Teams detection on microsoftTeams.app.isInitialized() — don't assume Teams context</constraint>
+    <constraint source="project">MUST NOT break non-Teams launch paths (Dataverse, direct URL, navigateTo)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Research: verify TeamsJS 2.19+ NAA API surface is stable (check npm registry)</step>
+    <step order="2">Add @microsoft/teams-js dependency to SpaarkeAi package.json</step>
+    <step order="3">Create Teams context detection utility (isRunningInTeams())</step>
+    <step order="4">Modify auth bootstrap: if Teams detected, use createNestablePublicClientApplication</step>
+    <step order="5">Register brk-multihub redirect URI on Entra app registration (az ad app update)</step>
+    <step order="6">Create teams-manifest.json with static personal tab configuration</step>
+    <step order="7">Create app icons (192x192, 32x32) for Teams manifest</step>
+    <step order="8">Package Teams app (zip: manifest.json + icons)</step>
+    <step order="9">Sideload and test in Teams desktop client</step>
+    <step order="10">Test on Teams web client (no third-party cookies scenario)</step>
+    <step order="11">Document: admin consent requirements, tenant-wide deployment steps</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Spaarke AI appears as a personal tab in Teams</criterion>
+    <criterion>NAA auth works — tokens acquired without OBO exchange</criterion>
+    <criterion>Works in Teams desktop, web, and mobile (iOS)</criterion>
+    <criterion>Non-Teams launch paths still work (no regression)</criterion>
+    <criterion>Teams manifest passes validation (teams-toolkit validate or manual)</criterion>
+    <criterion>Documentation includes admin consent and deployment steps</criterion>
+  </acceptance-criteria>
+</task>

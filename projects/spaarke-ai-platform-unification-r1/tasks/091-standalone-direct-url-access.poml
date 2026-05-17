@@ -1,0 +1,79 @@
+<task id="AIPU-091" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Standalone direct URL access — top-frame MSAL auth for bookmarkable Spaarke AI</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <wave>5F</wave>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>frontend, auth</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>AIPU-040</dependencies>
+  </metadata>
+
+  <prompt>
+    Make the Spaarke AI Code Page work when opened directly via URL (top-frame) without
+    requiring Xrm.Navigation.navigateTo. This enables bookmarkable standalone access:
+    https://spaarkedev1.crm.dynamics.com/{appId}/webresources/sprk_spaarkeai
+
+    Currently, main.tsx calls resolveRuntimeConfig() which requires Xrm.Utility.getGlobalContext().
+    When opened as a top-frame web resource, Xrm IS available (unlike direct /webresources/ URL).
+    But when Xrm is NOT available (deep-link, external referrer), auth must fall back to
+    full MSAL redirect flow with config from environment variables or a config endpoint.
+
+    Implementation:
+    1. In main.tsx bootstrap, try resolveRuntimeConfig() first (works in MDA context)
+    2. If it throws (Xrm not available), fall back to a static config endpoint:
+       GET /api/config/client — returns { bffBaseUrl, msalClientId, msalAuthority, scopes }
+    3. For the fallback path, use MSAL redirect auth (not popup) since we're in top frame
+    4. Add a BFF endpoint: GET /api/config/client (anonymous, returns non-sensitive client config)
+    5. The Code Page should detect which auth mode it's in and use the appropriate MSAL flow:
+       - In navigateTo iframe: acquireTokenSilent + popup fallback (never redirect)
+       - In top frame: acquireTokenSilent + redirect fallback (standard SPA flow)
+
+    Research reference: projects/spaarke-ai-platform-unification-r1/notes/distribution-research.md
+
+    The goal: users can bookmark https://spaarkedev1.crm.dynamics.com/{appId}/webresources/sprk_spaarkeai
+    and it just works — auth redirects to login if needed, then renders Spaarke AI.
+  </prompt>
+
+  <role>Senior frontend developer with MSAL.js and Dataverse auth experience</role>
+
+  <goal>
+    Spaarke AI loads successfully from a direct/bookmarked URL without Xrm context.
+    Auth uses MSAL redirect flow in top frame. Config loads from BFF /api/config/client endpoint.
+  </goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+    <file>src/solutions/SpaarkeAi/src/config/runtimeConfig.ts</file>
+    <file>src/solutions/SpaarkeAi/src/services/authInit.ts</file>
+    <file>src/client/shared/Spaarke.Auth/src/</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/</file>
+    <file>projects/spaarke-ai-platform-unification-r1/notes/distribution-research.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="research">In navigateTo iframe: MUST use acquireTokenSilent + popup fallback (never redirect — breaks the parent frame)</constraint>
+    <constraint source="research">In top frame: MUST use acquireTokenSilent + redirect fallback (standard SPA pattern)</constraint>
+    <constraint source="ADR-008">BFF /api/config/client MUST be anonymous (no auth required) — returns only non-sensitive config (client ID, authority, scopes)</constraint>
+    <constraint source="project">MUST NOT break existing navigateTo launch (Xrm context path must still work)</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Create BFF endpoint: GET /api/config/client (anonymous) returning client config</step>
+    <step order="2">Detect frame context in main.tsx (window.self === window.top → top frame)</step>
+    <step order="3">Add config fallback: if resolveRuntimeConfig() throws, fetch /api/config/client</step>
+    <step order="4">Add MSAL mode detection: iframe → silent+popup; top-frame → silent+redirect</step>
+    <step order="5">Handle MSAL redirect response on page load (handleRedirectPromise)</step>
+    <step order="6">Test: open direct URL → redirects to login → returns to Spaarke AI authenticated</step>
+    <step order="7">Test: open via navigateTo → still works with Xrm path (no regression)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Direct URL https://{org}/webresources/sprk_spaarkeai loads and authenticates</criterion>
+    <criterion>If not authenticated, redirects to Azure AD login then returns</criterion>
+    <criterion>navigateTo launch still works (no regression)</criterion>
+    <criterion>BFF /api/config/client returns correct config anonymously</criterion>
+    <criterion>No sensitive data (secrets, keys) in /api/config/client response</criterion>
+  </acceptance-criteria>
+</task>

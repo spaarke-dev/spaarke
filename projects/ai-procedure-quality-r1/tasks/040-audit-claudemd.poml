@@ -1,0 +1,58 @@
+<task id="040" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Audit CLAUDE.md → AUDIT-FINDINGS-CLAUDEMD.md with target outline</title>
+    <phase>3a</phase>
+    <stream>audit</stream>
+    <tags>audit, claudemd</tags>
+    <estimate>1-2h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>002, 028</dependencies>
+    <writes-to>.claude/AUDIT-FINDINGS-CLAUDEMD.md</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Produce AUDIT-FINDINGS-CLAUDEMD.md with section-by-section disposition + target outline (4-section structure, &lt;200 lines). Cross-reference against Phase 2a skill findings to detect content that should live in a skill instead.</goal>
+    <context>Current CLAUDE.md is 1190 lines. Target: under 200 (ideally 150). The audit classifies each section as: keep / move-to-skill / move-to-settings / move-to-docs / move-to-knowledge / delete.</context>
+    <constraints>
+      - parallel-safe: false — main session only
+      - Cross-reference AUDIT-FINDINGS-SKILLS.md from Phase 2a to identify duplications
+      - Target outline must reduce to <200 lines and follow the 4-section structure: What is this project? / Load-bearing principles / Where does detail live? / How should the agent work?
+      - Verify all cross-references in current CLAUDE.md (does each path resolve?)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/AUDIT-FINDINGS-SKILLS.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/claudemd.md</file>
+      <file>projects/ai-procedure-quality-r1/design.md</file>
+      <file>projects/ai-procedure-quality-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read current CLAUDE.md and notes/inventory/claudemd.md</step>
+    <step>For each section, classify disposition per the 6 categories above</step>
+    <step>Cross-check against AUDIT-FINDINGS-SKILLS.md: if a section's content matches a skill's body, mark "move-to-skill: &lt;skill-name&gt;"</step>
+    <step>Identify deterministic rules in CLAUDE.md (always-do-X / never-do-Y); mark "move-to-settings"</step>
+    <step>Verify every cross-reference in current CLAUDE.md resolves; flag broken ones</step>
+    <step>Draft the target outline: 4 sections, &lt;200 lines, each section title + bullet points showing intended content</step>
+    <step>For each "move-to-X" disposition, name the specific destination (existing skill, new skill to create, doc path, knowledge path, settings.json change)</step>
+    <step>Write .claude/AUDIT-FINDINGS-CLAUDEMD.md with: Summary, Section-by-Section Audit, Target Outline, New Skills To Create (if any), Settings.json Changes Required (if any), Sign-Off Section (empty)</step>
+    <step>Add "Reviewer Sign-Off Required Before Phase 3b" notice at top</step>
+  </steps>
+
+  <outputs>
+    <output>.claude/AUDIT-FINDINGS-CLAUDEMD.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every section of CLAUDE.md classified</criterion>
+    <criterion>Target outline ≤ 200 lines</criterion>
+    <criterion>Every "move-to-X" has a concrete destination named</criterion>
+    <criterion>All cross-reference checks completed</criterion>
+    <criterion>Sign-off section ready for reviewer</criterion>
+  </acceptance-criteria>
+</task>

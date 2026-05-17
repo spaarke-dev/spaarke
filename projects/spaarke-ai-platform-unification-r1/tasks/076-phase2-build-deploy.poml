@@ -1,0 +1,77 @@
+<task id="AIPU-076" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Phase 2 Build and Deploy — BFF with Agent Service + Foundry agent definition</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <wave>7D</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-075</dependencies>
+  </metadata>
+
+  <prompt>
+    Build, publish, and deploy the BFF API with all Phase 2 services to the dev environment, then deploy the Foundry agent definition and update any playbooks that need ActionType 60 nodes. Verify each deployment step before proceeding to the next. This is a serial deployment gate — all integration tests in task 077 depend on this completing successfully.
+  </prompt>
+
+  <role>DevOps engineer familiar with Spaarke BFF deployment and Azure AI Foundry agent deployment</role>
+
+  <goal>
+    BFF API deployed to dev with Phase 2 services active, Foundry agent deployed and agent ID captured in app config, and playbooks containing ActionType 60 nodes deployed — health check endpoint returns 200 and agent endpoint responds.
+  </goal>
+
+  <relevant-files>
+    <file>scripts/Deploy-BffApi.ps1</file>
+    <file>infrastructure/ai-foundry/agents/</file>
+    <file>infrastructure/ai-foundry/README.md</file>
+    <file>docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md</file>
+    <file>src/server/api/Sprk.Bff.Api/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="project">Use scripts/Deploy-BffApi.ps1 for BFF deployment — do NOT deploy manually via az webapp deploy unless the script fails</constraint>
+    <constraint source="ADR-018">AgentServiceOptions:Enabled must be true in dev app config before any agent tests can run; verify config is set after deployment</constraint>
+    <constraint source="project">Capture deployed agent ID from az CLI output and store in Azure App Service config as AiServices__AgentService__AgentId — do not commit agent ID to source control</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>infrastructure/ai-foundry/README.md</file>
+      <file>docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF deployment" location="scripts/Deploy-BffApi.ps1">
+        Read Deploy-BffApi.ps1 to understand: build target, publish output path, az webapp deploy command, and any post-deploy steps like configuration updates
+      </pattern>
+      <pattern name="Foundry agent deployment" location="docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md">
+        Read the guide for the az ai agent create command syntax, required parameters, and how to capture the agent ID from the JSON response
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read scripts/Deploy-BffApi.ps1 to confirm the deployment steps and any required environment variables or prerequisites</step>
+    <step>Read infrastructure/ai-foundry/README.md and auth-AI-azure-resources.md to confirm dev Foundry project name, Hub endpoint, and subscription</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ --configuration Release and confirm zero errors</step>
+    <step>Run dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --output ./publish/bff</step>
+    <step>Run scripts/Deploy-BffApi.ps1 to deploy the published BFF to the dev App Service (spe-api-dev-67e2xz)</step>
+    <step>Verify BFF health check: GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz — expect 200</step>
+    <step>Set required Phase 2 app configuration in Azure App Service: AiServices__AgentService__Enabled=true, AiServices__CodeInterpreter__Enabled=true, AiServices__BingGrounding__Enabled=true (use az webapp config appsettings set)</step>
+    <step>Deploy Foundry agent: run az ai agent create command from infrastructure/ai-foundry/agents/ using environment variable substitution for all placeholders; capture the agent ID from the JSON response</step>
+    <step>Store agent ID: az webapp config appsettings set --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2 --settings AiServices__AgentService__AgentId=[captured-id]</step>
+    <step>Deploy any playbooks that include ActionType 60 nodes (check playbooks directory for updated definitions)</step>
+    <step>Perform smoke test: verify that a simple agent-routed chat request reaches the BFF and returns a non-error response (curl or Invoke-RestMethod)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>dotnet build Release succeeds with zero errors</criterion>
+    <criterion>BFF health check GET /healthz returns 200 after deployment</criterion>
+    <criterion>Phase 2 app settings (Enabled flags) are set in Azure App Service</criterion>
+    <criterion>Foundry agent deployed and agent ID stored in AiServices__AgentService__AgentId app setting</criterion>
+    <criterion>Playbooks with ActionType 60 nodes deployed to Dataverse</criterion>
+    <criterion>Smoke test: agent-routed chat request completes without 5xx error</criterion>
+    <criterion>Agent ID NOT committed to any source-controlled config file</criterion>
+  </acceptance-criteria>
+</task>

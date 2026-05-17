@@ -4,12 +4,16 @@ tags: [git, worktree, project-setup, operations]
 techStack: [git, powershell]
 appliesTo: ["new project", "parallel development", "multi-computer workflow"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
 # Worktree Setup
 
 > **Category**: Operations
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: Worktrees target user-named ephemeral directories (`spaarke-wt-{project-name}`) — no stable reference to rebuild and compare. The `git worktree` commands themselves are the contract.
 
 ---
 
@@ -730,4 +734,16 @@ Use `/conflict-check` skill to detect file overlap with active PRs before starti
 
 ---
 
-*Last updated: January 2026*
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Two Claude sessions edit the same file in different worktrees without conflict warning | Sessions are isolated; git only catches conflict at merge time | Before starting work in a worktree, run `/conflict-check` against active PRs AND against other worktrees (`git worktree list` + `git status` per worktree). |
+| Worktree commands operate on the wrong directory — accidentally modify main repo | Agent ran `git checkout master` in a worktree, OR used `cd` to change directory and didn't track which dir is which | Detect worktree vs main repo via `git rev-parse --git-dir` — `.git` = main repo, anything else = worktree. Refuse `git checkout master` in a worktree. |
+| Creating a new worktree but the branch already exists somewhere else | Branch was created previously and not cleaned up | Always `git fetch origin master:master` BEFORE creating worktree (refreshes origin tracking). Check `git branch -a` for the branch name first. |
+| Worktree directory deleted via `rm -rf` instead of `git worktree remove` | User cleaned up the directory directly | Git leaves an orphan worktree record. Run `git worktree prune` to clean up. Verify with `git worktree list`. |
+| Main repo's `*.sln` edited while worktree session was active — Visual Studio confused | Multiple sessions touching the same root-level file | Avoid editing root `*.sln` in parallel worktrees. If unavoidable, designate one worktree as "owner" of the sln file. |
+
+---
+
+*Last updated 2026-05-16 by ai-procedure-quality-r1 Phase 2b Wave 2b-A.*

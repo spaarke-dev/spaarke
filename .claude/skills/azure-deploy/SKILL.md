@@ -1,27 +1,32 @@
 ---
-description: Deploy Azure infrastructure, BFF API, Static Web Apps, and configure App Service settings
-tags: [deploy, azure, infrastructure, bicep, api, app-service, static-web-app, office-addins]
-techStack: [azure, bicep, dotnet, app-service, swa]
-appliesTo: ["infrastructure/**", "deploy to azure", "deploy api", "azure deployment", "deploy office addins", "deploy static web app"]
+description: Deploy Azure infrastructure (Bicep) and configure Key Vault Secrets. For BFF API use bff-deploy; for Office Add-ins use office-addins-deploy.
+tags: [deploy, azure, infrastructure, bicep, key-vault]
+techStack: [azure, bicep, key-vault, azure-cli]
+appliesTo: ["infrastructure/**", "deploy to azure", "deploy infrastructure", "bicep deploy", "key vault", "azure resource"]
 alwaysApply: false
+exemplar: infrastructure/bicep/stacks/ai-foundry-stack.bicep
+last-reviewed: 2026-05-17
 ---
 
 # Azure Deploy
 
 > **Category**: Operations
-> **Last Updated**: January 2026
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2c — refactored: removed stale BFF deploy section [defer to `bff-deploy`]; extracted Office Add-ins to new `office-addins-deploy` skill; fixed 2 broken workflow filename references; renumbered Key Vault from Type 4 to Type 2 since only Infrastructure + Key Vault remain in scope)
+> **Exemplar rationale**: `infrastructure/bicep/stacks/ai-foundry-stack.bicep` is a comprehensive Bicep stack demonstrating module composition, parameter passing, and Key Vault wiring.
 
 ---
 
-## Quick Reference
+## Quick Reference — Scope of THIS skill
 
-| Deployment Type | Tool | Skill/Guide |
-|-----------------|------|-------------|
-| Azure Infrastructure | Azure CLI + Bicep | This skill |
-| BFF API | Azure CLI / GitHub Actions | This skill |
-| **Office Add-ins / SWA** | **SWA CLI + PowerShell** | **This skill** |
-| Dataverse/PCF | PAC CLI | Use `dataverse-deploy` skill |
-| Solution Import | PAC CLI | Use `dataverse-deploy` skill |
+| Deployment Type | Tool | Where to Find |
+|-----------------|------|---------------|
+| **Azure Infrastructure (Bicep)** | Azure CLI + Bicep | THIS SKILL |
+| **Key Vault Secrets** | Azure CLI + Bicep | THIS SKILL |
+| BFF API to App Service | `Deploy-BffApi.ps1` + hash-verify | `bff-deploy` skill (the canonical authority — incident-grounded with May 2026 silent-failure hardening) |
+| Office Add-ins to SWA | SWA CLI + `Deploy-OfficeAddins.ps1` | `office-addins-deploy` skill |
+| Dataverse / PCF / solutions | PAC CLI | `dataverse-deploy`, `pcf-deploy` skills |
+| Power Pages Code Site | PAC CLI + Vite build | `power-page-deploy` skill |
 
 **For Dataverse deployments (PCF, solutions, web resources)**: Use the `dataverse-deploy` skill instead.
 
@@ -148,248 +153,7 @@ az resource list `
 
 ---
 
-## Deployment Type 2: BFF API (App Service)
-
-### When to Use
-
-- Deploying API code changes
-- Updating App Service configuration
-- Publishing new API version
-
-### Build API
-
-```powershell
-# Build release
-cd src/server/api/Sprk.Bff.Api
-dotnet publish -c Release -o ./publish
-
-# Or use publish profile
-dotnet publish -c Release /p:PublishProfile=Azure
-```
-
-### Deploy to App Service
-
-#### Option A: Deployment Script (Recommended for Dev)
-
-**Use the deployment script** - handles build, package, deploy, and verification:
-
-```powershell
-# Full build and deploy (~1 min)
-.\scripts\Deploy-BffApi.ps1
-
-# Deploy existing build (faster, ~30 sec)
-.\scripts\Deploy-BffApi.ps1 -SkipBuild
-```
-
-**What the script does:**
-1. Builds the API in Release mode (unless `-SkipBuild`)
-2. Creates deployment zip package
-3. Deploys via Azure CLI
-4. Waits for app restart
-5. Verifies health check passes
-
-#### Option A-alt: Manual Azure CLI
-
-If you need to run steps manually:
-
-```powershell
-# Build and package
-cd src/server/api/Sprk.Bff.Api
-dotnet publish -c Release -o ./publish
-Compress-Archive -Path './publish/*' -DestinationPath './publish.zip' -Force
-
-# Deploy
-az webapp deploy `
-  --resource-group spe-infrastructure-westus2 `
-  --name spe-api-dev-67e2xz `
-  --src-path ./publish.zip `
-  --type zip
-
-# Verify deployment took effect
-curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz
-```
-
-#### Option B: GitHub Actions (Production Releases)
-
-**Use for production deployments** - push to master triggers automated deployment:
-
-```powershell
-# Merge to master triggers deploy-staging.yml
-git push origin master
-
-# Monitor deployment
-gh run list --workflow=deploy-staging.yml --limit 3
-gh run watch
-```
-
-See `.github/workflows/deploy-staging.yml` for configuration.
-
-#### Option C: Kudu Zip Push Deploy (Troubleshooting Fallback)
-
-**Use when CLI deploy reports success but app still runs old code:**
-
-1. Go to **Azure Portal** → **App Services** → `spe-api-dev-67e2xz`
-2. Click **Advanced Tools** → **Go** (opens Kudu)
-3. Click **Tools** → **Zip Push Deploy**
-4. Drag and drop `publish.zip` onto the page
-5. Verify new entry appears in **Deployment Center** logs
-
-> **Note**: This is a rare fallback. If CLI deploys consistently fail to update the app, check Deployment Center logs first.
-
-### Configure App Settings
-
-```powershell
-# Set individual setting
-az webapp config appsettings set `
-  --resource-group spe-infrastructure-westus2 `
-  --name spe-api-dev-67e2xz `
-  --settings Ai__Enabled=true
-
-# Set multiple settings from file
-az webapp config appsettings set `
-  --resource-group spe-infrastructure-westus2 `
-  --name spe-api-dev-67e2xz `
-  --settings @appsettings.json
-```
-
-### Required App Settings
-
-**CRITICAL - App will NOT start without these:**
-
-| Setting | Example Value | Notes |
-|---------|---------------|-------|
-| `ASPNETCORE_ENVIRONMENT` | `Development` or `Production` | Production requires CORS |
-| `Cors__AllowedOrigins__0` | `https://spaarkedev1.crm.dynamics.com` | **Required for Production** |
-| `Cors__AllowedOrigins__1` | `https://spaarkedev1.api.crm.dynamics.com` | **Required for Production** |
-| `ConnectionStrings__ServiceBus` | `@Microsoft.KeyVault(...)` | Required |
-
-**AI Features (optional):**
-
-| Setting | Example Value |
-|---------|---------------|
-| `Ai__Enabled` | `true` |
-| `Ai__OpenAiEndpoint` | `https://spaarke-openai-dev.openai.azure.com/` |
-| `Ai__OpenAiKey` | `@Microsoft.KeyVault(...)` |
-| `DocumentIntelligence__Enabled` | `true` |
-| `DocumentIntelligence__AiSearchEndpoint` | `https://spaarke-search-dev.search.windows.net` |
-
-**Full settings reference**: See [azure-deployment.md](../../constraints/azure-deployment.md) and `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md`
-
----
-
-## Deployment Type 3: Office Add-ins (Static Web App)
-
-### When to Use
-
-- Deploying Office Add-in changes (Outlook, Word)
-- Updating taskpane UI or manifest
-- Dev iteration on add-in features
-
-### Resource Reference
-
-| Resource | Value |
-|----------|-------|
-| Static Web App Name | `spaarke-office-addins` |
-| Resource Group | `spe-infrastructure-westus2` |
-| URL | `https://icy-desert-0bfdbb61e.6.azurestaticapps.net` |
-| Source Directory | `src/client/office-addins` |
-| Dist Directory | `src/client/office-addins/dist` |
-
-### Dev Deployment (Recommended for Iteration)
-
-**Use the deployment script** - handles all the complexity:
-
-```powershell
-# Full build and deploy
-.\scripts\Deploy-OfficeAddins.ps1
-
-# Skip build (use existing dist)
-.\scripts\Deploy-OfficeAddins.ps1 -SkipBuild
-
-# Deploy to preview environment
-.\scripts\Deploy-OfficeAddins.ps1 -Environment preview
-
-# Verbose output
-.\scripts\Deploy-OfficeAddins.ps1 -Verbose
-```
-
-**What the script does:**
-1. Builds webpack production bundle (unless `-SkipBuild`)
-2. Gets fresh deployment token from Azure
-3. Deploys using SWA CLI with spinner workaround
-4. Verifies deployment and shows manifest version
-
-### Manual Deployment (Alternative)
-
-If you need to run steps manually:
-
-```powershell
-# Navigate to office-addins directory
-cd src/client/office-addins
-
-# 1. Build production bundle
-npx webpack --mode production
-
-# 2. Get fresh deployment token (tokens can expire/rotate)
-$token = az staticwebapp secrets list `
-  --name spaarke-office-addins `
-  --resource-group spe-infrastructure-westus2 `
-  --query properties.apiKey -o tsv
-
-# 3. Deploy with output to log file (avoids spinner hanging issue)
-Start-Process -FilePath 'powershell.exe' `
-  -ArgumentList "-NoProfile","-Command","npx swa deploy ./dist --deployment-token $token --env production *> deploy.log" `
-  -NoNewWindow -Wait
-
-# 4. Check deployment result
-Get-Content deploy.log
-
-# 5. Verify deployment (use cache-busting param)
-curl "https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.xml?v=$(Get-Date -Format 'HHmmss')"
-```
-
-### Why Direct Deploy Instead of GitHub Actions
-
-| Aspect | Direct Deploy | GitHub Actions |
-|--------|---------------|----------------|
-| Speed | ~30 seconds | 2-5 minutes (CI + deploy) |
-| Requires PR | No | Yes (merge to master) |
-| Best for | Dev iteration, debugging | Production releases |
-| Token | Fresh each time | Stored in secrets |
-
-**Use Direct Deploy when**:
-- Testing UI changes
-- Debugging add-in issues
-- Rapid iteration cycles
-- Any work that doesn't need PR review
-
-**Use GitHub Actions when**:
-- Ready for production release
-- Changes have been code-reviewed
-- Want deployment audit trail
-
-### Troubleshooting SWA Deployment
-
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| Spinner hangs forever | SWA CLI spinner blocks output | Use `Start-Process` with log redirect |
-| Old token rejected | Tokens rotate periodically | Get fresh token via `az staticwebapp secrets list` |
-| Deployment succeeds but old content | CDN caching | Add `?v=timestamp` to verify, wait 1-2 min |
-| 404 on deployed files | Wrong dist path | Verify `./dist` contains expected files |
-
-### Manifest Upload After Deploy
-
-After deploying code changes, if manifest changed:
-
-1. Download manifest: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.xml`
-2. Upload to M365 Admin Center → Integrated Apps → Upload custom app
-3. Wait 5-15 minutes for propagation to Outlook clients
-
-**Note**: Manifest version must be incremented (e.g., 1.0.1.0 → 1.0.2.0) for M365 to accept updates.
-
----
-
-## Deployment Type 4: Key Vault Secrets
+## Deployment Type 2: Key Vault Secrets
 
 ### Store Secrets
 
@@ -529,41 +293,47 @@ az webapp log deployment show --name spe-api-dev-67e2xz --resource-group spe-inf
 
 ### Automated Deployments via GitHub Actions
 
-This skill documents **manual** Azure deployments. For automated deployments, see the GitHub Actions workflows:
+This skill documents **manual** Azure Infrastructure + Key Vault Secrets work. For automated deployments, see the GitHub Actions workflows:
 
 | Workflow | Trigger | What It Deploys |
 |----------|---------|-----------------|
-| `deploy-staging.yml` | Auto (after CI passes on master) | API to staging App Service |
-| `deploy-to-azure.yml` | Manual trigger | Infrastructure (Bicep) + API to production |
+| `.github/workflows/deploy-infrastructure.yml` | Manual trigger (`workflow_dispatch`) | Azure Infrastructure (Bicep stacks) |
+| `.github/workflows/deploy-bff-api.yml` | Auto (after CI passes on master) OR manual | BFF API — see `bff-deploy` skill |
+| `.github/workflows/deploy-office-addins.yml` | Manual trigger | Office Add-ins SWA — see `office-addins-deploy` skill |
+| `.github/workflows/deploy-platform.yml` | Manual trigger | Cross-platform deployment orchestrator |
+| `.github/workflows/deploy-promote.yml` | Manual trigger | Promote a deployed artifact between environments |
+| `.github/workflows/deploy-slot-swap.yml` | After CI green | Slot swap for App Service blue-green deploys |
+
+**Note**: Earlier docs referenced `deploy-staging.yml` and `deploy-to-azure.yml` — these workflow files do NOT exist. The actual workflow names are listed above (verified 2026-05-17).
 
 ### When to Use Manual vs Automated
 
 | Scenario | Use |
 |----------|-----|
-| Regular code deployments | Automated (`deploy-staging.yml` after merge to master) |
-| Production deployment | Automated (`deploy-to-azure.yml` manual trigger) |
-| Emergency hotfix | Manual deployment (this skill) |
-| Infrastructure changes only | Manual deployment (this skill) |
+| Routine infrastructure update | Automated (`deploy-infrastructure.yml` workflow_dispatch) |
+| Emergency hotfix on Bicep | Manual deployment (this skill) |
+| First-time infrastructure stand-up | Manual deployment (this skill) |
 | Debugging deployment issues | Manual deployment (this skill) |
+| BFF API deploy | `bff-deploy` skill (DO NOT do BFF deploys via this skill) |
 
-### Trigger Automated Deployment
+### Trigger Automated Infrastructure Deployment
 
 ```powershell
-# Trigger production deployment manually
-gh workflow run deploy-to-azure.yml
+# Trigger infrastructure deployment manually
+gh workflow run deploy-infrastructure.yml
 
 # Monitor deployment progress
 gh run watch
 
 # View deployment status
-gh run list --workflow=deploy-to-azure.yml --limit 5
+gh run list --workflow=deploy-infrastructure.yml --limit 5
 ```
 
 ### Check Deployment Status
 
 ```powershell
 # View recent deployments
-gh run list --workflow=deploy-to-azure.yml
+gh run list --workflow=deploy-infrastructure.yml
 
 # View specific run details
 gh run view {run-id}
@@ -584,7 +354,7 @@ gh run download {run-id}
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 - **Avoid discovery queries** - Use endpoint values from Environment Reference above
 - **Operational commands OK** - Deployments, secret management, configuration are permitted
@@ -603,13 +373,24 @@ gh run download {run-id}
 | **Office Add-ins** | `.\scripts\Deploy-OfficeAddins.ps1` | Full build+deploy in ~30 sec |
 
 Both scripts support `-SkipBuild` flag to deploy existing builds faster.
-- **500 errors after deploy** - Check `/healthz` response body for DI scope or startup errors
+- **500 errors after deploy** - Check `/healthz` response body for DI scope or startup errors. For BFF-specific errors → use `bff-deploy` skill.
 
-### Office Add-ins Specific
+### Out of Scope (defer to other skills)
 
-- **Use the script** - Always use `.\scripts\Deploy-OfficeAddins.ps1` for SWA deployments
-- **SWA CLI spinner issue** - The script handles this; don't run `npx swa deploy` directly from bash
-- **Fresh tokens** - The script gets a fresh token each time; manual deploys should do the same
-- **CDN caching** - After deploy, use `?v=timestamp` parameter to verify new content
-- **Manifest changes** - After deploying manifest changes, remind user to upload to M365 Admin Center
-- **Version bumping** - Manifest version must be incremented for M365 to accept updates
+- **BFF API deploys** → `bff-deploy` skill (canonical authority; includes May 2026 silent-failure hardening with hash-verify + auto-recover)
+- **Office Add-ins / SWA deploys** → `office-addins-deploy` skill (extracted from this skill 2026-05-17)
+- **Dataverse PCF / solutions** → `dataverse-deploy` / `pcf-deploy` skills
+- **Power Pages Code Sites** → `power-page-deploy` skill
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| `az deployment group create` succeeds but resource doesn't appear in portal | Wrong resource group OR provider not registered for the subscription | Verify `az account show` matches expected subscription. Run `az provider register --namespace <namespace>` for first-time use of a new provider. |
+| Bicep deploy "succeeds" with `provisioningState: Succeeded` but child resources failed | Top-level deployment doesn't always surface child failures | Always check `az deployment group show --query properties.outputs` AND examine the child operations: `az deployment operation group list --resource-group <rg> --name <deployment>`. |
+| Key Vault secret stored but App Settings reference returns null | App Service's managed identity doesn't have `Get` permission on the Key Vault, OR the reference syntax `@Microsoft.KeyVault(SecretUri=...)` has a typo | Grant the App Service's system-assigned MI Key Vault Secrets User role. Verify reference syntax matches exactly (including the literal `@` and proper VaultName/SecretName fields). Test with `az webapp config appsettings list` to see resolved values. |
+| AI Foundry stack deploy fails with "Hub not found" mid-deploy | Resource dependencies aren't ordered correctly in the Bicep | The `ai-foundry-stack.bicep` example wires Hub → Project → Connections in correct order. Don't shortcut to deploy Project before Hub exists. |
+| Workflow `deploy-staging.yml` or `deploy-to-azure.yml` doesn't exist | Earlier docs referenced these by hopeful name; they were never created | Use the actual workflows listed in `## CI/CD Integration` (verified 2026-05-17). Fixed in this skill version. |
+| Deployment in slot 'staging' but production users still on old version | Slot swap step not run after staging validation | Slot deploys to `staging` are intentional — explicit `az webapp deployment slot swap` step is required to promote. Use `deploy-slot-swap.yml` workflow for this. |

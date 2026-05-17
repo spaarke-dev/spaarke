@@ -1,0 +1,4 @@
+# References subdirectory placeholder.
+# When a skill needs longer reference material (API docs, command syntax tables, deprecation lists,
+# detailed schemas), put it here and link from SKILL.md.
+# The agent will dereference these files only when the reference is relevant — keeps SKILL.md tight.

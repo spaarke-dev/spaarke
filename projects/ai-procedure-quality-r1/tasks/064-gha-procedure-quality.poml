@@ -1,0 +1,57 @@
+<task id="064" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Create .github/workflows/procedure-quality.yml</title>
+    <phase>4a</phase>
+    <stream>infrastructure</stream>
+    <tags>github-actions, ci, validator</tags>
+    <estimate>45min</estimate>
+    <rigor>FULL</rigor>
+    <parallel-group>4a-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>060, 061, 062, 063</dependencies>
+    <writes-to>.github/workflows/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>GHA workflow that runs the 4 validators on PRs that touch .claude/, scripts/quality/, .github/workflows/, or any opted-in exemplar source. Total runtime &lt;30s.</goal>
+    <context>The validators are local-only without this. This workflow makes them authoritative gates.</context>
+    <constraints>
+      - parallel-safe: false (writes to .github/)
+      - &lt;30s total runtime for the friction budget
+      - Path-filter triggers: only run on PRs touching the relevant directories
+      - Pin all action versions to commit SHAs (per F-20)
+      - Use ubuntu-latest runner
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>scripts/quality/Validate-ClaudeSettings.ps1</file>
+      <file>scripts/quality/Find-PatternDrift.ps1</file>
+      <file>scripts/quality/Check-BundleSizeDrift.ps1</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/workflows.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Create .github/workflows/procedure-quality.yml</step>
+    <step>Trigger: pull_request with path filters for .claude/**, scripts/quality/**, .github/workflows/**, plus any PCF source paths (for bundle-size check)</step>
+    <step>Jobs: validate-settings, find-pattern-drift, check-bundle-size — run in parallel</step>
+    <step>Test-ReferenceExemplars is NOT in this workflow (too slow); it runs in nightly-quality.yml instead</step>
+    <step>Each job runs its PS1 with -Quiet; fails the PR on non-zero exit</step>
+    <step>All `uses:` references pinned to commit SHAs</step>
+    <step>Total runtime budget: &lt;30s across the parallel jobs</step>
+    <step>Test workflow on a deliberately-broken PR (e.g., introduce schema error in settings.json) to confirm it blocks merge</step>
+  </steps>
+
+  <outputs>
+    <output>.github/workflows/procedure-quality.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Workflow YAML validates with actionlint (set up in task 071)</criterion>
+    <criterion>All actions pinned to SHAs</criterion>
+    <criterion>Test PR with broken settings.json is blocked</criterion>
+    <criterion>Clean PR completes in &lt;30s</criterion>
+  </acceptance-criteria>
+</task>

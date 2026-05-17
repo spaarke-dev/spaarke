@@ -1,0 +1,39 @@
+<task id="090" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Project wrap-up — update README, write lessons-learned, prompt for /merge-to-master</title>
+    <phase>wrap-up</phase>
+    <stream>closure</stream>
+    <tags>wrap-up, closure, lessons-learned</tags>
+    <estimate>30min</estimate>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>084</dependencies>
+    <writes-to>projects/ai-procedure-quality-r1/, README, master</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Mark the project complete. Capture lessons learned. Prompt user to merge the feature branch to master.</goal>
+  </prompt>
+
+  <steps>
+    <step>Update projects/ai-procedure-quality-r1/README.md status: "Complete"</step>
+    <step>Update projects/PROJECT-TRACKER.md with this project's row marked complete</step>
+    <step>Update current-task.md: status "none", next-action: "/merge-to-master"</step>
+    <step>Write projects/ai-procedure-quality-r1/notes/lessons-learned.md with: what worked (parallel agent waves, two-human-gate model, etc.), what didn't (any surprises), what to do differently in R2</step>
+    <step>Append CHANGELOG.md final entry: "Procedure-Quality-R1 complete — N validators operational, N skills refined, CLAUDE.md reduced from 1190 lines to M lines, 4 new artifacts, monthly cadence active"</step>
+    <step>Confirm: 1190 lines → M lines reduction in CLAUDE.md (capture the actual number)</step>
+    <step>Run /repo-cleanup to verify project hygiene</step>
+    <step>Prompt user: ready to /merge-to-master?</step>
+  </steps>
+
+  <outputs>
+    <output>Updated README, PROJECT-TRACKER, current-task, CHANGELOG</output>
+    <output>projects/ai-procedure-quality-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Project status reflects completion</criterion>
+    <criterion>Lessons-learned written</criterion>
+    <criterion>User prompted for merge</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,12 +1,18 @@
-# adr-aware
-
 ---
 description: Automatically load and apply relevant ADRs when creating or modifying resources
 tags: [adr, architecture, design, conventions]
 techStack: [all]
 appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx"]
 alwaysApply: true
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# adr-aware
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Exemplar rationale**: This skill prescribes a context-loading discipline, not a build/deploy procedure — no artifact to rebuild and compare. Quarterly manual review of the mapping table is the right cadence.
 
 ## Purpose
 
@@ -166,7 +172,7 @@ Reference this table for common constraints. The source of truth is:
 
 ## Integration with Other Skills
 
-### design-to-project
+### design-to-spec
 - Phase 2 (Context) should invoke ADR lookup using the mapping table
 - Generated CLAUDE.md should list applicable ADRs
 
@@ -267,4 +273,15 @@ Run `/adr-check` after completing tasks to verify no violations were introduced.
 
 ---
 
-*Last updated: December 25, 2025*
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Agent creates code that violates an ADR despite `adr-aware` being always-apply | Mapping table didn't trigger (resource type not recognized) OR agent loaded the ADR but ignored its constraint | Add the missed resource type to the mapping table (Rule 1) so future loads cover it. Run `/adr-check` to retroactively catch the violation. |
+| Two mapping tables disagree on which ADRs apply to a resource | Rule 1 (resource-type → ADR) and "Resource Type to Context Files Mapping" tables drift apart | Reconcile against current `.claude/adr/` inventory + ADR-jobs ADR coverage. The two tables should agree on `jobs.md` and other constraint files. |
+| Renamed skill referenced inline still appears in old form | Skill rename (e.g., `design-to-project` → `design-to-spec`) propagated to root CLAUDE.md but not here | Run `Find-SkillReferenceDrift.ps1` (Phase 4a) before claiming "all references updated." Update inline references in lockstep with skill renames. |
+| ADR-jobs (or another newer ADR) added but not in this skill's mapping | ADR creation skipped the propagation step in `ai-procedure-maintenance` | Run `/ai-procedure-maintenance` checklist when adding a new ADR — it explicitly updates the resource-type mapping in this skill. |
+
+---
+
+*Last updated 2026-05-16 by ai-procedure-quality-r1 Phase 2b Wave 2b-A.*

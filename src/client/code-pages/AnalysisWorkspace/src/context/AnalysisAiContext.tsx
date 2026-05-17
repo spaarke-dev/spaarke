@@ -5,7 +5,10 @@
  * Provides analysis state, editor refs, selection state, auth, and panel callbacks
  * to both the editor and chat panels in the unified workspace.
  *
- * @see ADR-012 — SprkChat uses callback-based props from this context
+ * Chat session lifecycle and context mapping are delegated to shared hooks from
+ * @spaarke/ai-context (useChatSession, useChatContextMapping) per ADR-012.
+ *
+ * @see ADR-012 — SprkChat uses callback-based props from this context; shared hooks
  * @see ADR-021 — Fluent UI v9 design system
  */
 
@@ -19,6 +22,11 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+// ---------------------------------------------------------------------------
+// @spaarke/ai-context — shared hooks (task AIPU-050)
+// ---------------------------------------------------------------------------
+import { useChatSession, useChatContextMapping } from '@spaarke/ai-context';
+import type { IAnalysisChatContextResponse } from '@spaarke/ai-context';
 import { useAuthContext, type AuthContextValue } from './AuthContext';
 import { useAnalysisLoader, type UseAnalysisLoaderResult } from '../hooks/useAnalysisLoader';
 import { getHostContext } from '../services/hostContext';
@@ -100,7 +108,7 @@ export interface AnalysisAiContextValue {
   // ── Chat State ──────────────────────────────────────────────────────────
   /** Current chat session ID (persisted to sessionStorage) */
   chatSessionId: string | null;
-  /** Set chat session ID (called when session is created) */
+  /** Set chat session ID (called when session is created by SprkChat) */
   setChatSessionId: (sessionId: string) => void;
   /** Current playbook ID for the chat */
   playbookId: string | undefined;
@@ -108,6 +116,15 @@ export interface AnalysisAiContextValue {
   setPlaybookId: (playbookId: string) => void;
   /** Pre-loaded chat history from sprk_chathistory (for SprkChat initialMessages) */
   chatHistory: IChatMessage[] | undefined;
+
+  // ── Analysis Chat Context (from @spaarke/ai-context useChatContextMapping) ──
+  /**
+   * Analysis-scoped chat context mapping from the BFF API.
+   * Provides available playbooks, inline actions, knowledge sources, and commands
+   * for the current analysis. Null while loading or when analysisId is absent.
+   * @see AnalysisChatContextEndpoints.cs — GET /api/ai/chat/context-mappings/analysis/{id}
+   */
+  contextMapping: IAnalysisChatContextResponse | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,8 +157,9 @@ export interface AnalysisAiProviderProps {
  * Composes:
  * - AuthContext (token, refresh)
  * - useAnalysisLoader (analysis record, document metadata)
+ * - useChatSession (@spaarke/ai-context) — session lifecycle management
+ * - useChatContextMapping (@spaarke/ai-context) — analysis chat context
  * - Editor ref and selection state
- * - Chat session state
  * - Panel callbacks (insert-to-editor, streaming)
  *
  * Must be rendered INSIDE AuthProvider (needs auth token).
@@ -157,20 +175,64 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
     token: auth.token,
   });
 
+  // ── Chat session lifecycle (AIPU-050: delegated to @spaarke/ai-context) ──
+  //
+  // useChatSession manages the full chat session lifecycle via the BFF API.
+  // The session object provides the canonical sessionId. The existing
+  // sessionStorage persistence (chatSessionId) stays in the public API for
+  // backward compatibility with ChatPanel and SprkChat.onSessionCreated.
+  const chatSessionHook = useChatSession({
+    bffBaseUrl,
+    initialMessages: loader.analysis?.chatHistory,
+  });
+
+  // ── Analysis chat context mapping (AIPU-050: from @spaarke/ai-context) ──
+  //
+  // Fetches available playbooks, inline actions, commands, and knowledge sources
+  // for the active analysis from GET /api/ai/chat/context-mappings/analysis/{id}.
+  // Re-fetches automatically when analysisId or playbookId changes (spec FR-08).
+
+  // Playbook state — persisted to sessionStorage (read initial value for context mapping)
+  const [playbookId, setPlaybookIdState] = useState<string | undefined>(() => {
+    try {
+      return sessionStorage.getItem(PLAYBOOK_KEY) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  });
+
+  const { contextMapping } = useChatContextMapping({
+    analysisId: hostContext.analysisId || undefined,
+    playbookId,
+    bffBaseUrl,
+  });
+
   // Editor ref — set by EditorPanel when it mounts
   const editorRef = useRef<EditorRef | null>(null);
 
   // Editor selection state — updated by EditorPanel on text selection
   const [editorSelection, setEditorSelection] = useState<string>('');
 
-  // Chat session state — persisted to sessionStorage
+  // ── Chat session ID — bridged from useChatSession + sessionStorage persistence ──
+  //
+  // SprkChat manages session creation internally and calls onSessionCreated with
+  // the new session object. We extract the sessionId string and persist it.
+  // The useChatSession hook's session object provides the authoritative session
+  // state when the hook creates sessions directly (e.g., context switching).
   const [chatSessionId, setChatSessionIdState] = useState<string | null>(() => {
+    // Initialise from sessionStorage so returning users resume their session.
+    // This will be overridden once SprkChat calls onSessionCreated.
     try {
       return sessionStorage.getItem(CHAT_SESSION_KEY);
     } catch {
       return null;
     }
   });
+
+  // Derive the effective session ID: prefer the useChatSession hook's authoritative
+  // session (when it has created one directly), then fall back to the sessionStorage
+  // value (set by SprkChat via setChatSessionId callback).
+  const effectiveChatSessionId = chatSessionHook.session?.sessionId ?? chatSessionId;
 
   const setChatSessionId = useCallback((sessionId: string) => {
     setChatSessionIdState(sessionId);
@@ -180,15 +242,6 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
       // sessionStorage may be unavailable in some contexts
     }
   }, []);
-
-  // Playbook state — persisted to sessionStorage
-  const [playbookId, setPlaybookIdState] = useState<string | undefined>(() => {
-    try {
-      return sessionStorage.getItem(PLAYBOOK_KEY) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  });
 
   const setPlaybookId = useCallback((id: string) => {
     setPlaybookIdState(id);
@@ -280,12 +333,15 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
       streaming,
       streamingState,
 
-      // Chat state
-      chatSessionId,
+      // Chat state (chatSessionId bridged from useChatSession + sessionStorage)
+      chatSessionId: effectiveChatSessionId,
       setChatSessionId,
       playbookId,
       setPlaybookId,
       chatHistory: loader.analysis?.chatHistory,
+
+      // Analysis chat context mapping (from @spaarke/ai-context useChatContextMapping)
+      contextMapping,
     }),
     [
       loader,
@@ -298,10 +354,11 @@ export function AnalysisAiProvider({ children, bffBaseUrl }: AnalysisAiProviderP
       onInsertToEditor,
       streaming,
       streamingState,
-      chatSessionId,
+      effectiveChatSessionId,
       setChatSessionId,
       playbookId,
       setPlaybookId,
+      contextMapping,
     ]
   );
 

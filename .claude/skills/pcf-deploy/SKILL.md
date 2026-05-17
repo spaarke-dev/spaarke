@@ -1,15 +1,20 @@
 ---
-description: Build, pack, and deploy PCF controls to Dataverse via solution ZIP import
+description: Build, pack, and deploy PCF controls to Dataverse via solution ZIP import — uses npm run build:prod for production mode (AP-1 fix verified 2026-05-14)
 tags: [deploy, pcf, dataverse, power-platform, solution]
 techStack: [pcf-framework, typescript, react, dataverse]
 appliesTo: ["**/pcf/**", "deploy pcf", "build and deploy pcf", "pcf solution import"]
 alwaysApply: false
+exemplar: src/client/pcf/SemanticSearchControl/
+last-reviewed: 2026-05-17
 ---
 
 # PCF Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Updated**: February 22, 2026
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — fixed 2 broken ADR file paths; added FAILURE-MODES.md#AP-1 cross-reference; `leave-alone-justified` on body length per dereferencing-reliability concern)
+> **Exemplar rationale**: `src/client/pcf/SemanticSearchControl/` is the canonical PCF control — named throughout this skill's body. Live, verifiable reference.
+> **AP-1 fix verified in skill** (2026-05-14): Wrong "NEVER use npm run build:prod" instruction was removed. The Bundle Size & Production Mode section now mandates the correct `pcf-scripts build --buildMode production`. See [FAILURE-MODES.md#AP-1](../../FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong) for incident history.
 > **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
@@ -401,9 +406,24 @@ When the user wants to deploy manually for fastest iteration:
 
 | ADR | Relevance |
 |-----|-----------|
-| [ADR-006](../../adr/ADR-006-pcf-over-webresources.md) | PCF over legacy webresources |
-| [ADR-021](../../adr/ADR-021-fluent-design-system.md) | Fluent UI v9 design system |
-| [ADR-022](../../adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility, platform libraries |
+| [ADR-006](../../../docs/adr/ADR-006-prefer-pcf-over-webresources.md) | PCF over legacy webresources |
+| [ADR-021](../../../docs/adr/ADR-021-fluent-ui-design-system.md) | Fluent UI v9 design system |
+| [ADR-022](../../../docs/adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility, platform libraries |
+
+> **Path fix 2026-05-17**: ADR-006 and ADR-021 filenames updated to actual repo filenames (`ADR-006-prefer-pcf-over-webresources.md` not `ADR-006-pcf-over-webresources.md`; `ADR-021-fluent-ui-design-system.md` not `ADR-021-fluent-design-system.md`). All 3 ADR links verified to resolve.
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| PCF bundle size jumps 5-10× after rebuild (e.g., 440KB → 6.7MB) | `npm run build` (dev mode, no tree-shaking) used instead of `npm run build:prod` | **This is the AP-1 origin.** See [FAILURE-MODES.md#AP-1](../../FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong). ALWAYS use `npm run build:prod` for production deploys. Verify bundle size post-build matches expected ranges (skill's Bundle Size & Production Mode section). |
+| `npm run build:prod` script silently runs dev mode | Wrong flag in `package.json` (`--production` or `-- --mode production` instead of `--buildMode production`) | Verify each PCF's `package.json` `build:prod` script invokes `pcf-scripts build --buildMode production`. Phase 0 inventory caught 3 PCFs with wrong flags; fix at the package.json level. |
+| Solution import succeeds but PCF doesn't appear in form | Schema-name convention drift: `sprk_Sprk.<ControlName>` vs `sprk_Spaarke.Controls.<ControlName>` | Verify the schema name in `ControlManifest.xml` matches what's expected in the Form designer. Both conventions exist in the wild — must match exactly. |
+| Bundle deployed but React not initializing | `ControlManifest.Input.xml` `<platform-library>` for React 16 not declared correctly | Per ADR-022, PCF declares React 16 via `<platform-library name="React" version="16.x.x" />`. Without this, ReactDOM doesn't bootstrap. |
+| Multiple PCFs in one solution but only one deploys | Solution XML missing entries for second PCF | Each PCF needs its own `<RootComponent>` in `solution.xml` + matching directory structure. Don't try to deploy 2 controls from 1 solution unless explicitly set up. |
+| `pac solution import` fails with cryptic XML errors | XML templates in this skill body need updating OR solution.xml structure drifted from PAC CLI expectations | The XML templates in this skill body are kept inline (not extracted to references/) per Phase 2b Wave 2d dereferencing-reliability concern. If templates drift from current PAC CLI behavior, update them here in-place. |
 
 ---
 

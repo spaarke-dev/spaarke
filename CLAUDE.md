@@ -1,568 +1,109 @@
-# CLAUDE.md - Spaarke Repository Instructions
+# CLAUDE.md — Spaarke Repository Instructions
 
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current (Context Layer Hierarchy expanded with R2 docs directories)
->
-> **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 Phase 3b (rewrite from 1190 → ~225 lines; OLD version archived at `.claude/archive/2026-05-17/CLAUDE.md`)
+> **Purpose**: Repository-wide operational rules for Claude Code. Loads every session.
 
 ---
 
-## Development Environment
+## 1. What is Spaarke?
 
-### Adaptive Thinking & Effort Control (Opus 4.6)
-
-Claude Opus 4.6 introduces **adaptive thinking** — the model dynamically decides when and how much to think based on task complexity. This replaces the fixed `MAX_THINKING_TOKENS` budget from Opus 4.5.
-
-**How It Works**: Instead of a fixed thinking token budget, Claude evaluates each request's complexity and allocates thinking accordingly. The **effort parameter** provides soft guidance:
-
-| Effort Level | Thinking Behavior | Use Case |
-|-------------|-------------------|----------|
-| `max` | Always thinks deeply, no constraints (Opus 4.6 only) | Architectural decisions, complex debugging, multi-system refactors |
-| `high` (default) | Always thinks deeply | Complex reasoning, difficult coding, agentic task execution |
-| `medium` | Moderate thinking, may skip for simple queries | Balanced speed/quality for standard tasks, subagent coordination |
-| `low` | Minimal thinking, skips for simple tasks | Simple lookups, classification, high-volume operations, fast subagents |
-
-**Toggle Thinking in Session**: Press **Alt+T** (or **Option+T** on Mac) to toggle thinking on/off. Press **Ctrl+O** for verbose mode to view reasoning.
-
-**Environment Variables**:
-```bash
-# Opus 4.6: MAX_THINKING_TOKENS is IGNORED (adaptive thinking controls depth)
-# Setting to 0 still disables thinking entirely on any model
-CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
-```
-
-**Setting in Windows**:
-```cmd
-setx CLAUDE_CODE_MAX_OUTPUT_TOKENS "64000"
-```
-
-**Task-Specific Effort Guidance**:
-
-| Task Type | Recommended Effort | Why |
-|-----------|-------------------|-----|
-| `/project-pipeline` (full pipeline) | `high` or `max` | Multi-phase, deep resource discovery, 100+ tasks |
-| Task execution (FULL rigor) | `high` | Code implementation needs thorough reasoning |
-| Task execution (STANDARD) | `medium` | Tests and constrained tasks need balance |
-| Task execution (MINIMAL) | `low` | Documentation, inventory — speed over depth |
-| Subagent research/exploration | `low` or `medium` | Quick focused workers benefit from speed |
-| Agent team teammates | `medium` | Independent workers need efficiency at scale |
-| Code review / ADR check | `high` | Quality gates need thorough analysis |
-
-**Cost Impact**: Lower effort = fewer tokens = lower cost + lower latency. Use `low` for subagents and simple tasks to avoid unnecessary token spend.
-
-### Claude Code Model and Permission Settings
-
-This repository is configured for **Opus 4.6** with **auto-accept edits** via `.claude/settings.json`:
-
-```json
-{
-  "model": "opus",
-  "permissions": {
-    "defaultMode": "acceptEdits",
-    "allow": ["Read(**)", "Glob(**)", "Grep(**)", "Skill(*)", "Bash(git:*)", ...]
-  }
-}
-```
-
-**Model Selection**:
-- **Default**: `opus` (Claude Opus 4.6 - claude-opus-4-6)
-- **Check current**: `/model` or `/status` during session
-- **Override**: `claude --model sonnet` for faster, simpler tasks (Sonnet 4.5)
-
-**Permission Modes** (cycle with **Shift+Tab**):
-
-| Mode | Indicator | Use Case |
-|------|-----------|----------|
-| **Auto-Accept** | `⏵⏵ accept edits on` | Task implementation (default) |
-| **Plan Mode** | `⏸ plan mode on` | Code analysis, planning, exploration |
-| **Delegate Mode** | (agent teams only) | Lead coordinates, teammates implement |
-| **Don't Ask** | Auto-denies unless pre-approved | Strict mode using only `/permissions` allow list |
-| **Bypass Permissions** | All prompts skipped | Fully autonomous (containers/VMs only) |
-| **Ask Mode** | (none) | Explicit approval for each change |
-
-**Skip All Confirmations** (fully autonomous execution):
-
-```bash
-# OPTION 1: Bypass all permissions (use in isolated environments only)
-claude --dangerously-skip-permissions
-
-# OPTION 2: Set in settings.json for persistent bypass
-# In .claude/settings.json:
-{
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  }
-}
-
-# OPTION 3: Pre-approve specific tools to minimize prompts (RECOMMENDED)
-# In .claude/settings.json - allow common operations:
-{
-  "permissions": {
-    "defaultMode": "acceptEdits",
-    "allow": [
-      "Read(**)", "Glob(**)", "Grep(**)",
-      "Bash(git *)", "Bash(dotnet *)", "Bash(npm *)",
-      "Bash(az *)", "Bash(pac *)", "Bash(gh *)",
-      "Skill(*)", "Task(*)"
-    ]
-  }
-}
-```
-
-> **WARNING**: `--dangerously-skip-permissions` disables ALL safety checks. Only use in containers, VMs, or disposable environments. For daily development, use **acceptEdits** mode with a broad `allow` list instead.
-
-**Recommended Workflow**:
-
-1. **Planning Phase** (`/project-pipeline`, `/design-to-spec`):
-   - Press **Shift+Tab** to cycle to **Plan Mode**
-   - Claude analyzes, reads, plans without making changes
-   - Review the plan before implementation
-
-2. **Implementation Phase** (task execution):
-   - Press **Shift+Tab** to return to **Auto-Accept Mode**
-   - Claude implements changes automatically
-   - Quality gates (code-review, adr-check) run at Step 9.5
-
-3. **Fully Autonomous Phase** (CI/CD, batch tasks):
-   - Use `claude -p "task" --dangerously-skip-permissions --output-format json`
-   - Headless mode for scripted pipelines
-
-**Starting in Specific Mode**:
-```bash
-# Start in plan mode for analysis
-claude --permission-mode plan
-
-# Start in auto-accept for implementation
-claude --permission-mode acceptEdits
-
-# Fully autonomous (containers only)
-claude --dangerously-skip-permissions
-
-# Headless mode for CI/CD pipelines
-claude -p "run dotnet test" --output-format json
-```
+Spaarke is an **enterprise AI-directed legal operations intelligence platform** built on Power Apps/Dataverse, SharePoint Embedded, and Azure AI services; backend in **.NET 8 Minimal API**; frontend in **custom React Code Pages and PCF components**; the AI layer combines an internal **JPS (JSON Prompt Schema)** playbook system with Azure OpenAI deployments and a retrieval layer over SharePoint Embedded documents.
 
 ---
 
-## New Claude Code Features (February 2026)
+## 2. Source of Truth: Code, then `.claude/`, then `docs/`
 
-### Hooks System
+**Code wins. Docs lag.** When code and docs disagree, fix the docs. Loading priority for the agent:
 
-Hooks fire custom shell commands at specific points during a Claude Code session. Configure in `.claude/settings.json` or `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "command": "scripts/validate-bash-command.sh"
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit",
-        "command": "scripts/post-edit-lint.sh"
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "command": "scripts/run-quality-gate.sh"
-      }
-    ]
-  }
-}
-```
-
-**Available hook events**: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `TeammateIdle`, `TaskCompleted`, `Stop`
-
-**Spaarke use cases**:
-- Run `dotnet format` after file edits
-- Validate ADR compliance on code changes
-- Auto-run tests after implementation steps
-- Enforce quality gates on task completion
-
-### Headless / Non-Interactive Mode
-
-Run Claude Code programmatically without a terminal UI:
-
-```bash
-# Single query, get JSON output
-claude -p "run dotnet test and report results" --output-format json
-
-# Pipe input
-echo "explain this error" | claude -p --output-format json
-
-# Combine with skip-permissions for CI/CD
-claude -p "build and test" --dangerously-skip-permissions --output-format json
-```
-
-### MCP Server Integration
-
-Claude Code connects to the **Dataverse MCP server** via a local stdio proxy (`@microsoft/dataverse` npm package). Configuration is in `.mcp.json` at the repository root:
-
-```json
-{
-  "mcpServers": {
-    "dataverse": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@microsoft/dataverse", "mcp", "https://spaarkedev1.crm.dynamics.com"],
-      "env": {}
-    }
-  }
-}
-```
-
-MCP tools appear as regular tools and work with permission rules. **12 tools available:**
-
-| Tool | Purpose |
-|------|---------|
-| `mcp__dataverse__list_tables` | List all tables (filter by scope) |
-| `mcp__dataverse__describe_table` | T-SQL schema definition |
-| `mcp__dataverse__read_query` | SELECT queries |
-| `mcp__dataverse__create_record` | Insert row |
-| `mcp__dataverse__update_record` | Update row |
-| `mcp__dataverse__delete_record` | Delete row |
-| `mcp__dataverse__search` | Keyword search |
-| `mcp__dataverse__fetch` | Full record by ID |
-| `mcp__dataverse__create_table` | Create table |
-| `mcp__dataverse__update_table` | Add columns |
-| `mcp__dataverse__delete_table` | Delete table |
-| `mcp__dataverse__list_apps` | List model-driven apps |
-
-**When to use MCP tools**: Schema inspection, ad-hoc queries, test data creation, post-deployment verification.
-**When NOT to use**: Bulk operations (use BFF API), solution deployment (use `pac` CLI), runtime data access (use BFF API).
-
-**Setup guide**: [`docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md`](docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md)
-
-### Session Management
-
-| Command | Purpose |
-|---------|---------|
-| `/resume` | Resume a previous session |
-| `/rewind` | Rewind to an earlier point in the session |
-| `/teleport` | Resume and configure remote sessions (claude.ai subscribers) |
-| `/compact` | Compress conversation to free context |
-| `/clear` | Wipe conversation and start fresh |
-
-### Cost & Token Awareness
-
-- **Effort parameter** controls token spend per-request (see Adaptive Thinking section above)
-- Lower effort for subagents and simple tasks = significant cost savings
-- Agent teams multiply token usage per teammate — use judiciously
-- Monitor with `/status` during sessions
+1. **Code** — `.cs`, `.ts`, `.tsx` files in `src/` are the ground truth
+2. **`.claude/patterns/`** — 25-line pointer files telling you WHICH code to read
+3. **`.claude/adr/`** — concise ADR constraints (MUST / MUST NOT)
+4. **`.claude/constraints/`** — topic-based summaries
+5. **`docs/architecture/`** — design decisions + rationale (no implementation detail)
+6. **`docs/guides/`** — operational procedures (deploy, configure)
+7. **`docs/procedures/`** — development workflow (test, CI/CD, code review)
 
 ---
 
-## Agent Teams (Experimental)
+## 3. Sub-Agent Write Boundary (IMPORTANT)
 
-Agent teams coordinate multiple Claude Code instances working in parallel. One session acts as **team lead** (orchestrator), spawning **teammates** that work independently with their own context windows and communicate directly with each other.
+**Sub-agents launched via the Agent tool CANNOT write to `.claude/` paths** (skills, patterns, constraints, catalogs, agents, settings). This is intentional — it protects skill definitions from accidental modification by parallel agents.
 
-### Enabling Agent Teams
+**Canonical pattern** (proven across this project's 31 Phase 2a audits):
+1. Sub-agents READ + AUDIT `.claude/` files in parallel; return findings as structured text
+2. The MAIN SESSION applies fixes using Edit/Write tools
 
-```json
-// In .claude/settings.json
-{
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  }
-}
-```
-
-Or set the environment variable:
-```cmd
-setx CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS "1"
-```
-
-### When to Use Agent Teams vs. Subagents
-
-| Capability | Subagents (`Task` tool) | Agent Teams |
-|-----------|------------------------|-------------|
-| **Context** | Own window, results return to caller | Own window, fully independent |
-| **Communication** | Report back to main agent only | Teammates message each other directly |
-| **Coordination** | Main agent manages all work | Shared task list with self-coordination |
-| **Token cost** | Lower (results summarized) | Higher (each is a separate Claude instance) |
-| **Best for** | Focused research, exploration, quick checks | Parallel implementation, competing hypotheses, cross-layer work |
-
-**Use subagents for**: Quick research, code exploration, focused verification tasks
-**Use agent teams for**: Parallel feature implementation, multi-perspective code review, debugging with competing theories, cross-layer changes (API + PCF + tests)
-
-### Agent Teams for Spaarke Projects
-
-**Parallel code review** (3 reviewers):
-```
-Create an agent team to review PR #142. Spawn three reviewers:
-- One focused on security implications
-- One checking performance against ADRs
-- One validating test coverage
-```
-
-**Parallel feature implementation** (requires separate file ownership):
-```
-Create a team for the financial-intelligence module:
-- Teammate 1: BFF API endpoints (src/server/api/)
-- Teammate 2: PCF control (src/client/pcf/)
-- Teammate 3: Integration tests (tests/)
-Use Sonnet for each teammate. Require plan approval before changes.
-```
-
-**Investigation/debugging**:
-```
-Users report slow document uploads. Spawn 3 teammates to investigate:
-- One checking the SpeFileStore facade performance
-- One analyzing the Redis caching layer
-- One profiling the AI pipeline
-Have them debate findings and converge on root cause.
-```
-
-### Display Modes
-
-| Mode | Setting | Description |
-|------|---------|-------------|
-| **In-process** (default) | `"teammateMode": "in-process"` | All teammates in main terminal. Use Shift+Up/Down to navigate. |
-| **Split panes** | `"teammateMode": "tmux"` | Each teammate in own pane. Requires tmux or iTerm2. |
-
-```bash
-# Force in-process for a single session
-claude --teammate-mode in-process
-```
-
-### Delegate Mode
-
-When agent teams are active, press **Shift+Tab** to cycle into **Delegate Mode** — restricts the lead to coordination-only tools (spawning, messaging, task management). All implementation happens through teammates.
-
-### Key Rules for Spaarke Agent Teams
-
-- Each teammate loads `CLAUDE.md`, MCP servers, and skills automatically
-- Teammates start with the lead's permission settings
-- **Avoid file conflicts**: break work so each teammate owns different files/directories
-- Use `/conflict-check` before starting parallel work
-- Teammates cannot spawn their own teams (no nesting)
-- One team per session — clean up before starting a new team
-
-### Quality Gates with Hooks
-
-Use `TeammateIdle` and `TaskCompleted` hooks to enforce quality:
-- `TeammateIdle`: Run code-review when a teammate finishes
-- `TaskCompleted`: Run adr-check before marking task complete
+When an agent reports "Edit denied on `.claude/...`" — that's the boundary working correctly, not a bug.
 
 ---
 
-## 🚀 Project Initialization: Developer Workflow
-
-**Standard 2-Step Process for New Projects:**
-
-### Step 1: Create AI-Optimized Specification
-
-**If you have a human design document** (Word doc, design.md, rough notes):
-```bash
-/design-to-spec projects/{project-name}
-```
-- Transforms narrative design → structured spec.md
-- Adds preliminary ADR references (constraints only)
-- Flags ambiguities for clarification
-- **Output**: `projects/{project-name}/spec.md` (AI-ready specification)
-
-**OR manually write** `projects/{project-name}/spec.md` with:
-- Executive Summary, Scope, Requirements, Success Criteria, Technical Approach
-
-**→ Review spec.md before proceeding to Step 2**
-
----
-
-### Step 2: Initialize Project (Full Pipeline)
-
-```bash
-/project-pipeline projects/{project-name}
-```
-
-This orchestrates the complete setup (internal pipeline steps a-f):
-- a. ✅ Validates spec.md
-- b. ✅ **Comprehensive resource discovery** (ADRs, skills, patterns, knowledge docs)
-- c. ✅ Generates artifacts (README.md, PLAN.md, CLAUDE.md, folder structure)
-- d. ✅ Creates 50-200+ task files with full context
-- e. ✅ Creates feature branch and initial commit
-- f. ✅ Auto-starts task execution with parallel task agents
-
-**→ Runs autonomously by default — no approval gates, parallel task execution via concurrent agents**
-**→ For interactive mode: say "run pipeline interactively"**
-
----
-
-### Step 3: Execute Tasks
-
-**If project-pipeline auto-started task 001** (you said 'y' in Step 2):
-- Already executing task 001 in same session
-- Continue until task complete
-
-**If resuming in new session or moving to next task** (task 001 is typically auto-started by pipeline step f):
-```bash
-work on task 002
-# OR
-continue with next task
-# OR
-resume task 005
-```
-
-**What happens**: Natural language phrases automatically invoke the `task-execute` skill, which loads:
-- Task file (POML format)
-- Applicable ADRs and constraints
-- Knowledge docs and patterns
-- Project context (README, PLAN, CLAUDE.md)
-
-**Explicit invocation** (alternative):
-```bash
-/task-execute projects/{project-name}/tasks/002-*.poml
-```
-
----
-
-### 🚨 MANDATORY: Task Execution Protocol for Claude Code
+## 4. 🚨 MANDATORY: Task Execution Protocol
 
 **ABSOLUTE RULE**: When executing project tasks, Claude Code MUST invoke the `task-execute` skill. DO NOT read POML files directly and implement manually.
 
-#### Why This Matters
+### Why this matters
 
-The task-execute skill ensures:
-- ✅ Knowledge files are loaded (ADRs, constraints, patterns)
-- ✅ Context is properly tracked in current-task.md
-- ✅ Proactive checkpointing occurs every 3 steps
-- ✅ Quality gates run (code-review + adr-check) at Step 9.5
-- ✅ Progress is recoverable after compaction
-- ✅ PCF version bumping follows protocol
-- ✅ Deployment follows dataverse-deploy skill
+The `task-execute` skill ensures:
+- ✅ Knowledge files loaded (ADRs, constraints, patterns)
+- ✅ Context tracked in `current-task.md`
+- ✅ Proactive checkpointing every 3 steps
+- ✅ Quality gates run (code-review + adr-check at Step 9.5)
+- ✅ Progress recoverable after compaction
+- ✅ PCF version bumping + deployment skills invoked correctly
 
-**Bypassing this skill leads to**:
-- ❌ Missing ADR constraints
-- ❌ No checkpointing - lost progress after compaction
-- ❌ Skipped quality gates
-- ❌ Manual errors (forgotten version bumps, etc.)
+**Bypassing leads to**: missing ADR constraints, lost progress after compaction, skipped quality gates, manual errors.
 
-#### Auto-Detection Rules (Trigger Phrases)
+### Auto-Detection Rules (Trigger Phrases)
 
-When Claude Code detects these phrases, it MUST invoke task-execute skill:
+When you detect these phrases, you MUST invoke `task-execute`:
 
-| User Says | Required Action | Implementation |
-|-----------|-----------------|----------------|
-| "work on task X" | Execute task X | Invoke task-execute with task X POML file |
-| "continue" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
-| "continue with task X" | Execute task X | Invoke task-execute with task X POML file |
-| "next task" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
-| "keep going" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
-| "resume task X" | Execute task X | Invoke task-execute with task X POML file |
-| "pick up where we left off" | Execute task from current-task.md | Load current-task.md, invoke task-execute |
+| User Says | Required Action |
+|---|---|
+| "work on task X" | Invoke task-execute with task X POML |
+| "continue" / "keep going" / "next task" | Read `TASK-INDEX.md`, find first 🔲, invoke task-execute |
+| "continue with task X" / "resume task X" | Invoke task-execute with task X POML |
+| "pick up where we left off" | Load `current-task.md`, invoke task-execute |
 
-**Example - User says "continue"**:
-1. Read `projects/{project-name}/tasks/TASK-INDEX.md`
-2. Find first task with status 🔲 (pending)
-3. Invoke Skill tool with skill="task-execute" and task file path
-4. Let task-execute orchestrate the full protocol
+### Parallel Task Execution
 
-#### Parallel Task Execution
+When tasks can run in parallel (no inter-task dependencies), each task STILL uses `task-execute`. Pattern: ONE message with MULTIPLE Skill tool invocations (one per task). Sequential invocations waste parallelism.
 
-When tasks can run in parallel (no dependencies between them), each task MUST still use task-execute:
-
-**CORRECT Approach**:
-- Single message with multiple Skill tool invocations
-- Each invocation calls task-execute with a different task file
-- Example: Tasks 020, 021, 022 can run in parallel → Send one message with three Skill tool calls
-
-**INCORRECT Approach**:
-- Reading multiple POML files directly
-- Manually implementing from multiple tasks
-- Bypassing task-execute for "efficiency"
-
-See task-execute SKILL.md Step 8 for the complete execution protocol with checkpointing rules.
-
-#### Enforcement Checklist for Claude Code
-
-Before implementing ANY task:
-- [ ] Did user request task work? (any trigger phrase above)
-- [ ] Did I invoke the task-execute skill?
-- [ ] Did I load the task POML file directly? (❌ WRONG)
-- [ ] Did I implement changes without task-execute? (❌ WRONG)
-
-If you answered "no" to the second question or "yes" to questions 3-4, STOP and invoke task-execute instead.
+For details, see [`.claude/skills/task-execute/SKILL.md`](.claude/skills/task-execute/SKILL.md).
 
 ---
 
-### ⚠️ Component Skills (AI Internal Use Only)
+## 5. Context Management & Checkpointing
 
-These skills are **called BY orchestrators** and should NOT be invoked directly by developers:
+### Usage thresholds
 
-| Skill | Purpose | Called By |
-|-------|---------|-----------|
-| `project-setup` | Generate artifacts only (README, PLAN, CLAUDE.md) | `project-pipeline` (pipeline step c) |
-| `task-create` | Decompose plan.md into task files | `project-pipeline` (pipeline step d) |
-| `adr-aware` | Load applicable ADRs based on resource types | Multiple skills (auto) |
-| `script-aware` | Discover and reuse scripts from library | Multiple skills (auto) |
+| Context usage | Action |
+|---|---|
+| < 60% | Proceed normally |
+| 60–70% | Run `/checkpoint` (proactive save), then continue |
+| > 70% | STOP. Run `/checkpoint`, request `/compact` |
+| > 85% | EMERGENCY. Run `/checkpoint`, stop immediately |
 
-**Exception**: `task-execute` is also a skill, but it **IS developer-facing** for daily task work:
-- Used in Step 3 above: `work on task 001` invokes `task-execute`
-- Ensures proper context loading (knowledge files, ADRs, patterns)
-- Primary workflow for implementing individual tasks
-
-**When in doubt → Use `/project-pipeline`** (it orchestrates everything)
-
----
-
-## 🚨 AI Execution Rules (Critical)
-
-### Context Management
-
-| Usage | Action |
-|-------|--------|
-| < 60% | ✅ Proceed normally |
-| 60-70% | ⚠️ Run `/checkpoint` - proactive save, then continue |
-| > 70% | 🛑 STOP - Run `/checkpoint`, request `/compact` |
-| > 85% | 🚨 EMERGENCY - Immediately run `/checkpoint` and stop |
-
-**Commands**: `/context` (check) · `/checkpoint` (save state) · `/compact` (compress) · `/clear` (wipe)
+**Commands**: `/context` (check) · `/checkpoint` (save) · `/compact` (compress) · `/clear` (wipe)
 
 ### Proactive Checkpointing (MANDATORY)
 
-**Claude MUST checkpoint frequently during task execution. These rules are NOT optional.**
+Claude MUST checkpoint frequently. These rules are NOT optional:
 
 | Condition | Action |
-|-----------|--------|
+|---|---|
 | After every 3 completed task steps | Run `context-handoff` (silent: "✅ Checkpoint.") |
-| After modifying 5+ files in session | Run `context-handoff` |
-| After any deployment operation | Run `context-handoff` |
-| Before starting a complex step | Run `context-handoff` |
+| After modifying 5+ files | Run `context-handoff` |
+| After any deployment | Run `context-handoff` |
+| Before a complex step | Run `context-handoff` |
 | Context > 60% | Run `context-handoff` (verbose report) |
 | Context > 70% | Run `context-handoff` + STOP + request `/compact` |
 
-**Checkpoint behavior**:
-- Update `current-task.md` Quick Recovery section
-- Report briefly: "✅ Checkpoint saved. Continuing..."
-- Continue working (don't wait for user unless context > 70%)
+All work state must be recoverable from files alone: `projects/{name}/current-task.md`, `projects/{name}/tasks/TASK-INDEX.md`, `projects/{name}/CLAUDE.md`. See `.claude/skills/context-handoff/SKILL.md`.
 
-### Context Persistence
+---
 
-**All work state must be recoverable from files alone.**
-
-| File | Purpose | Updated By |
-|------|---------|------------|
-| `projects/{project-name}/current-task.md` | Active task state, completed steps, files modified | `task-execute` skill |
-| `projects/{project-name}/CLAUDE.md` | Project context, decisions, constraints | Manual or skills |
-| `projects/{project-name}/tasks/TASK-INDEX.md` | Task status overview | `task-execute` skill |
-
-**Resuming Work in a New Session**:
-
-| What You Want | What to Say |
-|---------------|-------------|
-| Resume where you left off | "Where was I?" or "Continue" |
-| Resume specific task | "Continue task 013" |
-| Resume specific project | "Continue work on {project-name}" |
-| Check all project status | "/project-status" |
-| Save progress before stopping | "Save my progress" (invokes `context-handoff`) |
-
-**Full Protocol**: [Context Recovery Procedure](docs/procedures/context-recovery.md)
-
-### Human Escalation Triggers
+## 6. Human Escalation Triggers
 
 **MUST request human input for**:
 - Ambiguous or conflicting requirements
@@ -571,620 +112,153 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 - Breaking changes (API contracts, DB schema)
 - Scope expansion beyond task boundaries
 
-**Format**: Use 🔔 **Human Input Required** block with situation, options, recommendation.
-
-### Task Completion and Transition
-
-After completing any task:
-1. Update task `.poml` file status to "completed"
-2. Update `TASK-INDEX.md` status: 🔲 → ✅
-3. **Reset `current-task.md`** for next task (clears steps, files, decisions)
-4. Set `current-task.md` to next pending task (or "none" if project complete)
-5. Report completion and ask if ready for next task
-
-**Important**: `current-task.md` tracks only the **active task**, not history. Task history is preserved in TASK-INDEX.md and individual .poml files.
-
-**Full protocols**: `.claude/protocols/` (AIP-001, AIP-002, AIP-003)
+Format: 🔔 **Human Input Required** with situation, options, recommendation.
 
 ---
 
-## Task Execution Rigor Levels
+## 7. Task Completion & Transition
 
-All tasks are executed via `task-execute` skill with one of three rigor levels determined automatically by decision tree.
+After completing any task:
+1. Update task `.poml` status to "completed"
+2. Update `TASK-INDEX.md`: 🔲 → ✅
+3. **Reset `current-task.md`** for next task (clears steps, files, decisions)
+4. Set `current-task.md` to next pending task (or "none" if project complete)
+5. Report completion; ask if ready for next task
 
-### Rigor Level Overview
+`current-task.md` tracks only the **active task** — history is in `TASK-INDEX.md` and per-task `.poml` files.
 
-| Level | When Applied | Protocol Steps | Reporting Frequency | Quality Gates |
-|-------|--------------|----------------|---------------------|---------------|
-| **FULL** | Code implementation, architecture changes, post-compaction recovery | All 11 steps mandatory | After each step | ✅ code-review + adr-check |
-| **STANDARD** | Tests, new file creation, tasks with constraints | 8 of 11 steps required | After major steps | ⏭️ Skipped |
-| **MINIMAL** | Documentation, inventory, simple updates | 4 of 11 steps required | Start + completion only | ⏭️ Skipped |
+---
 
-### Automatic Detection (Decision Tree)
+## 8. Task Execution Rigor Levels
 
-**FULL Protocol Required If Task Has ANY:**
-- Tags: `bff-api`, `api`, `pcf`, `plugin`, `auth`
-- Will modify code files (`.cs`, `.ts`, `.tsx`)
-- Has 6+ steps in task definition
-- Resuming after compaction or new session
-- Description includes: "implement", "refactor", "create service"
-- Dependencies on 3+ other tasks
+Every task is executed via `task-execute` at one of three rigor levels, auto-detected per task.
 
-**STANDARD Protocol Required If Task Has ANY:**
-- Tags: `testing`, `integration-test`
-- Will create new files
-- Has explicit `<constraints>` or ADRs listed
-- Phase 2.x or higher (integration/deployment phases)
-
-**MINIMAL Protocol Otherwise:**
-- Documentation tasks
-- Inventory/checklist creation
-- Simple configuration updates
+| Level | When applied | Quality gates |
+|---|---|---|
+| **FULL** | Code implementation, architecture changes, post-compaction recovery, tags include `bff-api`/`pcf`/`plugin`/`auth`, modifying `.cs`/`.ts`/`.tsx`, 6+ steps, deps on 3+ tasks | ✅ code-review + adr-check at Step 9.5 |
+| **STANDARD** | Tests, new file creation, tasks with constraints, tags include `testing`/`integration-test`, Phase 2.x+ tasks | ⏭️ Skipped |
+| **MINIMAL** | Documentation, inventory, simple updates | ⏭️ Skipped |
 
 ### Mandatory Rigor Level Declaration
 
-**At task start, Claude Code MUST output:**
+At task start, Claude Code MUST output:
 
 ```
 🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
-📋 REASON: [Why this level was chosen based on decision tree]
-
-📖 PROTOCOL STEPS TO EXECUTE:
-  ✅ Step 0.5: Determine rigor level
-  ✅ Step 1: Load Task File
-  ✅ Step 2: Initialize current-task.md
-  [... list continues based on rigor level ...]
-
+📋 REASON: [Why this level was chosen]
+📖 PROTOCOL STEPS TO EXECUTE: ...
 Proceeding with Step 0...
 ```
 
-This declaration is **non-negotiable** and makes protocol shortcuts visible.
+This declaration is non-negotiable and makes protocol shortcuts visible. **Override**: "Execute with FULL protocol" / "Execute with MINIMAL protocol" — use sparingly.
 
-### User Override
-
-You can override automatic detection:
-- **"Execute with FULL protocol"** → Forces all steps regardless of task type
-- **"Execute with MINIMAL protocol"** → Use carefully, only for documentation
-- **Default:** Auto-detect using decision tree
-
-### Examples by Task Type
-
-| Task Type | Example | Auto-Detected Level |
-|-----------|---------|-------------------|
-| Implement API endpoint | "Create authorization service" | **FULL** (bff-api tag) |
-| Update PCF component | "Add dark mode to control" | **FULL** (pcf tag, .tsx files) |
-| Write integration tests | "Test Document Profile endpoint" | **STANDARD** (testing tag) |
-| Create deployment checklist | "Identify forms using control" | **MINIMAL** (documentation) |
-| Refactor existing code | "Extract helper method" | **FULL** (code modification) |
-| Update documentation | "Add deployment guide" | **MINIMAL** (docs) |
-
-### Audit Trail in current-task.md
-
-Rigor level and execution are logged for recovery:
-
-```markdown
-### Task XXX Details
-
-**Rigor Level:** FULL
-**Reason:** Task tags include 'bff-api' (code implementation)
-**Protocol Steps Executed:**
-- [x] Step 0.5: Determined rigor level
-- [x] Step 1: Load Task File
-- [x] Step 2: Initialize current-task.md
-- [x] Step 4a: Load Constraints (api.md, testing.md)
-- [x] Step 4b: Load Patterns (endpoint-definition.md)
-[... etc]
-```
-
-**Full Details:** See `.claude/skills/task-execute/SKILL.md` Step 0.5 for complete decision tree and protocol requirements.
+For the full decision tree, see `.claude/skills/task-execute/SKILL.md` Step 0.5.
 
 ---
 
-## 🛠️ AI Agent Skills (MANDATORY)
+## 9. Security Rules
 
-**Skills are structured procedures that MUST be followed when triggered.**
-
-### Skill Discovery
-
-**BEFORE starting any project-related work**, check `.claude/skills/INDEX.md` for applicable workflows.
-
-**Skill Location**: `.claude/skills/{skill-name}/SKILL.md`
-
-### Trigger Phrases → Required Skills
-
-When these phrases are detected, **STOP** and load the corresponding skill:
-
-| Trigger Phrase | Skill | Action |
-|----------------|-------|--------|
-| "design to spec", "transform spec", "create AI spec" | `design-to-spec` | Load `.claude/skills/design-to-spec/SKILL.md` - Transform human design docs to AI-ready spec.md |
-| "start project", "initialize project from spec", "run project pipeline" | `project-pipeline` ⭐ | Load `.claude/skills/project-pipeline/SKILL.md` and run full pipeline (RECOMMENDED) |
-| "create project artifacts", "generate artifacts", "project setup" | `project-setup` | Load `.claude/skills/project-setup/SKILL.md` (advanced users only) |
-| "create tasks", "decompose plan", "generate tasks" | `task-create` | Load `.claude/skills/task-create/SKILL.md` and follow procedure |
-| "review code", "code review" | `code-review` | Load `.claude/skills/code-review/SKILL.md` and follow checklist |
-| "check ADRs", "validate architecture" | `adr-check` | Load `.claude/skills/adr-check/SKILL.md` and validate |
-| "deploy release", "new release", "production release", "deploy to production", "release to production" | `deploy-new-release` | Load `.claude/skills/deploy-new-release/SKILL.md` and follow procedure |
-| "deploy to azure", "deploy api", "azure deployment", "deploy infrastructure" | `azure-deploy` | Load `.claude/skills/azure-deploy/SKILL.md` and follow procedure |
-| "deploy to dataverse", "pac pcf push", "solution import", "deploy control", "publish customizations" | `dataverse-deploy` | Load `.claude/skills/dataverse-deploy/SKILL.md` and follow procedure |
-| "edit ribbon", "add ribbon button", "ribbon customization", "command bar button" | `ribbon-edit` | Load `.claude/skills/ribbon-edit/SKILL.md` and follow procedure |
-| "pull from github", "update from remote", "sync with github", "git pull", "get latest" | `pull-from-github` | Load `.claude/skills/pull-from-github/SKILL.md` and follow procedure |
-| "push to github", "create PR", "commit and push", "ready to merge", "submit changes" | `push-to-github` | Load `.claude/skills/push-to-github/SKILL.md` and follow procedure |
-| "update AI procedures", "add new ADR", "propagate changes", "maintain procedures" | `ai-procedure-maintenance` | Load `.claude/skills/ai-procedure-maintenance/SKILL.md` and follow checklists |
-| "create worktree", "setup worktree", "new project worktree", "worktree for project" | `worktree-setup` | Load `.claude/skills/worktree-setup/SKILL.md` and follow procedure |
-| "continue project", "resume project", "where was I", "pick up where I left off" | `project-continue` | Load `.claude/skills/project-continue/SKILL.md` and sync + load context |
-| "save progress", "save my state", "context handoff", "checkpoint", "checkpoint before compaction" | `context-handoff` | Load `.claude/skills/context-handoff/SKILL.md` and save state for recovery |
-| "clean up dev", "clear caches", "fix auth issues", "azure cli issues", "dev environment cleanup" | `dev-cleanup` | Load `.claude/skills/dev-cleanup/SKILL.md` and run cleanup script |
-| "merge to master", "check unmerged branches", "reconcile branches", "sync master", "audit branches" | `merge-to-master` | Load `.claude/skills/merge-to-master/SKILL.md` and follow procedure |
-| "deploy code page", "deploy web resource", "build webresource", "update code page" | `code-page-deploy` | Load `.claude/skills/code-page-deploy/SKILL.md` and follow two-step build pipeline |
-| "deploy power pages", "deploy spa", "deploy external workspace", "/power-page-deploy" | `power-page-deploy` | Load `.claude/skills/power-page-deploy/SKILL.md` — build Vite SPA and deploy via `Deploy-ExternalWorkspaceSpa.ps1` |
-| "create JPS action", "new JPS definition", "create analysis action", "new playbook action" | `jps-action-create` | Load `.claude/skills/jps-action-create/SKILL.md` and follow procedure |
-| "audit playbooks", "review playbooks", "check playbook compliance", "update playbooks" | `jps-playbook-audit` | Load `.claude/skills/jps-playbook-audit/SKILL.md` and follow procedure |
-| "design playbook", "create playbook", "new AI playbook", "playbook architecture" | `jps-playbook-design` | Load `.claude/skills/jps-playbook-design/SKILL.md` and follow procedure |
-| "refresh scope index", "update scope catalog", "sync scopes" | `jps-scope-refresh` | Load `.claude/skills/jps-scope-refresh/SKILL.md` and follow procedure |
-| "validate JPS", "check JPS", "JPS validation", "verify JPS schema" | `jps-validate` | Load `.claude/skills/jps-validate/SKILL.md` and follow procedure |
-| "sync worktree", "worktree sync", "full sync", "sync branch with master", "update worktree from master", "make sure we have everything" | `worktree-sync` | Load `.claude/skills/worktree-sync/SKILL.md` and follow procedure |
-
-### Auto-Detection Rules
-
-| Condition | Required Skill |
-|-----------|---------------|
-| `projects/{project-name}/design.md` (or .docx, .pdf) exists but `spec.md` doesn't | Run `design-to-spec` to transform |
-| `projects/{project-name}/spec.md` exists but `README.md` doesn't | Run `project-pipeline` (or `project-setup` if user requests minimal) |
-| `projects/{project-name}/plan.md` exists but `tasks/` is empty | Run `task-create` |
-| Creating API endpoint, PCF control, or plugin | Apply `adr-aware` (always-apply) |
-| Writing any code | Apply `spaarke-conventions` (always-apply) |
-| Running `pac` commands, deploying to Dataverse | Load `dataverse-deploy` skill first |
-| Running `az` commands, deploying to Azure | Load `azure-deploy` skill first |
-| Modifying ribbon XML, `RibbonDiffXml`, or command bar | Load `ribbon-edit` skill first |
-| Deploying changes to `src/server/api/Sprk.Bff.Api/` | Load `bff-deploy` skill — use `scripts/Deploy-BffApi.ps1` |
-| Deploying changes to `src/client/pcf/` | Load `pcf-deploy` skill — build, copy, pack, import |
-| Deploying changes to `src/client/code-pages/` | Load `code-page-deploy` skill — two-step build (webpack + inline HTML) |
-| Deploying changes to `src/client/external-spa/` | Load `power-page-deploy` skill — Vite build then `scripts/Deploy-ExternalWorkspaceSpa.ps1` — uploads `sprk_externalworkspace` web resource |
-| Deploying changes to `src/solutions/LegalWorkspace/` | Vite build (`npm run build`) then `scripts/Deploy-CorporateWorkspace.ps1` — uploads `sprk_corporateworkspace` web resource |
-| Deploying changes to `src/solutions/EventsPage/` | Use `scripts/Deploy-EventsPage.ps1` — uploads `sprk_eventspage` web resource |
-| Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
-| Starting new project from master | Run `merge-to-master` in audit mode to check for stranded branches |
-| Completing final task in a project | Prompt user to run `merge-to-master` to merge branch into master |
-| Working in a worktree and user says "sync", "update", or "make sure we have everything" | Run `worktree-sync` to guarantee full synchronization |
-| Inspecting Dataverse table structure or querying data | Use `mcp__dataverse__*` tools directly (no skill required) |
-| Exploring entity relationships or field definitions before coding | Use `mcp__dataverse__describe_table` for current schema state |
-| Creating or verifying Dataverse schema during development | Use MCP tools for inspection; `dataverse-create-schema` skill for scripted creation |
-| User says "deploy release", "new release", or "production release" | Run `deploy-new-release` for interactive release deployment |
-
-### Always-Apply Skills
-
-These skills are **automatically active** during all coding work:
-
-| Skill | Purpose |
-|-------|---------|
-| `adr-aware` | Proactively load relevant ADRs before creating resources |
-| `script-aware` | Discover and reuse scripts from library before writing new automation |
-| `spaarke-conventions` | Apply naming conventions and code patterns |
-
-### Slash Commands
-
-Use these commands to explicitly invoke skills:
-
-| Command | Purpose |
-|---------|----------|
-| `/design-to-spec {path}` | Transform human design doc to AI-optimized spec.md |
-| `/project-status [name]` | Check project status and get next action |
-| `/project-pipeline {path}` | **⭐ RECOMMENDED**: Full pipeline - spec → ready tasks + branch |
-| `/project-setup {path}` | Generate artifacts only (advanced users) |
-| `/task-create {path}` | Decompose plan into task files |
-| `/repo-cleanup` | Repository hygiene audit and ephemeral file cleanup |
-| `/code-review` | Review recent changes |
-| `/adr-check` | Validate ADR compliance |
-| `/deploy-new-release` | Interactive production release — pre-flight, env selection, deploy, validate, tag |
-| `/azure-deploy` | Deploy Azure infrastructure, BFF API, or configure App Service |
-| `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
-| `/power-page-deploy` | Build external SPA and deploy to Dataverse as `sprk_externalworkspace` web resource |
-| `/ribbon-edit` | Edit Dataverse ribbon via solution export/import |
-| `/pull-from-github` | Pull latest changes from GitHub |
-| `/push-to-github` | Commit changes and push to GitHub |
-| `/ai-procedure-maintenance` | Propagate updates when adding ADRs, patterns, constraints, skills |
-| `/worktree-setup` | Create and manage git worktrees for parallel project development |
-| `/project-continue {name}` | Continue project after PR merge or new session with full context |
-| `/context-handoff` | Save working state before compaction for reliable recovery |
-| `/checkpoint` | Alias for `/context-handoff` - quick state save |
-| `/dev-cleanup` | Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials) |
-| `/merge-to-master` | Merge completed branch work into master (audit, single merge, or full reconciliation) |
-| `/jps-action-create` | Create a new JPS definition for an Analysis Action |
-| `/jps-playbook-audit` | Audit existing playbooks against current scope catalog and standards |
-| `/jps-playbook-design` | Design and deploy a complete AI playbook end-to-end |
-| `/jps-scope-refresh` | Refresh scope-model-index.json from Dataverse state |
-| `/jps-validate` | Validate JPS JSON against schema and render test |
-| `/worktree-sync` | Guarantee worktree is fully synchronized — committed, pushed, merged to master, updated from master |
+- **NEVER** commit secrets (`.env`, `appsettings.local.json`, credentials, API keys)
+- Use `config/*.local.json` for local secrets (gitignored)
+- Use Azure Key Vault for production secrets
+- All API endpoints require auth (except `/healthz`, `/ping`)
 
 ---
 
-## Architecture Discovery
+## 10. Build Commands
 
-### Read Code First, Docs Second
+| Action | Command |
+|---|---|
+| Build BFF API | `dotnet build src/server/api/Sprk.Bff.Api/` |
+| Run tests | `dotnet test` |
+| Format C# | `dotnet format` |
+| PCF prod build | `npm run build:prod` (**NOT** `npm run build` — see [`FAILURE-MODES.md#AP-1`](.claude/FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong)) |
 
-**Code is the source of truth for implementation.** When you need to understand how something works:
+For full build/test reference, see [`docs/procedures/testing-and-code-quality.md`](docs/procedures/testing-and-code-quality.md).
 
-1. **Read the code** — the actual `.cs`, `.ts`, `.tsx` files
-2. **Read `.claude/patterns/`** — 25-line pointer files that tell you WHICH code to read
-3. **Read `.claude/adr/`** — concise constraints and MUST/MUST NOT rules
-4. **Read `.claude/constraints/`** — topic-based MUST/MUST NOT summaries
-5. **Read `docs/architecture/`** — decisions and rationale only (implementation details removed)
-6. **Read `docs/standards/`** — coding standards, anti-patterns, integration contracts (cross-cutting)
-7. **Read `docs/guides/`** — operational procedures (deployment, configuration)
-8. **Read `docs/procedures/`** — development workflow (testing, CI/CD, code review, dependency management)
-9. **Read `docs/data-model/`** — Dataverse entity schemas, ERD, field mappings, JSON schemas
+### Node Installs — Avoid `npm ci` for Vite Solutions
 
-**Never trust a doc over the code.** If a doc describes implementation and the code differs, the code wins.
+Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm ci` fails on ~14 of 16 solutions. Use `npm install --legacy-peer-deps --no-audit --no-fund` instead. The build scripts handle this automatically; don't add raw `npm ci` to new scripts.
 
-**Audit stamps**: All files in `docs/architecture/`, `docs/standards/`, `docs/procedures/`, `docs/data-model/`, `.claude/constraints/`, and `.claude/patterns/` carry `Last Reviewed` headers. Files stamped `2026-04-05` were verified against current code during the R2 documentation refactoring project.
+---
 
-### Sub-Agent Write Boundary (IMPORTANT)
+## 11. System Entry Points (where to start reading)
 
-**Sub-agents launched via the Agent tool cannot write to `.claude/` paths** (patterns, constraints, skills, catalogs). This is an intentional permission boundary that protects skill definitions from accidental modification by parallel agents.
-
-**The canonical audit pattern** (proven in R2):
-1. Sub-agents **read and audit** files in `.claude/` — they can find issues, verify references, produce reports
-2. Sub-agents **return findings** to the main session as structured output
-3. The **main session applies fixes** using Edit/Write tools
-
-**Do not try to loosen this restriction.** It caught accidental modifications during R2. If you need to update many `.claude/` files, launch agents to audit in parallel (fast, read-only), then apply fixes sequentially from the main session.
-
-**Expected behavior**: When an agent reports "Edit denied on `.claude/...`", that is the boundary working correctly, not a bug.
-
-### Hooks: Current Guidance
-
-We evaluated automated hooks (`PostToolUse` for format-on-edit, `PreToolUse` for destructive-command blocking, etc.) in R2. **Current decision**: hooks are NOT configured in `.claude/settings.json` beyond what already exists.
-
-**Rationale**: Hooks only add value if they run consistently and accurately. We chose to enforce quality via:
-1. **Skill-level enforcement** — skills like `task-execute`, `adr-check`, `code-review` handle quality gates
-2. **CI/CD** — tier 1 blocking checks (see `projects/ci-cd-github-enhancement/` when implemented)
-3. **`doc-drift-audit` skill** — catches drift at project transitions
-
-**When to reconsider**: If we identify specific, high-value automations that run in <5 seconds, never produce false positives, and will be used every day. Candidates to watch: format-on-edit for `.cs` and `.tsx`, block-destructive-git-commands. Otherwise, skip hooks to keep the toolchain simple.
-
-### System Entry Points
-
-| Subsystem | Start Here | What It Shows |
-|-----------|-----------|---------------|
-| BFF API | `src/server/api/Sprk.Bff.Api/Program.cs` | All endpoint registration, DI, middleware |
+| Subsystem | Start here | Shows |
+|---|---|---|
+| BFF API | `src/server/api/Sprk.Bff.Api/Program.cs` | Endpoint registration, DI, middleware |
 | PCF Controls | `src/client/pcf/{Control}/control/index.ts` | Control lifecycle (init, updateView, destroy) |
 | Code Pages | `src/solutions/{Page}/src/main.tsx` | React 18 SPA entry with auth bootstrap |
-| Dataverse Plugins | `src/dataverse/plugins/.../BaseProxyPlugin.cs` | Plugin base class and lifecycle |
+| Dataverse Plugins | `src/dataverse/plugins/.../BaseProxyPlugin.cs` | Plugin base class + lifecycle |
 | AI Pipeline | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` | AI tool orchestration |
 | Shared UI | `src/client/shared/Spaarke.UI.Components/src/index.ts` | Component library exports |
 | Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | OBO + app-only Graph auth |
-| Jobs | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` | Background job processing |
+| Background Jobs | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` | Service Bus job processing |
 
-### Context Layer Hierarchy
+## 12. Context Layer Hierarchy
 
-| Layer | Contains | When to Load |
-|-------|----------|-------------|
+| Layer | Contains | When to load |
+|---|---|---|
 | **Code** | Implementation (source of truth) | Always — read before implementing |
 | **`.claude/patterns/`** | 25-line pointer files → code entry points | Per-task — tells you what to read |
-| **`.claude/adr/`** | Concise ADR constraints (MUST/MUST NOT) | Per-task — rules to follow |
+| **`.claude/adr/`** | Concise ADR constraints (MUST / MUST NOT) | Per-task — rules to follow |
 | **`.claude/constraints/`** | Topic-based constraint summaries | Per-task — quick rule reference |
-| **`.claude/catalogs/`** | AI scope & model catalog (JSON) | JPS playbook authoring/auditing |
-| **`docs/architecture/`** | Decisions and rationale only | When you need "why" behind a decision |
-| **`docs/standards/`** | Cross-cutting coding standards, anti-patterns, integration contracts | Before implementing new code |
-| **`docs/guides/`** | Operational procedures | When deploying, configuring, or troubleshooting |
-| **`docs/procedures/`** | Development workflow (testing, CI/CD, code review, dependency management) | During development process |
-| **`docs/data-model/`** | Dataverse entity schemas, ERD, field mappings, JSON schemas | When touching Dataverse data |
-| **`docs/enhancements/`** | Feature proposals, strategy documents, roadmaps | When planning new features |
-| **`docs/adr/`** | Full ADR history | Rarely — only for deep architectural context |
+| **`.claude/catalogs/`** | AI scope + model catalog (JSON) | JPS playbook authoring/auditing |
+| **`docs/architecture/`** | Decisions + rationale only | When you need WHY behind a decision |
+| **`docs/standards/`** | Cross-cutting coding standards | Before implementing new code |
+| **`docs/guides/`** | Operational procedures | When deploying, configuring, troubleshooting |
+| **`docs/procedures/`** | Development workflow | During development process |
+| **`docs/data-model/`** | Dataverse entity schemas, ERD | When touching Dataverse data |
+| **`docs/adr/`** | Full ADR history | Rarely — deep architectural context only |
 
 ---
 
-## Azure Infrastructure Resources
+## 13. Knowledge Repository for Rapidly-Evolving Topics
 
-**Avoid discovery queries** — resource names and endpoints are pre-documented below.
-**Operational commands are permitted** (deployments, secret management, configuration).
+Claude's training data has a knowledge cutoff. For rapidly-evolving Microsoft/AI platform topics where Claude's context may be stale (Azure AI Foundry, Power Platform updates, Dataverse MCP, Office Add-ins SDK, SharePoint Embedded), use the **`researcher` subagent**:
 
-- ❌ Don't run: `az resource list`, `az webapp show`, `az cognitiveservices account show`
-- ✅ Do run: `az webapp deploy`, `az keyvault secret set`, `az deployment group create`
+- **Mechanism**: `.claude/agents/researcher.md` (Opus, effort: high, project memory enabled)
+- **Trigger**: Invoke when external/current technical knowledge is needed that's not in skills, ADRs, or patterns
+- **Behavior**: Consults curated knowledge at [`knowledge/`](knowledge/) FIRST → falls back to Microsoft Learn, official Microsoft GitHub repos, then generic web search
+- **Accumulation**: Findings stored in the subagent's `MEMORY.md` (project-scoped) — accumulates Microsoft-platform knowledge across sessions
 
-### Quick Endpoints (Dev Environment)
-
-| Service | Endpoint |
-|---------|----------|
-| BFF API | `https://spe-api-dev-67e2xz.azurewebsites.net` |
-| Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
-| Document Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
-| Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
-| Dataverse MCP | `https://spaarkedev1.crm.dynamics.com/api/mcp` (via stdio proxy in `.mcp.json`) |
-
-### Resource Documentation
-
-| Need | Location | Content |
-|------|----------|---------|
-| AI resources (OpenAI, Doc Intel, AI Search, AI Foundry) | [`docs/architecture/auth-AI-azure-resources.md`](docs/architecture/auth-AI-azure-resources.md) | Endpoints, models, CLI commands |
-| All Azure resources | [`docs/architecture/auth-azure-resources.md`](docs/architecture/auth-azure-resources.md) | Full Azure inventory |
-| AI Foundry infrastructure | [`infrastructure/ai-foundry/README.md`](infrastructure/ai-foundry/README.md) | Hub, Project, Prompt Flows |
-| Resource naming conventions | [`docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md`](docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) | Naming patterns |
-
-### Key Resource Names
-
-| Resource Type | Dev Environment |
-|--------------|-----------------|
-| Resource Group | `spe-infrastructure-westus2` |
-| App Service | `spe-api-dev-67e2xz` |
-| Azure OpenAI | `spaarke-openai-dev` |
-| Document Intelligence | `spaarke-docintel-dev` |
-| AI Search | `spaarke-search-dev` |
-| AI Foundry Hub | `sprkspaarkedev-aif-hub` |
-| AI Foundry Project | `sprkspaarkedev-aif-proj` |
-| Key Vault | `spaarke-spekvcert` |
-
-### Dataverse Environments
-
-| Environment | URL | Purpose |
-|-------------|-----|---------|
-| Dev | `https://spaarkedev1.crm.dynamics.com` | Development/testing |
+**Knowledge repo location**: [`knowledge/`](knowledge/) at repo root — populated by parallel project `coding-knowledge-base-setup-r1` (merged to master before this rewrite). Currently includes `agent-framework/`, `azure-ai-search/`, refresh procedures, and a refresh log. The researcher consults this BEFORE external search and memoizes findings in its `MEMORY.md`.
 
 ---
 
-## Project Overview
+## 14. Hooks — Current Guidance
 
-**Spaarke** is a SharePoint Document Access Platform (SDAP) built with:
-- **.NET 8 Minimal API** (Backend) - SharePoint Embedded integration via Microsoft Graph
-- **Power Platform PCF Controls** (Frontend) - Field-bound TypeScript/React controls for Dataverse forms
-- **React Code Pages** (Frontend) - Standalone React 18 dialogs and pages (document viewers, wizards, panels)
-- **Dataverse Plugins** (Platform) - Thin validation/projection plugins
-
-## Repository Structure
-
-```
-projects/                      # Active development projects
-├── {project-name}/            # Each project has its own folder
-│   ├── spec.md                # Design specification (input)
-│   ├── README.md              # Project overview (generated)
-│   ├── plan.md                # Implementation plan (generated)
-│   ├── CLAUDE.md              # Project-specific AI context
-│   ├── tasks/                 # Task files (POML format)
-│   └── notes/                 # Ephemeral working files
-
-src/
-├── client/                    # Frontend components
-│   ├── pcf/                   # PCF Controls (React 16/17, field-bound form controls)
-│   ├── code-pages/            # React Code Pages (React 18, standalone dialogs & pages)
-│   ├── office-addins/         # Office Add-ins (React 18)
-│   └── shared/                # Shared UI components library (React 18-compatible)
-├── server/                    # Backend services
-│   ├── api/                   # .NET 8 Minimal API (Sprk.Bff.Api)
-│   └── shared/                # Shared .NET libraries
-└── solutions/                 # Dataverse solution projects
-
-tests/                         # Unit and integration tests
-docs/                          # Documentation (see above)
-infrastructure/                # Azure Bicep templates
-```
-
-## Architecture Decision Records (ADRs)
-
-ADRs are in `.claude/adr/` (concise) and `docs/adr/` (full). The key constraints are summarized here—**reference ADRs only if you need historical context** for why a decision was made.
-
-| ADR | Summary | Key Constraint |
-|-----|---------|----------------|
-| ADR-001 | Minimal API + BackgroundService | **No Azure Functions** |
-| ADR-002 | Thin Dataverse plugins | **No HTTP/Graph calls in plugins; <50ms p95** |
-| ADR-006 | Anti-legacy-JS: PCF for form controls, React Code Pages for dialogs | **No legacy JS webresources; field-bound → PCF; standalone dialog → Code Page** |
-| ADR-007 | SpeFileStore facade | **No Graph SDK types leak above facade** |
-| ADR-008 | Endpoint filters for auth | **No global auth middleware; use endpoint filters** |
-| ADR-009 | Redis-first caching | **No hybrid L1 cache unless profiling proves need** |
-| ADR-010 | DI minimalism | **≤15 non-framework DI registrations** |
-| ADR-012 | Shared component library | **Reuse `@spaarke/ui-components` across modules** |
-| ADR-013 | AI Architecture | **AI Tool Framework; extend BFF, not separate service** |
-| ADR-021 | Fluent UI v9 Design System | **All UI must use Fluent v9; no hard-coded colors; dark mode required** |
-| ADR-022 | PCF Platform Libraries (field-bound controls only) | **PCF: React 16 APIs, platform-provided; Code Pages: React 18, bundled** |
-
-## AI Architecture
-
-AI features are built using the **AI Tool Framework** - see `docs/architecture/AI-ARCHITECTURE.md` and `docs/architecture/playbook-architecture.md`.
-
-| Component | Purpose |
-|-----------|---------|
-| `AiToolEndpoints.cs` | Streaming + enqueue endpoints |
-| `AiToolService` | Tool orchestrator |
-| `IAiToolHandler` | Interface for tool implementations |
-| `AiToolAgent` PCF | Embedded streaming AI UI component |
-
-Key pattern: **Dual Pipeline** - SPE storage + AI processing execute in parallel.
-
-## Coding Standards
-
-### .NET (Backend)
-
-```csharp
-// ✅ DO: Use concrete types unless a seam is required
-services.AddSingleton<SpeFileStore>();
-services.AddSingleton<AuthorizationService>();
-
-// ✅ DO: Use endpoint filters for authorization
-app.MapGet("/api/documents/{id}", GetDocument)
-   .AddEndpointFilter<DocumentAuthorizationFilter>();
-
-// ✅ DO: Keep services focused and small
-public class SpeFileStore { /* Only SPE operations */ }
-
-// ❌ DON'T: Inject Graph SDK types into controllers
-public class BadController(GraphServiceClient graph) { } // WRONG
-
-// ❌ DON'T: Use global middleware for resource authorization
-app.UseMiddleware<AuthorizationMiddleware>(); // WRONG
-```
-
-### TypeScript/PCF (Field-Bound Form Controls — React 16/17)
-
-```typescript
-// ✅ DO: Import from shared component library
-import { DataGrid, StatusBadge } from "@spaarke/ui-components";
-
-// ✅ DO: Use Fluent UI v9 exclusively
-import { Button, Input } from "@fluentui/react-components";
-
-// ✅ DO: Use React 16 APIs (platform-provided, not bundled)
-// ReactControl returns element; ReactDOM.render() for StandardControl
-public updateView(context): React.ReactElement {
-    return React.createElement(FluentProvider, { theme }, React.createElement(MyComponent, { context }));
-}
-
-// ❌ DON'T: Create new legacy webresources (no-framework JS, jQuery)
-// ❌ DON'T: Use React 18 createRoot() in PCF — platform only provides React 16/17
-// ❌ DON'T: Mix Fluent UI versions (v8 and v9)
-// ❌ DON'T: Hard-code Dataverse entity schemas
-// ❌ DON'T: Use custom page + PCF wrapper for standalone dialogs — use a Code Page instead
-```
-
-### TypeScript/React Code Pages (Standalone Dialogs & Pages — React 18)
-
-```typescript
-// ✅ DO: Use React 18 createRoot (bundled, not platform-provided)
-import { createRoot } from "react-dom/client";
-const params = new URLSearchParams(window.location.search);
-createRoot(document.getElementById("root")!).render(
-    <FluentProvider theme={webLightTheme}><App documentId={params.get("documentId") ?? ""} /></FluentProvider>
-);
-
-// ✅ DO: Use WizardDialog / SidePanel from shared library for common layouts
-import { WizardDialog, SidePanel } from "@spaarke/ui-components";
-
-// ✅ DO: Open Code Page dialogs via navigateTo webresource (no custom page needed)
-Xrm.Navigation.navigateTo(
-    { pageType: "webresource", webresourceName: "sprk_mypagename", data: `documentId=${id}` },
-    { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } }
-);
-
-// ✅ DO: Use @spaarke/auth bootstrap for Code Pages calling BFF API
-// Bootstrap: resolveRuntimeConfig() → setRuntimeConfig() → ensureAuthInitialized() → render
-// See .claude/patterns/auth/spaarke-auth-initialization.md
-
-// ✅ DO: Use lazy functions for runtime config values
-export function getMsalConfig(): Configuration { return { clientId: getMsalClientId() }; }
-
-// ❌ DON'T: Use module-level constants that call runtime config getters
-const CLIENT_ID = getMsalClientId(); // WRONG — throws before bootstrap
-```
-
-### Dataverse Plugins
-
-```csharp
-// ✅ DO: Keep plugins thin (<200 LoC, <50ms execution)
-public class ValidationPlugin : IPlugin
-{
-    public void Execute(IServiceProvider serviceProvider)
-    {
-        // Validation only - no HTTP calls
-        ValidateRequiredFields(context);
-    }
-}
-
-// ❌ DON'T: Make HTTP/Graph calls from plugins
-// ❌ DON'T: Implement orchestration logic in plugins
-```
-
-## Commands
-
-| Action | Command |
-|--------|---------|
-| Build all | `dotnet build` |
-| Build API | `dotnet build src/server/api/Sprk.Bff.Api/` |
-| Build PCF | `cd src/client/pcf && npm run build` |
-| Test all | `dotnet test` |
-| Test with coverage | `dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings` |
-| Run API | `dotnet run --project src/server/api/Sprk.Bff.Api/` |
-| Format C# code | `dotnet format` |
-| Format TS/JSON | `npx prettier --check .` |
-| Fix TS/JSON formatting | `npx prettier --write .` |
-| Lint PCF TypeScript | `cd src/client/pcf && npx eslint .` |
-| Run pre-commit checks | `npx lint-staged` |
-
-**API Endpoints**: `https://localhost:5001` · Health check: `GET /healthz`
-
-### Node Installs: Avoid `npm ci` for Vite Solutions (2026-05-13)
-
-Many `src/solutions/*` Vite projects have **stale `package-lock.json` files** relative to current npm registry transitive dep versions (e.g. fluentui patches, tabster, keyborg). `npm ci` insists on exact lock-file resolution and **fails on ~14 of the 16 solutions**. Until the locks are deploy-verifiably regenerated:
-
-- ✅ **Use** `npm install --legacy-peer-deps --no-audit --no-fund` for fresh installs in `src/solutions/*` and `src/client/pcf/*`
-- ✅ **`Build-AllClientComponents.ps1`** auto-handles this: it skips install if `node_modules` exists, else does `npm install --legacy-peer-deps`
-- ✅ **`Build-ViteSolutionsDirect.ps1`** does the same — use this as a faster alternative for Vite-only builds
-- ❌ **Avoid** `npm ci` directly in Vite solutions until lock regeneration is scheduled
-- ❌ **Don't add `npm ci` to new build scripts** — copy the pattern from `Build-AllClientComponents.ps1`
-
-Regenerating the locks is queued but deferred because each regeneration pulls minor/patch upgrades (some jumpy — `keyborg 2.6.0 → 2.14.1`) that need per-solution deploy + smoke-test to verify no UI regression. Plan: one focused half-day session through all 14 solutions when bandwidth allows.
-
-## File Naming Conventions
-
-| Type | Convention | Example |
-|------|------------|---------|
-| C# files | PascalCase | `AuthorizationService.cs` |
-| TypeScript files | PascalCase for components | `DataGrid.tsx` |
-| TypeScript files | camelCase for utilities | `formatters.ts` |
-| Test files | `{ClassName}.Tests.cs` | `AuthorizationService.Tests.cs` |
-| ADRs | `ADR-{NNN}-{slug}.md` | `ADR-001-minimal-api-and-workers.md` |
-
-## Error Handling
-
-### API Responses
-- Use `ProblemDetails` for all error responses
-- Include correlation IDs for tracing
-- Return user-friendly messages (not stack traces)
-
-### PCF Controls
-- Use try/catch with user-friendly error messages
-- Log errors with context for debugging
-- Show inline error states in UI
-
-## Security Considerations
-
-- **Never** commit secrets to the repository
-- Use `config/*.local.json` for local secrets (gitignored)
-- Use Azure Key Vault for production secrets
-- All API endpoints require authentication (except `/healthz`, `/ping`)
-
-## Development Lifecycle
-
-All coding projects follow this process:
-
-| Phase | Description | Artifacts |
-|-------|-------------|-----------|
-| 1. **Product Feature Request** | Business need or user story | Feature request document |
-| 2. **Solution Assessment** | Evaluate approaches, identify risks | Assessment document |
-| 3. **Detailed Design Specification** | Technical design, data models, APIs | Design spec (.docx or .md) |
-| 4. **Project Plan** | Timeline, milestones, dependencies | `plan.md` in project folder |
-| 5. **Tasks** | Granular work items | `tasks/*.poml` in project folder |
-| 6. **Product Feature Documentation** | User-facing docs, admin guides | Docs in `docs/guides/` |
-| 7. **Complete Project** | Code complete, tested, deployed | Working feature |
-| 8. **Project Wrap-up** | Cleanup, archive, retrospective | Run `/repo-cleanup` |
-
-### 🤖 AI-Assisted Development
-
-For new projects, use `/design-to-spec` then `/project-pipeline`. See [Project Initialization: Developer Workflow](#-project-initialization-developer-workflow) for the complete workflow.
-
-### Before Starting Work
-
-1. **Check for skills** - Review `.claude/skills/INDEX.md` for applicable workflows
-2. **Identify the phase** - What lifecycle phase is this work in?
-3. **Check for existing artifacts** - Look for design specs, assessments
-4. **Follow the workflow** - If a design spec exists, run `/design-to-spec` then `/project-pipeline`
-
-### Working Checklist
-
-**Before making changes:**
-- Check ADRs align with your approach
-- Review `.claude/skills/INDEX.md` for applicable workflows
-
-**After completing work:**
-- Run tests (`dotnet test`)
-- Update task status in TASK-INDEX.md
-- Update docs if behavior changed
-- Run `/repo-cleanup` to validate structure
-- Use small, focused commits
-
-## Module-Specific Instructions
-
-See `CLAUDE.md` files in subdirectories for module-specific guidance:
-- `src/server/api/Sprk.Bff.Api/CLAUDE.md` - BFF API specifics
-- `src/client/pcf/CLAUDE.md` - PCF control development
-- `src/server/shared/CLAUDE.md` - Shared .NET libraries
+Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Quality enforcement runs via (1) skill-level checks (`task-execute`, `adr-check`, `code-review`), (2) CI/CD (`.github/workflows/sdap-ci.yml`), and (3) the `doc-drift-audit` skill at project transitions. Reconsider hooks only for narrow, high-frequency automations that run in <5s with zero false positives.
 
 ---
 
-*Last updated: February 11, 2026*
+## 15. Pointers — Where to find everything
+
+| Topic | Pointer |
+|---|---|
+| Skills + trigger phrases + slash commands | [`.claude/skills/INDEX.md`](.claude/skills/INDEX.md) |
+| ADRs (concise) | [`.claude/adr/INDEX.md`](.claude/adr/INDEX.md) |
+| ADRs (full history) | [`docs/adr/`](docs/adr/) |
+| Code patterns (25-line pointer files) | [`.claude/patterns/`](.claude/patterns/) |
+| Cross-cutting constraints | [`.claude/constraints/`](.claude/constraints/) |
+| Cross-cutting failure modes (anti-patterns + gotchas) | [`.claude/FAILURE-MODES.md`](.claude/FAILURE-MODES.md) |
+| Procedure-surface changelog | [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md) |
+| Architecture (subsystems, design) | [`docs/architecture/`](docs/architecture/) — includes `AI-ARCHITECTURE.md`, `auth-azure-resources.md` |
+| Coding standards (cross-cutting conventions) | [`docs/standards/`](docs/standards/) — `CODING-STANDARDS.md`, `INTEGRATION-CONTRACTS.md`, `ANTI-PATTERNS.md` |
+| Operational guides (deploy, configure, troubleshoot) | [`docs/guides/`](docs/guides/) — 40+ guides incl. `PCF-DEPLOYMENT-GUIDE.md`, `DATAVERSE-MCP-INTEGRATION-GUIDE.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md` |
+| Development procedures (test, CI/CD, code review) | [`docs/procedures/`](docs/procedures/) — `testing-and-code-quality.md`, `ci-cd-workflow.md`, `context-recovery.md` |
+| Dataverse data model (entity schemas, ERD) | [`docs/data-model/`](docs/data-model/) |
+| Azure resources (endpoints, names, conventions) | [`docs/architecture/auth-azure-resources.md`](docs/architecture/auth-azure-resources.md) |
+| Project initialization workflow | [`/design-to-spec`](.claude/skills/design-to-spec/) → [`/project-pipeline`](.claude/skills/project-pipeline/) |
+| Active project state | `projects/{name}/current-task.md` |
+| Active skill audit + sign-off | [`.claude/AUDIT-FINDINGS-SKILLS.md`](.claude/AUDIT-FINDINGS-SKILLS.md), [`.claude/AUDIT-FINDINGS-CLAUDEMD.md`](.claude/AUDIT-FINDINGS-CLAUDEMD.md) |
+| Researcher subagent (deep-dive Microsoft platform topics) | [`.claude/agents/researcher.md`](.claude/agents/researcher.md) |
+| Reversibility archive (removed content preserved by date) | [`.claude/archive/`](.claude/archive/) |
+| Module-specific CLAUDE.md | [`src/server/api/Sprk.Bff.Api/CLAUDE.md`](src/server/api/Sprk.Bff.Api/CLAUDE.md), [`src/client/pcf/CLAUDE.md`](src/client/pcf/CLAUDE.md), [`src/server/shared/CLAUDE.md`](src/server/shared/CLAUDE.md) |
+| Repository structure (top-level overview) | [`README.md`](README.md) |
+
+---
+
+## 16. Footer
+
+**Maintained by** the project owner. To extend this file: follow the rules in `.claude/skills/ai-procedure-maintenance/SKILL.md`. When in doubt about whether content belongs here vs in `docs/`: if it's a binding rule the agent must apply every turn → here; if it's reference/tutorial → `docs/`. Every PR touching this file MUST add an entry to [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md).

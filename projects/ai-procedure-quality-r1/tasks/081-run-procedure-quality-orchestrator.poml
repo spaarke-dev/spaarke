@@ -1,0 +1,36 @@
+<task id="081" project="ai-procedure-quality-r1">
+  <metadata>
+    <title>Build scripts/quality/Run-ProcedureQualityAudit.ps1 orchestrator</title>
+    <phase>5</phase>
+    <stream>cadence</stream>
+    <tags>orchestrator, audit, ps1</tags>
+    <estimate>1h</estimate>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>080</dependencies>
+    <writes-to>scripts/quality/</writes-to>
+  </metadata>
+
+  <prompt>
+    <goal>Orchestrator script invoked by the procedure-quality-audit skill. Runs the 4 validators + exemplar tests + manual spot-check, aggregates results into .claude/QUALITY-AUDIT-&lt;date&gt;.md.</goal>
+  </prompt>
+
+  <steps>
+    <step>Invoke each validator with -Verbose; capture exit codes + output</step>
+    <step>Pick 3 random skills with exemplar: none-too-volatile; emit prompts for manual spot-check (e.g., "Please manually verify {skill} still works against current codebase state")</step>
+    <step>Check wc -l CLAUDE.md; flag if &gt; 200</step>
+    <step>Compare against prior month's report (if exists at .claude/QUALITY-AUDIT-LAST.md); produce diff section</step>
+    <step>Write report: .claude/QUALITY-AUDIT-YYYY-MM-DD.md + copy to .claude/QUALITY-AUDIT-LAST.md</step>
+    <step>Exit non-zero if any validator FAILed (so it can be a GHA gate later if desired)</step>
+  </steps>
+
+  <outputs>
+    <output>scripts/quality/Run-ProcedureQualityAudit.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Single command runs full audit</criterion>
+    <criterion>Output is one consolidated markdown report</criterion>
+    <criterion>Diff vs prior month shown</criterion>
+  </acceptance-criteria>
+</task>

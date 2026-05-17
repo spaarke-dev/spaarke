@@ -1,19 +1,22 @@
-# doc-drift-audit
-
 ---
 description: Detect documentation drift — stale references in docs and .claude/ that no longer match current code. Compact diff-based alternative to full-repo audits.
 tags: [audit, documentation, drift-detection, quality]
 techStack: [all]
 appliesTo: ["audit doc drift", "check doc accuracy", "verify documentation", "project transition audit", "find stale references"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
 
+# doc-drift-audit
+
 > **Category**: Quality
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: New
+> **Last Reviewed**: 2026-05-16 (bumped from 2026-04-05; gold-standard content unchanged)
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — `leave-alone` on content; flipped frontmatter ABOVE H1 for runtime description extraction)
+> **Originally Reviewed**: 2026-04-05 by ai-procedure-refactoring-r2
+> **Status**: Stable (canonical exemplar for skill structure: audit-stamp block + Failure Modes & Recovery framing + Distinct-from-other-skills section)
 > **Created in**: R2 lessons-learned (after finding ~40 drift bugs via full-repo audit)
+> **Exemplar rationale**: Drift detection runs against ephemeral diffs against current code — no canonical reference output. The methodology itself is the contract.
 
 ---
 

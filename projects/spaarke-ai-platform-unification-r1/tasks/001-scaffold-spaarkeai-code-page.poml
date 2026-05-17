@@ -1,0 +1,75 @@
+<task id="AIPU-001" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Scaffold SpaarkeAi Code Page project</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <wave>0</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>code-page, vite, scaffold, frontend</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Create the SpaarkeAi standalone Code Page project at src/solutions/SpaarkeAi/. This is a React 19 + Vite single-file build that will host the three-pane AI workspace. Follow the canonical EventsPage/LegalWorkspace patterns for Vite config and auth bootstrap.
+  </prompt>
+
+  <role>Frontend developer with expertise in React 19, Vite, and Fluent UI v9</role>
+
+  <goal>
+    A buildable SpaarkeAi Code Page project at src/solutions/SpaarkeAi/ with Vite single-file config, React 19 entry point, auth bootstrap, FluentProvider with theme detection, and index.html — ready for component integration in Wave 1.
+  </goal>
+
+  <relevant-files>
+    <file>src/solutions/SpaarkeAi/</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="ADR-026">Use Vite + vite-plugin-singlefile, output single HTML file</constraint>
+    <constraint source="ADR-021">Wrap all UI in FluentProvider with theme, support dark mode</constraint>
+    <constraint source="ADR-022">Use React 19 createRoot (Code Page, not PCF)</constraint>
+    <constraint source="CLAUDE.md">Use npm install --legacy-peer-deps (not npm ci) for src/solutions/*</constraint>
+    <constraint source="project">Web resource name: sprk_spaarkeai</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+    </files>
+    <patterns>
+      <pattern name="Vite single-file config" location="src/solutions/EventsPage/vite.config.ts">
+        Canonical Vite config with viteSingleFile(), resolveSharedLibDeps(), assetsInlineLimit
+      </pattern>
+      <pattern name="Auth bootstrap" location="src/solutions/LegalWorkspace/src/main.tsx">
+        resolveRuntimeConfig() -> ensureAuthInitialized() -> createRoot render
+      </pattern>
+      <pattern name="Theme detection" location="src/client/code-pages/AnalysisWorkspace/src/index.tsx">
+        resolveCodePageTheme() + setupCodePageThemeListener() from @spaarke/ui-components
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>Read canonical patterns: EventsPage/vite.config.ts, LegalWorkspace/src/main.tsx, AnalysisWorkspace/src/index.tsx</step>
+    <step>Create src/solutions/SpaarkeAi/ directory structure: src/, public/, package.json, tsconfig.json, vite.config.ts, index.html</step>
+    <step>Configure package.json with React 19, @spaarke/auth, @spaarke/ui-components (file: refs), vite-plugin-singlefile</step>
+    <step>Create vite.config.ts following EventsPage pattern: viteSingleFile(), resolveSharedLibDeps(), React dedupe aliases</step>
+    <step>Create index.html with CSS reset for Dataverse iframe context</step>
+    <step>Create src/main.tsx with auth bootstrap: resolveRuntimeConfig() -> window globals -> createRoot -> FluentProvider with theme</step>
+    <step>Create src/App.tsx placeholder (will be replaced in Wave 4 task 040)</step>
+    <step>Run npm install --legacy-peer-deps and verify build succeeds with npm run build</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>src/solutions/SpaarkeAi/ directory exists with all config files</criterion>
+    <criterion>npm run build produces a single HTML file in dist/</criterion>
+    <criterion>main.tsx follows auth bootstrap pattern (resolveRuntimeConfig -> auth -> render)</criterion>
+    <criterion>FluentProvider wraps all UI with theme detection</criterion>
+    <criterion>vite.config.ts uses viteSingleFile() and resolveSharedLibDeps()</criterion>
+  </acceptance-criteria>
+</task>

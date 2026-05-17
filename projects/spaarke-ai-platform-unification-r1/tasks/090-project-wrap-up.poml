@@ -1,0 +1,75 @@
+<task id="AIPU-090" project="spaarke-ai-platform-unification-r1">
+  <metadata>
+    <title>Project Wrap-Up — final documentation, lessons learned, and cleanup</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <wave>9</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>documentation</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>AIPU-080</dependencies>
+  </metadata>
+
+  <prompt>
+    Complete the project wrap-up: update README.md status to Complete, create notes/lessons-learned.md capturing architectural decisions and implementation insights, verify all task statuses in TASK-INDEX.md are marked complete, and run /repo-cleanup to validate structure. Archive any ephemeral working files from notes/ subdirectories.
+  </prompt>
+
+  <role>Project lead with documentation experience</role>
+
+  <goal>
+    README.md shows "Complete" status, lessons-learned.md exists with actionable insights, TASK-INDEX.md shows all tasks complete, and /repo-cleanup passes without issues.
+  </goal>
+
+  <relevant-files>
+    <file>projects/spaarke-ai-platform-unification-r1/README.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/tasks/TASK-INDEX.md</file>
+    <file>projects/spaarke-ai-platform-unification-r1/notes/</file>
+    <file>projects/spaarke-ai-platform-unification-r1/CLAUDE.md</file>
+  </relevant-files>
+
+  <constraints>
+    <constraint source="pipeline">MUST update README.md status from "In Progress" to "Complete"</constraint>
+    <constraint source="pipeline">MUST create notes/lessons-learned.md with architecture decisions, what worked, what didn't</constraint>
+    <constraint source="pipeline">MUST verify all TASK-INDEX.md statuses are marked complete</constraint>
+    <constraint source="pipeline">MUST run /repo-cleanup and resolve any findings</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update README.md: set status to "Complete", update completion date, summarize what was delivered</step>
+    <step order="2">Create notes/lessons-learned.md with sections: Architecture Decisions, What Worked Well, What Didn't, Recommendations for Future Projects</step>
+    <step order="3">Verify all tasks in TASK-INDEX.md are marked with checkmark status</step>
+    <step order="4">Run /repo-cleanup to validate project structure</step>
+    <step order="5">Clean up ephemeral files from notes/ subdirectories (working drafts, scratch files)</step>
+    <step order="6">Final commit: "feat(ai-platform): complete project wrap-up"</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+    <tool>Glob</tool>
+    <tool>Skill</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated README.md with Complete status</output>
+    <output>notes/lessons-learned.md</output>
+    <output>Verified TASK-INDEX.md</output>
+    <output>Clean /repo-cleanup report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README.md status is "Complete"</criterion>
+    <criterion>lessons-learned.md exists with substantive content (>300 words)</criterion>
+    <criterion>All tasks in TASK-INDEX.md show complete status</criterion>
+    <criterion>/repo-cleanup passes with no critical findings</criterion>
+  </acceptance-criteria>
+</task>
