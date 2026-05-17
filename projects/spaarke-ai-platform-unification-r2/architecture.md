@@ -163,9 +163,14 @@
 | Component | Type | Purpose | Location |
 |-----------|------|---------|----------|
 | **CapabilityManifest** | Singleton service | In-memory catalog of all available capabilities | `Services/Ai/Capabilities/CapabilityManifest.cs` |
-| **ManifestRefreshService** | BackgroundService | Loads manifest from Dataverse at startup + periodic refresh | `Services/Ai/Capabilities/ManifestRefreshService.cs` |
-| **CapabilityActivationTool** | AI Tool | Meta-tool the orchestrator calls to load/unload capabilities | `Services/Ai/Chat/Tools/CapabilityActivationTool.cs` |
-| **OrchestratorPromptBuilder** | Service | Builds system prompt with capability index + active schemas | `Services/Ai/Chat/OrchestratorPromptBuilder.cs` |
+| **ManifestRefreshService** | BackgroundService | Webhook endpoint + 15-min polling backstop; rebuilds manifest | `Services/Ai/Capabilities/ManifestRefreshService.cs` |
+| **CapabilityRouter** | Service | Three-layer router: keyword → GPT-4o-mini → broad superset | `Services/Ai/Capabilities/CapabilityRouter.cs` |
+| **OrchestratorPromptBuilder** | Service | Builds stable prompt prefix + per-turn tool schemas | `Services/Ai/Chat/OrchestratorPromptBuilder.cs` |
+| **ISprkAgent** | Interface | Abstraction boundary — single impl (R2), multi-agent (R3) | `Services/Ai/Chat/ISprkAgent.cs` |
+| **DirectOpenAiAgent** | Service | R2 implementation of ISprkAgent — direct Azure OpenAI call | `Services/Ai/Chat/DirectOpenAiAgent.cs` |
+| **PromptShieldService** | Service | Calls Azure AI Content Safety Prompt Shields API | `Services/Ai/Safety/PromptShieldService.cs` |
+| **GroundednessCheckService** | Service | Calls Azure AI Content Safety Groundedness API | `Services/Ai/Safety/GroundednessCheckService.cs` |
+| **CitationVerificationService** | Service | Custom — verifies legal citations against index | `Services/Ai/Safety/CitationVerificationService.cs` |
 | **WorkspaceWidgetRegistry** | Client library | Registry for workspace pane widgets (lazy-load) | `@spaarke/ai-widgets` or extend `@spaarke/ai-outputs` |
 | **ContextWidgetRegistry** | Client library | Registry for context pane widgets (lazy-load) | `@spaarke/ai-widgets` or extend `@spaarke/ai-outputs` |
 | **SessionPersistenceService** | Service | Writes work history to Cosmos DB (messages, widgets, artifacts) | `Services/Ai/Sessions/SessionPersistenceService.cs` |
@@ -372,14 +377,15 @@ User message arrives at BFF
                                 │ (ambiguous, rare)
                                 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  LAYER 3: GPT-4o SELF-ACTIVATION (full double-call)         │
+│  LAYER 3: BROAD SUPERSET FALLBACK (0ms, no LLM)            │
 │                                                             │
-│  • Main model receives activate_capabilities as a tool      │
-│  • Decides on its own what to activate                      │
-│  • Requires second LLM call after activation                │
-│  • Handles: ~5-10% of turns (truly novel requests)          │
+│  • When Layers 1-2 can't classify confidently               │
+│  • Use active playbook's full tool set, OR "general"        │
+│    superset (core tools + most common extras)               │
+│  • More tools in prompt is cheaper than a double LLM call   │
+│  • Handles: ~5-10% of turns                                 │
 │                                                             │
-│  This is the EXPENSIVE path — acceptable at low frequency   │
+│  NEVER double-call. Single main LLM call on every turn.     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -466,34 +472,131 @@ Expected TBT (GPT-4o): ~20-30ms per token
 
 ---
 
-## 9. Component Dependency Graph
+## 9. AI Safety & Governance Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                   REQUEST PROCESSING PIPELINE                        │
+│                                                                     │
+│  User message                                                       │
+│       │                                                             │
+│       ▼                                                             │
+│  ┌─────────────────────────────────────────────┐                    │
+│  │  ROUTER (Layer 1/2/3 — selects tools[])     │                    │
+│  └──────────────────────┬──────────────────────┘                    │
+│                         │                                           │
+│                         ▼                                           │
+│  ┌─────────────────────────────────────────────┐                    │
+│  │  RETRIEVAL (SearchDocuments, QueryEntities)  │                    │
+│  │                                              │                    │
+│  │  ✓ PRIVILEGE FILTER applied to every query   │ ← Security        │
+│  │    (user group_ids in AI Search filter)      │                    │
+│  └──────────────────────┬──────────────────────┘                    │
+│                         │ retrieved docs                             │
+│                         ▼                                           │
+│  ┌─────────────────────────────────────────────┐                    │
+│  │  PROMPT SHIELDS (Azure AI Content Safety)    │ ← Pre-LLM check  │
+│  │                                              │                    │
+│  │  Scans: user message + retrieved documents   │                    │
+│  │  Detects: indirect prompt injection (XPIA)   │                    │
+│  │  Action: BLOCK if injection detected         │                    │
+│  │  Latency: +50-100ms                          │                    │
+│  └──────────────────────┬──────────────────────┘                    │
+│                         │ (safe)                                     │
+│                         ▼                                           │
+│  ┌─────────────────────────────────────────────┐                    │
+│  │  AZURE OPENAI (chat/completions)             │                    │
+│  │  • Stable prefix (index + persona + skills)  │                    │
+│  │  • tools[] selected by router                │                    │
+│  │  • Streaming response                        │                    │
+│  └──────────────────────┬──────────────────────┘                    │
+│                         │ streamed response                          │
+│                         ▼                                           │
+│  ┌─────────────────────────────────────────────┐                    │
+│  │  GROUNDEDNESS CHECK (Content Safety API)     │ ← Post-LLM check │
+│  │                                              │                    │
+│  │  Input: model response + source documents    │                    │
+│  │  Output: grounded / ungrounded segments      │                    │
+│  │  Action: annotate ungrounded claims in UI    │                    │
+│  │  Latency: +100-200ms (buffered check)        │                    │
+│  └──────────────────────┬──────────────────────┘                    │
+│                         │                                           │
+│                         ▼                                           │
+│  ┌─────────────────────────────────────────────┐                    │
+│  │  CITATION VERIFICATION (custom service)      │ ← Post-LLM check │
+│  │                                              │                    │
+│  │  Parse legal citations from response         │                    │
+│  │  Check each against statute/case index       │                    │
+│  │  Annotate: ✓ verified / ⚠️ unverified        │                    │
+│  │  Latency: +50-100ms (async, non-blocking)    │                    │
+│  └──────────────────────┬──────────────────────┘                    │
+│                         │                                           │
+│                         ▼                                           │
+│  Stream to client with safety annotations                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Safety Components
+
+| Component | Type | Service | New? |
+|-----------|------|---------|------|
+| PrivilegeFilterMiddleware | Pre-retrieval | Custom (AI Search filter) | Extend existing |
+| PromptShieldService | Pre-LLM | Azure AI Content Safety API | **NEW** |
+| GroundednessCheckService | Post-LLM | Azure AI Content Safety API | **NEW** |
+| CitationVerificationService | Post-LLM | Custom (AI Search lookup) | **NEW** |
+
+### Infrastructure
+
+| Resource | Purpose | Exists? |
+|----------|---------|---------|
+| Azure AI Content Safety (S0) | Prompt Shields + Groundedness API | Check — may already exist alongside OpenAI |
+| AI Search `privilege_group_ids` field | Per-document security filter | **No — index schema update needed** |
+| Citation entries in spaarke-references index | Statute/case verification data | **Partial — needs population** |
+
+---
+
+## 10. Component Dependency Graph
 
 ```
                     CapabilityManifest
                     (singleton, in-memory)
                            ▲
-                           │ refreshes from
+                           │ webhook + polling refresh
                            │
                   ManifestRefreshService ◀── Dataverse (source of truth)
                            │
                            │ read by
                            ▼
-              ┌─── SprkChatAgentFactory ───┐
-              │                            │
-              ▼                            ▼
-   OrchestratorPromptBuilder      CapabilityActivationTool
-              │                            │
-              ▼                            ▼
-       Azure OpenAI API            Session active caps (Redis)
+              ┌─── CapabilityRouter ────────────────────────┐
+              │    (keyword → mini → superset fallback)     │
+              │                                             │
+              │    Output: selected tools[] for this turn   │
+              └──────────────────┬──────────────────────────┘
+                                 │
+                                 ▼
+              ┌─── SprkChatAgentFactory (produces ISprkAgent) ───┐
+              │                                                  │
+              ▼                                                  ▼
+   OrchestratorPromptBuilder                      PromptShieldService
+   (stable prefix + tools[])                      (pre-LLM safety check)
+              │                                                  │
+              ▼                                                  │
+       Azure OpenAI API (single call) ◀──────────────────────────┘
               │
-              ├── Tool calls ──▶ Capability Library (Actions, Tools)
+              ├── Tool calls ──▶ Capability Library
               │                         │
-              │                         ├──▶ RagService (AI Search)
+              │                         ├──▶ RagService (+ privilege filter)
               │                         ├──▶ AgentServiceClient (Foundry)
               │                         ├──▶ DataverseService (OData)
               │                         └──▶ SpeFileStore (Graph)
               │
-              └── SSE events ──▶ Client (pane routing)
+              ├── Response ──▶ GroundednessCheckService (post-LLM)
+              │                         │
+              │                         ▼
+              │               CitationVerificationService (post-LLM)
+              │                         │
+              │                         ▼
+              └── SSE events ──▶ Client (with safety annotations)
                                         │
                                         ├──▶ WorkspaceTabManager
                                         ├──▶ ContextPaneController
@@ -502,13 +605,14 @@ Expected TBT (GPT-4o): ~20-30ms per token
 
 ---
 
-## 10. Completeness Checklist
+## 12. Completeness Checklist
 
 | Requirement | Component | Status |
 |-------------|-----------|--------|
-| AI orchestrates capabilities dynamically | CapabilityManifest + ActivationTool + per-turn injection | Designed |
-| User never needs to select a playbook | Orchestrator auto-activates based on intent | Designed |
-| Playbooks work as accelerators | Pre-composed bundles loadable by orchestrator | Designed |
+| AI orchestrates capabilities dynamically | CapabilityManifest + Router + per-turn tools[] injection | Designed |
+| User never needs to select a playbook | Router auto-selects tools based on intent | Designed |
+| Playbooks work as accelerators | Pre-composed bundles loadable by router | Designed |
+| Single LLM call per turn always | Router pre-selects tools[]; no meta-tools, no double-call | Designed |
 | Work persists across sessions | Cosmos DB warm tier + session restore | Designed |
 | Three panes coordinate via events | SSE event types + client-side routing | Designed (extends R1) |
 | Workspace supports multiple items | Tab manager, max 3 tabs | Designed |
@@ -517,11 +621,16 @@ Expected TBT (GPT-4o): ~20-30ms per token
 | Tenant can disable capabilities | Boolean toggles in Dataverse, cached in manifest | Designed |
 | Sessions restore quickly (<500ms) | Cosmos read + LLM summary + widget snapshot | Designed |
 | Prompt library for reuse | Cosmos DB storage, 4-tier ownership | Designed |
-| Capability catalog stays current | ManifestRefreshService (startup + periodic) | Designed |
-| Latency stays acceptable (<3s typical) | Three-layer routing avoids double-call on ~90% of turns | Designed |
+| Capability catalog stays current | ManifestRefreshService (webhook + polling backstop) | Designed |
+| Latency stays acceptable (<3s typical) | Router pre-selects; single LLM call; prompt caching | Designed |
 | Model tiering reduces cost + latency | GPT-4o-mini for classification + summarization | Designed |
-| Prompt stays within budget (~9000 tokens) | Token budget per component + auto-summarization + tool deactivation | Designed |
+| Prompt stays within budget (~9000 tokens) | Token budget per component + auto-summarization | Designed |
 | Latency is monitored | Azure Monitor: TTFT, TBT, TTLT, prompt token tracking | Designed |
+| Prompt injection defense | PromptShieldService (Azure AI Content Safety) | Designed |
+| Groundedness verification | GroundednessCheckService (Content Safety API) | Designed |
+| Citation verification | CitationVerificationService (custom, deterministic) | Designed |
+| Privilege-aware retrieval | Security filter on AI Search queries (group_ids) | Designed |
+| Multi-agent boundary (R3 prep) | ISprkAgent interface; DirectOpenAiAgent impl | Designed |
 
 ### Potential Gaps / Items to Confirm
 
@@ -530,11 +639,11 @@ Expected TBT (GPT-4o): ~20-30ms per token
 | 1 | **Cosmos DB provisioning** — who provisions and when? | Blocks session persistence development |
 | 2 | **spaarke-records-index sync** — how to trigger initial population? | DataverseQueryTools can work without it (OData direct), but discovery is degraded |
 | 3 | **Widget state serialization** — do all R1 widgets already support serialize/restore? | May need widget updates for session restore |
-| 4 | ~~**LLM summarization model**~~ — **Resolved**: GPT-4o-mini (see design.md Section 8.10) | — |
-| 5 | **Deactivation heuristics** — auto-deactivate after 3 turns without use (proposed). Validate with testing. | Context bloat if tools accumulate without cleanup |
-| 6 | ~~**Multi-turn capability activation**~~ — **Resolved**: Three-layer routing avoids double-call on ~90% of turns (see Section 6) | — |
-| 7 | **Layer 2 latency validation** — is GPT-4o-mini classification truly 200-500ms in practice? Need to benchmark. | If slower, Layer 1 keyword coverage must be broader |
-| 8 | **Separate Azure OpenAI deployments** — should GPT-4o-mini have its own deployment to avoid workload mixing? (Microsoft recommends separation) | Latency degradation from mixed workloads |
+| 4 | **Azure AI Content Safety** — verify resource exists or provision. Check regional availability for Groundedness API. | Blocks safety perimeter implementation |
+| 5 | **Citation index population** — what statute/case data to seed into spaarke-references? | Citation verification has no data to check against |
+| 6 | **Layer 2 latency validation** — is GPT-4o-mini classification truly 200-500ms in practice? Need to benchmark. | If slower, Layer 1 keyword coverage must be broader |
+| 7 | **Separate Azure OpenAI deployments** — should GPT-4o-mini have its own deployment? (Microsoft recommends separation) | Latency degradation from mixed workloads |
+| 8 | **Privilege group mapping** — how do we map user → matter access → group_ids for AI Search filter? | Privilege filtering has no enforcement data |
 
 ---
 
