@@ -3,6 +3,7 @@ using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Fluent;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Ai.Audit;
+using Sprk.Bff.Api.Services.Ai.Feedback;
 using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PromptLibrary;
 using Sprk.Bff.Api.Services.Ai.Sessions;
@@ -100,7 +101,10 @@ public static class AiPersistenceModule
         // Org + System template tiers are deferred to AIPU2-036 (Dataverse integration).
         services.AddScoped<IPromptLibraryService, PromptLibraryService>();
 
-        // TODO AIPU2-xxx: Register CosmosFeedbackStore
+        // AIPU2-036: FeedbackService — per-response thumbs up/down storage and aggregation.
+        // Scoped: one instance per HTTP request; shares the singleton CosmosClient.
+        // Cosmos DB feedback container, partition key /tenantId (ADR-015 Tier 3, 90-day retention).
+        services.AddScoped<IFeedbackService, FeedbackService>();
 
         return services;
     }

@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Ai.Capabilities;
+using Sprk.Bff.Api.Services.Ai.Chat;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -18,8 +19,16 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   5. ManifestRefreshService (singleton hosted service + IManifestRefreshTrigger) —
 ///      15-minute polling loop + Channel-based webhook wake-up
 ///
+/// UNCONDITIONAL registrations (AIPU2-012):
+///   6. CapabilityRouterOptions (IOptions) — confidence threshold configuration
+///   7. CapabilityRouter (singleton, also bound as ICapabilityRouter) — Layer 1 keyword classifier
+///
+/// UNCONDITIONAL registrations (AIPU2-015):
+///   8. OrchestratorPromptBuilder (singleton, also bound as IOrchestratorPromptBuilder) —
+///      builds two-layer system prompt (stable prefix + per-turn tool schemas).
+///
 /// Planned registrations (future AIPU2 tasks):
-///   6. AiSearchService         — Cross-provider semantic and hybrid search orchestration
+///   9. AiSearchService         — Cross-provider semantic and hybrid search orchestration
 ///   7. SummarizationService    — Document and conversation summarisation
 ///   8. CitationService         — Source citation extraction and verification
 ///   9. MultiProviderAiService  — Provider routing (Azure OpenAI, Anthropic, etc.)
@@ -84,6 +93,29 @@ public static class AiCapabilitiesModule
         services.AddHostedService(sp =>
             sp.GetRequiredService<ManifestRefreshService>());
 
+        // ── AIPU2-015: OrchestratorPromptBuilder ─────────────────────────────
+        // Singleton: OrchestratorPromptBuilder holds an in-process MemoryCache for the stable
+        // prefix (keyed by manifest hash). Singleton lifetime is required so the cache persists
+        // across requests (ADR-009 exception: in-process structural metadata, not business data).
+        services.AddSingleton<OrchestratorPromptBuilder>();
+        services.AddSingleton<IOrchestratorPromptBuilder>(sp =>
+            sp.GetRequiredService<OrchestratorPromptBuilder>());
+
+        // ── AIPU2-012: CapabilityRouter (Layer 1 keyword classifier) ─────────
+        // Options: bound from "Capabilities:Router" section.
+        services
+            .AddOptions<CapabilityRouterOptions>()
+            .Bind(configuration.GetSection(CapabilityRouterOptions.SectionName));
+
+        // Singleton: safe because CapabilityRouter reads ICapabilityManifest (lock-free)
+        // and IOptions<CapabilityRouterOptions> (immutable after startup).
+        // ADR-010: one concrete registration + interface forward.
+        services.AddSingleton<CapabilityRouter>();
+        services.AddSingleton<ICapabilityRouter>(sp =>
+            sp.GetRequiredService<CapabilityRouter>());
+
+        // TODO AIPU2-013: Register Layer 2 LLM intent classifier
+        // TODO AIPU2-014: Register Layer 3 fallback router
         // TODO AIPU2-xxx: Register AiSearchService, SummarizationService, CitationService, MultiProviderAiService
 
         return services;

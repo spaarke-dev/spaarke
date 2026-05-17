@@ -82,10 +82,18 @@ public static class AiSafetyModule
 
         // ICitationVerificationService / CitationVerificationService — AIPU2-022
         // Singleton: stateless orchestrator; all IVerificationProvider implementations are also singletons.
-        // IEnumerable<IVerificationProvider> resolves to an empty collection until AIPU2-023+ registers
-        // concrete providers (InternalIndexProvider, CourtListenerProvider, etc.).
         // ADR-010: interface registered for testability (unit tests inject stub providers).
         services.AddSingleton<ICitationVerificationService, CitationVerificationService>();
+
+        // InternalIndexProvider — AIPU2-023
+        // Singleton: stateless; SearchClient is thread-safe and long-lived.
+        // Handles CaseLaw, Statute, and Regulation types against spaarke-rag-references index.
+        // Registered as IVerificationProvider so CitationVerificationService receives it via
+        // IEnumerable<IVerificationProvider> constructor injection.
+        services.AddSingleton<IVerificationProvider>(sp =>
+            new InternalIndexProvider(
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<ILogger<InternalIndexProvider>>()));
 
         return services;
     }

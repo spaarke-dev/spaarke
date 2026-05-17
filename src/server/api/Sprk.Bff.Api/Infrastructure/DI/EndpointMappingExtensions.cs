@@ -159,6 +159,8 @@ public static class EndpointMappingExtensions
         app.MapKnowledgeBaseEndpoints();
         // AIPU2-035: Prompt Library — Personal, Team, Org, System template CRUD + render
         app.MapPromptLibraryEndpoints();
+        // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability
+        app.MapFeedbackEndpoints();
         // AI Capabilities: webhook-triggered manifest refresh (AIPU2-011)
         app.MapCapabilityEndpoints();
         app.MapChatEndpoints();
