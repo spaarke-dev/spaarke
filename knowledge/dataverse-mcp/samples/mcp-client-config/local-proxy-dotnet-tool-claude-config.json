@@ -1,0 +1,24 @@
+{
+  "_comment": "Source: https://github.com/microsoft/Dataverse-MCP/blob/main/lab02/README.md (commit 2bc5d0098b8ff49a7228aaf2a08df426a060ef6c, captured 2026-05-14). Legacy/alternate configuration that uses the .NET dotnet-tool local proxy (Microsoft.PowerPlatform.Dataverse.MCP) instead of the @microsoft/dataverse npm proxy shown in claude-desktop-config.json. The .NET proxy was the original local-proxy implementation shipped with the Build 2025 announcement; the npm proxy is the current Learn-documented path. Either works. This sample exists so curators can recognize the legacy form if they encounter it in older configurations or sample repos.",
+  "mcpServers": {
+    "Dataverse MCP Server": {
+      "command": "Microsoft.PowerPlatform.Dataverse.MCP",
+      "args": [
+        "--ConnectionUrl",
+        "<Connection URL from Lab 01>",
+        "--MCPServerName",
+        "DataverseMCPServer",
+        "--TenantId",
+        "<Tenant Id>",
+        "--EnableHttpLogging",
+        "true",
+        "--EnableMsalLogging",
+        "false",
+        "--Debug",
+        "false",
+        "--BackendProtocol",
+        "HTTP"
+      ]
+    }
+  }
+}

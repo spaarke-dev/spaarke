@@ -722,6 +722,12 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "refresh scope index", "update scope catalog", "sync scopes" | `jps-scope-refresh` | Load `.claude/skills/jps-scope-refresh/SKILL.md` and follow procedure |
 | "validate JPS", "check JPS", "JPS validation", "verify JPS schema" | `jps-validate` | Load `.claude/skills/jps-validate/SKILL.md` and follow procedure |
 | "sync worktree", "worktree sync", "full sync", "sync branch with master", "update worktree from master", "make sure we have everything" | `worktree-sync` | Load `.claude/skills/worktree-sync/SKILL.md` and follow procedure |
+| "MCP tool handler", "add tool to Spaarke MCP", "IAiToolHandler", "AiToolService" | `mcp-tool-handler` | Load `.claude/skills/mcp-tool-handler/SKILL.md` — reads `knowledge/mcp-apps/`, `knowledge/foundry-agent-service/` |
+| "declarative agent", "DA manifest", "Copilot agent", "Spaarke declarative agent" | `declarative-agent` | Load `.claude/skills/declarative-agent/SKILL.md` — reads `knowledge/declarative-agents/`, `knowledge/m365-copilot/` |
+| "Foundry agent", "Foundry workflow", "durable workflow", "HITL gate", "Foundry IQ knowledge base", "Agent Framework loop" | `foundry-agent` | Load `.claude/skills/foundry-agent/SKILL.md` — reads `knowledge/foundry-agent-service/`, `knowledge/foundry-iq/`, `knowledge/agent-framework/` |
+| "Dataverse MCP", "Business Skill", "App MCP", "custom MCP tool for Dataverse" | `dataverse-mcp-usage` | Load `.claude/skills/dataverse-mcp-usage/SKILL.md` — reads `knowledge/dataverse-mcp/` |
+| "SharePoint Embedded", "SPE container", "container type", "webUrl document open" | `spe-integration` | Load `.claude/skills/spe-integration/SKILL.md` — reads `knowledge/sharepoint-embedded/` |
+| "MCP App widget", "Copilot widget", "side-by-side widget", "inline widget" | `widget-design` | Load `.claude/skills/widget-design/SKILL.md` — reads `knowledge/mcp-apps/` |
 
 ### Auto-Detection Rules
 
@@ -812,6 +818,7 @@ Use these commands to explicitly invoke skills:
 7. **Read `docs/guides/`** — operational procedures (deployment, configuration)
 8. **Read `docs/procedures/`** — development workflow (testing, CI/CD, code review, dependency management)
 9. **Read `docs/data-model/`** — Dataverse entity schemas, ERD, field mappings, JSON schemas
+10. **Read `knowledge/<topic>/`** — curated Microsoft platform samples + NOTES.md (Spaarke perspective) + SOURCE.md (provenance). Loaded on-demand by the 6 knowledge-base skills (mcp-tool-handler, declarative-agent, foundry-agent, dataverse-mcp-usage, spe-integration, widget-design) when working on those platform pieces. **Refresh monthly** via `knowledge/REFRESH-PROCEDURE.md`.
 
 **Never trust a doc over the code.** If a doc describes implementation and the code differs, the code wins.
 
@@ -870,6 +877,7 @@ We evaluated automated hooks (`PostToolUse` for format-on-edit, `PreToolUse` for
 | **`docs/data-model/`** | Dataverse entity schemas, ERD, field mappings, JSON schemas | When touching Dataverse data |
 | **`docs/enhancements/`** | Feature proposals, strategy documents, roadmaps | When planning new features |
 | **`docs/adr/`** | Full ADR history | Rarely — only for deep architectural context |
+| **`knowledge/<topic>/`** | Curated Microsoft platform samples + Spaarke `NOTES.md` + `SOURCE.md` provenance. 11 topics: m365-copilot, mcp-apps, declarative-agents, agent-framework, foundry-agent-service, foundry-iq, work-iq, dataverse-mcp, sharepoint-embedded, azure-ai-search, github-mcp. | Loaded by 6 knowledge-base skills (see Skills table) when working on those platform pieces. Refreshed monthly. |
 
 ---
 
