@@ -551,16 +551,18 @@ The orchestrator is always free to ADD capabilities beyond what a playbook decla
 
 ---
 
-## 10. Open Questions
+## 10. Resolved Design Decisions
 
-1. **Pane names**: Are "Conversation", "Workspace", "Context" the right names?
-2. **Mobile**: Three panes don't work on mobile. Chat-only with swipe to Workspace?
-3. **Tab limits**: How many Workspace tabs can be open simultaneously?
-4. ~~**Playbook switching**: Should the AI proactively suggest switching playbooks mid-session?~~ → Resolved: orchestrator handles this dynamically (Section 8)
-5. **Collaboration**: Can two users share a session? (Future)
-6. **Orchestrator model**: Should the orchestrator be the same LLM instance as the chat agent, or a separate lightweight classifier that runs before the main LLM call?
-7. **Capability cost**: Some capabilities are expensive (CodeInterpreter, WebSearch). Should the orchestrator confirm before activating costly capabilities, or just activate and explain?
-8. **Tenant customization**: Can tenants disable specific capabilities globally? (e.g., "no web search for our firm")
+| # | Question | Decision |
+|---|----------|----------|
+| 1 | Pane names | **Conversation, Workspace, Context** — confirmed |
+| 2 | Mobile | **Out of scope for R2** |
+| 3 | Workspace tab limit | **3 tabs maximum** |
+| 4 | Playbook switching | **Orchestrator handles dynamically** (Section 8) |
+| 5 | Collaboration | **Out of scope for R2** (future) |
+| 6 | Orchestrator model | **Same LLM instance** as chat agent for simplicity; design for future ability to use a cheaper model if feasible (cost optimization) |
+| 7 | Capability cost gating | **No explicit confirmation gate** — orchestrator activates as needed without asking user permission |
+| 8 | Tenant customization | **Yes — simple on/off per capability at tenant level**; keep implementation lightweight (boolean flags, not complex rule engine) |
 
 ---
 
@@ -582,7 +584,6 @@ The orchestrator is always free to ADD capabilities beyond what a playbook decla
 | **Embedded wizards** | Adapt WizardDialog for Workspace rendering |
 | **Per-tool error isolation** | Catch per-tool in SprkChatAgentFactory.ResolveTools |
 | **Pane interaction protocol** | Formal SSE event contract (workspace_widget, context_update, etc.) |
-| **"Open in Spaarke" link** | Header bar deep-link to MDA |
 
 ### R3 Scope (Future — Distribution + Polish)
 
