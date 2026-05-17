@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Infrastructure.Sse;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Safety;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Telemetry;
@@ -94,6 +96,17 @@ public static class AiSafetyModule
             new InternalIndexProvider(
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<ILogger<InternalIndexProvider>>()));
+
+
+        // ISseEventValidator / SseEventValidator -- AIPU2-026
+        services.AddSingleton<ISseEventValidator, SseEventValidator>();
+
+        // SseValidationTelemetry -- AIPU2-026
+        services.AddSingleton<SseValidationTelemetry>();
+
+        // SseOutputGuard -- AIPU2-026
+        // Scoped: one instance per HTTP request. Validates SSE tool output payloads.
+        services.AddScoped<SseOutputGuard>();
 
         return services;
     }

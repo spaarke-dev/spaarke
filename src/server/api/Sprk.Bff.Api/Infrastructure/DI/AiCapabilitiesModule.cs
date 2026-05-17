@@ -1,3 +1,5 @@
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -110,12 +112,17 @@ public static class AiCapabilitiesModule
         // Singleton: safe because CapabilityRouter reads ICapabilityManifest (lock-free)
         // and IOptions<CapabilityRouterOptions> (immutable after startup).
         // ADR-010: one concrete registration + interface forward.
-        services.AddSingleton<CapabilityRouter>();
+        // AIPU2-013: factory injects IChatClient keyed "raw" for Layer 2 LLM classification.
+        // GetKeyedService returns null when the AI stack is not configured — Layer 2 is skipped.
+        services.AddSingleton<CapabilityRouter>(sp => new CapabilityRouter(
+            sp.GetRequiredService<ICapabilityManifest>(),
+            sp.GetRequiredService<IOptions<CapabilityRouterOptions>>(),
+            sp.GetKeyedService<IChatClient>("raw"),
+            sp.GetRequiredService<ILogger<CapabilityRouter>>()));
         services.AddSingleton<ICapabilityRouter>(sp =>
             sp.GetRequiredService<CapabilityRouter>());
 
-        // TODO AIPU2-013: Register Layer 2 LLM intent classifier
-        // TODO AIPU2-014: Register Layer 3 fallback router
+        // TODO AIPU2-014: Register Layer 3 fallback router (already implemented inline in CapabilityRouter)
         // TODO AIPU2-xxx: Register AiSearchService, SummarizationService, CitationService, MultiProviderAiService
 
         return services;

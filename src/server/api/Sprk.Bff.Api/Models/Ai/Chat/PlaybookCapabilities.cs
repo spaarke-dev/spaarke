@@ -17,6 +17,7 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 ///   summarize         = 100000006
 ///   legal_research    = 100000007
 ///   code_interpreter  = 100000008
+///   verify_citations  = 100000009
 ///
 /// The <see cref="PlaybookService"/> reads this field via OData Web API and maps the
 /// integer option values to these string constants via <c>ParseCapabilities</c>.
@@ -61,6 +62,16 @@ public static class PlaybookCapabilities
     public const string CodeInterpreter = "code_interpreter";
 
     /// <summary>
+    /// VerifyCitationsTool — explicit LLM-invokable citation verification against authoritative
+    /// legal databases. Exposed as the "verify_citations" AI function. Gated so only playbooks
+    /// that deal with legal documents include this tool in the LLM's tool schema.
+    /// The automatic post-LLM citation check (CitationSafetyCheck) runs unconditionally
+    /// regardless of this capability.
+    /// Dataverse option set integer code: 100000009.
+    /// </summary>
+    public const string VerifyCitations = "verify_citations";
+
+    /// <summary>
     /// All defined capability values. Useful for validation and iteration.
     /// </summary>
     public static readonly IReadOnlyList<string> All =
@@ -73,7 +84,8 @@ public static class PlaybookCapabilities
         WebSearch,
         Summarize,
         LegalResearch,
-        CodeInterpreter
+        CodeInterpreter,
+        VerifyCitations
     ];
 
     /// <summary>

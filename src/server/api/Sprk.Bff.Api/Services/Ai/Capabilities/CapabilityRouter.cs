@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Text.Json;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Telemetry;
 
@@ -77,10 +80,21 @@ public sealed class CapabilityRouter : ICapabilityRouter
     /// </summary>
     private const string MetricLatencyHistogramName = "ai_routing_layer1_latency_ms";
 
+    /// <summary>
+    /// Metric instrument name for Layer 2 hit counter (OTEL).
+    /// </summary>
+    private const string MetricLayer2HitCounterName = "ai_routing_layer2_hit";
+
+    /// <summary>
+    /// Metric instrument name for Layer 2 latency histogram (OTEL).
+    /// </summary>
+    private const string MetricLayer2LatencyHistogramName = "ai_routing_layer2_latency_ms";
+
     // ── Dependencies ──────────────────────────────────────────────────────────
 
     private readonly ICapabilityManifest _manifest;
     private readonly CapabilityRouterOptions _options;
+    private readonly IChatClient? _rawChatClient;
     private readonly ILogger<CapabilityRouter> _logger;
 
     // ── OTEL instrumentation ──────────────────────────────────────────────────
@@ -93,16 +107,43 @@ public sealed class CapabilityRouter : ICapabilityRouter
         RouterMeter.CreateHistogram<double>(MetricLatencyHistogramName, unit: "ms",
             description: "Wall-clock latency of Layer 1 keyword classification in milliseconds.");
 
-    // ── Constructor ───────────────────────────────────────────────────────────
+    private static readonly Counter<long> Layer2HitCounter =
+        RouterMeter.CreateCounter<long>(MetricLayer2HitCounterName, unit: "{hit}",
+            description: "Count of turns where Layer 2 LLM classification produced a confident result.");
+    private static readonly Histogram<double> Layer2LatencyHistogram =
+        RouterMeter.CreateHistogram<double>(MetricLayer2LatencyHistogramName, unit: "ms",
+            description: "Wall-clock latency of Layer 2 LLM classification in milliseconds.");
 
+    // ── Constructors ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Primary constructor — used by the DI factory registration in <see cref="AiCapabilitiesModule"/>.
+    /// <paramref name="rawChatClient"/> is null when the AI stack is not configured; in that case
+    /// Layer 2 classification is automatically skipped and turns fall through to Layer 3.
+    /// </summary>
     public CapabilityRouter(
         ICapabilityManifest manifest,
         IOptions<CapabilityRouterOptions> options,
+        [FromKeyedServices("raw")] IChatClient? rawChatClient,
         ILogger<CapabilityRouter> logger)
     {
         _manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _rawChatClient = rawChatClient;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Backward-compatible 3-param constructor used by tests and legacy DI registrations
+    /// that do not inject an <see cref="IChatClient"/>. Layer 2 is disabled when this overload
+    /// is used (rawChatClient is null).
+    /// </summary>
+    public CapabilityRouter(
+        ICapabilityManifest manifest,
+        IOptions<CapabilityRouterOptions> options,
+        ILogger<CapabilityRouter> logger)
+        : this(manifest, options, rawChatClient: null, logger)
+    {
     }
 
     // ── ICapabilityRouter ─────────────────────────────────────────────────────
@@ -374,5 +415,371 @@ public sealed class CapabilityRouter : ICapabilityRouter
             results.Add(entry.CapabilityName);
         }
         return [.. results];
+    }
+
+    // ── OTEL: Layer 3 counter ────────────────────────────────────────────────
+
+    private static readonly Counter<long> Layer3HitCounter =
+        RouterMeter.CreateCounter<long>("ai_routing_layer3_hit", unit: "{hit}",
+            description: "Count of turns where Layer 3 broad superset fallback was activated.");
+
+    // ── Full three-tier routing (AIPU2-013 / AIPU2-014) ──────────────────────
+
+    /// <inheritdoc />
+    public async Task<CapabilityRoutingResult> RouteAsync(
+        string userMessage,
+        string? activePlaybookName,
+        CancellationToken ct = default)
+    {
+        // ── Layer 1: synchronous keyword classifier ───────────────────────────
+        var layer1Result = RouteSync(userMessage, activePlaybookName);
+        if (layer1Result.IsConfident)
+        {
+            _logger.LogDebug(
+                "CapabilityRouter.RouteAsync: Layer 1 confident ({Confidence:F4}) — skipping Layers 2 and 3.",
+                layer1Result.Confidence);
+            return layer1Result;
+        }
+
+        // ── Layer 2: GPT-4o-mini intent classifier ────────────────────────────
+        if (_options.Layer2.Enabled && _rawChatClient is not null)
+        {
+            _logger.LogDebug(
+                "CapabilityRouter.RouteAsync: Layer 1 uncertain ({Confidence:F4}) — escalating to Layer 2.",
+                layer1Result.Confidence);
+
+            var layer2Result = await Layer2ClassifyAsync(userMessage, activePlaybookName, ct)
+                .ConfigureAwait(false);
+
+            if (layer2Result is not null)
+            {
+                return layer2Result;
+            }
+
+            _logger.LogDebug(
+                "CapabilityRouter.RouteAsync: Layer 2 did not produce a confident result — escalating to Layer 3.");
+        }
+        else
+        {
+            _logger.LogDebug(
+                "CapabilityRouter.RouteAsync: Layer 1 uncertain ({Confidence:F4}) — Layer 2 disabled or unavailable, escalating to Layer 3.",
+                layer1Result.Confidence);
+        }
+
+        // ── Layer 3: broad superset fallback ─────────────────────────────────
+        return Layer3Fallback(activePlaybookName);
+    }
+
+    // ── Layer 2: GPT-4o-mini intent classifier ────────────────────────────────
+
+    /// <summary>
+    /// Calls GPT-4o-mini with a compact classification prompt and returns a
+    /// <see cref="CapabilityRoutingResult.Confident"/> result if confidence is above threshold,
+    /// or <c>null</c> to signal fall-through to Layer 3.
+    ///
+    /// Returns null on: timeout, HTTP 429, JSON parse failure, no matches above threshold.
+    /// Never throws — all exceptions are caught and logged.
+    ///
+    /// ADR-015: userMessage content is sent to the LLM but is NEVER stored in logs or OTEL spans.
+    /// </summary>
+    private async Task<CapabilityRoutingResult?> Layer2ClassifyAsync(
+        string userMessage,
+        string? activePlaybookName,
+        CancellationToken callerCt)
+    {
+        using var activity = AiTelemetry.ActivitySource.StartActivity(
+            "ai.routing.layer2", ActivityKind.Internal);
+
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            // Snapshot the enabled capabilities (lock-free snapshot).
+            var allCapabilities = _manifest.GetAll();
+            var candidates = allCapabilities
+                .Take(_options.Layer2.MaxCandidates)
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                _logger.LogDebug("CapabilityRouter.Layer2: no candidates in manifest — skipping.");
+                return null;
+            }
+
+            // Build the classification prompt.
+            var messages = CapabilityClassificationPromptBuilder.Build(userMessage, candidates);
+
+            // Link a timeout CTS to the caller's token.
+            using var timeoutCts = new CancellationTokenSource(_options.Layer2.TimeoutMs);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(callerCt, timeoutCts.Token);
+
+            // JSON-mode chat completion — no function invocation.
+            var chatOptions = new ChatOptions
+            {
+                ResponseFormat = ChatResponseFormat.Json
+            };
+
+            var response = await _rawChatClient!
+                .GetResponseAsync(messages, chatOptions, linkedCts.Token)
+                .ConfigureAwait(false);
+
+            sw.Stop();
+            var latencyMs = sw.ElapsedMilliseconds;
+
+            var responseText = response.Text ?? string.Empty;
+
+            // Parse the JSON response.
+            var layer2Candidates = ParseLayer2Response(responseText, candidates);
+
+            if (layer2Candidates.Count == 0)
+            {
+                _logger.LogDebug(
+                    "CapabilityRouter.Layer2: no capabilities matched above threshold in LLM response.");
+                RecordLayer2Otel(activity, latencyMs, matched: false, capabilityName: null,
+                    promptTokens: response.Usage?.InputTokenCount,
+                    completionTokens: response.Usage?.OutputTokenCount);
+                Layer2LatencyHistogram.Record(latencyMs);
+                return null;
+            }
+
+            // Use the top-scoring candidate from Layer 2.
+            var top = layer2Candidates[0];
+            var effectiveThreshold = _options.PlaybookBiasThreshold < _options.ConfidenceThreshold
+                                     && activePlaybookName is not null
+                ? _options.PlaybookBiasThreshold
+                : _options.ConfidenceThreshold;
+
+            if (top.Confidence < effectiveThreshold)
+            {
+                _logger.LogDebug(
+                    "CapabilityRouter.Layer2: top capability {Name} confidence {Confidence:F4} below threshold {Threshold:F4}.",
+                    top.Name, top.Confidence, effectiveThreshold);
+                RecordLayer2Otel(activity, latencyMs, matched: false, capabilityName: top.Name,
+                    promptTokens: response.Usage?.InputTokenCount,
+                    completionTokens: response.Usage?.OutputTokenCount);
+                Layer2LatencyHistogram.Record(latencyMs);
+                return null;
+            }
+
+            _logger.LogDebug(
+                "CapabilityRouter.Layer2: classified as {Name} with confidence {Confidence:F4}, latency {LatencyMs}ms.",
+                top.Name, top.Confidence, latencyMs);
+
+            RecordLayer2Otel(activity, latencyMs, matched: true, capabilityName: top.Name,
+                promptTokens: response.Usage?.InputTokenCount,
+                completionTokens: response.Usage?.OutputTokenCount);
+            Layer2LatencyHistogram.Record(latencyMs);
+            Layer2HitCounter.Add(1);
+
+            return CapabilityRoutingResult.Confident(
+                [top.Name],
+                top.Confidence,
+                layer: 2,
+                latencyMs: latencyMs);
+        }
+        catch (OperationCanceledException) when (!callerCt.IsCancellationRequested)
+        {
+            // Timeout fired (not caller cancel) — fall through to Layer 3.
+            sw.Stop();
+            _logger.LogWarning(
+                "CapabilityRouter.Layer2: timed out after {TimeoutMs}ms — falling through to Layer 3.",
+                _options.Layer2.TimeoutMs);
+            Layer2LatencyHistogram.Record(sw.ElapsedMilliseconds);
+            activity?.SetTag("timeout", true);
+            return null;
+        }
+        catch (Exception ex) when (IsRateLimitException(ex))
+        {
+            sw.Stop();
+            _logger.LogWarning(
+                "CapabilityRouter.Layer2: rate-limited (HTTP 429) — falling through to Layer 3.");
+            Layer2LatencyHistogram.Record(sw.ElapsedMilliseconds);
+            activity?.SetTag("rate_limited", true);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            // Log the exception type/message — NOT the userMessage (ADR-015).
+            _logger.LogError(ex,
+                "CapabilityRouter.Layer2: unexpected error during LLM classification — falling through to Layer 3.");
+            Layer2LatencyHistogram.Record(sw.ElapsedMilliseconds);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Parses the GPT-4o-mini JSON response into a list of matched capabilities ordered
+    /// by confidence descending. Only returns entries whose names appear in the candidate list.
+    ///
+    /// Returns empty list on JSON parse failure.
+    /// </summary>
+    private static List<Layer2CapabilityResult> ParseLayer2Response(
+        string responseText,
+        IReadOnlyList<CapabilityManifestEntry> candidates)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(responseText);
+
+            if (!doc.RootElement.TryGetProperty("capabilities", out var capArray)
+                || capArray.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            // Build a fast lookup set of valid candidate names.
+            var validNames = new HashSet<string>(
+                candidates.Select(c => c.CapabilityName),
+                StringComparer.Ordinal);
+
+            var results = new List<Layer2CapabilityResult>(capArray.GetArrayLength());
+
+            foreach (var item in capArray.EnumerateArray())
+            {
+                if (!item.TryGetProperty("name", out var nameProp)
+                    || !item.TryGetProperty("confidence", out var confProp))
+                {
+                    continue;
+                }
+
+                var name = nameProp.GetString();
+                if (name is null || !validNames.Contains(name)) continue;
+
+                if (!confProp.TryGetDouble(out var confidence)) continue;
+
+                results.Add(new Layer2CapabilityResult(name, confidence));
+            }
+
+            // Sort by confidence descending.
+            results.Sort(static (a, b) => b.Confidence.CompareTo(a.Confidence));
+            return results;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Sets OTEL span tags for a Layer 2 call. ADR-015: no user message content.
+    /// </summary>
+    private static void RecordLayer2Otel(
+        Activity? activity,
+        long latencyMs,
+        bool matched,
+        string? capabilityName,
+        long? promptTokens,
+        long? completionTokens)
+    {
+        activity?.SetTag("latency_ms", latencyMs);
+        activity?.SetTag("matched", matched);
+
+        if (capabilityName is not null)
+        {
+            activity?.SetTag("matched_capability", capabilityName);
+        }
+
+        if (promptTokens.HasValue)
+        {
+            activity?.SetTag("prompt_tokens", promptTokens.Value);
+        }
+
+        if (completionTokens.HasValue)
+        {
+            activity?.SetTag("completion_tokens", completionTokens.Value);
+        }
+    }
+
+    /// <summary>
+    /// Returns true when the exception indicates an HTTP 429 rate-limit response from the LLM provider.
+    /// </summary>
+    private static bool IsRateLimitException(Exception ex)
+    {
+        var message = ex.Message;
+        return message.Contains("429", StringComparison.Ordinal)
+            || message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("TooManyRequests", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Lightweight record for a single capability result returned by the Layer 2 LLM classifier.
+    /// </summary>
+    private sealed record Layer2CapabilityResult(string Name, double Confidence);
+
+    /// <inheritdoc />
+    public CapabilityRoutingResult Layer3Fallback(string? activePlaybookName)
+    {
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            var toolNames = ComputeLayer3Superset();
+            sw.Stop();
+            Layer3HitCounter.Add(1);
+
+            _logger.LogDebug(
+                "CapabilityRouter.Layer3: superset computed — {ToolCount} tools, defaultPlaybookId={DefaultPlaybookId}, latency={LatencyMs}ms.",
+                toolNames.Length,
+                _options.DefaultPlaybookId ?? "(none)",
+                sw.ElapsedMilliseconds);
+
+            return CapabilityRoutingResult.Fallback(
+                fallbackCapabilityNames: [],
+                selectedToolNames: toolNames,
+                latencyMs: sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex,
+                "CapabilityRouter.Layer3: unexpected error computing superset — returning hard-coded general superset.");
+
+            return CapabilityRoutingResult.Fallback(
+                fallbackCapabilityNames: [],
+                selectedToolNames: CapabilityRouterOptions.GeneralSupersetFallbackTools,
+                latencyMs: sw.ElapsedMilliseconds);
+        }
+    }
+
+    private string[] ComputeLayer3Superset()
+    {
+        var capabilities = _manifest.GetAll();
+
+        IEnumerable<CapabilityManifestEntry> source = capabilities;
+        if (!string.IsNullOrWhiteSpace(_options.DefaultPlaybookId))
+        {
+            source = capabilities.Where(e => e.PlaybookId.HasValue);
+        }
+
+        var toolSet = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var entry in source)
+        {
+            foreach (var tool in entry.ToolNames)
+            {
+                if (!string.IsNullOrWhiteSpace(tool))
+                {
+                    toolSet.Add(tool);
+                }
+            }
+        }
+
+        var capped = toolSet.Take(_options.MaxSupersetTools).ToArray();
+
+        if (capped.Length == 0)
+        {
+            _logger.LogDebug(
+                "CapabilityRouter.Layer3: no tools in superset source — using GeneralSupersetFallbackTools ({Count} tools).",
+                CapabilityRouterOptions.GeneralSupersetFallbackTools.Length);
+            return CapabilityRouterOptions.GeneralSupersetFallbackTools;
+        }
+
+        return capped;
     }
 }

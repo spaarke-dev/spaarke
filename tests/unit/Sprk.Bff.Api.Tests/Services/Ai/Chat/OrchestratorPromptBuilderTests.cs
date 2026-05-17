@@ -227,7 +227,7 @@ public class OrchestratorPromptBuilderTests
         };
         var (_, builder) = CreateSut(caps);
 
-        var broadRouting = CapabilityRoutingResult.Fallback([], latencyMs: 0);
+        var broadRouting = CapabilityRoutingResult.Fallback([], selectedToolNames: [], latencyMs: 0);
         var context = DefaultContext();
 
         // Act
@@ -267,7 +267,7 @@ public class OrchestratorPromptBuilderTests
         var (_, builder) = CreateSut(caps);
 
         // Broad routing includes all tools; cap must still apply.
-        var broadRouting = CapabilityRoutingResult.Fallback([], latencyMs: 0);
+        var broadRouting = CapabilityRoutingResult.Fallback([], selectedToolNames: [], latencyMs: 0);
 
         // Act
         var result = builder.BuildSystemPrompt(broadRouting, DefaultContext());
@@ -440,7 +440,7 @@ public class OrchestratorPromptBuilderTests
     {
         var (_, builder) = CreateSut();
 
-        var act = () => builder.BuildSystemPrompt(CapabilityRoutingResult.Fallback([], 0), null!);
+        var act = () => builder.BuildSystemPrompt(CapabilityRoutingResult.Fallback([], selectedToolNames: [], latencyMs: 0), null!);
         act.Should().Throw<ArgumentNullException>().WithParameterName("context");
     }
 }

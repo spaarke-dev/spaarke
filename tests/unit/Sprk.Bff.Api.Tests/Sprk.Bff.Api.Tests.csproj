@@ -38,6 +38,9 @@
     <PackageReference Include="MimeKitLite" Version="4.15.1">
       <ExcludeAssets>all</ExcludeAssets>
     </PackageReference>
+
+    <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for CapabilityRouter tests (AIPU2-013/014) -->
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />

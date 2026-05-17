@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Ai.Foundry;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
@@ -661,6 +662,39 @@ public sealed class SprkChatAgentFactory
                         "LegalResearchTools requires AgentServiceClient and BingGroundingOptions — " +
                         "one or both are not registered. LegalResearchTools will not be available. " +
                         "Ensure AgentService and BingGrounding configuration sections are present.");
+                }
+            }
+
+            // VerifyCitationsTool — gated behind "verify_citations" capability (AIPU2-024).
+            // Exposes the "verify_citations" AI function so the LLM can verify legal citations
+            // when the user explicitly asks to check references, case validity, or regulatory
+            // citations in a passage of text.
+            //
+            // The automatic post-LLM citation check (CitationSafetyCheck) runs unconditionally
+            // after every response regardless of this capability — this gate only controls whether
+            // the LLM can explicitly invoke the tool during a turn.
+            //
+            // Requires ICitationVerificationService (singleton registered in AiSafetyModule).
+            // Factory-instantiated (ADR-010): no new DI registration.
+            if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))
+            {
+                var citationVerificationService = scopedProvider.GetService<ICitationVerificationService>();
+                if (citationVerificationService != null)
+                {
+                    var verifyCitationsTool = new VerifyCitationsTool(citationVerificationService, _logger);
+                    tools.Add(AIFunctionFactory.Create(
+                        verifyCitationsTool.VerifyCitationsAsync,
+                        name: "verify_citations",
+                        description: "Verifies legal citations found in the provided text against authoritative sources. " +
+                                     "Returns verification status, confidence, and source URLs for each citation. " +
+                                     "Use when the user asks to verify references, check case validity, or confirm " +
+                                     "regulatory citations."));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "VerifyCitationsTool requires ICitationVerificationService — service not registered. " +
+                        "Ensure AddAiSafetyModule is called before AddAiChatModule.");
                 }
             }
 
