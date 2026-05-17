@@ -1,11 +1,20 @@
+---
+description: Comprehensive code review covering security, performance, style, and ADR compliance — the judgment-layer quality gate that complements CI/CD's mechanical checks
+tags: [code-review, quality, security, performance, adr-compliance, judgment-layer]
+techStack: [all]
+appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx", "post-task", "pre-merge", "PR review"]
+alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-17
+---
+
 # code-review
 
----
-description: Comprehensive code review covering security, performance, style, and ADR compliance
-alwaysApply: false
----
-
-> **Last Updated**: March 13, 2026
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2c — `leave-alone-justified` on body length; **normalized minimal frontmatter** [inventory anomaly #6: description+alwaysApply only → full block]; **no procedural split** per dereference-reliability concern)
+> **Exemplar rationale**: Code reviews are per-PR outputs; no canonical reference holds. The 600-line Workflow body IS the canonical procedure.
+> **Justified length** (846 lines): operationally dense judgment-layer procedure invoked by every `090-project-wrap-up.poml` task (~70 auto-invocations). Splitting risks the dereferencing-reliability problem identified in Phase 2b Wave 2c — agents executing the review need procedural detail inline.
+> **CI/CD coverage note**: `sdap-ci.yml` covers ~40% of this skill's surface (security-scan via Trivy, build-test, code-quality formatting + ADR NetArchTest, adr-pr-comment). The other 60% (design quality, abstraction levels, cohesion/coupling judgment, "is this over-engineered?") is what THIS skill provides — automation can't replace the judgment layer.
 
 ## Purpose
 
@@ -844,3 +853,16 @@ Before completing code review, verify:
 - [ ] ADR compliance was checked
 - [ ] Positive patterns were acknowledged
 - [ ] Next steps are actionable
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Review marks PR "clean" but reviewers find issues later | The skill missed a dimension (e.g., looked at security + performance but skipped design quality) | The 10-dimension checklist in Workflow MUST be applied to every review. Skipping a dimension because "it didn't seem to apply" is the failure mode. Use the dimension as a prompt; even a one-line confirmation is OK. |
+| Review duplicates CI/CD findings (e.g., re-reports a Trivy vulnerability) | The skill wasn't aware of which CI/CD checks already ran | Before review, check `gh pr checks` to see what CI/CD covered. Add value beyond mechanical checks — focus on the judgment layer (design, abstraction, cohesion). Don't restate what `sdap-ci.yml` already flagged. |
+| Review nits trivial style issues but misses an architecture violation | Surface-level scan only; didn't load ADRs | ALWAYS invoke `adr-check` as part of the review (or have it run separately). Style issues are CI's job; ADR violations are the judgment layer. |
+| Review report is so long the user doesn't read it | Skill produced a wall of findings without prioritization | Sort findings: Critical → Warning → Suggestion → Acknowledged Positives. Critical items first. If 50+ findings, cluster them — present the top 5 with detail, the rest as a summary count. |
+| Review invoked but skill auto-stopped mid-way | Context budget pressure; the 846-line procedure didn't fit cleanly | The skill is long but procedural detail matters. Invoke on Opus with effort `high` for full reviews; `medium` for spot checks. Don't run on Haiku for full reviews — the judgment layer needs the deeper model. |
+| Trigger phrase ambiguity — "review code" interpreted as just running CI/CD | User mentally maps "review" → "run tests" instead of judgment-layer | Skill description explicitly calls out "judgment-layer quality gate that complements CI/CD's mechanical checks" (added 2026-05-17). When triggered, the agent should NOT just check CI status — it should perform the review. |
