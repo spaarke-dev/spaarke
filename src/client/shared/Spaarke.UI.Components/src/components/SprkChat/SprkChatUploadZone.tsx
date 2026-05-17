@@ -18,15 +18,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Text,
-  Spinner,
-  ProgressBar,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens, Text, Spinner, ProgressBar, mergeClasses } from '@fluentui/react-components';
 import {
   DocumentAddRegular,
   DocumentDismissRegular,
@@ -349,7 +341,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
     const xhr = new XMLHttpRequest();
     xhrRef.current = xhr;
 
-    xhr.upload.addEventListener('progress', (event) => {
+    xhr.upload.addEventListener('progress', event => {
       if (event.lengthComputable) {
         const pct = Math.round((event.loaded / event.total) * 100);
         setUploadProgress(pct);
@@ -410,24 +402,21 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
 
   // ── Drag event handlers ────────────────────────────────────────────────────
 
-  const handleDragEnter = React.useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dragCounterRef.current += 1;
+  const handleDragEnter = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
 
-      // Check file type from dataTransfer items (available during dragenter)
-      if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-        const item = e.dataTransfer.items[0];
-        if (item.kind === 'file') {
-          // During drag, MIME type may be available; extension is not
-          const isValid = ACCEPTED_MIME_TYPES.has(item.type) || item.type === '';
-          setIsDragOverValid(isValid);
-        }
+    // Check file type from dataTransfer items (available during dragenter)
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      const item = e.dataTransfer.items[0];
+      if (item.kind === 'file') {
+        // During drag, MIME type may be available; extension is not
+        const isValid = ACCEPTED_MIME_TYPES.has(item.type) || item.type === '';
+        setIsDragOverValid(isValid);
       }
-    },
-    [],
-  );
+    }
+  }, []);
 
   const handleDragOver = React.useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -436,7 +425,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
       // Required to allow drop
       e.dataTransfer.dropEffect = isDragOverValid === false ? 'none' : 'copy';
     },
-    [isDragOverValid],
+    [isDragOverValid]
   );
 
   const handleDragLeave = React.useCallback(
@@ -454,7 +443,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
         }
       }
     },
-    [phase],
+    [phase]
   );
 
   const handleDrop = React.useCallback(
@@ -502,7 +491,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
       xhrRef.current = xhr;
 
       // Track upload progress
-      xhr.upload.addEventListener('progress', (event) => {
+      xhr.upload.addEventListener('progress', event => {
         if (event.lengthComputable) {
           const pct = Math.round((event.loaded / event.total) * 100);
           setUploadProgress(pct);
@@ -559,7 +548,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
       xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
       xhr.send(formData);
     },
-    [sessionId, apiBaseUrl, accessToken, disabled, onUploadComplete, onUploadError],
+    [sessionId, apiBaseUrl, accessToken, disabled, onUploadComplete, onUploadError]
   );
 
   // ── Overlay class based on phase ───────────────────────────────────────────
@@ -605,9 +594,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
           <>
             <DocumentAddRegular className={styles.icon} />
             <Text className={styles.title}>Drop to analyze</Text>
-            <Text className={styles.subtitle}>
-              Accepted: {ACCEPTED_TYPES_LABEL} (max 50 MB)
-            </Text>
+            <Text className={styles.subtitle}>Accepted: {ACCEPTED_TYPES_LABEL} (max 50 MB)</Text>
           </>
         )}
 
@@ -616,9 +603,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
           <>
             <DocumentDismissRegular className={styles.iconError} />
             <Text className={styles.title}>Unsupported file type</Text>
-            <Text className={styles.subtitle}>
-              Accepted: {ACCEPTED_TYPES_LABEL}
-            </Text>
+            <Text className={styles.subtitle}>Accepted: {ACCEPTED_TYPES_LABEL}</Text>
           </>
         )}
 
@@ -636,11 +621,7 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
           <>
             <Spinner size="medium" label="Uploading..." />
             <div className={styles.progressContainer}>
-              <ProgressBar
-                className={styles.progressBar}
-                value={uploadProgress / 100}
-                max={1}
-              />
+              <ProgressBar className={styles.progressBar} value={uploadProgress / 100} max={1} />
               <Text className={styles.progressLabel}>{uploadProgress}%</Text>
             </div>
           </>

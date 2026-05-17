@@ -14,21 +14,10 @@
  * NOT PCF-safe — React 19.
  */
 
-import React, { useCallback, useState } from "react";
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Badge,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  CopyRegular,
-  CheckmarkRegular,
-  CodeRegular,
-} from "@fluentui/react-icons";
-import type { SourceWidgetProps } from "../types/widget-types";
+import React, { useCallback, useState } from 'react';
+import { makeStyles, tokens, Button, Badge, Text, mergeClasses } from '@fluentui/react-components';
+import { CopyRegular, CheckmarkRegular, CodeRegular } from '@fluentui/react-icons';
+import type { SourceWidgetProps } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Payload type
@@ -49,28 +38,28 @@ export interface CodeViewerData {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke1,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
-    minHeight: "36px",
+    minHeight: '36px',
   },
   languageBadge: {
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
     fontSize: tokens.fontSizeBase100,
   },
   copyButton: {
@@ -78,7 +67,7 @@ const useStyles = makeStyles({
   },
   scrollContainer: {
     flexGrow: 1,
-    overflow: "auto",
+    overflow: 'auto',
     backgroundColor: tokens.colorNeutralBackground3,
   },
   preBlock: {
@@ -87,42 +76,42 @@ const useStyles = makeStyles({
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
     lineHeight: tokens.lineHeightBase300,
-    display: "flex",
-    minHeight: "100%",
+    display: 'flex',
+    minHeight: '100%',
     color: tokens.colorNeutralForeground1,
   },
   lineNumbers: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalS}`,
     backgroundColor: tokens.colorNeutralBackground4,
-    borderRightWidth: "1px",
-    borderRightStyle: "solid",
+    borderRightWidth: '1px',
+    borderRightStyle: 'solid',
     borderRightColor: tokens.colorNeutralStroke2,
-    userSelect: "none",
+    userSelect: 'none',
     flexShrink: 0,
-    textAlign: "right",
+    textAlign: 'right',
     color: tokens.colorNeutralForeground4,
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
     lineHeight: tokens.lineHeightBase300,
-    minWidth: "2.5em",
+    minWidth: '2.5em',
   },
   lineNumberItem: {
-    display: "block",
+    display: 'block',
   },
   codeContent: {
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    whiteSpace: "pre",
+    whiteSpace: 'pre',
     flexGrow: 1,
-    outline: "none",
+    outline: 'none',
   },
   fallback: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
@@ -177,21 +166,17 @@ function CodeViewerWidget(props: SourceWidgetProps<CodeViewerData>) {
     );
   }
 
-  const code = data?.code ?? "";
+  const code = data?.code ?? '';
   const language = data?.language;
   const showLineNumbers = data?.showLineNumbers !== false; // default true
-  const lines = code.split("\n");
+  const lines = code.split('\n');
 
   return (
     <div className={mergeClasses(styles.root, className)}>
       {/* Header: language badge + copy button */}
       <div className={styles.header}>
         {language ? (
-          <Badge
-            className={styles.languageBadge}
-            appearance="outline"
-            color="informative"
-          >
+          <Badge className={styles.languageBadge} appearance="outline" color="informative">
             {language}
           </Badge>
         ) : (
@@ -202,17 +187,11 @@ function CodeViewerWidget(props: SourceWidgetProps<CodeViewerData>) {
           className={styles.copyButton}
           appearance="subtle"
           size="small"
-          icon={
-            copied ? (
-              <CheckmarkRegular className={styles.copiedIndicator} />
-            ) : (
-              <CopyRegular />
-            )
-          }
+          icon={copied ? <CheckmarkRegular className={styles.copiedIndicator} /> : <CopyRegular />}
           onClick={handleCopy}
-          aria-label={copied ? "Copied!" : "Copy code to clipboard"}
+          aria-label={copied ? 'Copied!' : 'Copy code to clipboard'}
         >
-          {copied ? "Copied!" : "Copy"}
+          {copied ? 'Copied!' : 'Copy'}
         </Button>
       </div>
 
@@ -220,10 +199,7 @@ function CodeViewerWidget(props: SourceWidgetProps<CodeViewerData>) {
       <div className={styles.scrollContainer}>
         <pre className={styles.preBlock}>
           {showLineNumbers && (
-            <span
-              className={styles.lineNumbers}
-              aria-hidden="true"
-            >
+            <span className={styles.lineNumbers} aria-hidden="true">
               {lines.map((_, i) => (
                 <span key={i} className={styles.lineNumberItem}>
                   {i + 1}
@@ -231,10 +207,7 @@ function CodeViewerWidget(props: SourceWidgetProps<CodeViewerData>) {
               ))}
             </span>
           )}
-          <code
-            className={styles.codeContent}
-            tabIndex={0}
-          >
+          <code className={styles.codeContent} tabIndex={0}>
             {code}
           </code>
         </pre>

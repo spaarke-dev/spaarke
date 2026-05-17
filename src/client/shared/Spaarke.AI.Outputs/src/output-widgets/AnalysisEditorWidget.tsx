@@ -14,20 +14,11 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
-import { useState } from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Button,
-  Textarea,
-  Divider,
-  Spinner,
-} from "@fluentui/react-components";
-import { EditRegular, SaveRegular } from "@fluentui/react-icons";
-import type { OutputWidgetProps } from "../types";
+import * as React from 'react';
+import { useState } from 'react';
+import { makeStyles, mergeClasses, tokens, Text, Button, Textarea, Divider, Spinner } from '@fluentui/react-components';
+import { EditRegular, SaveRegular } from '@fluentui/react-icons';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -65,24 +56,24 @@ export interface AnalysisEditorWidgetProps extends OutputWidgetProps<AnalysisEdi
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
   },
   toolbar: {
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
   },
   sectionList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalL,
   },
   section: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   heading: {
@@ -90,11 +81,11 @@ const useStyles = makeStyles({
   },
   body: {
     color: tokens.colorNeutralForeground2,
-    whiteSpace: "pre-wrap",
+    whiteSpace: 'pre-wrap',
   },
   textarea: {
-    width: "100%",
-    minHeight: "120px",
+    width: '100%',
+    minHeight: '120px',
     fontFamily: tokens.fontFamilyBase,
     fontSize: tokens.fontSizeBase300,
   },
@@ -148,15 +139,13 @@ export default function AnalysisEditorWidget({
   const handleEditToggle = (): void => {
     if (!isEditing) {
       // Clone sections into draft when opening edit mode
-      setDraftSections(data.sections.map((s) => ({ ...s })));
+      setDraftSections(data.sections.map(s => ({ ...s })));
     }
-    setIsEditing((prev) => !prev);
+    setIsEditing(prev => !prev);
   };
 
   const handleSectionBodyChange = (index: number, value: string): void => {
-    setDraftSections((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, body: value } : s))
-    );
+    setDraftSections(prev => prev.map((s, i) => (i === index ? { ...s, body: value } : s)));
   };
 
   const handleSave = (): void => {
@@ -172,26 +161,15 @@ export default function AnalysisEditorWidget({
         <div className={styles.toolbar}>
           {isEditing ? (
             <>
-              <Button
-                appearance="subtle"
-                onClick={() => setIsEditing(false)}
-              >
+              <Button appearance="subtle" onClick={() => setIsEditing(false)}>
                 Cancel
               </Button>
-              <Button
-                appearance="primary"
-                icon={<SaveRegular />}
-                onClick={handleSave}
-              >
+              <Button appearance="primary" icon={<SaveRegular />} onClick={handleSave}>
                 Save
               </Button>
             </>
           ) : (
-            <Button
-              appearance="subtle"
-              icon={<EditRegular />}
-              onClick={handleEditToggle}
-            >
+            <Button appearance="subtle" icon={<EditRegular />} onClick={handleEditToggle}>
               Edit
             </Button>
           )}
@@ -218,9 +196,7 @@ export default function AnalysisEditorWidget({
               </Text>
             )}
 
-            {index < sectionsToRender.length - 1 && (
-              <Divider className={styles.divider} />
-            )}
+            {index < sectionsToRender.length - 1 && <Divider className={styles.divider} />}
           </div>
         ))}
       </div>

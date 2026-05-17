@@ -820,19 +820,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // Handle file selected via the hidden file input triggered by "[action:upload]" chip.
   // Shows the upload overlay (isDragging=true) so SprkChatUploadZone renders and
   // immediately receives the file, reusing the drag-and-drop upload path.
-  const handleFileInputChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      // Reset input so the same file can be selected again if needed.
-      e.target.value = '';
-      // Store the file in state — SprkChatUploadZone will receive it via the
-      // initialFile prop and begin uploading immediately on mount.
-      setActionUploadFile(file);
-      setIsDragging(true);
-    },
-    []
-  );
+  const handleFileInputChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so the same file can be selected again if needed.
+    e.target.value = '';
+    // Store the file in state — SprkChatUploadZone will receive it via the
+    // initialFile prop and begin uploading immediately on mount.
+    setActionUploadFile(file);
+    setIsDragging(true);
+  }, []);
 
   // ── Plan Preview callbacks (Phase 2F) ──────────────────────────────────────
 

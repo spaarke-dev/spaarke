@@ -9,16 +9,16 @@ import type { ITokenResult, ITokenStrategy } from '../types';
  *   2. ssoSilent with loginHint (Azure AD session cookie + Xrm user context)
  */
 export declare class MsalSilentStrategy implements ITokenStrategy {
-    readonly name: "msal-silent";
-    private _instance;
-    private _initPromise;
-    private readonly _msalConfig;
-    private readonly _scope;
-    constructor(msalConfig: Configuration, scope: string);
-    tryAcquireToken(): Promise<ITokenResult | null>;
-    /** Expose the MSAL instance for tenant ID resolution and other utilities. */
-    getMsalInstance(): PublicClientApplication | null;
-    private _ensureInitialized;
-    private _buildResult;
+  readonly name: 'msal-silent';
+  private _instance;
+  private _initPromise;
+  private readonly _msalConfig;
+  private readonly _scope;
+  constructor(msalConfig: Configuration, scope: string);
+  tryAcquireToken(): Promise<ITokenResult | null>;
+  /** Expose the MSAL instance for tenant ID resolution and other utilities. */
+  getMsalInstance(): PublicClientApplication | null;
+  private _ensureInitialized;
+  private _buildResult;
 }
 //# sourceMappingURL=MsalSilentStrategy.d.ts.map

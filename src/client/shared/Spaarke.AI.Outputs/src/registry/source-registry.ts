@@ -15,8 +15,8 @@
  *   return <Component data={...} />;
  */
 
-import type React from "react";
-import { SourceWidgetType, type SourceWidgetProps } from "../types/widget-types";
+import type React from 'react';
+import { SourceWidgetType, type SourceWidgetProps } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Lazy factory record
@@ -33,32 +33,32 @@ export const sourceWidgetRegistry: Record<
   () => Promise<{ default: React.ComponentType<SourceWidgetProps<unknown>> }>
 > = {
   [SourceWidgetType.DocumentViewer]: () =>
-    import("../source-widgets/DocumentViewerWidget") as Promise<{
+    import('../source-widgets/DocumentViewerWidget') as Promise<{
       default: React.ComponentType<SourceWidgetProps<unknown>>;
     }>,
 
   [SourceWidgetType.WebSource]: () =>
-    import("../source-widgets/WebSourceWidget") as Promise<{
+    import('../source-widgets/WebSourceWidget') as Promise<{
       default: React.ComponentType<SourceWidgetProps<unknown>>;
     }>,
 
   [SourceWidgetType.LegalLibrary]: () =>
-    import("../source-widgets/LegalLibraryWidget") as Promise<{
+    import('../source-widgets/LegalLibraryWidget') as Promise<{
       default: React.ComponentType<SourceWidgetProps<unknown>>;
     }>,
 
   [SourceWidgetType.Citation]: () =>
-    import("../source-widgets/CitationWidget") as Promise<{
+    import('../source-widgets/CitationWidget') as Promise<{
       default: React.ComponentType<SourceWidgetProps<unknown>>;
     }>,
 
   [SourceWidgetType.ImageViewer]: () =>
-    import("../source-widgets/ImageViewerWidget") as Promise<{
+    import('../source-widgets/ImageViewerWidget') as Promise<{
       default: React.ComponentType<SourceWidgetProps<unknown>>;
     }>,
 
   [SourceWidgetType.CodeViewer]: () =>
-    import("../source-widgets/CodeViewerWidget") as Promise<{
+    import('../source-widgets/CodeViewerWidget') as Promise<{
       default: React.ComponentType<SourceWidgetProps<unknown>>;
     }>,
 };

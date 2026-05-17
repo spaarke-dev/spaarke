@@ -18,15 +18,9 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Spinner,
-} from "@fluentui/react-components";
-import type { OutputWidgetProps } from "../types";
+import * as React from 'react';
+import { makeStyles, mergeClasses, tokens, Text, Spinner } from '@fluentui/react-components';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -53,7 +47,7 @@ export interface ChartSeries {
 
 export interface ChartData {
   /** Chart type: "bar" renders vertical bar groups, "line" renders polylines. */
-  chartType: "bar" | "line";
+  chartType: 'bar' | 'line';
   /** Chart title rendered above the SVG. */
   title: string;
   /** Optional X-axis label. */
@@ -72,12 +66,12 @@ export type ChartWidgetProps = OutputWidgetProps<ChartData>;
 
 /** Default Fluent v9 token names used for series colors in cycle order. */
 const SERIES_COLORS_CSS = [
-  "var(--colorBrandForeground1)",
-  "var(--colorPaletteBlueForeground2)",
-  "var(--colorPaletteGreenForeground2)",
-  "var(--colorPaletteRedForeground2)",
-  "var(--colorPaletteYellowForeground2)",
-  "var(--colorPalettePurpleForeground2)",
+  'var(--colorBrandForeground1)',
+  'var(--colorPaletteBlueForeground2)',
+  'var(--colorPaletteGreenForeground2)',
+  'var(--colorPaletteRedForeground2)',
+  'var(--colorPaletteYellowForeground2)',
+  'var(--colorPalettePurpleForeground2)',
 ];
 
 const CHART_MARGIN = { top: 24, right: 20, bottom: 48, left: 56 };
@@ -90,38 +84,38 @@ const BAR_GROUP_GAP = 0.25; // fraction of group width used as gap
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    height: "100%",
+    height: '100%',
     padding: tokens.spacingHorizontalM,
-    boxSizing: "border-box",
+    boxSizing: 'border-box',
   },
   title: {
     fontWeight: tokens.fontWeightSemibold,
-    textAlign: "center",
+    textAlign: 'center',
     flexShrink: 0,
   },
   chartContainer: {
     flexGrow: 1,
     minHeight: 0,
-    position: "relative",
+    position: 'relative',
   },
   svg: {
-    display: "block",
-    width: "100%",
-    height: "100%",
+    display: 'block',
+    width: '100%',
+    height: '100%',
   },
   legend: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalS,
-    justifyContent: "center",
+    justifyContent: 'center',
     flexShrink: 0,
   },
   legendItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   errorText: {
@@ -155,7 +149,7 @@ function collectXLabels(seriesList: ChartSeries[]): string[] {
 
 /** Get a point's Y value by X label, or 0 if not found. */
 function getY(series: ChartSeries, xLabel: string): number {
-  const p = series.points.find((pt) => String(pt.x) === xLabel);
+  const p = series.points.find(pt => String(pt.x) === xLabel);
   return p ? p.y : 0;
 }
 
@@ -185,7 +179,7 @@ interface SvgChartProps {
 function BarChart({ data, width, height }: SvgChartProps): React.ReactElement {
   const { series } = data;
   const xLabels = collectXLabels(series);
-  const allYValues = series.flatMap((s) => s.points.map((p) => p.y));
+  const allYValues = series.flatMap(s => s.points.map(p => p.y));
   const maxY = niceMax(Math.max(...allYValues, 0));
 
   const m = CHART_MARGIN;
@@ -204,10 +198,8 @@ function BarChart({ data, width, height }: SvgChartProps): React.ReactElement {
   }
 
   const yScale = (v: number) => plotH - (v / maxY) * plotH;
-  const xGroupOffset = (i: number) =>
-    m.left + i * groupW + (groupW * BAR_GROUP_GAP) / 2;
-  const xBarOffset = (gi: number, si: number) =>
-    xGroupOffset(gi) + si * barW;
+  const xGroupOffset = (i: number) => m.left + i * groupW + (groupW * BAR_GROUP_GAP) / 2;
+  const xBarOffset = (gi: number, si: number) => xGroupOffset(gi) + si * barW;
 
   const axisColor = tokens.colorNeutralForeground3;
   const gridColor = tokens.colorNeutralStroke2;
@@ -227,15 +219,9 @@ function BarChart({ data, width, height }: SvgChartProps): React.ReactElement {
               y2={y}
               stroke={gridColor}
               strokeWidth={1}
-              strokeDasharray={i === 0 ? undefined : "4 4"}
+              strokeDasharray={i === 0 ? undefined : '4 4'}
             />
-            <text
-              x={m.left - 8}
-              y={y + 4}
-              textAnchor="end"
-              fontSize={10}
-              fill={labelColor}
-            >
+            <text x={m.left - 8} y={y + 4} textAnchor="end" fontSize={10} fill={labelColor}>
               {tick % 1 === 0 ? tick.toFixed(0) : tick.toFixed(1)}
             </text>
           </React.Fragment>
@@ -270,28 +256,14 @@ function BarChart({ data, width, height }: SvgChartProps): React.ReactElement {
       {xLabels.map((label, gi) => {
         const cx = xGroupOffset(gi) + (groupW * (1 - BAR_GROUP_GAP)) / 2;
         return (
-          <text
-            key={gi}
-            x={cx}
-            y={m.top + plotH + 16}
-            textAnchor="middle"
-            fontSize={10}
-            fill={labelColor}
-          >
-            {label.length > 10 ? label.slice(0, 10) + "…" : label}
+          <text key={gi} x={cx} y={m.top + plotH + 16} textAnchor="middle" fontSize={10} fill={labelColor}>
+            {label.length > 10 ? label.slice(0, 10) + '…' : label}
           </text>
         );
       })}
 
       {/* Axes */}
-      <line
-        x1={m.left}
-        y1={m.top}
-        x2={m.left}
-        y2={m.top + plotH}
-        stroke={axisColor}
-        strokeWidth={1.5}
-      />
+      <line x1={m.left} y1={m.top} x2={m.left} y2={m.top + plotH} stroke={axisColor} strokeWidth={1.5} />
       <line
         x1={m.left}
         y1={m.top + plotH}
@@ -317,13 +289,7 @@ function BarChart({ data, width, height }: SvgChartProps): React.ReactElement {
 
       {/* X-axis label */}
       {data.xLabel && (
-        <text
-          x={m.left + plotW / 2}
-          y={height - 6}
-          textAnchor="middle"
-          fontSize={11}
-          fill={labelColor}
-        >
+        <text x={m.left + plotW / 2} y={height - 6} textAnchor="middle" fontSize={11} fill={labelColor}>
           {data.xLabel}
         </text>
       )}
@@ -334,7 +300,7 @@ function BarChart({ data, width, height }: SvgChartProps): React.ReactElement {
 function LineChart({ data, width, height }: SvgChartProps): React.ReactElement {
   const { series } = data;
   const xLabels = collectXLabels(series);
-  const allYValues = series.flatMap((s) => s.points.map((p) => p.y));
+  const allYValues = series.flatMap(s => s.points.map(p => p.y));
   const maxY = niceMax(Math.max(...allYValues, 0));
 
   const m = CHART_MARGIN;
@@ -348,8 +314,7 @@ function LineChart({ data, width, height }: SvgChartProps): React.ReactElement {
   }
 
   const labelCount = xLabels.length;
-  const xScale = (i: number) =>
-    labelCount > 1 ? m.left + (i / (labelCount - 1)) * plotW : m.left + plotW / 2;
+  const xScale = (i: number) => (labelCount > 1 ? m.left + (i / (labelCount - 1)) * plotW : m.left + plotW / 2);
   const yScale = (v: number) => m.top + plotH - (v / maxY) * plotH;
 
   const axisColor = tokens.colorNeutralForeground3;
@@ -370,15 +335,9 @@ function LineChart({ data, width, height }: SvgChartProps): React.ReactElement {
               y2={y}
               stroke={gridColor}
               strokeWidth={1}
-              strokeDasharray={i === 0 ? undefined : "4 4"}
+              strokeDasharray={i === 0 ? undefined : '4 4'}
             />
-            <text
-              x={m.left - 8}
-              y={y + 4}
-              textAnchor="end"
-              fontSize={10}
-              fill={labelColor}
-            >
+            <text x={m.left - 8} y={y + 4} textAnchor="end" fontSize={10} fill={labelColor}>
               {tick % 1 === 0 ? tick.toFixed(0) : tick.toFixed(1)}
             </text>
           </React.Fragment>
@@ -395,7 +354,7 @@ function LineChart({ data, width, height }: SvgChartProps): React.ReactElement {
           y: getY(s, label),
         }));
 
-        const polyPoints = pts.map((p) => `${p.cx},${p.cy}`).join(" ");
+        const polyPoints = pts.map(p => `${p.cx},${p.cy}`).join(' ');
 
         return (
           <React.Fragment key={si}>
@@ -418,27 +377,13 @@ function LineChart({ data, width, height }: SvgChartProps): React.ReactElement {
 
       {/* X-axis labels */}
       {xLabels.map((label, gi) => (
-        <text
-          key={gi}
-          x={xScale(gi)}
-          y={m.top + plotH + 16}
-          textAnchor="middle"
-          fontSize={10}
-          fill={labelColor}
-        >
-          {label.length > 10 ? label.slice(0, 10) + "…" : label}
+        <text key={gi} x={xScale(gi)} y={m.top + plotH + 16} textAnchor="middle" fontSize={10} fill={labelColor}>
+          {label.length > 10 ? label.slice(0, 10) + '…' : label}
         </text>
       ))}
 
       {/* Axes */}
-      <line
-        x1={m.left}
-        y1={m.top}
-        x2={m.left}
-        y2={m.top + plotH}
-        stroke={axisColor}
-        strokeWidth={1.5}
-      />
+      <line x1={m.left} y1={m.top} x2={m.left} y2={m.top + plotH} stroke={axisColor} strokeWidth={1.5} />
       <line
         x1={m.left}
         y1={m.top + plotH}
@@ -464,13 +409,7 @@ function LineChart({ data, width, height }: SvgChartProps): React.ReactElement {
 
       {/* X-axis label */}
       {data.xLabel && (
-        <text
-          x={m.left + plotW / 2}
-          y={height - 6}
-          textAnchor="middle"
-          fontSize={11}
-          fill={labelColor}
-        >
+        <text x={m.left + plotW / 2} y={height - 6} textAnchor="middle" fontSize={11} fill={labelColor}>
           {data.xLabel}
         </text>
       )}
@@ -488,12 +427,7 @@ function LineChart({ data, width, height }: SvgChartProps): React.ReactElement {
  * on the container div, re-rendering the SVG whenever the container size
  * changes. All colors use Fluent v9 design tokens.
  */
-export default function ChartWidget({
-  data,
-  isLoading,
-  error,
-  className,
-}: ChartWidgetProps): React.ReactElement {
+export default function ChartWidget({ data, isLoading, error, className }: ChartWidgetProps): React.ReactElement {
   const styles = useStyles();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [size, setSize] = React.useState({ width: 0, height: 0 });
@@ -503,7 +437,7 @@ export default function ChartWidget({
     const el = containerRef.current;
     if (!el) return;
 
-    const observer = new ResizeObserver((entries) => {
+    const observer = new ResizeObserver(entries => {
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
@@ -530,9 +464,7 @@ export default function ChartWidget({
     );
   }
 
-  const hasData =
-    data.series.length > 0 &&
-    data.series.some((s) => s.points.length > 0);
+  const hasData = data.series.length > 0 && data.series.some(s => s.points.length > 0);
 
   return (
     <div className={mergeClasses(styles.root, className)}>
@@ -544,15 +476,13 @@ export default function ChartWidget({
       {/* SVG container — ResizeObserver watches this element */}
       <div className={styles.chartContainer} ref={containerRef}>
         {hasData && size.width > 0 && size.height > 0 ? (
-          data.chartType === "bar" ? (
+          data.chartType === 'bar' ? (
             <BarChart data={data} width={size.width} height={size.height} />
           ) : (
             <LineChart data={data} width={size.width} height={size.height} />
           )
         ) : (
-          !hasData && (
-            <Text className={styles.errorText}>No chart data available.</Text>
-          )
+          !hasData && <Text className={styles.errorText}>No chart data available.</Text>
         )}
       </div>
 

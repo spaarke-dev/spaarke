@@ -6,12 +6,12 @@
  */
 
 // Widget identity enums, generic prop types, and registry entry shapes (task 020).
-export * from "./widget-types";
+export * from './widget-types';
 
 // Import enums locally so this file's interface bodies can reference them
-import type { OutputWidgetType, SourceWidgetType } from "./widget-types";
+import type { OutputWidgetType, SourceWidgetType } from './widget-types';
 
-import type React from "react";
+import type React from 'react';
 
 // ---------------------------------------------------------------------------
 // Widget component contracts (pane-level orchestration props)
@@ -132,7 +132,7 @@ export interface ChatMessage {
   /** Unique message identifier. */
   id: string;
   /** Message role: user input or AI assistant response. */
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   /** Message content (may include markdown). */
   content: string;
   /** ISO 8601 timestamp when the message was created. */
@@ -164,7 +164,7 @@ export interface ChatSessionData {
  * Refined in Wave 3 task 030.
  */
 export interface OutputPaneEvent {
-  event: "output_pane";
+  event: 'output_pane';
   widgetType: OutputWidgetType;
   payload: unknown;
 }
@@ -174,7 +174,7 @@ export interface OutputPaneEvent {
  * Refined in Wave 3 task 030.
  */
 export interface SourcePaneEvent {
-  event: "source_pane";
+  event: 'source_pane';
   widgetType: SourceWidgetType;
   payload: unknown;
 }
@@ -184,7 +184,7 @@ export interface SourcePaneEvent {
  * Refined in Wave 3 task 030.
  */
 export interface SourceHighlightEvent {
-  event: "source_highlight";
+  event: 'source_highlight';
   sourceRef: string;
   selectionRef: string;
 }

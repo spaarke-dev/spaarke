@@ -9,7 +9,14 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import { IChatSseEvent, IChatSseEventData, ICitation, IDocumentStreamSseEvent, IAiPaneEvent, IUseSseStreamResult } from '../types';
+import {
+  IChatSseEvent,
+  IChatSseEventData,
+  ICitation,
+  IDocumentStreamSseEvent,
+  IAiPaneEvent,
+  IUseSseStreamResult,
+} from '../types';
 
 /**
  * Parse a single SSE data line into a ChatSseEvent.
@@ -61,11 +68,7 @@ export function parsePaneEvent(line: string): IAiPaneEvent | null {
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     const event = parsed['event'];
-    if (
-      event === 'output_pane' ||
-      event === 'source_pane' ||
-      event === 'source_highlight'
-    ) {
+    if (event === 'output_pane' || event === 'source_pane' || event === 'source_highlight') {
       return parsed as unknown as IAiPaneEvent;
     }
     return null;
@@ -172,22 +175,16 @@ export function useSseStream(): IUseSseStreamResult {
 
   // Task R2-051: Register/unregister the document stream event callback.
   // SprkChat.tsx calls this once during setup to wire bridge forwarding.
-  const setOnDocumentStreamEvent = useCallback(
-    (handler: ((event: IDocumentStreamSseEvent) => void) | null) => {
-      onDocumentStreamEventRef.current = handler;
-    },
-    []
-  );
+  const setOnDocumentStreamEvent = useCallback((handler: ((event: IDocumentStreamSseEvent) => void) | null) => {
+    onDocumentStreamEventRef.current = handler;
+  }, []);
 
   // Task 041: Register/unregister the AI pane-routing SSE event callback.
   // ChatPanel.tsx wires this to the StandaloneAiContext onPaneEvent callback so
   // OutputPanel and SourcePanel can react to output_pane / source_pane / source_highlight events.
-  const setOnPaneEvent = useCallback(
-    (handler: ((event: IAiPaneEvent) => void) | null) => {
-      onPaneEventRef.current = handler;
-    },
-    []
-  );
+  const setOnPaneEvent = useCallback((handler: ((event: IAiPaneEvent) => void) | null) => {
+    onPaneEventRef.current = handler;
+  }, []);
 
   /**
    * Extract tenant ID from JWT access token for X-Tenant-Id header.
@@ -322,7 +319,12 @@ export function useSseStream(): IUseSseStreamResult {
                 // SprkChat watches pendingActionEvent and dispatches to the appropriate handler
                 // (confirmation dialog, toast, Code Page navigateTo, or Xrm navigation).
                 setPendingActionEvent({
-                  type: event.type as 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate',
+                  type: event.type as
+                    | 'action_confirmation'
+                    | 'action_success'
+                    | 'action_error'
+                    | 'dialog_open'
+                    | 'navigate',
                   data: event.data || {},
                 });
               } else if (
@@ -421,7 +423,12 @@ export function useSseStream(): IUseSseStreamResult {
               // Task R2-052: Store action/dialog/navigate event for SprkChat to handle via useEffect.
               // Mirrors the main SSE parser block (R2-039/R2-052) — must include 'navigate'.
               setPendingActionEvent({
-                type: event.type as 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate',
+                type: event.type as
+                  | 'action_confirmation'
+                  | 'action_success'
+                  | 'action_error'
+                  | 'dialog_open'
+                  | 'navigate',
                 data: event.data || {},
               });
             } else if (

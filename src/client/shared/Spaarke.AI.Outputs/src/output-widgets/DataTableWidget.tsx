@@ -17,7 +17,7 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   mergeClasses,
@@ -36,9 +36,9 @@ import {
   TableRowId,
   createTableColumn,
   SortDirection,
-} from "@fluentui/react-components";
-import { SearchRegular } from "@fluentui/react-icons";
-import type { OutputWidgetProps } from "../types";
+} from '@fluentui/react-components';
+import { SearchRegular } from '@fluentui/react-icons';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -91,25 +91,25 @@ interface ControlledSortState {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
-    height: "100%",
-    overflow: "hidden",
+    height: '100%',
+    overflow: 'hidden',
   },
   searchBar: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
     flexShrink: 0,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   searchInput: {
-    width: "100%",
-    maxWidth: "320px",
+    width: '100%',
+    maxWidth: '320px',
   },
   tableContainer: {
-    overflowY: "auto",
+    overflowY: 'auto',
     flexGrow: 1,
     padding: `0 ${tokens.spacingHorizontalL} ${tokens.spacingVerticalM}`,
   },
@@ -132,17 +132,14 @@ const useStyles = makeStyles({
 
 /** Convert any cell value to a display string. */
 function cellToString(value: DataTableRowValue | undefined): string {
-  if (value === undefined || value === null) return "";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
 }
 
 /** Compare two raw cell values for sort (numeric if both are numbers, else string). */
-function compareCellValues(
-  a: DataTableRowValue | undefined,
-  b: DataTableRowValue | undefined
-): number {
-  if (typeof a === "number" && typeof b === "number") return a - b;
+function compareCellValues(a: DataTableRowValue | undefined, b: DataTableRowValue | undefined): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
   const sa = cellToString(a);
   const sb = cellToString(b);
   const na = Number(sa);
@@ -168,10 +165,10 @@ export default function DataTableWidget({
   className,
 }: DataTableWidgetProps): React.ReactElement {
   const styles = useStyles();
-  const [filterText, setFilterText] = React.useState("");
+  const [filterText, setFilterText] = React.useState('');
   const [sortState, setSortState] = React.useState<ControlledSortState>({
     sortColumn: undefined,
-    sortDirection: "ascending",
+    sortDirection: 'ascending',
   });
 
   // ---- Wrap source rows with stable indices --------------------------------
@@ -190,10 +187,8 @@ export default function DataTableWidget({
   const filteredItems = React.useMemo<IndexedRow[]>(() => {
     const query = filterText.trim().toLowerCase();
     if (!query) return indexedRows;
-    return indexedRows.filter((item) =>
-      (data?.columns ?? []).some((col) =>
-        cellToString(item.data[col.key]).toLowerCase().includes(query)
-      )
+    return indexedRows.filter(item =>
+      (data?.columns ?? []).some(col => cellToString(item.data[col.key]).toLowerCase().includes(query))
     );
   }, [indexedRows, filterText, data]);
 
@@ -203,24 +198,20 @@ export default function DataTableWidget({
     const { sortColumn, sortDirection } = sortState;
     if (!sortColumn) return filteredItems;
     const key = String(sortColumn);
-    const multiplier = sortDirection === "ascending" ? 1 : -1;
-    return [...filteredItems].sort(
-      (a, b) => multiplier * compareCellValues(a.data[key], b.data[key])
-    );
+    const multiplier = sortDirection === 'ascending' ? 1 : -1;
+    return [...filteredItems].sort((a, b) => multiplier * compareCellValues(a.data[key], b.data[key]));
   }, [filteredItems, sortState]);
 
   // ---- Fluent v9 column definitions ----------------------------------------
 
   const columns = React.useMemo<TableColumnDefinition<IndexedRow>[]>(
     () =>
-      (data?.columns ?? []).map((col) =>
+      (data?.columns ?? []).map(col =>
         createTableColumn<IndexedRow>({
           columnId: col.key,
-          compare: col.sortable
-            ? (a, b) => compareCellValues(a.data[col.key], b.data[col.key])
-            : undefined,
+          compare: col.sortable ? (a, b) => compareCellValues(a.data[col.key], b.data[col.key]) : undefined,
           renderHeaderCell: () => col.label,
-          renderCell: (item) => cellToString(item.data[col.key]),
+          renderCell: item => cellToString(item.data[col.key]),
         })
       ),
     [data]
@@ -228,10 +219,7 @@ export default function DataTableWidget({
 
   // ---- Row ID — use stable originalIndex ----------------------------------
 
-  const getRowId = React.useCallback(
-    (item: IndexedRow): TableRowId => item.originalIndex,
-    []
-  );
+  const getRowId = React.useCallback((item: IndexedRow): TableRowId => item.originalIndex, []);
 
   // ---- Render --------------------------------------------------------------
 
@@ -282,17 +270,11 @@ export default function DataTableWidget({
             <DataGridHeader>
               <DataGridRow>
                 {({ renderHeaderCell, columnId }) => {
-                  const col = data.columns.find((c) => c.key === columnId);
+                  const col = data.columns.find(c => c.key === columnId);
                   const isSortable = col?.sortable ?? false;
-                  const currentDir =
-                    sortState.sortColumn === columnId
-                      ? sortState.sortDirection
-                      : undefined;
+                  const currentDir = sortState.sortColumn === columnId ? sortState.sortDirection : undefined;
                   return (
-                    <DataGridHeaderCell
-                      key={String(columnId)}
-                      sortDirection={isSortable ? currentDir : undefined}
-                    >
+                    <DataGridHeaderCell key={String(columnId)} sortDirection={isSortable ? currentDir : undefined}>
                       {renderHeaderCell()}
                     </DataGridHeaderCell>
                   );
@@ -300,7 +282,7 @@ export default function DataTableWidget({
               </DataGridRow>
             </DataGridHeader>
             <DataGridBody<IndexedRow>>
-              {(row) => (
+              {row => (
                 <DataGridRow key={row.rowId}>
                   {({ renderCell }) => (
                     <DataGridCell>

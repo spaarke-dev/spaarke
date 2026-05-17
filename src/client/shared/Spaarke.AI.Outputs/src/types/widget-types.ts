@@ -8,7 +8,7 @@
  * NOT PCF-safe — requires React 19.
  */
 
-import type React from "react";
+import type React from 'react';
 
 // ---------------------------------------------------------------------------
 // Widget identity enums
@@ -20,21 +20,21 @@ import type React from "react";
  */
 export enum OutputWidgetType {
   // Wave 2 (task 020) — widgets 1-4
-  BudgetDashboard = "BudgetDashboard",
-  SearchResults = "SearchResults",
-  AnalysisEditor = "AnalysisEditor",
-  ContractComparison = "ContractComparison",
+  BudgetDashboard = 'BudgetDashboard',
+  SearchResults = 'SearchResults',
+  AnalysisEditor = 'AnalysisEditor',
+  ContractComparison = 'ContractComparison',
 
   // Wave 2 (task 021) — widgets 5-8
-  Timeline = "Timeline",
-  DocumentCompare = "DocumentCompare",
-  DataTable = "DataTable",
-  Chart = "Chart",
+  Timeline = 'Timeline',
+  DocumentCompare = 'DocumentCompare',
+  DataTable = 'DataTable',
+  Chart = 'Chart',
 
   // Wave 3 (task 031) — widgets 9-11
-  StatusSummary = "StatusSummary",
-  Recommendation = "Recommendation",
-  ActionPlan = "ActionPlan",
+  StatusSummary = 'StatusSummary',
+  Recommendation = 'Recommendation',
+  ActionPlan = 'ActionPlan',
 }
 
 /**
@@ -42,12 +42,12 @@ export enum OutputWidgetType {
  * Populated by Wave 2 task 022.
  */
 export enum SourceWidgetType {
-  DocumentViewer = "DocumentViewer",
-  WebSource = "WebSource",
-  LegalLibrary = "LegalLibrary",
-  Citation = "Citation",
-  ImageViewer = "ImageViewer",
-  CodeViewer = "CodeViewer",
+  DocumentViewer = 'DocumentViewer',
+  WebSource = 'WebSource',
+  LegalLibrary = 'LegalLibrary',
+  Citation = 'Citation',
+  ImageViewer = 'ImageViewer',
+  CodeViewer = 'CodeViewer',
 }
 
 // ---------------------------------------------------------------------------

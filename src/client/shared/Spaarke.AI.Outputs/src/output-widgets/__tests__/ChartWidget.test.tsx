@@ -13,15 +13,10 @@
  * render. The ResizeObserver is mocked to verify the component mounts.
  */
 
-import React from "react";
-import "@testing-library/jest-dom";
-import ChartWidget from "../ChartWidget";
-import {
-  renderWithTheme,
-  webLightTheme,
-  webDarkTheme,
-  mockChartProps,
-} from "../../__tests__/test-utils";
+import React from 'react';
+import '@testing-library/jest-dom';
+import ChartWidget from '../ChartWidget';
+import { renderWithTheme, webLightTheme, webDarkTheme, mockChartProps } from '../../__tests__/test-utils';
 
 // Mock ResizeObserver — jsdom does not implement it
 global.ResizeObserver = class ResizeObserver {
@@ -30,52 +25,40 @@ global.ResizeObserver = class ResizeObserver {
   disconnect() {}
 };
 
-describe("ChartWidget", () => {
+describe('ChartWidget', () => {
   const props = mockChartProps();
 
-  it("renders in light theme without error", () => {
-    const { container } = renderWithTheme(
-      <ChartWidget {...props} />,
-      webLightTheme
-    );
+  it('renders in light theme without error', () => {
+    const { container } = renderWithTheme(<ChartWidget {...props} />, webLightTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders in dark theme (webDarkTheme) without error", () => {
-    const { container } = renderWithTheme(
-      <ChartWidget {...props} />,
-      webDarkTheme
-    );
+  it('renders in dark theme (webDarkTheme) without error', () => {
+    const { container } = renderWithTheme(<ChartWidget {...props} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders within 200ms in light theme (NFR-01)", () => {
+  it('renders within 200ms in light theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<ChartWidget {...props} />, webLightTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders within 200ms in dark theme (NFR-01)", () => {
+  it('renders within 200ms in dark theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<ChartWidget {...props} />, webDarkTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders chart title", () => {
-    const { getByText } = renderWithTheme(
-      <ChartWidget {...props} />,
-      webLightTheme
-    );
-    expect(getByText("Matter Costs")).toBeTruthy();
+  it('renders chart title', () => {
+    const { getByText } = renderWithTheme(<ChartWidget {...props} />, webLightTheme);
+    expect(getByText('Matter Costs')).toBeTruthy();
   });
 
-  it("renders loading state in dark theme without error", () => {
-    const { container } = renderWithTheme(
-      <ChartWidget {...props} isLoading={true} />,
-      webDarkTheme
-    );
+  it('renders loading state in dark theme without error', () => {
+    const { container } = renderWithTheme(<ChartWidget {...props} isLoading={true} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 });

@@ -11,21 +11,10 @@
  * NOT PCF-safe — React 19.
  */
 
-import React, { useCallback, useRef, useState } from "react";
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  ZoomInRegular,
-  ZoomOutRegular,
-  ArrowResetRegular,
-  ImageRegular,
-} from "@fluentui/react-icons";
-import type { SourceWidgetProps } from "../types/widget-types";
+import React, { useCallback, useRef, useState } from 'react';
+import { makeStyles, tokens, Button, Text, mergeClasses } from '@fluentui/react-components';
+import { ZoomInRegular, ZoomOutRegular, ArrowResetRegular, ImageRegular } from '@fluentui/react-icons';
+import type { SourceWidgetProps } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,20 +44,20 @@ export interface ImageViewerData {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   toolbar: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke1,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
@@ -79,53 +68,53 @@ const useStyles = makeStyles({
   scaleLabel: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    minWidth: "40px",
-    textAlign: "center",
+    minWidth: '40px',
+    textAlign: 'center',
   },
   imageContainer: {
     flexGrow: 1,
-    overflow: "hidden",
-    position: "relative",
-    cursor: "grab",
-    userSelect: "none",
+    overflow: 'hidden',
+    position: 'relative',
+    cursor: 'grab',
+    userSelect: 'none',
     backgroundColor: tokens.colorNeutralBackground3,
-    ":active": {
-      cursor: "grabbing",
+    ':active': {
+      cursor: 'grabbing',
     },
   },
   imageContainerGrabbing: {
-    cursor: "grabbing",
+    cursor: 'grabbing',
   },
   image: {
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    maxWidth: "none",
-    maxHeight: "none",
-    transformOrigin: "center center",
-    pointerEvents: "none",
-    transition: "transform 0.05s ease-out",
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    maxWidth: 'none',
+    maxHeight: 'none',
+    transformOrigin: 'center center',
+    pointerEvents: 'none',
+    transition: 'transform 0.05s ease-out',
     // translateX/Y and scale are applied via inline style
   },
   imageNoTransition: {
-    transition: "none",
+    transition: 'none',
   },
   caption: {
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    textAlign: 'center',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
   fallback: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
@@ -151,17 +140,16 @@ function ImageViewerWidget(props: SourceWidgetProps<ImageViewerData>) {
   const dragStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
   // --- Clamp helper ---
-  const clampScale = (s: number) =>
-    Math.min(SCALE_MAX, Math.max(SCALE_MIN, s));
+  const clampScale = (s: number) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, s));
 
   // --- Zoom handlers ---
   const handleZoomIn = useCallback(() => {
-    setScale((s) => clampScale(s + SCALE_STEP));
+    setScale(s => clampScale(s + SCALE_STEP));
     setIsTransitioning(true);
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    setScale((s) => {
+    setScale(s => {
       const newScale = clampScale(s - SCALE_STEP);
       if (newScale === SCALE_MIN) {
         // Reset pan when fully zoomed out
@@ -185,7 +173,7 @@ function ImageViewerWidget(props: SourceWidgetProps<ImageViewerData>) {
     e.preventDefault();
     setIsTransitioning(false);
     const delta = -e.deltaY * WHEEL_SCALE_FACTOR;
-    setScale((s) => clampScale(s + delta * s));
+    setScale(s => clampScale(s + delta * s));
   }, []);
 
   // --- Pan handlers ---
@@ -204,13 +192,16 @@ function ImageViewerWidget(props: SourceWidgetProps<ImageViewerData>) {
     [translateX, translateY]
   );
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDragging || !dragStart.current) return;
-    const dx = e.clientX - dragStart.current.x;
-    const dy = e.clientY - dragStart.current.y;
-    setTranslateX(dragStart.current.tx + dx);
-    setTranslateY(dragStart.current.ty + dy);
-  }, [isDragging]);
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!isDragging || !dragStart.current) return;
+      const dx = e.clientX - dragStart.current.x;
+      const dy = e.clientY - dragStart.current.y;
+      setTranslateX(dragStart.current.tx + dx);
+      setTranslateY(dragStart.current.ty + dy);
+    },
+    [isDragging]
+  );
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
@@ -285,10 +276,7 @@ function ImageViewerWidget(props: SourceWidgetProps<ImageViewerData>) {
 
       {/* Image container */}
       <div
-        className={mergeClasses(
-          styles.imageContainer,
-          isDragging ? styles.imageContainerGrabbing : undefined
-        )}
+        className={mergeClasses(styles.imageContainer, isDragging ? styles.imageContainerGrabbing : undefined)}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -298,10 +286,7 @@ function ImageViewerWidget(props: SourceWidgetProps<ImageViewerData>) {
         aria-label={data?.alt}
       >
         <img
-          className={mergeClasses(
-            styles.image,
-            !isTransitioning ? styles.imageNoTransition : undefined
-          )}
+          className={mergeClasses(styles.image, !isTransitioning ? styles.imageNoTransition : undefined)}
           src={data?.src}
           alt={data?.alt}
           style={{ transform: imgTransform }}
@@ -310,9 +295,7 @@ function ImageViewerWidget(props: SourceWidgetProps<ImageViewerData>) {
       </div>
 
       {/* Caption */}
-      {data?.caption && (
-        <Text className={styles.caption}>{data.caption}</Text>
-      )}
+      {data?.caption && <Text className={styles.caption}>{data.caption}</Text>}
     </div>
   );
 }

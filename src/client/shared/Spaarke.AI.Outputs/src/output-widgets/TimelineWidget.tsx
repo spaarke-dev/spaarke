@@ -15,16 +15,9 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  shorthands,
-  tokens,
-  Text,
-  Spinner,
-} from "@fluentui/react-components";
-import type { OutputWidgetProps } from "../types";
+import * as React from 'react';
+import { makeStyles, mergeClasses, shorthands, tokens, Text, Spinner } from '@fluentui/react-components';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -56,60 +49,60 @@ export type TimelineWidgetProps = OutputWidgetProps<TimelineData>;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     padding: tokens.spacingHorizontalL,
-    overflowY: "auto",
+    overflowY: 'auto',
   },
   errorText: {
     color: tokens.colorStatusDangerForeground1,
   },
   eventRow: {
-    display: "grid",
-    gridTemplateColumns: "96px 20px 1fr",
+    display: 'grid',
+    gridTemplateColumns: '96px 20px 1fr',
     gap: `0 ${tokens.spacingHorizontalS}`,
-    alignItems: "start",
-    position: "relative",
+    alignItems: 'start',
+    position: 'relative',
   },
   dateColumn: {
-    textAlign: "right",
+    textAlign: 'right',
     paddingTop: tokens.spacingVerticalXS,
     color: tokens.colorNeutralForeground3,
-    whiteSpace: "nowrap",
+    whiteSpace: 'nowrap',
   },
   markerColumn: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    position: "relative",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    position: 'relative',
   },
   dot: {
-    width: "12px",
-    height: "12px",
-    borderRadius: "50%",
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorNeutralForeground3,
     flexShrink: 0,
-    marginTop: "4px",
+    marginTop: '4px',
     zIndex: 1,
   },
   dotMilestone: {
     backgroundColor: tokens.colorBrandBackground,
-    width: "14px",
-    height: "14px",
-    marginTop: "3px",
+    width: '14px',
+    height: '14px',
+    marginTop: '3px',
     boxShadow: `0 0 0 2px ${tokens.colorBrandBackgroundHover}`,
   },
   line: {
-    width: "2px",
+    width: '2px',
     flexGrow: 1,
     backgroundColor: tokens.colorNeutralStroke2,
     marginTop: tokens.spacingVerticalXXS,
     minHeight: tokens.spacingVerticalL,
   },
   contentColumn: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     paddingBottom: tokens.spacingVerticalM,
   },
@@ -132,12 +125,7 @@ const useStyles = makeStyles({
  * right-side label and description. Milestone events use brand color tokens
  * for the dot and label text to make them visually prominent.
  */
-export default function TimelineWidget({
-  data,
-  isLoading,
-  error,
-  className,
-}: TimelineWidgetProps): React.ReactElement {
+export default function TimelineWidget({ data, isLoading, error, className }: TimelineWidgetProps): React.ReactElement {
   const styles = useStyles();
 
   if (isLoading) {
@@ -173,21 +161,13 @@ export default function TimelineWidget({
 
             {/* Marker column: dot + connecting line */}
             <div className={styles.markerColumn}>
-              <div
-                className={mergeClasses(
-                  styles.dot,
-                  isMilestone && styles.dotMilestone
-                )}
-              />
+              <div className={mergeClasses(styles.dot, isMilestone && styles.dotMilestone)} />
               {!isLast && <div className={styles.line} />}
             </div>
 
             {/* Content column */}
             <div className={styles.contentColumn}>
-              <Text
-                size={300}
-                className={isMilestone ? styles.labelMilestone : undefined}
-              >
+              <Text size={300} className={isMilestone ? styles.labelMilestone : undefined}>
                 {event.label}
               </Text>
               {event.description && (

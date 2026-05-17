@@ -9,13 +9,13 @@ import type { ITokenResult, ITokenStrategy } from '../types';
  *   - Deeply nested iframes (window.top.Xrm)
  */
 export declare class XrmStrategy implements ITokenStrategy {
-    readonly name: "xrm";
-    private readonly scope;
-    constructor(scope: string);
-    tryAcquireToken(): Promise<ITokenResult | null>;
-    private _resolveXrm;
-    /** Get the configured scope (used for diagnostics). */
-    getScope(): string;
-    private _buildResult;
+  readonly name: 'xrm';
+  private readonly scope;
+  constructor(scope: string);
+  tryAcquireToken(): Promise<ITokenResult | null>;
+  private _resolveXrm;
+  /** Get the configured scope (used for diagnostics). */
+  getScope(): string;
+  private _buildResult;
 }
 //# sourceMappingURL=XrmStrategy.d.ts.map

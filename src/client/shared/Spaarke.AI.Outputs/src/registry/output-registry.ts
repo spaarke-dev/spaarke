@@ -27,14 +27,10 @@
  *   });
  */
 
-import type React from "react";
-import type {
-  OutputWidgetRegistryEntry,
-  OutputWidgetRegistryMap,
-  OutputWidgetProps,
-} from "../types";
+import type React from 'react';
+import type { OutputWidgetRegistryEntry, OutputWidgetRegistryMap, OutputWidgetProps } from '../types';
 // OutputWidgetType is used as a value (Record key) so we import it without 'type'
-import { OutputWidgetType } from "../types";
+import { OutputWidgetType } from '../types';
 
 // ---------------------------------------------------------------------------
 // Internal registry store
@@ -56,7 +52,7 @@ export function registerOutputWidget(entry: OutputWidgetRegistryEntry): void {
   if (_registry.has(entry.type)) {
     throw new Error(
       `[ai-outputs] Output widget type "${entry.type}" is already registered. ` +
-        "Use replaceOutputWidget() to override an existing registration."
+        'Use replaceOutputWidget() to override an existing registration.'
     );
   }
   _registry.set(entry.type, entry);
@@ -78,9 +74,7 @@ export function replaceOutputWidget(entry: OutputWidgetRegistryEntry): void {
  * @param type - The OutputWidgetType to look up.
  * @returns The registry entry, or undefined if not registered.
  */
-export function getOutputWidget(
-  type: OutputWidgetType
-): OutputWidgetRegistryEntry | undefined {
+export function getOutputWidget(type: OutputWidgetType): OutputWidgetRegistryEntry | undefined {
   return _registry.get(type);
 }
 
@@ -131,15 +125,11 @@ type OutputWidgetFactory = () => Promise<{
  * future tasks. Throws a descriptive error at runtime if called before
  * the owning task adds the real implementation.
  */
-function _notYetImplemented(
-  widgetType: string,
-  ownerTask: string
-): OutputWidgetFactory {
+function _notYetImplemented(widgetType: string, ownerTask: string): OutputWidgetFactory {
   return () =>
     Promise.reject(
       new Error(
-        `[ai-outputs] Widget "${widgetType}" is not yet implemented. ` +
-          `It will be added by task ${ownerTask}.`
+        `[ai-outputs] Widget "${widgetType}" is not yet implemented. ` + `It will be added by task ${ownerTask}.`
       )
     );
 }
@@ -161,39 +151,39 @@ function _notYetImplemented(
 export const outputWidgetRegistry: Record<OutputWidgetType, OutputWidgetFactory> = {
   // Wave 2, task 020 — widgets 1-4 (implemented in this task)
   [OutputWidgetType.BudgetDashboard]: () =>
-    import("../output-widgets/BudgetDashboardWidget") as Promise<{
+    import('../output-widgets/BudgetDashboardWidget') as Promise<{
       default: React.ComponentType<OutputWidgetProps<unknown>>;
     }>,
   [OutputWidgetType.SearchResults]: () =>
-    import("../output-widgets/SearchResultsWidget") as Promise<{
+    import('../output-widgets/SearchResultsWidget') as Promise<{
       default: React.ComponentType<OutputWidgetProps<unknown>>;
     }>,
   [OutputWidgetType.AnalysisEditor]: () =>
-    import("../output-widgets/AnalysisEditorWidget") as Promise<{
+    import('../output-widgets/AnalysisEditorWidget') as Promise<{
       default: React.ComponentType<OutputWidgetProps<unknown>>;
     }>,
   [OutputWidgetType.ContractComparison]: () =>
-    import("../output-widgets/ContractComparisonWidget") as Promise<{
+    import('../output-widgets/ContractComparisonWidget') as Promise<{
       default: React.ComponentType<OutputWidgetProps<unknown>>;
     }>,
 
   // Wave 2, task 021 — widgets 5-8 (stubs replaced by AIPU-021)
-  [OutputWidgetType.Timeline]: _notYetImplemented("Timeline", "AIPU-021"),
-  [OutputWidgetType.DocumentCompare]: _notYetImplemented("DocumentCompare", "AIPU-021"),
-  [OutputWidgetType.DataTable]: _notYetImplemented("DataTable", "AIPU-021"),
-  [OutputWidgetType.Chart]: _notYetImplemented("Chart", "AIPU-021"),
+  [OutputWidgetType.Timeline]: _notYetImplemented('Timeline', 'AIPU-021'),
+  [OutputWidgetType.DocumentCompare]: _notYetImplemented('DocumentCompare', 'AIPU-021'),
+  [OutputWidgetType.DataTable]: _notYetImplemented('DataTable', 'AIPU-021'),
+  [OutputWidgetType.Chart]: _notYetImplemented('Chart', 'AIPU-021'),
 
   // Wave 3, task 031 — widgets 9-11 (implemented by AIPU-031)
   [OutputWidgetType.StatusSummary]: () =>
-    import("../output-widgets/StatusSummaryWidget") as Promise<{
+    import('../output-widgets/StatusSummaryWidget') as Promise<{
       default: React.ComponentType<OutputWidgetProps<unknown>>;
     }>,
   [OutputWidgetType.Recommendation]: () =>
-    import("../output-widgets/RecommendationWidget") as Promise<{
+    import('../output-widgets/RecommendationWidget') as Promise<{
       default: React.ComponentType<OutputWidgetProps<unknown>>;
     }>,
   [OutputWidgetType.ActionPlan]: () =>
-    import("../output-widgets/ActionPlanWidget") as Promise<{
+    import('../output-widgets/ActionPlanWidget') as Promise<{
       default: React.ComponentType<OutputWidgetProps<unknown>>;
     }>,
 };

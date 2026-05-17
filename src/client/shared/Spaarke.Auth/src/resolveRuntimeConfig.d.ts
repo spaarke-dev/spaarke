@@ -24,21 +24,21 @@
  */
 /** Resolved runtime configuration for Spaarke applications. */
 export interface IRuntimeConfig {
-    /**
-     * BFF API base URL (host only, WITHOUT /api suffix).
-     * Example: "https://spe-api-dev-67e2xz.azurewebsites.net"
-     *
-     * IMPORTANT: normalizeUrl() strips /api from the environment variable value.
-     * All client-side URL paths MUST include the /api/ prefix themselves.
-     * e.g., fetch(`${bffBaseUrl}/api/ai/chat/sessions`)
-     */
-    bffBaseUrl: string;
-    /** BFF API OAuth scope (e.g., "api://<app-id>/user_impersonation"). */
-    bffOAuthScope: string;
-    /** Azure AD client ID for MSAL authentication. */
-    msalClientId: string;
-    /** Azure AD tenant ID (from Xrm organizationSettings). Empty string if not available. */
-    tenantId: string;
+  /**
+   * BFF API base URL (host only, WITHOUT /api suffix).
+   * Example: "https://spe-api-dev-67e2xz.azurewebsites.net"
+   *
+   * IMPORTANT: normalizeUrl() strips /api from the environment variable value.
+   * All client-side URL paths MUST include the /api/ prefix themselves.
+   * e.g., fetch(`${bffBaseUrl}/api/ai/chat/sessions`)
+   */
+  bffBaseUrl: string;
+  /** BFF API OAuth scope (e.g., "api://<app-id>/user_impersonation"). */
+  bffOAuthScope: string;
+  /** Azure AD client ID for MSAL authentication. */
+  msalClientId: string;
+  /** Azure AD tenant ID (from Xrm organizationSettings). Empty string if not available. */
+  tenantId: string;
 }
 /** Clear the runtime config cache. Useful for testing or after env var updates. */
 export declare function clearRuntimeConfigCache(): void;

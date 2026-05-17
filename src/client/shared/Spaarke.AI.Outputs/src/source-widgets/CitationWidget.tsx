@@ -11,27 +11,16 @@
  * NOT PCF-safe — React 19.
  */
 
-import React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Link,
-  mergeClasses,
-} from "@fluentui/react-components";
-import {
-  DocumentRegular,
-  GlobeRegular,
-  BookOpenRegular,
-  QuestionCircleRegular,
-} from "@fluentui/react-icons";
-import type { SourceWidgetProps } from "../types/widget-types";
+import React from 'react';
+import { makeStyles, tokens, Text, Link, mergeClasses } from '@fluentui/react-components';
+import { DocumentRegular, GlobeRegular, BookOpenRegular, QuestionCircleRegular } from '@fluentui/react-icons';
+import type { SourceWidgetProps } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Payload type
 // ---------------------------------------------------------------------------
 
-export type CitationSourceType = "web" | "document" | "legal" | "other";
+export type CitationSourceType = 'web' | 'document' | 'legal' | 'other';
 
 export interface Citation {
   /** Unique citation identifier. */
@@ -57,12 +46,12 @@ export interface CitationData {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingHorizontalM,
   },
   header: {
@@ -73,51 +62,51 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   list: {
-    listStyleType: "none",
+    listStyleType: 'none',
     margin: 0,
     padding: 0,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   listItem: {
-    display: "flex",
-    alignItems: "flex-start",
+    display: 'flex',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
     paddingBottom: tokens.spacingVerticalS,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
-    ":last-child": {
-      borderBottomWidth: "0px",
+    ':last-child': {
+      borderBottomWidth: '0px',
     },
   },
   indexBadge: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: "24px",
-    height: "24px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '24px',
+    height: '24px',
     borderRadius: tokens.borderRadiusCircular,
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground2,
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     flexShrink: 0,
-    marginTop: "2px",
+    marginTop: '2px',
   },
   iconWrapper: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     color: tokens.colorNeutralForeground3,
     flexShrink: 0,
-    marginTop: "3px",
+    marginTop: '3px',
   },
   citationContent: {
     flexGrow: 1,
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   citationText: {
@@ -127,14 +116,14 @@ const useStyles = makeStyles({
   },
   citationLink: {
     fontSize: tokens.fontSizeBase200,
-    wordBreak: "break-all",
+    wordBreak: 'break-all',
   },
   empty: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
@@ -149,11 +138,11 @@ const useStyles = makeStyles({
 
 function SourceIcon({ sourceType }: { sourceType: CitationSourceType }) {
   switch (sourceType) {
-    case "document":
+    case 'document':
       return <DocumentRegular fontSize={14} />;
-    case "web":
+    case 'web':
       return <GlobeRegular fontSize={14} />;
-    case "legal":
+    case 'legal':
       return <BookOpenRegular fontSize={14} />;
     default:
       return <QuestionCircleRegular fontSize={14} />;
@@ -206,11 +195,11 @@ function CitationWidget(props: SourceWidgetProps<CitationData>) {
   return (
     <div className={mergeClasses(styles.root, className)}>
       <Text className={styles.header}>
-        {citations.length} {citations.length === 1 ? "Citation" : "Citations"}
+        {citations.length} {citations.length === 1 ? 'Citation' : 'Citations'}
       </Text>
 
       <ol className={styles.list}>
-        {citations.map((citation) => (
+        {citations.map(citation => (
           <li key={citation.id} className={styles.listItem}>
             <span className={styles.indexBadge}>{citation.index}</span>
 
@@ -221,12 +210,7 @@ function CitationWidget(props: SourceWidgetProps<CitationData>) {
             <div className={styles.citationContent}>
               <Text className={styles.citationText}>{citation.text}</Text>
               {citation.url && (
-                <Link
-                  className={styles.citationLink}
-                  href={citation.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <Link className={styles.citationLink} href={citation.url} target="_blank" rel="noopener noreferrer">
                   {citation.url}
                 </Link>
               )}

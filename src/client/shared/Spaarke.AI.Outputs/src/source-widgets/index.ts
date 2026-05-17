@@ -10,25 +10,25 @@
  */
 
 // DocumentViewerWidget — SPE document preview via iframe / object
-export { default as DocumentViewerWidget } from "./DocumentViewerWidget";
-export type { DocumentViewerData } from "./DocumentViewerWidget";
+export { default as DocumentViewerWidget } from './DocumentViewerWidget';
+export type { DocumentViewerData } from './DocumentViewerWidget';
 
 // WebSourceWidget — URL bar + sandboxed iframe web preview
-export { default as WebSourceWidget } from "./WebSourceWidget";
-export type { WebSourceData } from "./WebSourceWidget";
+export { default as WebSourceWidget } from './WebSourceWidget';
+export type { WebSourceData } from './WebSourceWidget';
 
 // LegalLibraryWidget — structured legal case / statute citation card
-export { default as LegalLibraryWidget } from "./LegalLibraryWidget";
-export type { LegalLibraryData } from "./LegalLibraryWidget";
+export { default as LegalLibraryWidget } from './LegalLibraryWidget';
+export type { LegalLibraryData } from './LegalLibraryWidget';
 
 // CitationWidget — numbered citation reference list
-export { default as CitationWidget } from "./CitationWidget";
-export type { CitationData, Citation, CitationSourceType } from "./CitationWidget";
+export { default as CitationWidget } from './CitationWidget';
+export type { CitationData, Citation, CitationSourceType } from './CitationWidget';
 
 // ImageViewerWidget — image with pan/zoom via CSS transform
-export { default as ImageViewerWidget } from "./ImageViewerWidget";
-export type { ImageViewerData } from "./ImageViewerWidget";
+export { default as ImageViewerWidget } from './ImageViewerWidget';
+export type { ImageViewerData } from './ImageViewerWidget';
 
 // CodeViewerWidget — monospace code block with line numbers + copy
-export { default as CodeViewerWidget } from "./CodeViewerWidget";
-export type { CodeViewerData } from "./CodeViewerWidget";
+export { default as CodeViewerWidget } from './CodeViewerWidget';
+export type { CodeViewerData } from './CodeViewerWidget';

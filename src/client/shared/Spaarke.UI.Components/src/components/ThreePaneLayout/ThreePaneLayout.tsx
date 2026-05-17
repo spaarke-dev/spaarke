@@ -203,24 +203,14 @@ export function ThreePaneLayout({
   // Calculate ARIA ratios for PanelSplitter accessibility
   // Left splitter: proportion of (left pane) relative to total visible width
   // Right splitter: proportion of (left + center) relative to total visible width
-  const containerWidth =
-    containerRef.current?.getBoundingClientRect().width ?? 0;
+  const containerWidth = containerRef.current?.getBoundingClientRect().width ?? 0;
 
-  const leftRatio =
-    containerWidth > 0 && isLeftVisible
-      ? leftWidthPx / containerWidth
-      : 0;
+  const leftRatio = containerWidth > 0 && isLeftVisible ? leftWidthPx / containerWidth : 0;
 
-  const rightRatio =
-    containerWidth > 0 && isRightVisible
-      ? (containerWidth - rightWidthPx) / containerWidth
-      : 1;
+  const rightRatio = containerWidth > 0 && isRightVisible ? (containerWidth - rightWidthPx) / containerWidth : 1;
 
   return (
-    <div
-      className={mergeClasses(styles.root, className)}
-      ref={containerRef as React.RefObject<HTMLDivElement>}
-    >
+    <div className={mergeClasses(styles.root, className)} ref={containerRef as React.RefObject<HTMLDivElement>}>
       {/* ---- Left Pane ---- */}
       {isLeftVisible ? (
         <div
@@ -237,16 +227,14 @@ export function ThreePaneLayout({
           tabIndex={0}
           aria-label={leftPaneCollapseLabel}
           title={leftPaneCollapseLabel}
-          onKeyDown={(e) => {
+          onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               toggleLeft();
             }
           }}
         >
-          <ChevronRight16Regular
-            style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}
-          />
+          <ChevronRight16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
           <span className={styles.collapsedLabel}>{leftPaneCollapseLabel}</span>
         </div>
       )}
@@ -263,9 +251,7 @@ export function ThreePaneLayout({
       )}
 
       {/* ---- Center Pane (flex:1) ---- */}
-      <div className={styles.centerPane}>
-        {centerPane}
-      </div>
+      <div className={styles.centerPane}>{centerPane}</div>
 
       {/* ---- Right Splitter (between center and right) ---- */}
       {isRightVisible && (
@@ -294,16 +280,14 @@ export function ThreePaneLayout({
           tabIndex={0}
           aria-label={rightPaneCollapseLabel}
           title={rightPaneCollapseLabel}
-          onKeyDown={(e) => {
+          onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               toggleRight();
             }
           }}
         >
-          <ChevronLeft16Regular
-            style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}
-          />
+          <ChevronLeft16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
           <span className={styles.collapsedLabel}>{rightPaneCollapseLabel}</span>
         </div>
       )}

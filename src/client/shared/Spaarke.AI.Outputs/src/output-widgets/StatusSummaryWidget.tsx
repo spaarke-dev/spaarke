@@ -18,28 +18,17 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Spinner,
-} from "@fluentui/react-components";
-import {
-  CheckmarkCircle20Filled,
-  Warning20Filled,
-  ErrorCircle20Filled,
-  Info20Filled,
-} from "@fluentui/react-icons";
-import type { OutputWidgetProps } from "../types";
+import * as React from 'react';
+import { makeStyles, mergeClasses, tokens, Text, Spinner } from '@fluentui/react-components';
+import { CheckmarkCircle20Filled, Warning20Filled, ErrorCircle20Filled, Info20Filled } from '@fluentui/react-icons';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
 /** Status level for a single category row. */
-export type StatusLevel = "success" | "warning" | "error" | "info";
+export type StatusLevel = 'success' | 'warning' | 'error' | 'info';
 
 /** A single category entry in the status summary. */
 export interface StatusCategory {
@@ -68,8 +57,8 @@ export type StatusSummaryWidgetProps = OutputWidgetProps<StatusSummaryData>;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
   },
@@ -77,29 +66,29 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   categoryList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   categoryRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
   },
   iconWrapper: {
-    flexShrink: "0",
-    display: "flex",
-    alignItems: "center",
-    paddingTop: "2px", // visual alignment with first text line
+    flexShrink: '0',
+    display: 'flex',
+    alignItems: 'center',
+    paddingTop: '2px', // visual alignment with first text line
   },
   categoryContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    flex: "1",
+    flex: '1',
   },
   categoryLabel: {
     fontWeight: tokens.fontWeightSemibold,
@@ -147,29 +136,15 @@ function StatusIcon({
   infoClassName,
 }: StatusIconProps): React.ReactElement {
   switch (status) {
-    case "success":
-      return (
-        <CheckmarkCircle20Filled
-          className={mergeClasses(iconClassName, successClassName)}
-        />
-      );
-    case "warning":
-      return (
-        <Warning20Filled
-          className={mergeClasses(iconClassName, warningClassName)}
-        />
-      );
-    case "error":
-      return (
-        <ErrorCircle20Filled
-          className={mergeClasses(iconClassName, errorClassName)}
-        />
-      );
-    case "info":
+    case 'success':
+      return <CheckmarkCircle20Filled className={mergeClasses(iconClassName, successClassName)} />;
+    case 'warning':
+      return <Warning20Filled className={mergeClasses(iconClassName, warningClassName)} />;
+    case 'error':
+      return <ErrorCircle20Filled className={mergeClasses(iconClassName, errorClassName)} />;
+    case 'info':
     default:
-      return (
-        <Info20Filled className={mergeClasses(iconClassName, infoClassName)} />
-      );
+      return <Info20Filled className={mergeClasses(iconClassName, infoClassName)} />;
   }
 }
 
@@ -215,7 +190,7 @@ export default function StatusSummaryWidget({
       )}
 
       <div className={styles.categoryList}>
-        {data.categories.map((category) => (
+        {data.categories.map(category => (
           <div key={category.id} className={styles.categoryRow}>
             <span className={styles.iconWrapper}>
               <StatusIcon

@@ -17,23 +17,15 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  Badge,
-  Spinner,
-  ToggleButton,
-} from "@fluentui/react-components";
-import type { OutputWidgetProps } from "../types";
+import * as React from 'react';
+import { makeStyles, mergeClasses, tokens, Text, Badge, Spinner, ToggleButton } from '@fluentui/react-components';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
-export type DocumentChangeType = "added" | "removed" | "changed" | "unchanged";
+export type DocumentChangeType = 'added' | 'removed' | 'changed' | 'unchanged';
 
 export interface DocumentCompareLine {
   /** Unique identifier for this line pair. */
@@ -54,7 +46,7 @@ export interface DocumentCompareData {
   /** Ordered list of line comparison entries. */
   lines: DocumentCompareLine[];
   /** Default view mode; can be toggled by the user in the widget. */
-  viewMode?: "side-by-side" | "unified";
+  viewMode?: 'side-by-side' | 'unified';
 }
 
 export type DocumentCompareWidgetProps = OutputWidgetProps<DocumentCompareData>;
@@ -65,19 +57,19 @@ export type DocumentCompareWidgetProps = OutputWidgetProps<DocumentCompareData>;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
-    height: "100%",
-    overflow: "hidden",
+    height: '100%',
+    overflow: 'hidden',
   },
   errorText: {
     color: tokens.colorStatusDangerForeground1,
     padding: tokens.spacingHorizontalL,
   },
   toolbar: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalL}`,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -87,18 +79,18 @@ const useStyles = makeStyles({
     flexGrow: 1,
   },
   scrollArea: {
-    overflowY: "auto",
+    overflowY: 'auto',
     flexGrow: 1,
   },
   // Side-by-side: two-column CSS grid
   sideBySideGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: 0,
   },
   sideBySideHeader: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: 0,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     flexShrink: 0,
@@ -117,9 +109,9 @@ const useStyles = makeStyles({
     padding: `2px ${tokens.spacingHorizontalM}`,
     fontFamily: tokens.fontFamilyMonospace,
     fontSize: tokens.fontSizeBase200,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    minHeight: "22px",
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    minHeight: '22px',
     lineHeight: tokens.lineHeightBase300,
   },
   lineCellLeft: {
@@ -127,8 +119,8 @@ const useStyles = makeStyles({
   },
   // Unified view: single column
   unifiedRow: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: 0,
   },
   unifiedLineLabel: {
@@ -156,31 +148,27 @@ const useStyles = makeStyles({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getChangeStyleKey(
-  changeType: DocumentChangeType
-): "bgAdded" | "bgRemoved" | "bgChanged" | "bgUnchanged" {
+function getChangeStyleKey(changeType: DocumentChangeType): 'bgAdded' | 'bgRemoved' | 'bgChanged' | 'bgUnchanged' {
   switch (changeType) {
-    case "added":
-      return "bgAdded";
-    case "removed":
-      return "bgRemoved";
-    case "changed":
-      return "bgChanged";
+    case 'added':
+      return 'bgAdded';
+    case 'removed':
+      return 'bgRemoved';
+    case 'changed':
+      return 'bgChanged';
     default:
-      return "bgUnchanged";
+      return 'bgUnchanged';
   }
 }
 
-function changeTypeBadgeColor(
-  changeType: DocumentChangeType
-): "success" | "danger" | "warning" | undefined {
+function changeTypeBadgeColor(changeType: DocumentChangeType): 'success' | 'danger' | 'warning' | undefined {
   switch (changeType) {
-    case "added":
-      return "success";
-    case "removed":
-      return "danger";
-    case "changed":
-      return "warning";
+    case 'added':
+      return 'success';
+    case 'removed':
+      return 'danger';
+    case 'changed':
+      return 'warning';
     default:
       return undefined;
   }
@@ -197,40 +185,21 @@ interface SideBySideViewProps {
   styles: ReturnType<typeof useStyles>;
 }
 
-function SideBySideView({
-  lines,
-  leftLabel,
-  rightLabel,
-  styles,
-}: SideBySideViewProps): React.ReactElement {
+function SideBySideView({ lines, leftLabel, rightLabel, styles }: SideBySideViewProps): React.ReactElement {
   return (
     <>
       <div className={styles.sideBySideHeader}>
-        <div className={mergeClasses(styles.headerCell, styles.headerCellLeft)}>
-          {leftLabel}
-        </div>
+        <div className={mergeClasses(styles.headerCell, styles.headerCellLeft)}>{leftLabel}</div>
         <div className={styles.headerCell}>{rightLabel}</div>
       </div>
       <div className={styles.scrollArea}>
         <div className={styles.sideBySideGrid}>
-          {lines.map((line) => {
+          {lines.map(line => {
             const bgKey = getChangeStyleKey(line.changeType);
             return (
               <React.Fragment key={line.id}>
-                <div
-                  className={mergeClasses(
-                    styles.lineCell,
-                    styles.lineCellLeft,
-                    styles[bgKey]
-                  )}
-                >
-                  {line.leftText}
-                </div>
-                <div
-                  className={mergeClasses(styles.lineCell, styles[bgKey])}
-                >
-                  {line.rightText}
-                </div>
+                <div className={mergeClasses(styles.lineCell, styles.lineCellLeft, styles[bgKey])}>{line.leftText}</div>
+                <div className={mergeClasses(styles.lineCell, styles[bgKey])}>{line.rightText}</div>
               </React.Fragment>
             );
           })}
@@ -247,17 +216,12 @@ interface UnifiedViewProps {
   styles: ReturnType<typeof useStyles>;
 }
 
-function UnifiedView({
-  lines,
-  leftLabel,
-  rightLabel,
-  styles,
-}: UnifiedViewProps): React.ReactElement {
+function UnifiedView({ lines, leftLabel, rightLabel, styles }: UnifiedViewProps): React.ReactElement {
   return (
     <div className={styles.scrollArea}>
-      {lines.map((line) => {
+      {lines.map(line => {
         const bgKey = getChangeStyleKey(line.changeType);
-        const isChanged = line.changeType !== "unchanged";
+        const isChanged = line.changeType !== 'unchanged';
 
         return (
           <div key={line.id} className={styles.unifiedRow}>
@@ -277,9 +241,7 @@ function UnifiedView({
                 )}
               </>
             ) : (
-              <div className={mergeClasses(styles.lineCell, styles[bgKey])}>
-                {line.leftText || line.rightText}
-              </div>
+              <div className={mergeClasses(styles.lineCell, styles[bgKey])}>{line.leftText || line.rightText}</div>
             )}
           </div>
         );
@@ -304,9 +266,7 @@ export default function DocumentCompareWidget({
   className,
 }: DocumentCompareWidgetProps): React.ReactElement {
   const styles = useStyles();
-  const [viewMode, setViewMode] = React.useState<"side-by-side" | "unified">(
-    data?.viewMode ?? "side-by-side"
-  );
+  const [viewMode, setViewMode] = React.useState<'side-by-side' | 'unified'>(data?.viewMode ?? 'side-by-side');
 
   if (isLoading) {
     return (
@@ -324,13 +284,9 @@ export default function DocumentCompareWidget({
     );
   }
 
-  const addedCount = data.lines.filter((l) => l.changeType === "added").length;
-  const removedCount = data.lines.filter(
-    (l) => l.changeType === "removed"
-  ).length;
-  const changedCount = data.lines.filter(
-    (l) => l.changeType === "changed"
-  ).length;
+  const addedCount = data.lines.filter(l => l.changeType === 'added').length;
+  const removedCount = data.lines.filter(l => l.changeType === 'removed').length;
+  const changedCount = data.lines.filter(l => l.changeType === 'changed').length;
 
   return (
     <div className={mergeClasses(styles.root, className)}>
@@ -352,37 +308,19 @@ export default function DocumentCompareWidget({
           </Badge>
         )}
         <div className={styles.toolbarSpacer} />
-        <ToggleButton
-          size="small"
-          checked={viewMode === "side-by-side"}
-          onClick={() => setViewMode("side-by-side")}
-        >
+        <ToggleButton size="small" checked={viewMode === 'side-by-side'} onClick={() => setViewMode('side-by-side')}>
           Side by side
         </ToggleButton>
-        <ToggleButton
-          size="small"
-          checked={viewMode === "unified"}
-          onClick={() => setViewMode("unified")}
-        >
+        <ToggleButton size="small" checked={viewMode === 'unified'} onClick={() => setViewMode('unified')}>
           Unified
         </ToggleButton>
       </div>
 
       {/* Content */}
-      {viewMode === "side-by-side" ? (
-        <SideBySideView
-          lines={data.lines}
-          leftLabel={data.leftLabel}
-          rightLabel={data.rightLabel}
-          styles={styles}
-        />
+      {viewMode === 'side-by-side' ? (
+        <SideBySideView lines={data.lines} leftLabel={data.leftLabel} rightLabel={data.rightLabel} styles={styles} />
       ) : (
-        <UnifiedView
-          lines={data.lines}
-          leftLabel={data.leftLabel}
-          rightLabel={data.rightLabel}
-          styles={styles}
-        />
+        <UnifiedView lines={data.lines} leftLabel={data.leftLabel} rightLabel={data.rightLabel} styles={styles} />
       )}
     </div>
   );

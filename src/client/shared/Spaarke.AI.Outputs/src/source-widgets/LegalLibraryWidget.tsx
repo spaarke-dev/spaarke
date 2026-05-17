@@ -10,19 +10,10 @@
  * NOT PCF-safe — React 19.
  */
 
-import React from "react";
-import {
-  makeStyles,
-  tokens,
-  Card,
-  CardHeader,
-  Text,
-  Link,
-  Divider,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { BookOpenRegular, CalendarRegular, BuildingBankRegular, OpenRegular } from "@fluentui/react-icons";
-import type { SourceWidgetProps } from "../types/widget-types";
+import React from 'react';
+import { makeStyles, tokens, Card, CardHeader, Text, Link, Divider, mergeClasses } from '@fluentui/react-components';
+import { BookOpenRegular, CalendarRegular, BuildingBankRegular, OpenRegular } from '@fluentui/react-icons';
+import type { SourceWidgetProps } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Payload type
@@ -47,16 +38,16 @@ export interface LegalLibraryData {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "auto",
+    overflow: 'auto',
     padding: tokens.spacingHorizontalM,
   },
   card: {
-    width: "100%",
+    width: '100%',
     backgroundColor: tokens.colorNeutralBackground2,
   },
   citationTitle: {
@@ -67,14 +58,14 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalXS,
   },
   metaRow: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalM,
     marginBottom: tokens.spacingVerticalS,
   },
   metaItem: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
@@ -87,33 +78,33 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
     marginBottom: tokens.spacingVerticalXS,
   },
   excerpt: {
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground2,
-    borderLeftWidth: "3px",
-    borderLeftStyle: "solid",
+    borderLeftWidth: '3px',
+    borderLeftStyle: 'solid',
     borderLeftColor: tokens.colorBrandStroke1,
     paddingLeft: tokens.spacingHorizontalM,
-    fontStyle: "italic",
+    fontStyle: 'italic',
     margin: 0,
   },
   linkRow: {
     marginTop: tokens.spacingVerticalM,
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
   },
   fallback: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
@@ -155,11 +146,7 @@ function LegalLibraryWidget(props: SourceWidgetProps<LegalLibraryData>) {
   return (
     <div className={mergeClasses(styles.root, className)}>
       <Card className={styles.card} appearance="filled-alternative">
-        <CardHeader
-          header={
-            <Text className={styles.citationTitle}>{data?.citation}</Text>
-          }
-        />
+        <CardHeader header={<Text className={styles.citationTitle}>{data?.citation}</Text>} />
 
         {(data?.court || data?.date) && (
           <div className={styles.metaRow}>
@@ -181,9 +168,7 @@ function LegalLibraryWidget(props: SourceWidgetProps<LegalLibraryData>) {
         <Divider className={styles.divider} />
 
         <Text className={styles.excerptLabel}>Excerpt</Text>
-        <blockquote className={styles.excerpt}>
-          {data?.excerpt}
-        </blockquote>
+        <blockquote className={styles.excerpt}>{data?.excerpt}</blockquote>
 
         {data?.url && (
           <div className={styles.linkRow}>

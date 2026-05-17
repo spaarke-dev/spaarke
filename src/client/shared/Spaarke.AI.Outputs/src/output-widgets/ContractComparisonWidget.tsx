@@ -13,17 +13,9 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  shorthands,
-  tokens,
-  Text,
-  Badge,
-  Spinner,
-} from "@fluentui/react-components";
-import type { OutputWidgetProps } from "../types";
+import * as React from 'react';
+import { makeStyles, mergeClasses, shorthands, tokens, Text, Badge, Spinner } from '@fluentui/react-components';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -60,57 +52,57 @@ export type ContractComparisonWidgetProps = OutputWidgetProps<ContractComparison
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
   },
   columnHeaders: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
     paddingBottom: tokens.spacingVerticalXS,
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
   },
   columnHeader: {
     fontWeight: tokens.fontWeightSemibold,
   },
   clauseList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   clauseRow: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
     padding: tokens.spacingVerticalS,
     borderRadius: tokens.borderRadiusMedium,
-    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground1,
   },
   clauseRowDelta: {
     backgroundColor: tokens.colorStatusWarningBackground2,
-    ...shorthands.border("1px", "solid", tokens.colorStatusWarningBorderActive),
+    ...shorthands.border('1px', 'solid', tokens.colorStatusWarningBorderActive),
   },
   clauseCell: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   clauseText: {
     color: tokens.colorNeutralForeground1,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
   },
   clauseTextDelta: {
     color: tokens.colorStatusWarningForeground3,
   },
   deltaIndicator: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    gridColumn: "1 / -1",
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gridColumn: '1 / -1',
     paddingTop: tokens.spacingVerticalXXS,
   },
   errorText: {
@@ -177,36 +169,18 @@ export default function ContractComparisonWidget({
 
       {/* Clause rows */}
       <div className={styles.clauseList}>
-        {data.clauses.map((clause) => (
-          <div
-            key={clause.id}
-            className={mergeClasses(
-              styles.clauseRow,
-              clause.hasDelta && styles.clauseRowDelta
-            )}
-          >
+        {data.clauses.map(clause => (
+          <div key={clause.id} className={mergeClasses(styles.clauseRow, clause.hasDelta && styles.clauseRowDelta)}>
             {/* Left clause cell */}
             <div className={styles.clauseCell}>
-              <Text
-                size={300}
-                className={mergeClasses(
-                  styles.clauseText,
-                  clause.hasDelta && styles.clauseTextDelta
-                )}
-              >
+              <Text size={300} className={mergeClasses(styles.clauseText, clause.hasDelta && styles.clauseTextDelta)}>
                 {clause.left}
               </Text>
             </div>
 
             {/* Right clause cell */}
             <div className={styles.clauseCell}>
-              <Text
-                size={300}
-                className={mergeClasses(
-                  styles.clauseText,
-                  clause.hasDelta && styles.clauseTextDelta
-                )}
-              >
+              <Text size={300} className={mergeClasses(styles.clauseText, clause.hasDelta && styles.clauseTextDelta)}>
                 {clause.right}
               </Text>
             </div>

@@ -14,16 +14,10 @@
  * NOT PCF-safe — React 19.
  */
 
-import React, { useCallback } from "react";
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { ArrowDownloadRegular, DocumentRegular } from "@fluentui/react-icons";
-import type { SourceWidgetProps } from "../types/widget-types";
+import React, { useCallback } from 'react';
+import { makeStyles, tokens, Button, Text, mergeClasses } from '@fluentui/react-components';
+import { ArrowDownloadRegular, DocumentRegular } from '@fluentui/react-icons';
+import type { SourceWidgetProps } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Payload type
@@ -46,54 +40,54 @@ export interface DocumentViewerData {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   toolbar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke1,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
   },
   fileName: {
     fontWeight: tokens.fontWeightSemibold,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     flexGrow: 1,
     marginRight: tokens.spacingHorizontalM,
   },
   viewerContainer: {
     flexGrow: 1,
-    overflow: "hidden",
-    position: "relative",
+    overflow: 'hidden',
+    position: 'relative',
   },
   iframe: {
-    width: "100%",
-    height: "100%",
-    border: "none",
-    display: "block",
+    width: '100%',
+    height: '100%',
+    border: 'none',
+    display: 'block',
   },
   objectEl: {
-    width: "100%",
-    height: "100%",
-    display: "block",
+    width: '100%',
+    height: '100%',
+    display: 'block',
   },
   fallback: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
@@ -111,13 +105,13 @@ function DocumentViewerWidget(props: SourceWidgetProps<DocumentViewerData>) {
   const { data, isLoading, error, className } = props;
   const styles = useStyles();
 
-  const isPdf = data?.mimeType === "application/pdf";
+  const isPdf = data?.mimeType === 'application/pdf';
 
   const handleDownload = useCallback(() => {
     if (!data?.documentUrl) return;
-    const link = document.createElement("a");
+    const link = document.createElement('a');
     link.href = data.documentUrl;
-    link.download = data.fileName ?? "document";
+    link.download = data.fileName ?? 'document';
     link.click();
   }, [data?.documentUrl, data?.fileName]);
 
@@ -147,14 +141,14 @@ function DocumentViewerWidget(props: SourceWidgetProps<DocumentViewerData>) {
     <div className={mergeClasses(styles.root, className)}>
       <div className={styles.toolbar}>
         <Text className={styles.fileName} title={data?.fileName}>
-          {data?.fileName ?? "Document"}
+          {data?.fileName ?? 'Document'}
         </Text>
         {data?.canDownload && (
           <Button
             appearance="subtle"
             icon={<ArrowDownloadRegular />}
             onClick={handleDownload}
-            aria-label={`Download ${data?.fileName ?? "document"}`}
+            aria-label={`Download ${data?.fileName ?? 'document'}`}
           >
             Download
           </Button>
@@ -167,13 +161,13 @@ function DocumentViewerWidget(props: SourceWidgetProps<DocumentViewerData>) {
             className={styles.objectEl}
             data={data?.documentUrl}
             type="application/pdf"
-            aria-label={data?.fileName ?? "PDF document"}
+            aria-label={data?.fileName ?? 'PDF document'}
           >
             {/* Fallback for browsers that cannot render PDF inline */}
             <div className={styles.fallback}>
               <DocumentRegular fontSize={40} />
               <Text>
-                PDF preview unavailable.{" "}
+                PDF preview unavailable.{' '}
                 {data?.canDownload && (
                   <Button appearance="transparent" onClick={handleDownload}>
                     Download to view.
@@ -186,7 +180,7 @@ function DocumentViewerWidget(props: SourceWidgetProps<DocumentViewerData>) {
           <iframe
             className={styles.iframe}
             src={data?.documentUrl}
-            title={data?.fileName ?? "Document preview"}
+            title={data?.fileName ?? 'Document preview'}
             sandbox="allow-scripts allow-same-origin allow-forms"
           />
         )}

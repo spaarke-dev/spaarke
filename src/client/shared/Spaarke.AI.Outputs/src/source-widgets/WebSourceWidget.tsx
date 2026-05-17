@@ -12,17 +12,10 @@
  * NOT PCF-safe — React 19.
  */
 
-import React from "react";
-import {
-  makeStyles,
-  tokens,
-  Input,
-  Link,
-  Text,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { GlobeRegular, OpenRegular } from "@fluentui/react-icons";
-import type { SourceWidgetProps } from "../types/widget-types";
+import React from 'react';
+import { makeStyles, tokens, Input, Link, Text, mergeClasses } from '@fluentui/react-components';
+import { GlobeRegular, OpenRegular } from '@fluentui/react-icons';
+import type { SourceWidgetProps } from '../types/widget-types';
 
 // ---------------------------------------------------------------------------
 // Payload type
@@ -41,20 +34,20 @@ export interface WebSourceData {
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   urlBar: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke1,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
@@ -66,36 +59,36 @@ const useStyles = makeStyles({
   urlInput: {
     flexGrow: 1,
     // Override input focus ring to avoid redundancy with the container
-    "& input": {
-      cursor: "default",
+    '& input': {
+      cursor: 'default',
       color: tokens.colorNeutralForeground2,
       fontSize: tokens.fontSizeBase200,
     },
   },
   openLink: {
     flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     fontSize: tokens.fontSizeBase200,
   },
   iframeContainer: {
     flexGrow: 1,
-    overflow: "hidden",
-    position: "relative",
+    overflow: 'hidden',
+    position: 'relative',
   },
   iframe: {
-    width: "100%",
-    height: "100%",
-    border: "none",
-    display: "block",
+    width: '100%',
+    height: '100%',
+    border: 'none',
+    display: 'block',
   },
   fallback: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
   },
@@ -134,7 +127,7 @@ function WebSourceWidget(props: SourceWidgetProps<WebSourceData>) {
     );
   }
 
-  const displayUrl = data?.url ?? "";
+  const displayUrl = data?.url ?? '';
   const iframeTitle = data?.title ?? displayUrl;
 
   return (

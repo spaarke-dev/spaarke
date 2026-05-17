@@ -31,7 +31,4 @@ export { useSelectionListener } from './useSelectionListener';
 export type { UseSelectionListenerOptions, IUseSelectionListenerResult } from './useSelectionListener';
 
 export { useDynamicSlashCommands } from './useDynamicSlashCommands';
-export type {
-  UseDynamicSlashCommandsOptions,
-  IUseDynamicSlashCommandsResult,
-} from './useDynamicSlashCommands';
+export type { UseDynamicSlashCommandsOptions, IUseDynamicSlashCommandsResult } from './useDynamicSlashCommands';

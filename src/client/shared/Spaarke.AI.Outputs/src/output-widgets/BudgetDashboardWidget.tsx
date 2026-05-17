@@ -14,16 +14,9 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  mergeClasses,
-  tokens,
-  Text,
-  ProgressBar,
-  Spinner,
-} from "@fluentui/react-components";
-import type { OutputWidgetProps } from "../types";
+import * as React from 'react';
+import { makeStyles, mergeClasses, tokens, Text, ProgressBar, Spinner } from '@fluentui/react-components';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -55,8 +48,8 @@ export type BudgetDashboardWidgetProps = OutputWidgetProps<BudgetDashboardData>;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
   },
@@ -64,19 +57,19 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   itemList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   item: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   itemHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "baseline",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
   },
   overBudget: {
     color: tokens.colorStatusDangerForeground1,
@@ -85,7 +78,7 @@ const useStyles = makeStyles({
     color: tokens.colorStatusSuccessForeground1,
   },
   progressTrack: {
-    width: "100%",
+    width: '100%',
   },
   errorText: {
     color: tokens.colorStatusDangerForeground1,
@@ -99,7 +92,7 @@ const useStyles = makeStyles({
 function formatCurrency(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat(undefined, {
-      style: "currency",
+      style: 'currency',
       currency,
       maximumFractionDigits: 0,
     }).format(amount);
@@ -158,19 +151,11 @@ export default function BudgetDashboardWidget({
             <div key={index} className={styles.item}>
               <div className={styles.itemHeader}>
                 <Text size={300}>{item.label}</Text>
-                <Text
-                  size={200}
-                  className={isOver ? styles.overBudget : styles.underBudget}
-                >
-                  {formatCurrency(item.spent, item.currency)} /{" "}
-                  {formatCurrency(item.budget, item.currency)}
+                <Text size={200} className={isOver ? styles.overBudget : styles.underBudget}>
+                  {formatCurrency(item.spent, item.currency)} / {formatCurrency(item.budget, item.currency)}
                 </Text>
               </div>
-              <ProgressBar
-                className={styles.progressTrack}
-                value={clamped}
-                color={isOver ? "error" : "success"}
-              />
+              <ProgressBar className={styles.progressTrack} value={clamped} color={isOver ? 'error' : 'success'} />
             </div>
           );
         })}

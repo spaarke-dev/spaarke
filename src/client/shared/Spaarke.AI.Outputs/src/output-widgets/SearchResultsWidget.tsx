@@ -14,7 +14,7 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   mergeClasses,
@@ -25,8 +25,8 @@ import {
   Card,
   CardHeader,
   Spinner,
-} from "@fluentui/react-components";
-import type { OutputWidgetProps } from "../types";
+} from '@fluentui/react-components';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -63,14 +63,14 @@ export type SearchResultsWidgetProps = OutputWidgetProps<SearchResultsData>;
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
   },
   queryHeader: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   queryLabel: {
@@ -81,17 +81,17 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   resultList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   card: {
-    width: "100%",
-    boxSizing: "border-box",
+    width: '100%',
+    boxSizing: 'border-box',
   },
   cardBody: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalS,
@@ -117,17 +117,15 @@ function formatScore(score: number): string {
   return `${Math.round(score * 100)}%`;
 }
 
-function scoreToBadgeAppearance(score: number): "filled" | "tint" | "ghost" | "outline" {
-  return score >= 0.8 ? "filled" : score >= 0.5 ? "tint" : "ghost";
+function scoreToBadgeAppearance(score: number): 'filled' | 'tint' | 'ghost' | 'outline' {
+  return score >= 0.8 ? 'filled' : score >= 0.5 ? 'tint' : 'ghost';
 }
 
-function scoreToBadgeColor(
-  score: number
-): "success" | "warning" | "important" | "informative" {
-  if (score >= 0.8) return "success";
-  if (score >= 0.5) return "informative";
-  if (score >= 0.3) return "warning";
-  return "important";
+function scoreToBadgeColor(score: number): 'success' | 'warning' | 'important' | 'informative' {
+  if (score >= 0.8) return 'success';
+  if (score >= 0.5) return 'informative';
+  if (score >= 0.3) return 'warning';
+  return 'important';
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +178,7 @@ export default function SearchResultsWidget({
         <Text className={styles.noResults}>No results found.</Text>
       ) : (
         <div className={styles.resultList}>
-          {data.results.map((result) => (
+          {data.results.map(result => (
             <Card key={result.id} className={styles.card} appearance="filled-alternative">
               <CardHeader
                 header={

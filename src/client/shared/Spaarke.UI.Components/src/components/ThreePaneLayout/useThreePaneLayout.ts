@@ -162,8 +162,7 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
       if (!container) return Math.max(minLeftWidthPx, width);
       const containerWidth = container.getBoundingClientRect().width;
       const rightOccupied = visibility.right ? rightWidthPx + SPLITTER_WIDTH_PX : 0;
-      const maxLeft =
-        containerWidth - rightOccupied - SPLITTER_WIDTH_PX - minCenterWidthPx;
+      const maxLeft = containerWidth - rightOccupied - SPLITTER_WIDTH_PX - minCenterWidthPx;
       return Math.max(minLeftWidthPx, Math.min(maxLeft, width));
     },
     [visibility.right, rightWidthPx, minLeftWidthPx, minCenterWidthPx]
@@ -175,8 +174,7 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
       if (!container) return Math.max(minRightWidthPx, width);
       const containerWidth = container.getBoundingClientRect().width;
       const leftOccupied = visibility.left ? leftWidthPx + SPLITTER_WIDTH_PX : 0;
-      const maxRight =
-        containerWidth - leftOccupied - SPLITTER_WIDTH_PX - minCenterWidthPx;
+      const maxRight = containerWidth - leftOccupied - SPLITTER_WIDTH_PX - minCenterWidthPx;
       return Math.max(minRightWidthPx, Math.min(maxRight, width));
     },
     [visibility.left, leftWidthPx, minRightWidthPx, minCenterWidthPx]
@@ -268,17 +266,16 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
   // ------------------------------------------------------------------
 
   const makeSplitterMouseDown = useCallback(
-    (splitter: 'left' | 'right', currentWidth: number) =>
-      (e: React.MouseEvent) => {
-        e.preventDefault();
-        isDraggingRef.current = true;
-        activeSplitterRef.current = splitter;
-        dragStartXRef.current = e.clientX;
-        dragStartWidthRef.current = currentWidth;
-        setIsDragging(true);
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-      },
+    (splitter: 'left' | 'right', currentWidth: number) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      isDraggingRef.current = true;
+      activeSplitterRef.current = splitter;
+      dragStartXRef.current = e.clientX;
+      dragStartWidthRef.current = currentWidth;
+      setIsDragging(true);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    },
     []
   );
 
@@ -287,27 +284,30 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
   // ------------------------------------------------------------------
 
   const makeKeyDown = useCallback(
-    (splitter: 'left' | 'right', currentWidth: number, update: (w: number) => void) =>
-      (e: React.KeyboardEvent) => {
-        let delta = 0;
-        if (splitter === 'left') {
-          // Left splitter: ArrowRight grows left pane, ArrowLeft shrinks
-          if (e.key === 'ArrowRight') delta = KEYBOARD_STEP_PX;
-          else if (e.key === 'ArrowLeft') delta = -KEYBOARD_STEP_PX;
-          else if (e.key === 'End') delta = 9999;   // expand left to max
-          else if (e.key === 'Home') delta = -9999; // collapse left to min
-          else return;
-        } else {
-          // Right splitter: ArrowLeft grows right pane, ArrowRight shrinks
-          if (e.key === 'ArrowLeft') delta = KEYBOARD_STEP_PX;
-          else if (e.key === 'ArrowRight') delta = -KEYBOARD_STEP_PX;
-          else if (e.key === 'Home') delta = 9999;  // expand right to max
-          else if (e.key === 'End') delta = -9999;  // collapse right to min
-          else return;
-        }
-        e.preventDefault();
-        update(currentWidth + delta);
-      },
+    (splitter: 'left' | 'right', currentWidth: number, update: (w: number) => void) => (e: React.KeyboardEvent) => {
+      let delta = 0;
+      if (splitter === 'left') {
+        // Left splitter: ArrowRight grows left pane, ArrowLeft shrinks
+        if (e.key === 'ArrowRight') delta = KEYBOARD_STEP_PX;
+        else if (e.key === 'ArrowLeft') delta = -KEYBOARD_STEP_PX;
+        else if (e.key === 'End')
+          delta = 9999; // expand left to max
+        else if (e.key === 'Home')
+          delta = -9999; // collapse left to min
+        else return;
+      } else {
+        // Right splitter: ArrowLeft grows right pane, ArrowRight shrinks
+        if (e.key === 'ArrowLeft') delta = KEYBOARD_STEP_PX;
+        else if (e.key === 'ArrowRight') delta = -KEYBOARD_STEP_PX;
+        else if (e.key === 'Home')
+          delta = 9999; // expand right to max
+        else if (e.key === 'End')
+          delta = -9999; // collapse right to min
+        else return;
+      }
+      e.preventDefault();
+      update(currentWidth + delta);
+    },
     []
   );
 
@@ -323,7 +323,15 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
     persistWidth(leftWidthKey, defaultLeftWidthPx);
     persistWidth(rightWidthKey, defaultRightWidthPx);
     persistVisibility(visibilityKey, newVisibility);
-  }, [defaultLeftWidthPx, defaultRightWidthPx, defaultLeftVisible, defaultRightVisible, leftWidthKey, rightWidthKey, visibilityKey]);
+  }, [
+    defaultLeftWidthPx,
+    defaultRightWidthPx,
+    defaultLeftVisible,
+    defaultRightVisible,
+    leftWidthKey,
+    rightWidthKey,
+    visibilityKey,
+  ]);
 
   // ------------------------------------------------------------------
   // Splitter handler objects

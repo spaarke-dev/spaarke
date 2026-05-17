@@ -12,72 +12,52 @@
  * and link elements are tested instead.
  */
 
-import React from "react";
-import "@testing-library/jest-dom";
-import WebSourceWidget from "../WebSourceWidget";
-import {
-  renderWithTheme,
-  webLightTheme,
-  webDarkTheme,
-  mockWebSourceProps,
-} from "../../__tests__/test-utils";
+import React from 'react';
+import '@testing-library/jest-dom';
+import WebSourceWidget from '../WebSourceWidget';
+import { renderWithTheme, webLightTheme, webDarkTheme, mockWebSourceProps } from '../../__tests__/test-utils';
 
-describe("WebSourceWidget", () => {
+describe('WebSourceWidget', () => {
   const props = mockWebSourceProps();
 
-  it("renders in light theme without error", () => {
-    const { container } = renderWithTheme(
-      <WebSourceWidget {...props} />,
-      webLightTheme
-    );
+  it('renders in light theme without error', () => {
+    const { container } = renderWithTheme(<WebSourceWidget {...props} />, webLightTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders in dark theme (webDarkTheme) without error", () => {
-    const { container } = renderWithTheme(
-      <WebSourceWidget {...props} />,
-      webDarkTheme
-    );
+  it('renders in dark theme (webDarkTheme) without error', () => {
+    const { container } = renderWithTheme(<WebSourceWidget {...props} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders within 200ms in light theme (NFR-01)", () => {
+  it('renders within 200ms in light theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<WebSourceWidget {...props} />, webLightTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders within 200ms in dark theme (NFR-01)", () => {
+  it('renders within 200ms in dark theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<WebSourceWidget {...props} />, webDarkTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders the URL input in the URL bar", () => {
-    const { container } = renderWithTheme(
-      <WebSourceWidget {...props} />,
-      webLightTheme
-    );
-    const input = container.querySelector("input");
+  it('renders the URL input in the URL bar', () => {
+    const { container } = renderWithTheme(<WebSourceWidget {...props} />, webLightTheme);
+    const input = container.querySelector('input');
     expect(input).toBeTruthy();
-    expect(input?.value).toBe("https://example.com");
+    expect(input?.value).toBe('https://example.com');
   });
 
   it("renders the 'Open' link", () => {
-    const { getByText } = renderWithTheme(
-      <WebSourceWidget {...props} />,
-      webLightTheme
-    );
-    expect(getByText("Open")).toBeTruthy();
+    const { getByText } = renderWithTheme(<WebSourceWidget {...props} />, webLightTheme);
+    expect(getByText('Open')).toBeTruthy();
   });
 
-  it("renders loading state without error", () => {
-    const { container } = renderWithTheme(
-      <WebSourceWidget {...props} isLoading={true} />,
-      webDarkTheme
-    );
+  it('renders loading state without error', () => {
+    const { container } = renderWithTheme(<WebSourceWidget {...props} isLoading={true} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 });

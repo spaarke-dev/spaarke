@@ -20,7 +20,7 @@
  * @see ADR-012 — Shared component library
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   mergeClasses,
@@ -31,15 +31,15 @@ import {
   Card,
   CardHeader,
   Spinner,
-} from "@fluentui/react-components";
-import type { OutputWidgetProps } from "../types";
+} from '@fluentui/react-components';
+import type { OutputWidgetProps } from '../types';
 
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
 /** Priority level for an individual recommendation. */
-export type RecommendationPriority = "high" | "medium" | "low";
+export type RecommendationPriority = 'high' | 'medium' | 'low';
 
 /** A single AI recommendation entry. */
 export interface Recommendation {
@@ -74,39 +74,39 @@ export type RecommendationWidgetProps = OutputWidgetProps<RecommendationData> & 
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingHorizontalL,
   },
   cardList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
   card: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     padding: tokens.spacingHorizontalM,
   },
   cardHeaderRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   recommendationText: {
     fontWeight: tokens.fontWeightSemibold,
-    flex: "1",
+    flex: '1',
   },
   rationale: {
     color: tokens.colorNeutralForeground2,
   },
   actionRow: {
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
     marginTop: tokens.spacingVerticalXS,
   },
   errorText: {
@@ -122,29 +122,27 @@ const useStyles = makeStyles({
  * Map a RecommendationPriority to the Badge appearance value expected by
  * Fluent v9 Badge. Uses the color prop values defined in the component API.
  */
-function priorityToBadgeColor(
-  priority: RecommendationPriority
-): "danger" | "warning" | "informative" {
+function priorityToBadgeColor(priority: RecommendationPriority): 'danger' | 'warning' | 'informative' {
   switch (priority) {
-    case "high":
-      return "danger";
-    case "medium":
-      return "warning";
-    case "low":
+    case 'high':
+      return 'danger';
+    case 'medium':
+      return 'warning';
+    case 'low':
     default:
-      return "informative";
+      return 'informative';
   }
 }
 
 function priorityLabel(priority: RecommendationPriority): string {
   switch (priority) {
-    case "high":
-      return "High";
-    case "medium":
-      return "Medium";
-    case "low":
+    case 'high':
+      return 'High';
+    case 'medium':
+      return 'Medium';
+    case 'low':
     default:
-      return "Low";
+      return 'Low';
   }
 }
 
@@ -185,7 +183,7 @@ export default function RecommendationWidget({
   return (
     <div className={mergeClasses(styles.root, className)}>
       <div className={styles.cardList}>
-        {data.recommendations.map((rec) => (
+        {data.recommendations.map(rec => (
           <Card key={rec.id} className={styles.card}>
             <CardHeader
               header={
@@ -213,11 +211,7 @@ export default function RecommendationWidget({
 
             {onApply && (
               <div className={styles.actionRow}>
-                <Button
-                  appearance="primary"
-                  size="small"
-                  onClick={() => onApply(rec.id)}
-                >
+                <Button appearance="primary" size="small" onClick={() => onApply(rec.id)}>
                   Apply
                 </Button>
               </div>

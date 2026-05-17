@@ -13,66 +13,49 @@
  * will render normally.
  */
 
-import React from "react";
-import "@testing-library/jest-dom";
-import DocumentViewerWidget from "../DocumentViewerWidget";
-import {
-  renderWithTheme,
-  webLightTheme,
-  webDarkTheme,
-  mockDocumentViewerProps,
-} from "../../__tests__/test-utils";
+import React from 'react';
+import '@testing-library/jest-dom';
+import DocumentViewerWidget from '../DocumentViewerWidget';
+import { renderWithTheme, webLightTheme, webDarkTheme, mockDocumentViewerProps } from '../../__tests__/test-utils';
 
-describe("DocumentViewerWidget", () => {
+describe('DocumentViewerWidget', () => {
   const props = mockDocumentViewerProps();
 
-  it("renders in light theme without error", () => {
-    const { container } = renderWithTheme(
-      <DocumentViewerWidget {...props} />,
-      webLightTheme
-    );
+  it('renders in light theme without error', () => {
+    const { container } = renderWithTheme(<DocumentViewerWidget {...props} />, webLightTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders in dark theme (webDarkTheme) without error", () => {
-    const { container } = renderWithTheme(
-      <DocumentViewerWidget {...props} />,
-      webDarkTheme
-    );
+  it('renders in dark theme (webDarkTheme) without error', () => {
+    const { container } = renderWithTheme(<DocumentViewerWidget {...props} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders within 200ms in light theme (NFR-01)", () => {
+  it('renders within 200ms in light theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<DocumentViewerWidget {...props} />, webLightTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders within 200ms in dark theme (NFR-01)", () => {
+  it('renders within 200ms in dark theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<DocumentViewerWidget {...props} />, webDarkTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders the file name in the toolbar", () => {
-    const { getByText } = renderWithTheme(
-      <DocumentViewerWidget {...props} />,
-      webLightTheme
-    );
-    expect(getByText("Agreement.pdf")).toBeTruthy();
+  it('renders the file name in the toolbar', () => {
+    const { getByText } = renderWithTheme(<DocumentViewerWidget {...props} />, webLightTheme);
+    expect(getByText('Agreement.pdf')).toBeTruthy();
   });
 
-  it("renders loading state without error", () => {
-    const { container } = renderWithTheme(
-      <DocumentViewerWidget {...props} isLoading={true} />,
-      webDarkTheme
-    );
+  it('renders loading state without error', () => {
+    const { container } = renderWithTheme(<DocumentViewerWidget {...props} isLoading={true} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders error state without throwing", () => {
+  it('renders error state without throwing', () => {
     const { container } = renderWithTheme(
       <DocumentViewerWidget {...props} error="Failed to load document." />,
       webDarkTheme

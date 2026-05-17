@@ -12,82 +12,59 @@
  * The widget chrome (toolbar buttons, caption) is verified instead.
  */
 
-import React from "react";
-import "@testing-library/jest-dom";
-import ImageViewerWidget from "../ImageViewerWidget";
-import {
-  renderWithTheme,
-  webLightTheme,
-  webDarkTheme,
-  mockImageViewerProps,
-} from "../../__tests__/test-utils";
+import React from 'react';
+import '@testing-library/jest-dom';
+import ImageViewerWidget from '../ImageViewerWidget';
+import { renderWithTheme, webLightTheme, webDarkTheme, mockImageViewerProps } from '../../__tests__/test-utils';
 
-describe("ImageViewerWidget", () => {
+describe('ImageViewerWidget', () => {
   const props = mockImageViewerProps();
 
-  it("renders in light theme without error", () => {
-    const { container } = renderWithTheme(
-      <ImageViewerWidget {...props} />,
-      webLightTheme
-    );
+  it('renders in light theme without error', () => {
+    const { container } = renderWithTheme(<ImageViewerWidget {...props} />, webLightTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders in dark theme (webDarkTheme) without error", () => {
-    const { container } = renderWithTheme(
-      <ImageViewerWidget {...props} />,
-      webDarkTheme
-    );
+  it('renders in dark theme (webDarkTheme) without error', () => {
+    const { container } = renderWithTheme(<ImageViewerWidget {...props} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 
-  it("renders within 200ms in light theme (NFR-01)", () => {
+  it('renders within 200ms in light theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<ImageViewerWidget {...props} />, webLightTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders within 200ms in dark theme (NFR-01)", () => {
+  it('renders within 200ms in dark theme (NFR-01)', () => {
     const start = performance.now();
     renderWithTheme(<ImageViewerWidget {...props} />, webDarkTheme);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(200);
   });
 
-  it("renders the image caption", () => {
-    const { getByText } = renderWithTheme(
-      <ImageViewerWidget {...props} />,
-      webLightTheme
-    );
-    expect(getByText("Figure 1: Agreement structure")).toBeTruthy();
+  it('renders the image caption', () => {
+    const { getByText } = renderWithTheme(<ImageViewerWidget {...props} />, webLightTheme);
+    expect(getByText('Figure 1: Agreement structure')).toBeTruthy();
   });
 
-  it("renders zoom control buttons", () => {
-    const { getByLabelText } = renderWithTheme(
-      <ImageViewerWidget {...props} />,
-      webLightTheme
-    );
-    expect(getByLabelText("Zoom in")).toBeTruthy();
-    expect(getByLabelText("Zoom out")).toBeTruthy();
-    expect(getByLabelText("Reset zoom and pan")).toBeTruthy();
+  it('renders zoom control buttons', () => {
+    const { getByLabelText } = renderWithTheme(<ImageViewerWidget {...props} />, webLightTheme);
+    expect(getByLabelText('Zoom in')).toBeTruthy();
+    expect(getByLabelText('Zoom out')).toBeTruthy();
+    expect(getByLabelText('Reset zoom and pan')).toBeTruthy();
   });
 
-  it("renders the image element with alt text", () => {
-    const { container } = renderWithTheme(
-      <ImageViewerWidget {...props} />,
-      webLightTheme
-    );
-    const img = container.querySelector("img");
+  it('renders the image element with alt text', () => {
+    const { container } = renderWithTheme(<ImageViewerWidget {...props} />, webLightTheme);
+    const img = container.querySelector('img');
     expect(img).toBeTruthy();
-    expect(img?.getAttribute("alt")).toBe("Contract diagram");
+    expect(img?.getAttribute('alt')).toBe('Contract diagram');
   });
 
-  it("renders loading state without error", () => {
-    const { container } = renderWithTheme(
-      <ImageViewerWidget {...props} isLoading={true} />,
-      webDarkTheme
-    );
+  it('renders loading state without error', () => {
+    const { container } = renderWithTheme(<ImageViewerWidget {...props} isLoading={true} />, webDarkTheme);
     expect(container.firstChild).toBeTruthy();
   });
 });
