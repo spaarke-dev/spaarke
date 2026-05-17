@@ -1,12 +1,19 @@
-# project-setup
-
 ---
 description: Generate project artifacts (README, PLAN, CLAUDE.md) from a design specification
 tags: [project-setup, artifacts, scaffolding, component]
 techStack: [all]
 appliesTo: ["projects/*/", "create artifacts", "generate project files"]
 alwaysApply: false
+exemplar: none-too-volatile
+last-reviewed: 2026-05-16
 ---
+
+# project-setup
+
+> **Last Reviewed**: 2026-05-16
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — flipped frontmatter above H1; extracted CLAUDE.md template to references/)
+> **Exemplar rationale**: Project artifacts are per-project; the template patterns are what's reusable. See `references/claudemd-template.md`.
+> **Developer note**: This is a COMPONENT skill — typically called BY `project-pipeline`. For most users, invoke `/project-pipeline` instead.
 
 ## Prerequisites
 
@@ -255,173 +262,21 @@ Use `project-plan.template.md` structure:
 
 ### Step 6: Generate CLAUDE.md
 
-Create project-specific AI context file:
+Create project-specific AI context file. **The canonical template** lives at [`references/claudemd-template.md`](references/claudemd-template.md) — copy that template, then replace `{placeholders}` (project name, dates, ADR list, key constraints) with project-specific values.
 
-```markdown
-# {Project Name} - AI Context
+Key sections the generated CLAUDE.md MUST contain (from the template):
 
-> **Purpose**: This file provides context for Claude Code when working on {project-name}.
-> **Always load this file first** when working on any task in this project.
+1. **Project Status** — Phase / Last Updated / Current Task / Next Action
+2. **Quick Reference** — Key Files + Project Metadata
+3. **Context Loading Rules** — what to load on session start
+4. **🚨 MANDATORY: Task Execution Protocol** — bind every "work on task X" trigger to the `task-execute` skill
+5. **Multi-File Work Decomposition** — when to parallelize vs serialize
+6. **Key Technical Constraints** — extracted from `spec.md` (ADRs, tech stack rules)
+7. **Decisions Made** — empty initially; updated as project progresses
+8. **Implementation Notes** — gotchas, workarounds, learnings
+9. **Resources** — applicable ADRs, related projects, external docs
 
----
-
-## Project Status
-
-- **Phase**: Planning
-- **Last Updated**: {YYYY-MM-DD}
-- **Current Task**: Not started
-- **Next Action**: Run task-create to decompose plan into task files
-
----
-
-## Quick Reference
-
-### Key Files
-- [`spec.md`](spec.md) - Original design specification (permanent reference)
-- [`README.md`](README.md) - Project overview and graduation criteria
-- [`plan.md`](plan.md) - Implementation plan and WBS
-- [`current-task.md`](current-task.md) - **Active task state** (for context recovery)
-- [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) - Task tracker (will be created by task-create)
-
-### Project Metadata
-- **Project Name**: {project-name}
-- **Type**: {API/PCF/Plugin/Integration/etc. - from spec}
-- **Complexity**: {Low/Medium/High - from spec analysis}
-
----
-
-## Context Loading Rules
-
-When working on this project, Claude Code should:
-
-1. **Always load this file first** when starting work on any task
-2. **Check current-task.md** for active work state (especially after compaction/new session)
-3. **Reference spec.md** for design decisions, requirements, and acceptance criteria
-4. **Load the relevant task file** from `tasks/` based on current work
-5. **Apply ADRs** relevant to the technologies used (loaded automatically via adr-aware)
-
-**Context Recovery**: If resuming work, see [Context Recovery Protocol](../../docs/procedures/context-recovery.md)
-
----
-
-## 🚨 MANDATORY: Task Execution Protocol
-
-**ABSOLUTE RULE**: All task work MUST use the `task-execute` skill. DO NOT read POML files directly and implement manually.
-
-### Auto-Detection Rules (Trigger Phrases)
-
-When you detect these phrases from the user, invoke task-execute skill:
-
-| User Says | Required Action |
-|-----------|-----------------|
-| "work on task X" | Execute task X via task-execute |
-| "continue" | Execute next pending task (check TASK-INDEX.md for next 🔲) |
-| "continue with task X" | Execute task X via task-execute |
-| "next task" | Execute next pending task via task-execute |
-| "keep going" | Execute next pending task via task-execute |
-| "resume task X" | Execute task X via task-execute |
-| "pick up where we left off" | Load current-task.md, invoke task-execute |
-
-**Implementation**: When user triggers task work, invoke Skill tool with `skill="task-execute"` and task file path.
-
-### Why This Matters
-
-The task-execute skill ensures:
-- ✅ Knowledge files are loaded (ADRs, constraints, patterns)
-- ✅ Context is properly tracked in current-task.md
-- ✅ Proactive checkpointing occurs every 3 steps
-- ✅ Quality gates run (code-review + adr-check) at Step 9.5
-- ✅ Progress is recoverable after compaction
-
-**Bypassing this skill leads to**:
-- ❌ Missing ADR constraints
-- ❌ No checkpointing - lost progress after compaction
-- ❌ Skipped quality gates
-
-### Parallel Task Execution
-
-When tasks can run in parallel (no dependencies), each task MUST still use task-execute:
-- Send one message with multiple Skill tool invocations
-- Each invocation calls task-execute with a different task file
-- Example: Tasks 020, 021, 022 in parallel → Three separate task-execute calls in one message
-
-See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for complete protocol.
-
-### 🚨 MUST: Multi-File Work Decomposition
-
-**For tasks modifying 4+ files, Claude Code MUST:**
-
-1. **Decompose into dependency graph**:
-   - Group files by module/component
-   - Identify which changes depend on others
-   - Separate parallel-safe work from sequential work
-
-2. **Delegate to subagents in parallel where safe**:
-   - Use Task tool with `subagent_type="general-purpose"`
-   - Send ONE message with MULTIPLE Task tool calls for independent work
-   - Each subagent handles one module/component
-   - Provide each subagent with specific files and constraints
-
-3. **Parallelize when**:
-   - Files are in different modules → CAN parallelize
-   - Files have no shared interfaces → CAN parallelize
-   - Work is independent (no imports between files) → CAN parallelize
-
-4. **Serialize when**:
-   - Files have tight coupling (shared state, imports)
-   - One file must be created before another uses it
-   - Sequential logic required
-
-**Example**: Task modifies 6 files (3 API endpoints + 2 PCF components + 1 shared types)
-- Phase 1 (serial): SharedTypes.ts (dependency of others)
-- Phase 2 (parallel): 3 subagents handle API endpoints, Component A, Component B
-
-See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md) for complete protocol.
-
----
-
-## Key Technical Constraints
-
-{Extract key constraints from spec.md, examples:}
-- Must use .NET 8 Minimal API (no Azure Functions) - per ADR-001
-- PCF controls must use Fluent UI v9, no v8, dark mode required - per ADR-006, ADR-021
-- No HTTP calls from Dataverse plugins - per ADR-002
-- Redis-first caching strategy - per ADR-009
-
----
-
-## Decisions Made
-
-<!-- Log key architectural/implementation decisions here as project progresses -->
-<!-- Format: Date, Decision, Rationale, Who -->
-
-*No decisions recorded yet*
-
----
-
-## Implementation Notes
-
-<!-- Add notes about gotchas, workarounds, or important learnings during implementation -->
-
-*No notes yet*
-
----
-
-## Resources
-
-### Applicable ADRs
-{List ADRs relevant to this project - to be filled in by project-pipeline or manually}
-
-### Related Projects
-{List related projects if any}
-
-### External Documentation
-{Links to external docs, APIs, SDKs relevant to this project}
-
----
-
-*This file should be kept updated throughout project lifecycle*
-```
+See `references/claudemd-template.md` for the full template body to paste in.
 
 ### Step 7: Generate current-task.md
 
@@ -650,6 +505,18 @@ Before completing project-setup, verify:
 - ✅ Side-effect-free (no git operations, no external calls)
 
 For most users, **use project-pipeline instead** - it orchestrates this skill along with resource discovery, task creation, and branching.
+
+---
+
+## Failure Modes & Recovery
+
+| Failure | Cause | Prevention / Recovery |
+|---|---|---|
+| Generated CLAUDE.md has unfilled `{placeholders}` left in body | Author copy-pasted the template but forgot to fill in project name, dates, or ADR list | Always grep generated CLAUDE.md for `{[a-z]` patterns before completing project setup — they signal unfilled placeholders. |
+| Skill invoked directly when user actually needed `/project-pipeline` | User typed "create project artifacts" instead of "start project" | The Developer Note explicitly redirects to project-pipeline. If you find yourself doing resource discovery or task creation inside this skill, you've drifted out of scope — stop and switch to project-pipeline. |
+| Project artifacts created but folder structure incomplete (missing `tasks/`, `notes/`, etc.) | Skill ran but template enforcement was loose | Always create the full directory tree (per Conventions section) — empty directories should have `.gitkeep` placeholders. |
+| Two `## Resources` sections appeared in generated CLAUDE.md | Old SKILL.md duplication propagated through generation | Fixed in Wave 2b-B (2026-05-16) by extracting the canonical template to `references/claudemd-template.md`. The template has ONE `## Resources` section; the duplicate has been removed. |
+| Generated CLAUDE.md references stale skill names | Template references a skill that has been renamed (e.g., `design-to-project` → `design-to-spec`) | Template references skills indirectly ("the task-execute skill") so renames don't break it. But if a renamed skill is referenced by its old name, fix the template at `references/claudemd-template.md`. |
 
 ---
 
