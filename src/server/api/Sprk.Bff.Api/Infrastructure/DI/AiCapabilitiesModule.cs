@@ -13,11 +13,16 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   2. ICapabilityManifestLoader / DataverseCapabilityManifestLoader (singleton) — Dataverse loader
 ///   3. CapabilityManifestInitializer (hosted service) — populates manifest at startup
 ///
+/// UNCONDITIONAL registrations (AIPU2-011):
+///   4. ManifestRefreshOptions (IOptions) — configures refresh interval + webhook secret
+///   5. ManifestRefreshService (singleton hosted service + IManifestRefreshTrigger) —
+///      15-minute polling loop + Channel-based webhook wake-up
+///
 /// Planned registrations (future AIPU2 tasks):
-///   4. AiSearchService         — Cross-provider semantic and hybrid search orchestration
-///   5. SummarizationService    — Document and conversation summarisation
-///   6. CitationService         — Source citation extraction and verification
-///   7. MultiProviderAiService  — Provider routing (Azure OpenAI, Anthropic, etc.)
+///   6. AiSearchService         — Cross-provider semantic and hybrid search orchestration
+///   7. SummarizationService    — Document and conversation summarisation
+///   8. CitationService         — Source citation extraction and verification
+///   9. MultiProviderAiService  — Provider routing (Azure OpenAI, Anthropic, etc.)
 ///
 /// Prerequisites (must already be registered before calling AddAiCapabilitiesModule):
 ///   - <c>IConfiguration</c>       — registered by the host
@@ -62,6 +67,22 @@ public static class AiCapabilitiesModule
         // Hosted service: populates the manifest before the first HTTP request is served.
         // ADR-001: IHostedService (no Azure Functions).
         services.AddHostedService<CapabilityManifestInitializer>();
+
+        // ── AIPU2-011: ManifestRefreshService ────────────────────────────────
+        // Options: bound from "Capabilities" section (RefreshIntervalMinutes, WebhookSecret).
+        services
+            .AddOptions<ManifestRefreshOptions>()
+            .Bind(configuration.GetSection(ManifestRefreshOptions.SectionName));
+
+        // ManifestRefreshService: singleton that also implements IManifestRefreshTrigger.
+        // Registered as both IHostedService (for the background loop) and IManifestRefreshTrigger
+        // (for the webhook endpoint to inject and call TriggerRefresh()).
+        // ADR-010: the concrete type is registered once; the interface forwards to the same instance.
+        services.AddSingleton<ManifestRefreshService>();
+        services.AddSingleton<IManifestRefreshTrigger>(sp =>
+            sp.GetRequiredService<ManifestRefreshService>());
+        services.AddHostedService(sp =>
+            sp.GetRequiredService<ManifestRefreshService>());
 
         // TODO AIPU2-xxx: Register AiSearchService, SummarizationService, CitationService, MultiProviderAiService
 

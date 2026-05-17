@@ -3,6 +3,8 @@ using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Fluent;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Ai.Audit;
+using Sprk.Bff.Api.Services.Ai.Memory;
+using Sprk.Bff.Api.Services.Ai.PromptLibrary;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -85,7 +87,20 @@ public static class AiPersistenceModule
             databaseName: databaseName,
             logger: sp.GetRequiredService<ILogger<AuditLogService>>()));
 
-        // TODO AIPU2-xxx: Register CosmosPromptStore, CosmosMemoryStore, CosmosFeedbackStore
+        // AIPU2-034: MatterMemoryService — per-matter structured AI memory (ADR-015 Tier 3, GDPR erasure supported).
+        // Scoped: CosmosClient is thread-safe singleton; MatterMemoryService reads ETag per request.
+        // Uses the same CosmosClient singleton and databaseName resolved above.
+        services.AddScoped<IMatterMemoryService>(sp => new MatterMemoryService(
+            cosmosClient: sp.GetRequiredService<CosmosClient>(),
+            databaseName: databaseName,
+            logger: sp.GetRequiredService<ILogger<MatterMemoryService>>()));
+
+        // AIPU2-035: PromptLibraryService — Personal + Team template CRUD (Cosmos DB prompts container).
+        // Scoped: one instance per HTTP request; shares the singleton CosmosClient.
+        // Org + System template tiers are deferred to AIPU2-036 (Dataverse integration).
+        services.AddScoped<IPromptLibraryService, PromptLibraryService>();
+
+        // TODO AIPU2-xxx: Register CosmosFeedbackStore
 
         return services;
     }

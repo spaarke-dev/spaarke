@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Ai.Safety;
+using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -78,6 +79,13 @@ public static class AiSafetyModule
             var telemetry  = sp.GetRequiredService<GroundednessCheckTelemetry>();
             return new GroundednessCheckService(httpClient, logger, telemetry);
         });
+
+        // ICitationVerificationService / CitationVerificationService — AIPU2-022
+        // Singleton: stateless orchestrator; all IVerificationProvider implementations are also singletons.
+        // IEnumerable<IVerificationProvider> resolves to an empty collection until AIPU2-023+ registers
+        // concrete providers (InternalIndexProvider, CourtListenerProvider, etc.).
+        // ADR-010: interface registered for testability (unit tests inject stub providers).
+        services.AddSingleton<ICitationVerificationService, CitationVerificationService>();
 
         return services;
     }

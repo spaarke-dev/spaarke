@@ -66,6 +66,11 @@ public static class JobProcessingModule
             configuration.GetSection(Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions.SectionName));
         services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>();
 
+        // RecordSyncJob — incremental Dataverse to AI Search record sync (AIPU2-041)
+        services.Configure<Sprk.Bff.Api.Services.Jobs.RecordSyncOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Services.Jobs.RecordSyncOptions.SectionName));
+        services.AddHostedService<Sprk.Bff.Api.Services.Jobs.RecordSyncJob>();
+
         services.Configure<ReindexingOptions>(
             configuration.GetSection(ReindexingOptions.SectionName));
 
@@ -79,6 +84,7 @@ public static class JobProcessingModule
         Console.WriteLine("\u2713 Document vector backfill service registered (enable via config)");
         Console.WriteLine("\u2713 Embedding migration service registered (enable via config)");
         Console.WriteLine("\u2713 Scheduled RAG indexing service registered (enable via config)");
+        Console.WriteLine("\u2713 RecordSyncJob registered (enable via RecordSync:Enabled=true)");
 
         return services;
     }

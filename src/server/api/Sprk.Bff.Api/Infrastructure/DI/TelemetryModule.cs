@@ -26,6 +26,8 @@ public static class TelemetryModule
                 metrics.AddMeter("Sprk.Bff.Api.Finance");
                 // AI Safety meter (AIPU2-020): Prompt Shield blocked_total + latency_ms
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.PromptShieldTelemetry.MeterName);
+                // AI Capabilities meter (AIPU2-011): ai_capability_manifest_refresh_total
+                metrics.AddMeter("Sprk.Bff.Api.AiCapabilities");
             })
             .WithTracing(tracing =>
             {

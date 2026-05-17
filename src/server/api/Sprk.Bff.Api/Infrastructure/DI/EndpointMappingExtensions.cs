@@ -157,6 +157,10 @@ public static class EndpointMappingExtensions
 
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
+        // AIPU2-035: Prompt Library — Personal, Team, Org, System template CRUD + render
+        app.MapPromptLibraryEndpoints();
+        // AI Capabilities: webhook-triggered manifest refresh (AIPU2-011)
+        app.MapCapabilityEndpoints();
         app.MapChatEndpoints();
         try { app.MapChatDocumentEndpoints(); }
         catch (Exception ex)
