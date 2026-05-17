@@ -225,15 +225,17 @@ OData API = DETAIL + ACTION  (get full record, create, update, filter by exact c
 
 ## 5. Work History — Session Persistence
 
-### 5.1 Architecture: Redis + Cosmos DB (No Dataverse)
+### 5.1 Architecture: Redis + Cosmos DB (Write-Through)
 
-Session data uses Redis + Cosmos DB only. Dataverse is too expensive ($40/GB vs Cosmos $0.25/GB) and wrong-shaped for high-frequency message-level reads/writes.
+Session data uses Redis + Cosmos DB with **write-through** (every message written to both). No idle-flush — no data loss if user takes a phone call or Redis evicts.
 
-| Tier | Store | What | TTL |
-|------|-------|------|-----|
-| Hot | **Redis** | Active session, streaming state, pending actions | 24h sliding |
-| Warm | **Cosmos DB** | Work history — full context, all artifacts | 90 days |
-| Cold | **Azure Blob** | Compliance archive | Configurable (years) |
+| Tier | Store | What | TTL | Write Pattern |
+|------|-------|------|-----|---------------|
+| Hot | **Redis** | Active session, streaming state | 24h sliding | Every message |
+| Warm | **Cosmos DB** | Full session (messages, widgets, tools, decisions) | 90 days | Write-through (every message) |
+| Cold | **Azure Blob** | Compliance archive | Configurable (years) | Periodic export |
+
+**Why write-through, not idle-flush:** Users take phone calls, get interrupted, close browsers. A 5-min idle threshold loses data. Write-through costs marginally more Cosmos RUs but guarantees zero message loss. Redis serves as the read-optimized hot cache; Cosmos is the durable store.
 
 Cosmos DB is provisioned alongside the AI Foundry Agent Service (which uses the same Cosmos DB for BYO thread storage).
 
@@ -263,7 +265,13 @@ When a user returns to a previous session:
 
 Target: < 500ms restore time.
 
-**LLM Summarization**: At 15 messages or 8,000 tokens, summarize using gpt-4o-mini. On restore, send summary + last 10 messages. 80-90% token cost reduction vs. full replay.
+**LLM Summarization**: At **25 messages** or 8,000 tokens, summarize using **GPT-4o** (not mini — legal context requires higher quality to avoid dropping qualifications). On restore, send summary + last 10 verbatim messages.
+
+**Summarization safety for legal work:**
+- Use GPT-4o (not mini) — the quality difference matters for retaining legal qualifications ("except in cases of gross negligence")
+- Extract **key legal conclusions** as structured data alongside the narrative summary
+- Full verbatim messages always available in Cosmos on demand (never deleted by summarization)
+- Threshold: 25 messages (legal conversations are denser than general chat)
 
 ### 5.4 Prompt Library
 
@@ -275,7 +283,55 @@ Users save favorite prompts as reusable templates:
 | Template | "Review all active matters for {clientName} and summarize status, budget, and upcoming deadlines" |
 | Variables | `{clientName}` — typed, with entity-ref pickers auto-filled from context |
 | Ownership | personal / team / organization / system (4-tier) |
-| Storage | Cosmos DB (not Dataverse) |
+| Storage | Personal/team → Cosmos DB. Organization/system → Dataverse (admin UX consistency) |
+
+### 5.5 Audit Trail (Compliance Log)
+
+An **append-only** audit log captures every AI interaction for compliance and malpractice defense:
+
+| Field | Content |
+|-------|---------|
+| timestamp | UTC ISO-8601 |
+| userId | Azure AD object ID |
+| sessionId | Session identifier |
+| action | "chat_response", "tool_call", "document_access", "citation_generated" |
+| toolsCalled | List of tools invoked this turn |
+| documentsAccessed | Document IDs retrieved/viewed |
+| responseHash | SHA-256 of full AI response (for tampering detection) |
+| safetyResults | { promptShield: pass/fail, groundedness: score, citationsVerified: count } |
+| matterContext | Matter ID, entity type (for privilege audit) |
+
+**Storage:** Cosmos DB container with **immutable policy** (append-only, no deletes). Separate from work history — this is a compliance artifact, not a user-facing feature.
+
+**Retention:** Configurable per tenant (default: 7 years for legal). Exportable to Azure Blob for cold archive.
+
+### 5.6 Matter-Scoped AI Memory
+
+Persistent structured memory per matter. When a user starts a new session on the same matter, the AI already knows key context:
+
+| Memory Type | Example | How Populated |
+|------------|---------|---------------|
+| Parties | "Company X (plaintiff) vs Company Y (defendant)" | AI extracts from first session, user confirms |
+| Key dates | "Markman hearing July 15, 2026" | AI extracts from documents + user input |
+| Prior analyses | "3 weak claims identified in patent review (May 12)" | Auto-saved from completed analyses |
+| Key facts | "Contract value $2.4M, 3-year term, auto-renewal" | AI extracts, user validates |
+
+**Storage:** Cosmos DB, partitioned by `tenantId/matterId`. Structured JSON (not free-text).
+
+**Integration:** On session start, if matter context is provided, load matter memory into system prompt (adds ~200-500 tokens depending on density). This dramatically reduces re-prompting for returning users.
+
+**Lifecycle:** Memory persists until matter is closed or user explicitly clears it.
+
+### 5.7 Feedback Collection
+
+Simple thumbs up/down + optional text feedback on every AI response:
+
+- Stored in Cosmos (per response, linked to session + turn)
+- Aggregated per-playbook, per-capability, per-tool
+- Powers quality improvement: which capabilities produce value vs. noise
+- Future: feeds fine-tuning signal and capability ranking
+
+**UI:** Non-intrusive thumbs icons on each AI message. Optional text only on thumbs-down.
 
 ---
 
@@ -308,9 +364,25 @@ interface WorkspaceWidget<TData, TActions> {
 
   // Persistence — for work history save/restore
   serializeState(): string;
-  restoreState(state: string): void;
+  restoreState(state: string): void;  // "data-refreshed restore" — re-fetch current data, not stale snapshot
 }
 ```
+
+**Widget restore contract:** `restoreState()` performs a **data-refreshed restore** — it re-fetches current data from the source (Dataverse, AI Search, etc.) using the stored query/entity reference, NOT a stale data snapshot. This ensures widgets show current state on session resume. The serialized state stores the widget TYPE + query parameters + layout, not the data itself.
+
+**R1 widget status:** Existing R1 widgets do NOT implement serialize/restore. R2 adds this interface; R1 widgets need `serializeState()`/`restoreState()` methods added (estimated: 1-2 hours per widget).
+
+### 6.3 Document Comparison / Redlining
+
+Table-stakes for legal AI. "Compare this draft to the executed version" is a daily workflow.
+
+| Component | Purpose |
+|-----------|---------|
+| **CompareDocumentsTool** | AI tool that accepts two document IDs, produces structured diff (additions, deletions, modifications per section) |
+| **RedlineViewerWidget** | Workspace widget showing side-by-side view with change tracking highlights |
+| **AI narration** | Model generates "Summary of material differences" based on diff output |
+
+**Integration:** User says "compare this draft to the final version" → router activates CompareDocumentsTool → tool fetches both docs from SPE → produces diff → emits `workspace_widget` SSE event with RedlineViewer + diff data → Context pane shows AI-narrated summary of changes.
 
 ### 6.3 Embedded Wizards
 
@@ -692,14 +764,33 @@ User message + Retrieved documents
 
 **Service:** Azure AI Content Safety — Groundedness Detection API (GA, standalone)
 
-**Integration point:** BFF buffers model response (or checks in chunks), calls Groundedness API, annotates ungrounded segments before streaming to user.
+**Streaming vs. Groundedness tradeoff:**
 
-**Behavior:**
-- Grounded claims → stream normally
-- Ungrounded claims → stream with visual annotation ("unverified" indicator in UI)
-- Severely ungrounded → append disclaimer: "This response contains claims not directly supported by the source documents."
+Groundedness requires the complete response (or a meaningful chunk) to verify against sources. Streaming sends tokens immediately. These conflict.
 
-**Latency:** ~100-200ms on buffered response. Can run on completed chunks while earlier tokens are already streaming.
+**R2 approach: Stream optimistically, annotate retroactively (Option 2)**
+
+```
+Tokens stream to user immediately via SSE (good perceived latency)
+         │
+         ▼ (response complete)
+BFF buffers full response, calls Groundedness API (~100-200ms)
+         │
+         ▼
+Emit follow-up SSE event: { type: "safety_annotation",
+  groundedness: { ungrounded_segments: [...], score: 0.85 },
+  confidence: "high" }
+         │
+         ▼
+Client UI retroactively annotates ungrounded segments
+(visual highlight appears ~200ms after last token)
+```
+
+**User experience:** Response streams in real-time (good). 200ms after completion, ungrounded segments get subtle visual flagging. Users see the full response form naturally, then safety annotations appear.
+
+**R3 evolution:** Chunk-level checking (buffer in sentence-sized chunks, check each, adds ~100ms per chunk but provides inline annotations during streaming).
+
+**Decision rationale for legal buyers:** "We stream for responsiveness, then verify for safety. All claims are checked against source documents within 200ms of completion. Unverified claims are visually flagged. Full audit trail captures safety results."
 
 #### 3. Citation Verification (Post-LLM, Custom)
 
@@ -731,6 +822,32 @@ User message + Retrieved documents
 - Zero additional latency (filter is part of the search query)
 
 **Existing state:** Entity-scoped search (R1) partially covers this — searches are scoped to a specific matter's SPE container. R2 extends this to cross-matter searches where results from multiple matters must be privilege-filtered.
+
+**Cross-matter conversation safety:** When RAG scope changes across matter boundaries mid-conversation (user pivots from Matter A to Matter B), source content from Matter A in conversation history is a privilege leakage vector. **Resolution:** Strip retrieved document content from history when matter context changes, keeping only the AI's conclusions (which contain no verbatim privileged text). User is notified: "Switching matter context — prior document details cleared from context."
+
+#### 5. Confidence Scoring (Post-LLM)
+
+**What:** Beyond binary groundedness (grounded/not), provide calibrated confidence indicators so legal professionals can gauge reliance.
+
+| Level | Criteria | UI Indicator |
+|-------|----------|-------------|
+| **High** | Claim directly supported by 2+ source passages | Green confidence bar |
+| **Medium** | Supported by 1 source passage, some inference | Yellow confidence bar |
+| **Low** | Significant inference, limited source support | Orange confidence bar + disclaimer |
+
+**Implementation:** Count source passages that semantically match each claim segment (reuse the groundedness API's segment mapping). Emit as part of the `safety_annotation` SSE event.
+
+**Value:** Legal professionals calibrate their reliance on AI outputs. Builds trust incrementally — users learn which types of queries produce high-confidence vs. low-confidence results.
+
+#### 6. Structured Output Validation (SSE Event Integrity)
+
+**What:** AI tool responses emitting structured SSE events (workspace_widget, context_update) MUST produce valid JSON matching predefined schemas. Malformed output silently breaks the UI.
+
+**Implementation:**
+- Define JSON Schema for each SSE event type (workspace_widget payload, context_update payload)
+- Use Azure OpenAI's **structured output mode** (JSON mode with schema) for tool-calling responses that produce widget data
+- BFF validates tool output against schema BEFORE emitting SSE
+- If validation fails: emit generic fallback widget with raw text (never break the UI)
 
 ### 9.3 Governance Layer Architecture
 
@@ -840,32 +957,74 @@ public class FoundryWorkflowAgent : ISprkAgent { /* delegates to Foundry Workflo
 |------|-----------|
 | **Dynamic capability orchestration** | CapabilityManifest, per-turn tool[] injection via router, OrchestratorPromptBuilder (stable prefix) |
 | **Two-layer routing + fallback** | Keyword classifier (Layer 1), GPT-4o-mini pre-check (Layer 2), broad superset fallback (Layer 3). No meta-tools. Single LLM call per turn always. |
-| **AI Safety & Governance** | Prompt Shields (pre-LLM), Groundedness Detection (post-LLM), Citation Verification (custom), Privilege-Aware Retrieval (index filter) |
-| **Model tiering** | GPT-4o-mini deployment for classification + summarization; GPT-4o for main conversation |
+| **AI Safety & Governance** | Prompt Shields, Groundedness (stream + retroactive annotate), Citation Verification, Privilege Filter, Confidence Scoring, Structured Output Validation |
+| **Audit trail** | Append-only compliance log in Cosmos (immutable policy). Every AI interaction logged with response hash + safety results. |
+| **Model tiering** | GPT-4o-mini for classification; GPT-4o for main conversation + legal summarization |
 | **Latency monitoring** | Azure Monitor metrics: TTFT, TBT, TTLT, prompt token tracking, alert thresholds |
-| **Capability library** | Define all actions/tools/skills/knowledge as catalog entries in Dataverse; build manifest refresh |
+| **Capability library** | Define all actions/tools/skills/knowledge as catalog entries in Dataverse; webhook + polling manifest refresh |
 | **Hybrid search** | DataverseQueryTools (OData), spaarke-records-index sync pipeline |
+| **Document comparison** | CompareDocumentsTool + RedlineViewerWidget (table-stakes legal workflow) |
 | **Adaptive Context pane** | ContextWidgetRegistry, playbook gallery → entity info → sources → progress |
-| **Workspace tabs** | Tab management in center pane, multiple active widgets |
+| **Workspace tabs** | Tab management in center pane, max 3 active widgets |
 | **Default playbook** | Dataverse record, auto-load in standalone mode (accelerator, not gate) |
-| **Work history** | Cosmos DB warm tier, full session persistence, session restore |
-| **Prompt library** | Cosmos DB storage, 4-tier ownership, variable templates |
-| **Interactive widgets** | Action callbacks, edit mode, serialize/restore state |
+| **Work history** | Cosmos DB write-through (every message), session restore, widget state |
+| **Matter-scoped AI memory** | Persistent structured facts per matter (parties, dates, prior analyses) in Cosmos |
+| **Session summarization** | GPT-4o at 25 messages; extract key legal conclusions as structured data alongside narrative |
+| **Prompt library** | Personal/team in Cosmos, org/system in Dataverse (admin UX consistency) |
+| **Feedback collection** | Thumbs up/down + text per response, aggregated per-capability |
+| **Interactive widgets** | Action callbacks, edit mode, data-refreshed serialize/restore |
 | **Embedded wizards** | Adapt WizardDialog for Workspace rendering |
 | **Per-tool error isolation** | Catch per-tool in SprkChatAgentFactory.ResolveTools |
-| **Pane interaction protocol** | Formal SSE event contract (workspace_widget, context_update, etc.) |
-| **Session summarization** | GPT-4o-mini auto-summarization at 15 messages or 4000 history tokens; keeps prompt within budget |
+| **Pane interaction protocol** | Formal SSE event contract with JSON Schema validation (workspace_widget, context_update, safety_annotation) |
+| **ISprkAgent boundary** | Interface + DirectOpenAiAgent impl — multi-agent ready for R3 |
 
-### R3 Scope (Future — Distribution + Polish)
+### R3 Scope (Future — Distribution + Multi-Agent)
 
 | Area | Work Items |
 |------|-----------|
+| Multi-agent orchestration | MultiAgentOrchestrator impl of ISprkAgent; parallel sub-agents for complex workflows |
+| Chunk-level groundedness | Real-time safety annotations during streaming (per-sentence buffering) |
 | PWA distribution | Azure Static Web App, manifest.json, service worker |
 | Teams Tab | NAA auth, Teams manifest, sideload |
 | Command palette | Ctrl+K overlay for power users |
 | Adaptive complexity | Guided vs. expert mode based on usage |
 | Notification integration | Background AI process completion alerts |
+| Westlaw/Lexis integration | External citation verification against commercial legal databases |
+
+### Model Agnosticism
+
+The architecture is designed to be **model-agnostic**. By the time R2 ships, GPT-4.1, o3, or other models may be GA.
+
+- `ISprkAgent` interface decouples orchestration from any specific model
+- Latency estimates (TTFT, TBT) are GPT-4o-specific — recalibrate when changing models
+- Prompt token budget (~9000) may need adjustment for different model context windows
+- Model selection is configuration (Azure OpenAI deployment name), not code change
+- OrchestratorPromptBuilder should not assume model-specific behavior
 
 ---
 
-*Draft design document — 2026-05-17. Review and refine before running /design-to-spec.*
+## 14. Decisions Log (Pre-Spec)
+
+All significant design decisions resolved in this document, for spec.md traceability:
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D-01 | Single LLM call per turn always (no meta-tools) | Eliminates double-call latency; prompt caching preserved |
+| D-02 | Router pre-selects tools[] (BFF controls, LLM doesn't see changes) | Decouples tool selection from prompt content |
+| D-03 | Stream + retroactive annotation for groundedness | Best tradeoff of perceived latency vs. safety for R2 |
+| D-04 | GPT-4o for legal summarization (not mini) | Legal context requires high quality to retain qualifications |
+| D-05 | 25 messages before summarization (not 15) | Legal conversations are denser |
+| D-06 | Write-through to Cosmos (not idle-flush) | No data loss on interruption |
+| D-07 | Prompt library split: personal in Cosmos, org/system in Dataverse | Matches admin UX expectations |
+| D-08 | Data-refreshed widget restore (not stale snapshot) | Legal professionals need current data |
+| D-09 | Strip source content on cross-matter pivot (keep conclusions only) | Prevents privilege leakage in conversation history |
+| D-10 | Append-only audit log separate from work history | Compliance artifact with immutable policy |
+| D-11 | No Foundry Agent Framework for orchestration | We need per-turn tool control + custom SSE — Foundry is capability provider only |
+| D-12 | Defer Foundry Toolbox/hybrid integration | Platform still rapidly evolving; adds complexity without clear benefit yet |
+| D-13 | ISprkAgent boundary drawn now, multi-agent in R3 | Future-proofs without over-engineering R2 |
+| D-14 | Webhook + polling for manifest refresh | Webhook is primary (low-latency), polling is backstop |
+| D-15 | Architecture is model-agnostic | Config-driven model selection; estimates are for current GPT-4o |
+
+---
+
+*Design document — 2026-05-17. Ready for /design-to-spec.*

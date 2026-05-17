@@ -171,6 +171,12 @@
 | **PromptShieldService** | Service | Calls Azure AI Content Safety Prompt Shields API | `Services/Ai/Safety/PromptShieldService.cs` |
 | **GroundednessCheckService** | Service | Calls Azure AI Content Safety Groundedness API | `Services/Ai/Safety/GroundednessCheckService.cs` |
 | **CitationVerificationService** | Service | Custom — verifies legal citations against index | `Services/Ai/Safety/CitationVerificationService.cs` |
+| **ConfidenceScoringService** | Service | Scores AI output confidence (high/medium/low) based on source passage count | `Services/Ai/Safety/ConfidenceScoringService.cs` |
+| **AuditLogService** | Service | Append-only compliance log (user, action, docs, response hash, safety results) | `Services/Ai/Audit/AuditLogService.cs` |
+| **MatterMemoryService** | Service | Persistent per-matter structured facts (parties, deadlines, prior analyses) | `Services/Ai/Memory/MatterMemoryService.cs` |
+| **FeedbackService** | Service | Thumbs up/down + text feedback per response, stored in Cosmos | `Services/Ai/Feedback/FeedbackService.cs` |
+| **CompareDocumentsTool** | AI Tool | Produces diff/redline between two document versions | `Services/Ai/Chat/Tools/CompareDocumentsTool.cs` |
+| **RedlineViewerWidget** | Client widget | Side-by-side diff with AI-narrated material differences | `@spaarke/ai-widgets` |
 | **WorkspaceWidgetRegistry** | Client library | Registry for workspace pane widgets (lazy-load) | `@spaarke/ai-widgets` or extend `@spaarke/ai-outputs` |
 | **ContextWidgetRegistry** | Client library | Registry for context pane widgets (lazy-load) | `@spaarke/ai-widgets` or extend `@spaarke/ai-outputs` |
 | **SessionPersistenceService** | Service | Writes work history to Cosmos DB (messages, widgets, artifacts) | `Services/Ai/Sessions/SessionPersistenceService.cs` |
@@ -185,8 +191,8 @@
 
 | Component | Extension | What Changes |
 |-----------|-----------|--------------|
-| **SprkChatAgentFactory** | Dynamic tool injection | Accepts `activeCapabilities` set per-turn instead of static playbook capabilities |
-| **ChatSessionManager** | Cosmos DB tier | Flush to Cosmos on session idle/close; restore from Cosmos |
+| **SprkChatAgentFactory** | Dynamic tool injection | Router provides tools[] per-turn; factory passes to Azure OpenAI |
+| **ChatSessionManager** | Write-through persistence | Every message written to both Redis (hot) AND Cosmos (durable). No idle-flush. |
 | **ChatEndpoints** | SSE event types | New event types: workspace_widget, context_update, workspace_action |
 | **SprkChat** (UI) | Pane coordination | Dispatches/subscribes cross-pane events |
 | **ThreePaneLayout** | Tab support | Workspace pane supports tabbed multi-widget layout (max 3) |
@@ -216,63 +222,80 @@ User sends message: "Compare indemnity caps to our Q2 budget"
 ┌─────────────────────────────────────────────────────────┐
 │ ChatEndpoints.SendMessageAsync                          │
 │                                                         │
-│ 1. Load session from Redis (active capabilities, history)│
-│ 2. Call SprkChatAgentFactory.CreateAgentAsync            │
+│ 1. Load session from Redis (history, matter context)    │
+│ 2. Write message to Cosmos (write-through audit)        │
 └───────────────────────────────┬─────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────┐
-│ SprkChatAgentFactory                                    │
+│ CapabilityRouter (PRE-selects tools[] — NO LLM here)    │
 │                                                         │
-│ 3. Build system prompt:                                 │
-│    - Capability INDEX (compact, always present)         │
-│    - Active tool SCHEMAS (from session state)           │
-│    - Conversation history (last N messages + summary)   │
+│ 3. Layer 1: Keyword classify user message (~0ms)        │
+│    → If confident: select tools[]                       │
+│    → If uncertain: Layer 2                              │
 │                                                         │
-│ 4. Send to Azure OpenAI                                 │
-└───────────────────────────────┬─────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────┐
-│ Azure OpenAI Response                                   │
+│ 4. Layer 2: GPT-4o-mini classify (~200-500ms)           │
+│    → Input: message + capability index (~600 tokens)    │
+│    → Output: ["CodeInterpreter", "QueryEntities"]       │
+│    → If classified: select tools[]                      │
+│    → If ambiguous: Layer 3 (broad superset)             │
 │                                                         │
-│ 5. LLM decides: "I need CodeInterpreter + QueryEntities │
-│    but they're not in my active tools"                  │
-│                                                         │
-│ 6. LLM calls: activate_capabilities(                    │
-│      ["CodeInterpreter", "QueryEntities"])              │
-└───────────────────────────────┬─────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────┐
-│ CapabilityActivationTool.Execute                        │
-│                                                         │
-│ 7. Validate against CapabilityManifest:                 │
+│ 5. Validate selections against CapabilityManifest:      │
 │    - Capability exists? ✓                               │
 │    - User has permission? ✓                             │
 │    - Tenant toggle enabled? ✓                           │
-│    - Kill switch (feature flag)? ✓                      │
+│    - Kill switch? ✓                                     │
 │                                                         │
-│ 8. Update session active capabilities in Redis          │
-│ 9. Return confirmation to LLM                           │
+│ 6. Output: final tools[] for this turn                  │
 └───────────────────────────────┬─────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────┐
-│ SprkChatAgentFactory (SECOND LLM call this turn)        │
+│ Retrieval + Safety (if tools include search)            │
 │                                                         │
-│ 10. Rebuild system prompt with updated tool schemas:    │
-│     - Now includes CodeInterpreter + QueryEntities      │
-│     - May deactivate LegalResearch (no longer relevant) │
+│ 7. Execute retrieval tools (SearchDocuments, etc.)      │
+│    - Privilege filter applied (user group_ids)          │
 │                                                         │
-│ 11. LLM executes with new tools:                        │
-│     - Calls QueryEntities("sprk_budget", filter)        │
-│     - Calls CodeInterpreter(comparison code)            │
+│ 8. Prompt Shields check on retrieved documents          │
+│    - If injection detected → BLOCK, return error SSE    │
+└───────────────────────────────┬─────────────────────────┘
+                                │ (safe)
+                                ▼
+┌─────────────────────────────────────────────────────────┐
+│ OrchestratorPromptBuilder + Azure OpenAI (SINGLE call)  │
 │                                                         │
-│ 12. Emit SSE events:                                    │
-│     - token → streaming comparison text                 │
-│     - workspace_widget → BudgetDashboard widget         │
-│     - context_update → financial data summary           │
+│ 9. Build prompt:                                        │
+│    - Stable prefix (persona + capability index)         │
+│    - Selected tool schemas (from step 6)                │
+│    - Conversation history (last 25 msgs or summary)     │
+│    - Retrieved context (from step 7)                    │
+│                                                         │
+│ 10. Send to Azure OpenAI with tools[] + stream:true     │
+│     - LLM calls tools as needed (QueryEntities, etc.)   │
+│     - Stream tokens to client via SSE                   │
+│                                                         │
+│ 11. Emit SSE events as response streams:                │
+│     - token → Conversation pane                         │
+│     - workspace_widget → Workspace pane (JSON schema)   │
+│     - context_update → Context pane                     │
+└───────────────────────────────┬─────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────┐
+│ Post-LLM Safety (async, after stream completes)         │
+│                                                         │
+│ 12. Groundedness check (buffered response vs sources)   │
+│     → Emit annotation SSE: { ungrounded: [segments] }   │
+│                                                         │
+│ 13. Citation verification (parse + index lookup)        │
+│     → Emit annotation SSE: { citations: [verified/not]} │
+│                                                         │
+│ 14. Confidence scoring (source passage count)           │
+│     → Emit annotation SSE: { confidence: "high" }       │
+│                                                         │
+│ 15. Write to audit log (Cosmos, append-only):           │
+│     user, timestamp, tools called, docs accessed,       │
+│     response hash, safety check results                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -282,16 +305,16 @@ User sends message: "Compare indemnity caps to our Q2 budget"
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  New Session │     │  Active Work │     │  Session Idle │     │  Restore    │
-│             │     │             │     │  (>5 min)    │     │             │
-│ • Redis key │────▶│ • Redis     │────▶│ • Flush to   │     │ • Load from │
-│   created   │     │ • Messages  │     │   Cosmos DB  │◀────│   Cosmos DB │
-│ • Core tools│     │ • Tool calls│     │ • Summarize  │     │ • Rebuild   │
-│   active    │     │ • Widget    │     │   if >15 msgs│     │   context   │
-│ • No history│     │   state     │     │ • Snapshot   │     │ • Restore   │
-│             │     │ • Active    │     │   workspace  │     │   widgets   │
-│             │     │   caps      │     │ • Keep Redis │     │ • Resume    │
-│             │     │             │     │   24h TTL    │     │   agent     │
+│  New Session │     │  Active Work │     │  Redis Evict  │     │  Restore    │
+│             │     │             │     │  (24h TTL)   │     │             │
+│ • Redis key │────▶│ • Redis     │────▶│ • Redis gone │     │ • Load from │
+│   created   │     │   (hot)     │     │ • Cosmos has │◀────│   Cosmos DB │
+│ • Cosmos    │     │ • Cosmos    │     │   everything │     │ • Rebuild   │
+│   session   │     │   (write-   │     │ • No data    │     │   context   │
+│   record    │     │   through)  │     │   loss       │     │ • Summarize │
+│ • Router    │     │ • Audit log │     │              │     │   if >25msg │
+│   selects   │     │   (every    │     │              │     │ • Restore   │
+│   tools     │     │   turn)     │     │              │     │   widgets   │
 └─────────────┘     └─────────────┘     └──────────────┘     └─────────────┘
 ```
 
