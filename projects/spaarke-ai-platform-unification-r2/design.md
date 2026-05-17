@@ -792,22 +792,121 @@ Client UI retroactively annotates ungrounded segments
 
 **Decision rationale for legal buyers:** "We stream for responsiveness, then verify for safety. All claims are checked against source documents within 200ms of completion. Unverified claims are visually flagged. Full audit trail captures safety results."
 
-#### 3. Citation Verification (Post-LLM, Custom)
+#### 3. Citation Verification (Post-LLM, Custom — Multi-Provider)
 
-**What:** Deterministic check that every legal citation the model produces (case names, statute references, regulation numbers) actually exists.
+**What:** Deterministic check that every legal citation the model produces (case names, statute references, patent numbers, regulatory filings) actually exists in an authoritative source.
 
-**Service:** Custom — no Azure service does this. Built against:
-- Our own statute/regulation index (AI Search)
-- Future: Westlaw/Lexis API integration (R3)
+**This is both a safety component AND a capability in the library** — it operates as:
+- **Post-LLM safety check:** automatically verifies citations in every AI response
+- **Playbook node:** structured pipeline step (ActionType TBD) for batch citation verification workflows
+- **AI Tool:** `VerifyCitations` tool callable by the LLM during conversation ("verify these references for me")
+- **Knowledge resource:** verification providers are knowledge sources the AI can query ("find the full text of 542 U.S. 296")
 
-**Integration point:** After generation, parse citations from response, verify each against index, annotate in UI.
+#### Multi-Provider Architecture
+
+```
+CitationVerificationService
+    │
+    ├── Citation Type Detection (regex + heuristic)
+    │   • Case law:    "Smith v. Jones, 542 U.S. 296 (2004)"
+    │   • Statute:     "35 U.S.C. § 101"
+    │   • Patent:      "US Patent No. 10,234,567"
+    │   • SEC filing:  "Form 10-K, filed 2025-03-15"
+    │   • Regulation:  "17 CFR § 240.10b-5"
+    │
+    ├── IVerificationProvider (interface)
+    │   │
+    │   │  VerifyAsync(Citation citation) → VerificationResult
+    │   │  SearchAsync(string query) → Citation[]
+    │   │  GetFullTextAsync(Citation citation) → string
+    │   │
+    │   ├── InternalIndexProvider        ← R2 (our AI Search indices)
+    │   ├── LexisNexisProvider           ← future (case law, statutes)
+    │   ├── WestlawProvider              ← future (cases, regulations)
+    │   ├── USPTOProvider                ← future (patents)
+    │   ├── EdgarProvider                ← future (SEC filings)
+    │   └── CustomProvider               ← tenant-configurable
+    │
+    └── VerificationResult
+        • verified: boolean
+        • source: provider name
+        • confidence: high/medium/low
+        • link: URL to authoritative source
+        • snippet: relevant text excerpt (for context pane)
+```
+
+#### Provider Routing
+
+| Citation Type | Detection Pattern | R2 Provider | Future Providers |
+|--------------|-------------------|-------------|-----------------|
+| Case law | `v.` + reporter citation pattern | InternalIndex | LexisNexis, Westlaw |
+| Statute | `§` or "Section" + title/code pattern | InternalIndex | LexisNexis, Westlaw |
+| Patent | "Patent" + number pattern (US, EP, WO) | InternalIndex | USPTO, EPO |
+| SEC filing | "Form 10-K/Q/8-K" + CIK/company | InternalIndex | EDGAR API |
+| Regulation | CFR + title/part pattern | InternalIndex | GovInfo API |
+
+#### As a Playbook Node (ActionType TBD)
+
+```
+PlaybookNode: CitationVerification
+  Input: document text OR AI response text
+  Steps:
+    1. Extract all citations (regex + NER)
+    2. Route each to appropriate provider
+    3. Batch verify (parallel per-provider)
+    4. Return structured results with links
+  Output: VerificationReport (verified[], unverified[], partial[])
+  Widget: CitationReportWidget (workspace pane)
+```
+
+#### As an AI Tool
+
+```csharp
+[Description("Verify legal citations against authoritative databases. " +
+    "Use when the user asks to verify references, check case validity, " +
+    "or confirm regulatory citations.")]
+public async Task<VerificationReport> VerifyCitationsAsync(
+    [Description("The text containing citations to verify")] string text,
+    [Description("Optional: specific citation types to check")] string[]? types)
+```
+
+The tool is available in the capability library as both:
+- A **post-generation safety check** (automatic, every response)
+- A **user-invocable tool** (explicit: "verify these citations for me")
+- A **knowledge source** (the LLM can query providers to find citations: "find relevant patent prior art for X")
+
+#### Integration Point (Post-LLM Safety)
+
+After generation, parse citations from response, route to appropriate providers, annotate in UI:
 
 **UI behavior:**
-- Verified citation: `Smith v. Jones, 542 U.S. 296 (2004)` ✓
-- Unverified citation: `Smith v. Jones, 542 U.S. 296 (2004)` ⚠️ "Citation not found in index"
-- No citations: no verification needed
+- Verified citation: `Smith v. Jones, 542 U.S. 296 (2004)` ✓ [LexisNexis]
+- Unverified citation: `Smith v. Jones, 542 U.S. 296 (2004)` ⚠️ "Not found in available sources"
+- Partially verified: `Smith v. Jones (2004)` ~ "Case exists but reporter citation couldn't be confirmed"
+- No citations in response: no verification needed
 
-**Implementation:** `CitationVerificationService` — regex-extracts citations, batch-queries AI Search, returns verified/unverified map.
+#### R2 Deliverable
+
+- `IVerificationProvider` interface
+- `InternalIndexProvider` implementation (queries our AI Search spaarke-references index)
+- `CitationVerificationService` with type detection + provider routing
+- `VerifyCitationsTool` (AI-callable tool in capability library)
+- Playbook node type registered in `INodeExecutor` framework
+- UI annotation SSE event (`safety_annotation.citations`)
+
+#### Configuration (Tenant-Level)
+
+Providers are enabled per-tenant in Dataverse (same pattern as capability toggles):
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `CitationVerification:Enabled` | true | Master kill switch |
+| `CitationVerification:Providers` | ["internal"] | Active providers for this tenant |
+| `CitationVerification:LexisNexis:ApiKey` | (none) | Tenant's own LexisNexis subscription |
+| `CitationVerification:USPTO:Enabled` | false | Patent verification |
+| `CitationVerification:Edgar:Enabled` | false | SEC filing verification |
+
+Tenants bring their own API keys for commercial databases. The platform provides the integration; the tenant provides access.
 
 #### 4. Privilege-Aware Retrieval (During Retrieval)
 
@@ -1024,6 +1123,8 @@ All significant design decisions resolved in this document, for spec.md traceabi
 | D-13 | ISprkAgent boundary drawn now, multi-agent in R3 | Future-proofs without over-engineering R2 |
 | D-14 | Webhook + polling for manifest refresh | Webhook is primary (low-latency), polling is backstop |
 | D-15 | Architecture is model-agnostic | Config-driven model selection; estimates are for current GPT-4o |
+| D-16 | Citation verification is multi-provider with pluggable sources | Tenants use different legal databases (LexisNexis, Westlaw, USPTO, EDGAR). IVerificationProvider interface allows plug-in without code changes. Tenants bring their own API keys. |
+| D-17 | Citation verification operates as safety check + playbook node + AI tool + knowledge source | It's not just post-LLM safety — it's a first-class capability in the library that the AI can invoke and users can request |
 
 ---
 
