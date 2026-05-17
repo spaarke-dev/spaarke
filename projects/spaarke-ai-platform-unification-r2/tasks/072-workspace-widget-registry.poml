@@ -1,0 +1,47 @@
+<task id="AIPU2-072" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build WorkspaceWidgetRegistry with Lazy-Load Dynamic Import</title>
+    <phase>4A</phase>
+    <tags>frontend, widgets, registry</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-071</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    The WorkspacePane needs to resolve widget implementations on demand without bundling all
+    widget code into the initial chunk. WorkspaceWidgetRegistry provides a lazy-factory registry:
+    each widget type is registered with a dynamic import factory so it is only loaded when first
+    requested. The R1 output-registry.ts used a similar pattern; follow it but adapt for the
+    WorkspaceWidget interface and add metadata (displayName, category) per registration. Unknown
+    widget types must not crash the shell — they fall back to a generic text display widget.
+  </prompt>
+  <role>Frontend developer with TypeScript dynamic imports, code-splitting, and registry pattern experience.</role>
+  <goal>
+    WorkspaceWidgetRegistry is built, exported from @spaarke/ai-widgets, and resolveWorkspaceWidget()
+    returns the correct lazy-loaded widget or a generic fallback for unknown types. No widget
+    crashes the WorkspacePane.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Outputs/src/registry/output-registry.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read output-registry.ts in Spaarke.AI.Outputs to understand the existing lazy-factory registration pattern used in R1.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts.</step>
+    <step>Define WorkspaceWidgetRegistration type: { displayName: string; category: string; factory: () => Promise&lt;{ default: new() => WorkspaceWidget }&gt; }.</step>
+    <step>Implement WorkspaceWidgetRegistry as a Map&lt;string, WorkspaceWidgetRegistration&gt; with registerWorkspaceWidget(type, registration) and resolveWorkspaceWidget(type) functions.</step>
+    <step>resolveWorkspaceWidget must: call the factory via dynamic import, cache the resolved constructor after first load, return null if factory throws (log error).</step>
+    <step>Register a built-in GenericTextWidget as the fallback for unknown types — resolveWorkspaceWidget should return GenericTextWidget when the requested type is not registered.</step>
+    <step>Export resolveWorkspaceWidget, registerWorkspaceWidget, and WorkspaceWidgetRegistration from src/index.ts.</step>
+    <step>Write unit tests: known type resolves to correct widget; unknown type resolves to GenericTextWidget; failed factory import returns GenericTextWidget (not undefined, not throw).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>WorkspaceWidgetRegistry.ts exists with registerWorkspaceWidget and resolveWorkspaceWidget exported.</criterion>
+    <criterion>Lazy-load via dynamic import — widget code is not bundled until first resolution.</criterion>
+    <criterion>Resolved constructors are cached after first load (no redundant dynamic imports).</criterion>
+    <criterion>Unknown types return GenericTextWidget, never undefined or throw.</criterion>
+    <criterion>Unit tests for known, unknown, and failed-factory cases pass.</criterion>
+  </acceptance-criteria>
+</task>

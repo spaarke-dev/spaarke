@@ -1,0 +1,51 @@
+<task id="AIPU2-116" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Cross-matter privilege leakage test</title>
+    <phase>6</phase>
+    <tags>testing, security</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-028, AIPU2-027</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Legal workspace AI must never leak privileged document content across matter boundaries.
+    This test suite verifies the privilege filter (AIPU2-028) and matter context isolation
+    (AIPU2-027) work correctly under realistic cross-matter scenarios. The key risk: a user
+    who has access to Matter A and Matter B could inadvertently (or deliberately) trigger the
+    AI to reference Matter A documents when working in Matter B context. The design allows
+    AI conclusions to persist in conversation history but must strip source document content.
+  </prompt>
+  <role>Security engineer focused on data isolation and privilege boundary enforcement.</role>
+  <goal>
+    No document content from Matter A is accessible when the active context is Matter B.
+    Users are notified of the privilege boundary on matter pivot. AI conclusions from prior
+    context are preserved in history but source document text is stripped. Unauthorized users
+    cannot search or retrieve documents from a matter they do not have access to.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Authorization</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Set up test fixtures: two matters (Matter A and Matter B) with distinct documents. User has authorized access to both. Create sessions with document context loaded for each matter.</step>
+    <step>Test 1 — Matter pivot content stripping: start with Matter A context (documents loaded), switch to Matter B, send a query that would elicit reference to Matter A documents. Verify the AI response contains no Matter A document text. Verify a privilege boundary notification appears in the UI.</step>
+    <step>Test 2 — History preservation: after the Matter A -> Matter B pivot, verify that AI conclusions from the Matter A session appear in conversation history (e.g. "You previously found that...") but that the underlying source passages are not quoted or accessible.</step>
+    <step>Test 3 — Cross-matter search: from Matter B context, attempt a search query that would match Matter A documents (by content similarity). Verify search results only return Matter B documents.</step>
+    <step>Test 4 — Unauthorized user: create a test scenario where a user has access to Matter B but not Matter A. Attempt to access Matter A session data or documents. Verify 403 Forbidden is returned and no content is leaked.</step>
+    <step>Test 5 — Forced injection: attempt to craft a chat message that references Matter A document IDs directly (e.g. "Summarize document ID abc123 from Matter A"). Verify the API rejects the request or returns empty content with an authorization error.</step>
+    <step>Document all test cases, inputs, expected outcomes, and actual outcomes in notes/privilege-leakage-test-report.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Matter pivot: no Matter A document text appears in AI responses when active context is Matter B.</criterion>
+    <criterion>Privilege boundary notification is shown to the user on matter pivot.</criterion>
+    <criterion>AI conclusions from prior context are preserved in history; source document passages are not accessible.</criterion>
+    <criterion>Cross-matter search returns only documents from the active matter.</criterion>
+    <criterion>Unauthorized user receives 403 Forbidden when attempting to access a matter they do not have access to.</criterion>
+    <criterion>Direct document ID reference from an unauthorized matter is rejected by the API.</criterion>
+    <criterion>Test report written to notes/privilege-leakage-test-report.md with all 5 test cases documented.</criterion>
+  </acceptance-criteria>
+</task>

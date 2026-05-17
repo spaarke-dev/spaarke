@@ -1,0 +1,46 @@
+<task id="AIPU2-064" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Extend ChatSessionManager with Cosmos Write-Through Integration</title>
+    <phase>3</phase>
+    <tags>bff-api, cosmos-db, session</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-030</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1 ChatSessionManager stores session state exclusively in Redis with a TTL. R2 requires
+    durable session persistence via Cosmos DB (SessionPersistenceService, established in
+    AIPU2-030) so that sessions survive Redis eviction and can be replayed for audit. Extend
+    ChatSessionManager with a write-through strategy: every write to Redis is immediately
+    followed by a write to Cosmos. On GetSessionAsync, if Redis returns a miss, fall back to
+    Cosmos and repopulate Redis. Preserve existing key patterns and TTLs so no existing
+    behaviour changes for warm sessions.
+  </prompt>
+  <role>Senior .NET developer with Redis and Cosmos DB experience.</role>
+  <goal>
+    Every chat message is persisted in both Redis and Cosmos DB. Redis misses fall back to Cosmos
+    transparently. Existing key patterns and TTLs are unchanged. Integration tests confirm
+    write-through and fallback paths.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ChatSessionManager.cs in full to understand all write paths (AddMessageAsync, UpdateSessionAsync, etc.) and read paths (GetSessionAsync).</step>
+    <step>Inject ISessionPersistenceService (from AIPU2-030) into ChatSessionManager constructor via DI.</step>
+    <step>For each write path: after the Redis write succeeds, call SessionPersistenceService.PersistAsync asynchronously (fire-and-forget with structured error log on failure — Cosmos failure must not fail the Redis write or the chat turn).</step>
+    <step>In GetSessionAsync: on Redis miss (null result), call SessionPersistenceService.RetrieveAsync; if found, repopulate Redis with the original TTL and return the session.</step>
+    <step>Preserve all existing Redis key patterns (session:{sessionId}, turn:{turnId}) and TTL values exactly.</step>
+    <step>Write integration tests: (a) write then read from warm Redis — Cosmos not called on read; (b) simulate Redis miss — Cosmos fallback repopulates Redis; (c) Cosmos write failure — Redis write still succeeds, error is logged.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Every AddMessageAsync / UpdateSessionAsync call writes to both Redis and Cosmos.</criterion>
+    <criterion>GetSessionAsync falls back to Cosmos on Redis miss and repopulates Redis.</criterion>
+    <criterion>Cosmos write failure does not propagate to the caller — error is logged only.</criterion>
+    <criterion>Existing Redis key patterns and TTLs are unchanged.</criterion>
+    <criterion>Integration tests for write-through and fallback paths pass.</criterion>
+  </acceptance-criteria>
+</task>

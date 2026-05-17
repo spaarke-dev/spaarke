@@ -1,0 +1,50 @@
+<task id="AIPU2-012" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build Capability Router Layer 1 — Keyword Classifier</title>
+    <phase>2A</phase>
+    <tags>bff-api, ai, routing</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-010</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build Layer 1 of the three-tier capability router — a zero-LLM-latency keyword classifier. It extends the
+    existing AgentServiceRoutingMiddleware patterns and matches user turn text against keyword hints stored in
+    each CapabilityManifestEntry. When confidence exceeds 0.8 the capability is activated directly without
+    calling the LLM. This layer must handle over 60% of all turns and complete in under 50ms.
+  </prompt>
+  <role>Senior .NET backend engineer familiar with Spaarke AI middleware and routing patterns.</role>
+  <goal>
+    Layer 1 classifies over 60% of turns with confidence above 0.8, produces zero LLM calls for those turns,
+    and completes within 50ms end-to-end as measured by an OTEL span.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentServiceRoutingMiddleware.cs</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read AgentServiceRoutingMiddleware.cs fully to understand the middleware chain, IAgentServiceContext, and how existing routing decisions are propagated.</step>
+    <step>Create CapabilityRoutingResult.cs record with: MatchedCapabilityName (string?), Confidence (float), RoutingLayer (enum: Layer1, Layer2, Layer3, None), ElapsedMs (double).</step>
+    <step>Create ICapabilityRouter.cs interface with: Task&lt;CapabilityRoutingResult&gt; RouteAsync(string userTurn, CancellationToken ct).</step>
+    <step>Create CapabilityRouter.cs implementing ICapabilityRouter. Layer 1 logic: normalize user turn to lowercase, tokenize on whitespace and punctuation, score each capability by counting KeywordHints matches (score = matchCount / totalHints, weighted by hint specificity), select top capability, compute confidence = topScore / (topScore + secondScore + epsilon).</step>
+    <step>Add confidence threshold constant (default 0.8, configurable via IOptions&lt;CapabilityRouterOptions&gt;). If confidence &gt;= threshold, return Layer1 result immediately without calling Layer 2 or 3.</step>
+    <step>Instrument with OpenTelemetry: start Activity "capability_router.layer1", set tags capability_name, confidence, matched=true|false, record duration. Emit ai_routing_layer1_hit counter and ai_routing_layer1_latency_ms histogram.</step>
+    <step>Add CapabilityRoutingMiddleware.cs that sits in the AI middleware chain, calls ICapabilityRouter.RouteAsync, and writes the CapabilityRoutingResult into IAgentServiceContext for downstream services (prompt builder, tool loader).</step>
+    <step>Register ICapabilityRouter (singleton), CapabilityRouter, and CapabilityRoutingMiddleware in AddAiCapabilitiesModule().</step>
+    <step>Write unit tests covering: exact keyword match produces confidence &gt;= 0.8, ambiguous turn produces confidence &lt; 0.8 (falls through to Layer 2), empty turn returns None, disabled capability not matched.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "CapabilityRouter"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Layer 1 returns a result in under 50ms for a manifest with 50 capabilities (verified by unit test timing).</criterion>
+    <criterion>Confidence >= 0.8 for unambiguous single-capability turns (e.g. "find case law on negligence" when only one capability has "case law" hints).</criterion>
+    <criterion>Confidence &lt; 0.8 for ambiguous turns — router signals fall-through to Layer 2.</criterion>
+    <criterion>OTEL Activity "capability_router.layer1" emitted for every routing call.</criterion>
+    <criterion>Disabled capabilities are never matched regardless of keyword overlap.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "CapabilityRouter"`.</criterion>
+    <criterion>Build succeeds with no new warnings.</criterion>
+  </acceptance-criteria>
+</task>

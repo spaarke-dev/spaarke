@@ -1,0 +1,48 @@
+<task id="AIPU2-071" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Define WorkspaceWidget and ContextWidget Interfaces + Base Types</title>
+    <phase>4A</phase>
+    <tags>frontend, widgets, types</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-070</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    All widgets in R2 must implement one of two typed interfaces: WorkspaceWidget (rendered in
+    Workspace pane tabs) or ContextWidget (rendered in the Context pane). Defining these
+    interfaces before any widget implementation prevents divergence and ensures every widget
+    supports serialize/restore, selection notification, and action completion callbacks. The
+    generic type parameters TData and TActions allow each widget to declare its own data and
+    action shapes while remaining substitutable in the registries. This task defines the
+    interfaces and all supporting types, documented with JSDoc.
+  </prompt>
+  <role>Frontend developer with TypeScript generics and interface design experience.</role>
+  <goal>
+    WorkspaceWidget&lt;TData, TActions&gt; and ContextWidget interfaces compile with all supporting
+    types exported from @spaarke/ai-widgets. Every type is documented with JSDoc. No widget
+    implementations — interfaces only.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the spec.md FR-201 section to understand the full list of widget capabilities required (render, actions, selection, state serialization, etc.).</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/types/WorkspaceWidget.ts defining the WorkspaceWidget&lt;TData = unknown, TActions = unknown&gt; interface with the following members: render(data: TData, context: WidgetRenderContext): React.ReactElement; actions: TActions; onSelectionChange(selection: Selection): void; onActionComplete(result: ActionResult&lt;TActions&gt;): void; serializeState(): WidgetState&lt;TData&gt;; restoreState(state: WidgetState&lt;TData&gt;): Promise&lt;void&gt;.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/types/ContextWidget.ts defining the ContextWidget interface (simpler — no tabs, no actions) with: render(data: unknown, context: WidgetRenderContext): React.ReactElement; onHighlight?(citationId: string): void.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/types/shared.ts defining: WidgetRenderContext (sessionId, entityContext, theme), Selection (selectionType, selectedIds, metadata), ActionResult&lt;TActions&gt; (action, success, payload, errorMessage), WidgetState&lt;TData&gt; (widgetType, version, data, timestamp).</step>
+    <step>Add JSDoc comments to every interface member explaining purpose and expected behavior.</step>
+    <step>Export all types from src/index.ts barrel.</step>
+    <step>Verify TypeScript compilation succeeds with strict mode enabled.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>WorkspaceWidget&lt;TData, TActions&gt; interface exists in src/types/WorkspaceWidget.ts with all required members.</criterion>
+    <criterion>ContextWidget interface exists in src/types/ContextWidget.ts.</criterion>
+    <criterion>Shared types (WidgetRenderContext, Selection, ActionResult, WidgetState) exist in src/types/shared.ts.</criterion>
+    <criterion>All types exported from src/index.ts.</criterion>
+    <criterion>TypeScript compiles in strict mode without errors.</criterion>
+    <criterion>Every public interface member has a JSDoc comment.</criterion>
+  </acceptance-criteria>
+</task>

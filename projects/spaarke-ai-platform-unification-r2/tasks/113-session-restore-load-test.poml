@@ -1,0 +1,49 @@
+<task id="AIPU2-113" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Session restore load test (p95 under 500ms target)</title>
+    <phase>6</phase>
+    <tags>testing, performance, session</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-106</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Validate that the full session restore flow (AIPU2-106) meets the p95 under 500ms latency
+    target under realistic conditions. This test uses a session with 25+ messages and 3+
+    workspace widgets — the kind of session a regular user would accumulate in a working day.
+    The goal is to identify and fix any bottlenecks before deployment. Key areas to investigate:
+    Cosmos DB read latency, conversation summary generation time, and widget data-refresh
+    parallelism.
+  </prompt>
+  <role>Performance engineer or backend developer with profiling experience.</role>
+  <goal>
+    A test session with 25+ messages and 3 workspace widgets restores end-to-end in p95 under
+    500ms. Bottlenecks are identified and either fixed or documented with a mitigation plan.
+    Timing breakdown (Cosmos read, summary, widget restore) is captured in the test report.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Session</file>
+      <file>src/solutions/SpaarkeAi/src/components/Shell</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create a test session in Cosmos DB with: 25 messages (mix of user + AI turns), a conversation summary already generated, and 3 workspace widgets (e.g. DocumentViewerWidget + SearchResultsWidget + CitationWidget). Use a script or test fixture to create this session.</step>
+    <step>Instrument SessionRestoreService to emit timing spans: (a) start of Cosmos read, (b) end of Cosmos read, (c) end of summary lookup, (d) end of widget spec assembly, (e) response sent. Log spans with session ID.</step>
+    <step>Instrument the frontend restore flow: (a) start of fetch, (b) response received, (c) workspace tabs mounted, (d) context widget mounted, (e) conversation messages rendered. Log with performance.mark/measure.</step>
+    <step>Run 20 restore requests against the test session (not simultaneous — sequential to measure per-request latency). Collect all timing spans.</step>
+    <step>Calculate p50 and p95 end-to-end restore time from the 20 measurements. Identify which phase (Cosmos, summary, widget restore, frontend render) accounts for the most time.</step>
+    <step>If p95 exceeds 500ms: investigate top bottleneck. Likely fixes: ensure widget data-refresh calls are parallel (Promise.all, not sequential), verify Cosmos container is indexed correctly, confirm summary is pre-generated not on-demand during restore.</step>
+    <step>Re-run after fixes and confirm p95 is under 500ms. Document in notes/session-restore-load-test-report.md: test session spec, measurement methodology, per-phase timing breakdown, p50/p95 results, any optimizations applied.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Test session contains at least 25 messages and 3 workspace widgets.</criterion>
+    <criterion>20 restore requests are measured end-to-end with per-phase timing breakdown.</criterion>
+    <criterion>p95 end-to-end restore time is under 500ms after any optimizations.</criterion>
+    <criterion>Widget data-refresh calls execute in parallel (not sequential) during restore.</criterion>
+    <criterion>Any Cosmos or backend bottleneck is either fixed or documented with a mitigation plan.</criterion>
+    <criterion>Test report written to notes/session-restore-load-test-report.md with p50/p95 results and timing breakdown.</criterion>
+  </acceptance-criteria>
+</task>

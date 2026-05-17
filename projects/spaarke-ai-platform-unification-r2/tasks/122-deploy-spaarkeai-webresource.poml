@@ -1,0 +1,54 @@
+<task id="AIPU2-122" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Deploy SpaarkeAi web resource with rebuilt frontend</title>
+    <phase>7</phase>
+    <tags>deploy, frontend, webresource</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-120</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build and deploy the rebuilt SpaarkeAi frontend (three-pane shell, all widgets, safety
+    annotations, session restore) as the sprk_spaarkeai Dataverse web resource. This is a
+    Vite-based React 18 solution following the same deployment pattern as other Spaarke
+    solutions. If a Deploy-SpaarkeAi.ps1 script does not yet exist, create it following the
+    pattern of Deploy-AnalysisWorkspace.ps1. After deployment, verify the three-pane layout
+    renders and SSE streaming works in the Dataverse environment.
+  </prompt>
+  <role>DevOps engineer following the power-page-deploy or code-page-deploy skill procedure for Vite solutions.</role>
+  <goal>
+    The rebuilt SpaarkeAi web resource is deployed to sprk_spaarkeai in the dev Dataverse
+    environment. The three-pane layout renders correctly. SSE streaming produces token events
+    in the ConversationPane. Session restore works with a test session ID. No R1 functionality
+    is broken.
+  </goal>
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-AnalysisWorkspace.ps1</file>
+      <file>.claude/skills/power-page-deploy/SKILL.md</file>
+      <file>src/solutions/SpaarkeAi</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Navigate to src/solutions/SpaarkeAi and run npm install --legacy-peer-deps --no-audit --no-fund (per CLAUDE.md npm install guidance for Vite solutions).</step>
+    <step>Run npm run build and verify the Vite build completes successfully. Check that the dist/ output includes the main bundle and all assets.</step>
+    <step>Check if scripts/Deploy-SpaarkeAi.ps1 exists. If not, create it by copying Deploy-AnalysisWorkspace.ps1 and updating the web resource name to sprk_spaarkeai and the solution source path to src/solutions/SpaarkeAi/dist.</step>
+    <step>Run scripts/Deploy-SpaarkeAi.ps1 targeting the dev Dataverse environment (https://spaarkedev1.crm.dynamics.com). Capture output and verify success.</step>
+    <step>Open the SpaarkeAi page in Dataverse. Verify the three-pane layout renders (workspace, context, conversation panes are visible with correct proportions).</step>
+    <step>Verify SSE streaming: type a message in ConversationPane and verify token events stream in progressively. Verify done event closes the stream cleanly.</step>
+    <step>Verify session restore: navigate to SpaarkeAi with a ?sessionId= parameter from a known test session. Verify workspace tabs and conversation restore correctly.</step>
+    <step>Verify no R1 regression: confirm existing document viewing, search, and wizard flows still work.</step>
+    <step>Record deployment details in notes/deploy-spaarkeai-webresource-log.md: deployment time, version hash, verification results.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>SpaarkeAi Vite build completes with no errors.</criterion>
+    <criterion>Deploy-SpaarkeAi.ps1 exists and deploys successfully to sprk_spaarkeai web resource.</criterion>
+    <criterion>Three-pane layout renders correctly in Dataverse dev environment.</criterion>
+    <criterion>SSE streaming produces progressive token events in ConversationPane.</criterion>
+    <criterion>Session restore works with a test sessionId parameter.</criterion>
+    <criterion>No R1 document/search/wizard regressions detected.</criterion>
+    <criterion>Deployment log written to notes/deploy-spaarkeai-webresource-log.md.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-001" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Amend ADR-015 with Governed Data Stores Section</title>
+    <phase>1</phase>
+    <tags>adr, documentation</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    ADR-015 currently covers AI data governance at a high level but does not distinguish between the three distinct tiers of data storage that the R2 platform will use: application logs (strict operational), compliance audit records (governed, immutable), and AI work history (governed, queryable). These tiers have different retention policies, access controls, and compliance obligations. Without explicit ADR guidance, engineers will make inconsistent choices about where to write data, leading to audit failures or GDPR violations.
+
+    Amend both the concise ADR in .claude/adr/ and the full ADR in docs/adr/ to add a "Governed Data Stores" section that defines the three tiers, their permitted uses, retention rules, and which Cosmos DB containers (from task 002) map to each tier.
+  </prompt>
+  <role>Platform architect with AI governance and compliance expertise.</role>
+  <goal>
+    ADR-015 (both concise and full versions) contains a "Governed Data Stores" section that unambiguously defines the three data tiers, their retention policies, access control rules, and maps each tier to the Cosmos DB containers provisioned in task AIPU2-002. The Last Reviewed date is updated. Any downstream constraint files referencing ADR-015 are also updated if the amendment changes existing guidance.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai-data-governance.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the current concise ADR at .claude/adr/ADR-015-ai-data-governance.md in full to understand existing structure, decisions, and any existing data store references.</step>
+    <step>Read the full ADR at docs/adr/ADR-015-ai-data-governance.md to capture historical context and rationale sections.</step>
+    <step>Read projects/spaarke-ai-platform-unification-r2/spec.md to extract the R2 data storage requirements (sessions, prompts, audit, memory, feedback containers) and their governance requirements.</step>
+    <step>Draft the "Governed Data Stores" section defining three tiers:
+      - Tier 1 (App Logs - Strict Operational): Azure Monitor / Application Insights only; no PII permitted; 90-day retention; read access: SRE only.
+      - Tier 2 (Compliance Audit - Governed Immutable): Cosmos DB `audit` container; full prompt/response pairs with redacted PII; 7-year retention; append-only; read access: compliance role only; maps to AIPU2-002.
+      - Tier 3 (AI Work History - Governed Queryable): Cosmos DB `sessions`, `prompts`, `memory`, `feedback` containers; user-scoped; 90-day default retention with user-controlled deletion; read access: owning user + admin; GDPR right-to-erasure applies; maps to AIPU2-002.</step>
+    <step>Amend .claude/adr/ADR-015-ai-data-governance.md: insert the "Governed Data Stores" section with concise MUST/MUST NOT rules for each tier; update the Last Reviewed date to today's date.</step>
+    <step>Amend docs/adr/ADR-015-ai-data-governance.md: insert the full "Governed Data Stores" section with rationale, compliance references (GDPR Art. 17, retention schedule), container mapping table, and access control matrix; update the Last Reviewed date.</step>
+    <step>Read .claude/constraints/ai-data-governance.md (if it exists) and update any constraint rules that now have more specific guidance from the amended ADR tiers.</step>
+    <step>Verify that no other .claude/adr/ or .claude/constraints/ files reference ADR-015 in a way that conflicts with the new tier definitions; fix any conflicts found.</step>
+    <step>If ai-procedure-maintenance skill is needed (new MUST rules added), invoke it to propagate changes to downstream constraint summaries.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Both .claude/adr/ADR-015-ai-data-governance.md and docs/adr/ADR-015-ai-data-governance.md contain a "Governed Data Stores" section with all three tiers defined.</criterion>
+    <criterion>Each tier specifies: permitted storage backend, retention period, access control rules, and GDPR applicability.</criterion>
+    <criterion>The Cosmos DB container mapping (sessions, prompts, audit, memory, feedback) is present in the section and cross-references task AIPU2-002.</criterion>
+    <criterion>Both files have an updated Last Reviewed date matching today's date.</criterion>
+    <criterion>No existing MUST/MUST NOT rules in the concise ADR were removed or weakened without explicit rationale recorded in the full ADR.</criterion>
+    <criterion>Any .claude/constraints/ files that reference ADR-015 data storage guidance reflect the new tier definitions without contradiction.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,55 @@
+<task id="AIPU2-032" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Implement session summarization at 25 messages using GPT-4o</title>
+    <phase>2C</phase>
+    <tags>bff-api, ai, summarization</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-030</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Implement automatic session summarization that triggers when a chat session reaches
+    25 messages or 8,000 tokens. Use GPT-4o (not GPT-4o-mini) — legal context quality
+    requires the full model. The summarization must extract both a narrative summary and
+    a list of structured key legal conclusions (parties, decisions, obligations, risks)
+    as separate fields. The full verbatim message history must always remain in Cosmos DB;
+    the summary is an additional field written alongside the messages, not a replacement.
+    After summarization, the in-memory session is trimmed to the summary + last 10 messages
+    to keep the context window manageable.
+  </prompt>
+  <role>Senior .NET developer familiar with Azure OpenAI SDK, structured prompt engineering, and chat session lifecycle management.</role>
+  <goal>
+    Summarization triggers automatically at the 25-message or 8,000-token threshold. The
+    resulting summary preserves key legal qualifications and conclusions in structured form.
+    Full message history is never deleted from Cosmos DB. The in-memory context is trimmed
+    post-summarization so subsequent LLM calls stay within context limits.
+  </goal>
+  <knowledge>
+    <files>
+      <file>docs/guides/AI-MODEL-SELECTION-GUIDE.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read AI-MODEL-SELECTION-GUIDE.md and ai.md constraints to confirm model selection rules and summarization prompt patterns before implementing.</step>
+    <step>Create SessionSummarizationService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Persistence/. Define ISessionSummarizationService with ShouldSummarize(session) and SummarizeAsync(session) methods.</step>
+    <step>Implement ShouldSummarize: return true if message count >= 25 OR estimated token count >= 8000. Estimate tokens as (total character count / 4) as a fast approximation.</step>
+    <step>Implement SummarizeAsync: call Azure OpenAI GPT-4o with a structured prompt requesting two outputs — (1) narrative summary paragraph, (2) JSON array of LegalConclusion objects (type, description, parties, confidence). Parse the response and populate SessionSummary record fields.</step>
+    <step>Define SessionSummary record: NarrativeSummary (string), LegalConclusions (IReadOnlyList of LegalConclusion), SummarizedAt (DateTimeOffset), MessageCountAtSummarization (int), ModelUsed (string, always "gpt-4o").</step>
+    <step>After summarization, write the SessionSummary to the existing Cosmos session document (merge/patch, do not replace full document). Do not delete any messages from Cosmos.</step>
+    <step>Trim the in-memory ChatSession.Messages to only the last 10 messages (after writing summary to Cosmos). The summary is now available via ChatSession.Summary for context reconstruction.</step>
+    <step>Hook SummarizeAsync into the ChatSessionManager message-append path (call after each PersistMessage, check ShouldSummarize, run async in background without blocking streaming).</step>
+    <step>Register SessionSummarizationService in AddAiPersistenceModule.</step>
+    <step>Write unit tests: (a) threshold not reached — no summarization, (b) 25-message trigger, (c) 8000-token trigger, (d) summary written to Cosmos, (e) in-memory trimmed to 10 messages, (f) GPT-4o model name asserted in the outgoing request.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Summarization triggers at exactly 25 messages or when estimated tokens exceed 8,000.</criterion>
+    <criterion>GPT-4o (not gpt-4o-mini) is the model used — asserted in tests.</criterion>
+    <criterion>SessionSummary contains both NarrativeSummary (string) and LegalConclusions (structured JSON).</criterion>
+    <criterion>Full message history remains in Cosmos DB after summarization — no messages deleted.</criterion>
+    <criterion>In-memory session is trimmed to last 10 messages after summarization completes.</criterion>
+    <criterion>Summarization runs asynchronously and does not block the streaming response.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

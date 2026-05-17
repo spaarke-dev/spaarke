@@ -1,0 +1,49 @@
+<task id="AIPU2-079" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build ConversationPane Wrapping SprkChat as Child</title>
+    <phase>4B</phase>
+    <tags>frontend, conversation, sprkchat</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-075, AIPU2-076</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1's ChatPanel.tsx was the top-level host for SprkChat, managing auth, session init, and
+    SSE streaming directly. In R2, AiSessionProvider (AIPU2-076) takes over session and
+    streaming concerns; ConversationPane is a thin wrapper that renders SprkChat as a child
+    and bridges SprkChat's onPaneEvent callback to PaneEventBus dispatch. SprkChat's existing
+    prop interface must be preserved — no changes to the SprkChat component itself. ConversationPane
+    also manages the Welcome → ActiveChat stage transition within the conversation slot.
+  </prompt>
+  <role>Frontend developer with React 19 component composition and Fluent v9 experience.</role>
+  <goal>
+    SprkChat renders inside ConversationPane with all R1 functionality intact. SprkChat's
+    onPaneEvent events flow to PaneEventBus. Welcome → ActiveChat transition handled.
+    R1's ChatPanel.tsx is replaced.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeAi/src/components/ChatPanel.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ChatPanel.tsx and SprkChat.tsx to understand the current SprkChat props interface (especially onPaneEvent, session props, streaming props) and what ChatPanel currently manages.</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx.</step>
+    <step>Wire SprkChat's session and streaming props from useAiSession() hook (from AiSessionProvider) — do not pass raw auth tokens or SSE hooks directly from ConversationPane.</step>
+    <step>Implement the onPaneEvent callback: receive the SprkChatPaneEvent from SprkChat, map it to the appropriate PaneEventBus channel and dispatch it using useDispatchPaneEvent().</step>
+    <step>Implement Welcome stage: when ShellStage is 'welcome', render a Fluent v9 welcome UI above or instead of SprkChat input; transition to 'active-chat' when the user sends the first message.</step>
+    <step>Ensure SprkChat.tsx receives the same prop values it received from ChatPanel.tsx — no regressions in R1 SprkChat functionality.</step>
+    <step>Place ConversationPane in the conversation slot of ThreePaneShell (replace placeholder div).</step>
+    <step>Verify the full chat flow works end-to-end: user types → SprkChat sends → SSE received by AiSessionProvider → dispatched to PaneEventBus → WorkspacePane and ContextPaneController both update.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ConversationPane renders SprkChat as a child component with preserved prop interface.</criterion>
+    <criterion>SprkChat's onPaneEvent events dispatch to the correct PaneEventBus channel.</criterion>
+    <criterion>Session and streaming state wired from useAiSession(), not duplicated in ConversationPane.</criterion>
+    <criterion>Welcome stage renders before first message; transitions to active-chat on first send.</criterion>
+    <criterion>R1's ChatPanel.tsx is replaced by ConversationPane.</criterion>
+    <criterion>End-to-end chat flow (user input → SSE → all three panes update) works correctly.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,52 @@
+<task id="AIPU2-090" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build Safety Annotation UI (Groundedness Highlights + Citation Badges)</title>
+    <phase>4E</phase>
+    <tags>frontend, ai-safety, ui</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-074, AIPU2-062</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    AIPU2-065 wires safety services into the agent pipeline and AIPU2-062 adds the
+    safety_annotation SSE event type. This task builds the UI that consumes those events.
+    When a safety_annotation event arrives on the PaneEventBus 'safety' channel, the
+    ConversationPane must retroactively annotate the completed AI message: ungrounded segments
+    receive a subtle background highlight, each citation gets a verification badge (verified
+    checkmark, unverified warning, partial tilde). The annotation must appear approximately
+    200ms after the last streaming token to avoid a jarring mid-stream appearance. All colors
+    use Fluent v9 semantic tokens so they work in dark mode.
+  </prompt>
+  <role>Frontend developer with React 19, Fluent v9, and post-render annotation experience.</role>
+  <goal>
+    Safety annotations appear in the UI post-stream: ungrounded segments highlighted, citation
+    verification badges rendered, all colors use Fluent v9 tokens. Annotations appear ~200ms
+    after last token. Specified in FR-402 and FR-403.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 for Fluent v9 token guidance and spec.md FR-402/FR-403 for the exact annotation requirements (what constitutes "ungrounded", badge icons for each verification state).</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/conversation/SafetyAnnotationOverlay.tsx — a component that accepts a completed AI message and a SafetyAnnotation payload and applies annotations.</step>
+    <step>Subscribe to the 'safety' PaneEventBus channel via usePaneEvent in ConversationPane; on safety_annotation event, store the payload keyed by turnId.</step>
+    <step>After 200ms (setTimeout cleared on unmount): apply the SafetyAnnotation to the corresponding message by rendering SafetyAnnotationOverlay in place of the plain message text.</step>
+    <step>Implement ungrounded segment highlighting: parse the annotation's segment map, wrap ungrounded text spans with a Fluent v9 background token (colorStatusWarningBackground1 or equivalent for subtle highlighting).</step>
+    <step>Implement citation badges: for each citation reference in the message, render a Fluent v9 Badge icon — CheckmarkCircle (verified, green token), Warning (unverified, yellow token), SwapRegular or Tilde (partial, blue token).</step>
+    <step>Ensure annotation is purely additive — no message text is modified, only overlays/badges are added. If annotation fails or is missing, the message renders without annotations (no error state).</step>
+    <step>Write unit tests: (a) safety_annotation event triggers annotation after 200ms; (b) ungrounded segment wraps in highlight span; (c) citation badges render correct icon per verification state; (d) missing annotation renders plain message.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>safety_annotation PaneEventBus events trigger retroactive annotation ~200ms after last token.</criterion>
+    <criterion>Ungrounded segments highlighted with Fluent v9 warning background token.</criterion>
+    <criterion>Citation badges render: CheckmarkCircle for verified, Warning for unverified, Tilde/Swap for partial — using correct Fluent v9 icon and color tokens.</criterion>
+    <criterion>Dark mode: all annotation colors use Fluent v9 tokens and are distinguishable in dark theme.</criterion>
+    <criterion>Missing or failed annotation leaves message text unchanged — no error state rendered.</criterion>
+    <criterion>Unit tests for timing, segment highlighting, badge states, and missing annotation pass.</criterion>
+    <criterion>FR-402 and FR-403 requirements from spec.md are satisfied.</criterion>
+  </acceptance-criteria>
+</task>

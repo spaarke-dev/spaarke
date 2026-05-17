@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-005" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Add privilege_group_ids Field to AI Search Document Index</title>
+    <phase>1</phase>
+    <tags>infrastructure, ai-search, security</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The R2 AI platform will use Azure AI Search for document retrieval in the AI pipeline. Currently, the search index has no field for carrying document-level privilege information, which means the AI pipeline cannot filter search results by the requesting user's group memberships. Without the privilege_group_ids field, any authenticated user could potentially receive document snippets from documents their group does not have access to through the AI assistant.
+
+    Add a privilege_group_ids field (Collection(Edm.String), filterable, not searchable) to both the knowledge index and the discovery index schema JSON files, deploy the schema updates to the dev Azure AI Search service, and verify the field is correctly configured as filterable.
+  </prompt>
+  <role>Azure AI Search infrastructure engineer with security indexing expertise.</role>
+  <goal>
+    The privilege_group_ids field (Collection(Edm.String), filterable=true, searchable=false, retrievable=true) exists in both the spaarke-knowledge-index and spaarke-discovery-index in the dev Azure AI Search service. The schema JSON files in infrastructure/ai-search/ are updated to match. The field can be used in $filter expressions to restrict results to documents the requesting user's groups are permitted to access.
+  </goal>
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+      <file>infrastructure/ai-search/discovery-index.json</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read infrastructure/ai-search/spaarke-knowledge-index-v2.json in full to understand the current index schema structure, field definitions format, and how existing filterable fields are declared.</step>
+    <step>Read infrastructure/ai-search/discovery-index.json in full for the same understanding of that index's schema.</step>
+    <step>Read .claude/constraints/auth.md to understand the privilege model: how group IDs are represented, whether they are Entra group object IDs or custom Spaarke identifiers, and any existing security trimming patterns.</step>
+    <step>Add the privilege_group_ids field to infrastructure/ai-search/spaarke-knowledge-index-v2.json:
+      {
+        "name": "privilege_group_ids",
+        "type": "Collection(Edm.String)",
+        "searchable": false,
+        "filterable": true,
+        "retrievable": true,
+        "sortable": false,
+        "facetable": false
+      }
+      Insert the field in the fields array at a logical position after existing metadata fields.</step>
+    <step>Add the same privilege_group_ids field definition to infrastructure/ai-search/discovery-index.json with identical field attributes.</step>
+    <step>Retrieve the current Azure AI Search service admin key from Key Vault:
+      az keyvault secret show --vault-name spaarke-spekvcert --name AiSearch--AdminKey --query value -o tsv</step>
+    <step>Deploy the updated knowledge index schema to the dev AI Search service (spaarke-search-dev) using the Azure AI Search REST API:
+      PUT https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index?api-version=2024-07-01
+      with the full updated JSON body and the admin key header.
+      Note: Adding a new field to an existing index is a non-breaking schema update.</step>
+    <step>Deploy the updated discovery index schema using the same approach.</step>
+    <step>Verify the field was added to both indexes:
+      GET https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index?api-version=2024-07-01
+      Confirm privilege_group_ids appears in the fields array with filterable=true.
+      Repeat for the discovery index.</step>
+    <step>Run a test $filter query against each index using privilege_group_ids to confirm the field is accepted as a filter expression:
+      $filter=privilege_group_ids/any(g: g eq 'test-group-id')
+      Confirm the query returns HTTP 200 (not a 400 filter error).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>infrastructure/ai-search/spaarke-knowledge-index-v2.json contains the privilege_group_ids field with type Collection(Edm.String), filterable=true, searchable=false, retrievable=true.</criterion>
+    <criterion>infrastructure/ai-search/discovery-index.json contains the same privilege_group_ids field definition.</criterion>
+    <criterion>The spaarke-knowledge-index in the dev Azure AI Search service contains the privilege_group_ids field confirmed via GET index API response.</criterion>
+    <criterion>The discovery index in the dev Azure AI Search service contains the privilege_group_ids field confirmed via GET index API response.</criterion>
+    <criterion>A $filter expression using privilege_group_ids/any(g: g eq '...') returns HTTP 200 on both indexes.</criterion>
+    <criterion>No admin keys or secrets appear in any committed file.</criterion>
+  </acceptance-criteria>
+</task>

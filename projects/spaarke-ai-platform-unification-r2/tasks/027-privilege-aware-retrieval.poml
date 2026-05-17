@@ -1,0 +1,57 @@
+<task id="AIPU2-027" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Implement Privilege-Aware Retrieval — AI Search Security Filter</title>
+    <phase>2B</phase>
+    <tags>bff-api, security, ai-search</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-005</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Extend the BFF's RagService to apply privilege_group_ids security filters on every Azure AI Search query.
+    Currently, AI Search returns all indexed documents matching the semantic query regardless of the requesting
+    user's matter access. This change ensures that cross-matter searches only return documents from matters
+    the user is explicitly authorized to access. Group IDs are resolved from the caller's Azure AD token
+    claims (group membership claims or on-demand Graph group lookup). This is a security-critical change —
+    no document from an unauthorized matter must ever appear in retrieval results.
+  </prompt>
+  <role>Senior .NET security engineer with Azure AI Search filter syntax and Entra ID group claims experience.</role>
+  <goal>
+    Every RagService query includes a privilege_group_ids security filter. Documents not matching the user's
+    group IDs are never returned. Cross-matter retrieval isolation is enforced at the search layer.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read IRagService.cs and its implementation to understand the current search query construction, SearchOptions usage, and what fields are indexed in the AI Search index.</step>
+    <step>Read auth.md and GraphClientFactory.cs to understand how user identity and group membership are currently resolved in the BFF request pipeline.</step>
+    <step>Verify the AI Search index schema includes a privilege_group_ids field (string collection, filterable). If not present in the index definition, add it to the index schema update script (infrastructure/ai-search/) and document the schema change in the task notes. Do not apply schema changes to production — flag for deployment.</step>
+    <step>Create IPrivilegeGroupResolver.cs interface with: Task&lt;IReadOnlyList&lt;string&gt;&gt; ResolveGroupIdsAsync(ClaimsPrincipal user, CancellationToken ct).</step>
+    <step>Create PrivilegeGroupResolver.cs implementing IPrivilegeGroupResolver. Strategy: (1) Check JWT claims for "groups" claim (direct group IDs); (2) If groups claim absent or overage (200+ groups), call Microsoft Graph GET /me/memberOf to resolve transitively. Cache per user ID in IMemoryCache with 5-minute TTL.</step>
+    <step>In RagService, inject IPrivilegeGroupResolver. Before building SearchOptions, call ResolveGroupIdsAsync and construct the OData filter: privilege_group_ids/any(g: g eq '{groupId1}') or privilege_group_ids/any(g: g eq '{groupId2}') ... Format using SearchFilter.Create for parameterized safety.</step>
+    <step>Handle edge cases: empty group list → filter returns no documents (do not omit filter — log error and return empty result); Graph call failure → fail-closed (return empty results and log error, do not fall back to unfiltered search).</step>
+    <step>Add OTEL counter ai_retrieval_privilege_filter_applied_total and ai_retrieval_privilege_filter_empty_result_total (when user has no matching group).</step>
+    <step>Register IPrivilegeGroupResolver as scoped (per-request) in the DI container.</step>
+    <step>Write unit tests: groups from claims applied as filter, groups from Graph fallback applied, empty group list returns empty results, Graph failure returns empty results (not unfiltered).</step>
+    <step>Write an integration test (or clearly marked manual test checklist) that verifies a user without matter access receives zero results for that matter's documents.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "Privilege"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Every RagService query includes a privilege_group_ids filter — verified by examining SearchOptions in tests.</criterion>
+    <criterion>Group IDs resolved from JWT claims when the "groups" claim is present.</criterion>
+    <criterion>Graph API fallback used when groups claim is absent or overage (200+ groups).</criterion>
+    <criterion>Empty group list results in an empty search result set, not an unfiltered query.</criterion>
+    <criterion>Graph API failure results in empty search results and an error log (fail-closed).</criterion>
+    <criterion>Group resolution results cached per user for 5 minutes.</criterion>
+    <criterion>OTEL counters emitted correctly.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "Privilege"`.</criterion>
+    <criterion>No unfiltered AI Search query can be issued through RagService after this change.</criterion>
+  </acceptance-criteria>
+</task>

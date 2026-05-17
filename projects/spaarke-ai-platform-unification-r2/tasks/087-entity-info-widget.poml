@@ -1,0 +1,50 @@
+<task id="AIPU2-087" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build EntityInfoWidget for Context Pane</title>
+    <phase>4D</phase>
+    <tags>frontend, widgets, entity</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-073</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    During the loading and early active-chat stages, the Context pane shows information about
+    the entity currently in scope (e.g., a legal matter: matter name, client, status, key dates,
+    budget). This gives users immediate context without requiring a chat turn. EntityInfoWidget
+    implements ContextWidget and loads entity detail from Dataverse context passed via the
+    context_update event payload. It must update reactively when the entity context changes
+    (e.g., user navigates to a different matter record).
+  </prompt>
+  <role>Frontend developer with React 19, Fluent v9, and Dataverse context integration experience.</role>
+  <goal>
+    Entity information (matter name, client, status, key dates, budget) displays in the Context
+    pane during entity-info stage. Widget updates when entity context changes. Registered in
+    ContextWidgetRegistry.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 to confirm Fluent v9 component and token requirements.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/widgets/context/EntityInfoWidget.tsx implementing ContextWidget.</step>
+    <step>Define EntityInfoData type: { entityType: string; entityId: string; displayName: string; clientName?: string; status?: string; keyDates?: KeyDate[]; budget?: BudgetSummary; customFields?: Record&lt;string, string&gt; }.</step>
+    <step>Render entity information using Fluent v9 layout: displayName as heading, status as Badge, key dates as a compact list, budget as a progress bar (spent vs. total) if present, customFields as a definition list.</step>
+    <step>Subscribe to additional context_update events within the widget using usePaneEvent on the 'context' channel — when a new entity-info event arrives with a different entityId, update the displayed data reactively.</step>
+    <step>Show a Fluent v9 Skeleton loading state while entity data is being fetched if the initial payload is partial.</step>
+    <step>Handle missing optional fields gracefully — absent fields are simply not rendered (no empty rows).</step>
+    <step>Register EntityInfoWidget in ContextWidgetRegistry.</step>
+    <step>Write unit tests: entity fields render correctly; missing optional fields produce no empty rows; entityId change updates displayed data.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Entity display name, client, status, key dates, and budget render correctly using Fluent v9 components.</criterion>
+    <criterion>Missing optional fields are omitted — no empty rows or null labels.</criterion>
+    <criterion>Widget updates reactively when a new context_update event with a different entityId arrives.</criterion>
+    <criterion>Skeleton loading state renders while entity data is incomplete.</criterion>
+    <criterion>Widget registered in ContextWidgetRegistry and renders in ContextPaneController during entity-info stage.</criterion>
+    <criterion>No hard-coded colors — all styling uses Fluent v9 design tokens (ADR-021).</criterion>
+    <criterion>Unit tests for field rendering, optional omission, and reactive update pass.</criterion>
+  </acceptance-criteria>
+</task>

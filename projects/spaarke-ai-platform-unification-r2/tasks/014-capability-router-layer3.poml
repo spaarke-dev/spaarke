@@ -1,0 +1,50 @@
+<task id="AIPU2-014" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build Capability Router Layer 3 — Broad Superset Fallback</title>
+    <phase>2A</phase>
+    <tags>bff-api, ai, routing</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-012</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build Layer 3 of the capability router — the broad superset fallback used for the small fraction of turns
+    (under 10%) that neither Layer 1 nor Layer 2 can classify. Rather than refusing or erroring, Layer 3
+    activates the full general-purpose tool set (the union of all enabled capabilities' tool sets, capped at
+    a sensible maximum). When the matched playbook has a defined broad superset, that is used instead.
+    Layer 3 adds zero milliseconds of LLM routing overhead since it requires no additional AI call.
+  </prompt>
+  <role>Senior .NET backend engineer familiar with Spaarke AI tool orchestration patterns.</role>
+  <goal>
+    Layer 3 returns a deterministic CapabilityRoutingResult in under 1ms (no I/O), covering fewer than 10%
+    of all turns. The returned tool set is the full superset or the playbook-defined broad set.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityManifest.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read CapabilityRouter.cs (from task 012) and CapabilityManifest.cs (from task 010) to understand the routing result structure and manifest API.</step>
+    <step>Add Layer3FallbackAsync(CancellationToken ct) method to CapabilityRouter.cs. This is called when both Layer 1 and Layer 2 fail to produce a high-confidence result.</step>
+    <step>Implement superset tool set computation: call ICapabilityManifest.GetAll(), union all ToolNames across enabled capabilities, deduplicate, sort alphabetically for deterministic ordering, cap at MaxSupersetTools (default 12, configurable in CapabilityRouterOptions).</step>
+    <step>Check if a default playbook is configured (CapabilityRouterOptions.DefaultPlaybookId). If set, load that playbook's tool set via IPlaybookRepository (or ICapabilityManifest lookup) and use it as the superset instead of the computed union.</step>
+    <step>Return CapabilityRoutingResult with MatchedCapabilityName = null, Confidence = 0.0, RoutingLayer = Layer3, and the resolved superset tool names in an extended property (add SelectedToolNames to CapabilityRoutingResult).</step>
+    <step>Instrument with OTEL: emit ai_routing_layer3_hit counter. No Activity span needed (synchronous, &lt;1ms).</step>
+    <step>Update CapabilityRoutingMiddleware to write SelectedToolNames from the routing result into IAgentServiceContext so the OrchestratorPromptBuilder (task 015) can use them.</step>
+    <step>Write unit tests: superset computed correctly from 3 capabilities, cap enforced at MaxSupersetTools, DefaultPlaybookId overrides computed superset, Layer 3 never called when Layer 1 or 2 succeeds.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "CapabilityRouter"` to verify all three layers.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Layer 3 returns a result synchronously with no I/O in under 1ms.</criterion>
+    <criterion>Superset tool list is deduplicated and capped at MaxSupersetTools.</criterion>
+    <criterion>DefaultPlaybookId overrides computed superset when configured.</criterion>
+    <criterion>SelectedToolNames are written to IAgentServiceContext by CapabilityRoutingMiddleware.</criterion>
+    <criterion>ai_routing_layer3_hit OTEL counter incremented on every Layer 3 activation.</criterion>
+    <criterion>Layer 3 is never activated when Layer 1 or Layer 2 produces a confident result.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "CapabilityRouter"`.</criterion>
+  </acceptance-criteria>
+</task>

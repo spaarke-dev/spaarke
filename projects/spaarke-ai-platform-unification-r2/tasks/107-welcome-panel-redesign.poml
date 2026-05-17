@@ -1,0 +1,54 @@
+<task id="AIPU2-107" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Redesign WelcomePanel for Stage 1 of three-pane lifecycle</title>
+    <phase>5</phase>
+    <tags>frontend, ui, welcome</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-079, AIPU2-086</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The R1 WelcomePanel is a single-pane component. In the R2 three-pane layout, the Stage 1
+    (Landing) experience is distributed across all three panes: Workspace shows "What would you
+    like to work on?" plus recent work, Context shows the PlaybookGalleryWidget, and
+    Conversation shows a welcome message with prompt suggestion buttons. The existing R1
+    WelcomePanel must be decomposed into three coordinated sub-components and integrated with
+    the Stage 1 state (AIPU2-105). Recent sessions data from R1 WelcomePanel should be
+    preserved and surfaced in the Workspace pane.
+  </prompt>
+  <role>Frontend developer responsible for landing experience and first-run UX.</role>
+  <goal>
+    The Stage 1 landing experience matches design.md Section 2.3 Stage 1 layout: Workspace
+    shows recent work cards + "Start new work" CTA, Context shows PlaybookGalleryWidget,
+    Conversation shows welcome message + at least 3 prompt suggestion chips. Recent sessions
+    from the R1 WelcomePanel data source are surfaced as work cards in the Workspace pane.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/ConversationPane</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Audit R1 WelcomePanel.tsx: identify what data it loads (recent sessions, suggested prompts), what API calls it makes, and what UI it renders. Document the data contracts.</step>
+    <step>Create WorkspaceLandingWidget: renders "What would you like to work on?" heading, recent work cards (from R1 WelcomePanel data source), and a "Start new work" CTA button. Each recent work card shows session title, date, and playbook name; clicking restores the session (triggers session restore flow).</step>
+    <step>The PlaybookGalleryWidget (AIPU2-086) serves as the Context pane content for Stage 1 — confirm it is correctly registered in ContextPaneController's Stage 1 configuration from AIPU2-105.</step>
+    <step>Create ConversationLandingContent: renders a friendly welcome message, and 3-5 prompt suggestion chips based on the user's recent activity or playbook catalog. Chips dispatch a pre-filled message to SprkChat on click.</step>
+    <step>Wire all three components into ThreePaneShell Stage 1 configuration (coordinating with AIPU2-105).</step>
+    <step>Preserve R1 WelcomePanel session data API call — reuse the same endpoint so existing data appears in the new WorkspaceLandingWidget recent work cards.</step>
+    <step>Apply Fluent UI v9 card and layout tokens throughout — no hard-coded spacing or colors.</step>
+    <step>Test: navigate to SpaarkeAi without a sessionId, verify Stage 1 renders all three pane contents correctly, verify recent work cards load and clicking one restores the session.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Stage 1 Workspace pane shows "What would you like to work on?" heading and recent work cards sourced from the R1 WelcomePanel data API.</criterion>
+    <criterion>Stage 1 Context pane shows PlaybookGalleryWidget.</criterion>
+    <criterion>Stage 1 Conversation pane shows a welcome message and at least 3 prompt suggestion chips.</criterion>
+    <criterion>Clicking a recent work card triggers the session restore flow (AIPU2-106).</criterion>
+    <criterion>Clicking a prompt suggestion chip pre-fills and sends the message to SprkChat.</criterion>
+    <criterion>All layout uses Fluent UI v9 tokens — no hard-coded colors or spacing.</criterion>
+    <criterion>R1 WelcomePanel.tsx is either removed or clearly deprecated with a comment pointing to the new components.</criterion>
+  </acceptance-criteria>
+</task>

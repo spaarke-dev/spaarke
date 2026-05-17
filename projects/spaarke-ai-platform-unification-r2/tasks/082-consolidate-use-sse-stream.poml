@@ -1,0 +1,50 @@
+<task id="AIPU2-082" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Consolidate Duplicate useSseStream Implementations</title>
+    <phase>4C</phase>
+    <tags>frontend, refactor, sse</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-076</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Two parallel implementations of useSseStream exist in R1: one in Spaarke.UI.Components
+    (used by SprkChat) and one in Spaarke.AI.Context (used by the AI context providers).
+    They drifted over time and now differ in error handling, reconnect logic, and event parsing.
+    R2's AiSessionProvider introduced a third potential usage. Before adding more SSE consumers,
+    consolidate to a single canonical useSseStream hook in Spaarke.UI.Components (as the lower-
+    level shared library) and update both consumers to import from there. Remove the duplicate
+    from Spaarke.AI.Context.
+  </prompt>
+  <role>Frontend developer with React hooks, TypeScript, and SSE (EventSource) experience.</role>
+  <goal>
+    A single canonical useSseStream hook exists in Spaarke.UI.Components. Both former consumers
+    (SprkChat and AiSessionProvider) reference the same source. The duplicate in Spaarke.AI.Context
+    is removed. No behavioral regression in SSE handling.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useSseStream.ts</file>
+      <file>src/client/shared/Spaarke.AI.Context/src/hooks/useSseStream.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read both useSseStream implementations in full to identify all differences: error handling strategy, reconnect logic, event type parsing, AbortController usage, cleanup on unmount.</step>
+    <step>Determine the canonical implementation: take the best behavior from each — prefer the more robust error handling and reconnect logic; document any differences resolved and why.</step>
+    <step>Move/update the canonical implementation to src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts (a new shared hooks directory, not inside SprkChat component folder).</step>
+    <step>Export useSseStream from Spaarke.UI.Components src/index.ts barrel so all consumers can import it as @spaarke/ui-components useSseStream.</step>
+    <step>Update SprkChat's internal import to use the new canonical path.</step>
+    <step>Update AiSessionProvider to import useSseStream from @spaarke/ui-components instead of the Spaarke.AI.Context local copy.</step>
+    <step>Delete src/client/shared/Spaarke.AI.Context/src/hooks/useSseStream.ts.</step>
+    <step>Run all existing SSE-related tests and verify no regressions; add a test confirming both SprkChat and AiSessionProvider use the same hook source.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Single canonical useSseStream exists in Spaarke.UI.Components/src/hooks/ and is barrel-exported.</criterion>
+    <criterion>SprkChat imports useSseStream from the canonical location.</criterion>
+    <criterion>AiSessionProvider imports useSseStream from @spaarke/ui-components.</criterion>
+    <criterion>Duplicate useSseStream in Spaarke.AI.Context is deleted.</criterion>
+    <criterion>All existing SSE streaming tests pass without behavioral regression.</criterion>
+    <criterion>Differences between the two R1 implementations are documented in a code comment explaining what was chosen and why.</criterion>
+  </acceptance-criteria>
+</task>

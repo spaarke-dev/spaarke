@@ -1,0 +1,48 @@
+<task id="AIPU2-111" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Widget serialize/restore test for all 18 widgets</title>
+    <phase>6</phase>
+    <tags>testing, widgets</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-080, AIPU2-081, AIPU2-085, AIPU2-086, AIPU2-087, AIPU2-088, AIPU2-089</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Every WorkspaceWidget and ContextWidget must survive a serialize -> close -> restore cycle
+    and display current data (not stale snapshots) after restore. This test covers all 18
+    widgets implemented across Phase 4. Failures here indicate broken session persistence
+    which is a core R2 promise. The test should be automated where possible (unit or
+    integration level) and must produce a per-widget pass/fail matrix.
+  </prompt>
+  <role>Frontend developer responsible for widget testing and session persistence validation.</role>
+  <goal>
+    All 18 widgets pass the serialize -> close -> restore cycle. After restore, each widget
+    displays data-refreshed content (not the serialized snapshot text). A per-widget pass/fail
+    matrix is produced in notes/widget-serialize-test-report.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/WorkspacePane</file>
+      <file>src/solutions/SpaarkeAi/src/components/ContextPane</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Enumerate all 18 widgets from the Phase 4 implementation tasks (AIPU2-080 through AIPU2-089). Create a test matrix with columns: Widget Name, Serialized Fields, Restore Trigger, Data-Refresh Check, Pass/Fail.</step>
+    <step>For each widget, write a Jest unit test (or Vitest equivalent) that: (a) initializes the widget with test data, (b) calls widget.serialize(), (c) creates a new widget instance with the serialized state, (d) calls widget.restore(), (e) asserts the widget re-fetches current data (mock the API call and verify it is called with correct identifiers).</step>
+    <step>Verify that restored widget renders current data: the mock API response differs from the serialized snapshot, and the widget displays the fresh data (not the stale snapshot).</step>
+    <step>For widgets with complex state (e.g. document viewer scroll position, active tab index), verify state is also restored correctly alongside data refresh.</step>
+    <step>Run all 18 tests and collect results. For any failures, document the root cause and fix before marking as complete.</step>
+    <step>Write integration test for the full session restore path (complements AIPU2-106): restore a session with all 18 widget types represented (use mocks for missing data), verify each widget's data-refresh API call fires.</step>
+    <step>Document per-widget results in notes/widget-serialize-test-report.md: widget name, serialized fields tested, whether data-refresh fires, pass/fail.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 18 widgets have a serialize/restore unit test.</criterion>
+    <criterion>Each widget's restore() method triggers a data-refresh API call with correct identifiers from the serialized state.</criterion>
+    <criterion>Widget renders fresh API data (not stale snapshot) after restore — verified by differing mock vs. snapshot values.</criterion>
+    <criterion>Complex state (scroll position, active tab) is also correctly restored.</criterion>
+    <criterion>All 18 widgets pass — zero failing tests in the final run.</criterion>
+    <criterion>Test report written to notes/widget-serialize-test-report.md with per-widget pass/fail matrix.</criterion>
+  </acceptance-criteria>
+</task>

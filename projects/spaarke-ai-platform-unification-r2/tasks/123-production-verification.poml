@@ -1,0 +1,53 @@
+<task id="AIPU2-123" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Production verification (safety, routing, persistence)</title>
+    <phase>7</phase>
+    <tags>deploy, verification, e2e</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-121, AIPU2-122</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    After both the BFF API (AIPU2-121) and the SpaarkeAi web resource (AIPU2-122) are deployed,
+    run a structured end-to-end verification of all R2 features in the deployed dev environment.
+    This is the final quality gate before documentation and wrap-up. Covers: safety pipeline,
+    capability routing, Cosmos write-through persistence, session restore, and widget rendering.
+    This is not a repeat of Phase 6 tests — it verifies the complete stack is working together
+    in the deployed environment (not localhost, not mocks).
+  </prompt>
+  <role>QA engineer running the production verification checklist in the live dev environment.</role>
+  <goal>
+    All R2 features are verified operational in the deployed dev environment. Safety pipeline,
+    routing, Cosmos persistence, session restore, and widget rendering all produce correct
+    results. A signed-off verification report is written to notes/production-verification-report.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>notes/safety-e2e-test-report.md</file>
+      <file>notes/routing-benchmark-report.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Safety pipeline verification: send a prompt injection payload via the deployed SpaarkeAi UI. Verify blocking occurs and the UI shows a safe error message (not a stack trace). Verify a grounded response includes a groundedness annotation.</step>
+    <step>Capability routing verification: send a simple lookup query (expected Layer 1), a summarization query (expected Layer 2), and a multi-step analysis query (expected Layer 3). Verify each returns a response. Check Application Insights to confirm routing telemetry shows the correct layer assignment for each message.</step>
+    <step>Cosmos write-through verification: send 3 messages in a conversation. Open Cosmos DB Data Explorer and verify the messages are persisted in the messages container with correct session ID, user ID, and timestamps.</step>
+    <step>Session restore verification: note the session ID from step 3, close and reopen SpaarkeAi with ?sessionId=that-id. Verify all three panes restore correctly with current data.</step>
+    <step>Widget rendering verification: open a document in a WorkspaceWidget, verify it renders. Open the PlaybookGalleryWidget in the Context pane, verify playbooks load. Select a playbook, verify chat specializes.</step>
+    <step>Cross-pane integration verification: click a citation in WorkspaceWidget, verify Context pane highlights source. Select text in WorkspaceWidget, verify "Refine this?" chip appears in ConversationPane.</step>
+    <step>Audit log verification: after completing steps 1-6, query the audit Cosmos container (via Data Explorer or az cosmosdb) and verify audit entries were created for the AI interactions.</step>
+    <step>Document all verification results in notes/production-verification-report.md: each check, expected result, actual result, pass/fail. Sign off if all checks pass.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Prompt injection is blocked in the deployed environment with a safe UI error message.</criterion>
+    <criterion>Capability routing assigns all three test messages to the correct layers (confirmed via Application Insights telemetry).</criterion>
+    <criterion>Cosmos DB contains persisted messages from the test conversation (visible in Data Explorer).</criterion>
+    <criterion>Session restore reconstructs all three panes correctly from the persisted session.</criterion>
+    <criterion>Document viewer, playbook gallery, and playbook specialization all work in the deployed environment.</criterion>
+    <criterion>Cross-pane citation highlight and text refinement suggestion work end-to-end.</criterion>
+    <criterion>Audit entries are created for AI interactions in the audit Cosmos container.</criterion>
+    <criterion>Verification report written to notes/production-verification-report.md with all checks signed off.</criterion>
+  </acceptance-criteria>
+</task>

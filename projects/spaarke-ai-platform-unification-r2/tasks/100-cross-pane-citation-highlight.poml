@@ -1,0 +1,55 @@
+<task id="AIPU2-100" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Cross-pane: Citation click in Workspace highlights source in Context</title>
+    <phase>5</phase>
+    <tags>frontend, integration, cross-pane</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-074, AIPU2-080, AIPU2-081</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Wire up the cross-pane citation highlight flow so that when a user clicks a citation link
+    inside a WorkspaceWidget, the Context pane scrolls to and highlights the source passage
+    in the relevant source widget. This is a key discoverability feature: users should be
+    able to trace AI-generated citations back to the underlying document or search result
+    without manually navigating. Uses PaneEventBus (AIPU2-074) as the event backbone,
+    CitationWidget (AIPU2-080) as the source consumer, and SearchResultsWidget (AIPU2-081)
+    as a secondary path.
+  </prompt>
+  <role>Frontend developer with experience in React event-driven architectures and PCF/Code Page integration patterns.</role>
+  <goal>
+    Clicking any citation link inside a WorkspaceWidget dispatches a CrossPaneLinkEvent via
+    PaneEventBus. The ContextPaneController receives the event, identifies the correct source
+    widget (CitationWidget or SearchResultsWidget), scrolls to the referenced passage, and
+    applies a transient highlight animation. The full flow works in both the SearchResultsWidget
+    and CitationWidget paths.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/WorkspacePane</file>
+      <file>src/solutions/SpaarkeAi/src/components/ContextPane</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Review PaneEventBus API (AIPU2-074 output) and confirm CrossPaneLinkEvent shape: { type: 'cross-pane-link', sourceWidgetId: string, citationId: string, targetWidgetType: 'citation' | 'search-results', anchorRef: string }.</step>
+    <step>In WorkspaceWidget base class, add an onLink callback prop. When a citation anchor is clicked, call onLink with the citation metadata; WorkspaceWidget wrapper dispatches CrossPaneLinkEvent via PaneEventBus.</step>
+    <step>In ContextPaneController, subscribe to CrossPaneLinkEvent on mount and unsubscribe on unmount. On receipt, identify the active context widget by targetWidgetType.</step>
+    <step>Implement scrollToAndHighlight(anchorRef) in CitationWidget: scroll the citation entry into view, apply a 1.5s Fluent token-based highlight animation (backgroundColorBrandBackground2 fading to transparent), then clear.</step>
+    <step>Implement the same scrollToAndHighlight in SearchResultsWidget for the search-results path.</step>
+    <step>Wire up the SearchResultsWidget -> CitationWidget flow: if the active context widget is SearchResultsWidget and the citation maps to a search result, highlight the result row.</step>
+    <step>Write a manual integration test: load a document in WorkspaceWidget, trigger AI response with citations, click citation, verify Context pane highlights the correct source. Cover both widget paths.</step>
+    <step>Verify highlight uses only Fluent UI v9 tokens — no hard-coded colors (ADR-021).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Clicking a citation link in any WorkspaceWidget dispatches CrossPaneLinkEvent via PaneEventBus within 50ms of the click.</criterion>
+    <criterion>ContextPaneController receives the event and calls scrollToAndHighlight on the correct widget.</criterion>
+    <criterion>The target widget scrolls the cited passage into view and applies a visible highlight animation.</criterion>
+    <criterion>Highlight animation uses Fluent UI v9 tokens exclusively — no hard-coded colors.</criterion>
+    <criterion>The flow works for both the CitationWidget path and the SearchResultsWidget path.</criterion>
+    <criterion>No memory leaks: PaneEventBus subscription is cleaned up on ContextPaneController unmount.</criterion>
+  </acceptance-criteria>
+</task>

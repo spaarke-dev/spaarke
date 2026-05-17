@@ -1,0 +1,51 @@
+<task id="AIPU2-101" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Cross-pane: Text selection in Workspace triggers chat refinement suggestion</title>
+    <phase>5</phase>
+    <tags>frontend, integration, cross-pane</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-074, AIPU2-079</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    When a user selects text inside a WorkspaceWidget (e.g. a document viewer or search result),
+    the ConversationPane should detect this selection and offer a "Refine this?" suggestion chip
+    in SprkChat. If the user clicks the chip, the selected text is injected as context into the
+    next chat message. This reduces friction for iterative analysis — users can highlight a
+    clause, ask the AI to refine or explain it, without copying and pasting manually.
+    Uses PaneEventBus (AIPU2-074) and the SprkChat component (AIPU2-079).
+  </prompt>
+  <role>Frontend developer with React selection API experience and familiarity with the SprkChat SSE component.</role>
+  <goal>
+    When text is selected in any WorkspaceWidget, a SelectionChangedEvent is dispatched via
+    PaneEventBus. ConversationPane receives it and shows a "Refine this?" suggestion chip in
+    SprkChat. Clicking the chip prepopulates the chat input with the selected text as message
+    context and clears the chip. The chip disappears if the selection is cleared.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/ConversationPane</file>
+      <file>src/solutions/SpaarkeAi/src/components/SprkChat</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Define SelectionChangedEvent shape on PaneEventBus: { type: 'selection-changed', widgetId: string, selectedText: string | null, contextLabel: string }. Empty/null selectedText signals selection cleared.</step>
+    <step>In WorkspaceWidget base, add a mouseup/selectionchange listener that reads window.getSelection(), debounces 300ms, and dispatches SelectionChangedEvent via PaneEventBus. On selection clear, dispatch with selectedText: null.</step>
+    <step>In ConversationPane, subscribe to SelectionChangedEvent. On receipt with non-null text, store selectedText in local state and show "Refine this?" suggestion chip above the SprkChat input bar.</step>
+    <step>Style the chip using Fluent UI v9 Badge or Tag component with Fluent tokens. Display the first 40 chars of selected text as a preview label.</step>
+    <step>Wire chip click: call SprkChat.prependContext({ label: contextLabel, text: selectedText }) to inject the selection as a context block in the input, then clear chip state.</step>
+    <step>On SelectionChangedEvent with null text, hide the chip without affecting any in-progress input.</step>
+    <step>Verify the context block is included in the SSE request payload so the backend receives the selected text as additional context.</step>
+    <step>Test: select text in a WorkspaceWidget, verify chip appears; click chip, verify input is populated; clear selection, verify chip disappears.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Selecting text in any WorkspaceWidget dispatches SelectionChangedEvent within 350ms (300ms debounce + 50ms dispatch).</criterion>
+    <criterion>"Refine this?" chip appears in ConversationPane with a preview of the selected text.</criterion>
+    <criterion>Clicking the chip injects selected text as a context block into the SprkChat input.</criterion>
+    <criterion>The context block is sent to the backend as part of the SSE message payload.</criterion>
+    <criterion>Clearing the selection removes the chip without disrupting any in-progress user input.</criterion>
+    <criterion>Chip styling uses Fluent UI v9 tokens only — no hard-coded colors.</criterion>
+  </acceptance-criteria>
+</task>

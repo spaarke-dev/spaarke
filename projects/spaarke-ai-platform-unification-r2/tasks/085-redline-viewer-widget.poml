@@ -1,0 +1,54 @@
+<task id="AIPU2-085" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build RedlineViewerWidget for Document Comparison</title>
+    <phase>4D</phase>
+    <tags>frontend, widgets, documents</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-071, AIPU2-042</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Legal workflows frequently require side-by-side document comparison with tracked changes.
+    AIPU2-042 implemented the server-side document comparison BFF endpoint that returns a
+    structured diff (additions, deletions, modifications by section). RedlineViewerWidget
+    consumes this diff and renders it as a side-by-side view in the Workspace pane: left side
+    shows the original document, right side shows the modified version, with change type
+    highlights (additions in green, deletions in red, modifications in yellow using Fluent v9
+    semantic color tokens). Section-level navigation allows jumping between changed sections.
+    Widget must implement serializeState/restoreState via data-refreshed restore (re-call BFF
+    with the comparison identifiers).
+  </prompt>
+  <role>Frontend developer with React 19, Fluent v9, and document diff rendering experience.</role>
+  <goal>
+    Two document versions display side-by-side with changes highlighted using Fluent v9 semantic
+    color tokens. Section navigation works. Serialize/restore calls BFF for fresh diff data.
+    Widget registered in WorkspaceWidgetRegistry.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 to understand the Fluent v9 design token requirements — no hard-coded colors, dark mode required, use semantic tokens (colorPaletteGreenBackground2, colorPaletteRedBackground2, colorPaletteYellowBackground2 or equivalent).</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/RedlineViewerWidget.tsx implementing WorkspaceWidget&lt;RedlineViewerData, RedlineViewerActions&gt;.</step>
+    <step>Define RedlineViewerData type: { documentAId: string; documentBId: string; comparisonId: string; sections: DiffSection[] } where DiffSection carries the change type and text content for both sides.</step>
+    <step>Render a two-column layout (Fluent v9 Grid or CSS grid): left column = original text, right column = modified text, synchronized scroll.</step>
+    <step>Apply Fluent v9 semantic color tokens to highlight change regions: additions (colorPaletteGreenBackground2 or equivalent), deletions (colorPaletteRedBackground2), modifications (colorPaletteYellowBackground2). Verify tokens work in both light and dark themes.</step>
+    <step>Implement section-level navigation: a navigation panel lists changed section titles; clicking a section scrolls both columns to that section simultaneously.</step>
+    <step>Implement serializeState(): return { widgetType: 'redline-viewer', version: 1, data: { documentAId, documentBId, comparisonId }, timestamp }.</step>
+    <step>Implement restoreState(state): call BFF comparison endpoint with documentAId, documentBId, comparisonId to re-fetch fresh diff data; update widget display.</step>
+    <step>Register RedlineViewerWidget in WorkspaceWidgetRegistry with displayName: 'Document Comparison', category: 'document'.</step>
+    <step>Write unit tests: change highlights use correct Fluent tokens for each change type; section navigation scrolls to the correct section; serializeState returns only identifiers.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Side-by-side diff view renders additions (green), deletions (red), modifications (yellow) using Fluent v9 semantic color tokens — no hard-coded colors.</criterion>
+    <criterion>Dark mode: all highlight colors remain distinguishable using Fluent v9 dark theme tokens.</criterion>
+    <criterion>Section-level navigation lists all changed sections and scrolls both columns correctly.</criterion>
+    <criterion>serializeState returns only document identifiers (not full diff data).</criterion>
+    <criterion>restoreState calls BFF comparison endpoint and refreshes the widget with the response.</criterion>
+    <criterion>Widget registered in WorkspaceWidgetRegistry and renders in WorkspacePane tabs.</criterion>
+    <criterion>Unit tests for highlight tokens, navigation, and serialize pass.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,55 @@
+<task id="AIPU2-023" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build InternalIndexProvider — AI Search Citation Verification</title>
+    <phase>2B</phase>
+    <tags>bff-api, ai-safety, ai-search</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-022</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build InternalIndexProvider, an IVerificationProvider implementation that verifies citations against the
+    spaarke-references Azure AI Search index — the internal knowledge base of authoritative legal references
+    indexed from uploaded matter documents and curated legal sources. This provider handles CaseLaw, Statute,
+    and Regulation types that have been ingested into the internal index, providing the highest-confidence
+    verification path since it references Spaarke's own curated content.
+  </prompt>
+  <role>Senior .NET backend engineer with Azure AI Search SDK experience and Spaarke RAG patterns.</role>
+  <goal>
+    InternalIndexProvider queries the spaarke-references AI Search index, returns a CitationVerificationResult
+    with IsVerified=true and a confidence score when the citation text matches an indexed document, and returns
+    IsVerified=false with ConfidenceScore=0 when no match is found.
+  </goal>
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read IRagService.cs and spaarke-rag-references.json to understand the existing AI Search index structure, field names, scoring profiles, and how the search client is currently configured.</step>
+    <step>Create InternalIndexProvider.cs in Services/Ai/Safety/Citations/ implementing IVerificationProvider.</step>
+    <step>Set ProviderName = "InternalIndex" and SupportedTypes = [CitationType.CaseLaw, CitationType.Statute, CitationType.Regulation].</step>
+    <step>Implement VerifyAsync(Citation citation, CancellationToken ct): build a SearchOptions with filter on citationType field (matching citation.CitationType.ToString()), search query = citation.NormalizedKey, top = 3, select fields [id, title, content, sourceUrl, citationKey]. Use the existing SearchClient for the spaarke-references index (inject via IConfiguration["AiSearch:ReferencesIndexName"]).</step>
+    <step>Score the top result: if top result score &gt;= 0.85, return IsVerified=true, ConfidenceScore mapped from search score (normalize to 0-1), SourceUrl and VerifiedText from result. If score &lt; 0.85 or no results, return IsVerified=false, ConfidenceScore=0.</step>
+    <step>Implement SearchAsync(string query, CancellationToken ct): free-text search on the references index, return up to 5 Citation objects constructed from results.</step>
+    <step>Implement GetFullTextAsync(Citation citation, CancellationToken ct): look up by citationKey field exact match, return content field of the first result, or null if not found.</step>
+    <step>Handle search failures: SearchRequestFailedException → log and return IsVerified=false (no exception propagated).</step>
+    <step>Register InternalIndexProvider as IVerificationProvider in AddAiSafetyModule().</step>
+    <step>Write unit tests with mocked SearchClient: high-score result → verified, low-score result → not verified, no results → not verified, SearchRequestFailedException → not verified.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "InternalIndexProvider"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>InternalIndexProvider is registered as IVerificationProvider for CaseLaw, Statute, and Regulation types.</criterion>
+    <criterion>Search query uses citation.NormalizedKey against the spaarke-references index.</criterion>
+    <criterion>Top result with score &gt;= 0.85 returns IsVerified=true with SourceUrl and VerifiedText populated.</criterion>
+    <criterion>Score &lt; 0.85 or no results returns IsVerified=false, ConfidenceScore=0.</criterion>
+    <criterion>SearchAsync returns up to 5 Citation objects from free-text search.</criterion>
+    <criterion>GetFullTextAsync returns content of exact citationKey match, or null.</criterion>
+    <criterion>Search exceptions are caught and return IsVerified=false (never propagated).</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "InternalIndexProvider"`.</criterion>
+  </acceptance-criteria>
+</task>

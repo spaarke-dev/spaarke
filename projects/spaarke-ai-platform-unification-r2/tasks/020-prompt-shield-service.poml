@@ -1,0 +1,56 @@
+<task id="AIPU2-020" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build PromptShieldService — Azure AI Content Safety Integration</title>
+    <phase>2B</phase>
+    <tags>bff-api, ai-safety, content-safety</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-003, AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build PromptShieldService, which calls the Azure AI Content Safety Prompt Shields API to detect prompt
+    injection attempts in both user messages and documents retrieved from the knowledge base. This is the
+    primary defense-in-depth layer against adversarial inputs embedded in uploaded documents or chat turns.
+    When an injection is detected, the request is blocked before reaching the LLM and the user receives a
+    clear but non-alarming message. The service must complete in under 100ms to stay within the streaming
+    first-token latency budget.
+  </prompt>
+  <role>Senior .NET security engineer with Azure AI Content Safety API experience.</role>
+  <goal>
+    Prompt injection attempts in user messages and retrieved documents are detected and blocked before reaching
+    the orchestrator LLM. Detection latency is under 100ms. SAFE inputs pass through with no user-visible impact.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read AI-ARCHITECTURE.md and auth-AI-azure-resources.md to find the Content Safety endpoint, API key secret name, and any existing HTTP client registrations.</step>
+    <step>Create IPromptShieldService.cs interface with: Task&lt;PromptShieldResult&gt; ScanAsync(PromptShieldRequest request, CancellationToken ct).</step>
+    <step>Create PromptShieldRequest.cs record: UserMessage (string), Documents (IReadOnlyList&lt;string&gt; — retrieved passage texts, can be empty).</step>
+    <step>Create PromptShieldResult.cs record: IsBlocked (bool), BlockReason (enum: None, UserInjection, DocumentInjection), DetectedAttackType (string?), LatencyMs (double).</step>
+    <step>Create PromptShieldService.cs implementing IPromptShieldService. Use IHttpClientFactory to get a named client "ContentSafety". Call POST https://{endpoint}/contentsafety/text:shieldPrompt?api-version=2024-09-01 with body { "userPrompt": message, "documents": [...] }.</step>
+    <step>Parse the API response: check attackDetected in userPromptAnalysis and documentsAnalysis. Map to PromptShieldResult. If either is true, set IsBlocked = true and set BlockReason appropriately.</step>
+    <step>Handle failure modes: HTTP 429 → log and set IsBlocked = false (fail-open with warning), HTTP 5xx → same fail-open behavior, timeout (&gt;100ms) → fail-open with warning. Always log the failure reason.</step>
+    <step>Register named HttpClient "ContentSafety" with BaseAddress from IConfiguration["AiSafety:ContentSafety:Endpoint"] and Ocp-Apim-Subscription-Key header from Key Vault. Register IPromptShieldService in AddAiSafetyModule() extension method.</step>
+    <step>Integrate into the AI request pipeline: call PromptShieldService.ScanAsync before the LLM call. If IsBlocked, return a streaming SSE error event with user-friendly message "I was unable to process that request." and end the stream.</step>
+    <step>Emit OTEL counter ai_safety_prompt_shield_blocked_total (label reason=user_injection|document_injection) and histogram ai_safety_prompt_shield_latency_ms.</step>
+    <step>Write unit tests with mocked HttpClient: user injection detected → blocked, document injection detected → blocked, SAFE → not blocked, HTTP 429 → fail-open, timeout → fail-open.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "PromptShield"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>User messages containing known injection patterns are blocked before reaching the LLM.</criterion>
+    <criterion>Retrieved documents containing injection patterns are blocked before reaching the LLM.</criterion>
+    <criterion>SAFE inputs pass through with no user-visible impact and no stream interruption.</criterion>
+    <criterion>Blocked requests return a user-friendly SSE error message and terminate the stream.</criterion>
+    <criterion>Service completes in under 100ms (P95) — verified by histogram in tests.</criterion>
+    <criterion>HTTP 429 and timeouts result in fail-open behavior (not blocked), with warning logged.</criterion>
+    <criterion>OTEL counter and histogram emitted correctly.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "PromptShield"`.</criterion>
+  </acceptance-criteria>
+</task>

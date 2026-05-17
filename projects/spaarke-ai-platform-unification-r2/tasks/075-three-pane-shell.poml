@@ -1,0 +1,50 @@
+<task id="AIPU2-075" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build ThreePaneShell Root Component Replacing App.tsx</title>
+    <phase>4B</phase>
+    <tags>frontend, shell, architecture</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-074</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1's App.tsx was a single-pane layout with an embedded chat area and a collapsible source
+    panel. R2 replaces it with ThreePaneShell, a root component that renders three coordinated
+    panes (Conversation, Workspace, Context) using the preserved ThreePaneLayout splitter
+    mechanics from @spaarke/ui-components. ThreePaneShell owns PaneEventBus as a context
+    provider (so all child panes share one bus instance), manages stage lifecycle state
+    (Welcome, Loading, ActiveChat, Review), and defines the slots where ConversationPane,
+    WorkspacePane, and ContextPaneController will render. No pane content is implemented in
+    this task — only the shell structure and wiring.
+  </prompt>
+  <role>Frontend developer with React 19, component composition, and layout architecture experience.</role>
+  <goal>
+    ThreePaneShell renders three coordinated panes via ThreePaneLayout. PaneEventBus is
+    provided to all children via context. Stage lifecycle state is managed correctly. App.tsx
+    is replaced. No pane content implemented in this task.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeAi/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ThreePaneLayout/ThreePaneLayout.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read App.tsx to understand all current responsibilities (auth state, session init, layout, provider wiring) and identify what moves to ThreePaneShell vs. AiSessionProvider (AIPU2-076).</step>
+    <step>Read ThreePaneLayout.tsx to understand its prop interface (pane slot names, splitter configuration, collapse state).</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx as the new root component.</step>
+    <step>Wrap all children in PaneEventBusProvider (from AIPU2-074) as the outermost context provider.</step>
+    <step>Define stage lifecycle state using useState or useReducer: type ShellStage = 'welcome' | 'loading' | 'active-chat' | 'review'; include transition handlers (toLoading, toActiveChat, toReview, reset).</step>
+    <step>Use ThreePaneLayout with three named pane slots: conversation (left), workspace (center), context (right). Render placeholder divs in each slot for now.</step>
+    <step>Update the SpaarkeAi solution entry point (main.tsx or index.ts) to render ThreePaneShell instead of App.tsx.</step>
+    <step>Verify the application builds and renders the three-pane layout with working splitters in the browser.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ThreePaneShell.tsx exists and renders ThreePaneLayout with three named pane slots.</criterion>
+    <criterion>PaneEventBusProvider wraps all children — all three pane slots share one bus instance.</criterion>
+    <criterion>ShellStage state with transition handlers is implemented and exported for child pane use.</criterion>
+    <criterion>App.tsx is no longer the root component — ThreePaneShell is used instead.</criterion>
+    <criterion>Application builds without TypeScript errors and renders a three-pane layout with working splitters.</criterion>
+  </acceptance-criteria>
+</task>
