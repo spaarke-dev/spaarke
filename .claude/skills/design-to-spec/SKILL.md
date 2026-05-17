@@ -18,31 +18,16 @@ last-reviewed: 2026-05-16
 
 ## Prerequisites
 
-### Claude Code Extended Context Configuration
+### Claude Code Effort & Output Configuration
 
-**IMPORTANT**: Before running this skill, ensure Claude Code is configured with extended context settings:
+**Updated 2026-05-17**: Invoke this skill on **Opus with effort `high` or `max`** — it ingests verbose design documents (2000-5000 words), performs preliminary ADR/resource discovery, and generates structured spec.md. The previous prescription of `MAX_THINKING_TOKENS=50000` is **obsolete on Opus 4.6+** (adaptive thinking — the model decides depth dynamically). Only `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` remains load-bearing:
 
-```bash
-MAX_THINKING_TOKENS=50000
-CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
-```
-
-**Why Extended Context is Required**:
-- This skill ingests verbose design documents (often 2000-5000 words)
-- Performs **preliminary** resource discovery (ADR constraints for spec enrichment)
-- Generates structured spec.md with technical context
-- Chains into `project-pipeline` which performs comprehensive resource discovery
-
-**Verify settings before proceeding**:
 ```bash
 # Windows PowerShell
-echo $env:MAX_THINKING_TOKENS
-echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
-
-# Should output: 50000 and 64000
+$env:CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000"
 ```
 
-If not set, see root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
+For full context on adaptive thinking and effort tuning, see root [`CLAUDE.md`](../../../CLAUDE.md) §13 (Knowledge Repository) and the researcher subagent at `.claude/agents/researcher.md` if Microsoft platform questions arise mid-spec.
 
 ### Permission Mode: Plan Mode (RECOMMENDED)
 

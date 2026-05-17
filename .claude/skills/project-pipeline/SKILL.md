@@ -19,7 +19,7 @@ last-reviewed: 2026-05-17
 
 ### Claude Code Effort & Output Configuration
 
-**CRITICAL — Updated 2026-05-17**: This orchestrator runs best with **adaptive thinking on high or max effort** + extended output tokens. The previous prescription of `MAX_THINKING_TOKENS=50000` is **OBSOLETE on Opus 4.6+** — Anthropic moved to adaptive thinking where the model decides depth dynamically. See root [CLAUDE.md "Adaptive Thinking & Effort Control"](../../../CLAUDE.md#adaptive-thinking--effort-control-opus-46).
+**CRITICAL — Updated 2026-05-17**: This orchestrator runs best with **adaptive thinking on high or max effort** + extended output tokens. The previous prescription of `MAX_THINKING_TOKENS=50000` is **OBSOLETE on Opus 4.6+** — Anthropic moved to adaptive thinking where the model decides depth dynamically. See root [`CLAUDE.md`](../../../CLAUDE.md) for current configuration guidance.
 
 **Current prerequisites:**
 
@@ -56,7 +56,7 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 # Should output: 50000 and 64000
 ```
 
-**If not set**, the pipeline may fail or produce incomplete results. See root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
+**If output tokens not set**, the pipeline may produce truncated artifacts. See root [`CLAUDE.md`](../../../CLAUDE.md) for full guidance. (The legacy `MAX_THINKING_TOKENS` env var is IGNORED on Opus 4.6+ — adaptive thinking applies; invoke this skill on Opus with effort `high` or `max`.)
 
 ### Permission Mode: Plan Mode (REQUIRED for Steps 0-3)
 

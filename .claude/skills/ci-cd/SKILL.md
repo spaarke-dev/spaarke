@@ -362,7 +362,7 @@ No secrets required - runs in read-only mode.
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 - Always check `gh pr checks` before suggesting merge
 - If CI fails, read logs with `gh run view {id} --log` before suggesting fixes

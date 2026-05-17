@@ -36,7 +36,7 @@ This project is **meta** — it modifies the procedure surface (`.claude/`, `CLA
 
 When task-create generates tasks that modify `.claude/`, it MUST mark them `parallel-safe: false`. Sub-agents will hit "Edit denied on `.claude/...`" if accidentally dispatched — that's expected behavior, not a bug.
 
-See root [CLAUDE.md "Sub-Agent Write Boundary" section](../../CLAUDE.md#sub-agent-write-boundary-important).
+See root [`CLAUDE.md`](../../CLAUDE.md) §3 "Sub-Agent Write Boundary".
 
 ## Document Type Directories
 

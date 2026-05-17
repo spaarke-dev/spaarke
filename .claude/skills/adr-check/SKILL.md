@@ -276,7 +276,7 @@ gh workflow run adr-audit.yml
 | ADR-jobs or a newer ADR missed during review | ADR added recently but not in this skill's checklist | Run `/ai-procedure-maintenance` to propagate. The validation checklist must always cover every active ADR in `docs/adr/`. |
 | NetArchTest passes but skill reports a violation (or vice versa) | Skill's grep patterns drift from NetArchTest rule definitions | Treat NetArchTest as authoritative (it's mechanical). Update skill grep patterns to match. File a follow-up if a rule needs both forms. |
 
-## Tips for AI
+## Operator Notes
 
 - Be thorough: check all ADRs in the ADR index even when changes seem small
 - Be specific: always include file paths and line numbers

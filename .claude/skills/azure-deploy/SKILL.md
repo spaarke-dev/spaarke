@@ -354,7 +354,7 @@ gh run download {run-id}
 
 ---
 
-## Tips for AI
+## Operator Notes
 
 - **Avoid discovery queries** - Use endpoint values from Environment Reference above
 - **Operational commands OK** - Deployments, secret management, configuration are permitted
