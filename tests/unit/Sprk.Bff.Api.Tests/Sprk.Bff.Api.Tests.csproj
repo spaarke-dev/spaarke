@@ -8,6 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.23" />
+    <!-- Cosmos DB SDK — required to mock CosmosClient in SessionPersistenceService tests (AIPU2-030) -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <!-- MimeKit 4.15.1: fixes CVE-2026-30227 (CRLF injection in SMTP envelope address) -->
     <PackageReference Include="MimeKit" Version="4.15.1" />

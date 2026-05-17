@@ -1,3 +1,10 @@
+using Azure.Identity;
+using Microsoft.Azure.Cosmos;
+using Microsoft.Azure.Cosmos.Fluent;
+using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Services.Ai.Audit;
+using Sprk.Bff.Api.Services.Ai.Sessions;
+
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
@@ -7,16 +14,24 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// Registers the Cosmos DB persistence services introduced in Spaarke AI Platform Unification R2.
 /// All stores use write-through Cosmos DB (decision D-06: no idle-flush).
 ///
-/// UNCONDITIONAL registrations (planned — registered by future AIPU2 tasks):
-///   1. CosmosSessionStore   — Durable AI session storage (write-through, ADR-015 governed)
-///   2. CosmosPromptStore    — Prompt and completion audit log
-///   3. CosmosAuditStore     — Safety evaluation audit records
-///   4. CosmosMemoryStore    — Long-term semantic memory for agents
-///   5. CosmosFeedbackStore  — User feedback and thumbs-up/down records
+/// UNCONDITIONAL registrations:
+///   1. CosmosClient               — Singleton; uses DefaultAzureCredential (no connection strings)
+///   2. SessionPersistenceService  — Scoped; Redis + Cosmos DB dual-write (AIPU2-030)
+///
+/// Planned (registered by future AIPU2 tasks):
+///   3. CosmosPromptStore    — Prompt and completion audit log
+///   4. CosmosAuditStore     — Safety evaluation audit records
+///   5. CosmosMemoryStore    — Long-term semantic memory for agents
+///   6. CosmosFeedbackStore  — User feedback and thumbs-up/down records
 ///
 /// Prerequisites (must already be registered before calling AddAiPersistenceModule):
 ///   - <c>IConfiguration</c>  — registered by the host
+///   - <c>IDistributedCache</c> — registered by <c>AddCacheModule</c> (Redis or in-memory)
 ///   - <c>ILogger&lt;T&gt;</c> — registered via <c>AddLogging</c> (implicit in WebApplication.CreateBuilder)
+///
+/// Required configuration keys:
+///   - <c>CosmosPersistence:Endpoint</c>    — Cosmos DB account endpoint URI
+///   - <c>CosmosPersistence:DatabaseName</c> — Target database name
 ///
 /// Usage in Program.cs:
 /// <code>
@@ -29,13 +44,48 @@ public static class AiPersistenceModule
     /// Registers AI Persistence (Cosmos DB) services with the DI container.
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="configuration">Application configuration (Cosmos DB endpoint and key).</param>
+    /// <param name="configuration">Application configuration (Cosmos DB endpoint and database name).</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddAiPersistenceModule(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // TODO AIPU2-xxx: Register CosmosSessionStore, CosmosPromptStore, CosmosAuditStore, CosmosMemoryStore, CosmosFeedbackStore
+        var endpoint = configuration["CosmosPersistence:Endpoint"]
+            ?? throw new InvalidOperationException(
+                "CosmosPersistence:Endpoint is not configured. " +
+                "Add this setting to appsettings.json or Azure App Service configuration.");
+
+        // CosmosClient: singleton — thread-safe, manages connection pool internally.
+        // DefaultAzureCredential: no connection strings in code or config (ADR-015).
+        // SerializerOptions: use System.Text.Json for consistency with the rest of the BFF.
+        services.AddSingleton(_ =>
+        {
+            var credential = new DefaultAzureCredential();
+            return new CosmosClientBuilder(endpoint, credential)
+                .WithSerializerOptions(new CosmosSerializationOptions
+                {
+                    PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase
+                })
+                .WithConnectionModeDirect()
+                .WithThrottlingRetryOptions(maxRetryWaitTimeOnThrottledRequests: TimeSpan.FromSeconds(30), maxRetryAttemptsOnThrottledRequests: 9)
+                .Build();
+        });
+
+        // SessionPersistenceService: scoped — one instance per HTTP request.
+        // Dual-write: Redis (hot, 24h TTL) + Cosmos DB sessions container (warm, 90-day retention).
+        // ADR-015 Tier 3; ADR-009 Redis-first; D-06 write-through.
+        services.AddScoped<ISessionPersistenceService, SessionPersistenceService>();
+
+        // AIPU2-033: AuditLogService — append-only compliance log (ADR-015 Tier 2, 7-year retention).
+        // Singleton: CosmosClient and Container are thread-safe and designed for long-lived reuse.
+        // Reads CosmosPersistence:DatabaseName; defaults to "spaarke-ai" if not configured.
+        var databaseName = configuration["CosmosPersistence:DatabaseName"] ?? "spaarke-ai";
+        services.AddSingleton<IAuditLogService>(sp => new AuditLogService(
+            cosmosClient: sp.GetRequiredService<CosmosClient>(),
+            databaseName: databaseName,
+            logger: sp.GetRequiredService<ILogger<AuditLogService>>()));
+
+        // TODO AIPU2-xxx: Register CosmosPromptStore, CosmosMemoryStore, CosmosFeedbackStore
 
         return services;
     }
