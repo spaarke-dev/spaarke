@@ -40,7 +40,10 @@
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { ThreePaneLayout } from "@spaarke/ui-components";
-import { PaneEventBusProvider, usePaneEvent } from "@spaarke/ai-widgets";
+import { PaneEventBusProvider, usePaneEvent, AiSessionProvider } from "@spaarke/ai-widgets";
+import { ConversationPane } from "../conversation/ConversationPane";
+import { ContextPaneController } from "../context/ContextPaneController";
+import { WorkspacePane } from "../workspace/WorkspacePane";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state enum
@@ -120,69 +123,14 @@ const useStyles = makeStyles({
     height: "100%",
     overflow: "hidden",
   },
-
-  // Placeholder pane styling — replaced by real components in tasks 077-079
-  placeholderPane: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    height: "100%",
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    fontFamily: tokens.fontFamilyBase,
-    gap: tokens.spacingVerticalS,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-
-  placeholderLabel: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-  },
-
-  placeholderStage: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground4,
-  },
 });
 
 // ---------------------------------------------------------------------------
-// Placeholder slot components (replaced in tasks 077-079)
+// Placeholder slot components
+// ConversationPaneSlot replaced by ConversationPane (task AIPU2-079).
+// WorkspacePaneSlot replaced by WorkspacePane (task AIPU2-077).
+// ContextPaneSlot replaced by ContextPaneController (task AIPU2-078).
 // ---------------------------------------------------------------------------
-
-function ConversationPaneSlot(): React.JSX.Element {
-  const styles = useStyles();
-  const { currentStage } = useShellStage();
-  return (
-    <div className={styles.placeholderPane} data-testid="conversation-pane-slot">
-      <span className={styles.placeholderLabel}>Conversation Pane</span>
-      <span className={styles.placeholderStage}>stage: {currentStage}</span>
-    </div>
-  );
-}
-
-function WorkspacePaneSlot(): React.JSX.Element {
-  const styles = useStyles();
-  const { currentStage } = useShellStage();
-  return (
-    <div className={styles.placeholderPane} data-testid="workspace-pane-slot">
-      <span className={styles.placeholderLabel}>Workspace Pane</span>
-      <span className={styles.placeholderStage}>stage: {currentStage}</span>
-    </div>
-  );
-}
-
-function ContextPaneSlot(): React.JSX.Element {
-  const styles = useStyles();
-  const { currentStage } = useShellStage();
-  return (
-    <div className={styles.placeholderPane} data-testid="context-pane-slot">
-      <span className={styles.placeholderLabel}>Context Pane</span>
-      <span className={styles.placeholderStage}>stage: {currentStage}</span>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // ShellStageManager — subscribes to PaneEventBus, drives stage transitions
@@ -289,33 +237,53 @@ function ShellStageManager({ children }: ShellStageManagerProps): React.JSX.Elem
  *   />
  * </FluentProvider>
  */
-export function ThreePaneShell(_props: ThreePaneShellProps): React.JSX.Element {
+export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   const styles = useStyles();
+  const { bffBaseUrl, token, isAuthenticated, entityLogicalName, entityId, matterId } = props;
+
+  // Build the entity context for AiSessionProvider from URL params.
+  // R2: entityContext is resolved at the shell level and passed down via
+  // AiSessionProvider rather than being resolved inside StandaloneAiProvider.
+  const entityContext = React.useMemo(() => {
+    if (!entityLogicalName || !entityId) return null;
+    return {
+      entityType: entityLogicalName,
+      entityId,
+      ...(matterId ? { matterId } : {}),
+    };
+  }, [entityLogicalName, entityId, matterId]);
 
   return (
     <PaneEventBusProvider>
-      <ShellStageManager>
-        <div className={styles.shell}>
-          {/*
-           * ThreePaneLayout dimensions match R1 App.tsx values (340/400/240/240/320).
-           * storageKey is namespaced to the R2 shell so sessionStorage is isolated
-           * from any residual R1 keys.
-           */}
-          <ThreePaneLayout
-            leftPane={<ConversationPaneSlot />}
-            centerPane={<WorkspacePaneSlot />}
-            rightPane={<ContextPaneSlot />}
-            storageKey="spaarke-ai-r2-shell"
-            defaultLeftWidthPx={340}
-            defaultRightWidthPx={400}
-            minLeftWidthPx={240}
-            minRightWidthPx={240}
-            minCenterWidthPx={320}
-            leftPaneCollapseLabel="Show AI Chat"
-            rightPaneCollapseLabel="Show Context"
-          />
-        </div>
-      </ShellStageManager>
+      <AiSessionProvider
+        bffBaseUrl={bffBaseUrl}
+        token={token}
+        isAuthenticated={isAuthenticated}
+        entityContext={entityContext}
+      >
+        <ShellStageManager>
+          <div className={styles.shell}>
+            {/*
+             * ThreePaneLayout dimensions match R1 App.tsx values (340/400/240/240/320).
+             * storageKey is namespaced to the R2 shell so sessionStorage is isolated
+             * from any residual R1 keys.
+             */}
+            <ThreePaneLayout
+              leftPane={<ConversationPane />}
+              centerPane={<WorkspacePane />}
+              rightPane={<ContextPaneController />}
+              storageKey="spaarke-ai-r2-shell"
+              defaultLeftWidthPx={340}
+              defaultRightWidthPx={400}
+              minLeftWidthPx={240}
+              minRightWidthPx={240}
+              minCenterWidthPx={320}
+              leftPaneCollapseLabel="Show AI Chat"
+              rightPaneCollapseLabel="Show Context"
+            />
+          </div>
+        </ShellStageManager>
+      </AiSessionProvider>
     </PaneEventBusProvider>
   );
 }

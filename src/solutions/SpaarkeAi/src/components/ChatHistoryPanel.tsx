@@ -6,8 +6,11 @@
  * API and passes sessions as props to the presentational panel component.
  *
  * Data flow:
- *   useStandaloneAi() → bffBaseUrl + token → fetch BFF sessions list
+ *   useAiSession() → bffBaseUrl + token → fetch BFF sessions list
  *   → ChatHistoryPanel (from @spaarke/ai-outputs) — purely presentational
+ *
+ * R2 migration: switched from useStandaloneAi() (R1) to useAiSession() (R2)
+ * so this component works inside the AiSessionProvider tree in ConversationPane.
  *
  * Resume behavior: clicking "Resume" on a session card calls setChatSessionId()
  * in context, which updates the chatSessionId in StandaloneAiProvider + sessionStorage,
@@ -25,7 +28,7 @@
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { ChatHistoryPanel as LibChatHistoryPanel } from "@spaarke/ai-outputs";
-import { useStandaloneAi } from "@spaarke/ai-context";
+import { useAiSession } from "@spaarke/ai-widgets";
 import { buildBffApiUrl } from "@spaarke/auth";
 import type { ChatSession } from "@spaarke/ai-outputs";
 
@@ -149,7 +152,7 @@ function useSessionHistory(bffBaseUrl: string, token: string | null): UseSession
 export function ChatHistoryPanel(): React.JSX.Element {
   const styles = useStyles();
 
-  const { bffBaseUrl, token, isAuthenticated, setChatSessionId } = useStandaloneAi();
+  const { bffBaseUrl, token, isAuthenticated, setChatSessionId } = useAiSession();
 
   const { sessions, isLoading, reload } = useSessionHistory(
     bffBaseUrl,
