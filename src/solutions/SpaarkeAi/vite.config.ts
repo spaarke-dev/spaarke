@@ -27,6 +27,9 @@ function resolveSharedLibDeps(): import("vite").Plugin {
   const sharedLibPaths = [
     path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
+    path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
+    path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
+    path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -79,6 +82,12 @@ export default defineConfig({
         "src/**/*.ts",
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.ts"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.ts"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src/**/*.ts"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src/**/*.ts"),
       ],
     }),
     // Inline all JS/CSS into a single HTML file for Dataverse web resource deployment (ADR-026)
@@ -89,8 +98,19 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       // Map shared libraries to their source directories for direct source transpilation.
       // This avoids the need for a pre-built dist/ and ensures tree-shaking works correctly.
+      // Map bare imports (e.g. '@spaarke/auth') to /src for direct transpilation.
+      // Deep imports (e.g. '@spaarke/ui-components/src/components/...') are handled
+      // by the more-specific path alias that maps to the package root (no /src suffix),
+      // avoiding double /src/src/ resolution.
+      "@spaarke/ui-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
+      "@spaarke/ai-widgets/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
+      "@spaarke/ai-widgets": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
+      "@spaarke/ai-outputs/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
+      "@spaarke/ai-outputs": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
+      "@spaarke/ai-context/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src"),
+      "@spaarke/ai-context": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src"),
     },
     // Force single copy of shared packages across the bundle (ADR-022: no duplicate React)
     dedupe: [

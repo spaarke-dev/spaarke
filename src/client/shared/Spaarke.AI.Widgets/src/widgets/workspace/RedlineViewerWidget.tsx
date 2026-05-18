@@ -42,7 +42,7 @@ import {
 import {
   ChevronDown20Regular,
   ChevronRight20Regular,
-  DocumentCompare24Regular,
+  ColumnDoubleCompareRegular,
   ErrorCircle20Regular,
   Navigation20Regular,
 } from '@fluentui/react-icons';
@@ -824,7 +824,7 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
     return (
       <div className={mergeClasses(styles.root, className)}>
         <div className={styles.emptyContainer}>
-          <DocumentCompare24Regular
+          <ColumnDoubleCompareRegular
             style={{ fontSize: '48px', color: tokens.colorNeutralForeground4 }}
           />
           <Text style={{ color: tokens.colorNeutralForeground3 }}>
@@ -859,7 +859,7 @@ const RedlineViewerWidget: React.FC<WorkspaceWidgetProps<RedlineViewerData>> = (
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.headerTitle}>
-          <DocumentCompare24Regular className={styles.headerIcon} />
+          <ColumnDoubleCompareRegular className={styles.headerIcon} />
           <Text weight="semibold" size={400}>
             Document Comparison
           </Text>

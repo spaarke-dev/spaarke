@@ -46,8 +46,8 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
         isZoneRedundant: false
       }
     ]
-    // Disable public network access — access via Azure services / managed identity only
-    publicNetworkAccess: 'Disabled'
+    // SecuredByPerimeter in production; Enabled for dev (App Service needs public endpoint)
+    publicNetworkAccess: 'Enabled'
     // RBAC-only data plane access (no master keys used by application code)
     disableLocalAuth: false
     // TLS 1.2+ enforced
@@ -156,7 +156,7 @@ resource auditContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/cont
         version: 2
       }
       defaultTtl: -1 // No automatic expiry — audit records are permanent
-      analyticalStorageTtl: -1 // Analytical store enabled indefinitely
+      // analyticalStorageTtl not supported on serverless accounts — use Synapse Link at account level if needed
       indexingPolicy: {
         indexingMode: 'consistent'
         includedPaths: [
