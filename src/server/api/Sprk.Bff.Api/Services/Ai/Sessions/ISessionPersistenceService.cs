@@ -44,4 +44,23 @@ public interface ISessionPersistenceService
     /// <param name="sessionId">Session identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     Task DeleteSessionAsync(string tenantId, string sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persists a <see cref="SessionSummary"/> to the session document in both Redis and Cosmos DB.
+    ///
+    /// Merges the summary into the existing session document — full message history is never deleted.
+    /// After persisting the summary, the in-memory session's Messages list is trimmed to the last
+    /// <see cref="ISessionSummarizationService.TailMessageCount"/> messages (AIPU2-032).
+    ///
+    /// Either store failing is non-fatal — logged at Warning, streaming continues.
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier (partition key).</param>
+    /// <param name="sessionId">Session identifier.</param>
+    /// <param name="summary">The completed summary to persist.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task PersistSummaryAsync(
+        string tenantId,
+        string sessionId,
+        SessionSummary summary,
+        CancellationToken ct = default);
 }

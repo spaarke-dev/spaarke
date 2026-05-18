@@ -114,6 +114,32 @@ public class SessionPersistenceService : ISessionPersistenceService
     }
 
     /// <inheritdoc/>
+    public async Task PersistSummaryAsync(
+        string tenantId,
+        string sessionId,
+        SessionSummary summary,
+        CancellationToken ct = default)
+    {
+        // Load existing session from Redis (or Cosmos on cache miss)
+        var session = await LoadFromRedisAsync(tenantId, sessionId, ct)
+            ?? await LoadFromCosmosAsync(tenantId, sessionId, ct)
+            ?? CreateEmptySession(tenantId, sessionId);
+
+        // Write the structured summary alongside the verbatim messages (never remove messages).
+        session.Summary = summary;
+        session.LastActivity = DateTimeOffset.UtcNow;
+
+        // Write updated document to Redis (hot tier) — non-blocking on failure
+        await WriteToRedisAsync(tenantId, sessionId, session, ct);
+
+        // Upsert to Cosmos DB (warm tier) — fire-and-forget, non-blocking on failure.
+        // We do NOT pass the request CancellationToken because the HTTP request may have
+        // completed (or been cancelled) before the Cosmos write finishes (same pattern as
+        // PersistMessageAsync — ADR-015 D-06).
+        _ = UpsertToCosmosAsync(session, CancellationToken.None);
+    }
+
+    /// <inheritdoc/>
     public async Task DeleteSessionAsync(
         string tenantId,
         string sessionId,

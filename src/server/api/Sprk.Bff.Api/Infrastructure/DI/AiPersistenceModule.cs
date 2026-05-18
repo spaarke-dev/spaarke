@@ -106,6 +106,19 @@ public static class AiPersistenceModule
         // Cosmos DB feedback container, partition key /tenantId (ADR-015 Tier 3, 90-day retention).
         services.AddScoped<IFeedbackService, FeedbackService>();
 
+        // AIPU2-031: SessionRestoreService — loads a persisted session, checks Dataverse entity
+        // staleness via parallel ETag comparisons, and reconstructs the LLM context window.
+        // Scoped: depends on ISessionPersistenceService (scoped); one instance per HTTP request.
+        // IHttpClientFactory is registered by the host (AddHttpClient); HttpClient is not injected
+        // directly to allow per-call header isolation (bearer token set per request).
+        services.AddScoped<ISessionRestoreService, SessionRestoreService>();
+
+        // AIPU2-032: SessionSummarizationService — GPT-4o summarization at 25-message / 8K-token threshold.
+        // Scoped: IChatClient is singleton/thread-safe; scoped lifetime consistent with this module's
+        // other per-request services. IChatClient is registered by AddAiModule (prerequisite).
+        // The summary is written alongside verbatim messages — no messages are ever deleted.
+        services.AddScoped<ISessionSummarizationService, SessionSummarizationService>();
+
         return services;
     }
 }

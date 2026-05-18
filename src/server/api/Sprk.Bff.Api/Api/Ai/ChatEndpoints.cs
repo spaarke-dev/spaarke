@@ -8,6 +8,8 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
+using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
+using Sprk.Bff.Api.Telemetry;
 
 // Explicit alias to avoid ChatMessage ambiguity between domain model and AI framework.
 // Sprk.Bff.Api.Models.Ai.Chat.ChatMessage is the Dataverse persistence record.
@@ -262,6 +264,9 @@ public static class ChatEndpoints
         PendingPlanManager pendingPlanManager,
         IChatClient chatClient,
         [FromServices] IWorkingDocumentService workingDocumentService,
+        [FromServices] IMatterContextDetector matterContextDetector,
+        [FromServices] IConversationHistorySanitizer conversationHistorySanitizer,
+        [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
@@ -296,6 +301,88 @@ public static class ChatEndpoints
         logger.LogInformation(
             "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, document={DocumentId}",
             sessionId, tenantId, request.Message.Length, request.DocumentId ?? session.DocumentId);
+
+        // === AIPU2-028: Cross-Matter Conversation Safety (FR-408) ===
+        // Before building the agent or AI history, detect whether the session has pivoted
+        // from one matter to another.  If a pivot is detected, strip retrieved document
+        // passages from the domain history and emit a matter_context_change SSE event so
+        // the user is notified that prior document references are no longer available.
+        var incomingMatterId = session.HostContext?.EntityType == "matter"
+            ? session.HostContext.EntityId
+            : string.Empty;
+
+        var matterChange = matterContextDetector.DetectChange(session.Messages, incomingMatterId);
+        if (matterChange is not null)
+        {
+            var sanitized = conversationHistorySanitizer.StripRetrievedContent(
+                session.Messages,
+                matterChange.ChangeDetectedAtTurnIndex);
+
+            // Update the session in Redis with the sanitized history so subsequent
+            // turns no longer see the stripped content (write-through pattern).
+            if (sanitized.WasModified)
+            {
+                var sanitizedSession = session with { Messages = sanitized.Messages };
+                await sessionManager.UpdateSessionCacheAsync(sanitizedSession, cancellationToken);
+                session = sanitizedSession;
+            }
+
+            // Embed a new matter marker system message so future turns can detect the
+            // current matter boundary correctly.
+            var markerContent = MatterContextDetector.BuildMatterMarker(matterChange.NewMatterId);
+            var markerMessage = new DvChatMessage(
+                MessageId: Guid.NewGuid().ToString("N"),
+                SessionId: sessionId,
+                Role: ChatMessageRole.System,
+                Content: markerContent,
+                TokenCount: 0,
+                CreatedAt: DateTimeOffset.UtcNow,
+                SequenceNumber: session.Messages.Count + 1);
+            session = await historyManager.AddMessageAsync(session, markerMessage, cancellationToken);
+
+            // Emit matter_context_change SSE event before the turn is processed.
+            // The client uses this to notify the user that prior document references are gone.
+            var contextChangeData = new ChatSseMatterContextChangeData(
+                PreviousMatterId: matterChange.PreviousMatterId,
+                NewMatterId: matterChange.NewMatterId,
+                Message: sanitized.NotificationMessage);
+
+            await WriteChatSSEAsync(
+                response,
+                new ChatSseEvent("matter_context_change", null, contextChangeData),
+                cancellationToken);
+
+            // Emit OTEL counters (ADR-015: counts only, no matter IDs in metric labels).
+            crossMatterTelemetry.RecordPivot(sanitized.WasModified);
+            crossMatterTelemetry.RecordContentStripped(sanitized.RemovedDocumentCount);
+
+            logger.LogInformation(
+                "CrossMatterSafety: pivot handled for session={SessionId}, strippedMessages={StrippedCount}",
+                sessionId, sanitized.RemovedDocumentCount);
+        }
+        else if (!string.IsNullOrEmpty(incomingMatterId))
+        {
+            // No pivot — but if no matter marker exists yet, embed one now so future
+            // turns have a baseline to compare against.
+            var hasMarker = session.Messages.Any(m =>
+                m.Role == ChatMessageRole.System &&
+                m.Content.Contains(MatterContextDetector.MatterMarkerPrefix, StringComparison.Ordinal));
+
+            if (!hasMarker)
+            {
+                var markerContent = MatterContextDetector.BuildMatterMarker(incomingMatterId);
+                var markerMessage = new DvChatMessage(
+                    MessageId: Guid.NewGuid().ToString("N"),
+                    SessionId: sessionId,
+                    Role: ChatMessageRole.System,
+                    Content: markerContent,
+                    TokenCount: 0,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    SequenceNumber: session.Messages.Count + 1);
+                session = await historyManager.AddMessageAsync(session, markerMessage, cancellationToken);
+            }
+        }
+        // === End AIPU2-028 ===
 
         var fullResponse = new System.Text.StringBuilder();
 
@@ -1886,6 +1973,34 @@ public record ActionConfirmRequest(string ActionId, Dictionary<string, string>? 
 /// <param name="Message">Human-readable result message.</param>
 /// <param name="ActionId">The action identifier that was confirmed.</param>
 public record ActionConfirmResult(bool Success, string Message, string ActionId);
+
+/// <summary>
+/// Data payload for the <c>matter_context_change</c> SSE event (AIPU2-028, FR-408).
+///
+/// Emitted by <see cref="ChatEndpoints.SendMessageAsync"/> when the session pivots from one
+/// legal matter to another.  The client uses this event to notify the user that retrieved
+/// document references from the previous matter are no longer available in this conversation.
+///
+/// Wire format (camelCase JSON inside the SSE <c>data</c> field):
+/// <code>
+/// {
+///   "type": "matter_context_change",
+///   "content": null,
+///   "data": {
+///     "previousMatterId": "matter-a-guid",
+///     "newMatterId": "matter-b-guid",
+///     "message": "Matter context changed. Prior document details cleared from context for privilege protection."
+///   }
+/// }
+/// </code>
+/// </summary>
+/// <param name="PreviousMatterId">The matter ID from the previous conversation context.</param>
+/// <param name="NewMatterId">The matter ID of the new (incoming) context.</param>
+/// <param name="Message">Human-readable notification for the user.</param>
+public record ChatSseMatterContextChangeData(
+    string PreviousMatterId,
+    string NewMatterId,
+    string Message);
 
 /// <summary>Response body for GET /sessions/{id}/history.</summary>
 /// <param name="SessionId">The session identifier.</param>

@@ -50,4 +50,35 @@ public class StoredSession
     /// <summary>UTC timestamp of the most recent message or state update.</summary>
     [JsonPropertyName("lastActivity")]
     public DateTimeOffset LastActivity { get; set; }
+
+    /// <summary>
+    /// Dataverse entity references in scope when the session was saved.
+    /// Each entry carries a saved ETag so <see cref="ISessionRestoreService"/> can detect
+    /// whether the entity has changed since the session was persisted (ADR-015 D-08).
+    /// Empty for sessions that have no entity context (e.g., knowledge-only sessions).
+    /// </summary>
+    [JsonPropertyName("entityRefs")]
+    public List<SessionEntityRef> EntityRefs { get; set; } = [];
+
+    /// <summary>
+    /// LLM-generated conversation summary produced when the message count exceeds the
+    /// summarisation threshold. Used by <see cref="ISessionRestoreService"/> as the base
+    /// context string when reconstructing the context window on restore.
+    /// Null if no summary has been generated yet (short sessions use verbatim messages only).
+    /// </summary>
+    [JsonPropertyName("conversationSummary")]
+    public string? ConversationSummary { get; set; }
+
+    /// <summary>
+    /// Structured session summary produced by <see cref="ISessionSummarizationService"/> (AIPU2-032).
+    ///
+    /// Written by <see cref="SessionPersistenceService.PersistSummaryAsync"/> after the session
+    /// reaches the 25-message or 8,000-token threshold. Null until first summarization occurs.
+    ///
+    /// Contains both a free-text narrative and a structured list of key legal conclusions.
+    /// The full verbatim message history is always preserved in <see cref="Messages"/>;
+    /// this field is an addition to the document, never a replacement.
+    /// </summary>
+    [JsonPropertyName("summary")]
+    public SessionSummary? Summary { get; set; }
 }
