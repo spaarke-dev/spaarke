@@ -100,6 +100,12 @@ public static class AiSafetyModule
                 sp.GetRequiredService<ILogger<InternalIndexProvider>>()));
 
 
+        // CitationSafetyCheck — AIPU2-065
+        // Scoped: one instance per HTTP request. Depends on ICitationVerificationService (singleton).
+        // Factory-pattern callers (e.g. SafetyPipelineMiddleware) resolve this from the DI scope
+        // to avoid constructing the CitationVerificationService dependency chain manually.
+        services.AddScoped<CitationSafetyCheck>();
+
         // ISseEventValidator / SseEventValidator -- AIPU2-026
         services.AddSingleton<ISseEventValidator, SseEventValidator>();
 

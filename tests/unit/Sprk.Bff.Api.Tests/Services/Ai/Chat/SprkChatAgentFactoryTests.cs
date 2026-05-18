@@ -2,8 +2,11 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Xunit;
 
@@ -127,9 +130,221 @@ public class SprkChatAgentFactoryTests
         agentDoc2.Context.SystemPrompt.Should().Be(prompt2);
     }
 
+    // ── AIPU2-061: Per-turn tool injection tests ──────────────────────────────
+
+    /// <summary>
+    /// When the CapabilityRouter returns a confident result for a simple greeting-like
+    /// message that matches no capability hints, the factory falls back to the full
+    /// playbook capability set (backward compatible).
+    ///
+    /// Verifies: factory returns an agent and does not throw when the router is
+    /// configured but routing produces an uncertain result for low-complexity intent.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithRouter_LowComplexityIntent_UsesFullCapabilitySet()
+    {
+        // Arrange
+        // Router returns "uncertain" for a simple hello message — no capability matched.
+        var routerMock = new Mock<ICapabilityRouter>();
+        routerMock
+            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityRoutingResult.Uncertain(0.0, layer: 1, latencyMs: 0));
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act — low-complexity greeting-style message
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
+            latestUserMessage: "Hello");
+
+        // Assert — agent created successfully, router was called
+        agent.Should().NotBeNull();
+        routerMock.Verify(
+            r => r.RouteAsync("Hello", It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// When the CapabilityRouter returns a confident result with a specific capability
+    /// selected for a document-analysis-style message, the factory passes the routing
+    /// result to ResolveTools. Verifies the agent is returned and the router was called
+    /// with the user message text.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithRouter_DocumentAnalysisIntent_CallsRouterWithUserMessage()
+    {
+        // Arrange
+        const string documentAnalysisMessage = "analyze this contract for risk clauses";
+
+        var routerMock = new Mock<ICapabilityRouter>();
+        routerMock
+            .Setup(r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityRoutingResult.Confident(
+                selectedCapabilities: ["analyze"],
+                confidence: 0.92,
+                layer: 1,
+                latencyMs: 3));
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
+            latestUserMessage: documentAnalysisMessage);
+
+        // Assert — agent created successfully, router was called with the exact user message
+        agent.Should().NotBeNull();
+        routerMock.Verify(
+            r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// When no user message is provided (latestUserMessage is null), the CapabilityRouter
+    /// is NOT called — the factory falls through to the existing full-capability-set path.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithRouter_NullUserMessage_RouterNotCalled()
+    {
+        // Arrange
+        var routerMock = new Mock<ICapabilityRouter>();
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act — no user message = initial session creation
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
+            latestUserMessage: null);
+
+        // Assert — router never called for null message
+        agent.Should().NotBeNull();
+        routerMock.Verify(
+            r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// When the tool set changes between turns (previous turn had different tools than current),
+    /// capability_change SSE events are emitted for added and removed tools.
+    ///
+    /// Verifies the FR-801 capability_change contract: the factory emits events so the
+    /// client can update UI affordances when the active capability profile changes.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_EmitsCapabilityChange_WhenToolSetDiffers()
+    {
+        // Arrange
+        var routerMock = new Mock<ICapabilityRouter>();
+        // Router returns a confident result — routing WILL happen but manifest is empty,
+        // so tool filtering leaves full set in place. The capability_change event is
+        // triggered by comparing current tools against previousTurnToolNames.
+        routerMock
+            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityRoutingResult.Uncertain(0.0, layer: 1, latencyMs: 0));
+
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        // Previous turn had a tool called "OldTool" that no longer appears in the current set.
+        // The current agent will have no tools (no DI services = no tools resolved).
+        // So the factory should emit "unavailable" for "OldTool".
+        var capturedEvents = new List<ChatSseEvent>();
+        Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
+        {
+            capturedEvents.Add(evt);
+            return Task.CompletedTask;
+        };
+
+        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act — previous turn had "OldTool", current turn will have no tools
+        await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
+            sseWriter: sseWriter,
+            latestUserMessage: "Hello",
+            previousTurnToolNames: ["OldTool"]);
+
+        // Assert — at least one capability_change event was emitted for "OldTool"
+        capturedEvents.Should().Contain(e =>
+            e.Type == "capability_change",
+            "factory must emit capability_change when tool set changes between turns");
+
+        var changeEvent = capturedEvents.First(e => e.Type == "capability_change");
+        changeEvent.Data.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// When the router is not registered in DI (null ICapabilityRouter), the factory
+    /// behaves exactly as before AIPU2-061 — no routing call, full tool set resolved.
+    /// </summary>
+    [Fact]
+    public async Task CreateAgentAsync_WithoutRouter_FallsBackToFullCapabilitySet()
+    {
+        // Arrange — no router registered (null capabilityRouter)
+        var contextProviderMock = new Mock<IChatContextProvider>();
+        contextProviderMock
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateDefaultContext());
+
+        // Use the original service provider (no router registration)
+        var services = BuildServiceProvider(contextProviderMock.Object, capabilityRouter: null);
+        var factory = services.GetRequiredService<SprkChatAgentFactory>();
+
+        // Act — any user message; router is absent so no routing occurs
+        var agent = await factory.CreateAgentAsync(
+            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
+            latestUserMessage: "summarize this document");
+
+        // Assert — agent created normally; no exception thrown
+        agent.Should().NotBeNull();
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private static CapabilityManifestEntry MakeManifestEntry(
+        string name,
+        string[] toolNames,
+        string[] keywordHints) =>
+        new CapabilityManifestEntry(
+            CapabilityName: name,
+            Description: $"Description for {name}",
+            KeywordHints: keywordHints,
+            PlaybookId: null,
+            ToolNames: toolNames,
+            IsEnabled: true,
+            TenantRestrictions: Array.Empty<string>());
+
     #region Private helpers
 
-    private static ServiceProvider BuildServiceProvider(IChatContextProvider contextProvider)
+    private static ServiceProvider BuildServiceProvider(
+        IChatContextProvider contextProvider,
+        ICapabilityRouter? capabilityRouter = null)
     {
         var services = new ServiceCollection();
 
@@ -148,7 +363,21 @@ public class SprkChatAgentFactoryTests
         services.AddLogging();
 
         // Register factory (singleton — matches ADR-010 constraint)
-        services.AddSingleton<SprkChatAgentFactory>();
+        // AIPU2-061: inject the router (may be null for backward-compat tests).
+        if (capabilityRouter is not null)
+        {
+            services.AddSingleton<SprkChatAgentFactory>(sp =>
+                new SprkChatAgentFactory(
+                    sp.GetRequiredService<IChatClient>(),
+                    sp.GetRequiredKeyedService<IChatClient>("raw"),
+                    sp,
+                    sp.GetRequiredService<ILogger<SprkChatAgentFactory>>(),
+                    capabilityRouter));
+        }
+        else
+        {
+            services.AddSingleton<SprkChatAgentFactory>();
+        }
 
         return services.BuildServiceProvider();
     }

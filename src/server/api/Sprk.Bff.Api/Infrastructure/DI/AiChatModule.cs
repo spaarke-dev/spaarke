@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -50,6 +51,16 @@ public static class AiChatModule
         //   - ILogger<DirectOpenAiAgent> (framework, always available)
         // Phase 3 will introduce FoundryAgent and a MultiAgentOrchestrator to replace this registration.
         services.AddSingleton<ISprkAgent, DirectOpenAiAgent>();
+
+        // AIPU2-066: AI Latency telemetry services.
+        // AiLatencyTelemetry — singleton: Meter instances are thread-safe and long-lived.
+        // ADR-010: concrete singleton, no interface (single implementation, no test seam required).
+        services.AddSingleton<AiLatencyTelemetry>();
+
+        // AiLatencyTracker — scoped: one stopwatch per HTTP request.
+        // Wraps AiLatencyTelemetry with per-request state (model, routing layer, elapsed times).
+        // Injected into ChatEndpoints streaming path to record TTFT / TBT / TTLT / token counts.
+        services.AddScoped<AiLatencyTracker>();
 
         return services;
     }

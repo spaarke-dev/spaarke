@@ -3,7 +3,7 @@
     <title>Define WorkspaceWidget and ContextWidget Interfaces + Base Types</title>
     <phase>4A</phase>
     <tags>frontend, widgets, types</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPU2-070</dependencies>
     <parallel-safe>false</parallel-safe>

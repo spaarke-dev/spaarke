@@ -1,12 +1,66 @@
 // @spaarke/ai-widgets — barrel export
-// Widget implementations are added by subsequent tasks (071–074).
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — React component prop contracts (tasks AIPU2-072/073)
 // ---------------------------------------------------------------------------
 
-export * from './types/widget-types';
+export type {
+  WorkspaceWidgetProps,
+  WorkspaceWidgetComponent,
+  ContextWidgetProps,
+  ContextWidgetComponent,
+  // Re-exports of task-071 types (via widget-types.ts pass-through):
+  WidgetRenderContext,
+  Selection,
+  ActionResult,
+  WidgetState,
+  WidgetRegistryEntry,
+  WidgetRegistryMetadata,
+  WorkspaceWidget,
+  WidgetActionDescriptor,
+  ContextWidget,
+} from './types/widget-types';
+
+// WidgetMetadata — canonical definition from shared.ts (task AIPU2-071).
+// Required by WorkspaceWidgetRegistry.registerWorkspaceWidget().
+export type { WidgetMetadata } from './types/shared';
+
 export * from './types/event-types';
+
+// ---------------------------------------------------------------------------
+// Registries: WorkspaceWidgetRegistry and ContextWidgetRegistry
+// ---------------------------------------------------------------------------
+
+// WorkspaceWidgetRegistry — lazy-load with GenericTextWidget fallback
+export {
+  registerWorkspaceWidget,
+  replaceWorkspaceWidget,
+  resolveWorkspaceWidget,
+  getWorkspaceWidgetMetadata,
+  getAllWorkspaceWidgetTypes,
+  hasWorkspaceWidget,
+  clearWorkspaceRegistry,
+} from './registry/WorkspaceWidgetRegistry';
+
+export type { WorkspaceWidgetRegistration } from './registry/WorkspaceWidgetRegistry';
+
+// ContextWidgetRegistry — lazy-load with null-return for unknown types
+export {
+  registerContextWidget,
+  replaceContextWidget,
+  resolveContextWidget,
+  hasContextWidget,
+  getAllContextWidgetTypes,
+  clearContextRegistry,
+} from './registry/ContextWidgetRegistry';
+
+export type { ContextWidgetRegistration } from './registry/ContextWidgetRegistry';
+
+// ---------------------------------------------------------------------------
+// Widgets: GenericTextWidget (fallback for unregistered workspace widget types)
+// ---------------------------------------------------------------------------
+
+export { default as GenericTextWidget } from './widgets/GenericTextWidget';
 
 // ---------------------------------------------------------------------------
 // Events: PaneEventBus, typed channels, React context + hooks

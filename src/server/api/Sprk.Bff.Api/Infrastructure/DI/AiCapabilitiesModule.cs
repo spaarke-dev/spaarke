@@ -122,6 +122,15 @@ public static class AiCapabilitiesModule
         services.AddSingleton<ICapabilityRouter>(sp =>
             sp.GetRequiredService<CapabilityRouter>());
 
+        // ── AIPU2-061: CapabilityValidator (scoped — reads ClaimsPrincipal) ──────
+        // Registered as scoped per the ADR-010 / class-level comment: each request
+        // gets a fresh validator that can safely read the caller's JWT claims.
+        // The factory resolves this from its internally-created async scope so the
+        // singleton factory never holds a scoped reference directly.
+        services.AddScoped<CapabilityValidator>();
+        services.AddScoped<ICapabilityValidator>(sp =>
+            sp.GetRequiredService<CapabilityValidator>());
+
         // TODO AIPU2-014: Register Layer 3 fallback router (already implemented inline in CapabilityRouter)
         // TODO AIPU2-xxx: Register AiSearchService, SummarizationService, CitationService, MultiProviderAiService
 

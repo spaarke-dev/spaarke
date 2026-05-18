@@ -28,6 +28,8 @@ public static class TelemetryModule
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.PromptShieldTelemetry.MeterName);
                 // AI Capabilities meter (AIPU2-011): ai_capability_manifest_refresh_total
                 metrics.AddMeter("Sprk.Bff.Api.AiCapabilities");
+                // AI Latency meter (AIPU2-066): TTFT, TBT, TTLT, prompt tokens, routing latency
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.AiLatencyTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {
