@@ -133,6 +133,28 @@ registerContextWidget('playbook-gallery', {
 });
 
 // ---------------------------------------------------------------------------
+// Widgets: FindingsWidget (context pane — sources-citations stage)
+//
+// Exported so consumers can reference the component directly and type-check
+// FindingsData payloads. Registered under 'findings'.
+// Citation link clicks dispatch context_highlight to the 'context' channel
+// so the active DocumentViewer scrolls to / highlights the cited passage.
+// ---------------------------------------------------------------------------
+
+export { default as FindingsWidget } from './widgets/context/FindingsWidget';
+export type {
+  FindingsData,
+  Finding,
+  Citation,
+  RiskLevel,
+} from './widgets/context/FindingsWidget';
+
+registerContextWidget('findings', {
+  factory: () =>
+    import('./widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+});
+
+// ---------------------------------------------------------------------------
 // Providers: AiSessionProvider (R2 session state + PaneEventBus routing)
 // ---------------------------------------------------------------------------
 
@@ -147,6 +169,29 @@ export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './provider
 
 // useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
 export { useAiSession } from './providers/useAiSession';
+
+// ---------------------------------------------------------------------------
+// Components: ConfidenceIndicator (AIPU2-091)
+//
+// Per-response confidence bar rendered below AI messages. Driven by the safety
+// pipeline confidence score; color-coded high/medium/low using Fluent v9
+// semantic status tokens. Low confidence adds a disclaimer text.
+// ---------------------------------------------------------------------------
+
+export { ConfidenceIndicator } from './components/ConfidenceIndicator';
+export type { ConfidenceIndicatorProps, ConfidenceLevel } from './components/ConfidenceIndicator';
+
+// ---------------------------------------------------------------------------
+// Components: FeedbackButtons (thumbs up/down + optional comment — AIPU2-092)
+//
+// Non-intrusive rating control rendered beneath each completed AI message.
+// Thumbs-up submits immediately; thumbs-down reveals an optional Textarea.
+// Calls POST /api/ai/feedback and shows a brief checkmark confirmation.
+// Only render when streaming is complete (isStreaming === false).
+// ---------------------------------------------------------------------------
+
+export { FeedbackButtons } from './components/FeedbackButtons';
+export type { FeedbackButtonsProps, FeedbackRating } from './components/FeedbackButtons';
 
 // ---------------------------------------------------------------------------
 // Events: PaneEventBus, typed channels, React context + hooks
@@ -174,3 +219,42 @@ export type { PaneEventBusProviderProps } from './events/PaneEventBusContext';
 export { usePaneEvent } from './events/usePaneEvent';
 export { useDispatchPaneEvent } from './events/useDispatchPaneEvent';
 export type { DispatchPaneEvent } from './events/useDispatchPaneEvent';
+
+// ---------------------------------------------------------------------------
+// Safety annotation UI (AIPU2-090 — FR-402, FR-403)
+//
+// SafetyAnnotationOverlay — subscribes to 'safety' PaneEventBus channel and
+// applies retroactive groundedness highlights + citation verification badges
+// ~200 ms after the last streaming token (D-03: stream + retroactive).
+//
+// AnnotatedMessageContent — stateless unified render of groundedness +
+// citation badge layers; exported for direct use when annotation state is
+// already available (e.g. in tests or server-side pre-annotated payloads).
+//
+// CitationBadge — inline Fluent v9 Badge for citation verification status.
+//   Variants: verified (green CheckmarkCircle), unverified (orange Warning),
+//             partial (blue ArrowSwap).
+//
+// GroundednessHighlight — wraps text with visual indicators for ungrounded
+//   segments: dashed underline + colorStatusWarningBackground1 fill.
+// ---------------------------------------------------------------------------
+
+export { default as SafetyAnnotationOverlay } from './components/SafetyAnnotationOverlay';
+export { AnnotatedMessageContent } from './components/SafetyAnnotationOverlay';
+export type {
+  SafetyAnnotationOverlayProps,
+  AnnotatedMessageContentProps,
+} from './components/SafetyAnnotationOverlay';
+
+export { CitationBadge } from './components/CitationBadge';
+export type {
+  CitationBadgeProps,
+  CitationVerificationResult,
+  CitationVerificationStatus,
+} from './components/CitationBadge';
+
+export { GroundednessHighlight } from './components/GroundednessHighlight';
+export type {
+  GroundednessHighlightProps,
+  GroundednessSegment,
+} from './components/GroundednessHighlight';

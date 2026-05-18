@@ -71,6 +71,23 @@ registerContextWidget('entity-info', {
 });
 
 // ---------------------------------------------------------------------------
+// findings
+//
+// Widget type: 'findings'
+// Stage:       sources-citations (after analysis completes)
+// Purpose:     Displays structured analysis findings — key items, risk levels,
+//              and citation links. Citation clicks dispatch context_highlight
+//              to the 'context' PaneEventBus channel so the active
+//              DocumentViewer scrolls to / highlights the cited passage.
+// (also registered inline in index.ts — duplicate is safe, first wins)
+// ---------------------------------------------------------------------------
+
+registerContextWidget('findings', {
+  factory: () =>
+    import('../widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+});
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from shell entry points)
 // ---------------------------------------------------------------------------
 
