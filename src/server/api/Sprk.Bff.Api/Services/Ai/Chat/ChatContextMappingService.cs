@@ -231,20 +231,6 @@ public class ChatContextMappingService
         string pageType,
         CancellationToken ct)
     {
-        // TODO: Replace with actual Dataverse query once sprk_aichatcontextmapping entity is deployed.
-        // The query should filter by:
-        //   sprk_entitytype = entityType
-        //   sprk_pagetype = pageType
-        //   statecode = 0 (Active)
-        // And order by sprk_sortorder ASC.
-        // Each record includes:
-        //   sprk_aichatcontextmappingid (GUID)
-        //   sprk_playbookid (EntityReference → sprk_analysisplaybook)
-        //   sprk_isdefault (bool)
-        //   sprk_sortorder (int)
-        // The playbook name and description come from the related playbook entity via
-        // a linked entity or separate lookup.
-
         try
         {
             var query = new QueryExpression(MappingEntityName)

@@ -1,16 +1,19 @@
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
 /// Manages working document persistence to Dataverse during and after analysis.
+/// Uses SpeFileStore (ADR-007) for SharePoint Embedded uploads.
 /// </summary>
 public class WorkingDocumentService : IWorkingDocumentService
 {
     private readonly IGenericEntityService _genericEntityService;
+    private readonly SpeFileStore _speFileStore;
     private readonly AnalysisOptions _options;
     private readonly ILogger<WorkingDocumentService> _logger;
 
@@ -18,10 +21,12 @@ public class WorkingDocumentService : IWorkingDocumentService
 
     public WorkingDocumentService(
         IGenericEntityService genericEntityService,
+        SpeFileStore speFileStore,
         IOptions<AnalysisOptions> options,
         ILogger<WorkingDocumentService> logger)
     {
         _genericEntityService = genericEntityService;
+        _speFileStore = speFileStore;
         _options = options.Value;
         _logger = logger;
     }
@@ -81,7 +86,7 @@ public class WorkingDocumentService : IWorkingDocumentService
     }
 
     /// <inheritdoc />
-    public Task<SavedDocumentResult> SaveToSpeAsync(
+    public async Task<SavedDocumentResult> SaveToSpeAsync(
         Guid analysisId,
         string fileName,
         byte[] content,
@@ -91,16 +96,89 @@ public class WorkingDocumentService : IWorkingDocumentService
         _logger.LogInformation("Saving analysis {AnalysisId} to SPE: {FileName} ({ContentLength} bytes)",
             analysisId, fileName, content.Length);
 
-        // SPE upload not yet implemented — returns stub result
-        _logger.LogWarning("SPE upload not implemented, returning stub result");
-
-        return Task.FromResult(new SavedDocumentResult
+        // Resolve the SPE container from the analysis's parent matter.
+        // The analysis record has a sprk_matterid lookup that points to a matter,
+        // which has a sprk_containerid field (the SPE container drive ID).
+        string? driveId = null;
+        try
         {
-            DocumentId = Guid.NewGuid(),
-            DriveId = "stub-drive-id",
-            ItemId = "stub-item-id",
-            WebUrl = $"https://stub.sharepoint.com/documents/{fileName}"
-        });
+            var analysisEntity = await _genericEntityService.RetrieveAsync(
+                "sprk_analysis", analysisId,
+                ["sprk_matterid"],
+                cancellationToken);
+
+            var matterRef = analysisEntity.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_matterid");
+            if (matterRef is not null)
+            {
+                var matterEntity = await _genericEntityService.RetrieveAsync(
+                    "sprk_matter", matterRef.Id,
+                    ["sprk_containerid"],
+                    cancellationToken);
+
+                var containerId = matterEntity.GetAttributeValue<string>("sprk_containerid");
+                if (!string.IsNullOrWhiteSpace(containerId))
+                {
+                    driveId = containerId;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to resolve SPE container for analysis {AnalysisId} — document will be saved to Dataverse only",
+                analysisId);
+        }
+
+        if (string.IsNullOrWhiteSpace(driveId))
+        {
+            _logger.LogWarning(
+                "No SPE container resolved for analysis {AnalysisId} — persisting to Dataverse field only",
+                analysisId);
+
+            // Fallback: save content to the analysis record's sprk_workingdocument field
+            await UpdateWorkingDocumentAsync(analysisId, System.Text.Encoding.UTF8.GetString(content), cancellationToken);
+
+            return new SavedDocumentResult
+            {
+                DocumentId = analysisId,
+                DriveId = string.Empty,
+                ItemId = string.Empty,
+                WebUrl = string.Empty
+            };
+        }
+
+        // Upload to SPE via SpeFileStore (ADR-007)
+        var path = $"/analysis-outputs/{analysisId}/{fileName}";
+        using var stream = new MemoryStream(content);
+
+        var uploadResult = await _speFileStore.UploadSmallAsync(driveId, path, stream, cancellationToken);
+
+        if (uploadResult is null)
+        {
+            _logger.LogWarning(
+                "SPE upload returned null for analysis {AnalysisId}, file {FileName}",
+                analysisId, fileName);
+
+            return new SavedDocumentResult
+            {
+                DocumentId = analysisId,
+                DriveId = driveId,
+                ItemId = string.Empty,
+                WebUrl = string.Empty
+            };
+        }
+
+        _logger.LogInformation(
+            "SPE upload succeeded for analysis {AnalysisId}: DriveId={DriveId}, ItemId={ItemId}",
+            analysisId, driveId, uploadResult.Id);
+
+        return new SavedDocumentResult
+        {
+            DocumentId = analysisId,
+            DriveId = driveId,
+            ItemId = uploadResult.Id,
+            WebUrl = uploadResult.WebUrl ?? string.Empty
+        };
     }
 
     /// <inheritdoc />

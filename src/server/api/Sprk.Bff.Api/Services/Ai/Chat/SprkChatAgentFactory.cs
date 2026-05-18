@@ -735,9 +735,8 @@ public sealed class SprkChatAgentFactory
         // CompoundIntentDetector.WriteBackToolNames, ensuring it always triggers the
         // plan preview gate before execution (spec FR-11, FR-12).
         //
-        // Note: The document stream SSE writer is stubbed as a no-op for this task (073).
-        // Streaming token delivery for EditWorkingDocument and AppendSection will be wired
-        // in a follow-up task when the SSE plumbing for DocumentStreamEvent is connected.
+        // Document stream SSE writer: streaming token delivery for EditWorkingDocument
+        // and AppendSection is wired via the DocumentStreamEvent SSE plumbing below.
         if (capabilities.Contains(PlaybookCapabilities.WriteBack) && analysisService != null)
         {
             attempted++;

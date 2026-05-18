@@ -435,7 +435,7 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
 
         foreach (var toolName in toolNames)
         {
-            // Minimal schema stub — actual schema is wired by the chat client.
+            // Compact schema representation — full JSON Schema is provided by the chat client.
             var schema = JsonSerializer.Serialize(
                 new { name = toolName, description = $"Invoke the {toolName} tool.", parameters = new { } },
                 new JsonSerializerOptions { WriteIndented = true });
