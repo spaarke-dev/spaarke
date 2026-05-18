@@ -2,6 +2,8 @@ using Sprk.Bff.Api.Infrastructure.Sse;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Safety;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
+using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
+using Sprk.Bff.Api.Services.Ai.Security;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -107,6 +109,27 @@ public static class AiSafetyModule
         // SseOutputGuard -- AIPU2-026
         // Scoped: one instance per HTTP request. Validates SSE tool output payloads.
         services.AddScoped<SseOutputGuard>();
+
+        // IPrivilegeGroupResolver — AIPU2-027
+        // Singleton: the implementation uses IHttpContextAccessor (singleton accessor) to access
+        // the per-request HttpContext at call time, avoiding a captive dependency issue with
+        // IRagService (also singleton). IMemoryCache and IGraphClientFactory are singletons.
+        // Interface registered for testability (unit tests inject a stub resolver).
+        services.AddSingleton<IPrivilegeGroupResolver, PrivilegeGroupResolver>();
+
+        // IMatterContextDetector — AIPU2-028 (FR-408: cross-matter conversation safety)
+        // Scoped: one per HTTP request; stateless between turns but bound to request logging context.
+        services.AddScoped<IMatterContextDetector, MatterContextDetector>();
+
+        // IConversationHistorySanitizer — AIPU2-028
+        // Scoped: one per HTTP request; stateless between turns.
+        services.AddScoped<IConversationHistorySanitizer, ConversationHistorySanitizer>();
+
+        // CrossMatterSafetyTelemetry — AIPU2-028
+        // Singleton: Meter instances are thread-safe and long-lived.
+        // ADR-010: no interface needed (single concrete implementation, no test seam required —
+        // tests that need silence simply don't assert on OTEL counters).
+        services.AddSingleton<CrossMatterSafetyTelemetry>();
 
         return services;
     }

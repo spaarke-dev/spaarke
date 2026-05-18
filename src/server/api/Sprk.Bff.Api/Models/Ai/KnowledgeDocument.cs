@@ -194,6 +194,15 @@ public class KnowledgeDocument
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
     [JsonPropertyName("parentEntityname")]
     public string? ParentEntityName { get; set; }
+
+    /// <summary>
+    /// Azure AD group IDs that are authorised to retrieve this document chunk.
+    /// Empty collection means the document is public (no privilege restriction).
+    /// Filterable string collection — used by privilege-aware retrieval (AIPU2-027).
+    /// </summary>
+    [SimpleField(IsFilterable = true)]
+    [JsonPropertyName("privilege_group_ids")]
+    public IList<string>? PrivilegeGroupIds { get; set; }
 }
 
 /// <summary>

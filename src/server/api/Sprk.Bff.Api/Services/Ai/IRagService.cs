@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -161,6 +162,14 @@ public record RagSearchOptions
     /// e.g., "contract", "policy", "procedure"
     /// </summary>
     public string? DocumentType { get; init; }
+
+    /// <summary>
+    /// The calling user's <see cref="ClaimsPrincipal"/>, used to resolve Azure AD group
+    /// membership for privilege_group_ids security filtering (AIPU2-027).
+    /// When null, only public documents (those with no privilege_group_ids) are returned.
+    /// Set this from the endpoint's HttpContext.User for all user-facing search calls.
+    /// </summary>
+    public ClaimsPrincipal? CallerPrincipal { get; init; }
 
     /// <summary>
     /// Optional filter by tags (OR semantics).

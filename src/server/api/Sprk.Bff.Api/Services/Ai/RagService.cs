@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Claims;
 using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Security;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -34,6 +36,7 @@ public partial class RagService : IRagService
     private readonly IKnowledgeDeploymentService _deploymentService;
     private readonly IOpenAiClient _openAiClient;
     private readonly IEmbeddingCache _embeddingCache;
+    private readonly IPrivilegeGroupResolver _privilegeGroupResolver;
     private readonly IResilientSearchClient? _resilientClient;
     private readonly AnalysisOptions _analysisOptions;
     private readonly ILogger<RagService> _logger;
@@ -62,6 +65,7 @@ public partial class RagService : IRagService
         IKnowledgeDeploymentService deploymentService,
         IOpenAiClient openAiClient,
         IEmbeddingCache embeddingCache,
+        IPrivilegeGroupResolver privilegeGroupResolver,
         IOptions<AnalysisOptions> analysisOptions,
         ILogger<RagService> logger,
         IResilientSearchClient? resilientClient = null,
@@ -70,6 +74,7 @@ public partial class RagService : IRagService
         _deploymentService = deploymentService;
         _openAiClient = openAiClient;
         _embeddingCache = embeddingCache;
+        _privilegeGroupResolver = privilegeGroupResolver ?? throw new ArgumentNullException(nameof(privilegeGroupResolver));
         _resilientClient = resilientClient;
         _analysisOptions = analysisOptions.Value;
         _logger = logger;
@@ -80,6 +85,20 @@ public partial class RagService : IRagService
     public async Task<RagSearchResponse> SearchAsync(
         string query,
         RagSearchOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        return await SearchAsync(query, options, user: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Search with an explicit <see cref="ClaimsPrincipal"/> for privilege-aware filtering.
+    /// When <paramref name="user"/> is null, the method attempts to resolve the principal
+    /// from <see cref="IHttpContextAccessor"/> (available in request-scoped scenarios).
+    /// </summary>
+    internal async Task<RagSearchResponse> SearchAsync(
+        string query,
+        RagSearchOptions options,
+        ClaimsPrincipal? user,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(query);
@@ -97,6 +116,39 @@ public partial class RagService : IRagService
 
         try
         {
+            // Step 0: Resolve privilege groups before issuing any search (AIPU2-027 — fail-closed).
+            // If group resolution fails, PrivilegeGroupResolver returns an empty list and logs the error.
+            // RagService then returns empty results rather than falling back to unfiltered search.
+            var principal = user ?? options.CallerPrincipal;
+            IReadOnlyList<string> userGroupIds;
+
+            if (principal != null)
+            {
+                userGroupIds = await _privilegeGroupResolver.ResolveGroupIdsAsync(principal, cancellationToken);
+
+                // Fail-closed: if the principal has no OID (malformed token) the resolver returns empty.
+                // We still proceed — BuildSearchOptions will add "not privilege_group_ids/any()"
+                // which returns only public documents, which is the correct safe default.
+                _telemetry?.RecordPrivilegeFilterApplied(groupCount: userGroupIds.Count);
+
+                if (userGroupIds.Count == 0)
+                {
+                    _logger.LogInformation(
+                        "RAG search: user has zero resolved groups for tenant {TenantId} — only public documents will be returned",
+                        options.TenantId);
+                    _telemetry?.RecordPrivilegeFilterEmptyResult();
+                }
+            }
+            else
+            {
+                // No principal available — system/background call. Apply public-only filter.
+                userGroupIds = Array.Empty<string>();
+                _logger.LogDebug(
+                    "RAG search: no caller principal available for tenant {TenantId} — applying public-only privilege filter",
+                    options.TenantId);
+                _telemetry?.RecordPrivilegeFilterApplied(groupCount: 0);
+            }
+
             // Step 1: Get embedding for query (with caching)
             ReadOnlyMemory<float> queryEmbedding = default;
             if (options.UseVectorSearch)
@@ -129,8 +181,8 @@ public partial class RagService : IRagService
                 ? await _deploymentService.GetSearchClientByDeploymentAsync(options.DeploymentId.Value, cancellationToken)
                 : await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
 
-            // Step 3: Build hybrid search options
-            var searchOptions = BuildSearchOptions(options, queryEmbedding);
+            // Step 3: Build hybrid search options with privilege filter applied
+            var searchOptions = BuildSearchOptions(options, queryEmbedding, userGroupIds);
 
             // Step 4: Execute search (with optional resilience)
             var searchText = options.UseKeywordSearch ? query : "*";
@@ -645,7 +697,10 @@ public partial class RagService : IRagService
 
     #region Private Methods
 
-    private SearchOptions BuildSearchOptions(RagSearchOptions options, ReadOnlyMemory<float> queryEmbedding)
+    private SearchOptions BuildSearchOptions(
+        RagSearchOptions options,
+        ReadOnlyMemory<float> queryEmbedding,
+        IReadOnlyList<string>? userGroupIds = null)
     {
         var searchOptions = new SearchOptions
         {
@@ -755,6 +810,12 @@ public partial class RagService : IRagService
             filters.Add($"parentEntityType eq '{EscapeFilterValue(options.ParentEntityType)}'");
             filters.Add($"parentEntityId eq '{EscapeFilterValue(options.ParentEntityId)}'");
         }
+
+        // Privilege filter — ALWAYS applied (AIPU2-027 security requirement).
+        // Ensures only documents the user's groups are authorised to view are returned.
+        // Null userGroupIds means system/background call: treat as public-only.
+        var privilegeFilter = PrivilegeFilterBuilder.BuildFilter(userGroupIds ?? Array.Empty<string>());
+        filters.Add(privilegeFilter);
 
         searchOptions.Filter = string.Join(" and ", filters);
 
