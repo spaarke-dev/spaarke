@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -19,6 +20,12 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// - Cache key pattern: "chat:session:{tenantId}:{sessionId}" (ADR-014).
 /// - Sliding TTL: 24 hours (NFR-07, ADR-009).
 /// - <see cref="ChatSessionManager.DeleteSessionAsync"/> removes from Redis and archives in Dataverse.
+///
+/// Cosmos write-through integration (decision D-06):
+/// - Write-through: Redis write always precedes Cosmos upsert (fire-and-forget).
+/// - Redis HIT: Cosmos is NOT consulted on warm-cache reads.
+/// - Redis MISS: Cosmos fallback re-populates Redis before Dataverse fallback.
+/// - Cosmos write failure: Redis write still succeeds; error is logged only.
 /// </summary>
 public class ChatSessionManagerTests
 {
@@ -29,14 +36,31 @@ public class ChatSessionManagerTests
     private readonly Mock<IDistributedCache> _cacheMock;
     private readonly Mock<IChatDataverseRepository> _repoMock;
     private readonly Mock<ILogger<ChatSessionManager>> _loggerMock;
+    private readonly Mock<ISessionPersistenceService> _persistenceMock;
+
+    /// <summary>SUT without Cosmos (backward-compatible mode).</summary>
     private readonly ChatSessionManager _sut;
+
+    /// <summary>SUT with Cosmos persistence wired in (D-06 write-through mode).</summary>
+    private readonly ChatSessionManager _sutWithCosmos;
 
     public ChatSessionManagerTests()
     {
         _cacheMock = new Mock<IDistributedCache>();
         _repoMock = new Mock<IChatDataverseRepository>();
         _loggerMock = new Mock<ILogger<ChatSessionManager>>();
-        _sut = new ChatSessionManager(_cacheMock.Object, _repoMock.Object, _loggerMock.Object);
+        _persistenceMock = new Mock<ISessionPersistenceService>();
+
+        _sut = new ChatSessionManager(
+            _cacheMock.Object,
+            _repoMock.Object,
+            _loggerMock.Object);
+
+        _sutWithCosmos = new ChatSessionManager(
+            _cacheMock.Object,
+            _repoMock.Object,
+            _loggerMock.Object,
+            _persistenceMock.Object);
     }
 
     // =========================================================================
@@ -336,6 +360,129 @@ public class ChatSessionManagerTests
     public void SessionCacheTtl_Is24Hours()
     {
         ChatSessionManager.SessionCacheTtl.Should().Be(TimeSpan.FromHours(24));
+    }
+
+    // =========================================================================
+    // Cosmos write-through integration tests (decision D-06)
+    // =========================================================================
+
+    /// <summary>
+    /// Write-through: GetSessionAsync on a warm Redis cache must NOT call Cosmos.
+    /// Cosmos is consulted only on Redis misses (ADR-009 Redis-first).
+    /// </summary>
+    [Fact]
+    public async Task GetSessionAsync_WarmRedisHit_DoesNotCallCosmos()
+    {
+        // Arrange
+        var existingSession = CreateTestSession("session-warm");
+        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(existingSession);
+        var cacheKey = ChatSessionManager.BuildCacheKey(TenantId, "session-warm");
+
+        _cacheMock
+            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cachedBytes);
+        _cacheMock
+            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _sutWithCosmos.GetSessionAsync(TenantId, "session-warm");
+
+        // Assert — result returned from Redis, Cosmos NOT called
+        result.Should().NotBeNull();
+        result!.SessionId.Should().Be("session-warm");
+        _persistenceMock.Verify(
+            p => p.LoadSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Cosmos must not be consulted on a Redis hit (ADR-009 Redis-first)");
+    }
+
+    /// <summary>
+    /// Redis miss + Cosmos hit: Cosmos fallback re-populates Redis so subsequent requests hit the hot path.
+    /// Dataverse must NOT be called when Cosmos holds the session.
+    /// </summary>
+    [Fact]
+    public async Task GetSessionAsync_RedisMiss_CosmosFallback_RePopulatesRedisAndSkipsDataverse()
+    {
+        // Arrange — Redis returns null (cache miss)
+        _cacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+
+        // Cosmos holds the session
+        var storedSession = new StoredSession
+        {
+            Id          = "session-cold-cosmos",
+            SessionId   = "session-cold-cosmos",
+            TenantId    = TenantId,
+            PlaybookId  = PlaybookId,
+            Messages    = [],
+            WidgetStates = [],
+            CreatedAt   = DateTimeOffset.UtcNow.AddMinutes(-30),
+            LastActivity = DateTimeOffset.UtcNow.AddMinutes(-5)
+        };
+        _persistenceMock
+            .Setup(p => p.LoadSessionAsync(TenantId, "session-cold-cosmos", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(storedSession);
+
+        SetupCacheSetSuccess();
+
+        // Act
+        var result = await _sutWithCosmos.GetSessionAsync(TenantId, "session-cold-cosmos");
+
+        // Assert — session returned from Cosmos
+        result.Should().NotBeNull();
+        result!.SessionId.Should().Be("session-cold-cosmos");
+        result.TenantId.Should().Be(TenantId);
+
+        // Redis must be re-warmed
+        _cacheMock.Verify(c => c.SetAsync(
+            It.Is<string>(k => k.Contains("session-cold-cosmos")),
+            It.IsAny<byte[]>(),
+            It.IsAny<DistributedCacheEntryOptions>(),
+            It.IsAny<CancellationToken>()),
+            Times.Once,
+            "Redis must be re-warmed from Cosmos so subsequent reads hit the hot path");
+
+        // Dataverse must NOT be called — Cosmos was sufficient
+        _repoMock.Verify(r => r.GetSessionAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Dataverse must not be called when Cosmos already has the session");
+    }
+
+    /// <summary>
+    /// Cosmos write failure: Redis write succeeds and the session is returned normally.
+    /// The Cosmos failure must never propagate to the caller (D-06 non-fatal policy).
+    /// </summary>
+    [Fact]
+    public async Task CreateSessionAsync_CosmosWriteFailure_RedisWriteSucceeds_NoExceptionThrown()
+    {
+        // Arrange — Dataverse succeeds
+        _repoMock
+            .Setup(r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        SetupCacheSetSuccess();
+
+        // Cosmos persistence throws (e.g., transient network error)
+        _persistenceMock
+            .Setup(p => p.PersistSessionAsync(It.IsAny<StoredSession>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Cosmos DB unavailable"));
+
+        // Act — must not throw despite Cosmos failure
+        var act = async () => await _sutWithCosmos.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
+        await act.Should().NotThrowAsync(
+            "Cosmos write failure must not surface to the caller (D-06 non-fatal policy)");
+
+        // Assert — Redis was still written
+        _cacheMock.Verify(c => c.SetAsync(
+            It.IsAny<string>(),
+            It.IsAny<byte[]>(),
+            It.IsAny<DistributedCacheEntryOptions>(),
+            It.IsAny<CancellationToken>()),
+            Times.Once,
+            "Redis write must succeed even when Cosmos is unavailable");
     }
 
     // =========================================================================

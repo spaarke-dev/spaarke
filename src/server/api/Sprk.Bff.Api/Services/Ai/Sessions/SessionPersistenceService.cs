@@ -186,6 +186,18 @@ public class SessionPersistenceService : ISessionPersistenceService
         }
     }
 
+    /// <inheritdoc/>
+    public async Task PersistSessionAsync(StoredSession session, CancellationToken ct = default)
+    {
+        // Write to Redis (hot tier) — non-blocking on failure
+        await WriteToRedisAsync(session.TenantId, session.SessionId, session, ct);
+
+        // Upsert to Cosmos DB (warm tier) — fire-and-forget, non-blocking on failure.
+        // We do NOT pass the request CancellationToken because the HTTP request may complete
+        // (or be cancelled) before the Cosmos write finishes (same pattern as PersistMessageAsync).
+        _ = UpsertToCosmosAsync(session, CancellationToken.None);
+    }
+
     // =========================================================================
     // Private helpers — Redis
     // =========================================================================

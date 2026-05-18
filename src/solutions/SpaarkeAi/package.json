@@ -33,6 +33,7 @@
     "@microsoft/applicationinsights-web": "^3.3.11",
     "@spaarke/ai-context": "file:../../client/shared/Spaarke.AI.Context",
     "@spaarke/ai-outputs": "file:../../client/shared/Spaarke.AI.Outputs",
+    "@spaarke/ai-widgets": "file:../../client/shared/Spaarke.AI.Widgets",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@types/dompurify": "^3.0.5",

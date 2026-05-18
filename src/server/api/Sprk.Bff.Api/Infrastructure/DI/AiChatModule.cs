@@ -42,9 +42,12 @@ public static class AiChatModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // AIPU2-008: Register the R2 provider-agnostic agent boundary (FR-701).
-        // DirectOpenAiAgent is the Phase 1 implementation that routes directly to Azure OpenAI (FR-702).
-        // Phase 2 (AIPU2-060) will complete the full streaming implementation inside DirectOpenAiAgent.
+        // AIPU2-008 / AIPU2-060: Register the R2 provider-agnostic agent boundary (FR-701/FR-702).
+        // DirectOpenAiAgent is the Phase 2 full implementation that streams directly from Azure OpenAI.
+        // Constructor deps resolved from DI:
+        //   - IChatClient                (singleton, registered in AiModule via AddChatClient().UseFunctionInvocation())
+        //   - IOrchestratorPromptBuilder (singleton, registered in AiCapabilitiesModule)
+        //   - ILogger<DirectOpenAiAgent> (framework, always available)
         // Phase 3 will introduce FoundryAgent and a MultiAgentOrchestrator to replace this registration.
         services.AddSingleton<ISprkAgent, DirectOpenAiAgent>();
 

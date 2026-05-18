@@ -63,4 +63,17 @@ public interface ISessionPersistenceService
         string sessionId,
         SessionSummary summary,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Upserts a complete <see cref="StoredSession"/> document to Cosmos DB (warm tier).
+    ///
+    /// Used by <see cref="Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager"/> for write-through
+    /// on session create and cache updates (decision D-06). The session document replaces any
+    /// existing document with the same id and partition key.
+    ///
+    /// Failure is non-fatal — logged at Warning, streaming continues.
+    /// </summary>
+    /// <param name="session">The session document to upsert.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task PersistSessionAsync(StoredSession session, CancellationToken ct = default);
 }

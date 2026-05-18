@@ -391,6 +391,12 @@ public static class ChatEndpoints
             // Create SSE writer delegate for out-of-band events (progress, document_replace)
             var sseWriter = CreateSseWriter(response);
 
+            // === R2: Create the R2 SSE emitter for the six new event types.
+            // Available to the response pipeline for duration of this request.
+            // R1 events (token, done, error, etc.) continue to be emitted via WriteChatSSEAsync
+            // — this emitter is purely additive and does not alter the R1 flow.
+            var r2Emitter = CreateR2Emitter(sseWriter, logger);
+
             // Create agent for this session — pass the user's message for conversation-aware
             // document chunk re-selection (FR-03, R2-054). When a document exceeds the 30K
             // token budget, this enables the DocumentContextService to select chunks most
@@ -1879,6 +1885,27 @@ public static class ChatEndpoints
     internal static Func<ChatSseEvent, CancellationToken, Task> CreateSseWriter(HttpResponse response)
     {
         return (evt, ct) => WriteChatSSEAsync(response, evt, ct);
+    }
+
+    /// <summary>
+    /// Creates an <see cref="R2SseEventEmitter"/> scoped to the current HTTP response.
+    ///
+    /// The emitter wraps the SSE writer delegate produced by <see cref="CreateSseWriter"/>
+    /// and exposes typed emit methods for the six R2 event types (workspace_widget,
+    /// context_update, context_highlight, workspace_action, capability_change,
+    /// safety_annotation). All R1 event types remain unchanged and are NOT routed through
+    /// this emitter.
+    ///
+    /// Callers inject the emitter into services or tool handlers that need to push R2 events
+    /// during a streaming turn without holding a direct reference to <see cref="HttpResponse"/>.
+    /// </summary>
+    /// <param name="sseWriter">The SSE writer delegate from <see cref="CreateSseWriter"/>.</param>
+    /// <param name="logger">Logger used for validation failure warnings (ADR-015: payload content is never logged).</param>
+    internal static R2SseEventEmitter CreateR2Emitter(
+        Func<ChatSseEvent, CancellationToken, Task> sseWriter,
+        ILogger logger)
+    {
+        return new R2SseEventEmitter(sseWriter, logger);
     }
 
     /// <summary>
