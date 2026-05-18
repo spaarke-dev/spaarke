@@ -2,14 +2,14 @@
 
 > **Project**: spaarke-ai-platform-unification-r2
 > **Status**: in-progress
-> **Active Wave**: W4.6
+> **Active Wave**: W5.2
 > **Last Updated**: 2026-05-17
 
 ## Quick Recovery
 
-**Next Action**: Execute Wave 4.6 (tasks 089, 090, 091, 092)
-**Last Checkpoint**: Wave 4.5 committed at 388b8fb4
-**Context**: 59 of 86 tasks complete (69%). Phases 1-3 + 4A-4D done.
+**Next Action**: Execute Wave 5.2 (tasks 106, 107 — session restore E2E + welcome redesign)
+**Last Checkpoint**: Wave 5.1 committed at ddbf2d16
+**Context**: 69 of 86 tasks complete (80%). Phases 1-5.1 done. 17 tasks remaining.
 **Branch**: work/spaarke-ai-platform-unification-r2 @ 388b8fb4
 
 ## Completed Waves
@@ -42,8 +42,6 @@
 
 | Wave | Tasks | Description |
 |------|-------|-------------|
-| W4.6 | 089,090,091,092 | FindingsWidget + safety annotation UI + confidence UI + feedback UI |
-| W5.1 | 100,101,102,103,104,105 | Cross-pane interactions + embedded wizards + stage lifecycle |
 | W5.2 | 106,107 | Session restore E2E + welcome panel redesign |
 | W6.1 | 110,111,112,113,114,115 | Safety E2E, widget serialize, routing benchmark, session load, prompt budget, audit |
 | W6.2 | 116,117,118 | Privilege leakage, SprkChat regression, dark mode/accessibility |
