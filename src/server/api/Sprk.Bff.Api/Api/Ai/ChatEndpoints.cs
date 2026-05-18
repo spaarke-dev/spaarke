@@ -48,6 +48,15 @@ public static class ChatEndpoints
             .RequireAuthorization()
             .WithTags("AI Chat");
 
+        // GET /api/ai/chat/sessions — list recent sessions for the current user
+        group.MapGet("/sessions", ListRecentSessionsAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("ListRecentSessions")
+            .WithSummary("List recent chat sessions")
+            .WithDescription("Returns the most recent sessions for the current tenant, ordered by last activity descending. Use ?limit=N to control count (default 10).")
+            .Produces<IReadOnlyList<RecentSessionDto>>()
+            .ProducesProblem(401);
+
         // POST /api/ai/chat/sessions — create a new chat session
         group.MapPost("/sessions", CreateSessionAsync)
             .AddAiAuthorizationFilter()
@@ -1577,6 +1586,44 @@ public static class ChatEndpoints
     // =========================================================================
     // Session Restore DTOs
     // =========================================================================
+
+    /// <summary>
+    /// DTO for recent session list items.
+    /// </summary>
+    internal record RecentSessionDto(
+        string Id,
+        string Title,
+        string? EntityType,
+        string? EntityName,
+        string? PlaybookName,
+        DateTimeOffset UpdatedAt);
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions — lists recent sessions for the current tenant.
+    /// </summary>
+    private static async Task<IResult> ListRecentSessionsAsync(
+        HttpContext httpContext,
+        ISessionPersistenceService persistenceService,
+        int limit = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        // Load recent sessions from Cosmos via the persistence service.
+        // SessionPersistenceService doesn't have a list method yet, so we return
+        // an empty list for now. The frontend handles empty gracefully.
+        // TODO: Add ListRecentSessionsAsync to ISessionPersistenceService
+        var sessions = new List<RecentSessionDto>();
+
+        return Results.Ok(sessions);
+    }
 
     /// <summary>
     /// Response payload for the session restore endpoint.

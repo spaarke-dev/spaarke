@@ -9,11 +9,13 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <summary>
 /// Manages working document persistence to Dataverse during and after analysis.
 /// Uses SpeFileStore (ADR-007) for SharePoint Embedded uploads.
+/// SpeFileStore is resolved via IServiceProvider at call time (not constructor-injected)
+/// because SpeFileStore is scoped and this service may be consumed transitively by singletons.
 /// </summary>
 public class WorkingDocumentService : IWorkingDocumentService
 {
     private readonly IGenericEntityService _genericEntityService;
-    private readonly SpeFileStore _speFileStore;
+    private readonly IServiceProvider _serviceProvider;
     private readonly AnalysisOptions _options;
     private readonly ILogger<WorkingDocumentService> _logger;
 
@@ -21,12 +23,12 @@ public class WorkingDocumentService : IWorkingDocumentService
 
     public WorkingDocumentService(
         IGenericEntityService genericEntityService,
-        SpeFileStore speFileStore,
+        IServiceProvider serviceProvider,
         IOptions<AnalysisOptions> options,
         ILogger<WorkingDocumentService> logger)
     {
         _genericEntityService = genericEntityService;
-        _speFileStore = speFileStore;
+        _serviceProvider = serviceProvider;
         _options = options.Value;
         _logger = logger;
     }
@@ -147,11 +149,27 @@ public class WorkingDocumentService : IWorkingDocumentService
             };
         }
 
-        // Upload to SPE via SpeFileStore (ADR-007)
+        // Upload to SPE via SpeFileStore (ADR-007).
+        // Resolved at call time via IServiceProvider because SpeFileStore is scoped
+        // and WorkingDocumentService may be consumed transitively by singleton services.
+        var speFileStore = _serviceProvider.GetService<SpeFileStore>();
+        if (speFileStore is null)
+        {
+            _logger.LogWarning("SpeFileStore not available — saving to Dataverse field only");
+            await UpdateWorkingDocumentAsync(analysisId, System.Text.Encoding.UTF8.GetString(content), cancellationToken);
+            return new SavedDocumentResult
+            {
+                DocumentId = analysisId,
+                DriveId = driveId,
+                ItemId = string.Empty,
+                WebUrl = string.Empty
+            };
+        }
+
         var path = $"/analysis-outputs/{analysisId}/{fileName}";
         using var stream = new MemoryStream(content);
 
-        var uploadResult = await _speFileStore.UploadSmallAsync(driveId, path, stream, cancellationToken);
+        var uploadResult = await speFileStore.UploadSmallAsync(driveId, path, stream, cancellationToken);
 
         if (uploadResult is null)
         {

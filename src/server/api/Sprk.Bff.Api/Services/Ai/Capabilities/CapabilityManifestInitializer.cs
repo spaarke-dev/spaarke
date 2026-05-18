@@ -56,10 +56,15 @@ public sealed class CapabilityManifestInitializer : IHostedService
         }
         catch (Exception ex)
         {
-            _logger.LogCritical(ex,
-                "CapabilityManifestInitializer: failed to load capability manifest — " +
-                "BFF cannot start without this data. Check Dataverse connectivity and configuration.");
-            throw;
+            _logger.LogWarning(ex,
+                "CapabilityManifestInitializer: failed to load capability manifest from Dataverse — " +
+                "starting with empty manifest. AI routing will use fallback logic until first refresh. " +
+                "Check Dataverse connectivity and configuration.");
+
+            // Graceful degradation: start with an empty manifest.
+            // ManifestRefreshService will retry periodically and populate it once Dataverse is reachable.
+            // Previously this was a fatal throw, but it blocked deployment to environments where
+            // capability entities haven't been provisioned yet.
         }
     }
 
