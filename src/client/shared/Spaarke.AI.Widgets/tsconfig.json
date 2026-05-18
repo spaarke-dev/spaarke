@@ -22,6 +22,7 @@
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
     "paths": {
+      "@spaarke/ai-outputs": ["../Spaarke.AI.Outputs/src/index.ts"],
       "@spaarke/ui-components": ["../Spaarke.UI.Components/dist/index.d.ts"]
     }
   },

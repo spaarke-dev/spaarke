@@ -7,6 +7,7 @@ const config: Config = {
   testMatch: ['**/__tests__/**/*.test.{ts,tsx}', '**/*.test.{ts,tsx}'],
   moduleNameMapper: {
     // Map workspace packages to source until dist is built in CI.
+    '^@spaarke/ai-outputs$': '<rootDir>/../Spaarke.AI.Outputs/src/index.ts',
     '^@spaarke/ui-components$': '<rootDir>/../Spaarke.UI.Components/src/index.ts',
     '^@spaarke/ai-context$': '<rootDir>/../Spaarke.AI.Context/src/index.ts',
     // @spaarke/auth — stub for tests; real implementation uses MSAL/browser APIs

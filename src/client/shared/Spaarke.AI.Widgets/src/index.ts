@@ -1,6 +1,20 @@
 // @spaarke/ai-widgets — barrel export
 
 // ---------------------------------------------------------------------------
+// Side-effect: register all R1 output widgets into WorkspaceWidgetRegistry
+// (AIPU2-080 — data-refreshed restore, D-08)
+// ---------------------------------------------------------------------------
+import { registerWorkspaceWidgets } from './widgets/workspace/register-workspace-widgets';
+registerWorkspaceWidgets();
+
+// ---------------------------------------------------------------------------
+// Side-effect: register all 6 R1 source widgets into ContextWidgetRegistry
+// (AIPU2-081 — migrate source widgets to context pane)
+// ---------------------------------------------------------------------------
+import { registerContextWidgets } from './widgets/context/register-context-widgets';
+registerContextWidgets();
+
+// ---------------------------------------------------------------------------
 // Types — React component prop contracts (tasks AIPU2-072/073)
 // ---------------------------------------------------------------------------
 
@@ -61,6 +75,62 @@ export type { ContextWidgetRegistration } from './registry/ContextWidgetRegistry
 // ---------------------------------------------------------------------------
 
 export { default as GenericTextWidget } from './widgets/GenericTextWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: RedlineViewerWidget — side-by-side document comparison (AIPU2-085)
+// Exported so consumers can reference the component directly and type-check
+// DocumentDiff payloads. Registration under 'redline-viewer' occurs via the
+// register-workspace-widgets side-effect import at the top of this file.
+// ---------------------------------------------------------------------------
+
+export { default as RedlineViewerWidget } from './widgets/workspace/RedlineViewerWidget';
+export type {
+  RedlineViewerData,
+  RedlineViewerActions,
+  RedlineViewerQueryParams,
+  DiffSection,
+  DiffChange,
+  DiffChangeType,
+} from './widgets/workspace/RedlineViewerWidget';
+export { serializeRedlineState } from './widgets/workspace/RedlineViewerWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: ProgressTrackerWidget (context pane — workflow step progress)
+//
+// Exported so consumers can reference the component directly and type-check
+// context_update payloads. The registerContextWidget() call below registers
+// the widget at module-load time under the 'progress-tracker' type key.
+// ---------------------------------------------------------------------------
+
+export { default as ProgressTrackerWidget } from './widgets/context/ProgressTrackerWidget';
+export type {
+  ProgressTrackerData,
+  WorkflowStep,
+} from './widgets/context/ProgressTrackerWidget';
+
+import { registerContextWidget } from './registry/ContextWidgetRegistry';
+registerContextWidget('progress-tracker', {
+  factory: () =>
+    import('./widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+});
+
+// ---------------------------------------------------------------------------
+// Widgets: PlaybookGalleryWidget (context pane — Welcome / playbook-gallery stage)
+//
+// Exported so consumers can reference the component directly and type-check
+// PlaybookGalleryData payloads. Registered under 'playbook-gallery'.
+// ---------------------------------------------------------------------------
+
+export { default as PlaybookGalleryWidget } from './widgets/context/PlaybookGalleryWidget';
+export type {
+  PlaybookGalleryData,
+  PlaybookSummary,
+} from './widgets/context/PlaybookGalleryWidget';
+
+registerContextWidget('playbook-gallery', {
+  factory: () =>
+    import('./widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+});
 
 // ---------------------------------------------------------------------------
 // Providers: AiSessionProvider (R2 session state + PaneEventBus routing)

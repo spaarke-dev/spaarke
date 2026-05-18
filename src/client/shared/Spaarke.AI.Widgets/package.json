@@ -37,6 +37,7 @@
     "react-dom": "^19.0.0"
   },
   "dependencies": {
+    "@spaarke/ai-outputs": "file:../Spaarke.AI.Outputs",
     "@spaarke/ui-components": "file:../Spaarke.UI.Components"
   },
   "devDependencies": {
