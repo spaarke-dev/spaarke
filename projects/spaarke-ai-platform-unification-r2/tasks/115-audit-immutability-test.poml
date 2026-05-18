@@ -3,7 +3,7 @@
     <title>Verify audit log immutability</title>
     <phase>6</phase>
     <tags>testing, compliance, cosmos-db</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPU2-033</dependencies>
     <parallel-safe>true</parallel-safe>

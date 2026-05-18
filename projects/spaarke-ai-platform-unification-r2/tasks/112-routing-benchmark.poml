@@ -3,7 +3,7 @@
     <title>Capability routing benchmark (layer distribution and latency)</title>
     <phase>6</phase>
     <tags>testing, performance, routing</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-061, AIPU2-066</dependencies>
     <parallel-safe>true</parallel-safe>

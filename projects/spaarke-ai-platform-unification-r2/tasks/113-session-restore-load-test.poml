@@ -3,7 +3,7 @@
     <title>Session restore load test (p95 under 500ms target)</title>
     <phase>6</phase>
     <tags>testing, performance, session</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-106</dependencies>
     <parallel-safe>true</parallel-safe>

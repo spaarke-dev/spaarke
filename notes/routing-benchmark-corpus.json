@@ -1,0 +1,176 @@
+{
+  "$schema": "routing-benchmark-corpus-schema",
+  "description": "Test corpus for CapabilityRouter benchmark (AIPU2-012/013/014). 105 messages across 3 layers.",
+  "manifest": [
+    {
+      "capabilityName": "legal_research",
+      "description": "Search legal databases for case law and precedents",
+      "keywordHints": ["case law", "legal precedent", "court decision", "statute", "regulation", "jurisdiction"]
+    },
+    {
+      "capabilityName": "document_search",
+      "description": "Search and retrieve documents from SharePoint Embedded",
+      "keywordHints": ["find document", "search files", "locate file", "document lookup"]
+    },
+    {
+      "capabilityName": "document_analysis",
+      "description": "Analyze document content using AI extraction",
+      "keywordHints": ["analyze document", "document review", "extract from document", "parse document"]
+    },
+    {
+      "capabilityName": "invoice_processing",
+      "description": "Process and classify financial invoices",
+      "keywordHints": ["invoice", "payment", "billing", "expense", "receipt", "vendor payment"]
+    },
+    {
+      "capabilityName": "email_processing",
+      "description": "Process incoming and outgoing email communications",
+      "keywordHints": ["email", "message", "inbox", "outbound email", "correspondence"]
+    },
+    {
+      "capabilityName": "knowledge_retrieval",
+      "description": "Retrieve answers from configured knowledge sources",
+      "keywordHints": ["knowledge base", "knowledge source", "FAQ", "help article"]
+    },
+    {
+      "capabilityName": "summarize_content",
+      "description": "Generate concise summaries of documents or text",
+      "keywordHints": ["summarize", "summary", "brief", "overview", "recap", "digest"]
+    },
+    {
+      "capabilityName": "semantic_search",
+      "description": "AI-powered semantic similarity search across documents",
+      "keywordHints": ["semantic search", "meaning search", "concept search", "similar documents"]
+    },
+    {
+      "capabilityName": "entity_lookup",
+      "description": "Query Dataverse entities by name or criteria",
+      "keywordHints": ["lookup entity", "find record", "search entities", "query records", "CRM lookup"]
+    },
+    {
+      "capabilityName": "write_back",
+      "description": "Write data back to Dataverse records",
+      "keywordHints": ["update record", "save changes", "write back", "modify entity", "edit record"]
+    }
+  ],
+  "corpus": [
+    {"id": 1, "message": "Find case law on negligence from 2023", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "factual-lookup"},
+    {"id": 2, "message": "What legal precedent exists for wrongful termination?", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "factual-lookup"},
+    {"id": 3, "message": "Show me the court decision in Smith v. Jones", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "factual-lookup"},
+    {"id": 4, "message": "What statute governs data privacy in California?", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "factual-lookup"},
+    {"id": 5, "message": "Which regulation applies to hazardous waste disposal?", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "factual-lookup"},
+    {"id": 6, "message": "Find the jurisdiction for this contract dispute", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "factual-lookup"},
+    {"id": 7, "message": "Search files for the Q3 quarterly report", "expectedLayer": 1, "expectedCapability": "document_search", "category": "factual-lookup"},
+    {"id": 8, "message": "Locate file named engagement-letter.docx", "expectedLayer": 1, "expectedCapability": "document_search", "category": "factual-lookup"},
+    {"id": 9, "message": "I need to find document for the Anderson matter", "expectedLayer": 1, "expectedCapability": "document_search", "category": "factual-lookup"},
+    {"id": 10, "message": "Show me the latest invoice from Acme Corp", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "factual-lookup"},
+    {"id": 11, "message": "What is the payment status for order 12345?", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "factual-lookup"},
+    {"id": 12, "message": "Check the billing for last month", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "factual-lookup"},
+    {"id": 13, "message": "Show me unread items in my inbox", "expectedLayer": 1, "expectedCapability": "email_processing", "category": "factual-lookup"},
+    {"id": 14, "message": "Check my knowledge base for onboarding procedures", "expectedLayer": 1, "expectedCapability": "knowledge_retrieval", "category": "factual-lookup"},
+    {"id": 15, "message": "Find record for client Johnson & Associates", "expectedLayer": 1, "expectedCapability": "entity_lookup", "category": "factual-lookup"},
+
+    {"id": 16, "message": "Analyze document and extract all named parties", "expectedLayer": 1, "expectedCapability": "document_analysis", "category": "action-request"},
+    {"id": 17, "message": "Parse document to identify key dates and deadlines", "expectedLayer": 1, "expectedCapability": "document_analysis", "category": "action-request"},
+    {"id": 18, "message": "Please summarize the attached contract", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "action-request"},
+    {"id": 19, "message": "Give me a brief of the deposition transcript", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "action-request"},
+    {"id": 20, "message": "Create an overview of all pending matters", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "action-request"},
+    {"id": 21, "message": "Update record with new contact phone number", "expectedLayer": 1, "expectedCapability": "write_back", "category": "action-request"},
+    {"id": 22, "message": "Save changes to the matter status field", "expectedLayer": 1, "expectedCapability": "write_back", "category": "action-request"},
+    {"id": 23, "message": "Write back the corrected billing address", "expectedLayer": 1, "expectedCapability": "write_back", "category": "action-request"},
+    {"id": 24, "message": "Modify entity to mark this case as closed", "expectedLayer": 1, "expectedCapability": "write_back", "category": "action-request"},
+    {"id": 25, "message": "Edit record to add the opposing counsel name", "expectedLayer": 1, "expectedCapability": "write_back", "category": "action-request"},
+    {"id": 26, "message": "Run a semantic search for similar contracts", "expectedLayer": 1, "expectedCapability": "semantic_search", "category": "action-request"},
+    {"id": 27, "message": "Find similar documents using concept search", "expectedLayer": 1, "expectedCapability": "semantic_search", "category": "action-request"},
+    {"id": 28, "message": "Search entities for all active matters in Dallas", "expectedLayer": 1, "expectedCapability": "entity_lookup", "category": "action-request"},
+    {"id": 29, "message": "Query records where status equals pending review", "expectedLayer": 1, "expectedCapability": "entity_lookup", "category": "action-request"},
+    {"id": 30, "message": "Send outbound email to the client about the hearing date", "expectedLayer": 1, "expectedCapability": "email_processing", "category": "action-request"},
+
+    {"id": 31, "message": "Look up case law and legal precedent for breach of fiduciary duty", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "multi-keyword"},
+    {"id": 32, "message": "Find the statute and regulation governing securities fraud", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "multi-keyword"},
+    {"id": 33, "message": "What court decision or legal precedent covers intellectual property theft?", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "multi-keyword"},
+    {"id": 34, "message": "Analyze document and do a document review of the lease agreement", "expectedLayer": 1, "expectedCapability": "document_analysis", "category": "multi-keyword"},
+    {"id": 35, "message": "Process the invoice and update the payment records", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "multi-keyword"},
+    {"id": 36, "message": "Check the billing and expense report for duplicates", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "multi-keyword"},
+    {"id": 37, "message": "Summarize and give me a recap of the meeting notes", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "multi-keyword"},
+    {"id": 38, "message": "Provide a brief overview and digest of the regulatory filing", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "multi-keyword"},
+    {"id": 39, "message": "Find the knowledge base FAQ on password reset procedures", "expectedLayer": 1, "expectedCapability": "knowledge_retrieval", "category": "multi-keyword"},
+    {"id": 40, "message": "CRM lookup to find record for the Peterson engagement", "expectedLayer": 1, "expectedCapability": "entity_lookup", "category": "multi-keyword"},
+
+    {"id": 41, "message": "Is there case law in the employment jurisdiction for this?", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "playbook-biased"},
+    {"id": 42, "message": "Find the relevant regulation for our jurisdiction", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "playbook-biased"},
+    {"id": 43, "message": "Any legal precedent on non-compete enforcement?", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "playbook-biased"},
+    {"id": 44, "message": "Check the vendor payment history for last quarter", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "playbook-biased"},
+    {"id": 45, "message": "What expense claims need approval this week?", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "playbook-biased"},
+    {"id": 46, "message": "Review the receipt from the client dinner", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "playbook-biased"},
+    {"id": 47, "message": "Draft outbound email to notify the court of continuance", "expectedLayer": 1, "expectedCapability": "email_processing", "category": "playbook-biased"},
+    {"id": 48, "message": "Check my correspondence with opposing counsel", "expectedLayer": 1, "expectedCapability": "email_processing", "category": "playbook-biased"},
+    {"id": 49, "message": "Meaning search for documents about environmental compliance", "expectedLayer": 1, "expectedCapability": "semantic_search", "category": "playbook-biased"},
+    {"id": 50, "message": "Run a document lookup to check for prior versions", "expectedLayer": 1, "expectedCapability": "document_search", "category": "playbook-biased"},
+
+    {"id": 51, "message": "I need to search through all our legal databases for precedents", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "description-boost"},
+    {"id": 52, "message": "Can you search and retrieve the uploaded documents from last week?", "expectedLayer": 1, "expectedCapability": "document_search", "category": "description-boost"},
+    {"id": 53, "message": "Help me analyze the content of this agreement using extraction", "expectedLayer": 1, "expectedCapability": "document_analysis", "category": "description-boost"},
+    {"id": 54, "message": "Process these financial invoices for the current billing cycle", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "description-boost"},
+    {"id": 55, "message": "I need to process incoming email communications for this matter", "expectedLayer": 1, "expectedCapability": "email_processing", "category": "description-boost"},
+    {"id": 56, "message": "Retrieve answers from the configured knowledge sources", "expectedLayer": 1, "expectedCapability": "knowledge_retrieval", "category": "description-boost"},
+    {"id": 57, "message": "Generate a concise summary of this deposition", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "description-boost"},
+    {"id": 58, "message": "Perform a similarity search across our document collection", "expectedLayer": 1, "expectedCapability": "semantic_search", "category": "description-boost"},
+    {"id": 59, "message": "Lookup entity records matching criteria for open matters", "expectedLayer": 1, "expectedCapability": "entity_lookup", "category": "description-boost"},
+    {"id": 60, "message": "Write data back to the Dataverse records for this client", "expectedLayer": 1, "expectedCapability": "write_back", "category": "description-boost"},
+
+    {"id": 61, "message": "Show me case law on tortious interference", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "single-keyword"},
+    {"id": 62, "message": "What is the relevant statute here?", "expectedLayer": 1, "expectedCapability": "legal_research", "category": "single-keyword"},
+    {"id": 63, "message": "Please do a document review of this filing", "expectedLayer": 1, "expectedCapability": "document_analysis", "category": "single-keyword"},
+    {"id": 64, "message": "Where is the receipt for the conference?", "expectedLayer": 1, "expectedCapability": "invoice_processing", "category": "single-keyword"},
+    {"id": 65, "message": "Check the FAQ about leave policies", "expectedLayer": 1, "expectedCapability": "knowledge_retrieval", "category": "single-keyword"},
+    {"id": 66, "message": "Give me a digest of the pleading", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "single-keyword"},
+    {"id": 67, "message": "I need a recap of the weekly standup notes", "expectedLayer": 1, "expectedCapability": "summarize_content", "category": "single-keyword"},
+    {"id": 68, "message": "Do a CRM lookup for the Wilson matter", "expectedLayer": 1, "expectedCapability": "entity_lookup", "category": "single-keyword"},
+    {"id": 69, "message": "Forward this correspondence to the team lead", "expectedLayer": 1, "expectedCapability": "email_processing", "category": "single-keyword"},
+    {"id": 70, "message": "Check for similar documents in the repository", "expectedLayer": 1, "expectedCapability": "semantic_search", "category": "single-keyword"},
+
+    {"id": 71, "message": "What rulings have courts made on employer liability for remote workers?", "expectedLayer": 2, "expectedCapability": "legal_research", "category": "paraphrased"},
+    {"id": 72, "message": "I need to pull up the contract we signed with the vendor last year", "expectedLayer": 2, "expectedCapability": "document_search", "category": "paraphrased"},
+    {"id": 73, "message": "Can you break down the key clauses in this NDA for me?", "expectedLayer": 2, "expectedCapability": "document_analysis", "category": "paraphrased"},
+    {"id": 74, "message": "How much do we owe the external consultant for March?", "expectedLayer": 2, "expectedCapability": "invoice_processing", "category": "paraphrased"},
+    {"id": 75, "message": "What did the other side say in their last communication?", "expectedLayer": 2, "expectedCapability": "email_processing", "category": "paraphrased"},
+    {"id": 76, "message": "Give me the TL;DR of this 50-page expert report", "expectedLayer": 2, "expectedCapability": "summarize_content", "category": "paraphrased"},
+    {"id": 77, "message": "Set the priority of the Henderson case to urgent", "expectedLayer": 2, "expectedCapability": "write_back", "category": "paraphrased"},
+    {"id": 78, "message": "Are there any contracts that deal with similar indemnification terms?", "expectedLayer": 2, "expectedCapability": "semantic_search", "category": "paraphrased"},
+
+    {"id": 79, "message": "Search for the document and also review it for key terms", "expectedLayer": 2, "expectedCapability": null, "category": "ambiguous-cross-capability"},
+    {"id": 80, "message": "Find the invoice document from the vendor", "expectedLayer": 2, "expectedCapability": null, "category": "ambiguous-cross-capability"},
+    {"id": 81, "message": "Summarize the email correspondence about the settlement", "expectedLayer": 2, "expectedCapability": null, "category": "ambiguous-cross-capability"},
+    {"id": 82, "message": "Analyze and summarize the deposition transcript", "expectedLayer": 2, "expectedCapability": null, "category": "ambiguous-cross-capability"},
+    {"id": 83, "message": "Look up the record and update it with new billing info", "expectedLayer": 2, "expectedCapability": null, "category": "ambiguous-cross-capability"},
+    {"id": 84, "message": "Review the document and find similar ones in the system", "expectedLayer": 2, "expectedCapability": null, "category": "ambiguous-cross-capability"},
+    {"id": 85, "message": "Search for all communications related to this payment dispute", "expectedLayer": 2, "expectedCapability": null, "category": "ambiguous-cross-capability"},
+
+    {"id": 86, "message": "What are our obligations under this agreement?", "expectedLayer": 2, "expectedCapability": "document_analysis", "category": "indirect-intent"},
+    {"id": 87, "message": "Did we get a response from the other party yet?", "expectedLayer": 2, "expectedCapability": "email_processing", "category": "indirect-intent"},
+    {"id": 88, "message": "How much are we spending on outside counsel this quarter?", "expectedLayer": 2, "expectedCapability": "invoice_processing", "category": "indirect-intent"},
+    {"id": 89, "message": "What is the latest on the Martinez case?", "expectedLayer": 2, "expectedCapability": "entity_lookup", "category": "indirect-intent"},
+    {"id": 90, "message": "Can you bring me up to speed on this contract?", "expectedLayer": 2, "expectedCapability": "summarize_content", "category": "indirect-intent"},
+
+    {"id": 91, "message": "Pull the brief for the amicus curiae filing", "expectedLayer": 2, "expectedCapability": "document_search", "category": "jargon-variant"},
+    {"id": 92, "message": "What does the voir dire transcript reveal about juror bias?", "expectedLayer": 2, "expectedCapability": "document_analysis", "category": "jargon-variant"},
+    {"id": 93, "message": "Check the docket for any pending motions in limine", "expectedLayer": 2, "expectedCapability": "legal_research", "category": "jargon-variant"},
+    {"id": 94, "message": "Run a conflicts check for the new engagement", "expectedLayer": 2, "expectedCapability": "entity_lookup", "category": "jargon-variant"},
+    {"id": 95, "message": "What is the retainer balance for the Thompson matter?", "expectedLayer": 2, "expectedCapability": "invoice_processing", "category": "jargon-variant"},
+
+    {"id": 96, "message": "What is the weather like in Dallas today?", "expectedLayer": 3, "expectedCapability": null, "category": "off-topic"},
+    {"id": 97, "message": "Tell me a joke about lawyers", "expectedLayer": 3, "expectedCapability": null, "category": "off-topic"},
+    {"id": 98, "message": "What is the capital of France?", "expectedLayer": 3, "expectedCapability": null, "category": "off-topic"},
+    {"id": 99, "message": "Can you play music for me?", "expectedLayer": 3, "expectedCapability": null, "category": "off-topic"},
+
+    {"id": 100, "message": "What capabilities do you have?", "expectedLayer": 3, "expectedCapability": null, "category": "meta-question"},
+    {"id": 101, "message": "How does the routing algorithm work?", "expectedLayer": 3, "expectedCapability": null, "category": "meta-question"},
+    {"id": 102, "message": "What version of the AI model are you using?", "expectedLayer": 3, "expectedCapability": null, "category": "meta-question"},
+
+    {"id": 103, "message": "asdf qwerty zxcv bnm", "expectedLayer": 3, "expectedCapability": null, "category": "gibberish"},
+    {"id": 104, "message": "xxxxxx 12345 !@#$%", "expectedLayer": 3, "expectedCapability": null, "category": "gibberish"},
+
+    {"id": 105, "message": "it is a the on at", "expectedLayer": 3, "expectedCapability": null, "category": "empty-adjacent"}
+  ]
+}

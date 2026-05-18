@@ -145,12 +145,12 @@
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 110 | Safety perimeter E2E test | :black_square_button: | Yes | 065, 090 |
-| 111 | Widget serialize/restore test (18 widgets) | :black_square_button: | Yes | 080, 081, 085-089 |
-| 112 | Capability routing benchmark | :black_square_button: | Yes | 061, 066 |
-| 113 | Session restore load test (<500ms) | :black_square_button: | Yes | 106 |
-| 114 | Prompt token budget validation (~9000) | :black_square_button: | Yes | 015, 061 |
-| 115 | Audit log immutability verification | :black_square_button: | Yes | 033 |
+| 110 | Safety perimeter E2E test | :white_check_mark: | Yes | 065, 090 |
+| 111 | Widget serialize/restore test (18 widgets) | :white_check_mark: | Yes | 080, 081, 085-089 |
+| 112 | Capability routing benchmark | :white_check_mark: | Yes | 061, 066 |
+| 113 | Session restore load test (<500ms) | :white_check_mark: | Yes | 106 |
+| 114 | Prompt token budget validation (~9000) | :white_check_mark: | Yes | 015, 061 |
+| 115 | Audit log immutability verification | :white_check_mark: | Yes | 033 |
 | 116 | Cross-matter privilege leakage test | :black_square_button: | Yes | 028, 027 |
 | 117 | SprkChat regression test (23 SSE types) | :black_square_button: | Yes | 079, 062 |
 | 118 | Dark mode / accessibility (ADR-021) | :black_square_button: | Yes | 090, 091, 092 |

@@ -132,10 +132,17 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
             total = prefixTokens + suffixTokens;
         }
 
+        var residualBudget = TotalTokenBudget - total;
         _logger.LogDebug(
             "OrchestratorPromptBuilder: built prompt. PrefixTokens={PrefixTokens}, " +
-            "SuffixTokens={SuffixTokens}, Total={Total}, CacheHit={CacheHit}, Tools={ToolCount}",
-            prefixTokens, suffixTokens, total, cacheHit, activeTools.Count);
+            "SuffixTokens={SuffixTokens}, Total={Total}, ResidualBudget={ResidualBudget}, " +
+            "CacheHit={CacheHit}, Tools={ToolCount}",
+            prefixTokens, suffixTokens, total, residualBudget, cacheHit, activeTools.Count);
+
+        _logger.LogDebug(
+            "OrchestratorPromptBuilder: budget utilisation — {Percentage}% of {Budget} tokens consumed, " +
+            "{Residual} tokens remaining for history + user message",
+            (int)(total * 100.0 / TotalTokenBudget), TotalTokenBudget, residualBudget);
 
         return new OrchestratorPrompt(
             SystemPromptPrefix: prefix,
@@ -195,16 +202,45 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
         var sb = new StringBuilder(4096);
 
         // ── Section 1: Persona ────────────────────────────────────────────────
+        var beforePersona = sb.Length;
         AppendPersona(sb, context);
+        var personaTokens = EstimateTokens(sb.ToString().Substring(beforePersona));
+        _logger.LogDebug(
+            "OrchestratorPromptBuilder: component budget — Persona={PersonaTokens} tokens",
+            personaTokens);
 
         // ── Section 2: Capability index ───────────────────────────────────────
+        var beforeCapIndex = sb.Length;
         AppendCapabilityIndex(sb, compactCapabilityIndex);
+        var capIndexTokens = EstimateTokens(sb.ToString().Substring(beforeCapIndex));
+        _logger.LogDebug(
+            "OrchestratorPromptBuilder: component budget — CapabilityIndex={CapIndexTokens} tokens (compact={Compact})",
+            capIndexTokens, compactCapabilityIndex);
 
         // ── Section 3: Standing instructions ─────────────────────────────────
+        var beforeStanding = sb.Length;
         AppendStandingInstructions(sb, context);
+        var standingTokens = EstimateTokens(sb.ToString().Substring(beforeStanding));
+        _logger.LogDebug(
+            "OrchestratorPromptBuilder: component budget — StandingInstructions={StandingTokens} tokens",
+            standingTokens);
 
         // ── Section 4: Entity enrichment (optional) ───────────────────────────
+        var beforeEnrichment = sb.Length;
         AppendEntityEnrichment(sb, context);
+        var enrichmentTokens = EstimateTokens(sb.ToString().Substring(beforeEnrichment));
+        if (enrichmentTokens > 0)
+        {
+            _logger.LogDebug(
+                "OrchestratorPromptBuilder: component budget — EntityEnrichment={EnrichmentTokens} tokens",
+                enrichmentTokens);
+        }
+
+        var totalPrefixTokens = EstimateTokens(sb.ToString());
+        _logger.LogDebug(
+            "OrchestratorPromptBuilder: prefix total — Persona={PersonaTokens} + CapIndex={CapIndexTokens} + " +
+            "Standing={StandingTokens} + Enrichment={EnrichmentTokens} = {TotalPrefixTokens} tokens",
+            personaTokens, capIndexTokens, standingTokens, enrichmentTokens, totalPrefixTokens);
 
         return sb.ToString();
     }
@@ -421,6 +457,11 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
         }
 
         sb.AppendLine("```");
+
+        var totalSuffixTokens = EstimateTokens(sb.ToString());
+        _logger.LogDebug(
+            "OrchestratorPromptBuilder: suffix total — {ToolCount} tool schemas, {SuffixTokens} tokens",
+            activeTools.Count, totalSuffixTokens);
 
         return (sb.ToString(), activeTools);
     }

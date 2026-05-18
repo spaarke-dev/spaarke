@@ -2,14 +2,14 @@
 
 > **Project**: spaarke-ai-platform-unification-r2
 > **Status**: in-progress
-> **Active Wave**: W6.1 (next)
+> **Active Wave**: W6.2 (next)
 > **Last Updated**: 2026-05-17
 
 ## Quick Recovery
 
-**Next Action**: Execute Wave 6.1 (tasks 110-115 — testing & hardening, 6 parallel tasks)
-**Last Checkpoint**: Wave 5.2 committed (pending)
-**Context**: 71 of 86 tasks complete (83%). Phases 1-5 done. 15 tasks remaining.
+**Next Action**: Execute Wave 6.2 (tasks 116, 117, 118 — privilege leakage, SprkChat regression, dark mode)
+**Last Checkpoint**: Wave 6.1 committed (pending)
+**Context**: 77 of 86 tasks complete (90%). Phase 6.1 done. 9 tasks remaining.
 **Branch**: work/spaarke-ai-platform-unification-r2
 
 ## Completed Waves
@@ -29,31 +29,12 @@
 | W4.5 | 080,081,085,086,087,088 | 388b8fb4 |
 | W4.6 | 089,090,091,092 | 7028d9da |
 | W5.1 | 100,101,102,103,104,105 | ddbf2d16 |
-| W5.2 | 106,107 | (pending commit) |
-
-## Phases Complete
-
-- Phase 1: Foundation & Infrastructure (8/8)
-- Phase 2: Backend Services (27/27)
-- Phase 3: Agent Boundary & Integration (7/7)
-- Phase 4: Widget Library + Shell + Migration + New Widgets + Safety UI (21/21)
-- Phase 5: Integration & End-to-End (8/8)
+| W5.2 | 106,107 | bbff148f |
+| W6.1 | 110,111,112,113,114,115 | (pending commit) |
 
 ## Remaining Waves
 
 | Wave | Tasks | Description |
 |------|-------|-------------|
-| W6.1 | 110,111,112,113,114,115 | Safety E2E, widget serialize, routing benchmark, session load, prompt budget, audit |
 | W6.2 | 116,117,118 | Privilege leakage, SprkChat regression, dark mode/accessibility |
 | W7 | 120,121,122,123,124,199 | Deploy + verify + docs + wrap-up |
-
-## Decisions Made (W5.2)
-
-- Session restore uses useSessionRestore hook → SessionRestoreManager component pattern
-- RestoreContext provides conversation summary + messages to ConversationPane
-- Widget states dispatched as widget_load events on workspace bus channel
-- Toast notifications for restore failure (404/error) via Fluent UI Toaster
-- Conversation summary rendered as collapsible block above SprkChat
-- WorkspaceLandingWidget replaces static empty state in WorkspacePane Stage 1
-- ContextPaneController auto-loads PlaybookGalleryWidget in Stage 1
-- WelcomePanel.tsx preserved for ConversationPane Stage 1 (not deleted)

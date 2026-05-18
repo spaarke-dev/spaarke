@@ -3,7 +3,7 @@
     <title>Validate prompt token budget stays within ~9000 tokens</title>
     <phase>6</phase>
     <tags>testing, performance, ai</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPU2-015, AIPU2-061</dependencies>
     <parallel-safe>true</parallel-safe>

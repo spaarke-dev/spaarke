@@ -3,7 +3,7 @@
     <title>Widget serialize/restore test for all 18 widgets</title>
     <phase>6</phase>
     <tags>testing, widgets</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-080, AIPU2-081, AIPU2-085, AIPU2-086, AIPU2-087, AIPU2-088, AIPU2-089</dependencies>
     <parallel-safe>true</parallel-safe>
