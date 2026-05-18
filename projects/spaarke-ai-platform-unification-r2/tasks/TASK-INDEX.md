@@ -132,14 +132,14 @@
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 100 | Cross-pane: citation click -> source highlight | :black_square_button: | Yes | 074, 080, 081 |
-| 101 | Cross-pane: text selection -> chat refinement | :black_square_button: | Yes | 074, 079 |
-| 102 | Cross-pane: playbook selection -> chat specialize | :black_square_button: | Yes | 074, 086, 079 |
-| 103 | Cross-pane: tab change -> context adaptation | :black_square_button: | Yes | 077, 078 |
-| 104 | Embedded wizards in Workspace | :black_square_button: | Yes | 077 |
-| 105 | Stage lifecycle (4 stages) | :black_square_button: | Yes | 075, 079, 077, 078 |
-| 106 | Session restore end-to-end | :black_square_button: | Yes | 031, 080, 081 |
-| 107 | Welcome panel redesign (Stage 1) | :black_square_button: | Yes | 079, 086 |
+| 100 | Cross-pane: citation click -> source highlight | :white_check_mark: | Yes | 074, 080, 081 |
+| 101 | Cross-pane: text selection -> chat refinement | :white_check_mark: | Yes | 074, 079 |
+| 102 | Cross-pane: playbook selection -> chat specialize | :white_check_mark: | Yes | 074, 086, 079 |
+| 103 | Cross-pane: tab change -> context adaptation | :white_check_mark: | Yes | 077, 078 |
+| 104 | Embedded wizards in Workspace | :white_check_mark: | Yes | 077 |
+| 105 | Stage lifecycle (4 stages) | :white_check_mark: | Yes | 075, 079, 077, 078 |
+| 106 | Session restore end-to-end | :white_check_mark: | Yes | 031, 080, 081 |
+| 107 | Welcome panel redesign (Stage 1) | :white_check_mark: | Yes | 079, 086 |
 
 ## Phase 6: Testing & Hardening (9 tasks)
 

@@ -1,6 +1,16 @@
 /**
  * WelcomePanel.tsx — Welcome experience for Spaarke AI (no-context launch)
  *
+ * **R2 Note**: In the three-pane layout (AIPU2-107), the welcome experience is
+ * distributed across all three panes:
+ *   - Workspace (center): WorkspaceLandingWidget — recent work cards + "Start new work"
+ *   - Context (right):    PlaybookGalleryWidget — playbook catalog
+ *   - Conversation (left): WelcomePanel (this file) — prompt buttons + welcome message
+ *
+ * This component remains the Stage 1 content for the **Conversation pane only**.
+ * The "Recent Conversations" section is preserved but may duplicate with
+ * WorkspaceLandingWidget's "Recent Work" section — both use the same BFF API.
+ *
  * Shown in the left pane when Spaarke AI opens from main navigation with no
  * entity context and no active chat session. Provides:
  *   1. Branded header: "Welcome to Spaarke AI" with sparkle icon
@@ -20,8 +30,9 @@
  * - ADR-021: Dark mode must work without additional CSS (tokens adapt automatically)
  * - Responsive grid: 2×2 on desktop, single-column on narrow panes
  *
+ * @see WorkspaceLandingWidget — R2 workspace pane Stage 1 content
  * @see ADR-021 — Fluent v9 design system, dark mode, semantic tokens
- * @see ChatPanel.tsx — renders this component when no session and no entity context
+ * @see ConversationPane.tsx — renders this component when no session and no entity context
  */
 
 import * as React from "react";

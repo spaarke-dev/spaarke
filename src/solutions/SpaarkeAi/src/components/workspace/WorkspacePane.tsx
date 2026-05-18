@@ -45,6 +45,7 @@ import { useShellStage } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type { WorkspaceTabManagerState } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
+import { WorkspaceLandingWidget } from "./WorkspaceLandingWidget";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -322,17 +323,8 @@ export function WorkspacePane(): React.JSX.Element {
     // Any other empty state: generic workspace placeholder.
     if (currentStage === "welcome") {
       return (
-        <div className={styles.root}>
-          <div className={styles.emptyState} data-testid="workspace-stage-welcome">
-            <AppsListRegular className={styles.emptyIcon} />
-            <Text className={styles.emptyTitle} size={500}>
-              What would you like to work on?
-            </Text>
-            <Text className={styles.emptySubtitle} size={200}>
-              Select a playbook from the right panel to get started, or type a
-              question in the chat. Recent work will appear here.
-            </Text>
-          </div>
+        <div className={styles.root} data-testid="workspace-stage-welcome">
+          <WorkspaceLandingWidget />
         </div>
       );
     }

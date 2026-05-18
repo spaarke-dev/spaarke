@@ -56,11 +56,13 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens } from "@fluentui/react-components";
+import { makeStyles, tokens, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
 import { ThreePaneLayout } from "@spaarke/ui-components";
 import {
   PaneEventBusProvider,
   usePaneEvent,
+  useDispatchPaneEvent,
+  useAiSession,
   AiSessionProvider,
   determineStage,
   shouldReset,
@@ -69,6 +71,8 @@ import type { SessionState } from "@spaarke/ai-widgets";
 import { ConversationPane } from "../conversation/ConversationPane";
 import { ContextPaneController } from "../context/ContextPaneController";
 import { WorkspacePane } from "../workspace/WorkspacePane";
+import { useSessionRestore } from "../../hooks/useSessionRestore";
+import type { SessionRestoreSpec } from "../../hooks/useSessionRestore";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state type (four-stage, design.md Section 2.3)
@@ -153,6 +157,8 @@ export interface ThreePaneShellProps {
   entityId?: string;
   /** Matter ID shorthand from URL. Optional. */
   matterId?: string;
+  /** Session ID for session restore flow (AIPU2-106). When present, triggers restore before first render. */
+  sessionId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +369,143 @@ function ShellStageManager({ children }: ShellStageManagerProps): React.JSX.Elem
 }
 
 // ---------------------------------------------------------------------------
+// RestoreContext — exposes restore state to panes (conversation summary, etc.)
+// ---------------------------------------------------------------------------
+
+export interface RestoreContextValue {
+  /** Conversation summary from the restore spec (null if no summary or no restore). */
+  conversationSummary: string | null;
+  /** Recent messages from the restore spec (empty if no restore). */
+  recentMessages: SessionRestoreSpec["recentMessages"];
+  /** Whether entities have changed since the session was saved. */
+  hasStaleEntities: boolean;
+}
+
+export const RestoreContext = React.createContext<RestoreContextValue | null>(null);
+RestoreContext.displayName = "RestoreContext";
+
+export function useRestoreContext(): RestoreContextValue | null {
+  return React.useContext(RestoreContext);
+}
+
+// ---------------------------------------------------------------------------
+// SessionRestoreManager — applies restore spec to session + dispatches events
+// ---------------------------------------------------------------------------
+
+interface SessionRestoreManagerProps {
+  children: React.ReactNode;
+  sessionId: string | undefined;
+}
+
+/**
+ * Lives inside PaneEventBusProvider + AiSessionProvider + ShellStageManager.
+ * When a sessionId URL param is present:
+ *   1. Fetches restore spec from BFF via useSessionRestore
+ *   2. Sets chatSessionId + playbookId on AiSessionProvider
+ *   3. Dispatches widget_load events for each widget state
+ *   4. Advances shell stage via toActiveChat()
+ *   5. Provides conversation restore data via RestoreContext
+ *   6. On 404: shows toast and lets Stage 1 render
+ */
+function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerProps): React.JSX.Element {
+  const { bffBaseUrl, token, setChatSessionId, setPlaybookId } = useAiSession();
+  const dispatch = useDispatchPaneEvent();
+  const { toActiveChat } = useShellStage();
+
+  const { restoreSpec, isRestoring, restoreError, isNotFound } = useSessionRestore(
+    sessionId,
+    bffBaseUrl,
+    token
+  );
+
+  // Toast for restore failure
+  const toasterId = useId("restore-toast");
+  const { dispatchToast } = useToastController(toasterId);
+
+  // Track whether we've already applied the restore spec (guard against double-apply).
+  const appliedRef = React.useRef<string | null>(null);
+
+  // Apply restore spec once it arrives
+  React.useEffect(() => {
+    if (!restoreSpec) return;
+    if (appliedRef.current === restoreSpec.sessionId) return;
+    appliedRef.current = restoreSpec.sessionId;
+
+    // 1. Set session state on AiSessionProvider
+    setChatSessionId(restoreSpec.sessionId);
+    if (restoreSpec.playbookId) {
+      setPlaybookId(restoreSpec.playbookId);
+    }
+
+    // 2. Dispatch widget_load events for each saved widget state
+    const widgetEntries = Object.entries(restoreSpec.widgetStates);
+    for (const [widgetType, serializedData] of widgetEntries) {
+      let widgetData: unknown = null;
+      try {
+        widgetData = JSON.parse(serializedData);
+      } catch {
+        widgetData = { raw: serializedData };
+      }
+
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType,
+        widgetData,
+      });
+    }
+
+    // 3. Advance shell stage
+    if (widgetEntries.length > 0) {
+      toActiveChat();
+    }
+
+    console.info(
+      `[SessionRestore] Applied restore spec: session=${restoreSpec.sessionId}, ` +
+        `widgets=${widgetEntries.length}, summary=${restoreSpec.conversationSummary !== null}`
+    );
+  }, [restoreSpec, setChatSessionId, setPlaybookId, dispatch, toActiveChat]);
+
+  // Show toast on 404 or error
+  React.useEffect(() => {
+    if (isNotFound) {
+      dispatchToast(
+        <Toast>
+          <ToastTitle>Session not found. Starting a new session.</ToastTitle>
+        </Toast>,
+        { intent: "warning", timeout: 5000 }
+      );
+    } else if (restoreError && !isNotFound) {
+      dispatchToast(
+        <Toast>
+          <ToastTitle>Failed to restore session: {restoreError}</ToastTitle>
+        </Toast>,
+        { intent: "error", timeout: 5000 }
+      );
+    }
+  }, [isNotFound, restoreError, dispatchToast]);
+
+  // Provide restore context to panes (conversation summary + recent messages)
+  const restoreContextValue = React.useMemo<RestoreContextValue | null>(
+    () =>
+      restoreSpec
+        ? {
+            conversationSummary: restoreSpec.conversationSummary,
+            recentMessages: restoreSpec.recentMessages,
+            hasStaleEntities: restoreSpec.hasStaleEntities,
+          }
+        : null,
+    [restoreSpec]
+  );
+
+  return (
+    <RestoreContext.Provider value={restoreContextValue}>
+      <Toaster toasterId={toasterId} position="top" />
+      {children}
+    </RestoreContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ThreePaneShell — public root component
 // ---------------------------------------------------------------------------
 
@@ -390,7 +533,7 @@ function ShellStageManager({ children }: ShellStageManagerProps): React.JSX.Elem
  */
 export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   const styles = useStyles();
-  const { bffBaseUrl, token, isAuthenticated, entityLogicalName, entityId, matterId } = props;
+  const { bffBaseUrl, token, isAuthenticated, entityLogicalName, entityId, matterId, sessionId } = props;
 
   // Build the entity context for AiSessionProvider from URL params.
   // R2: entityContext is resolved at the shell level and passed down via
@@ -413,26 +556,28 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
         entityContext={entityContext}
       >
         <ShellStageManager>
-          <div className={styles.shell}>
-            {/*
-             * ThreePaneLayout dimensions match R1 App.tsx values (340/400/240/240/320).
-             * storageKey is namespaced to the R2 shell so sessionStorage is isolated
-             * from any residual R1 keys.
-             */}
-            <ThreePaneLayout
-              leftPane={<ConversationPane />}
-              centerPane={<WorkspacePane />}
-              rightPane={<ContextPaneController />}
-              storageKey="spaarke-ai-r2-shell"
-              defaultLeftWidthPx={340}
-              defaultRightWidthPx={400}
-              minLeftWidthPx={240}
-              minRightWidthPx={240}
-              minCenterWidthPx={320}
-              leftPaneCollapseLabel="Show AI Chat"
-              rightPaneCollapseLabel="Show Context"
-            />
-          </div>
+          <SessionRestoreManager sessionId={sessionId}>
+            <div className={styles.shell}>
+              {/*
+               * ThreePaneLayout dimensions match R1 App.tsx values (340/400/240/240/320).
+               * storageKey is namespaced to the R2 shell so sessionStorage is isolated
+               * from any residual R1 keys.
+               */}
+              <ThreePaneLayout
+                leftPane={<ConversationPane />}
+                centerPane={<WorkspacePane />}
+                rightPane={<ContextPaneController />}
+                storageKey="spaarke-ai-r2-shell"
+                defaultLeftWidthPx={340}
+                defaultRightWidthPx={400}
+                minLeftWidthPx={240}
+                minRightWidthPx={240}
+                minCenterWidthPx={320}
+                leftPaneCollapseLabel="Show AI Chat"
+                rightPaneCollapseLabel="Show Context"
+              />
+            </div>
+          </SessionRestoreManager>
         </ShellStageManager>
       </AiSessionProvider>
     </PaneEventBusProvider>

@@ -349,8 +349,27 @@ export function ContextPaneController(): React.JSX.Element {
 
   // Keep contextStage in sync with shell stage changes (fallback when no
   // context_update has set a specific stage for the new shell stage).
+  // Also auto-load the PlaybookGalleryWidget when entering Stage 1 (AIPU2-107).
   React.useEffect(() => {
     setContextStage(shellStageToContextStage(currentStage));
+
+    // Auto-load PlaybookGalleryWidget in Stage 1 so the gallery is interactive
+    // from the start (not just a static placeholder). The widget is resolved
+    // lazily from the ContextWidgetRegistry — same path as context_update events.
+    if (currentStage === "welcome") {
+      setIsResolving(true);
+      resolveContextWidget("playbook-gallery").then((Component) => {
+        setIsResolving(false);
+        if (Component !== null) {
+          setActiveWidget({
+            Component,
+            widgetType: "playbook-gallery",
+            data: null,
+            isLoading: false,
+          });
+        }
+      });
+    }
   }, [currentStage]);
 
   // ---------------------------------------------------------------------------

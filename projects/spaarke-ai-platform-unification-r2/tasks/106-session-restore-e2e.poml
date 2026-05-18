@@ -3,7 +3,7 @@
     <title>End-to-end session restore (Cosmos -> widgets -> panes)</title>
     <phase>5</phase>
     <tags>frontend, integration, session</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPU2-031, AIPU2-080, AIPU2-081</dependencies>
     <parallel-safe>false</parallel-safe>

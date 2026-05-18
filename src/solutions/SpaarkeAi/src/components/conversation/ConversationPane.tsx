@@ -80,7 +80,7 @@ import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 import { ChatHistoryPanel } from "../ChatHistoryPanel";
-import { useShellStage } from "../shell/ThreePaneShell";
+import { useShellStage, useRestoreContext } from "../shell/ThreePaneShell";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -305,6 +305,55 @@ const useStyles = makeStyles({
     minHeight: 0,
     overflow: "hidden",
   },
+
+  // ── Conversation restore summary block (AIPU2-106) ──────────────────────
+  restoreSummaryBlock: {
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: tokens.colorNeutralStroke2,
+    cursor: "pointer",
+  },
+  restoreSummaryHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+  },
+  restoreSummaryContent: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    whiteSpace: "pre-wrap",
+    maxHeight: "120px",
+    overflowY: "auto",
+    lineHeight: tokens.lineHeightBase200,
+  },
+  restoreStaleWarning: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    backgroundColor: tokens.colorStatusWarningBackground1,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorStatusWarningForeground1,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: tokens.colorStatusWarningForeground3,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -345,6 +394,10 @@ export function ConversationPane(): React.JSX.Element {
 
   // ── Shell stage transitions ─────────────────────────────────────────────
   const { toLoading, reset } = useShellStage();
+
+  // ── Session restore context (AIPU2-106) ─────────────────────────────────
+  const restoreCtx = useRestoreContext();
+  const [summaryExpanded, setSummaryExpanded] = React.useState(false);
 
   // ── PaneEventBus dispatch — conversation channel ────────────────────────
   // Used to broadcast first_message events so ShellStageManager can advance
@@ -784,6 +837,33 @@ export function ConversationPane(): React.JSX.Element {
           //   a truncated preview of the selected text. Clicking the chip populates
           //   predefinedPrompts with a refinement prompt and clears the chip.
           <div className={styles.chatWrapper}>
+            {/* ── Stale entity warning (AIPU2-106) ── */}
+            {restoreCtx?.hasStaleEntities && (
+              <div className={styles.restoreStaleWarning} role="alert">
+                Some referenced entities have changed since this session was saved.
+                Results may differ from the original analysis.
+              </div>
+            )}
+
+            {/* ── Conversation restore summary (AIPU2-106) ── */}
+            {restoreCtx?.conversationSummary && (
+              <div
+                className={styles.restoreSummaryBlock}
+                role="region"
+                aria-label="Previous conversation summary"
+                onClick={() => setSummaryExpanded((prev) => !prev)}
+              >
+                <div className={styles.restoreSummaryHeader}>
+                  {summaryExpanded ? "▼" : "▶"} Previous conversation
+                </div>
+                {summaryExpanded && (
+                  <div className={styles.restoreSummaryContent}>
+                    {restoreCtx.conversationSummary}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── "Refine this?" chip bar — visible only when workspace text is selected ── */}
             {selectionChip !== null && (
               <div className={styles.refinementChipBar} role="region" aria-label="Refinement suggestion">

@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
 using Sprk.Bff.Api.Telemetry;
 
@@ -119,6 +120,16 @@ public static class ChatEndpoints
             .Produces(204)
             .ProducesProblem(401)
             .ProducesProblem(403)
+            .ProducesProblem(404);
+
+        // GET /api/ai/chat/sessions/{sessionId}/restore — restore session state for three-pane UI
+        group.MapGet("/sessions/{sessionId}/restore", RestoreSessionAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("RestoreSession")
+            .WithSummary("Restore a persisted session for the three-pane UI")
+            .WithDescription("Loads session from Cosmos DB, checks entity staleness, reconstructs LLM context, and returns widget states for UI restoration. Target: <500ms p95.")
+            .Produces<SessionRestoreResponse>()
+            .ProducesProblem(401)
             .ProducesProblem(404);
 
         // GET /api/ai/chat/playbooks — discover available playbooks (no session required)
@@ -1561,6 +1572,86 @@ public static class ChatEndpoints
         if (string.Equals(category, "playbook", StringComparison.OrdinalIgnoreCase))
             return "playbook";
         return "scope";
+    }
+
+    // =========================================================================
+    // Session Restore DTOs
+    // =========================================================================
+
+    /// <summary>
+    /// Response payload for the session restore endpoint.
+    /// Maps RestoredSession to a frontend-friendly JSON contract.
+    /// </summary>
+    internal record SessionRestoreResponse(
+        string SessionId,
+        Guid? PlaybookId,
+        string Stage,
+        IReadOnlyDictionary<string, string> WidgetStates,
+        string? ConversationSummary,
+        IReadOnlyList<SessionRestoreMessageDto> RecentMessages,
+        bool HasStaleEntities,
+        long RestoreLatencyMs);
+
+    /// <summary>
+    /// A single message in the restore response — minimal projection of SessionMessage.
+    /// </summary>
+    internal record SessionRestoreMessageDto(
+        string Role,
+        string Content,
+        DateTimeOffset Timestamp);
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions/{sessionId}/restore
+    /// Restores a persisted session for the three-pane SpaarkeAi UI.
+    /// </summary>
+    private static async Task<IResult> RestoreSessionAsync(
+        string sessionId,
+        HttpContext httpContext,
+        ISessionRestoreService restoreService,
+        ISessionPersistenceService persistenceService,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var restored = await restoreService.RestoreSessionAsync(tenantId, sessionId, cancellationToken);
+        if (restored is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
+
+        // Load the full session to extract recent messages for the conversation pane
+        var session = await persistenceService.LoadSessionAsync(tenantId, sessionId, cancellationToken);
+
+        var recentMessages = session?.Messages
+            .TakeLast(10)
+            .Select(m => new SessionRestoreMessageDto(m.Role, m.Content, m.Timestamp))
+            .ToList()
+            ?? [];
+
+        // Determine the stage from the restored session state
+        var stage = restored.WidgetStates.Count > 0 ? "active-chat" : "loading";
+
+        var response = new SessionRestoreResponse(
+            SessionId: restored.SessionId,
+            PlaybookId: restored.PlaybookId,
+            Stage: stage,
+            WidgetStates: restored.WidgetStates,
+            ConversationSummary: restored.WasSummarized ? restored.ReconstructedContext : null,
+            RecentMessages: recentMessages,
+            HasStaleEntities: restored.StaleEntityRefs.Count > 0,
+            RestoreLatencyMs: restored.RestoreLatencyMs);
+
+        return Results.Ok(response);
     }
 
     // =========================================================================

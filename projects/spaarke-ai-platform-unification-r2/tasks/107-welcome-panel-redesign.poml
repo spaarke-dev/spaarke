@@ -3,7 +3,7 @@
     <title>Redesign WelcomePanel for Stage 1 of three-pane lifecycle</title>
     <phase>5</phase>
     <tags>frontend, ui, welcome</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-079, AIPU2-086</dependencies>
     <parallel-safe>true</parallel-safe>

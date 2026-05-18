@@ -62,6 +62,8 @@ export interface AppProps {
   entityId?: string;
   /** Matter ID shorthand from URL ?matterId= */
   matterId?: string;
+  /** Session ID for restore flow (AIPU2-106). When present, triggers session restore before first render. */
+  sessionId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +122,7 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
           entityLogicalName={props.entityLogicalName}
           entityId={props.entityId}
           matterId={props.matterId}
+          sessionId={props.sessionId}
         />
       </div>
     </div>
