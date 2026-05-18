@@ -225,6 +225,26 @@ export class WorkspaceTabManager {
   }
 
   // -------------------------------------------------------------------------
+  // clearAllTabs (AIPU2-102 — exclusive playbook selection)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Remove all tabs and reset active tab to null.
+   *
+   * Called by WorkspacePane when a `playbook-selected` event arrives with
+   * `isExclusive === true`. Exclusive playbooks enforce a clean slate — the
+   * workspace is reset before seeding the playbook's defaultWidgets.
+   *
+   * @returns The number of tabs that were removed.
+   */
+  clearAllTabs(): number {
+    const count = this._tabs.length;
+    this._tabs = [];
+    this._activeTabId = null;
+    return count;
+  }
+
+  // -------------------------------------------------------------------------
   // getSnapshot
   // -------------------------------------------------------------------------
 

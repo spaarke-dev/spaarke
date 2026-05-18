@@ -20,6 +20,7 @@ export type {
   ContextPaneEvent,
   ConversationPaneEvent,
   SafetyPaneEvent,
+  WizardStepEvent,
 } from './PaneEventTypes';
 
 // React context provider

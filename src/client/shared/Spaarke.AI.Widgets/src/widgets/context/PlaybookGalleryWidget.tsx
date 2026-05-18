@@ -64,6 +64,17 @@ export interface PlaybookSummary {
    * a generic BookOpenRegular icon.
    */
   iconName?: string;
+  /**
+   * Default workspace widgets to pre-load when this playbook is selected.
+   * An empty array means the workspace keeps its current tabs on selection.
+   */
+  defaultWidgets?: Array<{ widgetType: string; widgetData?: unknown; displayName?: string }>;
+  /**
+   * When true, selecting this playbook clears all existing workspace tabs
+   * before seeding defaultWidgets (guardrail / exclusive-focus playbooks).
+   * Defaults to false.
+   */
+  isExclusive?: boolean;
 }
 
 /**
@@ -409,10 +420,14 @@ const PlaybookGalleryWidget: React.FC<ContextWidgetProps<PlaybookGalleryData>> =
 
   const handlePlaybookSelect = (id: string, name: string) => {
     setSelectedId(id);
+    // Find the full playbook summary to include defaultWidgets and isExclusive.
+    const playbook = (data?.playbooks ?? []).find((p) => p.id === id);
     dispatch('conversation', {
-      type: 'playbook_change',
+      type: 'playbook-selected',
       playbookId: id,
       playbookName: name,
+      defaultWidgets: playbook?.defaultWidgets ?? [],
+      isExclusive: playbook?.isExclusive ?? false,
     });
   };
 

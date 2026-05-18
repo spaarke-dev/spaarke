@@ -40,8 +40,9 @@ import { DocumentRegular } from "@fluentui/react-icons";
 import {
   usePaneEvent,
   resolveContextWidget,
+  getContextWidgetForTab,
 } from "@spaarke/ai-widgets";
-import type { ContextWidgetComponent, ContextPaneEvent } from "@spaarke/ai-widgets";
+import type { ContextWidgetComponent, ContextPaneEvent, WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import { useShellStage } from "../shell/ThreePaneShell";
 import type { ShellStage } from "../shell/ThreePaneShell";
 
@@ -73,7 +74,9 @@ const CONTEXT_TYPE_TO_STAGE: Record<string, ContextStage> = {
   "sources-citations": "sources-citations",
   "source": "sources-citations",
   "citation": "sources-citations",
+  "findings": "sources-citations",      // FindingsWidget — citations/sources stage
   "progress": "progress",
+  "progress-tracker": "progress",       // ProgressTrackerWidget
   "related-items": "related-items",
   "related": "related-items",
 };
@@ -82,12 +85,17 @@ const CONTEXT_TYPE_TO_STAGE: Record<string, ContextStage> = {
 // ShellStage → default ContextStage (used when no context_update has arrived)
 // ---------------------------------------------------------------------------
 
+// Mapping per design.md Section 2.3 + task AIPU2-105:
+//   Stage 1 welcome      → playbook-gallery  (gallery of available playbooks)
+//   Stage 2 loading      → entity-info       (document info / entity waiting)
+//   Stage 3 active-chat  → sources-citations (findings, citations, sources)
+//   Stage 4 review       → related-items     (tab-adaptive: adapts via tab_change)
 function shellStageToContextStage(stage: ShellStage): ContextStage {
   switch (stage) {
-    case "welcome": return "playbook-gallery";
-    case "loading": return "playbook-gallery"; // spinner from loading state, not widget
+    case "welcome":     return "playbook-gallery";
+    case "loading":     return "entity-info";    // Stage 2: awaiting document/entity selection
     case "active-chat": return "sources-citations";
-    case "review": return "related-items";
+    case "review":      return "related-items";  // Stage 4: adapts to active tab via tab_change
   }
 }
 
@@ -408,6 +416,70 @@ export function ContextPaneController(): React.JSX.Element {
   }, []));
 
   // ---------------------------------------------------------------------------
+  // PaneEventBus subscription — 'workspace' channel
+  //
+  // Listens for tab_change events so the Context pane can automatically adapt
+  // its widget to match the newly active workspace tab. This is the cross-pane
+  // interaction defined in task AIPU2-103.
+  //
+  // The event MUST NOT affect ConversationPane state — we only update local
+  // context widget state here, and we do not re-dispatch the event.
+  // ---------------------------------------------------------------------------
+
+  usePaneEvent("workspace", React.useCallback((event: WorkspacePaneEvent): void => {
+    if (event.type !== "tab_change") {
+      // Only handle tab_change events; all other workspace events are ignored
+      // by the Context pane — they are handled exclusively by WorkspacePane.
+      return;
+    }
+
+    const workspaceWidgetType = event.widgetType ?? "";
+    if (!workspaceWidgetType) {
+      // No widget type on the event — tab may be empty/loading; keep current context.
+      return;
+    }
+
+    // Look up the recommended context widget type for this workspace widget.
+    const recommendedContextType = getContextWidgetForTab(workspaceWidgetType);
+
+    if (recommendedContextType === null) {
+      // Explicit null mapping (or unknown type) — keep the current context widget.
+      // This is the correct behaviour for widget types like ActionPlan that have
+      // no meaningful context pairing.
+      return;
+    }
+
+    // Resolve and activate the recommended context widget.
+    // Use the workspace tab's widgetData as the context data so the widget
+    // receives relevant metadata (documentId, searchQuery, etc.).
+    const contextData = event.widgetData ?? null;
+
+    // Update the context stage to match the recommended context type.
+    const mappedStage = CONTEXT_TYPE_TO_STAGE[recommendedContextType];
+    if (mappedStage) {
+      setContextStage(mappedStage);
+    }
+
+    setIsResolving(true);
+    resolveContextWidget(recommendedContextType).then((Component) => {
+      setIsResolving(false);
+      if (Component !== null) {
+        setActiveWidget({
+          Component,
+          widgetType: recommendedContextType,
+          data: contextData,
+          isLoading: false,
+        });
+      } else {
+        // Registry returned null for the recommended type — this indicates a
+        // version mismatch or unregistered widget. Show the stage-default
+        // empty state rather than crashing or showing stale content.
+        setActiveWidget(null);
+      }
+    });
+  }, []));
+
+  // ---------------------------------------------------------------------------
   // Derive header stage label for debugging / accessibility
   // ---------------------------------------------------------------------------
 
@@ -426,19 +498,28 @@ export function ContextPaneController(): React.JSX.Element {
   /**
    * Renders the appropriate content for the current combination of shell
    * stage and active widget state.
+   *
+   * Per design.md Section 2.3 + task AIPU2-105:
+   *   Stage 1 'welcome':     Playbook gallery (select a playbook to begin).
+   *   Stage 2 'loading':     Entity info / document waiting spinner.
+   *   Stage 3 'active-chat': Findings / sources / citations widget.
+   *   Stage 4 'review':      Context adapts to active workspace tab via tab_change.
    */
   function renderContent(): React.ReactNode {
-    // Shell is in 'loading' stage — show spinner regardless of widget state
-    if (currentStage === "loading") {
-      return (
-        <div className={styles.loadingState}>
-          <Spinner size="medium" label="Gathering context..." />
-        </div>
-      );
-    }
-
-    // Welcome stage — no playbook selected, show gallery placeholder
+    // Stage 1 — welcome: no playbook selected, show gallery placeholder.
+    // The PlaybookGalleryWidget (AIPU2-086) should ideally be loaded here via
+    // a context_update event, but if no event has arrived yet we show the
+    // static placeholder so the pane is never empty.
     if (currentStage === "welcome") {
+      // If a widget has been loaded (e.g. PlaybookGalleryWidget via context_update),
+      // prefer it over the static placeholder so the gallery renders interactively.
+      if (activeWidget !== null) {
+        return (
+          <div className={styles.content} data-testid="context-pane-widget">
+            <ResolvedContextWidget slot={activeWidget} highlightRef={highlightRef} />
+          </div>
+        );
+      }
       return (
         <div className={styles.emptyState} data-testid="context-pane-welcome">
           <DocumentRegular className={styles.emptyIcon} />
@@ -446,14 +527,39 @@ export function ContextPaneController(): React.JSX.Element {
             Select a Playbook
           </Text>
           <Text className={styles.emptySubtitle} size={200}>
-            Choose a playbook from the left panel to start your analysis.
-            Context, sources, and citations will appear here.
+            Choose a playbook from the right panel to configure the AI agent
+            and get started. Context, sources, and citations will appear here.
           </Text>
         </div>
       );
     }
 
-    // Async resolution in progress — show spinner while registry loads widget
+    // Stage 2 — loading: playbook selected, awaiting document/entity selection.
+    // Show entity-info waiting state (per design.md Stage 2 diagram).
+    if (currentStage === "loading") {
+      // If a widget arrived via context_update (e.g. entity-info widget), render it.
+      if (activeWidget !== null) {
+        return (
+          <div className={styles.content} data-testid="context-pane-widget">
+            <ResolvedContextWidget slot={activeWidget} highlightRef={highlightRef} />
+          </div>
+        );
+      }
+      return (
+        <div className={styles.loadingState} data-testid="context-pane-loading">
+          <Spinner size="medium" label="Gathering context..." />
+          <Text
+            size={200}
+            style={{ color: tokens.colorNeutralForeground3, textAlign: "center" }}
+          >
+            Select or upload a document to begin your analysis.
+          </Text>
+        </div>
+      );
+    }
+
+    // Async resolution in progress — show spinner while registry loads widget.
+    // Applies in Stage 3 and Stage 4 after a context_update arrives.
     if (isResolving) {
       return (
         <div
@@ -465,7 +571,11 @@ export function ContextPaneController(): React.JSX.Element {
       );
     }
 
-    // Active widget ready — render it
+    // Active widget ready — render it.
+    // Applies in Stage 3 (active-chat) and Stage 4 (review/multi-task).
+    // In Stage 4 the widget is updated by tab_change events (ContextPaneController
+    // subscribes to the workspace channel and resolves the recommended context
+    // widget for the new active workspace widget type).
     if (activeWidget !== null) {
       return (
         <div className={styles.content} data-testid="context-pane-widget">
@@ -478,7 +588,7 @@ export function ContextPaneController(): React.JSX.Element {
     }
 
     // No active widget yet, but shell is in active-chat or review —
-    // render stage-specific empty state.
+    // render stage-specific empty state (before first context_update arrives).
     return renderStageDefaultContent();
   }
 

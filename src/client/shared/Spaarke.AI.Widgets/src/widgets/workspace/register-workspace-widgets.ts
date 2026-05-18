@@ -284,6 +284,99 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// 9. create-matter-wizard — Embedded CreateMatterWizard (task AIPU2-104)
+//    Category: wizard — multi-step Create Matter flow embedded as a workspace tab.
+//    allowMultiple=false — only one Create Matter wizard at a time per session.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string used by the AI router when it triggers the Create Matter
+   * flow programmatically (e.g. from a playbook action or chat intent).
+   * Must match the widgetType value in any server-side workspace_widget SSE
+   * events that request this wizard.
+   */
+  'create-matter-wizard',
+  {
+    displayName: 'Create Matter Wizard',
+    category: 'wizard',
+    icon: 'DocumentAdd24Regular',
+    /**
+     * allowMultiple=false: a session should not have two simultaneous
+     * "Create Matter" wizards — opening a second replaces the first tab.
+     */
+    allowMultiple: false,
+    /**
+     * defaultOrder=80: wizards appear after all output widgets (10–70) and
+     * the redline viewer (25) so they don't crowd the primary output area.
+     */
+    defaultOrder: 80,
+  },
+  () =>
+    import('./CreateMatterWizardWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 10. document-upload-wizard — Embedded DocumentUpload flow (task AIPU2-104)
+//     Category: wizard — three-step file upload flow embedded as a workspace tab.
+//     allowMultiple=true — users may upload multiple batches of documents in
+//     parallel tabs within a single session.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  'document-upload-wizard',
+  {
+    displayName: 'Upload Documents',
+    category: 'wizard',
+    icon: 'CloudArrowUp24Regular',
+    /**
+     * allowMultiple=true: different document upload sessions may coexist;
+     * e.g. uploading contract exhibits while a matter upload is in progress.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=85: positioned just after the Create Matter wizard.
+     */
+    defaultOrder: 85,
+  },
+  () =>
+    import('./DocumentUploadWizardWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 11. search-select-wizard — Embedded Search & Select flow (task AIPU2-104)
+//     Category: wizard — two-step record picker embedded as a workspace tab.
+//     allowMultiple=true — multiple entity-type pickers may coexist (e.g.
+//     searching for a matter and an account simultaneously).
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  'search-select-wizard',
+  {
+    displayName: 'Search & Select',
+    category: 'wizard',
+    icon: 'Search24Regular',
+    /**
+     * allowMultiple=true: callers may open separate search-select wizards
+     * for different entity types in the same session.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=90: positioned after the upload wizard.
+     */
+    defaultOrder: 90,
+  },
+  () =>
+    import('./SearchSelectWizardWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from index.ts side-effect import)
 // ---------------------------------------------------------------------------
 

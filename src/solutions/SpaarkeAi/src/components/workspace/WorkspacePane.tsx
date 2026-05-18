@@ -7,13 +7,16 @@
  * at shell startup.
  *
  * Handled PaneEventBus events:
- *   widget_load   — add new tab, resolve widget component, activate tab
- *   widget_update — update existing tab's data payload
- *   widget_action — forward action to the active tab's widget via ref
+ *   workspace / widget_load       — add new tab, resolve widget component, activate tab
+ *   workspace / widget_update     — update existing tab's data payload
+ *   workspace / widget_action     — forward action to the active tab's widget via ref
+ *   conversation / playbook-selected — clear tabs (if exclusive) + seed defaultWidgets (AIPU2-102)
  *
  * Dispatched PaneEventBus events:
- *   workspace / tab_change — emitted when the active tab changes so
- *                            ContextPaneController can adapt its view
+ *   workspace / tab_change       — emitted when the active tab changes so
+ *                                  ContextPaneController can adapt its view
+ *   workspace / tab_count_change — emitted when the number of open tabs changes
+ *                                  so ShellStageManager can drive Stage 3↔4
  *
  * This component replaces R1's OutputPanel.tsx.
  *
@@ -25,15 +28,20 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import { BrainCircuitRegular } from "@fluentui/react-icons";
+import { makeStyles, tokens, Text, Spinner } from "@fluentui/react-components";
+import {
+  BrainCircuitRegular,
+  DocumentSearchRegular,
+  AppsListRegular,
+} from "@fluentui/react-icons";
 import {
   usePaneEvent,
   useDispatchPaneEvent,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
 } from "@spaarke/ai-widgets";
-import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
+import { useShellStage } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type { WorkspaceTabManagerState } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
@@ -52,6 +60,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
+  // ── Stage 1 / Stage 2 empty states ───────────────────────────────────────
   emptyState: {
     flex: 1,
     display: "flex",
@@ -83,6 +92,15 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     maxWidth: "280px",
   },
+
+  // ── Stage 2 action row ────────────────────────────────────────────────────
+  actionRow: {
+    display: "flex",
+    flexDirection: "row",
+    gap: tokens.spacingHorizontalM,
+    justifyContent: "center",
+    marginTop: tokens.spacingVerticalS,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -99,6 +117,9 @@ const useStyles = makeStyles({
 export function WorkspacePane(): React.JSX.Element {
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
+
+  // Current shell stage drives the empty-state content (Stage 1 vs Stage 2).
+  const { currentStage } = useShellStage();
 
   // ---------------------------------------------------------------------------
   // Tab manager — single instance per WorkspacePane mount
@@ -144,11 +165,25 @@ export function WorkspacePane(): React.JSX.Element {
         manager.resolveTabComponent(tabId, Component, resolvedMeta?.displayName);
         syncState();
 
-        // Dispatch widget_load to the bus so ShellStageManager can advance stage.
+        // Snapshot the current tab count after resolution so ShellStageManager
+        // can advance stage (Stage 2 → Stage 3 / Stage 4).
+        const snapshot = manager.getSnapshot();
+        const currentTabCount = snapshot.tabs.length;
+
+        // Dispatch widget_load WITH tabId so ShellStageManager reacts to it
+        // (server-initiated events carry no tabId; this is the confirmation).
+        // tabCount is included so ShellStageManager can also derive Stage 4.
         dispatch("workspace", {
           type: "widget_load",
           widgetType,
           tabId,
+          ...(currentTabCount > 0 ? { tabCount: currentTabCount } : {}),
+        });
+
+        // Dispatch tab_count_change so ShellStageManager can drive Stage 3↔4.
+        dispatch("workspace", {
+          type: "tab_count_change",
+          tabCount: currentTabCount,
         });
       });
     } else if (event.type === "widget_update") {
@@ -160,6 +195,59 @@ export function WorkspacePane(): React.JSX.Element {
       // Forward widget_action events are handled by the widget itself via
       // the bus — WorkspacePane is a transparent router here.
       // No tab-manager state change needed.
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // PaneEventBus subscription — 'conversation' channel (AIPU2-102)
+  //
+  // Receives `playbook-selected` events dispatched by PlaybookGalleryWidget
+  // when the user picks a playbook from the gallery in the Context pane.
+  //
+  // Behaviour:
+  //   isExclusive === true  → clear all existing tabs, then seed defaultWidgets
+  //   isExclusive === false → keep existing tabs, then seed defaultWidgets (additive)
+  //   defaultWidgets empty  → no tab seeding (workspace retains current state)
+  //
+  // Each defaultWidget follows the same addTab → resolveWorkspaceWidget path
+  // used by server-initiated widget_load events, ensuring identical tab lifecycle.
+  // ---------------------------------------------------------------------------
+
+  usePaneEvent("conversation", (event: ConversationPaneEvent): void => {
+    if (event.type !== "playbook-selected") return;
+
+    const manager = managerRef.current;
+    const defaultWidgets = event.defaultWidgets ?? [];
+    const isExclusive = event.isExclusive ?? false;
+
+    // Clear all existing tabs when the playbook is exclusive (guardrail mode).
+    if (isExclusive && manager.getSnapshot().tabs.length > 0) {
+      manager.clearAllTabs();
+      syncState();
+      // Emit tabs_clear so subscribers (e.g. ContextPaneController) can reset.
+      dispatch("workspace", { type: "tabs_clear" });
+    }
+
+    // Seed each default widget as a new tab.
+    // When defaultWidgets is empty the workspace retains its current state.
+    for (const widgetConfig of defaultWidgets) {
+      const widgetType = widgetConfig.widgetType;
+      const widgetData = widgetConfig.widgetData ?? null;
+      const meta = getWorkspaceWidgetMetadata(widgetType);
+      const displayName = widgetConfig.displayName ?? meta?.displayName ?? widgetType;
+
+      const tabId = manager.addTab(widgetType, widgetData, displayName);
+      syncState();
+
+      // Lazy-resolve the widget component — same pattern as workspace channel.
+      resolveWorkspaceWidget(widgetType).then((Component) => {
+        const resolvedMeta = getWorkspaceWidgetMetadata(widgetType);
+        manager.resolveTabComponent(tabId, Component, resolvedMeta?.displayName);
+        syncState();
+
+        // Dispatch widget_load (with tabId) so ShellStageManager can advance stage.
+        dispatch("workspace", { type: "widget_load", widgetType, tabId });
+      });
     }
   });
 
@@ -197,7 +285,18 @@ export function WorkspacePane(): React.JSX.Element {
       const newActiveId = manager.closeTab(tabId);
       syncState();
 
-      // If closing the tab changed the active tab, dispatch a tab_change.
+      const snapshot = manager.getSnapshot();
+      const currentTabCount = snapshot.tabs.length;
+
+      // Dispatch tab_count_change so ShellStageManager can revert Stage 4 → Stage 3
+      // when the user closes tabs down to one, or Stage 3 → Stage 1 when all tabs close.
+      dispatch("workspace", {
+        type: "tab_count_change",
+        tabCount: currentTabCount,
+      });
+
+      // If closing the tab changed the active tab, dispatch a tab_change so
+      // ContextPaneController can adapt its view to the new active widget.
       if (newActiveId !== null) {
         const newActive = manager.getActiveTab();
         dispatch("workspace", {
@@ -218,9 +317,51 @@ export function WorkspacePane(): React.JSX.Element {
   const { tabs, activeTabId } = tabState;
 
   if (tabs.length === 0) {
+    // Stage 1 (welcome): show "What would you like to work on?" + recent work prompt.
+    // Stage 2 (loading): show document/entity selection UI.
+    // Any other empty state: generic workspace placeholder.
+    if (currentStage === "welcome") {
+      return (
+        <div className={styles.root}>
+          <div className={styles.emptyState} data-testid="workspace-stage-welcome">
+            <AppsListRegular className={styles.emptyIcon} />
+            <Text className={styles.emptyTitle} size={500}>
+              What would you like to work on?
+            </Text>
+            <Text className={styles.emptySubtitle} size={200}>
+              Select a playbook from the right panel to get started, or type a
+              question in the chat. Recent work will appear here.
+            </Text>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentStage === "loading") {
+      return (
+        <div className={styles.root}>
+          <div className={styles.emptyState} data-testid="workspace-stage-loading">
+            <DocumentSearchRegular className={styles.emptyIcon} />
+            <Text className={styles.emptyTitle} size={400}>
+              Select a document or entity
+            </Text>
+            <Text className={styles.emptySubtitle} size={200}>
+              Upload or browse for a document to analyze, or navigate to a
+              record in Dataverse to begin working with it.
+            </Text>
+            <div className={styles.actionRow}>
+              <Spinner size="tiny" label="Waiting for selection..." />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // active-chat or review with no tabs: generic placeholder (should not happen
+    // normally, but provides a safe fallback).
     return (
       <div className={styles.root}>
-        <div className={styles.emptyState}>
+        <div className={styles.emptyState} data-testid="workspace-stage-default">
           <BrainCircuitRegular className={styles.emptyIcon} />
           <Text className={styles.emptyTitle} size={400}>
             Workspace

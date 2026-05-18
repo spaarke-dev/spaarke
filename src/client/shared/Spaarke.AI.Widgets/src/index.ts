@@ -95,6 +95,55 @@ export type {
 export { serializeRedlineState } from './widgets/workspace/RedlineViewerWidget';
 
 // ---------------------------------------------------------------------------
+// Widgets: CreateMatterWizardWidget — embedded Create Matter flow (AIPU2-104)
+//
+// Embeds CreateMatterWizard from @spaarke/ui-components in a workspace tab
+// without modal chrome. Subscribes to wizard_step PaneEventBus events so
+// ConversationPane AI can drive step navigation and field pre-fill.
+// Registered under 'create-matter-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as CreateMatterWizardWidget } from './widgets/workspace/CreateMatterWizardWidget';
+export type {
+  CreateMatterWizardData,
+  CreateMatterWizardQueryParams,
+} from './widgets/workspace/CreateMatterWizardWidget';
+export { serializeCreateMatterWizardState } from './widgets/workspace/CreateMatterWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: DocumentUploadWizardWidget — embedded document upload (AIPU2-104)
+//
+// Three-step file upload flow (Select → Details → Review & Upload) embedded
+// as a workspace tab. On completion dispatches widget_load for DocumentViewer
+// and context_update with the new document entity info.
+// Registered under 'document-upload-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as DocumentUploadWizardWidget } from './widgets/workspace/DocumentUploadWizardWidget';
+export type {
+  DocumentUploadWizardData,
+  DocumentUploadWizardQueryParams,
+} from './widgets/workspace/DocumentUploadWizardWidget';
+export { serializeDocumentUploadWizardState } from './widgets/workspace/DocumentUploadWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: SearchSelectWizardWidget — embedded search-and-select (AIPU2-104)
+//
+// Two-step record picker (Search → Confirm) embedded as a workspace tab.
+// On selection dispatches context_update with entity id/type/name so the
+// Context pane can update its entity chip.
+// Registered under 'search-select-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as SearchSelectWizardWidget } from './widgets/workspace/SearchSelectWizardWidget';
+export type {
+  SearchSelectWizardData,
+  SearchSelectWizardQueryParams,
+  SearchResultItem,
+} from './widgets/workspace/SearchSelectWizardWidget';
+export { serializeSearchSelectWizardState } from './widgets/workspace/SearchSelectWizardWidget';
+
+// ---------------------------------------------------------------------------
 // Widgets: ProgressTrackerWidget (context pane — workflow step progress)
 //
 // Exported so consumers can reference the component directly and type-check
@@ -194,6 +243,23 @@ export { FeedbackButtons } from './components/FeedbackButtons';
 export type { FeedbackButtonsProps, FeedbackRating } from './components/FeedbackButtons';
 
 // ---------------------------------------------------------------------------
+// Interactions: text-selection cross-pane integration (AIPU2-101)
+//
+// TextSelectionListener — declarative wrapper component for workspace widgets.
+//   Listens for mouseup/selectionchange, debounces 300 ms, enforces minimum
+//   selection length, and dispatches selection_changed on the workspace channel.
+//
+// useTextSelection — imperative hook for advanced widget authors who need direct
+//   control over when selection events are dispatched (e.g. virtual-scroll canvases).
+// ---------------------------------------------------------------------------
+
+export { TextSelectionListener } from './interactions/TextSelectionListener';
+export type { TextSelectionListenerProps } from './interactions/TextSelectionListener';
+
+export { useTextSelection } from './interactions/useTextSelection';
+export type { UseTextSelectionResult } from './interactions/useTextSelection';
+
+// ---------------------------------------------------------------------------
 // Events: PaneEventBus, typed channels, React context + hooks
 // ---------------------------------------------------------------------------
 
@@ -209,6 +275,8 @@ export type {
   ContextPaneEvent,
   ConversationPaneEvent,
   SafetyPaneEvent,
+  PlaybookWidgetConfig,
+  WizardStepEvent,
 } from './events/PaneEventTypes';
 
 // React context provider — wrap the three-pane shell root with this
@@ -258,3 +326,54 @@ export type {
   GroundednessHighlightProps,
   GroundednessSegment,
 } from './components/GroundednessHighlight';
+
+// ---------------------------------------------------------------------------
+// Interactions: TabContextMapping (AIPU2-103 — cross-pane tab/context adapter)
+//
+// getContextWidgetForTab — maps a workspace widget type to the recommended
+//   context widget type. Returns null when no recommendation exists (keep
+//   the current context widget unchanged).
+//
+// TAB_CONTEXT_MAPPING — the underlying readonly mapping Record, exported for
+//   testing and for consumers that need to inspect or extend the mapping.
+// ---------------------------------------------------------------------------
+
+export { getContextWidgetForTab, TAB_CONTEXT_MAPPING } from './interactions/TabContextMapping';
+
+// ---------------------------------------------------------------------------
+// Interactions: StageTransitionRules (AIPU2-105 — four-stage pane lifecycle)
+//
+// determineStage — pure function: SessionState → PaneStage. Centralises all
+//   stage transition logic so every pane and the ShellStageManager compute
+//   the current stage consistently from the same inputs.
+//
+// shouldReset — convenience predicate for the "any → welcome" hard reset
+//   (session cleared / deleted).
+//
+// PaneStage / SessionState — exported types for consumer type-safety.
+// ---------------------------------------------------------------------------
+
+export type { PaneStage, SessionState } from './interactions/StageTransitionRules';
+export { determineStage, shouldReset } from './interactions/StageTransitionRules';
+
+// ---------------------------------------------------------------------------
+// Interactions: Citation link cross-pane highlight flow (AIPU2-100)
+//
+// handleCitationClick — pure utility dispatching context_highlight to the
+//   'context' PaneEventBus channel. Accepts a pre-resolved dispatch function so
+//   it is usable outside React (event callbacks, tests, imperative code).
+//
+// useCitationLink — React hook returning a stable handleCitationClick callback.
+//   Wire the returned function to citation anchor click handlers in workspace
+//   widgets. Dispatches context_highlight synchronously (<50 ms, AC-1).
+//   Requires a PaneEventBusProvider ancestor.
+//
+// CitationClickPayload — payload type for handleCitationClick.
+// CitationClickHandler — function type returned by useCitationLink.
+// ---------------------------------------------------------------------------
+
+export { handleCitationClick } from './interactions/CitationLinkHandler';
+export type { CitationClickPayload } from './interactions/CitationLinkHandler';
+
+export { useCitationLink } from './interactions/useCitationLink';
+export type { CitationClickHandler } from './interactions/useCitationLink';
