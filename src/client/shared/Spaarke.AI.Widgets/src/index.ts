@@ -63,6 +63,22 @@ export type { ContextWidgetRegistration } from './registry/ContextWidgetRegistry
 export { default as GenericTextWidget } from './widgets/GenericTextWidget';
 
 // ---------------------------------------------------------------------------
+// Providers: AiSessionProvider (R2 session state + PaneEventBus routing)
+// ---------------------------------------------------------------------------
+
+// AiSessionProvider — replaces R1 StandaloneAiProvider; routes SSE events to PaneEventBus
+export { AiSessionProvider } from './providers/AiSessionProvider';
+export type {
+  AiSessionContextValue,
+  AiSessionProviderProps,
+  AiContextMapping,
+} from './providers/AiSessionProvider';
+export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './providers/AiSessionProvider';
+
+// useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
+export { useAiSession } from './providers/useAiSession';
+
+// ---------------------------------------------------------------------------
 // Events: PaneEventBus, typed channels, React context + hooks
 // ---------------------------------------------------------------------------
 

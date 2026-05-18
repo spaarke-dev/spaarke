@@ -1,21 +1,22 @@
 /**
- * App.tsx — SpaarkeAi root application component.
+ * App.tsx — SpaarkeAi root application component (R2).
  *
- * Provider tree (per ADR-021, ADR-022, task 040):
+ * Provider tree (per ADR-021, ADR-022):
  *   FluentProvider (theme detection — resolveCodePageTheme + setupCodePageThemeListener)
  *     └─ AppWithAuth (acquires BFF token via @spaarke/auth)
- *          └─ StandaloneAiProvider (from @spaarke/ai-context — entity resolution + chat state)
- *               └─ AppShell (ThreePaneLayout with all three pane components)
+ *          └─ ThreePaneShell (R2 root shell — PaneEventBus + stage lifecycle + ThreePaneLayout)
  *
  * Auth pattern: no React AuthProvider component — @spaarke/auth is a class-based
  * provider initialized in main.tsx (ensureAuthInitialized). App acquires the token
- * via getAuthProvider().getAccessToken() in a useEffect and passes it down as a prop
- * to StandaloneAiProvider. This follows the same pattern as AnalysisWorkspace ChatPanel.
+ * via getAuthProvider().getAccessToken() in a useEffect and passes it to ThreePaneShell.
+ *
+ * R2 change: AppShell + StandaloneAiProvider replaced by ThreePaneShell.
+ * AiSessionProvider (AIPU2-076) will be added inside ThreePaneShell once implemented.
  *
  * @see ADR-021 - Fluent v9, dark mode required, semantic tokens only
  * @see ADR-022 - React 19 createRoot for Code Pages
  * @see ADR-026 - Single-file Vite build for Dataverse web resource
- * @see StandaloneAiContext.tsx in @spaarke/ai-context — context provider
+ * @see ThreePaneShell — R2 shell with PaneEventBus + stage lifecycle
  * @see .claude/patterns/auth/spaarke-auth-initialization.md — auth bootstrap
  */
 
@@ -24,14 +25,10 @@ import { FluentProvider, makeStyles, tokens } from "@fluentui/react-components";
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
-  ThreePaneLayout,
 } from "@spaarke/ui-components";
-import { StandaloneAiProvider } from "@spaarke/ai-context";
 import { getAuthProvider } from "@spaarke/auth";
 import { getBffBaseUrl } from "./config/runtimeConfig";
-import { LeftPane } from "./components/LeftPane";
-import { OutputPanel } from "./components/OutputPanel";
-import { SourcePanel } from "./components/SourcePanel";
+import { ThreePaneShell } from "./components/shell/ThreePaneShell";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -68,53 +65,17 @@ export interface AppProps {
 }
 
 // ---------------------------------------------------------------------------
-// AppShell — inner shell rendered inside StandaloneAiProvider
+// AppWithAuth — acquires BFF token, mounts ThreePaneShell
 // ---------------------------------------------------------------------------
 
-const useShellStyles = makeStyles({
-  shell: {
-    display: "flex",
-    width: "100%",
-    height: "100%",
-    overflow: "hidden",
-  },
-});
-
-function AppShell(): React.JSX.Element {
-  const styles = useShellStyles();
-
-  return (
-    <div className={styles.shell}>
-      <ThreePaneLayout
-        leftPane={<LeftPane />}
-        centerPane={<OutputPanel />}
-        rightPane={<SourcePanel />}
-        storageKey="spaarke-ai-workspace"
-        defaultLeftWidthPx={340}
-        defaultRightWidthPx={400}
-        minLeftWidthPx={240}
-        minRightWidthPx={240}
-        minCenterWidthPx={320}
-        leftPaneCollapseLabel="Show AI Chat"
-        rightPaneCollapseLabel="Show Sources"
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AppWithAuth — acquires BFF token, mounts StandaloneAiProvider
-// ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function AppWithAuth(_props: AppProps): React.JSX.Element {
+function AppWithAuth(props: AppProps): React.JSX.Element {
   const styles = useStyles();
 
   const [token, setToken] = React.useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = React.useState<boolean>(false);
 
   // Acquire BFF access token after auth is initialized (non-blocking for render).
-  // StandaloneAiProvider handles partial states (isAuthenticated=false → skips BFF calls).
+  // ThreePaneShell handles partial states (isAuthenticated=false → skips BFF calls).
   React.useEffect(() => {
     let cancelled = false;
 
@@ -152,13 +113,14 @@ function AppWithAuth(_props: AppProps): React.JSX.Element {
   return (
     <div className={styles.appRoot}>
       <div className={styles.layoutShell}>
-        <StandaloneAiProvider
+        <ThreePaneShell
           bffBaseUrl={bffBaseUrl}
           token={token}
           isAuthenticated={isAuthenticated}
-        >
-          <AppShell />
-        </StandaloneAiProvider>
+          entityLogicalName={props.entityLogicalName}
+          entityId={props.entityId}
+          matterId={props.matterId}
+        />
       </div>
     </div>
   );

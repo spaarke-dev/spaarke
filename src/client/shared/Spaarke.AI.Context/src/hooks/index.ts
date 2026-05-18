@@ -17,4 +17,7 @@ export type { UseChatContextMappingOptions } from './useChatContextMapping';
 export { useChatPlaybooks } from './useChatPlaybooks';
 export type { UseChatPlaybooksOptions } from './useChatPlaybooks';
 
-export { useSseStream, parseSseEvent } from './useSseStream';
+// useSseStream was removed from @spaarke/ai-context (AIPU2-082).
+// The canonical implementation is in @spaarke/ui-components:
+//   src/hooks/useSseStream.ts (barrel-exported as useSseStream, parseSseEvent, parsePaneEvent)
+// Consumers that need useSseStream should depend on @spaarke/ui-components directly.

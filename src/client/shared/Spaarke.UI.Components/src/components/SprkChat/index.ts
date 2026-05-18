@@ -51,7 +51,9 @@ export { SprkChatExportWord } from './SprkChatExportWord';
 export type { ISprkChatExportWordProps } from './SprkChatExportWord';
 
 // Hooks
-export { useSseStream } from './hooks/useSseStream';
+// Note: useSseStream is exported from src/hooks/useSseStream (canonical) via src/hooks/index.ts.
+// Re-exporting here would cause a duplicate named export when both src/hooks and src/components
+// are barrel-exported from src/index.ts. Import from '@spaarke/ui-components' directly.
 export { useChatSession } from './hooks/useChatSession';
 export { useChatPlaybooks } from './hooks/useChatPlaybooks';
 

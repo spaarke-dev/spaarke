@@ -45,7 +45,7 @@ import { SprkChatTypingIndicator } from './SprkChatTypingIndicator';
 import { SprkChatUploadZone } from './SprkChatUploadZone';
 import type { UploadedDocument } from './SprkChatUploadZone';
 import type { InlineAiAction, InlineActionBroadcastEvent } from '../InlineAiToolbar/inlineAiToolbar.types';
-import { useSseStream, parseSseEvent } from './hooks/useSseStream';
+import { useSseStream, parseSseEvent } from '../../hooks/useSseStream';
 import { useChatSession } from './hooks/useChatSession';
 import { useChatPlaybooks } from './hooks/useChatPlaybooks';
 import { useSelectionListener } from './hooks/useSelectionListener';
