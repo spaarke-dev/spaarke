@@ -1,10 +1,10 @@
 # Authentication Azure Resources & GUIDs
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current (OpenAI region corrected; config keys aligned with `DocumentIntelligence` section)
+> **Last Updated**: 2026-05-17
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-platform-unification-r2
+> **Status**: Current (R2: Cosmos DB containers added; Content Safety resource added; RBAC updated)
 > **Applies To**: Debugging, deployment, configuration lookup
 
 ---
@@ -222,6 +222,27 @@ DocumentIntelligence__SummarizeModel=gpt-4o-mini
 
 ---
 
+### Azure AI Content Safety (R2)
+
+| Property | Value |
+|----------|-------|
+| **Name** | `spaarke-contentsafety-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Endpoint** | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
+| **SKU** | S0 (Standard) |
+| **Purpose** | Prompt injection detection (PromptShieldService) and groundedness annotation (GroundednessCheckService) |
+
+**App Service Settings** (bound via `AiSafetyModule`):
+```
+AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/
+AiSafety__ContentSafety__ApiKey=(from Key Vault or App Settings)
+```
+
+**API used**: `POST {endpoint}/contentsafety/text:shieldPrompt?api-version=2024-09-01`
+
+---
+
 ### Managed Identity
 
 | Property | Value |
@@ -232,7 +253,7 @@ DocumentIntelligence__SummarizeModel=gpt-4o-mini
 
 **Required Role Assignments**:
 - Key Vault: `Key Vault Secrets User`
-- Cosmos DB: `Cosmos DB Built-in Data Contributor` (granted by `cosmos-db.bicep`)
+- Cosmos DB: `Cosmos DB Built-in Data Contributor` (role ID `00000000-0000-0000-0000-000000000002`, scoped to account `spaarke-cosmos-{env}`, granted by `infrastructure/bicep/modules/cosmos-db.bicep`)
 
 ---
 

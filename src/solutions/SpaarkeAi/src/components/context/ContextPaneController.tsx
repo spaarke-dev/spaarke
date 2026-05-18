@@ -368,6 +368,8 @@ export function ContextPaneController(): React.JSX.Element {
             isLoading: false,
           });
         }
+      }).catch(() => {
+        setIsResolving(false);
       });
     }
   }, [currentStage]);

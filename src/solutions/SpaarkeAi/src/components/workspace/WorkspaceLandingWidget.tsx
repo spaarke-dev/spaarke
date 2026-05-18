@@ -173,6 +173,15 @@ const useStyles = makeStyles({
     textAlign: "center",
     paddingTop: tokens.spacingVerticalXS,
   },
+
+  headerSubtitle: {
+    color: tokens.colorNeutralForeground3,
+  },
+
+  recentHeaderIcon: {
+    fontSize: "14px",
+    flexShrink: 0,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -301,7 +310,7 @@ export function WorkspaceLandingWidget(): React.JSX.Element {
         <Text as="h2" size={500} weight="semibold">
           What would you like to work on?
         </Text>
-        <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
+        <Text size={300} className={styles.headerSubtitle}>
           Select a playbook from the right panel, resume recent work below,
           or type a question in the chat.
         </Text>
@@ -318,7 +327,7 @@ export function WorkspaceLandingWidget(): React.JSX.Element {
       {/* ── Recent work ── */}
       <div className={styles.recentSection}>
         <div className={styles.recentHeader}>
-          <HistoryRegular style={{ fontSize: "14px", flexShrink: 0 }} />
+          <HistoryRegular className={styles.recentHeaderIcon} />
           <Text size={200} weight="semibold">
             Recent Work
           </Text>

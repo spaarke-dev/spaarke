@@ -1,9 +1,11 @@
 # Spaarke AI Platform Unification R2
 
-> **Status**: In Progress
+> **Status**: Complete
 > **Branch**: `work/spaarke-ai-platform-unification-r2`
 > **Created**: 2026-05-17
+> **Completed**: 2026-05-17
 > **Type**: Platform Rebuild (frontend) + Extension (backend)
+> **Tasks**: 86/86 complete across 7 phases
 
 ## Overview
 
@@ -43,6 +45,20 @@ Rebuild the Spaarke AI frontend and extend the BFF backend to deliver an AI-dire
 6. All R1 SprkChat functionality preserved
 7. Widget serialize/restore works for all migrated widgets
 8. Prompt token budget stays within ~9000 tokens
+
+## Delivery Summary
+
+R2 delivered a complete AI-directed three-pane experience for the Spaarke legal operations platform:
+
+- **Three-Pane Shell**: Coordinated Conversation, Workspace, and Context panes with unified PaneEventBus and 4-stage lifecycle (Welcome, Active, Review, Complete)
+- **Capability Router**: 3-layer dynamic routing (keyword, GPT-4o-mini, superset fallback) enforcing the single-LLM-call-per-turn invariant
+- **AI Safety Pipeline**: Pre-LLM prompt shields + post-LLM groundedness checking, citation verification, confidence scoring, and privilege-aware retrieval
+- **Cosmos DB Persistence**: Write-through session persistence with Redis caching, audit log, matter memory, prompt library, and feedback collection
+- **Session Restore**: Data-refreshed widget restore (D-08 pattern) completing in <500ms
+- **Feedback Collection**: Thumbs up/down + free-text feedback persisted to Cosmos with audit trail
+- **21 Widgets**: 13 R1 widgets migrated + 5 new widgets (Redline Viewer, Playbook Gallery, Entity Info, Progress Tracker, Findings) + 3 safety/feedback widgets
+- **23 SSE Event Types**: Full streaming event contract for real-time AI responses with structured JSON schemas
+- **ISprkAgent Abstraction**: R3-ready agent interface with DirectOpenAiAgent implementation
 
 ## Quick Links
 

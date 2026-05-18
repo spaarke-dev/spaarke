@@ -110,6 +110,11 @@ public class SessionRestoreService : ISessionRestoreService
             ? session.WidgetStates.AsReadOnly()
             : new Dictionary<string, string>().AsReadOnly();
 
+        // ── Step 5: Extract recent messages for frontend conversation restore ──
+        var recentMessages = session.Messages.Count <= VerbatimTailLength
+            ? (IReadOnlyList<SessionMessage>)session.Messages.AsReadOnly()
+            : session.Messages.Skip(session.Messages.Count - VerbatimTailLength).ToList().AsReadOnly();
+
         sw.Stop();
 
         _logger.LogInformation(
@@ -134,7 +139,8 @@ public class SessionRestoreService : ISessionRestoreService
             WidgetStates: widgetStates,
             WasSummarized: wasSummarized,
             RestoredAt: DateTimeOffset.UtcNow,
-            RestoreLatencyMs: sw.ElapsedMilliseconds);
+            RestoreLatencyMs: sw.ElapsedMilliseconds,
+            RecentMessages: recentMessages);
     }
 
     // =========================================================================

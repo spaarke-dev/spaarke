@@ -1,15 +1,15 @@
 # Current Task - Spaarke AI Platform Unification R2
 
 > **Project**: spaarke-ai-platform-unification-r2
-> **Status**: in-progress
-> **Active Wave**: W7 (next)
+> **Status**: complete
+> **Active Wave**: none
 > **Last Updated**: 2026-05-17
 
 ## Quick Recovery
 
-**Next Action**: Execute Wave 7 (tasks 120-124, 199 — deploy + verify + docs + wrap-up)
-**Last Checkpoint**: Wave 6.2 committed (pending)
-**Context**: 80 of 86 tasks complete (93%). Phase 6 done. 6 tasks remaining (all Phase 7).
+**Next Action**: Merge branch `work/spaarke-ai-platform-unification-r2` to master
+**Last Checkpoint**: Project complete (86/86 tasks)
+**Context**: All 86 tasks across 7 phases complete. Project wrapped up.
 **Branch**: work/spaarke-ai-platform-unification-r2
 
 ## Completed Waves
@@ -23,10 +23,9 @@
 | W4.3-W4.6 | 075-092 | 13a8f6e8..7028d9da |
 | W5.1-W5.2 | 100-107 | ddbf2d16..bbff148f |
 | W6.1 | 110-115 | 242dc0e1 |
-| W6.2 | 116-118 | (pending commit) |
+| W6.2 | 116-118 | (committed) |
+| W7 | 120-124, 199 | (project wrap-up) |
 
 ## Remaining Wave
 
-| Wave | Tasks | Description |
-|------|-------|-------------|
-| W7 | 120,121,122,123,124,199 | Deploy Cosmos, deploy BFF, deploy web resource, verify, docs, wrap-up |
+None. Project complete.

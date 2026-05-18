@@ -1608,7 +1608,6 @@ public static class ChatEndpoints
         string sessionId,
         HttpContext httpContext,
         ISessionRestoreService restoreService,
-        ISessionPersistenceService persistenceService,
         CancellationToken cancellationToken)
     {
         var tenantId = ExtractTenantId(httpContext);
@@ -1629,16 +1628,11 @@ public static class ChatEndpoints
                 detail: $"Session '{sessionId}' not found.");
         }
 
-        // Load the full session to extract recent messages for the conversation pane
-        var session = await persistenceService.LoadSessionAsync(tenantId, sessionId, cancellationToken);
-
-        var recentMessages = session?.Messages
-            .TakeLast(10)
+        // Recent messages are now included in RestoredSession (single Cosmos read)
+        var recentMessages = restored.RecentMessages
             .Select(m => new SessionRestoreMessageDto(m.Role, m.Content, m.Timestamp))
-            .ToList()
-            ?? [];
+            .ToList();
 
-        // Determine the stage from the restored session state
         var stage = restored.WidgetStates.Count > 0 ? "active-chat" : "loading";
 
         var response = new SessionRestoreResponse(

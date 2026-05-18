@@ -3,7 +3,7 @@
     <title>Production verification (safety, routing, persistence)</title>
     <phase>7</phase>
     <tags>deploy, verification, e2e</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-121, AIPU2-122</dependencies>
     <parallel-safe>false</parallel-safe>

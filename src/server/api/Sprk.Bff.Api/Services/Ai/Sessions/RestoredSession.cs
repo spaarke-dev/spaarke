@@ -45,4 +45,5 @@ public record RestoredSession(
     IReadOnlyDictionary<string, string> WidgetStates,
     bool WasSummarized,
     DateTimeOffset RestoredAt,
-    long RestoreLatencyMs);
+    long RestoreLatencyMs,
+    IReadOnlyList<SessionMessage> RecentMessages);

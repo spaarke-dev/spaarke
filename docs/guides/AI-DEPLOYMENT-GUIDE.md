@@ -1,9 +1,10 @@
 # AI Document Intelligence - Deployment Guide
 
-> **Version**: 2.3
+> **Version**: 3.0
 > **Created**: 2025-12-28
-> **Updated**: 2026-01-16
-> **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1
+> **Updated**: 2026-05-17
+> **Last Reviewed**: 2026-05-17
+> **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1 + AI Platform Unification R2
 
 ---
 
@@ -681,6 +682,110 @@ File → Download → Extract Text → Chunk → Generate Embeddings → Index t
 - `DocumentIntelligence__AiSearchKey`
 
 Without these, you'll see: `⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)`
+
+---
+
+## Phase 9: AI Platform Unification R2
+
+### 9.1 Cosmos DB Infrastructure
+
+Deploy the Cosmos DB account, database, and containers using the provisioning script.
+
+```powershell
+# Preview changes (no modifications applied)
+.\scripts\Provision-CosmosDb.ps1 -Environment dev -WhatIf
+
+# Deploy Cosmos DB resources
+.\scripts\Provision-CosmosDb.ps1 -Environment dev
+
+# With RBAC assignment for App Service managed identity
+.\scripts\Provision-CosmosDb.ps1 -Environment dev -AppServicePrincipalId <object-id>
+```
+
+**Resources deployed**:
+
+| Resource | Name Pattern | Details |
+|----------|-------------|---------|
+| Cosmos DB Account | `spaarke-cosmos-{env}` | Serverless, RBAC-only (no master keys in app code) |
+| Database | `spaarke-ai` | 5 containers |
+| Container: sessions | partition key `/userId`, TTL 90 days | AI conversation sessions |
+| Container: prompts | partition key `/sessionId`, TTL 90 days | Prompt/completion pairs |
+| Container: audit | partition key `/tenantId`, no TTL | Immutable compliance audit trail |
+| Container: memory | partition key `/userId`, TTL 90 days | AI memory snapshots |
+| Container: feedback | partition key `/tenantId`, TTL 90 days | User feedback records |
+
+**RBAC assignment**: The App Service managed identity requires `Cosmos DB Built-in Data Contributor` (role ID `00000000-0000-0000-0000-000000000002`) scoped to the Cosmos DB account. This is granted automatically by the Bicep module (`infrastructure/bicep/modules/cosmos-db.bicep`) when `AppServicePrincipalId` is provided.
+
+### 9.2 BFF API Services Configuration (R2)
+
+Add the following App Service settings for R2 services:
+
+**Cosmos DB Persistence**:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `CosmosPersistence__Endpoint` | `https://spaarke-cosmos-{env}.documents.azure.com:443/` | Cosmos DB account endpoint |
+| `CosmosPersistence__DatabaseName` | `spaarke-ai` | Target database name |
+
+**Azure AI Content Safety**:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `AiSafety__ContentSafety__Endpoint` | `https://spaarke-contentsafety-{env}.cognitiveservices.azure.com/` | Content Safety REST API endpoint |
+| `AiSafety__ContentSafety__ApiKey` | (from Key Vault) | Content Safety API key (supports dynamic rotation) |
+
+```bash
+# Set Cosmos DB configuration
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings \
+    "CosmosPersistence__Endpoint=https://spaarke-cosmos-dev.documents.azure.com:443/" \
+    "CosmosPersistence__DatabaseName=spaarke-ai"
+
+# Set Content Safety configuration
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings \
+    "AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/" \
+    "AiSafety__ContentSafety__ApiKey=<api-key>"
+```
+
+### 9.3 SpaarkeAi Web Resource Deployment
+
+The SpaarkeAi Code Page is deployed as a Dataverse web resource. Build the solution and deploy using the deployment script.
+
+```bash
+# Build the SpaarkeAi solution
+cd src/solutions/SpaarkeAi
+npm install --legacy-peer-deps --no-audit --no-fund
+npm run build:prod
+
+# Deploy web resource to Dataverse
+.\scripts\Deploy-SpaarkeAi.ps1
+```
+
+**Web resource name**: `sprk_spaarkeai`
+
+**Source path**: `src/solutions/SpaarkeAi/dist`
+
+### 9.4 Verify R2 Deployment
+
+```bash
+# 1. Verify Cosmos DB is accessible (check API startup logs)
+# Look for: "CosmosClient initialized" or no CosmosPersistence errors
+
+# 2. Verify Content Safety is configured
+# Look for: no "AiSafety:ContentSafety:ApiKey is not configured" warnings
+
+# 3. Verify SpaarkeAi web resource is deployed
+pac solution list
+# Should show updated sprk_spaarkeai web resource
+
+# 4. Check health endpoint
+curl https://{api-url}/healthz
+```
 
 ---
 

@@ -3,7 +3,7 @@
     <title>Deploy BFF API with all new R2 services</title>
     <phase>7</phase>
     <tags>deploy, bff-api</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-120</dependencies>
     <parallel-safe>false</parallel-safe>

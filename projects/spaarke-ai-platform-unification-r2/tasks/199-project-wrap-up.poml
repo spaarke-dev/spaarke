@@ -3,7 +3,7 @@
     <title>Project wrap-up (README status, lessons learned, repo cleanup)</title>
     <phase>7</phase>
     <tags>project-management, wrap-up</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>AIPU2-120, AIPU2-121, AIPU2-122, AIPU2-123, AIPU2-124</dependencies>
     <parallel-safe>false</parallel-safe>

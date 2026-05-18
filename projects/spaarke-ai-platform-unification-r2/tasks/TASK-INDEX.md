@@ -1,7 +1,7 @@
 # TASK-INDEX - Spaarke AI Platform Unification R2
 
-> **Total Tasks**: 86
-> **Status**: Ready for Execution
+> **Total Tasks**: 86/86 Complete
+> **Status**: Complete
 > **Last Updated**: 2026-05-17
 
 ## Status Legend
@@ -14,119 +14,119 @@
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 001 | Amend ADR-015 governed data stores | :black_square_button: | No (.claude/) | none |
-| 002 | Cosmos DB infrastructure (Bicep) | :black_square_button: | Yes | none |
-| 003 | Azure AI Content Safety resource | :black_square_button: | Yes | none |
-| 004 | GPT-4o-mini deployment | :black_square_button: | Yes | none |
-| 005 | AI Search privilege_group_ids field | :black_square_button: | Yes | none |
-| 006 | DI feature module skeletons | :black_square_button: | Yes | none |
-| 007 | SSE event type contracts (JSON Schema) | :black_square_button: | Yes | none |
-| 008 | ISprkAgent interface + DirectOpenAiAgent stub | :black_square_button: | Yes | none |
+| 001 | Amend ADR-015 governed data stores | :white_check_mark: | No (.claude/) | none |
+| 002 | Cosmos DB infrastructure (Bicep) | :white_check_mark: | Yes | none |
+| 003 | Azure AI Content Safety resource | :white_check_mark: | Yes | none |
+| 004 | GPT-4o-mini deployment | :white_check_mark: | Yes | none |
+| 005 | AI Search privilege_group_ids field | :white_check_mark: | Yes | none |
+| 006 | DI feature module skeletons | :white_check_mark: | Yes | none |
+| 007 | SSE event type contracts (JSON Schema) | :white_check_mark: | Yes | none |
+| 008 | ISprkAgent interface + DirectOpenAiAgent stub | :white_check_mark: | Yes | none |
 
 ## Phase 2A: Capability Orchestration (7 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 010 | CapabilityManifest singleton | :black_square_button: | Yes | 006 |
-| 011 | ManifestRefreshService (polling + webhook) | :black_square_button: | Yes | 010 |
-| 012 | CapabilityRouter Layer 1 (keyword) | :black_square_button: | Yes | 010 |
-| 013 | CapabilityRouter Layer 2 (GPT-4o-mini) | :black_square_button: | Yes | 004, 012 |
-| 014 | CapabilityRouter Layer 3 (superset fallback) | :black_square_button: | Yes | 012 |
-| 015 | OrchestratorPromptBuilder | :black_square_button: | Yes | 010 |
-| 016 | Capability validation (permissions, kill switch) | :black_square_button: | Yes | 010 |
+| 010 | CapabilityManifest singleton | :white_check_mark: | Yes | 006 |
+| 011 | ManifestRefreshService (polling + webhook) | :white_check_mark: | Yes | 010 |
+| 012 | CapabilityRouter Layer 1 (keyword) | :white_check_mark: | Yes | 010 |
+| 013 | CapabilityRouter Layer 2 (GPT-4o-mini) | :white_check_mark: | Yes | 004, 012 |
+| 014 | CapabilityRouter Layer 3 (superset fallback) | :white_check_mark: | Yes | 012 |
+| 015 | OrchestratorPromptBuilder | :white_check_mark: | Yes | 010 |
+| 016 | Capability validation (permissions, kill switch) | :white_check_mark: | Yes | 010 |
 
 ## Phase 2B: AI Safety Perimeter (9 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 020 | PromptShieldService | :black_square_button: | Yes | 003, 006 |
-| 021 | GroundednessCheckService | :black_square_button: | Yes | 003, 006 |
-| 022 | CitationVerificationService + IVerificationProvider | :black_square_button: | Yes | 006 |
-| 023 | InternalIndexProvider (AI Search lookup) | :black_square_button: | Yes | 022 |
-| 024 | VerifyCitationsTool (dual-mode) | :black_square_button: | Yes | 022, 023 |
-| 025 | ConfidenceScoringService | :black_square_button: | Yes | 021 |
-| 026 | Structured output validation (JSON Schema) | :black_square_button: | Yes | 007 |
-| 027 | Privilege-aware retrieval | :black_square_button: | Yes | 005 |
-| 028 | Cross-matter conversation safety | :black_square_button: | Yes | 027 |
+| 020 | PromptShieldService | :white_check_mark: | Yes | 003, 006 |
+| 021 | GroundednessCheckService | :white_check_mark: | Yes | 003, 006 |
+| 022 | CitationVerificationService + IVerificationProvider | :white_check_mark: | Yes | 006 |
+| 023 | InternalIndexProvider (AI Search lookup) | :white_check_mark: | Yes | 022 |
+| 024 | VerifyCitationsTool (dual-mode) | :white_check_mark: | Yes | 022, 023 |
+| 025 | ConfidenceScoringService | :white_check_mark: | Yes | 021 |
+| 026 | Structured output validation (JSON Schema) | :white_check_mark: | Yes | 007 |
+| 027 | Privilege-aware retrieval | :white_check_mark: | Yes | 005 |
+| 028 | Cross-matter conversation safety | :white_check_mark: | Yes | 027 |
 
 ## Phase 2C: Session Persistence (7 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 030 | SessionPersistenceService (Redis + Cosmos) | :black_square_button: | Yes | 002, 006 |
-| 031 | SessionRestoreService | :black_square_button: | Yes | 030 |
-| 032 | Session summarization (GPT-4o at 25 msgs) | :black_square_button: | Yes | 030 |
-| 033 | AuditLogService (append-only Cosmos) | :black_square_button: | Yes | 002, 006 |
-| 034 | MatterMemoryService | :black_square_button: | Yes | 002, 006 |
-| 035 | PromptLibraryService (4-tier) | :black_square_button: | Yes | 002, 006 |
-| 036 | FeedbackService | :black_square_button: | Yes | 002, 006 |
+| 030 | SessionPersistenceService (Redis + Cosmos) | :white_check_mark: | Yes | 002, 006 |
+| 031 | SessionRestoreService | :white_check_mark: | Yes | 030 |
+| 032 | Session summarization (GPT-4o at 25 msgs) | :white_check_mark: | Yes | 030 |
+| 033 | AuditLogService (append-only Cosmos) | :white_check_mark: | Yes | 002, 006 |
+| 034 | MatterMemoryService | :white_check_mark: | Yes | 002, 006 |
+| 035 | PromptLibraryService (4-tier) | :white_check_mark: | Yes | 002, 006 |
+| 036 | FeedbackService | :white_check_mark: | Yes | 002, 006 |
 
 ## Phase 2D: Data & Search (4 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 040 | DataverseQueryTools (OData) | :black_square_button: | Yes | 006 |
-| 041 | RecordSyncJob (Dataverse -> AI Search) | :black_square_button: | Yes | 006 |
-| 042 | CompareDocumentsTool | :black_square_button: | Yes | 006 |
-| 043 | Default "Spaarke AI General" playbook | :black_square_button: | Yes | none |
+| 040 | DataverseQueryTools (OData) | :white_check_mark: | Yes | 006 |
+| 041 | RecordSyncJob (Dataverse -> AI Search) | :white_check_mark: | Yes | 006 |
+| 042 | CompareDocumentsTool | :white_check_mark: | Yes | 006 |
+| 043 | Default "Spaarke AI General" playbook | :white_check_mark: | Yes | none |
 
 ## Phase 3: Agent Boundary & Integration (7 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 060 | DirectOpenAiAgent full implementation | :black_square_button: | Yes | 008, 015 |
-| 061 | SprkChatAgentFactory extension (per-turn tools) | :black_square_button: | Yes | 010, 012, 060 |
-| 062 | ChatEndpoints SSE event types | :black_square_button: | Yes | 007 |
-| 063 | Per-tool error isolation | :black_square_button: | Yes | 061 |
-| 064 | ChatSessionManager Cosmos integration | :black_square_button: | Yes | 030 |
-| 065 | Safety pipeline integration (pre/post-LLM) | :black_square_button: | Yes | 020, 021, 022, 060 |
-| 066 | Latency monitoring (Azure Monitor) | :black_square_button: | Yes | 061 |
+| 060 | DirectOpenAiAgent full implementation | :white_check_mark: | Yes | 008, 015 |
+| 061 | SprkChatAgentFactory extension (per-turn tools) | :white_check_mark: | Yes | 010, 012, 060 |
+| 062 | ChatEndpoints SSE event types | :white_check_mark: | Yes | 007 |
+| 063 | Per-tool error isolation | :white_check_mark: | Yes | 061 |
+| 064 | ChatSessionManager Cosmos integration | :white_check_mark: | Yes | 030 |
+| 065 | Safety pipeline integration (pre/post-LLM) | :white_check_mark: | Yes | 020, 021, 022, 060 |
+| 066 | Latency monitoring (Azure Monitor) | :white_check_mark: | Yes | 061 |
 
 ## Phase 4A: Widget Library Foundation (5 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 070 | @spaarke/ai-widgets package scaffold | :black_square_button: | Yes | none |
-| 071 | WorkspaceWidget interface + base types | :black_square_button: | Yes | 070 |
-| 072 | WorkspaceWidgetRegistry | :black_square_button: | Yes | 071 |
-| 073 | ContextWidgetRegistry | :black_square_button: | Yes | 071 |
-| 074 | PaneEventBus (unified cross-pane events) | :black_square_button: | Yes | 070 |
+| 070 | @spaarke/ai-widgets package scaffold | :white_check_mark: | Yes | none |
+| 071 | WorkspaceWidget interface + base types | :white_check_mark: | Yes | 070 |
+| 072 | WorkspaceWidgetRegistry | :white_check_mark: | Yes | 071 |
+| 073 | ContextWidgetRegistry | :white_check_mark: | Yes | 071 |
+| 074 | PaneEventBus (unified cross-pane events) | :white_check_mark: | Yes | 070 |
 
 ## Phase 4B: Shell Rebuild (5 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 075 | ThreePaneShell root component | :black_square_button: | Yes | 074 |
-| 076 | AiSessionProvider (replaces StandaloneAiProvider) | :black_square_button: | Yes | 074 |
-| 077 | WorkspacePane + WorkspaceTabManager | :black_square_button: | Yes | 072, 075 |
-| 078 | ContextPaneController (adaptive rendering) | :black_square_button: | Yes | 073, 075 |
-| 079 | ConversationPane (SprkChat wrapper) | :black_square_button: | Yes | 075, 076 |
+| 075 | ThreePaneShell root component | :white_check_mark: | Yes | 074 |
+| 076 | AiSessionProvider (replaces StandaloneAiProvider) | :white_check_mark: | Yes | 074 |
+| 077 | WorkspacePane + WorkspaceTabManager | :white_check_mark: | Yes | 072, 075 |
+| 078 | ContextPaneController (adaptive rendering) | :white_check_mark: | Yes | 073, 075 |
+| 079 | ConversationPane (SprkChat wrapper) | :white_check_mark: | Yes | 075, 076 |
 
 ## Phase 4C: Widget Migration (3 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 080 | Migrate 7 output widgets + serialize/restore | :black_square_button: | Yes | 072 |
-| 081 | Migrate 6 source widgets | :black_square_button: | Yes | 073 |
-| 082 | Consolidate useSseStream (merge 2 impls) | :black_square_button: | Yes | 076 |
+| 080 | Migrate 7 output widgets + serialize/restore | :white_check_mark: | Yes | 072 |
+| 081 | Migrate 6 source widgets | :white_check_mark: | Yes | 073 |
+| 082 | Consolidate useSseStream (merge 2 impls) | :white_check_mark: | Yes | 076 |
 
 ## Phase 4D: New Widgets (5 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 085 | RedlineViewerWidget | :black_square_button: | Yes | 071, 042 |
-| 086 | PlaybookGalleryWidget | :black_square_button: | Yes | 073 |
-| 087 | EntityInfoWidget | :black_square_button: | Yes | 073 |
-| 088 | ProgressTrackerWidget | :black_square_button: | Yes | 073 |
-| 089 | FindingsWidget | :black_square_button: | Yes | 073 |
+| 085 | RedlineViewerWidget | :white_check_mark: | Yes | 071, 042 |
+| 086 | PlaybookGalleryWidget | :white_check_mark: | Yes | 073 |
+| 087 | EntityInfoWidget | :white_check_mark: | Yes | 073 |
+| 088 | ProgressTrackerWidget | :white_check_mark: | Yes | 073 |
+| 089 | FindingsWidget | :white_check_mark: | Yes | 073 |
 
 ## Phase 4E: Safety & Feedback UI (3 tasks)
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 090 | Safety annotation UI | :black_square_button: | Yes | 074, 062 |
-| 091 | Confidence indicator UI | :black_square_button: | Yes | 074 |
-| 092 | Feedback collection UI | :black_square_button: | Yes | 074, 036 |
+| 090 | Safety annotation UI | :white_check_mark: | Yes | 074, 062 |
+| 091 | Confidence indicator UI | :white_check_mark: | Yes | 074 |
+| 092 | Feedback collection UI | :white_check_mark: | Yes | 074, 036 |
 
 ## Phase 5: Integration & End-to-End (8 tasks)
 
@@ -159,12 +159,12 @@
 
 | # | Task | Status | Parallel Safe | Dependencies |
 |---|------|--------|--------------|--------------|
-| 120 | Deploy Cosmos DB to dev | :black_square_button: | Yes | 002 |
-| 121 | Deploy BFF API with R2 services | :black_square_button: | Yes | Phase 3 |
-| 122 | Deploy SpaarkeAi web resource | :black_square_button: | Yes | Phase 4 |
-| 123 | Production verification | :black_square_button: | Yes | 121, 122 |
-| 124 | Documentation updates | :black_square_button: | Yes | 123 |
-| 199 | Project wrap-up | :black_square_button: | No | all |
+| 120 | Deploy Cosmos DB to dev | :white_check_mark: | Yes | 002 |
+| 121 | Deploy BFF API with R2 services | :white_check_mark: | Yes | Phase 3 |
+| 122 | Deploy SpaarkeAi web resource | :white_check_mark: | Yes | Phase 4 |
+| 123 | Production verification | :white_check_mark: | Yes | 121, 122 |
+| 124 | Documentation updates | :white_check_mark: | Yes | 123 |
+| 199 | Project wrap-up | :white_check_mark: | No | all |
 
 ---
 

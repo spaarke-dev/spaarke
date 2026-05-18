@@ -1,8 +1,8 @@
 # Spaarke AI Architecture
 
-> **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Updated**: May 17, 2026
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-platform-unification-r2
 > **Status**: Current
 > **Purpose**: Technical reference for the Spaarke AI platform — scope library, tool framework, execution runtime, and infrastructure.
 
@@ -63,7 +63,8 @@ Two handler interface hierarchies coexist: `IAnalysisToolHandler` for the tool h
  │  TIER 4: AZURE INFRASTRUCTURE                                      │
  │  Cloud services backing everything                                 │
  │  Azure OpenAI · Azure AI Search · Document Intelligence            │
- │  Redis · Service Bus · AI Foundry (future hosting option)          │
+ │  Redis · Service Bus · Cosmos DB · Content Safety                  │
+│  AI Foundry (future hosting option)                                │
  └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -250,6 +251,114 @@ Retrieval mode is configured per-node via `ConfigJson` (`auto`/`always`/`never`,
 | Consumed by | SprkChat | `PlaybookChatContextProvider` → `IChatContextProvider` | Resolves scopes to agent tools for conversational AI |
 | Consumed by | PCF / Code Pages | `AnalysisEndpoints` (SSE) | Frontend consumes SSE token stream |
 | Consumed by | Scope Config Editor | `HandlerEndpoints` | Handler discovery for dropdown population |
+| Depends on | Cosmos DB | `CosmosClient` via `AiPersistenceModule` | Session, audit, feedback, memory, prompt persistence (R2) |
+| Depends on | Azure Content Safety | `PromptShieldService`, `GroundednessCheckService` | Prompt injection detection, groundedness annotation (R2) |
+| Consumed by | Capability Router | `ICapabilityRouter` via `AiCapabilitiesModule` | Three-tier intent classification for chat turns (R2) |
+| Consumed by | Feedback | `FeedbackEndpoints` | Per-response quality feedback collection (R2) |
+
+---
+
+## Capability Router (R2)
+
+The `CapabilityRouter` provides three-tier intent classification to route user messages to the correct AI capability before prompt assembly. Introduced in Spaarke AI Platform Unification R2 (AIPU2-012/013/014).
+
+```
+User Message
+     │
+     ▼
+Layer 1: Keyword Classifier (synchronous, <50ms, no I/O)
+  ├── Confident (confidence >= threshold)  → Return capability
+  └── Uncertain                            → Escalate ↓
+     ▼
+Layer 2: GPT-4o-mini Intent Classifier (async, JSON-mode, configurable timeout)
+  ├── Confident (above threshold)          → Return capability
+  ├── Timeout / 429 / parse failure        → Fail through ↓
+  └── Below threshold                      → Escalate ↓
+     ▼
+Layer 3: Broad Superset Fallback
+  └── Return union of all capability tool names (capped at MaxSupersetTools)
+```
+
+| Component | Path | Responsibility |
+|-----------|------|---------------|
+| CapabilityRouter | `Services/Ai/Capabilities/CapabilityRouter.cs` | Three-tier classifier: keyword → GPT-4o-mini → superset |
+| ICapabilityRouter | `Services/Ai/Capabilities/ICapabilityRouter.cs` | Router interface: `RouteSync`, `RouteAsync`, `Layer3Fallback` |
+| CapabilityRouterOptions | `Services/Ai/Capabilities/CapabilityRouterOptions.cs` | Thresholds, Layer 2 toggle, timeout, max candidates |
+| CapabilityRoutingResult | `Services/Ai/Capabilities/CapabilityRoutingResult.cs` | Result record: `Confident`, `Uncertain`, `Fallback` factories |
+| AiCapabilitiesModule | `Infrastructure/DI/AiCapabilitiesModule.cs` | DI registration for router and manifest |
+
+**Layer 1** scores each capability by keyword hint match ratio plus a weak description-word bonus. Playbook bias multiplier (1.5x) boosts capabilities belonging to the active playbook, with a lower confidence threshold (`PlaybookBiasThreshold`).
+
+**Layer 2** sends a compact classification prompt to GPT-4o-mini with JSON-mode response. Candidates are capped at `MaxCandidates`. Timeout, HTTP 429, and parse failures all fail through to Layer 3 (never block the request).
+
+**Layer 3** computes the union of all tool names across all manifest capabilities (or `GeneralSupersetFallbackTools` if empty), enabling the LLM to self-select tools from the full set.
+
+**OTEL instrumentation**: Activity `capability_router.layer1` / `ai.routing.layer2`; counters `ai_routing_layer1_hit`, `ai_routing_layer2_hit`, `ai_routing_layer3_hit`; histograms for latency. ADR-015: user message content is never logged or recorded in spans.
+
+---
+
+## Safety Pipeline (R2)
+
+The safety perimeter comprises four services that run pre-LLM and post-LLM to detect prompt injection, verify groundedness, validate citations, and enforce privilege boundaries. All services are registered in `AiSafetyModule` (ADR-010 module pattern). Services fail open to preserve availability.
+
+| Service | Path | Stage | Purpose |
+|---------|------|-------|---------|
+| PromptShieldService | `Services/Ai/Safety/PromptShieldService.cs` | Pre-LLM | Calls Azure AI Content Safety Prompt Shields API to detect prompt injection (user and document attacks). 100ms hard timeout; fail-open on 429/5xx/timeout. |
+| GroundednessCheckService | `Services/Ai/Safety/GroundednessCheckService.cs` | Post-LLM | Retroactive groundedness annotation via Azure AI Content Safety. Scores claims against source documents. |
+| CitationVerificationService | `Services/Ai/Safety/Citations/CitationVerificationService.cs` | Post-LLM | Verifies citation references against `IVerificationProvider` implementations (e.g. InternalIndexProvider for spaarke-rag-references). |
+| PrivilegeGroupResolver | `Services/Ai/Security/PrivilegeGroupResolver.cs` | Pre-LLM | Resolves the user's Dataverse security role memberships to determine which tools and capabilities are authorized. |
+
+**SafetyPipelineMiddleware** (`Services/Ai/Chat/Middleware/SafetyPipelineMiddleware.cs`) orchestrates the pipeline as a decorator on `ISprkChatAgent`. It runs PromptShield pre-LLM and GroundednessCheck + CitationVerification post-LLM.
+
+**Cross-matter safety** (AIPU2-028): `MatterContextDetector` detects when a conversation crosses matter boundaries. `ConversationHistorySanitizer` strips prior matter context from the message history to prevent information leakage.
+
+**Required configuration**:
+
+| Setting | Description |
+|---------|-------------|
+| `AiSafety:ContentSafety:Endpoint` | Azure AI Content Safety endpoint (default: `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/`) |
+| `AiSafety:ContentSafety:ApiKey` | Content Safety API key (supports Key Vault rotation) |
+
+---
+
+## Cosmos DB Persistence (R2)
+
+Session state, audit logs, feedback, memory, and prompt history are persisted to Azure Cosmos DB (serverless, RBAC-only auth via `DefaultAzureCredential`). Registered in `AiPersistenceModule` (ADR-010 module pattern).
+
+**Access pattern**: Write-through (decision D-06: no idle-flush). Redis serves as the hot cache (24h TTL); Cosmos DB is warm storage (90-day retention for most containers, permanent for audit).
+
+| Container | Partition Key | TTL | Purpose | Service |
+|-----------|--------------|-----|---------|---------|
+| `sessions` | `/userId` | 90 days | AI conversation sessions | SessionPersistenceService |
+| `prompts` | `/sessionId` | 90 days | Individual prompt/completion pairs | PromptLibraryService |
+| `audit` | `/tenantId` | None (permanent) | Immutable compliance audit trail (ADR-015 Tier 2) | AuditLogService |
+| `memory` | `/userId` | 90 days | Per-matter structured AI memory snapshots | MatterMemoryService |
+| `feedback` | `/tenantId` | 90 days | User feedback (thumbs up/down) on AI responses | FeedbackService |
+
+**CosmosClient** is registered as Singleton (thread-safe, manages connection pool internally). Uses `CosmosClientBuilder` with `WithConnectionModeDirect()` and throttling retry (30s wait, 9 retries).
+
+**Required configuration**:
+
+| Setting | Description |
+|---------|-------------|
+| `CosmosPersistence:Endpoint` | Cosmos DB account endpoint URI |
+| `CosmosPersistence:DatabaseName` | Target database name (default: `spaarke-ai`) |
+
+---
+
+## Feedback Collection (R2)
+
+`FeedbackService` stores per-response user feedback (thumbs up/down with optional comment) in the Cosmos DB `feedback` container and provides aggregation queries for playbook and capability quality reporting (AIPU2-036).
+
+| Method | Purpose |
+|--------|---------|
+| `SubmitAsync` | Writes a `FeedbackEntry` to Cosmos DB; enforces 500-char comment cap |
+| `GetAggregateByPlaybookAsync` | Counts thumbs-up/down and retrieves top-10 negative comments for a playbook |
+| `GetAggregateByCapabilityAsync` | Same aggregation scoped to a capability ID |
+
+**Endpoint**: `POST /api/ai/feedback` / `GET /api/ai/feedback/playbook/{id}` / `GET /api/ai/feedback/capability/{id}` (registered in `FeedbackEndpoints.cs`).
+
+All queries are tenant-scoped (partition key = `/tenantId`). Aggregation queries use Cosmos SQL with parameterized filters to prevent injection.
 
 ---
 
@@ -279,6 +388,10 @@ Retrieval mode is configured per-node via `ConfigJson` (`auto`/`always`/`never`,
 | Per-node error isolation | ToolResult captures errors without aborting playbook | Soft failure: other nodes continue executing | ADR-016 |
 | Dual output paths | Analysis Output (RTF) + Document Fields (JSON) | Different consumers need different formats | ADR-014 |
 | Endpoint filters for auth | AiAuthorizationFilter per endpoint | No global middleware; fine-grained resource checks | ADR-008 |
+| Three-tier capability routing | Keyword → GPT-4o-mini → superset fallback | Fast sync path for common intents; LLM escalation only when needed | AIPU2-012 |
+| Fail-open safety perimeter | PromptShield returns FailOpen on timeout/429/5xx | Availability over blocking; safety events logged for review | AIPU2-020 |
+| Write-through Cosmos persistence | Redis hot (24h) + Cosmos warm (90d) | No idle-flush complexity; dual-write guarantees durability | AIPU2-030 |
+| RBAC-only Cosmos auth | DefaultAzureCredential, no connection strings | No secrets in app settings; managed identity only | AIPU2-002 |
 
 ---
 
@@ -310,6 +423,7 @@ Retrieval mode is configured per-node via `ConfigJson` (`auto`/`always`/`never`,
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-05-17 | 5.0 | R2 additions: Capability Router (3-tier), Safety Pipeline (PromptShield, Groundedness, Citations, privilege filter), Cosmos DB persistence (5 containers, write-through), Feedback Collection. Updated Tier 4, integration points, design decisions. |
 | 2026-04-05 | 4.0 | Restored depth: tool handler framework internals, handler registration, streaming paths, scope resolution, knowledge retrieval, integration points, known pitfalls. Restructured to mandatory architecture doc format. |
 | 2026-03-13 | 3.4 | Added DeliverToIndex node (ActionType 41). |
 | 2026-03-06 | 3.3 | Added JSON Prompt Schema (JPS) documentation: $choices dynamic enum resolution with 5 Dataverse prefix types. |
