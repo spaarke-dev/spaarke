@@ -1,31 +1,62 @@
 # Current Task - Spaarke AI Platform Unification R2
 
 > **Project**: spaarke-ai-platform-unification-r2
-> **Status**: complete
-> **Active Wave**: none
-> **Last Updated**: 2026-05-17
+> **Status**: deployed-testing
+> **Active Wave**: Post-deployment testing
+> **Last Updated**: 2026-05-18
 
 ## Quick Recovery
 
-**Next Action**: Merge branch `work/spaarke-ai-platform-unification-r2` to master
-**Last Checkpoint**: Project complete (86/86 tasks)
-**Context**: All 86 tasks across 7 phases complete. Project wrapped up.
-**Branch**: work/spaarke-ai-platform-unification-r2
+**Next Action**: Continue functional testing in deployed dev environment
+**Last Checkpoint**: All code committed + pushed at 24b78f65
+**Context**: 86/86 tasks complete. Deployed to dev. Testing in progress.
+**Branch**: work/spaarke-ai-platform-unification-r2 (pushed to origin)
 
-## Completed Waves
+## Deployment Status
 
-| Wave | Tasks | Commit |
-|------|-------|--------|
-| W1 | 001-008 | f8202156 |
-| W2.1-W2.5 | 010-043 | b5b46b5f..173d1549 |
-| W3.1+W4.1 | 060,062,064,070,074 | 9be93621 |
-| W3.2+W4.2 | 061,063,065,066,071,072,073 | 78965f07 |
-| W4.3-W4.6 | 075-092 | 13a8f6e8..7028d9da |
-| W5.1-W5.2 | 100-107 | ddbf2d16..bbff148f |
-| W6.1 | 110-115 | 242dc0e1 |
-| W6.2 | 116-118 | (committed) |
-| W7 | 120-124, 199 | (project wrap-up) |
+| Component | Status | Endpoint/Resource |
+|-----------|--------|------------------|
+| **Cosmos DB** | Deployed | `spe-cosmos-dev-ai` / `spaarke-ai` database / 5 containers |
+| **BFF API** | Deployed + healthy | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| **SpaarkeAi web resource** | Deployed | `sprk_spaarkeai` (resource ID: 5206a442-3451-f111-bec7-7ced8d1dc988) |
 
-## Remaining Wave
+## Issues Found During Testing
 
-None. Project complete.
+### Fixed (committed at 24b78f65)
+1. **GET /api/ai/chat/sessions → 404**: Added list endpoint (returns empty — Cosmos list query TBD)
+2. **DI scope mismatch (500.30)**: SpeFileStore (scoped) injected into WorkingDocumentService consumed by singletons → resolved via IServiceProvider at call time
+3. **CapabilityManifest fast-fail (500.30)**: Startup crashed when Dataverse capability entities not provisioned → graceful degradation with empty manifest
+
+### Fixed (committed at 39222103)
+4. **Cosmos analyticalStorageTtl**: Not supported on serverless → removed from Bicep
+5. **Cosmos publicNetworkAccess**: Was Disabled → changed to Enabled for dev
+6. **Vite build failures**: Added source aliases for @spaarke/ai-widgets, ai-outputs, ai-context + deep import aliases
+7. **DocumentCompare24Regular icon**: Doesn't exist → replaced with ColumnDoubleCompareRegular
+
+### Fixed (committed at 2beddfe8)
+8. **Pre-existing stubs replaced**: WorkingDocumentService SPE upload, CreateTaskNodeExecutor, OutputOrchestratorService, ScopeManagementService
+
+### Known Remaining Issues (for next session)
+- **401 on POST /api/ai/chat/sessions and GET /api/ai/chat/playbooks**: Auth token not being sent on some SprkChat requests. Investigate token acquisition flow in ConversationPane → SprkChat.
+- **GET /api/ai/chat/sessions returns empty array**: Need to implement ListRecentSessionsAsync in SessionPersistenceService (Cosmos query by tenantId, ordered by lastActivity desc)
+- **workspace/layouts endpoints 401**: These are separate workspace layout endpoints — may be pre-existing R1 endpoints with auth issues
+
+## Deployment Lessons Learned (DOCUMENT IN FAILURE-MODES.md)
+1. **DI scope validation**: Never constructor-inject scoped services into classes consumed transitively by singletons. Use IServiceProvider.GetService<T>() at call time.
+2. **IHostedService startup**: Services loading from external data sources (Dataverse, APIs) should degrade gracefully, not fast-fail, in dev environments.
+3. **Cosmos serverless**: analyticalStorageTtl is not supported — remove from Bicep for serverless accounts.
+4. **Vite source aliases**: When workspace packages use deep imports (`@pkg/src/components/...`), add explicit `/src` aliases to prevent double `/src/src/` path resolution.
+5. **Linux App Service cold start**: Use Deploy-BffApi.ps1 with 30+ retries × 10s intervals (300s total) for reliable health check.
+
+## Git State
+- Branch: `work/spaarke-ai-platform-unification-r2`
+- Last commit: `24b78f65` (pushed to origin)
+- Clean working tree (no uncommitted changes)
+
+## On the Other Computer
+```bash
+git clone https://github.com/spaarke-dev/spaarke spaarke-wt-spaarke-ai-platform-unification-r2
+cd spaarke-wt-spaarke-ai-platform-unification-r2
+git checkout work/spaarke-ai-platform-unification-r2
+# Then: "continue project spaarke-ai-platform-unification-r2"
+```
