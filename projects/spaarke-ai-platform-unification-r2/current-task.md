@@ -2,14 +2,14 @@
 
 > **Project**: spaarke-ai-platform-unification-r2
 > **Status**: in-progress
-> **Active Wave**: W6.2 (next)
+> **Active Wave**: W7 (next)
 > **Last Updated**: 2026-05-17
 
 ## Quick Recovery
 
-**Next Action**: Execute Wave 6.2 (tasks 116, 117, 118 — privilege leakage, SprkChat regression, dark mode)
-**Last Checkpoint**: Wave 6.1 committed (pending)
-**Context**: 77 of 86 tasks complete (90%). Phase 6.1 done. 9 tasks remaining.
+**Next Action**: Execute Wave 7 (tasks 120-124, 199 — deploy + verify + docs + wrap-up)
+**Last Checkpoint**: Wave 6.2 committed (pending)
+**Context**: 80 of 86 tasks complete (93%). Phase 6 done. 6 tasks remaining (all Phase 7).
 **Branch**: work/spaarke-ai-platform-unification-r2
 
 ## Completed Waves
@@ -17,24 +17,16 @@
 | Wave | Tasks | Commit |
 |------|-------|--------|
 | W1 | 001-008 | f8202156 |
-| W2.1 | 010,020,021,030,033,040 | b5b46b5f |
-| W2.2 | 011,022,034,035,041,042 | c9d7b967 |
-| W2.3 | 012,015,023,036,043 | 99b5ba0a |
-| W2.4 | 013,014,016,024,025,026 | ddd09456 |
-| W2.5 | 027,028,031,032 | 173d1549 |
+| W2.1-W2.5 | 010-043 | b5b46b5f..173d1549 |
 | W3.1+W4.1 | 060,062,064,070,074 | 9be93621 |
 | W3.2+W4.2 | 061,063,065,066,071,072,073 | 78965f07 |
-| W4.3 | 075,076,082 | 13a8f6e8 |
-| W4.4 | 077,078,079 | 2ae5576e |
-| W4.5 | 080,081,085,086,087,088 | 388b8fb4 |
-| W4.6 | 089,090,091,092 | 7028d9da |
-| W5.1 | 100,101,102,103,104,105 | ddbf2d16 |
-| W5.2 | 106,107 | bbff148f |
-| W6.1 | 110,111,112,113,114,115 | (pending commit) |
+| W4.3-W4.6 | 075-092 | 13a8f6e8..7028d9da |
+| W5.1-W5.2 | 100-107 | ddbf2d16..bbff148f |
+| W6.1 | 110-115 | 242dc0e1 |
+| W6.2 | 116-118 | (pending commit) |
 
-## Remaining Waves
+## Remaining Wave
 
 | Wave | Tasks | Description |
 |------|-------|-------------|
-| W6.2 | 116,117,118 | Privilege leakage, SprkChat regression, dark mode/accessibility |
-| W7 | 120,121,122,123,124,199 | Deploy + verify + docs + wrap-up |
+| W7 | 120,121,122,123,124,199 | Deploy Cosmos, deploy BFF, deploy web resource, verify, docs, wrap-up |

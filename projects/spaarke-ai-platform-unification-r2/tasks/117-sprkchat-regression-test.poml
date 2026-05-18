@@ -3,7 +3,7 @@
     <title>SprkChat regression test for all 23 SSE event types</title>
     <phase>6</phase>
     <tags>testing, regression, sprkchat</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>AIPU2-079, AIPU2-062</dependencies>
     <parallel-safe>true</parallel-safe>

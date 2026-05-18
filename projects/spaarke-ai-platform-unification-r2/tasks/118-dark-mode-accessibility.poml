@@ -3,7 +3,7 @@
     <title>Dark mode and accessibility compliance (ADR-021)</title>
     <phase>6</phase>
     <tags>testing, accessibility, fluent-ui</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-090, AIPU2-091, AIPU2-092</dependencies>
     <parallel-safe>true</parallel-safe>

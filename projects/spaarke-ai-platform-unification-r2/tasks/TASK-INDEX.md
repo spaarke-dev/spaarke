@@ -151,9 +151,9 @@
 | 113 | Session restore load test (<500ms) | :white_check_mark: | Yes | 106 |
 | 114 | Prompt token budget validation (~9000) | :white_check_mark: | Yes | 015, 061 |
 | 115 | Audit log immutability verification | :white_check_mark: | Yes | 033 |
-| 116 | Cross-matter privilege leakage test | :black_square_button: | Yes | 028, 027 |
-| 117 | SprkChat regression test (23 SSE types) | :black_square_button: | Yes | 079, 062 |
-| 118 | Dark mode / accessibility (ADR-021) | :black_square_button: | Yes | 090, 091, 092 |
+| 116 | Cross-matter privilege leakage test | :white_check_mark: | Yes | 028, 027 |
+| 117 | SprkChat regression test (23 SSE types) | :white_check_mark: | Yes | 079, 062 |
+| 118 | Dark mode / accessibility (ADR-021) | :white_check_mark: | Yes | 090, 091, 092 |
 
 ## Phase 7: Deployment & Wrap-up (6 tasks)
 

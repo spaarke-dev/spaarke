@@ -3,7 +3,7 @@
     <title>Cross-matter privilege leakage test</title>
     <phase>6</phase>
     <tags>testing, security</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>AIPU2-028, AIPU2-027</dependencies>
     <parallel-safe>true</parallel-safe>
