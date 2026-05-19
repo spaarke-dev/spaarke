@@ -3,7 +3,7 @@
     <title>Add .claude/CHANGELOG.md entry for auth v2 in-progress markers</title>
     <phase>0 — Pre-flight</phase>
     <tags>docs, pre-flight, changelog</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>5 minutes</estimated-effort>
     <dependencies>004</dependencies>
     <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
@@ -32,4 +32,15 @@
     <criterion>Entry format matches existing conventions.</criterion>
     <criterion>All files changed in PR are listed.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+    Added auth v2 pre-flight bullets to existing [Unreleased] section under Added / Changed / Deprecated / Verified subheadings (introduced new "Verified" subheading for PF-11 since the verification produced no edits but is a meaningful audit-trail entry). Each bullet cites its PF number and commit SHA. Added a "Retirement note" subheading explaining that all PF-* entries are transitional and will be removed during Workstream F.
+
+    Commit SHAs referenced:
+      - c2198007 — PF-1, PF-2 (renames), PF-3 (references)
+      - 281f7210 — PF-4..PF-10 (STOP banners)
+      - f58317b0 — PF-11 (verification, no edits)
+      - 5b04b6ff — PF-12 (root CLAUDE.md pointer)
+      - (this commit) — PF-13 (CHANGELOG entry)
+  </notes>
 </task>
