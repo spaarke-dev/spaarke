@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
 > **Total Tasks**: 32/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11, Phase C: 9/10 — task 040 deferred). Plus B-addendum 031 deferred.
-> **Status**: Phase C CODE COMPLETE (9 tasks shipped in 2 parallel waves). NEXT: deploy to BOTH envs via Deploy-BffApi.ps1 + OBO smoke check + operator pre-deploy actions (Graph permissions + Dataverse Application User).
+> **Status**: Phase C SIGNED OFF (code shipped + deployed + OBO smoke check PASS). NEXT: Phase D (CSP/CAE/security 060-064).
 > **Last Updated**: 2026-05-19
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
 
