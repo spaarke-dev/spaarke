@@ -13,7 +13,18 @@
  */
 
 import { initAuth, authenticatedFetch as sharedAuthFetch, getAuthProvider } from "@spaarke/auth";
-import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, getTenantId } from "../config/runtimeConfig";
+// NOTE: import alias is REQUIRED — this module also exports an async `getTenantId`
+// below (which awaits initAuth then calls provider.getTenantId()). Without the
+// alias, the local function declaration shadows the import at runtime, so
+// `getTenantId()` inside `initAuth({...})` returns a Promise<string> instead of
+// string → infinite recursion (the async fn re-enters initAuth) AND TypeError
+// when @spaarke/auth tries to call .trim() on the Promise.
+import {
+  getBffBaseUrl,
+  getBffOAuthScope,
+  getMsalClientId,
+  getTenantId as getRuntimeTenantId,
+} from "../config/runtimeConfig";
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -35,7 +46,7 @@ export function ensureAuthInitialized(): Promise<void> {
           // authority `login.microsoftonline.com/{tenantId}`. Without this the
           // authority falls back to `/organizations` and ssoSilent can't
           // disambiguate the session cookie → popup-on-every-startup.
-          tenantId: getTenantId(),
+          tenantId: getRuntimeTenantId(),
           bffBaseUrl: getBffBaseUrl(),
           bffApiScope: getBffOAuthScope(),
           proactiveRefresh: true,

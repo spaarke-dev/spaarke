@@ -77,6 +77,25 @@ describe('resolveConfig', () => {
     expect(config.authority).toBe('https://login.microsoftonline.com/organizations');
   });
 
+  it('defensively ignores a non-string tenantId (e.g. accidental Promise) without throwing', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = resolveConfig({
+        clientId: 'custom-id',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tenantId: Promise.resolve('guid') as any,
+      });
+      expect(config.authority).toBe('https://login.microsoftonline.com/organizations');
+      expect(config.tenantId).toBe('');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('tenantId is not a string'),
+        'object'
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('prefers user config over window global', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__SPAARKE_MSAL_CLIENT_ID__ = 'from-window';
