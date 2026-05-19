@@ -9,25 +9,27 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 002 - Apply STOP banners to 5 partially-superseded pattern/constraint/architecture docs |
-| **Step** | Begin Step 1 of task 002 |
+| **Task** | 003 - Verify + finalize project CLAUDE.md prohibition section |
+| **Step** | Begin Step 1 of task 003 |
 | **Status** | not-started |
-| **Next Action** | `work on task 002` |
+| **Next Action** | `work on task 003` |
 
 ## State
 
 - Worktree: `c:\code_files\spaarke-wt-spaarke-auth-v2-and-hardening`
 - Branch: `work/spaarke-auth-v2-and-hardening`
-- Phase 0 progress: 1/5 tasks complete (001 ✅; 002–005 remaining)
-- Overall: 1/49 tasks complete
+- Phase 0 progress: 2/5 tasks complete (001 ✅, 002 ✅; 003–005 remaining)
+- Overall: 2/49 tasks complete
 
-## Handoff Notes (from task 001)
+## Handoff Notes (from task 002)
 
-- Task 001 deprecated `msal-client.md` + `spaarke-auth-initialization.md` via `git mv`; all 11 in-scope references updated.
-- Out-of-scope-but-flagged for future cleanup: `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` line 800 still describes "three patterns are partly/fully superseded" by their pre-rename names — this is correct narrative context but if Phase F task 091/094 wants a fully consistent doc, those occurrences can be updated then.
-- Phase 0 tasks 002–005 also touch `.claude/` paths — main-session-only (no parallelism). Phase A unlocks parallel groups (A-Parallel-1, A-Parallel-2).
+- 7 files got STOP banners (5 partial-canonical + 2 full-deprecation). All 7 banners verified via grep `🛑 STOP`.
+- Banner format from `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 Layer 2` was used verbatim. Per-file canonical exceptions follow the PF-4..PF-10 table.
+- Task 003 next: verify the project CLAUDE.md prohibition section (already present per `projects/spaarke-auth-v2-and-hardening/CLAUDE.md` "🚨 ACTIVE AUTH V2 REFACTOR" section). Task may be mostly a verification + minor edits.
+- Phase 0 tasks 003–005 remain main-session-only (.claude/ paths). No parallelism until Phase A.
 
 ## Key Learnings
 
-- Edits to many files in parallel still require Read before each Edit (per harness rule). Group Read calls in one message, then Edit calls in one message — fastest pattern.
-- The audit doc is the planning artifact; references inside it that name `msal-client.md`/`spaarke-auth-initialization.md` are intentional rename-action descriptions and should NOT be auto-updated by future grep sweeps.
+- The `---` ... `---` banner sandwich pattern from §8.2 works cleanly with the existing `# Title` content below — no markdown rendering conflicts observed.
+- Box-drawing chars (═) are preserved as UTF-8 by both the Edit tool and git (no encoding warnings).
+- For files that have been renamed (e.g., DEPRECATED-spaarke-auth-initialization.md), each post-rename path needs its own Read before Edit — the harness tracks the renamed file as a distinct entity even if content is unchanged.

@@ -3,7 +3,7 @@
     <title>Apply STOP banners to partially-superseded auth pattern docs</title>
     <phase>0 — Pre-flight</phase>
     <tags>docs, pre-flight, deprecation</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30 minutes</estimated-effort>
     <dependencies>001</dependencies>
     <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
@@ -47,4 +47,24 @@
     <criterion>No content removed from any file (canonical sections preserved verbatim, just below the banner).</criterion>
     <criterion>Markdown renders correctly; no broken links or syntax.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+
+    Inserted STOP banners verbatim from §8.2 Layer 2 template into 7 files (5 partial-supersession + 2 full-deprecation):
+
+    Partial supersession (canonical-exception variant — PF-4..PF-8):
+      - .claude/patterns/auth/spaarke-sso-binding.md (INV-1..INV-7 + Bundling Reality canonical)
+      - .claude/constraints/auth.md (OAuth/OBO server-side + MSAL config invariants + BFF URL helper canonical)
+      - .claude/patterns/auth/token-caching.md (server-side Redis OBO canonical)
+      - docs/architecture/AUTH-AND-BFF-URL-PATTERN.md (buildBffApiUrl canonical)
+      - docs/architecture/sdap-auth-patterns.md (OBO + server-side patterns canonical)
+
+    Full deprecation (no-exception variant — PF-9, PF-10):
+      - .claude/patterns/auth/DEPRECATED-msal-client.md
+      - .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md
+
+    Banner format: ---,  🛑 STOP line, ═══ box-drawing rule, DO/DO NOT block, "What IS still canonical" exception line, closing ═══, ---. Prepended above the existing `# Title` line; no content removed.
+
+    Verified via grep "🛑 STOP" — all 7 files match. Acceptance criteria all satisfied.
+  </notes>
 </task>

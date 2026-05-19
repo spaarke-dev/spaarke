@@ -1,3 +1,21 @@
+---
+🛑 STOP — DO NOT USE THIS DOCUMENT FOR NEW AUTH WORK 🛑
+═══════════════════════════════════════════════════════════════════════════
+PRE-V2 CONTENT. Spaarke Auth v2 + Hardening is in active development.
+Canonical v2 source: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md
+ADR-027 will become canonical when v2 ships.
+
+DO NOT add `accessToken: string` props anywhere.
+DO NOT write raw fetch() with `Authorization: Bearer ${...}` headers.
+DO NOT reference BridgeStrategy, XrmStrategy, or window.__SPAARKE_BFF_TOKEN__.
+DO use `authenticatedFetch()` from @spaarke/auth.
+DO use `useAuth()` hook (after v2 ships).
+When in doubt: STOP and consult the audit doc above.
+
+What IS still canonical in this file: OAuth/OBO server-side MUST rules (lines 31-37); MSAL client config invariants (lines 38-44); BFF URL helper rules (lines 92-126) remain canonical. Client-side cascade rules (line 43 §"Required MSAL config", line 70 §"6-strategy chain reference") are pre-v2.
+═══════════════════════════════════════════════════════════════════════════
+---
+
 # Authentication & Authorization Constraints
 
 > **Domain**: OAuth, OBO, Token Management, Access Control

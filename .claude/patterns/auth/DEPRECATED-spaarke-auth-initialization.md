@@ -1,3 +1,24 @@
+---
+🛑 STOP — THIS DOCUMENT IS FULLY DEPRECATED 🛑
+═══════════════════════════════════════════════════════════════════════════
+DELETED-IN-WAITING. This file is fully superseded by Spaarke Auth v2
+and will be removed when v2 ships (Workstream F4, task 094).
+
+Canonical v2 source: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md
+ADR-027 will become canonical when v2 ships.
+
+DO NOT use any pattern from this file in new code.
+DO NOT cite this file in new POMLs, comments, or design docs.
+DO NOT add `accessToken: string` props anywhere.
+DO NOT write raw fetch() with `Authorization: Bearer ${...}` headers.
+DO NOT reference BridgeStrategy, XrmStrategy, or window.__SPAARKE_BFF_TOKEN__.
+DO use `authenticatedFetch()` from @spaarke/auth.
+DO use `useAuth()` hook (after v2 ships).
+
+What IS still canonical in this file: NOTHING — fully deprecated.
+═══════════════════════════════════════════════════════════════════════════
+---
+
 # @spaarke/auth Initialization Pattern
 
 > **Last Reviewed**: 2026-05-13
