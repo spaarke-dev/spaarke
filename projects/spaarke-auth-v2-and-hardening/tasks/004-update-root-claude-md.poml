@@ -3,7 +3,7 @@
     <title>Update root CLAUDE.md §15 Pointers to reference auth v2 audit doc</title>
     <phase>0 — Pre-flight</phase>
     <tags>docs, pre-flight, cross-worktree-awareness</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>10 minutes</estimated-effort>
     <dependencies>003</dependencies>
     <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
@@ -35,4 +35,10 @@
     <criterion>Table renders correctly in markdown.</criterion>
     <criterion>No other content in root CLAUDE.md modified.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+    Added single row to root CLAUDE.md §15 Pointers, positioned immediately after "Active project state" row:
+      | Active auth v2 design (pre-ADR-027) | [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md) — supersedes auth patterns marked `DEPRECATED-*` |
+    No other content modified in root CLAUDE.md. Table renders correctly.
+  </notes>
 </task>

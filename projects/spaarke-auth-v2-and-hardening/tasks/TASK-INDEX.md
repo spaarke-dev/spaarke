@@ -1,6 +1,6 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 3/49 complete
+> **Total Tasks**: 4/49 complete
 > **Status**: In Progress (Phase 0)
 > **Last Updated**: 2026-05-18
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
@@ -24,7 +24,7 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 | 001 | Rename DEPRECATED-msal-client.md + DEPRECATED-spaarke-auth-initialization.md; update INDEX references | :white_check_mark: | Main-Only (.claude/) | none |
 | 002 | Apply STOP banners to 5 partially-superseded pattern/constraint/architecture docs | :white_check_mark: | Main-Only (.claude/) | 001 |
 | 003 | Verify + finalize project CLAUDE.md prohibition section | :white_check_mark: | Main-Only (.claude/) | 002 |
-| 004 | Update root CLAUDE.md §15 Pointers to reference AUDIT-FINDINGS-AUTH-SYSTEM.md | :black_square_button: | Main-Only (.claude/) | 003 |
+| 004 | Update root CLAUDE.md §15 Pointers to reference AUDIT-FINDINGS-AUTH-SYSTEM.md | :white_check_mark: | Main-Only (.claude/) | 003 |
 | 005 | Add entry to .claude/CHANGELOG.md documenting v2 in-progress markers | :black_square_button: | Main-Only (.claude/) | 004 |
 
 **Phase gate**: MSAL regression test still passes after PR merge. No agent or human should follow stale guidance during the remaining phases.
