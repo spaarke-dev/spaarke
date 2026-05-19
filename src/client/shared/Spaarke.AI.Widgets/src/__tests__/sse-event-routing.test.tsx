@@ -36,18 +36,29 @@ import type {
 import type { AiPaneEvent } from '@spaarke/ai-context';
 
 // ---------------------------------------------------------------------------
-// Mock @spaarke/auth — AiSessionProvider imports buildBffApiUrl / authenticatedFetch
-// but pane routing tests never trigger the BFF fetch (entityContext is null).
+// Mock @spaarke/auth — AiSessionProvider imports buildBffApiUrl + useAuth and
+// renders nothing token-related itself; pane routing tests never trigger the
+// BFF fetch (entityContext is null), so a static authenticated stub suffices.
 // ---------------------------------------------------------------------------
 
-jest.mock('@spaarke/auth', () => ({
-  buildBffApiUrl: (base: string, path: string) => `${base}${path}`,
-  authenticatedFetch: jest.fn().mockResolvedValue({
+jest.mock('@spaarke/auth', () => {
+  const stubFetch = jest.fn().mockResolvedValue({
     ok: false,
     status: 404,
     json: async () => ({}),
-  }),
-}));
+  });
+  return {
+    buildBffApiUrl: (base: string, path: string) => `${base}${path}`,
+    authenticatedFetch: stubFetch,
+    useAuth: jest.fn(() => ({
+      isAuthenticated: true,
+      getAccessToken: jest.fn().mockResolvedValue('test-token'),
+      authenticatedFetch: stubFetch,
+      tenantId: 'tenant-guid-from-mock',
+      logout: jest.fn(),
+    })),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -56,6 +67,10 @@ jest.mock('@spaarke/auth', () => ({
 /**
  * Creates a test wrapper with PaneEventBusProvider + AiSessionProvider.
  * Uses the provided bus instance for inspection.
+ *
+ * Auth is supplied via the mocked useAuth() inside AiSessionProvider — the
+ * provider no longer takes token / isAuthenticated as props (Spaarke Auth v2
+ * function-based contract; see AUDIT-FINDINGS-AUTH-SYSTEM §H-4).
  */
 function makeWrapper(bus: PaneEventBus) {
   return function Wrapper({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -63,8 +78,6 @@ function makeWrapper(bus: PaneEventBus) {
       <PaneEventBusProvider bus={bus}>
         <AiSessionProvider
           bffBaseUrl="https://test-bff.example.com"
-          token="test-token"
-          isAuthenticated={true}
           entityContext={null}
         >
           {children}

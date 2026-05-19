@@ -3,7 +3,7 @@
     <title>Migrate AiSessionProvider context to function-based API</title>
     <phase>B — Consumer migration</phase>
     <tags>auth, ai-widgets, react, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>Phase A complete</dependencies>
     <parallel-safe>false (foundation for B)</parallel-safe>
@@ -39,4 +39,28 @@
     <criterion>Compile errors at consumer sites are the expected list (not unrelated breakage).</criterion>
     <criterion>Existing provider tests updated and passing.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. AiSessionContextValue now exposes the function-based
+    contract: { isAuthenticated, getAccessToken, authenticatedFetch, tenantId,
+    bffBaseUrl, ... } with no token string. Provider internally calls useAuth()
+    from @spaarke/auth; props no longer include token/isAuthenticated.
+
+    Tests: AiSessionProvider.test.tsx 24/24 + sse-event-routing.test.tsx 16/16
+    (the latter was also renamed from .ts → .tsx to fix a pre-existing JSX
+    parse failure under the current ts-jest).
+
+    Jest mock for @spaarke/auth now exports useAuth (default: authenticated
+    state with stub getAccessToken/authenticatedFetch/tenantId).
+
+    Predicted consumer breakage to address in tasks 021/022/023:
+      - src/solutions/SpaarkeAi/src/components/ChatHistoryPanel.tsx:155
+      - src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx:411
+      - src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx:284
+      - src/client/shared/Spaarke.AI.Widgets/src/components/FeedbackButtons.tsx
+        (still defines `token: string | null` PROP — callers will fail to populate)
+
+    AiSessionProvider.tsx now requires that `initAuth(...)` from @spaarke/auth
+    has been called before mount (useAuth throws otherwise). SpaarkeAi already
+    does this in App.tsx via authInit.ts (post-hotfix v2).
+  </notes>
 </task>

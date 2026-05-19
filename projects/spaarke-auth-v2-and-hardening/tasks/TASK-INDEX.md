@@ -1,8 +1,8 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 7/49 complete
-> **Status**: In Progress (Phase 0)
-> **Last Updated**: 2026-05-18
+> **Total Tasks**: 13/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 1/11)
+> **Status**: In Progress (Phase B started — AiSessionProvider migrated to function-based API)
+> **Last Updated**: 2026-05-19
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
 
 ## Status Legend
@@ -51,7 +51,7 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 
 | # | Task | Status | Parallel Group | Dependencies |
 |---|------|--------|----------------|--------------|
-| 020 | Migrate AiSessionProvider context to function-based API | :black_square_button: | No | Phase A |
+| 020 | Migrate AiSessionProvider context to function-based API | :white_check_mark: | No | Phase A |
 | 021 | Migrate SpaarkeAi App.tsx (stop snapshotting token in useEffect) | :black_square_button: | No | 020 |
 | 022 | Migrate SpaarkeAi panes (ConversationPane, WelcomePanel, ChatHistoryPanel, WorkspaceLandingWidget, ChatPanel, FeedbackButtons, ThreePaneShell) | :black_square_button: | B-Parallel-1 | 020 |
 | 023 | Refactor SprkChat API: drop accessToken prop, require authenticatedFetch + getAccessToken; update 3 hooks (useChatSession, useChatPlaybooks, useChatContextMapping); useSseStream calls getAccessToken() per-stream-open | :black_square_button: | B-Parallel-1 | 020 |

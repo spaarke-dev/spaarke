@@ -34,19 +34,37 @@ import type { WorkspacePaneEvent, ContextPaneEvent, SafetyPaneEvent } from '../.
 import type { AiPaneEvent } from '@spaarke/ai-context';
 
 // ---------------------------------------------------------------------------
-// Mock @spaarke/auth — AiSessionProvider calls buildBffApiUrl / authenticatedFetch
-// but the tests that exercise pane routing do not trigger the BFF fetch
-// (entityContext is omitted so the effect guard exits early).
+// Mock @spaarke/auth — AiSessionProvider calls buildBffApiUrl + useAuth at
+// render time. The tests below don't trigger the BFF fetch (entityContext is
+// omitted so the useEffect guard exits early), so the default mocked useAuth
+// (isAuthenticated: true with stub getAccessToken / authenticatedFetch /
+// tenantId) is sufficient.
+//
+// The factory below is hoisted by jest before any module-level const is
+// initialised — we must therefore inline all stub functions inside the
+// factory body (no out-of-scope references). Tests that need to read the
+// mock state pull the module via `jest.requireMock('@spaarke/auth')`.
 // ---------------------------------------------------------------------------
 
-jest.mock('@spaarke/auth', () => ({
-  buildBffApiUrl: (base: string, path: string) => `${base}${path}`,
-  authenticatedFetch: jest.fn().mockResolvedValue({
+jest.mock('@spaarke/auth', () => {
+  const stubFetch = jest.fn().mockResolvedValue({
     ok: false,
     status: 404,
     json: async () => ({}),
-  }),
-}));
+  });
+  const stubGetAccessToken = jest.fn().mockResolvedValue('test-access-token');
+  return {
+    buildBffApiUrl: (base: string, path: string) => `${base}${path}`,
+    authenticatedFetch: stubFetch,
+    useAuth: jest.fn(() => ({
+      isAuthenticated: true,
+      getAccessToken: stubGetAccessToken,
+      authenticatedFetch: stubFetch,
+      tenantId: 'tenant-guid-from-mock',
+      logout: jest.fn(),
+    })),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,8 +81,6 @@ function makeWrapper(bus: PaneEventBus, overrides?: Partial<React.ComponentProps
       <PaneEventBusProvider bus={bus}>
         <AiSessionProvider
           bffBaseUrl="https://spe-api-dev.example.com"
-          token="test-token"
-          isAuthenticated={true}
           entityContext={null}
           {...overrides}
         >
@@ -486,11 +502,7 @@ describe('useAiSession — outside provider', () => {
     // AiSessionProvider without PaneEventBusProvider — dispatch hook will throw
     function BadWrapper({ children }: { children: React.ReactNode }) {
       return (
-        <AiSessionProvider
-          bffBaseUrl="https://example.com"
-          token={null}
-          isAuthenticated={false}
-        >
+        <AiSessionProvider bffBaseUrl="https://example.com">
           {children}
         </AiSessionProvider>
       );
@@ -503,22 +515,45 @@ describe('useAiSession — outside provider', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Auth / props pass-through
+// Auth surface (function-based contract — Spaarke Auth v2 §H-4)
 // ---------------------------------------------------------------------------
 
-describe('AiSessionProvider — auth state pass-through', () => {
-  it('exposes token, isAuthenticated, and bffBaseUrl from props', () => {
+describe('AiSessionProvider — auth surface (function-based contract)', () => {
+  it('exposes isAuthenticated / getAccessToken / authenticatedFetch / tenantId from useAuth()', () => {
+    const bus = new PaneEventBus();
+    const { result } = renderSession(bus);
+
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(typeof result.current.getAccessToken).toBe('function');
+    expect(typeof result.current.authenticatedFetch).toBe('function');
+    expect(result.current.tenantId).toBe('tenant-guid-from-mock');
+  });
+
+  it('does NOT expose a `token: string` field — function-based contract', () => {
+    const bus = new PaneEventBus();
+    const { result } = renderSession(bus);
+
+    // The context value type is enforced at compile-time; this runtime check
+    // is a belt-and-braces guard against accidental field reintroduction.
+    expect((result.current as unknown as Record<string, unknown>).token).toBeUndefined();
+  });
+
+  it('getAccessToken resolves to a string when called', async () => {
+    const bus = new PaneEventBus();
+    const { result } = renderSession(bus);
+
+    const token = await result.current.getAccessToken();
+    expect(token).toBe('test-access-token');
+  });
+
+  it('exposes bffBaseUrl from props (passes through unmodified)', () => {
     const bus = new PaneEventBus();
     const { result } = renderHook(() => useAiSession(), {
       wrapper: makeWrapper(bus, {
-        token: 'my-bearer-token',
-        isAuthenticated: true,
         bffBaseUrl: 'https://custom-bff.example.com',
       }),
     });
 
-    expect(result.current.token).toBe('my-bearer-token');
-    expect(result.current.isAuthenticated).toBe(true);
     expect(result.current.bffBaseUrl).toBe('https://custom-bff.example.com');
   });
 

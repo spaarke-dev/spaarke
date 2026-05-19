@@ -18,17 +18,20 @@
  *  - Streaming callbacks (`onStreamStart`, `onStreamToken`, `onStreamEnd`) are still
  *    provided for SprkChat's zero-serialisation path to the output pane.
  *
+ * Auth: the provider reads auth state via `useAuth()` from @spaarke/auth
+ * internally — consumers do NOT pass token / isAuthenticated props. This is the
+ * Spaarke Auth v2 function-based contract (AUDIT-FINDINGS-AUTH-SYSTEM §H-4):
+ * no token strings cross component boundaries. `initAuth(...)` MUST have been
+ * called before this provider mounts.
+ *
  * Must be rendered INSIDE:
- *  - AuthProvider   (needs token / isAuthenticated)
  *  - PaneEventBusProvider (useDispatchPaneEvent depends on the bus context)
  *
  * @example
  * <PaneEventBusProvider>
- *   <AuthProvider>
- *     <AiSessionProvider bffBaseUrl={config.bffBaseUrl} token={token} isAuthenticated={isAuthenticated}>
- *       <SpaarkeAiShell />
- *     </AiSessionProvider>
- *   </AuthProvider>
+ *   <AiSessionProvider bffBaseUrl={config.bffBaseUrl}>
+ *     <SpaarkeAiShell />
+ *   </AiSessionProvider>
  * </PaneEventBusProvider>
  *
  * @see StandaloneAiContext.tsx in Spaarke.AI.Context — R1 provider being replaced
@@ -38,19 +41,19 @@
  * @see ADR-012 — shared component library constraints
  * @see ADR-013 — AI Architecture: extend BFF, not separate service
  * @see ADR-022 — React 19 for Code Pages (bundled — this file is NOT PCF-safe)
+ * @see AUDIT-FINDINGS-AUTH-SYSTEM §H-4 — function-based auth contract
  */
 
 import React, {
   createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { buildBffApiUrl, authenticatedFetch } from '@spaarke/auth';
+import { buildBffApiUrl, useAuth, type AuthenticatedFetchFn } from '@spaarke/auth';
 import { useDispatchPaneEvent } from '../events/useDispatchPaneEvent';
 import type { AiPaneEvent, EntityContext, StreamingCallbacks, StreamingState } from '@spaarke/ai-context';
 import type { WorkspacePaneEvent, ContextPaneEvent, SafetyPaneEvent } from '../events/PaneEventTypes';
@@ -95,11 +98,24 @@ export interface AiContextMapping {
  *   const { entityContext, chatSessionId, playbookId, streaming, isStreaming } = useAiSession();
  */
 export interface AiSessionContextValue {
-  // ── Auth ─────────────────────────────────────────────────────────────────
-  /** Bearer access token for BFF API calls (null when not authenticated) */
-  token: string | null;
-  /** Whether the user is currently authenticated */
+  // ── Auth (function-based contract per Spaarke Auth v2 / §H-4) ───────────
+  /** Whether a fresh cached BFF token is currently available (sync) */
   isAuthenticated: boolean;
+  /**
+   * Acquire a fresh BFF access token. Always routes through the @spaarke/auth
+   * provider's in-memory cache + JWT exp validation. Use this only when
+   * `authenticatedFetch` cannot wrap the network call (notably SSE
+   * `ReadableStream` lifecycle).
+   */
+  getAccessToken: () => Promise<string>;
+  /**
+   * Authenticated fetch — auto-attaches Bearer header, retries 401 once with
+   * backoff. Preferred over `getAccessToken` for one-shot HTTP calls because
+   * the token is never materialised in consumer code.
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
+  /** Azure AD tenant ID from the cached JWT `tid` claim. Empty string if no token cached. */
+  tenantId: string;
   /** BFF API base URL (HOST only — use buildBffApiUrl() to build endpoint URLs) */
   bffBaseUrl: string;
 
@@ -165,10 +181,6 @@ export interface AiSessionProviderProps {
   children: ReactNode;
   /** BFF API base URL (HOST only — resolved by resolveRuntimeConfig() in the shell) */
   bffBaseUrl: string;
-  /** Access token for BFF API calls (from @spaarke/auth AuthProvider) */
-  token: string | null;
-  /** Whether auth is ready */
-  isAuthenticated: boolean;
   /**
    * Entity context resolved by the host shell (via useEntityResolver).
    *
@@ -223,25 +235,30 @@ AiSessionContext.displayName = 'AiSessionContext';
  *     so multiple pane subscribers receive every event independently
  *
  * MUST be rendered inside:
- *   - AuthProvider (needs token / isAuthenticated)
  *   - PaneEventBusProvider (useDispatchPaneEvent reads the bus context)
+ *
+ * `initAuth(...)` from @spaarke/auth MUST have been called before mount — the
+ * provider reads auth state via `useAuth()` and that hook throws if the
+ * library is not initialised.
  *
  * @example
  * <PaneEventBusProvider>
- *   <AuthProvider>
- *     <AiSessionProvider bffBaseUrl={config.bffBaseUrl} token={token} isAuthenticated={isAuthenticated} entityContext={entityContext}>
- *       <SpaarkeAiShell />
- *     </AiSessionProvider>
- *   </AuthProvider>
+ *   <AiSessionProvider bffBaseUrl={config.bffBaseUrl} entityContext={entityContext}>
+ *     <SpaarkeAiShell />
+ *   </AiSessionProvider>
  * </PaneEventBusProvider>
  */
 export function AiSessionProvider({
   children,
   bffBaseUrl,
-  token,
-  isAuthenticated,
   entityContext = null,
 }: AiSessionProviderProps): React.JSX.Element {
+  // ── Auth state from @spaarke/auth (function-based contract) ────────────
+  // Reads fresh on every render — `isAuthenticated` is a sync getter against
+  // the in-memory cache, `getAccessToken`/`authenticatedFetch` are stable
+  // function references re-emitted each call. No token string in state.
+  const { isAuthenticated, getAccessToken, authenticatedFetch, tenantId } = useAuth();
+
   // ── PaneEventBus dispatch (R2 multi-subscriber routing) ────────────────
   //
   // useDispatchPaneEvent() requires PaneEventBusProvider to be in the tree.
@@ -256,7 +273,7 @@ export function AiSessionProvider({
   useEffect(() => {
     // Only fetch context mapping when auth is ready and entity context is present.
     // Entityless mode: skip the fetch (contextMapping stays null).
-    if (!isAuthenticated || !token) return;
+    if (!isAuthenticated) return;
     if (!entityContext) return;
 
     let cancelled = false;
@@ -310,7 +327,11 @@ export function AiSessionProvider({
     return () => {
       cancelled = true;
     };
-  }, [bffBaseUrl, entityContext, isAuthenticated, token]);
+    // authenticatedFetch is a stable module-level function in @spaarke/auth and
+    // does not need to be a dep — including it would re-fire the effect on
+    // every render because useAuth() returns a new object each call.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bffBaseUrl, entityContext, isAuthenticated]);
 
   // ── Chat Session State (persisted to sessionStorage) ───────────────────
   const [chatSessionId, setChatSessionIdState] = useState<string | null>(
@@ -474,9 +495,11 @@ export function AiSessionProvider({
   // ── Compose context value ──────────────────────────────────────────────
   const value: AiSessionContextValue = useMemo(
     (): AiSessionContextValue => ({
-      // Auth
-      token,
+      // Auth (function-based contract — no token strings)
       isAuthenticated,
+      getAccessToken,
+      authenticatedFetch,
+      tenantId,
       bffBaseUrl,
 
       // Session
@@ -505,8 +528,10 @@ export function AiSessionProvider({
       isLoading,
     }),
     [
-      token,
       isAuthenticated,
+      getAccessToken,
+      authenticatedFetch,
+      tenantId,
       bffBaseUrl,
       chatSessionId,
       setChatSessionId,
