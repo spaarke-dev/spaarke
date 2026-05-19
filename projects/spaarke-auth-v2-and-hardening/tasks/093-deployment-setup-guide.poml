@@ -1,0 +1,33 @@
+<task id="AUTHV2-093" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Write docs/guides/auth-deployment-setup.md</title>
+    <phase>F — Engineering canonical docs</phase>
+    <tags>docs, guides, deployment, env-independence, MINIMAL</tags>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>090</dependencies>
+    <parallel-safe>F-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>Document the mechanical setup for deploying Spaarke auth to a new customer tenant. 4 client Dataverse env vars + 8 App Service settings + Key Vault secret names + verification steps. Goal: anyone with the tenant's resources can deploy auth with no architectural decisions.</prompt>
+  <role>Operations writer.</role>
+  <goal>Mechanical checklist that a customer's DevOps team can follow with zero engineering decisions.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §4.3 (env-independence checklist source)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create docs/guides/auth-deployment-setup.md.</step>
+    <step>List 4 client env vars (sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId) with Dataverse admin steps.</step>
+    <step>List 8 App Service settings with Azure portal/CLI commands.</step>
+    <step>List Key Vault secret names with creation commands.</step>
+    <step>Verification: hit /healthz, check console logs show tenant GUID in authority, MSAL regression test.</step>
+    <step>Add a customer-responsibilities section: CA policies, MFA, secret rotation cadence (customer-owned, per per-tenant model).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Guide is complete and mechanical (no engineering decisions needed by reader).</criterion>
+    <criterion>All 4 client vars + 8 server settings listed.</criterion>
+    <criterion>Verification steps included.</criterion>
+    <criterion>Customer responsibilities explicit.</criterion>
+  </acceptance-criteria>
+</task>

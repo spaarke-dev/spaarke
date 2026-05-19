@@ -1,0 +1,30 @@
+<task id="AUTHV2-082" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Fix Office Add-in useSaveFlow staleness</title>
+    <phase>B4 — Office Add-ins consolidation</phase>
+    <tags>auth, office-addins, hook, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>080</dependencies>
+    <parallel-safe>B4-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>useSaveFlow.ts has raw `Bearer ${accessToken}` at lines 526 + 864 in fetch calls. Replace with authenticatedFetch via useAuth().</prompt>
+  <role>Senior frontend engineer.</role>
+  <goal>No Bearer literals in useSaveFlow. authenticatedFetch used for all fetches.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Inside the hook, replace `const accessToken = ...` snapshots with `const { authenticatedFetch } = useAuth();`.</step>
+    <step>Replace fetch+manual-Bearer calls with authenticatedFetch.</step>
+    <step>Verify ESLint Bearer-literal ban doesn't flag anything in this file.</step>
+    <step>Test save flow end-to-end in deployed Outlook Add-in.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>useSaveFlow uses authenticatedFetch exclusively.</criterion>
+    <criterion>No Bearer literals.</criterion>
+    <criterion>Save flow works in deployed dev.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,37 @@
+<task id="AUTHV2-015" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Add version stamp + BroadcastChannel invalidation listener</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, observability, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>013</dependencies>
+    <parallel-safe>A-Parallel-2 (with 014, 016)</parallel-safe>
+  </metadata>
+  <prompt>
+    Add a version string to SpaarkeAuthProvider (e.g., '2.0.0') that gets logged on init. Helps detect un-rebuilt consumers in the wild (INV-8 violation surfaces as a version mismatch log instead of silent regression). Also wire the BroadcastChannel listener so all instances respect 'logout' events.
+  </prompt>
+  <role>Senior engineer focused on observability + cross-context coordination.</role>
+  <goal>
+    Library version visible in browser console on init. BroadcastChannel listener registered; logout events trigger clearCache in all contexts.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/SpaarkeAuthProvider.ts</file>
+      <file>src/client/shared/Spaarke.Auth/package.json (version field)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Add VERSION constant in src/index.ts derived from package.json version. Export it.</step>
+    <step>In SpaarkeAuthProvider constructor, console.info(`[SpaarkeAuth] v${VERSION} initialized`).</step>
+    <step>Subscribe BroadcastChannel 'spaarke-auth-events' on init; on {type: 'logout'} message, call this.clearAllCaches().</step>
+    <step>Ensure unsubscribe on dispose().</step>
+    <step>Run tsc --noEmit. Manual test: open two tabs, logout in one, verify clearCache happens in the other.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>VERSION constant exported.</criterion>
+    <criterion>Console log on init shows version.</criterion>
+    <criterion>BroadcastChannel listener triggers cache clear cross-tab.</criterion>
+    <criterion>Dispose cleans up the channel.</criterion>
+  </acceptance-criteria>
+</task>

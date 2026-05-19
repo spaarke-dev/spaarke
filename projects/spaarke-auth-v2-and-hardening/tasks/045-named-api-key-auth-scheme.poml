@@ -1,0 +1,35 @@
+<task id="AUTHV2-045" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Formalize named API key auth scheme</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, api-key, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>Endpoints like /api/admin/builder-scope/import and /api/ai/rag/* currently use ad-hoc header validation. Formalize as a named AuthenticationScheme so they integrate with the standard policy pipeline.</prompt>
+  <role>Senior .NET engineer with auth handler expertise.</role>
+  <goal>`AddAuthentication("ApiKey", ...)` scheme exists. Affected endpoints use `.RequireAuthorization("ApiKey")` instead of inline header checks.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Admin/AdminEndpoints.cs (builder-scope/import)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs (or wherever /api/ai/rag/* lives)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Implement ApiKeyAuthenticationHandler : AuthenticationHandler&lt;ApiKeyOptions&gt;. Reads `X-API-Key` header, validates against Key Vault-backed secret.</step>
+    <step>Register in DI: `services.AddAuthentication().AddScheme&lt;ApiKeyOptions, ApiKeyAuthenticationHandler&gt;("ApiKey", null)`.</step>
+    <step>Add `ApiKey:HashAlgorithm = SHA256` config option (constant-time compare).</step>
+    <step>Refactor affected endpoints to use `.RequireAuthorization(new AuthorizationPolicyBuilder("ApiKey").RequireAuthenticatedUser().Build())` instead of inline header checks.</step>
+    <step>Remove ad-hoc header validation code.</step>
+    <step>Document API key rotation procedure (Key Vault secret rotation).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ApiKey scheme registered via AddAuthentication.</criterion>
+    <criterion>Affected endpoints use the named scheme.</criterion>
+    <criterion>No inline header validation remains.</criterion>
+    <criterion>Constant-time compare used.</criterion>
+  </acceptance-criteria>
+</task>

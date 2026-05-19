@@ -1,0 +1,32 @@
+<task id="AUTHV2-047" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Fix appsettings.template.json — env-specific placeholders</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, config, env-independence, MINIMAL</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>Two config issues in appsettings.template.json: (1) AzureAd:TenantId is hardcoded "common" — should be #{TENANT_ID}#. (2) AgentToken:CopilotAudience hardcoded UUID `auth-3e04ab58-...` — should be parameterized.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>Template uses placeholders for all env-specific values. New customer-tenant deployment requires only placeholder substitution.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json (lines 36, 226)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §3 M-2, M-3</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Edit appsettings.template.json: line 36 change `"TenantId": "common"` to `"TenantId": "#{TENANT_ID}#"`.</step>
+    <step>Line 226: change `"CopilotAudience": "api://auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb/#{API_APP_ID}#"` to `"CopilotAudience": "api://#{COPILOT_SSO_PROVIDER_APP_ID}#/#{API_APP_ID}#"`.</step>
+    <step>Update deployment script (scripts/deploy-bff-api.ps1 or similar) to substitute COPILOT_SSO_PROVIDER_APP_ID from a parameter.</step>
+    <step>Update deployment parameter docs (env files, README) to add the new variable.</step>
+    <step>Re-deploy to dev and verify nothing broke.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No hardcoded "common" or UUIDs in appsettings.template.json for env-specific values.</criterion>
+    <criterion>Deployment script substitutes the new placeholders.</criterion>
+    <criterion>Dev deployment works with new template.</criterion>
+  </acceptance-criteria>
+</task>

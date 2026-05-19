@@ -1,0 +1,35 @@
+<task id="AUTHV2-024" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate PlaybookBuilder Code Page to function-based auth</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, code-page, react, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>
+    PlaybookBuilder has three files with raw `Bearer ${accessToken}` patterns. Replace all with useAuth() + authenticatedFetch.
+  </prompt>
+  <role>Senior React engineer.</role>
+  <goal>No raw Bearer literals in PlaybookBuilder; useAuth() is the only auth surface.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/aiPlaybookService.ts (line 279 raw Bearer)</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/dataverseClient.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/stores/templateStore.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Refactor aiPlaybookService.ts: remove accessToken parameter; use authenticatedFetch passed via constructor or service factory pattern.</step>
+    <step>Refactor dataverseClient.ts and templateStore.ts similarly.</step>
+    <step>Update PlaybookBuilder root component to obtain authenticatedFetch from useAuth() and pass to service constructors.</step>
+    <step>Run vite build for PlaybookBuilder. ESLint should catch any remaining Bearer literals.</step>
+    <step>Rebuild + redeploy PlaybookBuilder Code Page bundle.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No `Bearer ${...}` literals in PlaybookBuilder source.</criterion>
+    <criterion>Vite build succeeds.</criterion>
+    <criterion>PlaybookBuilder loads + works in deployed dev environment.</criterion>
+  </acceptance-criteria>
+</task>

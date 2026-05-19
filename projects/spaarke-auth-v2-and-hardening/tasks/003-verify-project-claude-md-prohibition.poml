@@ -1,0 +1,49 @@
+<task id="AUTHV2-003" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Verify project CLAUDE.md prohibition section is correct + complete</title>
+    <phase>0 — Pre-flight</phase>
+    <tags>docs, pre-flight, agent-enforcement</tags>
+    <status>not-started</status>
+    <estimated-effort>10 minutes</estimated-effort>
+    <dependencies>002</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>
+    The project's CLAUDE.md (this file: projects/spaarke-auth-v2-and-hardening/CLAUDE.md) already contains a "🚨 ACTIVE AUTH V2 REFACTOR — DO NOT REGRESS" section that lists MUST NOT and MUST rules. This is the highest-enforcement surface because project CLAUDE.md is auto-loaded every Claude Code session in this worktree.
+
+    Verify the prohibition section is correct and complete. Cross-check against the audit doc §8.2 Layer 3 (project CLAUDE.md prohibition specification). If any items are missing or wrong, fix them.
+
+    Specifically verify:
+    - All MUST NOT items from §8.2 Layer 3 are present
+    - All MUST items from §8.2 Layer 3 are present
+    - References to DEPRECATED-* filenames match the actual files (from task 001)
+    - Reference to the audit doc path is correct
+    - "When in doubt" escalation guidance is present
+  </prompt>
+  <role>Senior engineer verifying agent-enforcement surface. Precision matters; this file is loaded by every agent session.</role>
+  <goal>
+    Project CLAUDE.md prohibition section accurately captures all MUST/MUST NOT rules from audit §8.2 Layer 3. No discrepancies between this file and the canonical audit doc.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 Layer 3 (the spec for this prohibition)</file>
+      <file>projects/spaarke-auth-v2-and-hardening/CLAUDE.md (the file to verify)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 Layer 3 — note every MUST NOT and MUST bullet listed.</step>
+    <step>Read projects/spaarke-auth-v2-and-hardening/CLAUDE.md — find the "🚨 ACTIVE AUTH V2 REFACTOR — DO NOT REGRESS" section.</step>
+    <step>Cross-check: every bullet in §8.2 Layer 3 must appear in CLAUDE.md. Note discrepancies.</step>
+    <step>If discrepancies exist, edit CLAUDE.md to add missing items or fix wording. If no discrepancies, mark task complete.</step>
+    <step>Verify the DEPRECATED-* file references in CLAUDE.md match actual filenames from task 001.</step>
+    <step>Verify the path to AUDIT-FINDINGS-AUTH-SYSTEM.md is relative and resolves correctly.</step>
+    <step>If edits were made, commit with message: "docs(auth): align project CLAUDE.md prohibition with audit §8.2 (PF-11)" + standard footer.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Every MUST NOT bullet from audit §8.2 Layer 3 appears in project CLAUDE.md prohibition section.</criterion>
+    <criterion>Every MUST bullet from audit §8.2 Layer 3 appears in project CLAUDE.md.</criterion>
+    <criterion>DEPRECATED-* filename references match actual files from task 001.</criterion>
+    <criterion>Path to audit doc resolves correctly (relative path test).</criterion>
+    <criterion>"When in doubt" escalation guidance is present.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,29 @@
+<task id="AUTHV2-064" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Refresh token rotation integration test</title>
+    <phase>D — Reasonable security hardening</phase>
+    <tags>security, library, tests, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>Phase A</dependencies>
+    <parallel-safe>D-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>MSAL handles RT rotation by default. Add an integration test that confirms it actually happens (catches regression if Microsoft changes defaults).</prompt>
+  <role>Test engineer.</role>
+  <goal>Test that triggers an MSAL silent refresh and verifies the new RT differs from the old RT.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/tests/ (test directory)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Mock MSAL response to include refresh_token_1.</step>
+    <step>Trigger acquireTokenSilent → expect MSAL to use RT1, get back AT2 + RT2.</step>
+    <step>Assert RT2 !== RT1.</step>
+    <step>Document the test purpose in a comment.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Test exists and passes.</criterion>
+    <criterion>Test would fail if MSAL stops rotating RTs.</criterion>
+  </acceptance-criteria>
+</task>

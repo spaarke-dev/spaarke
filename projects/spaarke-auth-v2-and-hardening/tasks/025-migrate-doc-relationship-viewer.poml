@@ -1,0 +1,28 @@
+<task id="AUTHV2-025" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate DocumentRelationshipViewer Code Page</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, code-page, react, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>023</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>Single file — VisualizationApiService.ts:40 has direct `headers.Authorization = 'Bearer ${accessToken}'`. Replace with authenticatedFetch.</prompt>
+  <role>Senior React engineer.</role>
+  <goal>No raw Bearer literals in DocumentRelationshipViewer; uses authenticatedFetch.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Refactor VisualizationApiService to take authenticatedFetch in constructor; remove accessToken param.</step>
+    <step>Update consumer component to obtain via useAuth().</step>
+    <step>Vite build. Rebuild + redeploy bundle.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No Bearer literals in source.</criterion>
+    <criterion>Build succeeds; component loads in dev.</criterion>
+  </acceptance-criteria>
+</task>

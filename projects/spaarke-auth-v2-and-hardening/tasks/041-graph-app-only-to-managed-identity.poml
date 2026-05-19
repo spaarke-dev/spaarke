@@ -1,0 +1,32 @@
+<task id="AUTHV2-041" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate Graph app-only auth to DefaultAzureCredential (managed identity)</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, managed-identity, graph, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>040</dependencies>
+    <parallel-safe>C-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>GraphClientFactory.cs:90 uses ClientSecretCredential for Graph app-only flows (background jobs, SpeAdminGraphService). Migrate to DefaultAzureCredential so App Service managed identity is used. Eliminates a secret rotation surface.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>Graph app-only client uses DefaultAzureCredential. No ClientSecretCredential for Graph anywhere.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs (line 90 — current ClientSecretCredential)</file>
+      <file>.claude/patterns/auth/service-principal.md</file>
+      <file>.claude/patterns/auth/obo-flow.md (note: OBO flow stays — only app-only changes)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>In GraphClientFactory.cs, replace `new ClientSecretCredential(tenantId, clientId, clientSecret)` with `new DefaultAzureCredential()` (or `new ManagedIdentityCredential()` for explicit MI).</step>
+    <step>Verify App Service managed identity has Microsoft Graph permissions: `FileStorageContainer.Selected`, `Files.Read.All`, etc. (whatever app-only scopes the current ClientSecret has).</step>
+    <step>Remove `AzureAd:ClientSecret` from any code path that only used it for Graph app-only.</step>
+    <step>Build + deploy to dev. Test SpeAdminGraphService operations (admin endpoints).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>GraphClientFactory uses DefaultAzureCredential for app-only.</criterion>
+    <criterion>App Service MI has all required Graph permissions.</criterion>
+    <criterion>SpeAdminGraphService endpoints work in deployed dev.</criterion>
+  </acceptance-criteria>
+</task>

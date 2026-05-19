@@ -1,0 +1,30 @@
+<task id="AUTHV2-046" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Add idempotency guard in PostConfigure JwtBearerOptions</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, robustness, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>AuthorizationModule.cs:29-48 PostConfigure mutates TokenValidationParameters. If called twice (DI quirk) or chained incorrectly, audience list could be lost. Add idempotency guard + log warning if audience list ends up empty.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>PostConfigure is safe to call multiple times. Empty audience list triggers loud warning at startup.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs (lines 29-48)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing PostConfigure logic.</step>
+    <step>Add guard: at start of PostConfigure delegate, check if a marker key is already set in options.TokenValidationParameters; if so, skip. Set marker after first run.</step>
+    <step>After mutating audiences, log: if (audiences.Count == 0) logger.LogCritical("JWT audience list is empty after PostConfigure — all tokens will fail validation").</step>
+    <step>Unit test: call PostConfigure twice; verify audiences are added only once.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>PostConfigure is idempotent.</criterion>
+    <criterion>Empty audience list triggers critical log.</criterion>
+    <criterion>Unit test passes.</criterion>
+  </acceptance-criteria>
+</task>

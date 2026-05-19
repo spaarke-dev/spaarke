@@ -1,0 +1,50 @@
+<task id="AUTHV2-002" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Apply STOP banners to partially-superseded auth pattern docs</title>
+    <phase>0 — Pre-flight</phase>
+    <tags>docs, pre-flight, deprecation</tags>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>001</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>
+    Five docs contain content that is PARTIALLY superseded by Spaarke Auth v2 — some sections remain canonical, others are obsolete. We can't rename them (canonical parts stay). Instead, add visually disruptive STOP banners at the top of each file with a file-specific "what IS still canonical" exception line. The banner must be impossible to miss when an agent reads the file.
+
+    Use the exact template from .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 Layer 2 (search for "🛑 STOP — DO NOT USE THIS DOCUMENT FOR NEW AUTH WORK 🛑"). Customize the "What IS still canonical in this file:" line per the table in §8.2 (e.g., for spaarke-sso-binding.md the canonical section is "Required MSAL Configuration" — INV-1..INV-7).
+
+    Also add lighter "v2 transition" notes to two docs/architecture/ files.
+  </prompt>
+  <role>Senior engineer doing pre-flight communication setup. The wording matters — must be unambiguous to AI agents.</role>
+  <goal>
+    Every affected pattern/constraint/architecture doc has a banner at the top that an agent CANNOT miss when reading. Each banner names what stays canonical so agents know to read past the banner for that content. No content removed; only banners added.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 (Layer 2 — STOP banner template + per-file exceptions)</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/token-caching.md</file>
+      <file>docs/architecture/AUTH-AND-BFF-URL-PATTERN.md</file>
+      <file>docs/architecture/sdap-auth-patterns.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the audit doc §8.2 Layer 2 template carefully — copy it verbatim, then customize the "What IS still canonical in this file:" line per the per-file table.</step>
+    <step>Edit .claude/patterns/auth/spaarke-sso-binding.md — insert banner at the very top (before any other content). Canonical exception: '§"Required MSAL Configuration" (INV-1..INV-7) and §"Bundling Reality (CRITICAL)" (INV-8) remain canonical and ARE preserved by v2 literal lift. Cascade and strategy details are pre-v2.'</step>
+    <step>Edit .claude/constraints/auth.md — insert banner at top. Canonical exception: 'OAuth/OBO server-side MUST rules (lines 31-37); MSAL client config invariants (lines 38-44); BFF URL helper rules (lines 92-126) remain canonical. Client-side cascade rules (lines 43, 70) are pre-v2.'</step>
+    <step>Edit .claude/patterns/auth/token-caching.md — insert banner at top. Canonical exception: 'Server-side Redis OBO caching content remains canonical. Client-side cache cascade is pre-v2.'</step>
+    <step>Edit docs/architecture/AUTH-AND-BFF-URL-PATTERN.md — insert banner at top. Canonical exception: '`buildBffApiUrl()` URL construction unchanged in v2. Token acquisition section is pre-v2.'</step>
+    <step>Edit docs/architecture/sdap-auth-patterns.md — insert banner at top. Canonical exception: 'OBO flow taxonomy + server-side auth patterns remain canonical. Client-side cascade/snapshot patterns are pre-v2.'</step>
+    <step>Edit the two DEPRECATED-* files from task 001 — add a stronger banner that says the WHOLE file is deprecated (no exception line).</step>
+    <step>Verify each banner renders correctly in plain markdown (no broken syntax). Visual check via cat or Read.</step>
+    <step>Commit with message: "docs(auth): apply STOP banners to pre-v2 auth pattern docs (PF-4..PF-8)" + standard footer.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 5 partially-superseded docs have the STOP banner at the top with file-specific canonical exception.</criterion>
+    <criterion>Both DEPRECATED-* files have a full-deprecation banner with no exception.</criterion>
+    <criterion>Banner format matches the §8.2 Layer 2 template (visual horizontal rule, 🛑 emoji, all-caps lines).</criterion>
+    <criterion>No content removed from any file (canonical sections preserved verbatim, just below the banner).</criterion>
+    <criterion>Markdown renders correctly; no broken links or syntax.</criterion>
+  </acceptance-criteria>
+</task>

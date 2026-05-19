@@ -1,0 +1,34 @@
+<task id="AUTHV2-028" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Verify + rebuild all PCFs against @spaarke/auth v2</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, pcf, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>Phase A</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>PCFs (UniversalDatasetGrid, UniversalQuickCreate, SpeDocumentViewer, others) already use @spaarke/auth correctly per audit. Verify no compile errors from v2 library changes, rebuild + redeploy each. Critical for INV-8 (bundling reality).</prompt>
+  <role>PCF deployment engineer.</role>
+  <goal>Every PCF rebuilt against @spaarke/auth v2 and redeployed. No PCF stays on old library (would cause popup regression).</goal>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalDatasetGrid/</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+      <file>src/client/pcf/SpeDocumentViewer/</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md (deploy procedure)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>List all PCFs in src/client/pcf/. For each: run npm run build:prod (NOT npm run build — see CLAUDE.md AP-1).</step>
+    <step>If any fail compile, fix usage to match v2 API (likely just import path changes).</step>
+    <step>Run pcf-deploy skill for each PCF to push solution ZIP to Dataverse dev environment.</step>
+    <step>Verify in browser that each PCF loads without popup (MSAL regression check).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Every PCF builds with npm run build:prod (production mode).</criterion>
+    <criterion>Every PCF deployed to dev Dataverse environment.</criterion>
+    <criterion>MSAL regression test passes on each PCF.</criterion>
+    <criterion>No PCF references the OLD @spaarke/auth API.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,32 @@
+<task id="AUTHV2-027" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate SemanticSearch Code Page + External SPA</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, code-page, spa, react, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>SemanticSearch has a separate MsalAuthProvider that returns `Bearer ${token}` strings. External SPA has bff-client.ts with raw Bearer headers. Migrate both to @spaarke/auth.</prompt>
+  <role>Senior React engineer.</role>
+  <goal>SemanticSearch + External SPA use @spaarke/auth v2 useAuth() hook + authenticatedFetch. No parallel auth stacks.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/SemanticSearch/src/services/auth/MsalAuthProvider.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/services/authInit.ts</file>
+      <file>src/client/external-spa/src/auth/bff-client.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>SemanticSearch: replace MsalAuthProvider.ts + authInit.ts with @spaarke/auth initAuth() call. Migrate consumers to useAuth().</step>
+    <step>External SPA: replace bff-client.ts manual Bearer headers with authenticatedFetch.</step>
+    <step>Note: External SPA may need NaaStrategy or B2B-specific strategy in the future — for now use BrowserMsalStrategy default.</step>
+    <step>Vite build for both. Deploy bundles.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>SemanticSearch no longer has MsalAuthProvider.ts (deleted or stub re-export).</criterion>
+    <criterion>External SPA bff-client uses authenticatedFetch.</criterion>
+    <criterion>Both build cleanly + load in dev.</criterion>
+  </acceptance-criteria>
+</task>

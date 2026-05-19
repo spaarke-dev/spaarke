@@ -1,0 +1,30 @@
+<task id="AUTHV2-081" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Fix Office Add-in SseClient staleness</title>
+    <phase>B4 — Office Add-ins consolidation</phase>
+    <tags>auth, office-addins, sse, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>080</dependencies>
+    <parallel-safe>B4-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>SseClient.ts:78 captures accessToken from props and uses it in EventSource. EventSource cannot auto-retry on 401. Replace with getAccessToken() called right before opening the stream + close+reopen on 401.</prompt>
+  <role>Senior frontend engineer.</role>
+  <goal>SseClient gets fresh token per stream-open. No accessToken snapshot.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/taskpane/services/SseClient.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Refactor SseClient constructor: take getAccessToken function instead of accessToken string.</step>
+    <step>Call getAccessToken() right before new EventSource() to ensure freshness.</step>
+    <step>On EventSource error with 401: close current stream, getAccessToken() again, open new EventSource. Capped retry (max 3).</step>
+    <step>Test SSE flow in Outlook Add-in deployed to dev.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>SseClient takes getAccessToken function, not token string.</criterion>
+    <criterion>Token freshness verified at every stream open.</criterion>
+    <criterion>401 mid-stream triggers reopen with fresh token.</criterion>
+  </acceptance-criteria>
+</task>

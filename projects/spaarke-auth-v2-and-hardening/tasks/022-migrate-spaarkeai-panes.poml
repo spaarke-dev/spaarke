@@ -1,0 +1,44 @@
+<task id="AUTHV2-022" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate SpaarkeAi panes to function-based auth</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, code-page, react, spaarkeai, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>020</dependencies>
+    <parallel-safe>B-Parallel-1 (with 023)</parallel-safe>
+  </metadata>
+  <prompt>
+    Update all SpaarkeAi panes that destructured `.token` from useAiSession() to use the function-based API instead. For BFF calls, use authenticatedFetch. For SSE streaming, use getAccessToken() at stream-open.
+  </prompt>
+  <role>Senior React engineer.</role>
+  <goal>
+    No SpaarkeAi pane references `.token` from useAiSession() or accepts token as a prop. All BFF calls use authenticatedFetch.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/ChatHistoryPanel.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/ChatPanel.tsx (R1 legacy — check if still used)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/components/FeedbackButtons.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>For each file: replace `const { token, ... } = useAiSession();` with `const { authenticatedFetch, getAccessToken, ... } = useAiSession();`. Remove `token` from any prop chain.</step>
+    <step>Replace any `fetch(url, { headers: { Authorization: \`Bearer \${token}\` } })` with `authenticatedFetch(url, init)`.</step>
+    <step>For SprkChat invocations in ConversationPane: pass `authenticatedFetch` and `getAccessToken` as props (the new SprkChat API from task 023). Do NOT pass token.</step>
+    <step>If ChatPanel.tsx (R1 legacy) is unused, delete it. Otherwise migrate.</step>
+    <step>Run vite build. Verify no token-prop-chain compile errors.</step>
+    <step>Run MSAL regression test after build (clear caches, close browser, reopen, no popup expected).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No `.token` destructuring from useAiSession() in any SpaarkeAi pane.</criterion>
+    <criterion>No raw `Authorization: Bearer ${...}` literals in SpaarkeAi source.</criterion>
+    <criterion>Vite build succeeds.</criterion>
+    <criterion>MSAL regression test passes.</criterion>
+    <criterion>Idle-then-resume test: leave SpaarkeAi idle >80 min, return, attempt chat — succeeds (the original 401 bug).</criterion>
+  </acceptance-criteria>
+</task>

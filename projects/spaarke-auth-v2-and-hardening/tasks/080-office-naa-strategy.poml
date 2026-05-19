@@ -1,0 +1,34 @@
+<task id="AUTHV2-080" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement OfficeNaaStrategy in @spaarke/auth</title>
+    <phase>B4 — Office Add-ins consolidation</phase>
+    <tags>auth, office-addins, naa, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>Phase A</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Office Add-ins use Nested App Authentication (NAA) — different MSAL config than Dataverse. Add OfficeNaaStrategy implementing the AuthStrategy interface so Add-ins can use @spaarke/auth's useAuth() hook with NAA behavior under the hood. Deprecate the parallel authConfig.ts MSAL stack.</prompt>
+  <role>Office Add-ins + MSAL.js + NAA expertise.</role>
+  <goal>Office Add-ins use @spaarke/auth.initAuth({ strategy: new OfficeNaaStrategy(config) }). authConfig.ts deleted or stub re-export.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/auth/authConfig.ts (current NAA setup — port logic)</file>
+      <file>src/client/office-addins/shared/auth/NaaAuthService.ts</file>
+      <file>src/client/office-addins/shared/auth/DialogAuthService.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Implement src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts. Wrap NAA MSAL config (brk-multihub://localhost redirect, NAA broker).</step>
+    <step>Move logic from NaaAuthService.ts + DialogAuthService.ts into the strategy.</step>
+    <step>Update Office Add-in init code to call initAuth({ strategy: new OfficeNaaStrategy(...) }) — replaces authConfig.ts module-level setup.</step>
+    <step>Delete authConfig.ts, NaaAuthService.ts, DialogAuthService.ts (or stub them as deprecated re-exports for back-compat in the short term).</step>
+    <step>Rebuild + deploy Outlook + Word Add-ins.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>OfficeNaaStrategy implements AuthStrategy interface.</criterion>
+    <criterion>Office Add-ins use unified initAuth + useAuth pattern.</criterion>
+    <criterion>Separate authConfig.ts stack gone (or reduced to stubs).</criterion>
+    <criterion>Add-ins build + load in Outlook/Word.</criterion>
+  </acceptance-criteria>
+</task>

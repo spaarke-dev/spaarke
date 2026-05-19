@@ -1,0 +1,33 @@
+<task id="AUTHV2-063" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Step-up auth scaffolding — [RequiresStepUp] attribute + middleware</title>
+    <phase>D — Reasonable security hardening</phase>
+    <tags>security, server, step-up, mfa, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>D-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>Some operations should require fresh MFA challenge (delete-matter, export-data, modify-admin-permissions). Implement [RequiresStepUp] attribute + middleware that returns 401 with claims challenge when current token's acr doesn't meet minimum. Customer's CA policy decides what acr levels mean.</prompt>
+  <role>Security engineer.</role>
+  <goal>Mechanism exists. 2-3 sensitive ops tagged as proof points. Client receives 401 with WWW-Authenticate claims challenge; MSAL handles step-up via popup.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ (location for new middleware)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §"What they'd add" #8 (step-up)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create RequiresStepUpAttribute (endpoint metadata).</step>
+    <step>Create StepUpMiddleware (endpoint filter or middleware) that reads attribute, checks ClaimsPrincipal.acr; if missing or below threshold, returns 401 with WWW-Authenticate: Bearer error="insufficient_user_authentication", claims=...</step>
+    <step>Apply to 2-3 sensitive ops as proof: e.g., DELETE /api/matters/{id}, POST /api/exports/start, PATCH /api/admin/permissions.</step>
+    <step>Document acr-level mapping (acr=1 → no MFA, acr=urn:mace:incommon:iap:silver → MFA, customer-policy specific).</step>
+    <step>Client-side: in useAuth(), expose stepUp(claims) that re-triggers MSAL with claims challenge.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>RequiresStepUpAttribute + middleware exist.</criterion>
+    <criterion>2-3 endpoints tagged.</criterion>
+    <criterion>Client receives proper 401 + claims challenge.</criterion>
+    <criterion>MSAL popup flow handles the challenge correctly.</criterion>
+  </acceptance-criteria>
+</task>

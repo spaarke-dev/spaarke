@@ -1,0 +1,35 @@
+<task id="AUTHV2-090" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Draft ADR-027: Spaarke Auth Architecture</title>
+    <phase>F — Engineering canonical docs</phase>
+    <tags>docs, adr, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>All prior phases (A-E + B4) complete</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>Write ADR-027 capturing the v2 architecture. Replaces or amends prior auth ADRs (ADR-003, ADR-004, ADR-008, ADR-009 — note relationship). Becomes canonical reference for future engineering work.</prompt>
+  <role>Engineering writer + architect.</role>
+  <goal>ADR-027 exists at .claude/adr/ADR-027-spaarke-auth-architecture.md and docs/adr/ADR-027-spaarke-auth-architecture.md. References audit doc as the design rationale. Captures: function-based contract, pluggable strategies, MSAL invariants, per-tenant deployment, named auth schemes, deferred items.</prompt>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md (full design — distill into ADR)</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md (existing — relationship)</file>
+      <file>.claude/adr/ADR-009-redis-caching.md (existing — relationship)</file>
+      <file>docs/adr/ (full ADR format reference — pick one to model)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Write the concise version at .claude/adr/ADR-027-spaarke-auth-architecture.md (~100 lines). Sections: Status, Decision, Constraints (MUST/MUST NOT), Implementation Patterns, Integration with Other ADRs, Source Documentation pointer.</step>
+    <step>Write the full version at docs/adr/ADR-027-spaarke-auth-architecture.md (~500 lines). Captures rationale, alternatives considered, consequences.</step>
+    <step>Status: Accepted (assumes user approval at end of project).</step>
+    <step>Update .claude/adr/INDEX.md (or wherever ADRs are indexed) to list ADR-027.</step>
+    <step>Cross-link: existing ADRs that touch auth get a "See also: ADR-027" reference.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ADR-027 exists in both .claude/adr/ and docs/adr/.</criterion>
+    <criterion>Captures the 8 D-AUTH decisions from project CLAUDE.md.</criterion>
+    <criterion>Relationship to prior auth ADRs documented.</criterion>
+    <criterion>Index/INDEX.md updated.</criterion>
+  </acceptance-criteria>
+</task>

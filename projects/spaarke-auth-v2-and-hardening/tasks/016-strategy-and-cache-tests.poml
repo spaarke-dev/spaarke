@@ -1,0 +1,36 @@
+<task id="AUTHV2-016" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Write unit tests for BrowserMsalStrategy + InMemoryCache</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, tests, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>011, 012</dependencies>
+    <parallel-safe>A-Parallel-2 (with 014, 015)</parallel-safe>
+  </metadata>
+  <prompt>
+    Cover the new strategy + cache layer with unit tests. Tests for BrowserMsalStrategy (mocked MSAL) and InMemoryCache (mocked inner strategy). Coverage targets: happy path acquire, exp validation triggers refresh, 401 retry path, popup fallback path.
+  </prompt>
+  <role>Test engineer.</role>
+  <goal>
+    >= 80% line coverage for new strategy + cache code. Tests for the four critical paths above.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/tests/CacheStrategy.test.ts (existing pattern reference)</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/BrowserMsalStrategy.ts (from 011)</file>
+      <file>src/client/shared/Spaarke.Auth/src/strategies/InMemoryCache.ts (from 012)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create tests/BrowserMsalStrategy.test.ts. Mock MSAL.PublicClientApplication. Test: acquireTokenSilent success, ssoSilent fallback, popup last resort, JWT exp validation.</step>
+    <step>Create tests/InMemoryCache.test.ts. Test: cache hit (fresh), cache miss (expired triggers inner.acquire), clearCache cascades, JWT exp buffer logic.</step>
+    <step>Run jest. Verify coverage report shows new files >= 80%.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>tests/BrowserMsalStrategy.test.ts exists with >= 5 test cases.</criterion>
+    <criterion>tests/InMemoryCache.test.ts exists with >= 4 test cases.</criterion>
+    <criterion>All tests pass.</criterion>
+    <criterion>Coverage >= 80% for the two new files.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,31 @@
+<task id="AUTHV2-091" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Update spaarke-sso-binding.md — retire cascade section, keep INV-1..INV-8</title>
+    <phase>F — Engineering canonical docs</phase>
+    <tags>docs, patterns, MINIMAL</tags>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>090</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>Update spaarke-sso-binding.md to reflect v2: remove the 6-strategy cascade section (replaced by ADR-027); keep INV-1..INV-8 (MSAL config + Bundling Reality); remove the STOP banner from task 002 (no longer in-flux).</prompt>
+  <role>Engineering writer.</role>
+  <goal>spaarke-sso-binding.md is canonical for INV-1..INV-8 only. Points to ADR-027 for full architecture. STOP banner removed.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Remove the STOP banner added in task 002.</step>
+    <step>Remove or shorten the "6-Strategy Token Acquisition Chain" section — replace with a brief note: "v2 uses MSAL strategy + in-memory cache wrapper. See ADR-027 for details."</step>
+    <step>Keep Required MSAL Configuration section (INV-1..INV-3) unchanged.</step>
+    <step>Keep Bundling Reality section (INV-8) unchanged.</step>
+    <step>Add link to ADR-027 prominently.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>STOP banner removed.</criterion>
+    <criterion>Cascade section replaced with pointer to ADR-027.</criterion>
+    <criterion>INV-1..INV-8 content preserved.</criterion>
+  </acceptance-criteria>
+</task>

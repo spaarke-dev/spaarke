@@ -1,0 +1,28 @@
+<task id="AUTHV2-072" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Dependabot config for npm + nuget</title>
+    <phase>E — CI / Bundling hygiene</phase>
+    <tags>ci, dependencies, MINIMAL</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>E-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>Add Dependabot config so security updates open auto-PRs.</prompt>
+  <role>DevOps engineer.</role>
+  <goal>Dependabot opens PRs for npm + nuget security patches.</goal>
+  <knowledge>
+    <files>
+      <file>.github/dependabot.yml (target file)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create .github/dependabot.yml with npm + nuget ecosystem entries.</step>
+    <step>Configure weekly schedule. Group security updates separately.</step>
+    <step>Verify Dependabot recognizes the file (check repo Insights → Dependabot).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>dependabot.yml exists and is recognized by GitHub.</criterion>
+    <criterion>Weekly schedule active.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,44 @@
+<task id="AUTHV2-014" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement logout() API — client + server endpoint + Redis OBO invalidation</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, server, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>013</dependencies>
+    <parallel-safe>A-Parallel-2 (with 015, 016)</parallel-safe>
+  </metadata>
+  <prompt>
+    Implement a proper logout flow. Client: MSAL logoutPopup() + clear in-memory cache + BroadcastChannel invalidation message ('logout' event). Server: new POST /api/auth/logout endpoint that purges per-user OBO Redis entries (keyed by user oid).
+
+    Currently clearAllCaches exists but isn't called consistently. logout() bundles it into a single API.
+  </prompt>
+  <role>Full-stack engineer — TypeScript + .NET.</role>
+  <goal>
+    useAuth().logout() invocation: triggers MSAL logout, clears client caches, broadcasts logout to other tabs/iframes, and invalidates server-side OBO tokens for the user. After logout, attempting any BFF call returns 401.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Auth/src/SpaarkeAuthProvider.ts (existing clearAllCaches at line 171)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs (OBO Redis cache pattern, line 143)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Agent/AgentTokenService.cs (OBO cache key pattern, line 28)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Client: implement logout() in BrowserMsalStrategy and expose via SpaarkeAuthProvider. Sequence: MSAL.logoutPopup() (or logoutRedirect if popup blocked) → clearCache (in-memory) → BroadcastChannel.postMessage({type: 'logout'}).</step>
+    <step>Add BroadcastChannel 'spaarke-auth-events' singleton in initAuth.ts. Other contexts (other tabs/PCFs) listen for {type: 'logout'} and clear their in-memory caches in response.</step>
+    <step>Client: after MSAL logout completes, call authenticatedFetch('/api/auth/logout', {method: 'POST'}) — server-side OBO invalidation.</step>
+    <step>Server: add /api/auth/logout endpoint in a new AuthEndpoints.cs file. Requires authorization. Extracts user oid from claim. Calls IOboTokenCache.InvalidateForUser(oid) — implement that method on the existing OBO cache services (GraphClientFactory + AgentTokenService).</step>
+    <step>Server: IOboTokenCache.InvalidateForUser implementation: enumerate Redis keys matching `sdap:obo:*:{oidHash}:*` and delete. Use SCAN to avoid blocking.</step>
+    <step>Update useAuth() to expose logout from the provider.</step>
+    <step>Write integration test: simulated logout → verify cache cleared client-side + Redis keys deleted server-side.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>useAuth().logout() exists and is callable.</criterion>
+    <criterion>Client cache clears on logout.</criterion>
+    <criterion>BroadcastChannel 'logout' message fired and received by other contexts.</criterion>
+    <criterion>POST /api/auth/logout endpoint exists and requires auth.</criterion>
+    <criterion>Server endpoint invalidates per-user OBO entries in Redis.</criterion>
+    <criterion>Integration test passes.</criterion>
+  </acceptance-criteria>
+</task>

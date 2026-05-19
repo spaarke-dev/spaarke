@@ -1,0 +1,33 @@
+<task id="AUTHV2-042" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate Dataverse service identity to DefaultAzureCredential</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, managed-identity, dataverse, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>040</dependencies>
+    <parallel-safe>C-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>Multiple job handlers (PlaybookSharingService, DocumentCheckoutService, BulkRagIndexingJobHandler, etc.) read Dataverse:ClientSecret and construct ClientSecretCredential independently. Migrate all to DefaultAzureCredential (or centralized factory). Requires App Service MI to have Dataverse application user with appropriate roles.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>No Dataverse:ClientSecret read anywhere in code. All Dataverse service principal flows use managed identity.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/ (grep for ClientSecretCredential)</file>
+      <file>src/server/api/Sprk.Bff.Api/ (grep for Dataverse:ClientSecret)</file>
+      <file>.claude/patterns/auth/dataverse-obo.md (OBO flow unchanged)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Grep server src for all ClientSecretCredential usages. For each, identify if it's Dataverse-scoped.</step>
+    <step>Replace with DefaultAzureCredential. Consider creating a centralized DataverseCredentialFactory if many sites use the same pattern.</step>
+    <step>Configure App Service managed identity as a Dataverse application user via Power Platform admin center. Assign Spaarke Service Account role (or equivalent).</step>
+    <step>Build + deploy to dev. Test affected job handlers (run a manual job for each).</step>
+    <step>Remove Dataverse:ClientSecret from appsettings.template.json (or mark as deprecated).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No ClientSecretCredential references for Dataverse scope.</criterion>
+    <criterion>App Service MI is a Dataverse application user with required roles.</criterion>
+    <criterion>All affected job handlers execute successfully against Dataverse.</criterion>
+  </acceptance-criteria>
+</task>

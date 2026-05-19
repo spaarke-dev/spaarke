@@ -1,0 +1,33 @@
+<task id="AUTHV2-026" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate AnalysisWorkspace Code Page</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, code-page, react, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>AnalysisWorkspace has mixed code paths — some correct (per-request getAccessToken), some snapshot-based. Find all `Bearer ${token}` literals and replace with authenticatedFetch.</prompt>
+  <role>Senior React engineer.</role>
+  <goal>All AnalysisWorkspace BFF calls use authenticatedFetch. Mixed-pattern problem resolved.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/analysisApi.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/ (all service files)</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/context/AnalysisAiContext.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Grep AnalysisWorkspace for `Bearer ${` patterns and accessToken/token props.</step>
+    <step>Refactor each service to take authenticatedFetch; remove accessToken params.</step>
+    <step>Update AnalysisAiContext to use useAuth() internally; no token in context value.</step>
+    <step>SprkChat usage in AnalysisWorkspace: pass authenticatedFetch + getAccessToken (new SprkChat API from 023).</step>
+    <step>Vite build. Rebuild + redeploy bundle.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No Bearer literals in AnalysisWorkspace source.</criterion>
+    <criterion>AnalysisAiContext exposes function-based API.</criterion>
+    <criterion>Build succeeds; loads in dev with SprkChat working.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,30 @@
+<task id="AUTHV2-092" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Update .claude/constraints/auth.md — function-based contract MUST rule</title>
+    <phase>F — Engineering canonical docs</phase>
+    <tags>docs, constraints, MINIMAL</tags>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>090</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>Update constraints/auth.md: add MUST rule for function-based contract; remove client-cascade rules (superseded); remove STOP banner.</prompt>
+  <role>Engineering writer.</role>
+  <goal>Constraints file aligned with v2. Function-based contract is binding.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Remove STOP banner from task 002.</step>
+    <step>Update client-side MSAL section: keep INV-1..INV-3 rules; remove "6-strategy chain" reference; add "MUST use useAuth() hook + authenticatedFetch — no token: string in public APIs".</step>
+    <step>Add MUST NOT: "MUST NOT expose token: string or accessToken: string as a value in any component prop, hook return, or context".</step>
+    <step>Reference ADR-027 as source.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Function-based contract MUST rule present.</criterion>
+    <criterion>STOP banner removed.</criterion>
+    <criterion>Cascade rules removed.</criterion>
+  </acceptance-criteria>
+</task>

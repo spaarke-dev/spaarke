@@ -1,0 +1,36 @@
+<task id="AUTHV2-044" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Replace webhook clientState with HMAC-SHA256 signature validation</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, security, webhooks, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>/api/communications/incoming-webhook and /api/v1/emails/webhook-trigger currently use plain string match for clientState (CommunicationEndpoints.cs:401). Replace with HMAC-SHA256 signature validation. Remove DEVELOPMENT_MODE bypass.</prompt>
+  <role>Senior .NET engineer + Graph webhooks expertise.</role>
+  <goal>Webhook handlers verify HMAC signature before processing. No bypass. Compromise of webhook URL alone insufficient to forge notifications.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Communication/CommunicationEndpoints.cs (line 401)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Email/EmailWebhookEndpoints.cs (or similar)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §3 C-3</file>
+      <file>.claude/patterns/auth/graph-webhooks.md (Graph webhook reference)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Add Communication:WebhookSigningKey and Email:WebhookSigningKey as Key Vault references in appsettings.template.json.</step>
+    <step>Implement WebhookSignatureFilter (endpoint filter) that reads X-Hub-Signature-256 header (or equivalent), computes HMAC-SHA256(secret, body), compares constant-time.</step>
+    <step>Apply filter to /api/communications/incoming-webhook and /api/v1/emails/webhook-trigger.</step>
+    <step>Remove DEVELOPMENT_MODE bypass entirely.</step>
+    <step>Update Graph subscription registration to include signing key (Graph sends X-Hub-Signature-256 or similar).</step>
+    <step>Test: valid signature passes; tampered body fails; missing signature fails.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>WebhookSignatureFilter exists and validates HMAC-SHA256.</criterion>
+    <criterion>Both webhook endpoints require the filter (verified by integration test).</criterion>
+    <criterion>No DEVELOPMENT_MODE bypass remains.</criterion>
+    <criterion>Constant-time comparison used (prevent timing attacks).</criterion>
+  </acceptance-criteria>
+</task>

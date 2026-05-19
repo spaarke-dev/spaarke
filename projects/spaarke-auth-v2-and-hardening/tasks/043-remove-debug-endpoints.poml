@@ -1,0 +1,31 @@
+<task id="AUTHV2-043" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Remove /debug/* endpoints (or compile-time gate to non-prod)</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, security, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>7 debug endpoints currently anonymous including /debug/token which logs JWT claims (security risk per audit C-2). Delete entirely or #if DEBUG guard.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>No /debug/* endpoints reachable in production build. /debug/token specifically gone.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/DebugEndpointExtensions.cs (or wherever /debug/* are mapped)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs (/debug/{documentId})</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §3 C-2 + §2.1 unprotected endpoints list</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Locate all /debug/* route maps. List them.</step>
+    <step>Option A (preferred): delete the entire file/section. Option B: wrap in `#if DEBUG` so they only compile in Debug builds.</step>
+    <step>Build in Release mode and verify /debug/* return 404.</step>
+    <step>Update audit doc inventory if needed.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Release build returns 404 for /debug/token, /debug/dlq, /debug/handlers, /debug/services, /debug/{documentId} (visualization), and any others.</criterion>
+    <criterion>Endpoint inventory test confirms no /debug/* in production.</criterion>
+  </acceptance-criteria>
+</task>
