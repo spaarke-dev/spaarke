@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 18/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 6/11)
-> **Status**: In Progress (Phase B Wave 1 complete — App.tsx, panes, SprkChat API, PCFs verified, dup buildBffApiUrl deleted)
+> **Total Tasks**: 23/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11)
+> **Status**: Phase B COMPLETE. Awaiting MSAL regression test after wave deploys. Phase C next.
 > **Last Updated**: 2026-05-19
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
 
@@ -55,12 +55,12 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 | 021 | Migrate SpaarkeAi App.tsx (stop snapshotting token in useEffect) | :white_check_mark: | No | 020 |
 | 022 | Migrate SpaarkeAi panes (ConversationPane, WelcomePanel, ChatHistoryPanel, WorkspaceLandingWidget, ChatPanel, FeedbackButtons, ThreePaneShell) | :white_check_mark: | B-Parallel-1 | 020 |
 | 023 | Refactor SprkChat API: drop accessToken prop, require authenticatedFetch + getAccessToken; update 3 hooks (useChatSession, useChatPlaybooks, useChatContextMapping); useSseStream calls getAccessToken() per-stream-open | :white_check_mark: | B-Parallel-1 | 020 |
-| 024 | Migrate PlaybookBuilder Code Page (aiPlaybookService.ts, dataverseClient.ts, templateStore.ts) | :black_square_button: | B-Parallel-2 | 023 |
-| 025 | Migrate DocumentRelationshipViewer Code Page (VisualizationApiService.ts) | :black_square_button: | B-Parallel-2 | 023 |
-| 026 | Migrate AnalysisWorkspace Code Page (analysisApi.ts and remaining paths) | :black_square_button: | B-Parallel-2 | 023 |
-| 027 | Migrate SemanticSearch Code Page + External SPA (MsalAuthProvider, authInit, bff-client) | :black_square_button: | B-Parallel-2 | 023 |
+| 024 | Migrate PlaybookBuilder Code Page (aiPlaybookService.ts, dataverseClient.ts, templateStore.ts) | :white_check_mark: | B-Parallel-2 | 023 |
+| 025 | Migrate DocumentRelationshipViewer Code Page (VisualizationApiService.ts) | :white_check_mark: | B-Parallel-2 | 023 |
+| 026 | Migrate AnalysisWorkspace Code Page (analysisApi.ts and remaining paths) | :white_check_mark: | B-Parallel-2 | 023 |
+| 027 | Migrate SemanticSearch Code Page + External SPA (MsalAuthProvider, authInit, bff-client) | :white_check_mark: | B-Parallel-2 | 023 |
 | 028 | Verify + rebuild all PCFs (UniversalDatasetGrid, UniversalQuickCreate, SpeDocumentViewer, others) | :white_check_mark: | B-Parallel-2 | Phase A |
-| 029 | Update bffDataServiceAdapter docs/example to function-based pattern | :black_square_button: | B-Parallel-2 | 023 |
+| 029 | Update bffDataServiceAdapter docs/example to function-based pattern | :white_check_mark: | B-Parallel-2 | 023 |
 | 030 | Delete duplicate buildBffApiUrl from PCF environmentVariables.ts; import from @spaarke/auth | :white_check_mark: | B-Parallel-2 | Phase A |
 
 **Phase gate**: No `accessToken: string` or `token: string` props in `src/client/`. All consumers compile + pass tests. MSAL regression test still passes.

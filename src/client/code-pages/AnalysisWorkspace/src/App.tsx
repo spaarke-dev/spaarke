@@ -217,9 +217,19 @@ const useStyles = makeStyles({
 export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element {
   const styles = useStyles();
 
-  // ---- Auth (task 066) ----
-  // Hook must be called unconditionally (React rules of hooks)
-  const { token, isAuthenticated, isAuthenticating, authError, isXrmUnavailable, retryAuth } = useAuth();
+  // ---- Auth (Spaarke Auth v2 — task 026) ----
+  // Hook must be called unconditionally (React rules of hooks).
+  // Function-based contract: no `token: string`. Use authenticatedFetch /
+  // getAccessToken for BFF calls; never snapshot the token.
+  const {
+    isAuthenticated,
+    isAuthenticating,
+    authError,
+    isXrmUnavailable,
+    retryAuth,
+    authenticatedFetch,
+    getAccessToken,
+  } = useAuth();
 
   // ---- Task 061: Toast notification ----
   const toasterId = useId('workspace-toast');
@@ -309,7 +319,8 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   } = useAnalysisLoader({
     analysisId,
     documentId: resolvedDocumentId,
-    token,
+    isAuthenticated,
+    authenticatedFetch,
   });
 
   // ---- Resolve documentId from Dataverse lookup after analysis loads ----
@@ -332,7 +343,8 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   } = useAnalysisExecution({
     analysis,
     documentId: resolvedDocumentId,
-    token,
+    isAuthenticated,
+    getAccessToken,
     onComplete: () => {
       reloadAnalysis();
       // Task 061: Show completion toast
@@ -362,7 +374,8 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
   // ---- Task 062: Export to Word via BFF API ----
   const { exportState, exportError, doExport } = useExportAnalysis({
     analysisId,
-    token,
+    isAuthenticated,
+    authenticatedFetch,
     analysisTitle: analysis?.title,
   });
 

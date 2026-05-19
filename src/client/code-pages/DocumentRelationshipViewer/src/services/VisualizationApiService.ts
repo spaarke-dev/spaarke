@@ -3,8 +3,13 @@
  *
  * Handles fetching document relationship data from the BFF API.
  * Identical logic to PCF version — framework-agnostic service.
+ *
+ * Auth: uses `authenticatedFetch` from `@spaarke/auth` (function-based contract per
+ * ADR-027 / AUDIT-FINDINGS-AUTH-SYSTEM). NO token strings are accepted as parameters;
+ * the fetch wrapper materializes the Bearer header at request time and retries on 401.
  */
 
+import { authenticatedFetch } from '@spaarke/auth';
 import type {
   DocumentGraphResponse,
   ApiDocumentNode,
@@ -24,8 +29,7 @@ export class VisualizationApiService {
 
   async getRelatedDocuments(
     documentId: string,
-    params: VisualizationQueryParams,
-    accessToken?: string
+    params: VisualizationQueryParams
   ): Promise<{
     nodes: DocumentNode[];
     edges: DocumentEdge[];
@@ -33,16 +37,9 @@ export class VisualizationApiService {
   }> {
     const url = this.buildUrl(documentId, params);
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (accessToken) {
-      headers.Authorization = `Bearer ${accessToken}`;
-    }
-
-    const response = await fetch(url, {
+    const response = await authenticatedFetch(url, {
       method: 'GET',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
     });
 

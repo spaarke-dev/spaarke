@@ -3,7 +3,7 @@
     <title>Migrate PlaybookBuilder Code Page to function-based auth</title>
     <phase>B — Consumer migration</phase>
     <tags>auth, code-page, react, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>023</dependencies>
     <parallel-safe>B-Parallel-2</parallel-safe>
@@ -32,4 +32,29 @@
     <criterion>Vite build succeeds.</criterion>
     <criterion>PlaybookBuilder loads + works in deployed dev environment.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 as part of Phase B Wave 2 parallel batch (with 025, 026, 027, 029).
+
+    Files modified (3):
+    - src/client/code-pages/PlaybookBuilder/src/stores/templateStore.ts — full migration to authenticatedFetch (deleted local fetchWithBearerAuth helper; both fetchTemplates + clonePlaybook now use the canonical wrapper).
+    - src/client/code-pages/PlaybookBuilder/src/services/aiPlaybookService.ts — raw Bearer RETAINED with D-AUTH-7 justification (SSE streaming requires ReadableStream body access that authenticatedFetch does not expose; matches canonical pattern in @spaarke/ui-components useSseStream.ts and Wave 1 SprkChat). Token now sourced fresh per stream open from @spaarke/auth provider via authInit re-export — never snapshotted in React state. File header + inline comments document the constraint.
+    - src/client/code-pages/PlaybookBuilder/src/services/dataverseClient.ts — raw Bearer RETAINED with D-AUTH-7 justification (Dataverse Web API, not BFF; authenticatedFetch is BFF-scoped via buildBffApiUrl and would route to wrong host). Token fresh per request via @spaarke/auth provider. File header + inline comments document the constraint.
+
+    Bearer-literal audit:
+    - 2 raw Bearer literals remain (aiPlaybookService.ts:291 SSE, dataverseClient.ts:64 Dataverse Web API) — both with D-AUTH-7 justification block; acceptance-criterion #1 reads as "no UNJUSTIFIED Bearer literals" matching Wave 1 SprkChat precedent.
+    - 0 token snapshots in React state.
+    - 0 references to removed symbols (BridgeStrategy / XrmStrategy / window.__SPAARKE_BFF_TOKEN__ / tokenBridge / publishToken).
+    - Dead code authService.ts left in place per Phase 0 cleanup scope (will be deleted in a later cleanup task; no consumers in PlaybookBuilder src).
+
+    authInit.ts name-collision check (per memory feedback_name_collision_in_consumer_authinit): N/A — PlaybookBuilder authInit.ts does not export getTenantId and does not have the sync-import vs async-export collision pattern. initAuth() is called without tenantId (Phase A behavior). No fix needed.
+
+    Build verification:
+    - Build tool: webpack (NOT vite — task POML says "vite build" but PlaybookBuilder is webpack-based; verified webpack.config.js).
+    - Clean install: 526 packages in 35s (legacy peer deps).
+    - npm run build: succeeded in 23.4s; bundle.js = 1.65 MiB (1,734,702 bytes) at out/bundle.js.
+    - 5 webpack warnings, ALL pre-existing and unrelated to task 024: FixedSizeList import drift in @spaarke/ui-components DatasetGrid (react-window version mismatch, not in PlaybookBuilder's tree) and standard bundle-size warnings for SPA Code Pages.
+    - npm run lint: eslint binary not installed in this package (Phase E concern, not blocking).
+
+    Not deployed mid-wave per user instruction (MSAL regression test is per-deploy, runs after the full wave).
+  </notes>
 </task>

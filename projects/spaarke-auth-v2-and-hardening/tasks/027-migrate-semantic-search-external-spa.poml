@@ -3,7 +3,7 @@
     <title>Migrate SemanticSearch Code Page + External SPA</title>
     <phase>B — Consumer migration</phase>
     <tags>auth, code-page, spa, react, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1.5 hours</estimated-effort>
     <dependencies>023</dependencies>
     <parallel-safe>B-Parallel-2</parallel-safe>
@@ -29,4 +29,37 @@
     <criterion>External SPA bff-client uses authenticatedFetch.</criterion>
     <criterion>Both build cleanly + load in dev.</criterion>
   </acceptance-criteria>
+  <notes>
+Completed 2026-05-19 (Phase B Wave 2).
+
+FILES MODIFIED
+- src/client/code-pages/SemanticSearch/src/services/authInit.ts — added `tenantId: runtimeConfig.tenantId` + `proactiveRefresh: true` to initAuth() call. Wires the canonical SSO fix per memory `project_auth_v2_baseline_msal_bug`. NO name-collision risk: this file does not locally re-export a sync `getTenantId`, so direct property access on `runtimeConfig.tenantId` is safe (the bug pattern is async/sync shadow at import-vs-export, which doesn't apply here).
+- src/client/code-pages/SemanticSearch/src/services/auth/MsalAuthProvider.ts — DELETED (was @deprecated dead code; no production importer).
+- src/client/code-pages/SemanticSearch/src/services/auth/msalConfig.ts — DELETED (only consumer was the deleted MsalAuthProvider.ts).
+- src/client/code-pages/SemanticSearch/src/services/auth/ — directory removed (empty after deletes).
+- src/client/external-spa/src/auth/bff-client.ts — added 30-line file-header rationale documenting the out-of-scope decision; added `// Auth v2 (D-AUTH-7):` justification comment to the single Bearer-literal site in `executeFetch`. NO functional change — this file already centralized auth into one helper.
+
+EXTERNAL SPA DESIGN DECISION
+- The Secure Project Workspace SPA intentionally does NOT adopt @spaarke/auth in Phase B. Rationale documented in bff-client.ts file header:
+  1. THREAT MODEL: B2B portal — external guest users from many tenants sign into the workforce tenant. Each tab can be a different user → MUST use sessionStorage MSAL cache (current msal-config.ts:43) to prevent token leakage across tabs.
+  2. SPAARKE AUTH V2: uses localStorage for cross-tab survival — correct for internal Spaarke surfaces, WRONG for the B2B portal.
+  3. ADOPTING @spaarke/auth WOULD REQUIRE either (a) a B2B-aware strategy (e.g. NaaStrategy-style) or (b) two PublicClientApplication instances (one from @spaarke/auth, one from existing @azure/msal-react MsalProvider) which fragments the MSAL cache. Neither is in scope — task POML step 3 explicitly defers a B2B strategy to a later workstream.
+  4. PHASE B EFFECTIVE COMPLIANCE: bff-client.ts ALREADY funneled all Bearer literals through one helper (`executeFetch`). Phase B added (i) explicit out-of-scope rationale in the file header so future maintainers know not to "fix" this surface to use @spaarke/auth, and (ii) the `// Auth v2 (D-AUTH-7):` justification comment on the single Bearer-literal site to match the Wave 1 carryover note 3 pattern (ESLint path-based allowlist that task 070 will codify).
+
+BUILD VERIFICATION
+- External SPA: ✅ CLEAN. `vite build` succeeds. 2,592 modules transformed. 1,538.30 kB JS (417.19 kB gzipped). No errors, no new warnings.
+- SemanticSearch Code Page: ⚠️ PRE-EXISTING FAILURE (NOT introduced by 027). `npm run build` (webpack) fails with 4 errors all in `@spaarke/ui-components/node_modules/@lexical/react/*.prod.mjs` — `Can't resolve 'react/jsx-runtime'` under webpack's strict ESM mode. Failure traces through `index.tsx → ThemeProvider → @spaarke/ui-components → RichTextEditor → @lexical/react`. NONE of the failing modules are files I touched. CONFIRMED pre-existing by stashing all 027 changes and re-running the build — exact same 4 errors. Type-check (`tsc --noEmit`) finds no new errors caused by my changes; the only error referencing authInit.ts (TS6059 rootDir) is a pre-existing tsconfig issue affecting the entire package, not something this task introduced. Owner: separate webpack `extensionAlias` config task or upstream @lexical/react packaging fix. Recommend filing a Wave 2 carryover note.
+
+QUALITY GATES
+- No raw `Authorization: Bearer ${...}` literals in SemanticSearch.
+- No `accessToken: string` / `token: string` props in SemanticSearch.
+- No `BridgeStrategy` / `XrmStrategy` / `window.__SPAARKE_BFF_TOKEN__` / `tokenBridge` references in either surface.
+- External SPA: 1 Bearer-literal site in `executeFetch`, explicitly allowlisted.
+- ADR compliance: ADR-003, ADR-008 (server-side) unaffected. D-AUTH-1 through D-AUTH-7 honored.
+
+CARRYOVER FOR FUTURE WORK
+1. SemanticSearch webpack/ESM @lexical/react issue is pre-existing and blocks `npm run build` for the SemanticSearch Code Page. Needs a webpack `extensionAlias` config addition or a @spaarke/ui-components packaging fix.
+2. Wave 1 carryover note 3 (ESLint Bearer-literal rule with path-based allowlist) needs to add `src/client/external-spa/src/auth/bff-client.ts` to the allowlist (the `executeFetch` helper site). Justification comment is already in place.
+3. External SPA's eventual full adoption of @spaarke/auth — when the B2B strategy ships, replace `executeFetch` with `authenticatedFetch` from @spaarke/auth and the local MsalProvider/msal-config.ts/msal-auth.ts can be removed.
+  </notes>
 </task>

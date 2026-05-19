@@ -1,39 +1,28 @@
 /**
- * AuthContext -- React Context for AnalysisWorkspace Authentication
+ * AuthContext — Authentication lifecycle (initializeAuth) + UI state machine.
  *
- * Provides the auth token and auth state throughout the AnalysisWorkspace
- * component tree. Components use `useAuthContext()` to access the current
- * token, auth status, and retry/refresh capabilities.
+ * Spaarke Auth v2 rewrite (project: spaarke-auth-v2-and-hardening, task 026):
  *
- * Authentication lifecycle:
- *   1. AuthProvider mounts -> calls initializeAuth() from authService
- *   2. Token acquired via Xrm.Utility.getGlobalContext() (multi-strategy)
- *   3. Proactive token refresh runs on interval (every 4 minutes)
- *   4. Token available to all children via useAuthContext()
- *   5. 401 responses trigger token refresh via refreshToken()
+ *   - NO `token: string` in context value. Components requiring a token call
+ *     `getAccessToken()` (escape hatch for SSE) or use `authenticatedFetch`
+ *     (canonical path). Token strings never cross a component boundary.
  *
- * Constraints:
- *   - Auth tokens MUST NOT be transmitted via BroadcastChannel or postMessage
- *   - Each Code Page acquires its own token independently
- *   - Token is stored in React state only (in-memory), never in localStorage/sessionStorage
+ *   - This context owns the BOOTSTRAP lifecycle (initializeAuth() promise:
+ *     "authenticating" → "authenticated" / "error"). The provider singleton
+ *     created by @spaarke/auth handles token caching + proactive refresh
+ *     internally — we no longer poll on a setInterval.
  *
- * @see ADR-008 - Endpoint filters for auth
- * @see services/authService.ts - Token acquisition and caching
+ *   - `retryAuth()` re-runs initializeAuth() after an error. There is no
+ *     longer a `refreshToken()` method on the context — call sites that need
+ *     a fresh token call `getAccessToken()` directly (which always returns a
+ *     fresh value via the provider's cache + JWT exp validation).
+ *
+ * @see services/authInit.ts — initializeAuth() + library re-exports
+ * @see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md — function-based auth contract
  */
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
-import { getAccessToken, initializeAuth, clearTokenCache, AuthError } from '../services/authInit';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Interval for proactive token refresh (4 minutes).
- * Tokens typically live 1 hour; refreshing every 4 minutes ensures
- * the token is always fresh when API calls are made.
- */
-const TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
+import { initializeAuth, AuthError } from '../services/authInit';
 
 // ---------------------------------------------------------------------------
 // Auth State
@@ -42,22 +31,18 @@ const TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
 export type AuthStatus = 'authenticating' | 'authenticated' | 'error';
 
 export interface AuthContextValue {
-  /** Current auth status */
+  /** Current auth status — drives the UI state machine in App.tsx. */
   status: AuthStatus;
-  /** The Bearer access token (available when status is "authenticated") */
-  token: string | null;
-  /** Auth error details (available when status is "error") */
+  /** Auth error details (available when status === "error"). */
   error: AuthError | Error | null;
-  /** Whether the error is due to Xrm SDK being unavailable */
+  /** Whether the error is due to Xrm SDK being unavailable. */
   isXrmUnavailable: boolean;
-  /** Whether the user is fully authenticated */
+  /** Whether the user is fully authenticated. */
   isAuthenticated: boolean;
-  /** Whether authentication is in progress */
+  /** Whether authentication is in progress. */
   isAuthenticating: boolean;
-  /** Retry authentication after an error */
+  /** Retry authentication after an error. */
   retryAuth: () => void;
-  /** Force refresh the token (e.g., after a 401 response) */
-  refreshToken: () => Promise<string | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,116 +60,61 @@ export interface AuthProviderProps {
 }
 
 /**
- * AuthProvider -- wraps children with authentication context.
- *
- * On mount:
- *   1. Calls initializeAuth() to acquire the first token
- *   2. Sets up a proactive refresh interval
- *   3. Provides token + status to all children via context
+ * AuthProvider — runs initializeAuth() once on mount and tracks the bootstrap
+ * state (authenticating / authenticated / error). Children gate on
+ * `isAuthenticated` before calling `useAuth()` from @spaarke/auth, which
+ * throws if `initAuth()` hasn't run.
  */
 export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
   const [status, setStatus] = useState<AuthStatus>('authenticating');
-  const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<AuthError | Error | null>(null);
   const [isXrmUnavailable, setIsXrmUnavailable] = useState(false);
 
-  /**
-   * Initialize authentication -- acquire the first token.
-   */
-  const initAuth = useCallback(async () => {
+  const runInit = useCallback(async () => {
     setStatus('authenticating');
     setError(null);
     setIsXrmUnavailable(false);
 
     try {
-      const initialToken = await initializeAuth();
-      setToken(initialToken);
+      await initializeAuth();
       setStatus('authenticated');
     } catch (err) {
-      const authErr =
+      const authErr: AuthError | Error =
         err instanceof AuthError
           ? err
-          : new AuthError(err instanceof Error ? err.message : 'Authentication failed', {
-              isRetryable: true,
-              cause: err,
-            });
+          : err instanceof Error
+            ? err
+            : new Error(typeof err === 'string' ? err : 'Authentication failed');
+
       setError(authErr);
-      setIsXrmUnavailable(authErr instanceof AuthError && authErr.isXrmUnavailable);
+
+      // The library's AuthError uses string codes; "xrm_unavailable" indicates
+      // we are running outside Dataverse (Xrm context could not be resolved).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const code = (authErr as any).code;
+      setIsXrmUnavailable(code === 'xrm_unavailable' || code === 'no_xrm_context');
+
       setStatus('error');
-      // Log without exposing the token itself
       console.error('[AnalysisWorkspace:Auth] Authentication failed:', authErr.message);
     }
   }, []);
 
-  // Initialize on mount
+  // Initialize on mount (once)
   useEffect(() => {
-    initAuth();
-  }, [initAuth]);
+    runInit();
+  }, [runInit]);
 
-  /**
-   * Proactive token refresh interval.
-   * Silently refreshes the token before it expires. On failure, keeps
-   * the existing token (it may still be valid until actual expiration).
-   */
-  useEffect(() => {
-    if (status !== 'authenticated') return;
-
-    const intervalId = setInterval(async () => {
-      try {
-        const freshToken = await getAccessToken();
-        setToken(freshToken);
-      } catch (err) {
-        console.warn('[AnalysisWorkspace:Auth] Token refresh failed, will retry:', err);
-        // Don't set error state -- existing token may still work.
-        // The next API call will surface the real error if needed.
-      }
-    }, TOKEN_REFRESH_INTERVAL_MS);
-
-    return () => clearInterval(intervalId);
-  }, [status]);
-
-  /**
-   * Retry auth after an error. Clears the cache and re-initializes.
-   */
   const retryAuth = useCallback(() => {
-    clearTokenCache();
-    initAuth();
-  }, [initAuth]);
-
-  /**
-   * Force-refresh the token (e.g., after receiving a 401 from the BFF API).
-   * Returns the new token or null on failure.
-   */
-  const refreshToken = useCallback(async (): Promise<string | null> => {
-    try {
-      clearTokenCache();
-      const freshToken = await getAccessToken();
-      setToken(freshToken);
-      setStatus('authenticated');
-      return freshToken;
-    } catch (err) {
-      console.warn('[AnalysisWorkspace:Auth] Manual token refresh failed:', err);
-      // On refresh failure mid-session, don't immediately switch to error state.
-      // The user can continue with the existing token until it truly expires.
-      // If it's a hard failure (Xrm unavailable), switch to error.
-      if (err instanceof AuthError && err.isXrmUnavailable) {
-        setError(err);
-        setIsXrmUnavailable(true);
-        setStatus('error');
-      }
-      return null;
-    }
-  }, []);
+    runInit();
+  }, [runInit]);
 
   const value: AuthContextValue = {
     status,
-    token,
     error,
     isXrmUnavailable,
     isAuthenticated: status === 'authenticated',
     isAuthenticating: status === 'authenticating',
     retryAuth,
-    refreshToken,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -195,16 +125,19 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
 // ---------------------------------------------------------------------------
 
 /**
- * useAuthContext -- access the auth token and status from any component.
+ * useAuthContext — access the auth bootstrap state from any component.
+ *
+ * NOTE: For token / authenticatedFetch / getAccessToken, use the library's
+ * `useAuth()` hook from `@spaarke/auth` (re-exported via `../services/authInit`).
+ * This context is only for the bootstrap state machine.
  *
  * @throws Error if used outside of an AuthProvider
- * @returns AuthContextValue with token, status, retryAuth, refreshToken
  */
 export function useAuthContext(): AuthContextValue {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error(
-      'useAuthContext must be used within an AuthProvider. ' + 'Wrap your component tree with <AuthProvider>.'
+      'useAuthContext must be used within an AuthProvider. Wrap your component tree with <AuthProvider>.'
     );
   }
   return context;

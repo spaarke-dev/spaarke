@@ -3,7 +3,7 @@
     <title>Migrate DocumentRelationshipViewer Code Page</title>
     <phase>B — Consumer migration</phase>
     <tags>auth, code-page, react, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>023</dependencies>
     <parallel-safe>B-Parallel-2</parallel-safe>
@@ -25,4 +25,45 @@
     <criterion>No Bearer literals in source.</criterion>
     <criterion>Build succeeds; component loads in dev.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 (Phase B Wave 2 sub-agent, atomic commit by main session).
+
+    Files modified:
+      - src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts
+          Removed `accessToken?: string` param; switched from raw `fetch` + manual
+          `Authorization: Bearer ${...}` header to `authenticatedFetch` from `@spaarke/auth`.
+      - src/client/code-pages/DocumentRelationshipViewer/src/hooks/useVisualizationApi.ts
+          Removed `accessToken?: string` from `UseVisualizationApiOptions`, the destructure,
+          the service call args, and the useCallback dep list.
+      - src/client/code-pages/DocumentRelationshipViewer/src/App.tsx
+          Replaced the snapshot pattern (`useState&lt;string | undefined&gt;` + `useEffect` calling
+          `getToken()` + passing `accessToken` to the data hook) with `useAuth()`-derived
+          `getAccessToken` priming. New gate `isAuthReady` only signals when the provider's
+          in-memory cache is primed; the data hook now relies on `authenticatedFetch`
+          materializing the token at request time. `isAuthInitializing` removed.
+
+    Carryover authority audit (from Wave 1 task 028):
+      - authInit.ts:55 explicit `authority` setting — NOT PRESENT. The Wave 1 finding was
+        based on a stale read or different file. The actual authInit.ts is a thin
+        delegation wrapper around `initAuth(config)` and does NOT pass an authority.
+      - index.tsx bootstrap calls `initAuth({ clientId, bffApiScope, bffBaseUrl })` —
+        NO `authority`, NO `tenantId`. Already follows the canonical "let the library
+        resolve authority from tenantId via resolveDefaultAuthority" convention.
+      - No import-alias name collision: authInit.ts exports `getToken`, `clearAuthCache`,
+        `isAuthenticated`, `initializeAuth`. There is no `getTenantId` export and no
+        local `runtimeConfig.ts` in this folder — DRV uses `resolveRuntimeConfig` from
+        `@spaarke/auth` directly via index.tsx bootstrap.
+      - Legacy DEPRECATED files exist (services/auth/msalConfig.ts has hardcoded authority,
+        services/auth/MsalAuthProvider.ts, types/auth.ts) but are NOT imported by the
+        active code path (App.tsx, index.tsx, hooks). Out of scope; left untouched.
+
+    Build verification:
+      - npm install --legacy-peer-deps --no-audit --no-fund: 489 packages added, no errors.
+      - npm run build (webpack): success in 25 seconds; bundle.js 1.61 MiB; only 3
+        bundle-size warnings (pre-existing, not introduced by this change).
+      - build-webresource.ps1: inlined into sprk_documentrelationshipviewer.html (1644 KB).
+      - Grep for `Bearer \${` / `Authorization.*Bearer` across src/: 0 matches.
+
+    Did NOT commit (main session commits Wave 2 atomically). Did NOT update TASK-INDEX.md.
+  </notes>
 </task>

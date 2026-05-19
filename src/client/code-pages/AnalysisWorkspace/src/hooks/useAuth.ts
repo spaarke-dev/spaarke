@@ -1,72 +1,103 @@
 /**
- * @deprecated This hook still works but depends on AuthContext which now uses authInit.ts.
- * No changes needed to this file — it delegates to AuthContext.
- */
-
-/**
- * useAuth -- convenience hook for authentication state in AnalysisWorkspace
+ * useAuth — combined auth hook for AnalysisWorkspace components.
  *
- * Wraps useAuthContext() with a simplified return shape matching the task
- * specification. Components can use either useAuth() (simple) or
- * useAuthContext() (full API) depending on their needs.
+ * Spaarke Auth v2: merges the bootstrap state from `AuthContext` (status
+ * machine: authenticating / authenticated / error) with the function-based
+ * surface from `@spaarke/auth` (`authenticatedFetch`, `getAccessToken`,
+ * `tenantId`, `logout`).
  *
- * Return shape:
- *   - token: string | null -- the Bearer access token
- *   - isAuthenticated: boolean -- whether the user has a valid token
- *   - isAuthenticating: boolean -- whether token acquisition is in progress
- *   - authError: Error | null -- auth error details (if any)
- *   - refreshToken: () => Promise<string | null> -- force-refresh the token
- *   - retryAuth: () => void -- retry from scratch after an error
+ * Critically, NO `token: string` field is returned. Token strings never
+ * cross a component boundary — see CLAUDE.md §D-AUTH-1, §D-AUTH-7.
+ *
+ *   - Use `authenticatedFetch(url, init)` for one-shot BFF API calls.
+ *   - Use `await getAccessToken()` ONLY for SSE / WebSocket setup where
+ *     authenticatedFetch can't wrap the lifecycle. Never snapshot the result.
  *
  * @example
  * ```tsx
- * const { token, isAuthenticated, isAuthenticating, authError, retryAuth } = useAuth();
+ * const {
+ *   isAuthenticated, isAuthenticating, authError, retryAuth,
+ *   authenticatedFetch, getAccessToken,
+ * } = useAuth();
  *
  * if (isAuthenticating) return <Spinner label="Authenticating..." />;
  * if (authError) return <ErrorState error={authError} onRetry={retryAuth} />;
- * if (isAuthenticated && token) return <AuthenticatedContent token={token} />;
- * ```
  *
- * @see context/AuthContext.tsx -- the provider that manages auth state
- * @see services/authService.ts -- the token acquisition service
+ * // Call site:
+ * const r = await authenticatedFetch(`${bff}/api/v1/foo`);
+ * ```
  */
 
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import { useAuthContext } from '../context/AuthContext';
+import { useAuth as sharedUseAuth } from '../services/authInit';
 
 export interface UseAuthResult {
-  /** The Bearer access token (null when not authenticated) */
-  token: string | null;
-  /** Whether the user is fully authenticated with a valid token */
+  /** Whether the user is fully authenticated (bootstrap completed + library has a token). */
   isAuthenticated: boolean;
-  /** Whether authentication is in progress (initial or retry) */
+  /** Whether authentication is in progress (initial or retry). */
   isAuthenticating: boolean;
-  /** Auth error details, or null if no error */
+  /** Auth error details, or null if no error. */
   authError: Error | null;
-  /** Whether the error is because Xrm SDK is not available (outside Dataverse) */
+  /** Whether the error is because Xrm SDK is not available (outside Dataverse). */
   isXrmUnavailable: boolean;
-  /** Force-refresh the token (e.g., after a 401 from BFF API) */
-  refreshToken: () => Promise<string | null>;
-  /** Retry authentication from scratch after an error */
+  /** Retry authentication from scratch after an error. */
   retryAuth: () => void;
+
+  // ── Function-based auth surface (v2 contract) ─────────────────────────────
+
+  /** Authenticated fetch — attaches Bearer header, retries 401 with backoff. */
+  authenticatedFetch: AuthenticatedFetchFn;
+  /** Acquire a fresh BFF token. Use ONLY for SSE/WebSocket paths. */
+  getAccessToken: () => Promise<string>;
+  /** Azure AD tenant ID from the cached JWT `tid` claim (empty string until first token). */
+  tenantId: string;
+  /** Log out: clears MSAL refresh token + broadcasts to other tabs. */
+  logout: () => Promise<void>;
 }
 
 /**
- * useAuth -- simplified authentication hook for AnalysisWorkspace components.
+ * useAuth — bootstrap state + function-based auth surface.
  *
- * Must be used within an AuthProvider.
- *
- * @returns UseAuthResult with token, status booleans, error, and actions
+ * MUST be used inside `<AuthProvider>`. Reading the library surface throws if
+ * `initAuth()` hasn't run, so we only read it once `isAuthenticated === true`.
  */
 export function useAuth(): UseAuthResult {
   const ctx = useAuthContext();
 
+  // Only consult the library after bootstrap completed — sharedUseAuth() throws
+  // before initAuth() resolves. While bootstrap is in flight, return safe
+  // no-op stand-ins so components rendering during the spinner phase don't
+  // explode if they read these fields defensively.
+  if (ctx.isAuthenticated) {
+    const lib = sharedUseAuth();
+    return {
+      isAuthenticated: true,
+      isAuthenticating: false,
+      authError: null,
+      isXrmUnavailable: false,
+      retryAuth: ctx.retryAuth,
+      authenticatedFetch: lib.authenticatedFetch,
+      getAccessToken: lib.getAccessToken,
+      tenantId: lib.tenantId,
+      logout: lib.logout,
+    };
+  }
+
+  // Pre-auth or error state — provide functions that reject so call sites
+  // can't accidentally fire requests without auth.
+  const rejectNotReady = (): Promise<never> =>
+    Promise.reject(new Error('Authentication not initialized. Wait for isAuthenticated.'));
+
   return {
-    token: ctx.token,
-    isAuthenticated: ctx.isAuthenticated,
+    isAuthenticated: false,
     isAuthenticating: ctx.isAuthenticating,
     authError: ctx.error,
     isXrmUnavailable: ctx.isXrmUnavailable,
-    refreshToken: ctx.refreshToken,
     retryAuth: ctx.retryAuth,
+    authenticatedFetch: rejectNotReady as unknown as AuthenticatedFetchFn,
+    getAccessToken: rejectNotReady,
+    tenantId: '',
+    logout: rejectNotReady,
   };
 }

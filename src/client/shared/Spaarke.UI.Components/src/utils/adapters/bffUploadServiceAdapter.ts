@@ -1,23 +1,33 @@
 /**
  * BFF API Adapter for IUploadService
  *
- * Bridges file upload operations to the Spaarke BFF API in a Power Pages SPA
- * context where no Xrm object is available. Authentication is handled by the
- * caller-provided `authenticatedFetch` function.
+ * Bridges file upload operations to the Spaarke BFF API in any Spaarke
+ * consumer context (Code Page SPA, PCF, Office Add-in). Authentication is
+ * handled by the caller-provided `authenticatedFetch` function (from
+ * `useAuth()` in `@spaarke/auth`).
  *
  * Uses XMLHttpRequest for upload progress reporting when an `onProgress`
- * callback is provided, with a token-extraction hook so the XHR request
- * carries the same credentials as the authenticated fetch.
+ * callback is provided. XHR cannot use the `authenticatedFetch` wrapper,
+ * so an optional `getBearerToken` callback is accepted — this is one of
+ * the documented Auth v2 exception sites where the token is materialized
+ * explicitly (see D-AUTH-7). Use `getAccessToken` from `useAuth()` here.
  *
  * @see IUploadService in ../../types/serviceInterfaces
  * @see ADR-007 - SpeFileStore Facade
  * @see ADR-012 - Shared Component Library
+ * @see ADR-027 - Spaarke Auth Architecture (v2) — function-based contract
  *
  * @example
  * ```typescript
+ * import { useAuth } from "@spaarke/auth";
  * import { createBffUploadService } from "@spaarke/ui-components";
  *
- * const uploadService = createBffUploadService(authenticatedFetch, "https://spe-api-dev-67e2xz.azurewebsites.net");
+ * const { authenticatedFetch, getAccessToken } = useAuth();
+ * const uploadService = createBffUploadService(
+ *   authenticatedFetch,
+ *   "https://spe-api-dev-67e2xz.azurewebsites.net",
+ *   getAccessToken  // required only when callers may pass onProgress (XHR path)
+ * );
  * const result = await uploadService.uploadFile(
  *   "sprk_matter", matterId, file,
  *   { onProgress: (loaded, total) => console.log(`${Math.round(loaded/total*100)}%`) }
@@ -38,6 +48,11 @@ import type { AuthenticatedFetch } from './bffDataServiceAdapter';
  * When progress reporting is requested the adapter falls back to
  * XMLHttpRequest which cannot use the `authenticatedFetch` wrapper.
  * Provide this callback so the XHR can set its own Authorization header.
+ *
+ * Use `getAccessToken` returned from `useAuth()` in `@spaarke/auth`; this
+ * is one of the audited D-AUTH-7 exception sites where the token must be
+ * materialized as a string because the underlying transport (XHR) does not
+ * accept a fetch wrapper.
  */
 export type GetBearerToken = () => Promise<string>;
 
@@ -48,42 +63,46 @@ export type GetBearerToken = () => Promise<string>;
  * requires server-side Microsoft Graph API calls that cannot be made
  * from the browser.
  *
- * @param authenticatedFetch - A fetch wrapper that attaches auth credentials
+ * @param authenticatedFetch - The `authenticatedFetch` returned by `useAuth()` from `@spaarke/auth`.
+ *   Used for the no-progress upload path and for `getContainerIdForEntity`.
  * @param bffBaseUrl - Base URL of the Spaarke BFF API (e.g. "https://spe-api-dev-67e2xz.azurewebsites.net")
- * @param getBearerToken - Optional async function returning a Bearer token for XHR progress uploads
+ * @param getBearerToken - Optional async function returning a Bearer token for XHR progress uploads.
+ *   Pass `getAccessToken` from `useAuth()`. Required only when callers may supply `onProgress`.
  * @returns An IUploadService backed by the BFF API
  *
  * @example
  * ```typescript
- * // With MSAL-based authenticated fetch and token getter
- * const authFetch: AuthenticatedFetch = async (url, init) => {
- *   const token = await msalInstance.acquireTokenSilent({ scopes: ["api://..."] });
- *   return fetch(url, {
- *     ...init,
- *     headers: { ...init?.headers, Authorization: `Bearer ${token.accessToken}` },
- *   });
- * };
+ * // In a React component or hook:
+ * import { useAuth } from "@spaarke/auth";
+ * import { createBffUploadService } from "@spaarke/ui-components";
  *
- * const getToken = async () => {
- *   const result = await msalInstance.acquireTokenSilent({ scopes: ["api://..."] });
- *   return result.accessToken;
- * };
+ * function MatterUploadPanel({ bffBaseUrl, matterId }: { bffBaseUrl: string; matterId: string }) {
+ *   const { authenticatedFetch, getAccessToken } = useAuth();
  *
- * const uploadService = createBffUploadService(authFetch, "https://spe-api-dev-67e2xz.azurewebsites.net", getToken);
+ *   const uploadService = useMemo(
+ *     () => createBffUploadService(authenticatedFetch, bffBaseUrl, getAccessToken),
+ *     [authenticatedFetch, bffBaseUrl, getAccessToken]
+ *   );
  *
- * // Upload with progress tracking
- * const result = await uploadService.uploadFile(
- *   "sprk_matter",
- *   "00000000-0000-0000-0000-000000000001",
- *   selectedFile,
- *   {
- *     onProgress: (loaded, total) => setProgress(Math.round((loaded / total) * 100)),
- *     metadata: { category: "contract" },
- *   }
- * );
+ *   const handleUpload = useCallback(async (selectedFile: File) => {
+ *     // Upload with progress tracking (uses XHR path internally)
+ *     const result = await uploadService.uploadFile(
+ *       "sprk_matter",
+ *       matterId,
+ *       selectedFile,
+ *       {
+ *         onProgress: (loaded, total) => setProgress(Math.round((loaded / total) * 100)),
+ *         metadata: { category: "contract" },
+ *       }
+ *     );
  *
- * // Retrieve the container ID for an entity
- * const containerId = await uploadService.getContainerIdForEntity("sprk_matter", matterId);
+ *     // Retrieve the container ID for an entity (uses authenticatedFetch path)
+ *     const containerId = await uploadService.getContainerIdForEntity("sprk_matter", matterId);
+ *     console.log(`Uploaded ${result.name} into container ${containerId}`);
+ *   }, [uploadService, matterId]);
+ *
+ *   // ...
+ * }
  * ```
  */
 export function createBffUploadService(

@@ -11,11 +11,12 @@
  *   2. Status is "draft" (statusCode === 1 or status === "draft")
  *   3. Content is empty (0 chars)
  *   4. Has an actionId OR playbookId
- *   5. Token is available (BFF auth)
+ *   5. User is authenticated
  *   6. Not already executing
  *
- * Also exports triggerExecute() for manual invocation from the
- * Run Analysis button, bypassing the shouldAutoExecute guard.
+ * Spaarke Auth v2 (task 026): consumes `getAccessToken: () => Promise<string>`
+ * instead of a snapshotted token. The SSE path inside executeAnalysis awaits
+ * the getter once at stream-open and never persists the value.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,8 +28,6 @@ const LOG_PREFIX = '[AnalysisWorkspace:useAnalysisExecution]';
 
 /**
  * Maps backend `step` field values to frontend AiProgressStepper step IDs.
- * `text_extracted` maps to `context_ready` because both represent the same
- * user-visible step (doc intel done → context loading begins).
  */
 const BACKEND_STEP_TO_FRONTEND: Record<string, string> = {
   document_loaded: 'document_loaded',
@@ -47,8 +46,10 @@ export interface UseAnalysisExecutionOptions {
   analysis: AnalysisRecord | null;
   /** Document ID for the source document */
   documentId: string;
-  /** Bearer auth token for BFF API */
-  token: string | null;
+  /** Whether the user is authenticated (gate before executing). */
+  isAuthenticated: boolean;
+  /** Token getter — passed through to executeAnalysis's SSE setup. */
+  getAccessToken: () => Promise<string>;
   /** Called when execution completes — triggers analysis reload */
   onComplete: () => void;
   /** Called with accumulated content during streaming for display */
@@ -56,21 +57,13 @@ export interface UseAnalysisExecutionOptions {
 }
 
 export interface UseAnalysisExecutionResult {
-  /** Whether analysis execution is currently running */
   isExecuting: boolean;
-  /** Error from execution (null on success) */
   executionError: AnalysisError | null;
-  /** Current execution progress message */
   progressMessage: string;
-  /** Number of content chunks received */
   chunkCount: number;
-  /** Currently active pipeline step ID for AiProgressStepper */
   activeStepId: string | null;
-  /** Pipeline step IDs that have completed for AiProgressStepper */
   completedStepIds: string[];
-  /** Manually trigger execution (bypasses shouldAutoExecute guard). Used by Run Analysis button. */
   triggerExecute: () => void;
-  /** Abort an in-progress execution (cancel button). */
   cancelExecution: () => void;
 }
 
@@ -79,7 +72,7 @@ export interface UseAnalysisExecutionResult {
 // ---------------------------------------------------------------------------
 
 export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseAnalysisExecutionResult {
-  const { analysis, documentId, token, onComplete, onStreamContent } = options;
+  const { analysis, documentId, isAuthenticated, getAccessToken, onComplete, onStreamContent } = options;
 
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionError, setExecutionError] = useState<AnalysisError | null>(null);
@@ -91,20 +84,15 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
   // Track whether we've already triggered execution for this analysis
   const executedRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // Ref tracks current active step for step transitions (avoids stale closure)
   const activeStepRef = useRef<string | null>(null);
-  // Ref tracks whether the first content chunk has been received (for delivering step)
   const firstContentChunkRef = useRef(false);
 
   /**
    * Check if the analysis should auto-execute.
-   *
-   * Uses statuscode-based logic: auto-execute when the record is Draft
-   * (statusCode===1), has no content, and has an action/playbook configured.
    */
   const shouldAutoExecute = useCallback((): boolean => {
     if (!analysis) return false;
-    if (!token) return false;
+    if (!isAuthenticated) return false;
     if (isExecuting) return false;
     if (executedRef.current === analysis.id) return false;
 
@@ -118,20 +106,19 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
       `${LOG_PREFIX} Auto-execute conditions met: draft=${isDraft}, empty=${isEmpty}, hasAction=${hasAction}`
     );
     return true;
-  }, [analysis, token, isExecuting]);
+  }, [analysis, isAuthenticated, isExecuting]);
 
   /**
    * Execute the analysis via BFF SSE endpoint.
    */
   const doExecute = useCallback(async () => {
-    if (!analysis || !token) return;
+    if (!analysis || !isAuthenticated) return;
 
     console.log(`${LOG_PREFIX} Executing analysis: ${analysis.id}`);
     console.log(`${LOG_PREFIX}   actionId: ${analysis.actionId ?? 'none'}`);
     console.log(`${LOG_PREFIX}   playbookId: ${analysis.playbookId ?? 'none'}`);
     console.log(`${LOG_PREFIX}   documentId: ${documentId}`);
 
-    // Mark as executed to prevent re-trigger
     executedRef.current = analysis.id;
     setIsExecuting(true);
     setExecutionError(null);
@@ -147,7 +134,7 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
 
     let contentBuffer = '';
     let lastRenderTime = 0;
-    const RENDER_INTERVAL = 150; // ms — throttle to ~6-7 renders/sec to prevent Lexical DOM jank
+    const RENDER_INTERVAL = 150;
 
     try {
       await executeAnalysis({
@@ -155,19 +142,16 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
         documentIds: [documentId],
         actionId: analysis.actionId,
         playbookId: analysis.playbookId,
-        token,
+        getAccessToken,
         signal: abortController.signal,
         onChunk: (chunk: AnalysisStreamChunk) => {
           if (chunk.type === 'metadata') {
             setProgressMessage('Processing document...');
-            // Activate the first step as soon as stream opens
             activeStepRef.current = 'document_loaded';
             setActiveStepId('document_loaded');
           } else if (chunk.type === 'progress' && chunk.step) {
-            // Map backend step to frontend step ID
             const frontendStepId = BACKEND_STEP_TO_FRONTEND[chunk.step];
             if (frontendStepId && frontendStepId !== activeStepRef.current) {
-              // Mark previous step as completed before advancing
               const prevStep = activeStepRef.current;
               if (prevStep) {
                 setCompletedStepIds(prev => prev.includes(prevStep) ? prev : [...prev, prevStep]);
@@ -180,7 +164,6 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
             setChunkCount(prev => prev + 1);
             setProgressMessage('Generating analysis...');
 
-            // On first content token, advance to the "delivering" step
             if (!firstContentChunkRef.current) {
               firstContentChunkRef.current = true;
               const prevStep = activeStepRef.current;
@@ -191,17 +174,14 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
               setActiveStepId('delivering');
             }
 
-            // Throttle render updates for per-token streaming
             const now = Date.now();
             if (now - lastRenderTime >= RENDER_INTERVAL) {
               onStreamContent?.(contentBuffer);
               lastRenderTime = now;
             }
           } else if (chunk.type === 'status' && chunk.content === 'done') {
-            // Final flush — always render complete content
             onStreamContent?.(contentBuffer);
             setProgressMessage('Analysis complete');
-            // Mark all steps complete
             setCompletedStepIds(['document_loaded', 'extracting_text', 'context_ready', 'analyzing', 'delivering']);
             setActiveStepId(null);
             activeStepRef.current = null;
@@ -215,7 +195,6 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
       // Small delay to allow Dataverse write to propagate
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Trigger reload from Dataverse
       onComplete();
     } catch (err) {
       if (abortController.signal.aborted) {
@@ -238,7 +217,7 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
       setIsExecuting(false);
       abortRef.current = null;
     }
-  }, [analysis, documentId, token, onComplete, onStreamContent]);
+  }, [analysis, documentId, isAuthenticated, getAccessToken, onComplete, onStreamContent]);
 
   /**
    * Auto-execute when conditions are met.
@@ -251,15 +230,14 @@ export function useAnalysisExecution(options: UseAnalysisExecutionOptions): UseA
 
   /**
    * Manually trigger execution — bypasses shouldAutoExecute guard.
-   * Used by the Run Analysis button (task 062).
    */
   const triggerExecute = useCallback(() => {
-    if (!analysis || !token || isExecuting) return;
+    if (!analysis || !isAuthenticated || isExecuting) return;
     doExecute();
-  }, [analysis, token, isExecuting, doExecute]);
+  }, [analysis, isAuthenticated, isExecuting, doExecute]);
 
   /**
-   * Abort in-progress execution. Used by the AiProgressStepper cancel button.
+   * Abort in-progress execution.
    */
   const cancelExecution = useCallback(() => {
     abortRef.current?.abort();

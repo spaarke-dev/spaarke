@@ -46,6 +46,8 @@ const useStyles = makeStyles({
  */
 export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const styles = useStyles();
+  // Spaarke Auth v2 (task 026): destructure function-based auth (no `token`).
+  // SprkChat receives authenticatedFetch + getAccessToken instead of accessToken.
   const {
     chatSessionId,
     setChatSessionId,
@@ -54,7 +56,8 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     playbookId,
     setPlaybookId,
     bffBaseUrl,
-    token,
+    authenticatedFetch,
+    getAccessToken,
     streaming,
     chatHistory,
   } = useAnalysisAi();
@@ -119,7 +122,8 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
         analysisId={analysisId || undefined}
         playbookId={playbookId}
         apiBaseUrl={bffBaseUrl}
-        accessToken={token ?? ''}
+        authenticatedFetch={authenticatedFetch}
+        getAccessToken={getAccessToken}
         onSessionCreated={handleSessionCreated}
         onPlaybookChange={setPlaybookId}
         hostContext={hostContext}
