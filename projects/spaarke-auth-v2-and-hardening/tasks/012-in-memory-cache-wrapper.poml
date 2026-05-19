@@ -3,7 +3,7 @@
     <title>Implement in-memory cache wrapper with JWT exp validation</title>
     <phase>A — Core library rebuild</phase>
     <tags>auth, library, typescript, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>010</dependencies>
     <parallel-safe>A-Parallel-1 (with 011)</parallel-safe>
@@ -40,4 +40,25 @@
     <criterion>SpaarkeAuthProvider composes InMemoryCache(BrowserMsalStrategy()).</criterion>
     <criterion>Unit tests for InMemoryCache pass.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. InMemoryCache.ts wraps any AuthStrategy with JWT-exp
+    freshness validation (5-min buffer matching BrowserMsalStrategy). Cache name
+    is composite ("in-memory-cache(browser-msal)") so the SpaarkeAuth log line
+    surfaces both layers. Two surfaces preserved for SpaarkeAuthProvider use:
+    `getCachedToken()` (sync — for JWT `tid` extraction) and `invalidate()`
+    (non-cascading — for proactive refresh, lets MSAL serve silently on next
+    acquire). `clearCache()` cascades to inner (logout / 401 retry).
+
+    SpaarkeAuthProvider simplified: dropped `_cacheStrategy`, `_sessionStorageStrategy`,
+    `_cacheToken()`, `_hasValidCache()` (was a no-op). Tenant ID still extracted
+    from JWT `tid` via `_extractTidFromCachedToken()` → now reads via
+    `_cache.getCachedToken()`.
+
+    Tests: 10/10 InMemoryCache.test.ts pass. config.test.ts has one pre-existing
+    failure (stale fixture expecting removed default clientId) — out of scope;
+    candidate for cleanup in task 016.
+
+    Quality gates deferred per D-AUTH-QUALITY-GATE-DEFERRAL (single comprehensive
+    code-review + adr-check after task 016).
+  </notes>
 </task>

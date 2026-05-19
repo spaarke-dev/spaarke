@@ -1,28 +1,24 @@
 import type { IAuthConfig, ITokenResult } from './types';
 import { AuthError } from './errors';
 import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
-import { CacheStrategy } from './strategies/CacheStrategy';
-import { SessionStorageStrategy } from './strategies/SessionStorageStrategy';
 import type { AuthStrategy } from './strategies/AuthStrategy';
 import { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';
+import { InMemoryCache } from './strategies/InMemoryCache';
 
 /**
- * Core auth provider (v2 — task 010).
+ * Core auth provider (v2 — tasks 010, 011, 012).
  *
- * Composes:
- *   1. In-memory CacheStrategy            (per-instance, fastest read)
- *   2. SessionStorageStrategy             (same-origin iframe sharing — task 012 removes this)
- *   3. Pluggable AuthStrategy             (BrowserMsalStrategy for PCFs+CodePages; OfficeNaaStrategy in 080)
+ * Composes a single InMemoryCache wrapping a pluggable AuthStrategy. The cache
+ * gates every acquire() by JWT `exp` (5-minute buffer); on miss it delegates to
+ * the strategy and stores the fresh result. Cross-tab/iframe persistence is
+ * provided by MSAL.localStorage at the BrowserMsalStrategy layer (INV-1).
  *
- * The strategy parameter encapsulates the actual MSAL/NAA token acquisition logic.
- * This replaces the pre-v2 6-strategy cascade (Bridge + Xrm + MsalSilent + MsalPopup
- * inline) with a single strategy.acquire() call.
+ * The strategy parameter is pluggable: BrowserMsalStrategy for PCFs + Code
+ * Pages (default); OfficeNaaStrategy for Office Add-ins (task 080).
  */
 export class SpaarkeAuthProvider {
   private readonly _config: Required<IAuthConfig>;
-  private readonly _cacheStrategy: CacheStrategy;
-  private readonly _sessionStorageStrategy: SessionStorageStrategy;
-  private readonly _strategy: AuthStrategy;
+  private readonly _cache: InMemoryCache;
   private _refreshInterval: ReturnType<typeof setInterval> | null = null;
 
   /**
@@ -38,40 +34,24 @@ export class SpaarkeAuthProvider {
       throw new AuthError('Xrm is required but not available in this context', 'xrm_required');
     }
 
-    this._cacheStrategy = new CacheStrategy();
-    this._sessionStorageStrategy = new SessionStorageStrategy();
-    this._strategy = strategy ?? new BrowserMsalStrategy(this._config);
+    const inner = strategy ?? new BrowserMsalStrategy(this._config);
+    this._cache = new InMemoryCache(inner);
 
     if (this._config.proactiveRefresh) {
       this._startProactiveRefresh();
     }
   }
 
-  /** Acquire a token. Tries in-memory → sessionStorage → strategy.acquire(). */
+  /** Acquire a token via the in-memory cache, falling through to the strategy on miss. */
   async getAccessToken(): Promise<string> {
-    // 1. In-memory cache (fastest, per-instance)
-    const cached = await this._cacheStrategy.tryAcquireToken();
-    if (cached) return cached.accessToken;
-
-    // 2. sessionStorage cache (shared across same-origin iframes — task 012 removes this layer)
-    const sessionCached = await this._sessionStorageStrategy.tryAcquireToken();
-    if (sessionCached) {
-      console.info('[SpaarkeAuth] Token acquired via sessionStorage (cross-iframe cache)');
-      this._cacheToken(sessionCached.accessToken, sessionCached.expiresOn);
-      return sessionCached.accessToken;
-    }
-
-    // 3. Strategy (BrowserMsalStrategy / OfficeNaaStrategy / ...)
     try {
-      const result = await this._strategy.acquire();
+      const result = await this._cache.acquire();
       if (result.accessToken) {
-        console.info(`[SpaarkeAuth] Token acquired via ${this._strategy.name}`);
-        this._cacheToken(result.accessToken, result.expiresOn);
+        console.info(`[SpaarkeAuth] Token acquired via ${this._cache.name}`);
         return result.accessToken;
       }
-      console.warn(`[SpaarkeAuth] Strategy ${this._strategy.name} returned empty token`);
     } catch (err) {
-      console.warn(`[SpaarkeAuth] Strategy ${this._strategy.name} failed:`, err);
+      console.warn(`[SpaarkeAuth] ${this._cache.name} failed:`, err);
     }
 
     console.error('[SpaarkeAuth] All token acquisition exhausted. Config:', {
@@ -84,24 +64,21 @@ export class SpaarkeAuthProvider {
   }
 
   /**
-   * Clear the in-memory token cache to force re-acquisition on next call.
-   * Does NOT clear sessionStorage (would cascade other components on shared origin).
-   * Use clearAllCaches() for explicit logout (INV-7).
+   * Invalidate the in-memory token cache to force re-acquisition on the next call.
+   * Does NOT cascade to the inner strategy. Use clearAllCaches() for explicit logout (INV-7).
    */
   clearCache(): void {
-    this._cacheStrategy.clear();
+    this._cache.invalidate();
   }
 
-  /** Clear ALL caches including shared sessionStorage AND strategy-local state. Use for explicit logout. */
+  /** Clear the in-memory cache AND cascade to the strategy. Use for explicit logout. */
   clearAllCaches(): void {
-    this._cacheStrategy.clear();
-    this._sessionStorageStrategy.clear();
-    this._strategy.clearCache();
+    this._cache.clearCache();
   }
 
   /** Whether a cached token is currently available (synchronous check). */
   isAuthenticated(): boolean {
-    return this._cacheStrategy.tryAcquireToken !== undefined && this._hasValidCache();
+    return this._cache.getCachedToken() !== null;
   }
 
   /** Get the resolved config. */
@@ -169,14 +146,9 @@ export class SpaarkeAuthProvider {
     }
   }
 
-  private _cacheToken(token: string, expiresOn: number): void {
-    this._cacheStrategy.store(token, expiresOn);
-    this._sessionStorageStrategy.store(token, expiresOn);
-  }
-
   private _extractTidFromCachedToken(): string {
     try {
-      const token = this._cacheStrategy.getCachedToken();
+      const token = this._cache.getCachedToken();
       if (!token) return '';
       const parts = token.split('.');
       if (parts.length !== 3) return '';
@@ -184,14 +156,6 @@ export class SpaarkeAuthProvider {
       return payload.tid ?? '';
     } catch {
       return '';
-    }
-  }
-
-  private _hasValidCache(): boolean {
-    try {
-      return this._cacheStrategy !== null;
-    } catch {
-      return false;
     }
   }
 
@@ -209,7 +173,7 @@ export class SpaarkeAuthProvider {
   private _startProactiveRefresh(): void {
     this._refreshInterval = setInterval(async () => {
       try {
-        this._cacheStrategy.clear();
+        this._cache.invalidate();
         await this.getAccessToken();
       } catch {
         // Swallow — proactive refresh is best-effort
