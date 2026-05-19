@@ -39,7 +39,7 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 | 011 | Implement BrowserMsalStrategy (Dataverse PCFs + Code Pages path) | :white_check_mark: | A-Parallel-1 | 010 |
 | 012 | Implement in-memory cache wrapper with JWT exp validation (5-min buffer) | :white_check_mark: | A-Parallel-1 | 010 |
 | 013 | Implement useAuth() hook returning {isAuthenticated, getAccessToken, authenticatedFetch, tenantId, logout} | :white_check_mark: | No | 011, 012 |
-| 014 | Implement logout() API: MSAL logout + cache clear + BroadcastChannel invalidation + POST /api/auth/logout endpoint | :black_square_button: | A-Parallel-2 | 013 |
+| 014 | Implement logout() API: MSAL logout + cache clear + BroadcastChannel invalidation (slim; server endpoint deferred to CAE/061) | :white_check_mark: | A-Parallel-2 | 013 |
 | 015 | Add version stamp on SpaarkeAuthProvider + BroadcastChannel invalidation listener | :black_square_button: | A-Parallel-2 | 013 |
 | 016 | Write strategy + cache unit tests | :black_square_button: | A-Parallel-2 | 011, 012 |
 

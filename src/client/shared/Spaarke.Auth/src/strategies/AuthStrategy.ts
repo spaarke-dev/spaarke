@@ -28,4 +28,19 @@ export interface AuthStrategy {
 
   /** Clear any strategy-local cached state (used on logout / 401 retry). */
   clearCache(): void;
+
+  /**
+   * Sign the user out at the identity-provider layer.
+   *
+   * BrowserMsalStrategy: `MSAL.logoutPopup` — clears the refresh token from
+   * `localStorage` AND ends the Entra session (kills the session cookie). After
+   * this completes, both `acquireTokenSilent` and `ssoSilent` will fail until
+   * the user re-authenticates.
+   *
+   * OfficeNaaStrategy (task 080): TBD — Office NAA broker logout.
+   *
+   * Implementations should swallow non-fatal errors and at minimum cascade to
+   * `clearCache()` so the local cache state matches the user-intended outcome.
+   */
+  logout(): Promise<void>;
 }

@@ -16,6 +16,7 @@ const mockProvider = {
   getAccessToken: jest.fn(() => Promise.resolve('mock-access-token')),
   getCachedTenantId: jest.fn(() => 'mock-tenant-id'),
   clearAllCaches: jest.fn(),
+  logout: jest.fn(() => Promise.resolve()),
 };
 
 jest.mock('../src/initAuth', () => ({
@@ -30,6 +31,7 @@ describe('useAuth', () => {
     mockProvider.getAccessToken.mockClear();
     mockProvider.getCachedTenantId.mockClear();
     mockProvider.clearAllCaches.mockClear();
+    mockProvider.logout.mockClear();
   });
 
   it('returns the expected shape', () => {
@@ -69,17 +71,10 @@ describe('useAuth', () => {
     expect(mockProvider.getAccessToken).toHaveBeenCalledTimes(1);
   });
 
-  it('logout (stub) clears all provider caches', async () => {
-    // Suppress the intentional [useAuth] warning emitted by the stub
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const result = useAuth();
-      await result.logout();
+  it('logout delegates to provider.logout()', async () => {
+    const result = useAuth();
+    await result.logout();
 
-      expect(mockProvider.clearAllCaches).toHaveBeenCalledTimes(1);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('task 014'));
-    } finally {
-      warnSpy.mockRestore();
-    }
+    expect(mockProvider.logout).toHaveBeenCalledTimes(1);
   });
 });

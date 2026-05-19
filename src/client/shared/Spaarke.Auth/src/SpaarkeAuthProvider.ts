@@ -4,6 +4,7 @@ import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
 import type { AuthStrategy } from './strategies/AuthStrategy';
 import { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';
 import { InMemoryCache } from './strategies/InMemoryCache';
+import { broadcastLogout } from './broadcastChannel';
 
 /**
  * Core auth provider (v2 — tasks 010, 011, 012).
@@ -74,6 +75,24 @@ export class SpaarkeAuthProvider {
   /** Clear the in-memory cache AND cascade to the strategy. Use for explicit logout. */
   clearAllCaches(): void {
     this._cache.clearCache();
+  }
+
+  /**
+   * Full logout flow:
+   *   1. Broadcast `{type:'logout'}` to all same-origin contexts (so other tabs
+   *      drop their in-memory caches before the user's network of components
+   *      starts firing failed requests).
+   *   2. Clear in-memory + strategy-local cache state in THIS context.
+   *   3. Drive the strategy through its real logout flow (MSAL.logoutPopup for
+   *      BrowserMsalStrategy — clears refresh token + ends Entra session).
+   *
+   * Server-side OBO cache invalidation is intentionally NOT performed (per the
+   * slim Phase A scope decision documented in projects/spaarke-auth-v2-and-hardening
+   * task 014 notes). Real server-side revocation lands with CAE in Phase D task 061.
+   */
+  async logout(): Promise<void> {
+    broadcastLogout();
+    await this._cache.logout();
   }
 
   /** Whether a cached token is currently available (synchronous check). */

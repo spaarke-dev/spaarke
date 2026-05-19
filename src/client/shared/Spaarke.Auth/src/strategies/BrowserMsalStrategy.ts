@@ -179,6 +179,36 @@ export class BrowserMsalStrategy implements AuthStrategy {
     });
   }
 
+  /**
+   * MSAL logout via popup. Clears the refresh token from `localStorage` AND ends
+   * the Entra session (kills the session cookie). After this resolves, neither
+   * `acquireTokenSilent` nor `ssoSilent` will succeed until the user re-auths.
+   *
+   * Popup-blocking fallback: if `logoutPopup` throws (browser blocked the popup,
+   * or no foreground window), at least call `clearCache()` so local MSAL state
+   * matches the user-intended logout. The Entra session may remain alive in this
+   * degraded path; the user's next interactive login resyncs everything.
+   */
+  async logout(): Promise<void> {
+    const msal = await this._ensureInitialized();
+    if (!msal) return;
+
+    const account = msal.getAllAccounts()[0];
+    try {
+      await msal.logoutPopup({ account });
+    } catch (err) {
+      console.warn(
+        '[BrowserMsalStrategy] logoutPopup failed; falling back to clearCache. Entra session may persist.',
+        err
+      );
+      try {
+        await msal.clearCache();
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
   /** Expose the underlying MSAL instance so SpaarkeAuthProvider can resolve tenant ID from accounts. */
   getMsalInstance(): PublicClientApplication | null {
     return this._instance;

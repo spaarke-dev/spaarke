@@ -19,7 +19,16 @@ export interface UseAuthResult {
   authenticatedFetch: AuthenticatedFetchFn;
   /** Azure AD tenant ID from the cached JWT `tid` claim. Empty string if no token cached. */
   tenantId: string;
-  /** Log the user out. Full implementation lands in task 014 (server invalidation + BroadcastChannel). */
+  /**
+   * Log the user out. Broadcasts `{type:'logout'}` to all same-origin contexts
+   * (other tabs/iframes drop their in-memory caches), then drives MSAL through
+   * `logoutPopup` (clears refresh token + ends Entra session). After this
+   * resolves, neither `acquireTokenSilent` nor `ssoSilent` will succeed until
+   * the user re-authenticates.
+   *
+   * Server-side OBO Redis cache invalidation is intentionally NOT performed
+   * (slim Phase A scope; real server-side revocation lands with CAE in task 061).
+   */
   logout: () => Promise<void>;
 }
 
@@ -44,12 +53,6 @@ export function useAuth(): UseAuthResult {
     getAccessToken: () => provider.getAccessToken(),
     authenticatedFetch,
     tenantId: provider.getCachedTenantId(),
-    logout: async () => {
-      console.warn(
-        '[useAuth] logout() is a stub pending task 014. Clearing local caches; ' +
-          'server-side OBO invalidation + BroadcastChannel notification not yet implemented.'
-      );
-      provider.clearAllCaches();
-    },
+    logout: () => provider.logout(),
   };
 }

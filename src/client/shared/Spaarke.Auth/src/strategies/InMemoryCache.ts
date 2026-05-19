@@ -63,6 +63,11 @@ export class InMemoryCache implements AuthStrategy {
     this._inner.clearCache();
   }
 
+  async logout(): Promise<void> {
+    this._cached = null;
+    await this._inner.logout();
+  }
+
   /**
    * Invalidate ONLY the in-memory cache without cascading to the inner strategy.
    * Used by proactive refresh to force the next `acquire()` to call the inner
