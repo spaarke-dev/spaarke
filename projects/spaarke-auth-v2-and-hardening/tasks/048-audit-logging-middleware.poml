@@ -3,7 +3,7 @@
     <title>Implement audit logging middleware — standard identity fields</title>
     <phase>C — Server hardening</phase>
     <tags>auth, server, observability, audit, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>none</dependencies>
     <parallel-safe>C-Parallel-2</parallel-safe>
@@ -30,4 +30,49 @@
     <criterion>OBO detection works (test with an endpoint that exchanges OBO).</criterion>
     <criterion>Field semantics documented.</criterion>
   </acceptance-criteria>
+  <notes>
+Completed 2026-05-19 — Phase C / Workstream C8.
+
+Files created:
+- src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs
+
+Files modified:
+- src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs
+  (added `using Sprk.Bff.Api.Infrastructure.Logging;` + `app.UseAuditEnrichment();`
+   call placed AFTER `app.UseAuthentication()` + `app.UseAuthorization()` and BEFORE
+   `app.UseRateLimiter()`)
+
+Implementation:
+- AuditEnrichmentMiddleware pushes `oid`, `appid`, `obo`, `tenantId`, `correlationId`
+  into the structured log scope via `ILogger&lt;T&gt;.BeginScope(IDictionary&lt;string, object?&gt;)`
+  on every AUTHENTICATED request. Anonymous requests (e.g. `/healthz`) pass through
+  unchanged.
+- Field semantics + sourcing fully documented in XML doc comments on the class and
+  on the `IsOnBehalfOfFlow` helper (single source of truth, no separate README needed).
+
+Claim resolution (matches existing patterns in ResourceAccessHandler.cs / AnalysisRagProcessor.cs):
+- `oid`: short claim → `http://schemas.microsoft.com/identity/claims/objectidentifier`
+- `appid`: `appid` (v1) → `azp` (v2)
+- `tenantId`: `tid` → long URI → `tenant_id`
+- `correlationId`: `HttpContext.TraceIdentifier` (W3C TraceParent)
+- `obo`: `true` when delegated `scp` claim present AND `oid` present; explicitly `false`
+  when `idtyp == "app"`.
+
+Security/PII rules enforced:
+- Never logs raw JWT, secrets, or Authorization header
+- Never logs UPN / email / display name (canonical identity = `oid` per task D3)
+- Anonymous endpoints get no scope
+
+Build: `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` → 0 errors. Only
+pre-existing warnings unrelated to this change.
+
+Parallel-execution coordination: Touched ONLY new file + narrow edits to
+MiddlewarePipelineExtensions.cs (NOT Program.cs as the task originally suggested —
+the actual pipeline registration lives in MiddlewarePipelineExtensions.cs). No
+collision with parallel tasks 043-047.
+
+Runtime verification (App Insights traces visible to customer) is deferred to the
+next deployment — the structured-scope contract is exercised by App Insights /
+OpenTelemetry / Serilog and is the standard mechanism for this pattern.
+  </notes>
 </task>

@@ -3,7 +3,7 @@
     <title>Formalize named API key auth scheme</title>
     <phase>C — Server hardening</phase>
     <tags>auth, server, api-key, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>none</dependencies>
     <parallel-safe>C-Parallel-2</parallel-safe>
@@ -32,4 +32,45 @@
     <criterion>No inline header validation remains.</criterion>
     <criterion>Constant-time compare used.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. Build: dotnet build src/server/api/Sprk.Bff.Api/ → 0 errors, 17 unrelated warnings.
+
+    SCHEMES + POLICIES (for task 049 / rate-limiting consumers):
+    - Schemes: `AuthSchemes.BuilderAdminApiKey` ("BuilderAdminApiKey"), `AuthSchemes.RagApiKey` ("RagApiKey")
+    - Policies: `AuthPolicies.BuilderAdminApiKey`, `AuthPolicies.RagApiKey`, `AuthPolicies.BuilderAdminOrOAuth` (composite — accepts EITHER JwtBearer OR BuilderAdminApiKey, used by builder-scope endpoints to preserve dual-auth)
+    - Constants live in `src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthSchemes.cs` and `AuthPolicies.cs`.
+
+    ENDPOINTS MIGRATED:
+    - `/api/admin/builder-scopes/import` + `/api/admin/builder-scopes/import-json` → `.RequireAuthorization(AuthPolicies.BuilderAdminOrOAuth)`. Inline ValidateAuth helper removed.
+    - `/api/ai/rag/enqueue-indexing` → `.RequireAuthorization(AuthPolicies.RagApiKey)`. Moved OUT of the `/api/ai/rag` group (which has its own `.RequireAuthorization()` JWT) and mapped on `app` directly, so the JWT policy does NOT compose with the API key policy (AND-composition would 401 API-key callers). Inline X-Api-Key header check + 500/401 branches removed from the EnqueueIndexing handler.
+
+    CONFIGURATION KEYS REQUIRED (unchanged from pre-refactor — no new keys):
+    - `BuilderAdmin:ApiKey` (existing — used by BuilderAdminApiKey scheme)
+    - `Rag:ApiKey` (existing — used by RagApiKey scheme)
+    Both should be Key Vault references in production (per task 040).
+
+    FILES MODIFIED:
+    - NEW src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/ApiKeyAuthenticationOptions.cs
+    - NEW src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/ApiKeyAuthenticationHandler.cs (constant-time compare via CryptographicOperations.FixedTimeEquals with length-mismatch padding)
+    - NEW src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthSchemes.cs
+    - NEW src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs
+    - MOD src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs (chained .AddScheme calls + 3 policies)
+    - MOD src/server/api/Sprk.Bff.Api/Api/Admin/BuilderScopeAdminEndpoints.cs (removed ValidateAuth, use AuthPolicies.BuilderAdminOrOAuth)
+    - MOD src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs (moved enqueue-indexing out of group, use AuthPolicies.RagApiKey)
+
+    DEPENDENCIES:
+    - Task 049 (rate-limiting) can reference these schemes/policies by name from `AuthSchemes` + `AuthPolicies` constants.
+
+    NOT TOUCHED (out of scope):
+    - Other endpoints with X-Api-Key validation (email webhook etc.) — task targeted only builder-scope/import + rag.
+    - Inline X-Api-Key references in non-endpoint code (config/services) are unchanged.
+
+    ROTATION PROCEDURE (Key Vault secret rotation):
+    1. Rotate the secret in Key Vault (new version).
+    2. App Service config reference auto-resolves to the new version on next config refresh.
+    3. No code deploy or restart strictly required (Microsoft.Identity.Web/JwtBearer behaviour is well-known), but for ApiKey scheme: IConfiguration is read on every request inside HandleAuthenticateAsync, so new secret value is picked up immediately on the next request after App Service config refresh.
+    4. To force immediate rollover: restart App Service (drops in-flight cached config).
+
+    SECURITY NOTE: `AuthenticateResult.NoResult()` is returned when the header is absent (vs `.Fail()`). This lets composite policies (like `BuilderAdminOrOAuth`) try the other scheme. Endpoints that should be API-key-only use the standalone `AuthPolicies.RagApiKey` / `AuthPolicies.BuilderAdminApiKey` which `.RequireAuthenticatedUser()` — that forces a 401 on missing/invalid key (because no other scheme is listed).
+  </notes>
 </task>

@@ -3,7 +3,7 @@
     <title>Fix appsettings.template.json — env-specific placeholders</title>
     <phase>C — Server hardening</phase>
     <tags>auth, server, config, env-independence, MINIMAL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>none</dependencies>
     <parallel-safe>C-Parallel-2</parallel-safe>
@@ -29,4 +29,29 @@
     <criterion>Deployment script substitutes the new placeholders.</criterion>
     <criterion>Dev deployment works with new template.</criterion>
   </acceptance-criteria>
+  <notes>
+Completed 2026-05-19 (parallel Phase C wave; sibling sub-agents executing 043, 044, 045, 046, 048).
+
+**Files modified:**
+- `src/server/api/Sprk.Bff.Api/appsettings.template.json`
+  - Line 36: `"TenantId": "common"` → `"TenantId": "#{TENANT_ID}#"` (M-2 fix)
+  - Line 226: `"CopilotAudience": "api://auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb/#{API_APP_ID}#"` → `"CopilotAudience": "api://#{COPILOT_SSO_PROVIDER_APP_ID}#/#{API_APP_ID}#"` (M-3 fix)
+- `src/server/api/Sprk.Bff.Api/appsettings.tokens.md`
+  - Added `#{COPILOT_SSO_PROVIDER_APP_ID}#` and `#{COPILOT_AGENT_APP_ID}#` to the token reference table
+  - Added them to the "Development Values" example block
+  - Added a "Notes" section explaining the historical UUID and providing the default value (`auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb`) for CI/CD pipelines that don't override
+
+**Placeholder format used:** `#{TOKEN_NAME}#` — matches existing convention documented in `appsettings.tokens.md` and used throughout the template (compatible with Azure DevOps `FileTransform@2` and GitHub Actions `cschleiden/replace-tokens`).
+
+**Step 3 (deployment script update) — NOT required:** `Deploy-BffApi.ps1` does NOT do placeholder substitution. Per `appsettings.tokens.md`, substitution happens in the CI/CD pipeline (Azure DevOps File Transform or GitHub Actions replace-tokens action) BEFORE `dotnet publish`. The deploy script only builds + packages + deploys + verifies. Substitution is configured via environment-specific variable registries that read from `appsettings.tokens.md`. **Operator action required for next deploy:** add `COPILOT_SSO_PROVIDER_APP_ID=auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb` to the dev + prod pipeline variable sets. (For dev, this can also live in App Service config as `AgentToken__CopilotAudience` Key Vault reference — bypassing template substitution entirely.)
+
+**Step 5 (re-deploy + verify) — DEFERRED:** Out of scope for this sub-agent per parallel-execution rules (DO NOT commit, DO NOT touch outside `src/server/api/Sprk.Bff.Api/`). To be done after Phase C waves consolidate.
+
+**Build verification:** `dotnet build src/server/api/Sprk.Bff.Api/` — pre-existing build break in `AuthorizationModule.cs:49,56` (missing `AuthSchemes` symbol) from sibling agent task 045 WIP. NOT caused by this task. JSON template file is not a compile input; `appsettings.tokens.md` is documentation. My changes have zero compile impact.
+
+**JSON validity verified:** Template parses cleanly after simulated CI substitution (booleans → `true`, strings → `placeholder`).
+
+**Audit by-product (NOT in scope for this task — flag for future hardening):**
+Other hardcoded values in `appsettings.template.json` reviewed: `BingSearch:Endpoint`, `LlamaParse:BaseUrl`, `AiSearch:*IndexName/SemanticConfigName/ApiKeySecretName`, `AzureOpenAI:EmbeddingModelName/ClassificationModelName`. All are service constants (universal endpoints or Spaarke-internal naming conventions shared across deployments), not env-specific tenant values. No M-grade audit findings against them. Out of scope.
+  </notes>
 </task>

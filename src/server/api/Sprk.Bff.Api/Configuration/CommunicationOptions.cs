@@ -40,11 +40,30 @@ public class CommunicationOptions
     public string WebhookNotificationUrl { get; set; } = string.Empty;
 
     /// <summary>
-    /// Shared secret used to validate Graph webhook notifications.
-    /// Should be stored in Key Vault and referenced via @Microsoft.KeyVault(...).
+    /// Shared secret carried inside the Graph notification body's <c>clientState</c> field.
+    /// Validated in constant time on every incoming notification. Must be stored in
+    /// Key Vault and referenced via <c>@Microsoft.KeyVault(...)</c>.
     /// </summary>
     [Required(ErrorMessage = "Communication:WebhookClientState is required for Graph webhook validation.")]
     public string WebhookClientState { get; set; } = string.Empty;
+
+    /// <summary>
+    /// HMAC-SHA256 signing key used by <see cref="Api.Filters.WebhookSignatureFilter"/>
+    /// to validate the <c>X-Hub-Signature-256</c> header on incoming webhook requests.
+    /// <para>
+    /// Microsoft Graph itself does not sign notification bodies, so this key is
+    /// applied when a signing relay (Logic App, Function, API Management) sits in
+    /// front of the endpoint and adds the signature on Graph's behalf. Together
+    /// with the body-level <see cref="WebhookClientState"/> check, this enforces
+    /// defense-in-depth: a leaked endpoint URL alone cannot forge notifications.
+    /// </para>
+    /// <para>
+    /// MUST be stored in Key Vault and referenced via <c>@Microsoft.KeyVault(...)</c>.
+    /// MUST be rotated on incident or on a calendar cadence (e.g., 90 days).
+    /// </para>
+    /// </summary>
+    [Required(ErrorMessage = "Communication:WebhookSigningKey is required (HMAC-SHA256 webhook validation). See Key Vault secret 'communication-webhook-signing-key'.")]
+    public string WebhookSigningKey { get; set; } = string.Empty;
 }
 
 /// <summary>

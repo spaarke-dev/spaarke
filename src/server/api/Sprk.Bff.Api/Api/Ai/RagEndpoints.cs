@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
@@ -127,15 +128,17 @@ public static class RagEndpoints
             .ProducesProblem(500);
 
         // POST /api/ai/rag/enqueue-indexing - Enqueue a file for background RAG indexing
-        // Uses AllowAnonymous + API key header validation (consistent with email webhook pattern)
-        // Security: Validates X-Api-Key header before enqueueing job
-        // Job handler uses app-only auth (Pattern 6) for SPE file access
-        group.MapPost("/enqueue-indexing", EnqueueIndexing)
-            .AllowAnonymous()
+        // Auth: Named RagApiKey scheme (task AUTHV2-045). Mapped on `app` (not `group`) so
+        // the group's `.RequireAuthorization()` (JWT default) does NOT compose with the API
+        // key policy — API key callers do not present a JWT, so AND-composition would 401 them.
+        // Job handler uses app-only auth (Pattern 6) for SPE file access.
+        app.MapPost("/api/ai/rag/enqueue-indexing", EnqueueIndexing)
+            .RequireAuthorization(AuthPolicies.RagApiKey)
             .RequireRateLimiting("ai-batch")
             .WithName("RagEnqueueIndexing")
+            .WithTags("AI RAG")
             .WithSummary("Enqueue a file for background RAG indexing")
-            .WithDescription("Validates API key header and enqueues file for async indexing via job handler. Used for background jobs, scheduled indexing, bulk operations, and automated testing.")
+            .WithDescription("Validates API key (X-Api-Key) via the named RagApiKey scheme and enqueues file for async indexing. Used for background jobs, scheduled indexing, bulk operations, and automated testing.")
             .Produces<EnqueueIndexingResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(400)
             .ProducesProblem(401)
@@ -672,18 +675,17 @@ public static class RagEndpoints
 
     /// <summary>
     /// Enqueue a file for background RAG indexing via job queue.
-    /// Uses API key header validation for security (consistent with email webhook pattern).
+    /// Authorization enforced upstream by the <see cref="AuthPolicies.RagApiKey"/> policy
+    /// (task AUTHV2-045 — named API key scheme). The job handler
+    /// (RagIndexingJobHandler) uses Pattern 6 (app-only auth) for SPE file access.
     /// </summary>
     /// <remarks>
-    /// This endpoint validates an API key header before enqueueing the job.
-    /// The job handler (RagIndexingJobHandler) uses Pattern 6 (app-only auth) for SPE file access.
     /// Returns 202 Accepted with job tracking information for async processing.
     /// </remarks>
     private static async Task<IResult> EnqueueIndexing(
         [FromBody] FileIndexRequest request,
         HttpRequest httpRequest,
         JobSubmissionService jobSubmissionService,
-        IConfiguration configuration,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -691,29 +693,10 @@ public static class RagEndpoints
         var traceId = httpRequest.HttpContext.TraceIdentifier;
         var correlationId = httpRequest.Headers["X-Correlation-Id"].FirstOrDefault() ?? traceId;
 
-        // Step 1: Validate API key header
-        var apiKey = httpRequest.Headers["X-Api-Key"].FirstOrDefault();
-        var expectedApiKey = configuration["Rag:ApiKey"];
+        // API key validation is performed by ApiKeyAuthenticationHandler (RagApiKey scheme)
+        // bound via .RequireAuthorization(AuthPolicies.RagApiKey) on the endpoint registration.
 
-        if (string.IsNullOrEmpty(expectedApiKey))
-        {
-            logger.LogWarning("RAG API key not configured - rejecting request");
-            return Results.Problem(
-                title: "Configuration Error",
-                detail: "RAG API key not configured on server",
-                statusCode: StatusCodes.Status500InternalServerError);
-        }
-
-        if (string.IsNullOrEmpty(apiKey) || apiKey != expectedApiKey)
-        {
-            logger.LogWarning("Invalid or missing RAG API key for request {TraceId}", traceId);
-            return Results.Problem(
-                title: "Unauthorized",
-                detail: "Invalid or missing API key",
-                statusCode: StatusCodes.Status401Unauthorized);
-        }
-
-        // Step 2: Validate required fields
+        // Validate required fields
         if (string.IsNullOrWhiteSpace(request.TenantId))
         {
             return Results.BadRequest(new ProblemDetails

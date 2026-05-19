@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 23/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11). Plus B-addendum: 1 deferred (task 031, wizard payload bugs — non-blocking).
-> **Status**: Phase B SIGNED OFF (deployed + regression-verified on BOTH envs). Phase C (server hardening) NEXT.
+> **Total Tasks**: 29/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11, Phase C: 6/10 — task 040 deferred; tasks 041+042+049 pending). Plus B-addendum 031 deferred.
+> **Status**: Phase C Wave 1 (043-048) shipped in code. Wave 2 next: 041, 042, 049. Then deploy + OBO smoke check.
 > **Last Updated**: 2026-05-19
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
 
@@ -71,15 +71,15 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 
 | # | Task | Status | Parallel Group | Dependencies |
 |---|------|--------|----------------|--------------|
-| 040 | Rotate AzureAd__ClientSecret + AgentToken__ClientSecret; convert App Service config to Key Vault references; coordinate App Service restart | :black_square_button: | No (deploy) | Phase A |
-| 041 | Migrate Graph app-only from ClientSecretCredential to DefaultAzureCredential (managed identity) | :black_square_button: | C-Parallel-1 | 040 |
-| 042 | Migrate Dataverse service identity from ClientSecretCredential to DefaultAzureCredential (multiple job handlers) | :black_square_button: | C-Parallel-1 | 040 |
-| 043 | Remove /debug/* endpoints (7 routes including /debug/token); #if DEBUG guard or delete entirely | :black_square_button: | C-Parallel-2 | none |
-| 044 | Replace webhook clientState with HMAC-SHA256 signature validation; remove DEVELOPMENT_MODE bypass | :black_square_button: | C-Parallel-2 | none |
-| 045 | Formalize named API key auth scheme; replace ad-hoc header validation on /api/admin/builder-scope/import, /api/ai/rag/* | :black_square_button: | C-Parallel-2 | none |
-| 046 | Add idempotency guard in PostConfigure JwtBearerOptions (AuthorizationModule.cs:29-48) | :black_square_button: | C-Parallel-2 | none |
-| 047 | Fix appsettings.template.json: TenantId common → #{TENANT_ID}#; parameterize Copilot audience UUID | :black_square_button: | C-Parallel-2 | none |
-| 048 | Audit logging middleware: enrich every authenticated request with oid, appid, obo, tenantId, correlationId | :black_square_button: | C-Parallel-2 | none |
+| 040 | Rotate AzureAd__ClientSecret + AgentToken__ClientSecret; convert App Service config to Key Vault references; coordinate App Service restart | :no_entry: deferred | No (deploy) | Phase A. **DEFERRED 2026-05-19**: dev env, no external users, no production data — low blast radius. Revisit at prod-readiness planning. Memory: `feedback-question-urgency-for-dev-only-infra-tasks` |
+| 041 | Migrate Graph app-only from ClientSecretCredential to DefaultAzureCredential (managed identity) | :black_square_button: | C-Parallel-1 | (was 040; UNBLOCKED — MI migration doesn't need 040 first) |
+| 042 | Migrate Dataverse service identity from ClientSecretCredential to DefaultAzureCredential (multiple job handlers) | :black_square_button: | C-Parallel-1 | (was 040; UNBLOCKED — MI migration doesn't need 040 first) |
+| 043 | Remove /debug/* endpoints — 11 routes removed (POML undercount said 7); DebugEndpointExtensions.cs DELETED | :white_check_mark: | C-Parallel-2 | none |
+| 044 | HMAC-SHA256 webhook validation + removed DEVELOPMENT_MODE bypass (Communication + Email webhooks; new WebhookSignatureFilter) | :white_check_mark: | C-Parallel-2 | none |
+| 045 | Named API key auth scheme (BuilderAdmin + Rag); 3 endpoints migrated; constant-time compare | :white_check_mark: | C-Parallel-2 | none |
+| 046 | PostConfigure<JwtBearerOptions> idempotency guard (Interlocked.CompareExchange + fixed stacked-handler bug) | :white_check_mark: | C-Parallel-2 | none |
+| 047 | appsettings.template.json: TenantId → #{TENANT_ID}#; Copilot UUID → #{COPILOT_SSO_PROVIDER_APP_ID}# | :white_check_mark: | C-Parallel-2 | none |
+| 048 | Audit logging middleware (AuditEnrichmentMiddleware; oid+appid+obo+tenantId+correlationId via BeginScope) | :white_check_mark: | C-Parallel-2 | none |
 | 049 | Rate limiting policies on anonymous + API key endpoints | :black_square_button: | C-Parallel-2 | 045 |
 
 **Phase gate**: No plain-text secrets in App Service config. No client secrets in code (managed identity for all server outbound). No /debug/* endpoints reachable. Webhook signatures verified. API key scheme is a named registration.

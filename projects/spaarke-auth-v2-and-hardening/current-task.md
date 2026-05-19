@@ -1,9 +1,19 @@
 # Current Task - Spaarke Auth v2 + Hardening
 
 > **Project**: spaarke-auth-v2-and-hardening
-> **Status**: 🎉 **PHASE B SIGNED OFF** (deployed + regression-verified on BOTH envs). Phase C (server hardening) NEXT.
-> **Active Phase**: B done. Phase C (server hardening 040-049) starts next.
-> **Last Updated**: 2026-05-19 (Phase B sign-off)
+> **Status**: Phase C in flight — Task 043 (remove /debug/* endpoints) executing in parallel with 044-048.
+> **Active Phase**: C — task 043 in-progress (FULL rigor sub-agent)
+> **Last Updated**: 2026-05-19 (task 043 dispatch)
+
+## Task 043 — Remove /debug/* endpoints (in-progress)
+
+**Rigor**: FULL · **Tags**: auth, server, security
+**Endpoints discovered**: 11 routes across 3 files
+- `Infrastructure/DI/DebugEndpointExtensions.cs` — 9 routes (delete file entirely)
+- `Infrastructure/DI/EndpointMappingExtensions.cs` — `/debug/token` (delete block) + `MapDebugEndpoints()` registration (narrow Edit)
+- `Api/Ai/VisualizationEndpoints.cs` — `/api/ai/visualization/debug/{documentId}` (delete block, already env-gated to Development)
+- `/status` endpoint references debug routes in its response (update string array)
+**Files modified (in-progress)**: DebugEndpointExtensions.cs (DELETE), EndpointMappingExtensions.cs, VisualizationEndpoints.cs
 
 ## Quick Recovery (Next Session)
 

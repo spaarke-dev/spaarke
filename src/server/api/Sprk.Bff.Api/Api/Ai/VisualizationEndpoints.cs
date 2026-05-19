@@ -70,19 +70,6 @@ public static class VisualizationEndpoints
             .ProducesProblem(422)
             .ProducesProblem(500);
 
-        // Debug endpoint - only available in Development environment
-        var env = app.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
-        if (env.IsDevelopment())
-        {
-            // GET /api/ai/visualization/debug/{documentId} - Debug document retrieval (Development only)
-            group.MapGet("/debug/{documentId:guid}", DebugDocumentRetrieval)
-                .AllowAnonymous()
-                .WithName("VisualizationDebugDocument")
-                .WithSummary("Debug: Test Dataverse document retrieval (Development only)")
-                .Produces<object>()
-                .ProducesProblem(500);
-        }
-
         return app;
     }
 
@@ -288,60 +275,6 @@ public static class VisualizationEndpoints
         }
     }
 
-    /// <summary>
-    /// Debug endpoint to test Dataverse document retrieval directly.
-    /// </summary>
-    private static async Task<IResult> DebugDocumentRetrieval(
-        Guid documentId,
-        IDocumentDataverseService dataverseService,
-        ILogger<Program> logger,
-        CancellationToken cancellationToken)
-    {
-        logger.LogInformation("Testing document retrieval for {DocumentId}", documentId);
-
-        try
-        {
-            var doc = await dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken);
-
-            if (doc == null)
-            {
-                return Results.Ok(new
-                {
-                    status = "NOT_FOUND",
-                    documentId = documentId.ToString(),
-                    message = "GetDocumentAsync returned null - document not found in Dataverse"
-                });
-            }
-
-            return Results.Ok(new
-            {
-                status = "FOUND",
-                documentId = doc.Id,
-                name = doc.Name,
-                fileName = doc.FileName,
-                isEmailArchive = doc.IsEmailArchive,
-                parentDocumentId = doc.ParentDocumentId,
-                matterId = doc.MatterId,
-                projectId = doc.ProjectId,
-                invoiceId = doc.InvoiceId,
-                emailConversationIndex = doc.EmailConversationIndex,
-                emailSubject = doc.EmailSubject,
-                createdOn = doc.CreatedOn
-            });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error retrieving document {DocumentId}", documentId);
-            return Results.Ok(new
-            {
-                status = "ERROR",
-                documentId = documentId.ToString(),
-                errorType = ex.GetType().Name,
-                errorMessage = ex.Message,
-                innerError = ex.InnerException?.Message
-            });
-        }
-    }
 }
 
 /// <summary>
