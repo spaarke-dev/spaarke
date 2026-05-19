@@ -124,9 +124,23 @@ When multiple tasks are marked parallel-safe within the same phase batch, invoke
 - Step 9.5: `code-review` + `adr-check` skills run automatically for FULL rigor tasks (any task that modifies `.cs` or `.ts` files)
 - Post-task: TASK-INDEX status updated; current-task.md reset
 
-### Regression test after every Workstream
+### Regression test cadence (risk-tiered)
 
-After each Workstream (Pre-flight, A, B, C, D, E, B4, F) completes, run the MSAL binding regression test from [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md#verification-after-changes):
+Run the MSAL binding regression test from [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md#verification-after-changes) **only when a workstream actually changed something that can break browser SSO**. Manual browser tests are not free; running them when the workstream can't possibly affect the outcome is waste.
+
+**Required** (workstream touched code paths that affect MSAL/browser SSO):
+- After **Phase A** (library rebuild)
+- After **EACH consumer rebuild + redeploy** in Phase B (per INV-8 bundling reality — a missed rebuild silently ships the old library and fires popup)
+- After **Phase B4** (Office Add-ins — different auth model, separate validation)
+- After **Phase D** (CSP + Trusted Types can block MSAL iframes; CAE forces re-auth)
+
+**Skip** (workstream did not touch browser auth):
+- Phase 0 (docs only)
+- Phase C (server-side only — do an OBO smoke check against the deployed BFF instead)
+- Phase E (CI infrastructure / dependency updates)
+- Phase F (docs only)
+
+**After Phase E task 071 ships**, this test runs automatically in CI on every PR (Playwright against a synthetic consumer). Manual cadence is interim.
 
 ```javascript
 // In Edge DevTools console after Workstream completion
@@ -139,7 +153,7 @@ document.cookie.split(';').forEach(c => {
 // FAIL: popup OR `/organizations` in the authority
 ```
 
-Acceptance criterion: PASS for every Workstream.
+**Known pre-existing baseline failure (until Phase A task 011 ships)**: `resolveLoginHint()` in `MsalSilentStrategy.ts:12-30` reads display name instead of UPN → AADSTS50058 → popup on browser startup. Discovered during Phase 0 gate (2026-05-18). The XrmStrategy is being deleted in Phase A; task 011 sources the hint from MSAL accounts directly. Do NOT patch this in Pre-flight — wait for Phase A.
 
 ---
 
