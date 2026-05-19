@@ -2,15 +2,15 @@
 
 > **Project**: spaarke-ai-platform-unification-r2
 > **Status**: deployed-testing
-> **Active Wave**: Post-deployment testing
+> **Active Wave**: Post-deployment testing — bug fixes
 > **Last Updated**: 2026-05-18
 
 ## Quick Recovery
 
-**Next Action**: Continue functional testing in deployed dev environment
-**Last Checkpoint**: All code committed + pushed at 24b78f65
-**Context**: 86/86 tasks complete. Deployed to dev. Testing in progress.
-**Branch**: work/spaarke-ai-platform-unification-r2 (pushed to origin)
+**Next Action**: Deploy SprkChat 401 fix to dev + re-verify chat session/playbook calls
+**Last Checkpoint**: 401 auth fix applied to SprkChat hooks (uncommitted, builds clean)
+**Context**: 86/86 tasks complete. Deployed to dev. Functional bugs being triaged.
+**Branch**: work/spaarke-ai-platform-unification-r2 (pushed to origin at 24b78f65)
 
 ## Deployment Status
 
@@ -36,8 +36,19 @@
 ### Fixed (committed at 2beddfe8)
 8. **Pre-existing stubs replaced**: WorkingDocumentService SPE upload, CreateTaskNodeExecutor, OutputOrchestratorService, ScopeManagementService
 
+### In Progress (2026-05-18 — uncommitted)
+- **401 on POST /api/ai/chat/sessions and GET /api/ai/chat/playbooks** — fix applied, awaiting commit + deploy.
+  - **Root cause (CONFIRMED via App Insights)**: Expired access token. `CopilotAuth` warning trace at `2026-05-18T23:17:26Z` shows `IDX10223: Lifetime validation failed. The token is expired. ValidTo (UTC): '5/18/2026 3:29:02 PM', Current time (UTC): '5/18/2026 11:17:26 PM'` — token had been expired for nearly 8 hours when the request arrived. The page had been idle long enough for the cached token to expire, and SprkChat's hooks (`useChatSession`, `useChatPlaybooks`, `useChatContextMapping`) used raw `fetch()` with the `accessToken` React-prop captured at render time — no path to refresh on 401, no 401 retry. BFF auth config was fine all along (audience `api://1e40baad-...` and tenant `a221a95e-...` both match the token's claims).
+  - **Why the auth provider didn't refresh proactively**: `useAiSession().token` exposes whatever token was cached when the AuthProvider initialised. React state doesn't actively poll for expiry — the stale token sits in the prop until something forces a refresh. `@spaarke/auth`'s `authenticatedFetch` is what forces it (calls `provider.getAccessToken()` per-request + clears cache + retries 3× on 401).
+  - **Fix**: Added optional `authenticatedFetch?: AuthenticatedFetchFn` prop to `ISprkChatProps` and to all three SprkChat hooks. When provided (R2 Code Page path), hooks route through it — gaining silent token refresh and 401 retry with exponential backoff. When omitted, falls back to the existing raw fetch + accessToken (PCF / legacy path — backward compatible). `ConversationPane` imports `authenticatedFetch` from `@spaarke/auth` and passes it to SprkChat.
+  - **Files changed**: `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/{types.ts,SprkChat.tsx,hooks/useChatSession.ts,hooks/useChatPlaybooks.ts,hooks/useChatContextMapping.ts}`, `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`.
+  - **Verification**: `tsc --noEmit` clean for the change. `vite build` of SpaarkeAi succeeded (2720 modules, 9.88s). Jest tests not runnable in this worktree (pre-existing `react` peer-dep install issue, not introduced by this fix).
+  - **Post-deploy test**: Open SpaarkeAi, leave the page idle for >80 min (or close laptop overnight), return and try chat. Should succeed instead of 401.
+
+### Security finding (separate from 401 issue) — 2026-05-18
+- **`AzureAd__ClientSecret` and `AgentToken__ClientSecret` stored as plain values in App Service config** (resource `spe-api-dev-67e2xz`, RG `spe-infrastructure-westus2`). Plain-text secret values visible in `az webapp config appsettings list` output (redacted from this note). Should be rotated and moved to Key Vault references (`@Microsoft.KeyVault(SecretUri=...)`). The deployment template already uses Key Vault for `Dataverse:ClientSecret` — same pattern should apply here. **Action required**: rotate secret as part of v2 Workstream C1; the prior value was exposed in tooling output and must be treated as compromised.
+
 ### Known Remaining Issues (for next session)
-- **401 on POST /api/ai/chat/sessions and GET /api/ai/chat/playbooks**: Auth token not being sent on some SprkChat requests. Investigate token acquisition flow in ConversationPane → SprkChat.
 - **GET /api/ai/chat/sessions returns empty array**: Need to implement ListRecentSessionsAsync in SessionPersistenceService (Cosmos query by tenantId, ordered by lastActivity desc)
 - **workspace/layouts endpoints 401**: These are separate workspace layout endpoints — may be pre-existing R1 endpoints with auth issues
 
