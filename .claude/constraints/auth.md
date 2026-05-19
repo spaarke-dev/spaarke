@@ -87,7 +87,7 @@ Load when:
 - ❌ **MUST NOT** add `@spaarke/auth` bootstrap to Code Pages that only use `Xrm.WebApi` (unnecessary overhead)
 - ❌ **MUST NOT** create new `msalConfig.ts` files with module-level MSAL configuration constants
 
-> See: `.claude/patterns/auth/spaarke-auth-initialization.md` and `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md`
+> See: `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md` (⛔ deprecated — superseded by Spaarke Auth v2 `useAuth()`; see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md)) and `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md`
 
 ### BFF Base URL Convention (CRITICAL — Use `buildBffApiUrl()` Helper)
 
@@ -194,8 +194,8 @@ Examples:
 - [OAuth Scopes](../patterns/auth/oauth-scopes.md) - Scope format and configuration
 - [OBO Flow](../patterns/auth/obo-flow.md) - On-Behalf-Of token exchange
 - [Token Caching](../patterns/auth/token-caching.md) - Server & client token caching
-- [MSAL Client](../patterns/auth/msal-client.md) - Client-side MSAL patterns
-- [Spaarke Auth Initialization](../patterns/auth/spaarke-auth-initialization.md) - Bootstrap order in Code Pages
+- [MSAL Client](../patterns/auth/DEPRECATED-msal-client.md) — ⛔ DEPRECATED, superseded by Spaarke Auth v2 (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md))
+- [Spaarke Auth Initialization](../patterns/auth/DEPRECATED-spaarke-auth-initialization.md) — ⛔ DEPRECATED, bootstrap superseded by `useAuth()` (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md))
 - [Xrm WebApi vs BFF Auth](../patterns/auth/xrm-webapi-vs-bff-auth.md) - Decision matrix
 
 ---

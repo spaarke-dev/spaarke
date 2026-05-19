@@ -88,7 +88,7 @@ If the popup appears, check the `authority:` value in the log. `/organizations` 
 
 ## See Also
 
-- `.claude/patterns/auth/spaarke-auth-initialization.md` — bootstrap order in Code Pages
+- `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md` — bootstrap order in Code Pages (⛔ deprecated — superseded by Spaarke Auth v2 `useAuth()`; see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../../AUDIT-FINDINGS-AUTH-SYSTEM.md))
 - `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md` — when to bootstrap vs skip
 - `.claude/patterns/auth/bff-url-normalization.md` — URL construction helper
 - `docs/architecture/sdap-auth-patterns.md` — full taxonomy + threat model

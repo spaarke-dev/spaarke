@@ -324,7 +324,7 @@ Authenticated browser calls from `*.crm.dynamics.com` to the BFF (`api://{BFF-Ap
 ## Related
 
 - [Spaarke SSO Binding](../../.claude/patterns/auth/spaarke-sso-binding.md) — **Canonical reference** for tenant authority, 6-strategy chain, localStorage + cookie binding (2026-05-13)
-- [Spaarke Auth Initialization](../../.claude/patterns/auth/spaarke-auth-initialization.md) — Code Page bootstrap sequence
+- [Spaarke Auth Initialization](../../.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md) — Code Page bootstrap sequence (⛔ deprecated — superseded by Spaarke Auth v2 `useAuth()`; see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md))
 - [Token Caching](../../.claude/patterns/auth/token-caching.md) — Client localStorage + server Redis
 - [OBO Flow](../../.claude/patterns/auth/obo-flow.md) — GraphClientFactory code pointers
 - [Dataverse OBO](../../.claude/patterns/auth/dataverse-obo.md) — Dataverse-specific OBO

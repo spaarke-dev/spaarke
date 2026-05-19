@@ -3,7 +3,7 @@
     <title>Rename DEPRECATED auth pattern files + update INDEX references</title>
     <phase>0 — Pre-flight</phase>
     <tags>docs, pre-flight, deprecation</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>15 minutes</estimated-effort>
     <dependencies>none</dependencies>
     <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
@@ -44,4 +44,23 @@
     <criterion>No in-repo links to the old filenames remain unfixed (verified by grep).</criterion>
     <criterion>git log shows a single commit for this task.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+    - Both files renamed via `git mv` (R status in `git status`).
+    - 11 in-scope reference updates across `.claude/`, `docs/`, `src/solutions/`, and `CROSS-REFERENCE-MAP.md`.
+    - All other matches (historical project POMLs/plans, `.claude/archive/`, `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` PF-1/PF-2/PF-8 rename-action descriptions, this project's own planning artifacts) left as-is per task step 4(a).
+    - Files modified:
+      - `.claude/patterns/auth/DEPRECATED-msal-client.md` (renamed + fixed internal cross-link to DEPRECATED-spaarke-auth-initialization.md)
+      - `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md` (renamed)
+      - `.claude/patterns/auth/INDEX.md` (2 row updates + DEPRECATED status)
+      - `.claude/patterns/auth/spaarke-sso-binding.md` (1 link update)
+      - `.claude/patterns/INDEX.md` (1 loading-strategy row)
+      - `.claude/patterns/webresource/{code-page-wizard-wrapper.md, full-page-custom-page.md}` (1 each)
+      - `.claude/skills/code-page-deploy/SKILL.md` (1 troubleshooting row)
+      - `.claude/constraints/auth.md` (2 references)
+      - `CROSS-REFERENCE-MAP.md` (1 row)
+      - `docs/architecture/sdap-auth-patterns.md` (1 related-link)
+      - `src/solutions/SpaarkeAi/src/App.tsx` (1 @see comment)
+      - `src/solutions/Reporting/src/{main.tsx, services/authInit.ts, config/runtimeConfig.ts, config/reportingConfig.ts}` (1 each)
+  </notes>
 </task>

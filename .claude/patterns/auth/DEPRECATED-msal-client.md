@@ -32,5 +32,5 @@ Reference exemplar: `src/client/pcf/SemanticSearchControl/SemanticSearchControl/
 ## See Also
 
 - [`spaarke-sso-binding.md`](spaarke-sso-binding.md) — canonical binding + token chain
-- [`spaarke-auth-initialization.md`](spaarke-auth-initialization.md) — bootstrap order
+- [`DEPRECATED-spaarke-auth-initialization.md`](DEPRECATED-spaarke-auth-initialization.md) — bootstrap order (⛔ also deprecated)
 - [`xrm-webapi-vs-bff-auth.md`](xrm-webapi-vs-bff-auth.md) — decide whether you need auth at all

@@ -13,7 +13,7 @@ Building a full navigation page or side pane hosted in a Dataverse Model-Driven 
 3. `src/solutions/EventsPage/src/App.tsx` — `FluentProvider` + theme wiring skeleton
 4. `src/solutions/EventsPage/src/providers/ThemeProvider.ts` — `resolveTheme()` + `setupThemeListener()` (copy for new pages)
 5. `src/solutions/EventsPage/index.html` — CSS reset: `html, body, #root { margin:0; height:100%; overflow:hidden }`
-6. `.claude/patterns/auth/spaarke-auth-initialization.md` — auth bootstrap for pages calling BFF API
+6. `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md` — auth bootstrap (⛔ deprecated — superseded by Spaarke Auth v2 `useAuth()`; see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../../AUDIT-FINDINGS-AUTH-SYSTEM.md))
 
 ## Constraints
 - **ADR-006**: Full-page surfaces MUST be Code Pages; PCF platform injects React 16 — `createRoot` and `useId()` fail at runtime

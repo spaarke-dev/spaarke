@@ -15,8 +15,8 @@
 | [dataverse-obo.md](dataverse-obo.md) | Dataverse OBO token exchange | 2026-04-05 | Verified |
 | [service-principal.md](service-principal.md) | App-only auth (no user context) | 2026-04-05 | Current |
 | [token-caching.md](token-caching.md) | Token caching (Redis server + localStorage client) | 2026-05-13 | Verified |
-| [msal-client.md](msal-client.md) | Legacy PCF MSAL singleton (superseded by `@spaarke/auth`) | 2026-04-05 | Legacy |
-| [spaarke-auth-initialization.md](spaarke-auth-initialization.md) | Code Page auth bootstrap | 2026-04-05 | Current |
+| [DEPRECATED-msal-client.md](DEPRECATED-msal-client.md) | ⛔ DO NOT USE — fully superseded by Spaarke Auth v2 (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../../AUDIT-FINDINGS-AUTH-SYSTEM.md) and forthcoming ADR-027) | 2026-05-18 | **DEPRECATED** |
+| [DEPRECATED-spaarke-auth-initialization.md](DEPRECATED-spaarke-auth-initialization.md) | ⛔ DO NOT USE — bootstrap pattern superseded by `useAuth()` in Spaarke Auth v2 (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../../AUDIT-FINDINGS-AUTH-SYSTEM.md) and forthcoming ADR-027) | 2026-05-18 | **DEPRECATED** |
 | [xrm-webapi-vs-bff-auth.md](xrm-webapi-vs-bff-auth.md) | Decision: Xrm.WebApi vs BFF auth | 2026-04-05 | Verified |
 | [bff-url-normalization.md](bff-url-normalization.md) | **CRITICAL**: BFF URL construction via `buildBffApiUrl()` | 2026-04-05 | Verified |
 

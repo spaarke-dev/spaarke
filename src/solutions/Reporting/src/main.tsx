@@ -17,7 +17,7 @@
  * @see ADR-006 - Code Pages for full-page standalone surfaces (not PCF)
  * @see ADR-022 - Code Pages bundle their own React 19 (not platform-provided)
  * @see ADR-026 - Vite + vite-plugin-singlefile build standard
- * @see .claude/patterns/auth/spaarke-auth-initialization.md
+ * @see .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md (DEPRECATED — superseded by Spaarke Auth v2 useAuth(); see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
  */
 
 import * as React from "react";

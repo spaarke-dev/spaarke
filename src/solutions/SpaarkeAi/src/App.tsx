@@ -17,7 +17,7 @@
  * @see ADR-022 - React 19 createRoot for Code Pages
  * @see ADR-026 - Single-file Vite build for Dataverse web resource
  * @see ThreePaneShell — R2 shell with PaneEventBus + stage lifecycle
- * @see .claude/patterns/auth/spaarke-auth-initialization.md — auth bootstrap
+ * @see .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md — auth bootstrap (DEPRECATED — superseded by Spaarke Auth v2 useAuth(); see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
  */
 
 import * as React from "react";
