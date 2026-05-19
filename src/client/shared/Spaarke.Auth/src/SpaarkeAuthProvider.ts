@@ -1,4 +1,4 @@
-import type { IAuthConfig, ITokenResult } from './types';
+import type { IAuthConfig } from './types';
 import { AuthError } from './errors';
 import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
 import type { AuthStrategy } from './strategies/AuthStrategy';
@@ -171,7 +171,12 @@ export class SpaarkeAuthProvider {
     return '';
   }
 
-  /** Stop proactive refresh + remove broadcast listener (cleanup). */
+  /**
+   * Cascade-clean all instance state: proactive-refresh interval, broadcast
+   * listener, in-memory cache, and any strategy-local cache. Called by
+   * `initAuth()` on re-initialization to prevent leaks of the prior MSAL
+   * instance and listener.
+   */
   dispose(): void {
     if (this._refreshInterval) {
       clearInterval(this._refreshInterval);
@@ -181,6 +186,7 @@ export class SpaarkeAuthProvider {
       this._disposeBroadcastListener();
       this._disposeBroadcastListener = null;
     }
+    this._cache.clearCache();
   }
 
   private _extractTidFromCachedToken(): string {
@@ -219,6 +225,3 @@ export class SpaarkeAuthProvider {
   }
 }
 
-// Eliminate unused-import warning for ITokenResult — the type is intentionally
-// re-exported in case consumers were importing it transitively from this module.
-export type { ITokenResult };

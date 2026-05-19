@@ -1,11 +1,7 @@
 // Types
 export type {
   IAuthConfig,
-  ITokenResult,
-  ITokenStrategy,
   IProblemDetails,
-  TokenCacheEntry,
-  TokenSource,
   TokenResult,
   AuthenticatedFetchFn,
 } from './types';

@@ -226,7 +226,14 @@ export class BrowserMsalStrategy implements AuthStrategy {
     const expiresOn = expFromJwt || expFromMsal;
     if (!expiresOn) return null;
     if (expiresOn - Date.now() < EXPIRY_BUFFER_MS) {
-      console.warn('[BrowserMsalStrategy] acquired token is already within expiry buffer; rejecting');
+      // ERROR (not WARN): MSAL handed us a token that's structurally near
+      // its `exp` claim. This usually signals a real refresh-logic problem
+      // upstream (cached refresh token is stale; clock skew; etc.) and the
+      // operator should see it in Application Insights.
+      console.error(
+        '[BrowserMsalStrategy] acquired token already within expiry buffer; rejecting and falling through',
+        { msToExpiry: expiresOn - Date.now(), bufferMs: EXPIRY_BUFFER_MS }
+      );
       return null;
     }
     return { accessToken: result.accessToken, expiresOn };

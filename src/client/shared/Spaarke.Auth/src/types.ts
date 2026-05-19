@@ -16,45 +16,21 @@ export interface IAuthConfig {
   requireXrm?: boolean;
 }
 
-/** Result of a token acquisition attempt (legacy internal type used by Cache/SessionStorage strategies). */
-export interface ITokenResult {
-  /** The access token string. */
-  accessToken: string;
-  /** Token expiry time (Unix ms). */
-  expiresOn: number;
-  /** Which strategy provided the token. */
-  source: TokenSource;
-}
-
-/** Identifies which strategy provided a token (legacy — used by ITokenResult). */
-export type TokenSource = 'cache' | 'session-storage' | 'msal-silent' | 'msal-popup';
-
 /**
- * Result returned by the new AuthStrategy interface (v2 — task 010).
+ * Result returned by `AuthStrategy.acquire()`.
  *
- * Unlike ITokenResult, this does not encode the legacy `source` discriminator —
- * the source is implicit in which `AuthStrategy` was used (BrowserMsalStrategy,
- * OfficeNaaStrategy, etc.). Use this for all new strategy implementations.
+ * `accessToken` is empty (`''`) when acquisition failed across all of the
+ * strategy's internal mechanisms — callers should treat that as "no token"
+ * rather than an exception. `expiresOn` is the JWT `exp` claim (preferred)
+ * or the strategy-reported expiry (fallback).
  */
 export interface TokenResult {
-  /** The access token string. */
+  /** The access token string. Empty when acquisition failed. */
   accessToken: string;
-  /** Token expiry time (Unix ms). */
+  /** Token expiry time (Unix ms). 0 when acquisition failed. */
   expiresOn: number;
   /** Optional tenant ID parsed from the token (JWT `tid` claim). */
   tenantId?: string;
-}
-
-/** Entry stored in the in-memory token cache. */
-export interface TokenCacheEntry {
-  accessToken: string;
-  expiresOn: number;
-}
-
-/** Strategy interface — each token acquisition method implements this. */
-export interface ITokenStrategy {
-  readonly name: TokenSource;
-  tryAcquireToken(): Promise<ITokenResult | null>;
 }
 
 /**
