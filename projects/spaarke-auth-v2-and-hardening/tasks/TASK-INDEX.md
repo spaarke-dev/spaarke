@@ -1,6 +1,6 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 5/49 complete
+> **Total Tasks**: 6/49 complete
 > **Status**: In Progress (Phase 0)
 > **Last Updated**: 2026-05-18
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
@@ -35,7 +35,7 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 
 | # | Task | Status | Parallel Group | Dependencies |
 |---|------|--------|----------------|--------------|
-| 010 | Define AuthStrategy interface + token result types; preserve MSAL config logic by literal lift | :black_square_button: | No | Phase 0 |
+| 010 | Define AuthStrategy interface + token result types; preserve MSAL config logic by literal lift | :white_check_mark: | No | Phase 0 |
 | 011 | Implement BrowserMsalStrategy (Dataverse PCFs + Code Pages path) | :black_square_button: | A-Parallel-1 | 010 |
 | 012 | Implement in-memory cache wrapper with JWT exp validation (5-min buffer) | :black_square_button: | A-Parallel-1 | 010 |
 | 013 | Implement useAuth() hook returning {isAuthenticated, getAccessToken, authenticatedFetch, tenantId, logout} | :black_square_button: | No | 011, 012 |

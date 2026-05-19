@@ -16,7 +16,7 @@ export interface IAuthConfig {
   requireXrm?: boolean;
 }
 
-/** Result of a token acquisition attempt. */
+/** Result of a token acquisition attempt (legacy internal type used by Cache/SessionStorage strategies). */
 export interface ITokenResult {
   /** The access token string. */
   accessToken: string;
@@ -26,8 +26,24 @@ export interface ITokenResult {
   source: TokenSource;
 }
 
-/** Identifies which strategy provided a token. */
-export type TokenSource = 'bridge' | 'cache' | 'session-storage' | 'xrm' | 'msal-silent' | 'msal-popup';
+/** Identifies which strategy provided a token (legacy — used by ITokenResult). */
+export type TokenSource = 'cache' | 'session-storage' | 'msal-silent' | 'msal-popup';
+
+/**
+ * Result returned by the new AuthStrategy interface (v2 — task 010).
+ *
+ * Unlike ITokenResult, this does not encode the legacy `source` discriminator —
+ * the source is implicit in which `AuthStrategy` was used (BrowserMsalStrategy,
+ * OfficeNaaStrategy, etc.). Use this for all new strategy implementations.
+ */
+export interface TokenResult {
+  /** The access token string. */
+  accessToken: string;
+  /** Token expiry time (Unix ms). */
+  expiresOn: number;
+  /** Optional tenant ID parsed from the token (JWT `tid` claim). */
+  tenantId?: string;
+}
 
 /** Entry stored in the in-memory token cache. */
 export interface TokenCacheEntry {
@@ -54,7 +70,6 @@ export interface IProblemDetails {
 /** Window globals used for configuration. */
 declare global {
   interface Window {
-    __SPAARKE_BFF_TOKEN__?: string;
     __SPAARKE_MSAL_CLIENT_ID__?: string;
     __SPAARKE_BFF_URL__?: string;
     __SPAARKE_BFF_API_SCOPE__?: string;

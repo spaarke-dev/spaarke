@@ -1,5 +1,5 @@
 // Types
-export type { IAuthConfig, ITokenResult, ITokenStrategy, IProblemDetails, TokenCacheEntry, TokenSource } from './types';
+export type { IAuthConfig, ITokenResult, ITokenStrategy, IProblemDetails, TokenCacheEntry, TokenSource, TokenResult } from './types';
 
 // Errors
 export { AuthError, ApiError } from './errors';
@@ -11,8 +11,9 @@ export { resolveConfig, TOKEN_EXPIRY_BUFFER_MS, PROACTIVE_REFRESH_INTERVAL_MS } 
 export { resolveRuntimeConfig, clearRuntimeConfigCache } from './resolveRuntimeConfig';
 export type { IRuntimeConfig } from './resolveRuntimeConfig';
 
-// Token bridge
-export { publishToken, readBridgeToken, clearBridgeToken } from './tokenBridge';
+// Pluggable auth strategy (v2 — task 010)
+export type { AuthStrategy } from './strategies/AuthStrategy';
+export { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';
 
 // Core provider
 export { SpaarkeAuthProvider } from './SpaarkeAuthProvider';
