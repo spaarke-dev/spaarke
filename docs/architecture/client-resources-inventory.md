@@ -1,11 +1,19 @@
 # Client Resources Inventory — Definitive Reference
 
-> **Last Updated**: 2026-05-19
-> **Purpose**: Single source of truth for "what client-side components do we have, what's their status, when were they last updated?" Use this to answer the recurring question: "do we need to update X, or has it been replaced?"
-> **Method**: Last-commit dates from `git log`; manifest existence as build-readiness signal; co-existence detection for PCF↔Code Page replacement patterns.
-> **Maintenance**: When a control is created, retired, or replaced, update the relevant table.
+> **Last Updated**: 2026-05-19 (added Dataverse-verified usage data)
+> **Purpose**: Single source of truth for "what client-side components do we have, what's their status, when were they last updated, and ARE THEY ACTUALLY USED on forms?"
+> **Method**:
+> - Repo signal: last-commit dates from `git log`; `ControlManifest.Input.xml` existence as build-readiness signal.
+> - **Deployment signal**: live `systemform.formxml` LIKE queries against Dataverse (via MCP `read_query`). Also queried `savedquery.layoutxml` + `customcontroldefaultconfig.controldescriptionxml` — both returned zero PCF bindings, confirming PCFs in this environment are bound only via forms.
+> - Tenant queried: Spaarke Dev environment (484bc857-...) — re-run against other environments if they may differ.
+
+> **🚨 CRITICAL FINDING**: 3 PCFs are **deployed on production forms but their source is missing from the repo** (no `ControlManifest.Input.xml`). See §2.1 for the list and remediation. If those forms need updates, the PCFs cannot be rebuilt without source recovery.
 
 ## Summary
+
+| Category | Source-present + form-bound | Source-present + no form binding | Source-MISSING but form-bound (🚨) | Source-missing + no binding |
+|---|---|---|---|---|
+| **PCF controls** | **5** (verified live) | 9 (deployed but no form binding found — verify usage) | **3** (CRITICAL — recover source or retire) | 7 (safe to remove folder) |
 
 | Category | Active | Archived/Replaced | Total folders |
 |---|---|---|---|
@@ -21,48 +29,78 @@
 
 ---
 
-## 1. PCF Controls — Active (manifest exists, currently buildable)
+## 1. PCF Controls — Source present in repo
 
 > Path convention: `src/client/pcf/{name}/[control|{Name}]/ControlManifest.Input.xml`
-> Active = `ControlManifest.Input.xml` present.
+> "Source present" = `ControlManifest.Input.xml` exists (control is buildable).
+> "Forms bound to" verified via Dataverse `systemform.formxml LIKE '%{namespace}.{constructor}%'` query 2026-05-19.
 
-| Name | Namespace | Version | Manifest location | Last commit | Coexists with Code Page? |
+### 1.1 Source present AND bound to forms — verified live in production
+
+| Name | Namespace | Version | Forms bound to (Dataverse) | Last commit |
+|---|---|---|---|---|
+| **RelatedDocumentCount** | `Spaarke.Pcf.RelatedDocumentCount` | 1.21.2 | Document main form | 2026-05-13 |
+| **SemanticSearchControl** | `Sprk` | 1.1.41 | Matter / Work Assignment / Invoice / Project main forms | 2026-05-13 |
+| **SpeDocumentViewer** | `Spaarke` | 1.0.25 | Document main form | 2026-05-14 |
+| **UniversalQuickCreate** (constructor: `UniversalDocumentUpload`) | `Spaarke.Controls` | 3.15.3 | Upload Documents form | 2026-05-14 |
+| **VisualHost** | `Spaarke.Visuals` | 1.4.0 | Matter / Work Assignment / Project main forms | 2026-05-13 |
+
+### 1.2 Source present BUT no form binding found — verify usage
+
+> Zero matches in `systemform.formxml`, `savedquery.layoutxml`, AND `customcontroldefaultconfig.controldescriptionxml`. These PCFs may still be used via:
+> - MDA app components / sitemap entries (not queried)
+> - Field-level customControl JSON overrides on attribute metadata (rare)
+> - Globally invoked by web resources (e.g., ThemeEnforcer via app load JS)
+> - Deployed but not yet bound to anything (parked)
+>
+> **Action**: confirm each per row. If unused, retire and move to archive.
+
+| Name | Namespace | Version | Likely usage (verify) | Last commit | Notes |
 |---|---|---|---|---|---|
-| **AssociationResolver** | `Spaarke.Controls` | 1.1.0 | `pcf/AssociationResolver/ControlManifest.Input.xml` | 2026-05-14 | — |
-| **DocumentRelationshipViewer** | `Spaarke.Controls` | 1.0.35 | `pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/` | 2026-05-13 | ✅ Yes — `code-pages/DocumentRelationshipViewer` (different surfaces; share `@spaarke/ui-components`) |
-| **DrillThroughWorkspace** | `Spaarke.Controls` | 1.1.1 | `pcf/DrillThroughWorkspace/control/` | 2026-03-30 | — |
-| **EmailProcessingMonitor** | `Spaarke` | 1.1.0 | `pcf/EmailProcessingMonitor/control/` | 2026-05-13 | — |
-| **RelatedDocumentCount** | `Spaarke.Pcf.RelatedDocumentCount` | 1.21.2 | `pcf/RelatedDocumentCount/RelatedDocumentCount/` | 2026-05-13 | — |
-| **ScopeConfigEditor** | `Sprk` | 1.2.7 | `pcf/ScopeConfigEditor/ScopeConfigEditor/` | 2026-03-30 | — |
-| **SemanticSearchControl** | `Sprk` | 1.1.41 | `pcf/SemanticSearchControl/SemanticSearchControl/` | 2026-05-13 | ✅ Yes — `code-pages/SemanticSearch` (different surfaces; share `@spaarke/ui-components`) |
-| **SpaarkeGridCustomizer** | `Spaarke.Controls` | 1.0.0 | `pcf/SpaarkeGridCustomizer/ControlManifest.Input.xml` | 2026-05-14 | — |
-| **SpeDocumentViewer** | `Spaarke` | 1.0.25 | `pcf/SpeDocumentViewer/control/` | 2026-05-14 | — (per project memory: SpeDocumentViewer remains PCF, not migrated) |
-| **ThemeEnforcer** | `Spaarke` | 1.0.0 | `pcf/ThemeEnforcer/ControlManifest.Input.xml` | 2026-03-13 | — |
-| **UniversalDatasetGrid** | `Spaarke.UI.Components` | 2.3.0 | `pcf/UniversalDatasetGrid/control/` | 2026-05-13 | — |
-| **UniversalQuickCreate** (constructor: `UniversalDocumentUpload`) | `Spaarke.Controls` | 3.15.3 | `pcf/UniversalQuickCreate/control/` | 2026-05-14 | — |
-| **UpdateRelatedButton** | `Spaarke.Controls` | 1.0.0 | `pcf/UpdateRelatedButton/ControlManifest.Input.xml` | 2026-05-14 | — |
-| **VisualHost** | `Spaarke.Visuals` | 1.4.0 | `pcf/VisualHost/control/` | 2026-05-13 | — |
+| **AssociationResolver** | `Spaarke.Controls` | 1.1.0 | Possibly only used in Wizards (Code Pages) | 2026-05-14 | Verify if any MDA component binds it |
+| **DocumentRelationshipViewer** | `Spaarke.Controls` | 1.0.35 | Code Page version (`code-pages/DocumentRelationshipViewer`) is canonical; this PCF may be retired | 2026-05-13 | Coexists with Code Page; project memory mentions sharing `@spaarke/ui-components` |
+| **DrillThroughWorkspace** | `Spaarke.Controls` | 1.1.1 | Dataset PCF — expected to bind on subgrids or views, but zero matches | 2026-03-30 | Confirm whether deployed but unbound |
+| **EmailProcessingMonitor** | `Spaarke` | 1.1.0 | Standalone admin app/page — likely in MDA sitemap, not on a form | 2026-05-13 | Plausibly active; verify via app config |
+| **ScopeConfigEditor** | `Sprk` | 1.2.7 | Possibly field-level (column override on `sprk_aichatscope`?) | 2026-03-30 | Specialized editor — confirm binding |
+| **SpaarkeGridCustomizer** | `Spaarke.Controls` | 1.0.0 | Grid customizer — expected at entity default level, but zero matches | 2026-05-14 | Check MDA grid components |
+| **ThemeEnforcer** | `Spaarke` | 1.0.0 | Likely invoked at app load (e.g., via webresource JS), not bound on a form | 2026-03-13 | Plausibly active globally |
+| **UniversalDatasetGrid** | `Spaarke.UI.Components` | 2.3.0 | Dataset PCF — expected on subgrids in forms, but zero matches | 2026-05-13 | Confirm whether deployed but unbound |
+| **UpdateRelatedButton** | `Spaarke.Controls` | 1.0.0 | Lookup field control — expected on a form, but zero matches | 2026-05-14 | Confirm binding
 
-## 2. PCF Folders — Archived (NO manifest; not currently buildable)
+## 2. PCF Folders — Source MISSING from repo
 
-> Folder exists under `src/client/pcf/` but **no `ControlManifest.Input.xml` source file**. Build artifacts (`generated/`, `out/`) may remain. Status: archived — superseded by Code Pages or removed from use.
+> Folder exists under `src/client/pcf/` but **no `ControlManifest.Input.xml` source file**. Build artifacts (`generated/`, `out/`) may remain.
+> Dataverse query results split these into two very different groups: §2.1 are CRITICAL (deployed but unbuildable); §2.2 are safe to remove.
 
-| Folder | Last commit | Likely replacement | Folder contents |
+### 2.1 🚨 CRITICAL — DEPLOYED on production forms but source missing
+
+> These PCFs are bound to live forms in Dataverse but have NO source in the repo. **They cannot be rebuilt or modified without source recovery.** If a binding breaks (e.g., manifest version mismatch on solution import), there is no fix path without either (a) recovering the source from another location or (b) removing the binding and replacing the PCF with an alternative.
+
+| Folder | Last commit | Forms it's bound to (Dataverse) | Likely remediation |
 |---|---|---|---|
-| `pcf/AnalysisBuilder` | 2026-03-15 | Likely subsumed into PlaybookBuilder Code Page | `control/generated/` only |
-| `pcf/AnalysisWorkspace` | 2026-03-15 | Replaced by `code-pages/AnalysisWorkspace` (active 2026-05-16) | `control/generated/`, `out/`, `solution/` |
-| `pcf/AIMetadataExtractor` | 2025-12-02 | Unknown — oldest folder; likely deprecated | — |
-| `pcf/DueDatesWidget` | 2026-03-15 | Unknown | `control/generated/` |
-| `pcf/EventAutoAssociate` | 2026-03-15 | Unknown | — |
-| `pcf/EventCalendarFilter` | 2026-03-15 | Unknown | `control/generated/` |
-| `pcf/EventFormController` | 2026-03-15 | Unknown | — |
-| `pcf/PlaybookBuilderHost` | 2026-03-15 | Replaced by `code-pages/PlaybookBuilder` (active 2026-04-04) | `control/generated/` |
-| `pcf/RegardingLink` | 2026-03-15 | Unknown | — |
-| `pcf/SpeFileViewer` | 2026-03-15 | Likely replaced by `SpeDocumentViewer` (active 2026-05-14) | `control/generated/`, `out/`, `solution/` |
+| `pcf/AnalysisBuilder` | 2026-03-15 | **Analysis main form** | (a) recover source from git history / dev machine; (b) remove from form and re-implement as Code Page extension |
+| `pcf/EventAutoAssociate` | 2026-03-15 | **Event quick create form** | (a) recover source; (b) replace with form script or different control |
+| `pcf/EventCalendarFilter` | 2026-03-15 | **Event main form, Event modal form, Event Assign Work main form** (3 forms) | (a) recover source — this is high-value; (b) build replacement before retiring |
 
-**Recommendation**: Confirm replacement status for each, then either:
-- Delete folder entirely (build artifacts are not source-of-truth), or
-- Move to `.archive/2026-XX-XX/pcf-removed/` with a README noting replacement
+**Immediate action items**:
+1. Search Spaarke developers' local machines for these PCF source folders (someone likely has them)
+2. If found: commit back to repo as the new authoritative source
+3. If not found: scan git history (`git log --all -- src/client/pcf/AnalysisBuilder`) to find the last commit that contained the manifest; cherry-pick if possible
+4. Add a `pre-commit` hook that fails CI if any PCF used in production has no source (long-term prevention)
+
+### 2.2 Source missing AND no form binding — safe to clean up
+
+| Folder | Last commit | Likely replacement | Action |
+|---|---|---|---|
+| `pcf/AnalysisWorkspace` | 2026-03-15 | Replaced by `code-pages/AnalysisWorkspace` (2026-05-16) | Delete folder; build artifacts are not source-of-truth |
+| `pcf/AIMetadataExtractor` | 2025-12-02 | Unknown — never deployed | Delete folder |
+| `pcf/DueDatesWidget` | 2026-03-15 | Unknown — never deployed | Delete folder |
+| `pcf/EventFormController` | 2026-03-15 | Unknown — never deployed | Delete folder |
+| `pcf/PlaybookBuilderHost` | 2026-03-15 | Replaced by `code-pages/PlaybookBuilder` (2026-04-04) | Delete folder |
+| `pcf/RegardingLink` | 2026-03-15 | Unknown — never deployed | Delete folder |
+| `pcf/SpeFileViewer` | 2026-03-15 | Likely replaced by `SpeDocumentViewer` (2026-05-14) | Delete folder |
+
+**Recommended action**: For each of the 7 entries above, delete the folder via `git rm -rf src/client/pcf/{name}`. The build artifacts left behind don't help anyone. Alternative: move to `.claude/archive/2026-XX-XX/pcf-removed/` with a brief README if you want a history breadcrumb.
 
 ## 3. React Code Pages (in `src/client/code-pages/`)
 
@@ -124,18 +162,23 @@
 | **EventCommands** | 2026-02-06 | Ribbon commands + dialogs (not a Code Page — see §8) |
 | `src/solutions/webresources/` | 2026-03-20 | Sub-folder of additional JS web resources (see §6.2) |
 
-## 5. Suspected PCF↔Code Page co-existence / replacement analysis
+## 5. PCF↔Code Page co-existence / replacement analysis — verified
+
+> Updated 2026-05-19 with Dataverse usage data.
 
 | PCF (`pcf/`) | Code Page (`code-pages/`) | Status |
 |---|---|---|
-| `pcf/AnalysisWorkspace` (archived, no manifest) | `code-pages/AnalysisWorkspace` (active) | **Replaced**: Code Page is the active version |
-| `pcf/PlaybookBuilderHost` (archived, no manifest) | `code-pages/PlaybookBuilder` (active) | **Replaced**: Code Page is the active version |
-| `pcf/DocumentRelationshipViewer` (active) | `code-pages/DocumentRelationshipViewer` (active) | **Both active**: different deployment surfaces; share `@spaarke/ui-components` |
-| `pcf/SemanticSearchControl` (active) | `code-pages/SemanticSearch` (active) | **Both active**: different deployment surfaces; share `@spaarke/ui-components` |
-| `pcf/SpeFileViewer` (archived, no manifest) | (none) | **Likely replaced by** `pcf/SpeDocumentViewer` (different name, similar purpose) |
-| `pcf/SpeDocumentViewer` (active) | (none) | **PCF remains canonical** per project memory |
+| `pcf/AnalysisWorkspace` (source missing, NOT form-bound) | `code-pages/AnalysisWorkspace` (active) | **Replaced**: Code Page is the canonical version. PCF folder is safe to delete. |
+| `pcf/PlaybookBuilderHost` (source missing, NOT form-bound) | `code-pages/PlaybookBuilder` (active) | **Replaced**: Code Page is the canonical version. PCF folder is safe to delete. |
+| `pcf/DocumentRelationshipViewer` (source present, **NO form binding found**) | `code-pages/DocumentRelationshipViewer` (active) | **Code Page is canonical**; PCF may be retired. Verify no MDA component uses the PCF. |
+| `pcf/SemanticSearchControl` (source present, **bound to 4 forms**) | `code-pages/SemanticSearch` (active) | **Both active**: PCF on Matter/Work Assignment/Invoice/Project forms; Code Page for standalone surfaces. Share `@spaarke/ui-components`. |
+| `pcf/SpeFileViewer` (source missing, NOT form-bound) | (none) | **Truly retired**; superseded by `pcf/SpeDocumentViewer`. PCF folder safe to delete. |
+| `pcf/SpeDocumentViewer` (source present, **bound to Document main form**) | (none) | **PCF is canonical**. |
+| `pcf/AnalysisBuilder` 🚨 | (none) | **Deployed on Analysis main form but source MISSING** — see §2.1 |
+| `pcf/EventCalendarFilter` 🚨 | (none) | **Deployed on 3 Event forms but source MISSING** — see §2.1 |
+| `pcf/EventAutoAssociate` 🚨 | (none) | **Deployed on Event quick create but source MISSING** — see §2.1 |
 
-**Decision rule documented in project memory**: when a PCF has a Code Page version, the PCF stays for form-embedded scenarios and the Code Page covers standalone scenarios. They MUST share UI via `@spaarke/ui-components` to avoid duplication.
+**Decision rule** (documented in project memory): when a PCF has a Code Page version, the PCF stays for form-embedded scenarios and the Code Page covers standalone scenarios. They MUST share UI via `@spaarke/ui-components` to avoid duplication. The DocumentRelationshipViewer case suggests the PCF may have already been quietly retired (no form binding) — confirm before deleting source.
 
 ## 6. Web Resources (JavaScript)
 
@@ -234,12 +277,66 @@ When adding/changing client resources:
 **Doc location**: [docs/architecture/client-resources-inventory.md](client-resources-inventory.md)
 **Trigger phrase to update**: "client inventory", "is X deprecated", "PCF list", "Code Page list"
 
+### 12.1 Re-verifying PCF usage via Dataverse query (the load-bearing check)
+
+Repo evidence (last commit dates + manifest existence) is necessary but NOT sufficient. The **definitive** "is this PCF used?" answer comes from Dataverse. Re-run this check whenever the inventory feels stale or a major refactor is planned.
+
+**Method** — for each PCF, query `systemform.formxml`:
+
+```sql
+-- via mcp__dataverse__read_query
+SELECT TOP 20 name, objecttypecode, type
+FROM systemform
+WHERE formxml LIKE '%{Namespace.Constructor}%'
+```
+
+Where `{Namespace.Constructor}` is e.g., `Spaarke.Controls.AssociationResolver`, `Sprk.SemanticSearchControl`, `Spaarke.SpeDocumentViewer`.
+
+**Other binding surfaces to check** (verified 2026-05-19 — none in use for any Spaarke PCF, but check on each re-run in case the pattern changes):
+- `savedquery.layoutxml LIKE '%{PCF}%'` — view-level bindings
+- `customcontroldefaultconfig.controldescriptionxml LIKE '%{PCF}%'` — entity-default bindings
+
+**Findings interpretation**:
+- Form bindings found → PCF is in §1.1 (verified live)
+- No form bindings, source present → §1.2 (verify usage via MDA app config; possibly retire)
+- No form bindings, source missing → §2.2 (safe to delete folder)
+- Form bindings found, source missing → §2.1 🚨 CRITICAL (recover source or replace)
+
+**Cross-environment caveat**: queries above were run against Spaarke Dev. Production may differ. Re-run against Prod and Demo before any cleanup that touches §2.
+
+### 12.2 Long-term prevention
+
+To prevent "source missing but deployed" drift in the future, consider:
+1. CI check: enumerate all PCF folders without manifests; fail build if any are found on a deployed form (requires a tool to introspect deployed solutions)
+2. Solution export hook: after exporting a Spaarke solution, run an inventory script that flags any PCF binding whose source is missing from the repo
+3. Documentation rule: when retiring a PCF, the retirement PR MUST include removing it from all form bindings before deleting source
+
 ## 13. Open questions for confirmation
 
-The following items need owner confirmation (marked with ❓ in tables above):
+> Many items resolved 2026-05-19 via Dataverse query (§12.1). Remaining open items:
 
-1. **Older PCF folders without manifests** (§2): confirm replacement status for each. Recommendation: delete or move to `.claude/archive/2026-XX-XX/pcf-removed/` with a brief note.
-2. **`code-pages/SprkChatPane`** (§3): older commit (2026-03-26) than peers; verify it's still in use or has been superseded by `SpaarkeAi`.
-3. **`pcf/AIMetadataExtractor`** (§2): oldest folder (2025-12-02); confirm dead.
-4. **`sprk_chartdefinition_form.js`** (§6.2): oldest web resource (2026-01-03); confirm still bound to a form.
-5. **`solutions/webresources/`** vs **`client/webresources/js/`**: why two locations? Consider consolidating.
+### 13.1 🚨 URGENT — source recovery for 3 deployed PCFs (§2.1)
+
+| # | PCF | Action |
+|---|---|---|
+| Q1 | `pcf/AnalysisBuilder` (Analysis main form) | Search dev machines for source; if not found, plan replacement |
+| Q2 | `pcf/EventCalendarFilter` (Event main + modal + Assign Work forms) | High-value — 3 form bindings — prioritize source recovery |
+| Q3 | `pcf/EventAutoAssociate` (Event quick create form) | Search for source; if absent, replace with form script |
+
+### 13.2 Verify "source present but no form binding" PCFs (§1.2)
+
+For each of the 9 PCFs in §1.2, confirm whether they are:
+- In use via MDA app component / sitemap (verify via Power Apps admin)
+- In use via field-level customControl override (verify via `attribute` metadata)
+- In use globally via web resource JS (verify webresource bindings)
+- **Truly unused** — candidates for retirement
+
+The cleanest verification is via PAC CLI or solution export: check if any solution component includes the PCF binding.
+
+### 13.3 Minor (lower priority)
+
+| # | Item | Notes |
+|---|---|---|
+| Q4 | `code-pages/SprkChatPane` | Older commit (2026-03-26) than peers; verify it's still in use or superseded by `SpaarkeAi` |
+| Q5 | `sprk_chartdefinition_form.js` (§6.2) | Oldest web resource (2026-01-03); confirm still bound to a form |
+| Q6 | Two webresources directories | `solutions/webresources/` vs `client/webresources/js/` — why both? Consider consolidating |
