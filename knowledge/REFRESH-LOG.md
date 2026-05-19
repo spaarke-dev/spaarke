@@ -6,6 +6,24 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 
 ---
 
+## 2026-05-19 — Insights Engine pre-design research (researcher subagent)
+
+Added four new reference-only topics + one supplement, ahead of `projects/ai-spaarke-insights-engine-r1/` design work:
+
+- **NEW** [`cosmos-gremlin/`](./cosmos-gremlin/) — current state of Cosmos DB Gremlin (2026), partitioning, RU sizing for 1M-10M vertices, and a comparison vs. Cosmos NoSQL + adjacency / Postgres+AGE / Neo4j Aura. Note: Microsoft's product investment is visibly moving away from Gremlin; documented migration triggers.
+- **NEW** [`azure-functions-isv/`](./azure-functions-isv/) — Flex Consumption hosting, per-tenant Bicep + UAMI + Service Bus topic pattern, Application Insights correlation across BFF + Functions, cold-start mitigations.
+- **NEW** [`dataverse-sync/`](./dataverse-sync/) — webhook vs. Service Bus vs. change-tracking trigger comparison, idempotent indexing patterns, schema evolution, backfill strategies. Why Microsoft 365 Copilot connectors are NOT the right answer for application-side AI Search.
+- **NEW** [`foundry-memory-patterns/`](./foundry-memory-patterns/) — Foundry memory primitive now publicly documented (2026-04 docs); two-tier memory pattern (user_profile / chat_summary), scope-based partitioning, decision rubric for Foundry-hosted vs. custom BFF agent. Supersedes the `foundry-agent-service/docs/GAP-memory.md` entry.
+- **SUPPLEMENT** [`azure-ai-search/insights-engine-supplement.md`](./azure-ai-search/insights-engine-supplement.md) — Insights Engine-specific Q&A on integrated vectorization, ACL trimming via `vectorFilterMode=preFilter`, index schema for Observations, tier pricing for 1M-10M artifacts.
+
+All five documents are reference-only (no curated sample code). Future refreshes should:
+1. Curate runnable samples for `azure-functions-isv` (per-tenant Bicep + Flex Consumption Function App).
+2. Curate Dataverse change-tracking + Service Bus integration samples for `dataverse-sync`.
+3. Re-fetch Foundry memory docs to track GA pricing model.
+4. Re-evaluate Cosmos Gremlin product direction (deprecation watch).
+
+The `foundry-agent-service/docs/GAP-memory.md` entry should be updated next refresh to point at `foundry-memory-patterns/README.md`.
+
 ## 2026-05-14 — Project complete (Phases 0-3, 5, 6)
 
 All AI-executable phases of `coding-knowledge-base-setup-r1` complete:

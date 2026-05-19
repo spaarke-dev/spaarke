@@ -33,6 +33,10 @@ Each topic folder contains:
 | [`dataverse-mcp/`](./dataverse-mcp/) | Dataverse as MCP server — built-in tools, Business Skills, App MCP |
 | [`sharepoint-embedded/`](./sharepoint-embedded/) | SPE — document storage substrate, agent grounding via SharePoint knowledge source |
 | [`azure-ai-search/`](./azure-ai-search/) | Azure AI Search — application-code retrieval, vector + hybrid + semantic |
+| [`cosmos-gremlin/`](./cosmos-gremlin/) | Cosmos DB Gremlin — graph layer for the Insights Engine; partitioning, RU sizing, migration triggers |
+| [`azure-functions-isv/`](./azure-functions-isv/) | Azure Functions for ISV multi-tenant scenarios — Flex Consumption, per-tenant Bicep + UAMI |
+| [`dataverse-sync/`](./dataverse-sync/) | Dataverse → AI Search sync patterns — webhook vs Service Bus vs change-tracking, idempotent indexing |
+| [`foundry-memory-patterns/`](./foundry-memory-patterns/) | Foundry agent memory + tool patterns (reference) — for the custom BFF Insights Agent design |
 | [`github-mcp/`](./github-mcp/) | GitHub MCP server — runtime currency and long-tail API research |
 
 ## How Claude Code uses this

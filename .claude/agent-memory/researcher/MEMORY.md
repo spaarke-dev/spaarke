@@ -1,0 +1,4 @@
+- [Insights Engine pre-design research (2026-05-19)](insights-engine-pre-design-2026-05.md) — Five-topic research pass for `projects/ai-spaarke-insights-engine-r1/`; created four new knowledge folders + one supplement.
+- [Knowledge base layout convention](knowledge-base-layout.md) — How Spaarke's `knowledge/` tree is organized; SOURCE.md/NOTES.md/README.md convention; where to add new topics.
+- [Foundry memory now publicly documented](foundry-memory-now-public.md) — As of 2026-04, Foundry agent memory has full concept + how-to docs; GAP-memory.md in foundry-agent-service is superseded.
+- [Cosmos Gremlin product direction signal](cosmos-gremlin-direction.md) — Soft signals indicate Microsoft is steering new graph workloads away from Gremlin; no formal deprecation but documentation cadence and lack of vector support is telling.

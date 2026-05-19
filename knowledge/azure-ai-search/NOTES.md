@@ -1,4 +1,6 @@
 > ⚠️ STUB — senior engineer review pending
+>
+> **2026-05-19**: For Insights Engine-specific findings (vector + hybrid + integrated vectorization, ACL trimming via `vectorFilterMode=preFilter`, index schema for Observations, tier pricing for 1M-10M artifacts), see [`insights-engine-supplement.md`](./insights-engine-supplement.md). The supplement is researcher-authored and substantive — the stub TODOs below remain owned by senior engineer review.
 
 # NOTES — azure-ai-search
 
