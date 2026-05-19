@@ -11,7 +11,7 @@
     <Descriptions>
       <Description description="PCF control for viewing SharePoint Embedded documents with check-out/check-in workflow" languagecode="1033" />
     </Descriptions>
-    <Version>1.0.25</Version>
+    <Version>1.0.26</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

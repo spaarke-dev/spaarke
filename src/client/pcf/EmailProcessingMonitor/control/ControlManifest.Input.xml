@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke" constructor="EmailProcessingMonitor" version="1.1.0" display-name-key="EmailProcessingMonitor" description-key="Admin monitoring control (virtual PCF, platform-library React/Fluent, auth init via useEffect) v1.1.0" control-type="virtual">
+  <control namespace="Spaarke" constructor="EmailProcessingMonitor" version="1.1.1" display-name-key="EmailProcessingMonitor" description-key="Admin monitoring control (virtual PCF, platform-library React/Fluent, auth init via useEffect) v1.1.1" control-type="virtual">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>

@@ -1,16 +1,16 @@
 # Current Task - Spaarke Auth v2 + Hardening
 
 > **Project**: spaarke-auth-v2-and-hardening
-> **Status**: 🎉 **PHASE B COMPLETE (11/11)**. MSAL regression test pending. Phase C next.
-> **Active Phase**: B done. Phase C (server hardening 040-049) NEXT.
-> **Last Updated**: 2026-05-19 (post-Wave-2)
+> **Status**: 🎉 **PHASE B SIGNED OFF** (deployed + regression-verified on BOTH envs). Phase C (server hardening) NEXT.
+> **Active Phase**: B done. Phase C (server hardening 040-049) starts next.
+> **Last Updated**: 2026-05-19 (Phase B sign-off)
 
 ## Quick Recovery (Next Session)
 
 | Field | Value |
 |-------|-------|
-| **Status** | Phase B 11/11 ✅. Wave 1 committed (`918b0830`); Wave 2 pending commit. All Code Page + PCF + shared lib consumers migrated to function-based @spaarke/auth contract. ui-components rebuilds clean; SpaarkeAi vite builds 1.9 MB single-file HTML. |
-| **Next Action** | User: deploy the Wave 1+2 changes (SpaarkeAi, AnalysisWorkspace, DocumentRelationshipViewer, PlaybookBuilder, SemanticSearch Code Pages + 6 PCFs) and run the MSAL regression test from `.claude/patterns/auth/spaarke-sso-binding.md`. Then `continue` → Phase C (server hardening, tasks 040-049). |
+| **Status** | Phase B 11/11 ✅ + 3 standalone JS bug fixes + 1 deferred B-addendum task (031). All deployed + hash-verified on spaarkedev1 + spaarke-demo. User regression-tested Workspace + Document operations + email + Create Matter on Dev — all PASS. |
+| **Next Action** | `continue` → Phase C task 040 (rotate AzureAd__ClientSecret + AgentToken__ClientSecret; convert App Service config to Key Vault references; coordinate App Service restart). Phase C is server-only — NO MSAL browser regression required (OBO smoke check instead). |
 
 ## How to Resume
 
@@ -18,57 +18,85 @@
 continue
 ```
 
-## Phase B FINAL — 11/11 ✅
+## Phase B FINAL — what shipped
 
-| # | Task | Status | Wave | Commit |
-|---|------|--------|------|--------|
-| 020 | AiSessionProvider context → function-based API | ✅ | pre-wave | `6b6106f6` |
-| 021 | SpaarkeAi App.tsx — stop snapshotting token | ✅ | Wave 1 | `918b0830` |
-| 022 | SpaarkeAi panes + FeedbackButtons + R1 legacy cleanup | ✅ | Wave 1 | `918b0830` |
-| 023 | SprkChat API refactor + 3 hooks + useSseStream | ✅ | Wave 1 | `918b0830` |
-| 028 | Verify + rebuild all 6 PCFs against v2 | ✅ | Wave 1 | `918b0830` |
-| 030 | Delete duplicate buildBffApiUrl (was dead code) | ✅ | Wave 1 | `918b0830` |
-| 024 | PlaybookBuilder migration | ✅ | Wave 2 | pending |
-| 025 | DocumentRelationshipViewer migration | ✅ | Wave 2 | pending |
-| 026 | AnalysisWorkspace migration (incl. ChatPanel SprkChat fix + dead authService deletion) | ✅ | Wave 2 | pending |
-| 027 | SemanticSearch (deleted deprecated auth) + External SPA (out-of-scope documented) | ✅ | Wave 2 | pending |
-| 029 | bffDataServiceAdapter docs (also bffUploadServiceAdapter + adapters/index.ts) | ✅ | Wave 2 | pending |
+| Wave | Scope | Surfaces | Commit |
+|---|---|---|---|
+| Pre | 020 AiSessionProvider | 1 shared package | `6b6106f6` |
+| 1 | 021-023, 028, 030 | SpaarkeAi + panes + SprkChat + 6 PCFs + buildBffApiUrl dedup | `918b0830` |
+| 2 | 024-027, 029 | PlaybookBuilder, DocRelViewer, AnalysisWorkspace, SemanticSearch (build blocked), bffDataServiceAdapter docs | `1cbb299b` |
+| 3 | 031 (LegalWorkspace — sprk_corporateworkspace) | 8 files modified, 7 DELETED scaffolding files | _this commit_ |
+| 4 | 7 surfaces: SmartTodo (migration) + DocumentUploadWizard (migration) + 5 rebuilds (FindSimilar, PlaybookLibrary, SpeAdmin, WorkspaceLayout, Reporting) | _this commit_ | |
+| 5 | 7 wizard rebuilds (CreateEvent/Matter/Project/Todo/WorkAssignment + DailyBriefing + SummarizeFiles) + sprk_communication_send.js bug fix | _this commit_ | |
 
-## D-AUTH-7 exception sites (raw `Authorization: Bearer ${token}` legitimately required)
+Plus 3 standalone JS web resource bug fixes (deployed): `sprk_subgrid_parent_rollup.js` (JSON parse), `sprk_DocumentOperations.js` (defaultvalue env-var fallback), `sprk_communication_send.js` (same defaultvalue fix).
 
-After Phase B, these are the ONLY places raw Bearer headers exist. Each has a `// Auth v2 (D-AUTH-7):` justification comment. The ESLint allowlist task (Phase E task 070-area) needs this list:
+Plus 6 PCF version bumps + redeploys (all to both envs).
 
-| File | Reason |
-|---|---|
-| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx` (2 sites) | SSE: handlePlanProceed + handleEditorRefine |
-| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatUploadZone.tsx` (2 sites) | XHR uploads (authenticatedFetch can't wrap XHR) |
-| `src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts` | Main SSE fetch entry |
-| `src/client/code-pages/PlaybookBuilder/src/services/aiPlaybookService.ts` | SSE (mirror of SprkChat pattern) |
-| `src/client/code-pages/PlaybookBuilder/src/services/dataverseClient.ts` | Dataverse Web API (different scope — `authenticatedFetch` is BFF-scoped via buildBffApiUrl, would route to wrong host) |
-| `src/client/code-pages/AnalysisWorkspace/src/services/analysisApi.ts::executeAnalysis` | SSE |
-| `src/client/external-spa/src/auth/bff-client.ts::executeFetch` | External SPA out-of-scope for @spaarke/auth (B2B portal — sessionStorage vs localStorage threat model split documented in-file) |
+## Deploy state
 
-## Carryovers (logged for follow-up; NOT blockers for Phase B)
+| Env | PCFs (6) | Code Pages (13) | Standalone JS (3) |
+|---|---|---|---|
+| spaarkedev1 | ✅ All v.X+1 bumped + imported + published | ✅ Deployed via Deploy-WebResourceInline.ps1 | ✅ Deployed |
+| spaarke-demo | ✅ Same ZIPs imported + published | ✅ Same HTMLs deployed | ✅ Deployed |
 
-### Code/runtime carryovers
-1. **`Spaarke.UI.Components/src/services/document-upload/`** — `SdapApiClient.ts`, `ODataDataverseClient.ts`, `NavMapClient.ts` + `hooks/useAiSummary.ts` still build raw Bearer headers in implementation code. Need migration to `authenticatedFetch` (or D-AUTH-7 justification if they have legitimate exception reasons). Flagged by task 029.
-2. **`src/client/code-pages/PlaybookBuilder/src/services/authService.ts`** — deprecated, zero consumers in PlaybookBuilder. Safe to delete in a cleanup PR. Flagged by task 024.
-3. **`src/solutions/LegalWorkspace/src/services/bffAuthProvider.ts`** — references legacy patterns. NOT a Phase B consumer (LegalWorkspace was not in the migration list). Audit at Phase D security cleanup.
-4. **`src/client/code-pages/SpeDocumentViewer`** — residual dead `accessToken: string` props in hooks (`useCheckoutFlow.ts`, `useDocumentPreview.ts`, `types.ts`) + deprecated `AuthService.ts`. Not in active data flow. Cleanup candidate.
+Hash-verify: every Code Page + JS deploy SHA-256 MATCH on both envs.
 
-### Build/tooling carryovers
-5. **SemanticSearch webpack build broken** by `@lexical/react` `.prod.mjs` resolution (Can't resolve `react/jsx-runtime`). Confirmed pre-existing (not caused by Wave 2). Needs webpack `extensionAlias` config OR `@spaarke/ui-components` packaging fix. Blocks SemanticSearch redeploy until fixed. Flagged by task 027.
-6. **`@spaarke/ui-components` jest tests can't run** — package has React 16 peer deps but `@testing-library/react@14` requires React 18's `react-dom/client`. Confirmed pre-existing. Tests don't run; relies on consumer-side test coverage. Flagged by task 023.
-7. **AnalysisWorkspace `src/__tests__/useAnalysisLoader.test.ts`** still uses old `token: string | null` option shape — pre-existing broken in this package. Flagged by task 026.
-8. **ESLint Bearer-literal rule path-based allowlist** needs to be authored (Phase E task 070-area) covering all 9 D-AUTH-7 exception sites listed above. SSE + XHR + Dataverse Web API + external SPA are all legitimate exception classes.
+## User regression on Dev — PASS
 
-### Carryovers RESOLVED during Wave 2
-- ✅ **Wave 1 carryover #1 (DocumentRelationshipViewer explicit authority)** — closed as false positive by task 025. Active `authInit.ts` does NOT set explicit authority; only the deprecated `services/auth/msalConfig.ts` does, and it's not imported by the active code path.
-- ✅ **Wave 1 carryover (ChatPanel.tsx SprkChat consumer breakage)** — fixed by task 026 (passed `authenticatedFetch` + `getAccessToken` per the new SprkChat contract).
+- SpaarkeAi + 3 Wave 1+2 Code Pages: no popup, console clean (errors traced to non-Phase-B legacy JS)
+- Workspace (LegalWorkspace, post-Wave-3): no popup ✅
+- Document preview + open: works
+- Document upload wizard: works
+- Create Matter: matter created (N:N link bug → deferred to task 031)
+- Create Event + send email: email sent
+
+## D-AUTH-7 exception sites (canonical list for ESLint allowlist task 070-area)
+
+Sites that legitimately use raw `Authorization: Bearer ${token}` because the wrapper APIs can't handle XHR/SSE/Dataverse-direct/third-party-SDK:
+
+| Class | File | Reason |
+|---|---|---|
+| SSE | `Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx` (×2) | EventSource ReadableStream |
+| XHR | `Spaarke.UI.Components/src/components/SprkChat/SprkChatUploadZone.tsx` (×2) | XHR uploads — `authenticatedFetch` can't wrap XHR |
+| SSE | `Spaarke.UI.Components/src/hooks/useSseStream.ts` | Main SSE fetch entry |
+| SSE | `code-pages/PlaybookBuilder/src/services/aiPlaybookService.ts` | Mirror SprkChat SSE pattern |
+| Dataverse | `code-pages/PlaybookBuilder/src/services/dataverseClient.ts` | Dataverse Web API call (`authenticatedFetch` is BFF-scoped) |
+| SSE | `code-pages/AnalysisWorkspace/src/services/analysisApi.ts::executeAnalysis` | SSE |
+| Out-of-scope | `client/external-spa/src/auth/bff-client.ts::executeFetch` | B2B portal uses sessionStorage; `@spaarke/auth` uses localStorage |
+| Third-party SDK | `Reporting/src/components/ReportViewer.tsx` | Power BI `IReportEmbedConfiguration.accessToken` is SDK contract |
+
+## Memory entries saved during Phase B (5)
+
+1. `feedback-dual-env-deploys` — deploy to BOTH envs serially; bump versions from `max(both)`
+2. `feedback-name-collision-in-consumer-authinit` — same-name sync-import + async-export silent failure
+3. `feedback-proactive-parallel-dispatch` — batch parallel-safe sub-agents per wave
+4. `feedback-third-party-sdk-accesstoken-is-ok` — Power BI / MSAL / etc. literal token strings OK at SDK boundaries
+5. `project-auth-v2-baseline-msal-bug` — original bug history (pre-existing memory; refreshed during Phase A)
+
+## Carryovers (logged, non-blocking)
+
+### Pre-existing wizard payload bugs (deferred to task 031 per user)
+- CreateMatter: N:N association 400 (URL/body correct per schema; likely permissions OR duplicate-association). Matter create itself succeeds.
+- CreateProject: createRecord 400 "Error in query syntax" — likely `sprk_issecure` field not deployed OR wrong entity-set names in `@odata.bind`.
+- CreateWorkAssignment: same class of payload-malformation bug.
+- Investigation report in 031-fix-wizard-payload-bugs.poml `<notes>`. User to capture payload logs (console.info already in code at projectService.ts:327 + workAssignmentService.ts:452) before fix.
+
+### Other carryovers (logged earlier; not Phase B blockers)
+1. **SemanticSearch Code Page** still blocked by pre-existing `@lexical/react` `.prod.mjs` webpack resolution. Cannot rebuild/redeploy until that's fixed.
+2. **eslint missing devDep** in 4 PCF package.json files (UDG + DRV have it post-Phase-B; SDV/SSC/RDC/EPM used `--no-save` ephemeral). Worth normalizing in a small follow-up.
+3. **Deploy-SpaarkeAi.ps1 CREATE branch is buggy** (had to use Deploy-WebResourceInline.ps1 for spaarke-demo first-time create of sprk_spaarkeai).
+4. **Duplicate** `infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js` (older, unused — dedup candidate).
+5. **`Spaarke.UI.Components/src/services/document-upload/`** + `useAiSummary.ts` still build raw Bearer headers in implementation (Wave 2 task 029 noted, deferred).
+6. **SpeDocumentViewer** residual dead `accessToken: string` props in hooks (not in active data flow).
+7. **`@spaarke/ui-components` jest tests can't run** — React 16 peer vs `@testing-library/react@14` mismatch (pre-existing).
+8. **DocumentUploadWizard `bffTokenProvider`** prop still wired through wizard tree for Send Email / Work on Analysis paths (out of scope for line 686 fix).
+9. **PlaybookBuilder/services/authService.ts** deprecated, zero consumers — safe to delete in cleanup PR.
+10. **SpaarkeAi blob: ERR_FILE_NOT_FOUND** (minor; vite-plugin-singlefile sourcemap/chunk reference). Investigate if it becomes user-visible.
 
 ## 🚨 CRITICAL CARRYOVER (still applies for future consumer additions)
 
-Any NEW consumer that wires `tenantId: getRuntimeTenantId()` into `initAuth({...})` MUST use import alias to avoid name collision with locally-exported async `getTenantId`. See memory `feedback_name_collision_in_consumer_authinit` + `project_auth_v2_baseline_msal_bug`. The 4 Wave 2 consumers (024 PlaybookBuilder, 025 DocRelationshipViewer, 026 AnalysisWorkspace, 027 SemanticSearch) all turned out to NOT have this collision pattern (only SpaarkeAi did) — but new consumers should check.
+Any NEW consumer wiring `tenantId: getRuntimeTenantId()` into `initAuth({...})` MUST use import alias to avoid name collision with locally-exported async `getTenantId`. See memory `feedback_name_collision_in_consumer_authinit` + `project_auth_v2_baseline_msal_bug`. ALL 9 Phase B consumers that needed it now use the alias correctly (SpaarkeAi, LegalWorkspace, AnalysisWorkspace, etc. — confirmed by sub-agents).
 
 ## State
 
@@ -76,15 +104,18 @@ Any NEW consumer that wires `tenantId: getRuntimeTenantId()` into `initAuth({...
 - Branch: `work/spaarke-auth-v2-and-hardening`
 - Phase 0: 5/5 ✅
 - Phase A: 7/7 ✅ + 2 hotfix commits (`811e98b5`, `48788c1f`)
-- Phase B: **11/11 ✅** (Wave 1 commit `918b0830`; Wave 2 pending commit)
-- Overall: **23/49 tasks (47%)**
-- Library versions: `@spaarke/auth@2.0.0`, `@spaarke/ui-components@2.0.0`
-- Integration verified each wave: ui-components rebuild clean; SpaarkeAi vite builds; 6 PCFs build prod bundles; 3 of 4 code pages build clean (SemanticSearch blocked by pre-existing webpack issue — see carryover #5).
-- Deleted forbidden legacy files: 4 (Wave 2) — `AnalysisWorkspace/services/authService.ts` (had `__SPAARKE_BFF_TOKEN__`), `AnalysisWorkspace/config/msalConfig.ts`, `SemanticSearch/services/auth/MsalAuthProvider.ts`, `SemanticSearch/services/auth/msalConfig.ts`.
-- Deleted R1 legacy files: 4 (Wave 1) — SpaarkeAi's `LeftPane.tsx`, `ChatPanel.tsx`, `OutputPanel.tsx`, `SourcePanel.tsx` (were using `useStandaloneAi`).
+- Phase B: **11/11 ✅** + B-addendum task 031 deferred
+- Overall: 23/49 tasks (47%) — Phase C/D/E/F remaining
+- Library versions: `@spaarke/auth@2.0.0`, `@spaarke/ui-components@2.0.0`, `@spaarke/ai-widgets@0.1.0` (consumed-as-source)
 
-## Next: Phase C (server hardening 040-049)
+## Next: Phase C (server hardening 040-049) — 10 tasks, ~19h
 
-10 tasks, ~19h. Phase gate: no plain-text secrets in App Service config; managed identity for all server outbound; no `/debug/*` endpoints; webhook signatures verified; API key scheme formalized. Many parallel-safe within phase (C-Parallel-1 + C-Parallel-2 groups). Then Phase D (CSP/CAE/security 060-064), Phase E (CI 070-072), Phase F (docs/ADR-027 090).
+Tasks (mostly parallel-safe within phase):
+- 040 (No-parallel, deploy): Rotate AzureAd__ClientSecret + AgentToken__ClientSecret; convert App Service config to Key Vault references; coordinate App Service restart
+- 041, 042 (C-Parallel-1, depend on 040): Migrate Graph + Dataverse from ClientSecretCredential to DefaultAzureCredential (managed identity)
+- 043-048 (C-Parallel-2): Remove /debug/* endpoints; HMAC webhook validation; named API key scheme; PostConfigure idempotency; tenant template fix; audit log enrichment
+- 049 (C-Parallel-2, depends on 045): Rate limiting on anonymous + API key endpoints
 
-**Per project CLAUDE.md risk-tier rule**: Phase C is server-only — MSAL browser regression test is NOT required (do an OBO smoke check against the deployed BFF instead). Manual MSAL test IS required after Phase B Wave 1+2 deploys.
+**Per project CLAUDE.md risk-tier rule**: Phase C is server-only — MSAL browser regression test is NOT required (do an OBO smoke check against the deployed BFF instead). Manual MSAL test IS only required after auth-affecting client changes (Phase B done, Phase D's CSP/CAE work will need it).
+
+Phase C task 040 is the gating step (rotates secrets + Key Vault — needs App Service restart). Then C-Parallel-1 (managed identity migrations) can dispatch in parallel.

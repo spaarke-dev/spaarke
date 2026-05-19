@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "2.3.0"
+$version = "2.3.1"
 $solutionName = "SpaarkeUniversalDatasetGrid"
 $zipPath = "bin\${solutionName}_v$version.zip"
 

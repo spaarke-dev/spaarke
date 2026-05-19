@@ -13,17 +13,31 @@
  *   - Mock data is deterministic so tests and demos work reliably.
  *   - Uses AbortController so in-flight requests are cancelled on dialog close.
  *
+ * Spaarke Auth v2 (Phase B Wave 4 — task SmartTodo migration):
+ *   - Function-based auth contract: hook takes `authenticatedFetch` from
+ *     `useAuth()` (in @spaarke/auth) rather than an `accessToken: string`.
+ *   - NEVER snapshot a token; NEVER write raw `Authorization: Bearer ${...}`
+ *     literals. The single canonical site for Bearer header construction is
+ *     `authenticatedFetch` inside @spaarke/auth.
+ *   - When `authenticatedFetch` is not provided (e.g. the consuming component
+ *     has not wired up `useAuth()` yet), the hook falls back to mock data —
+ *     same NFR-06 fallback used when `bffBaseUrl` is absent.
+ *
+ * @see CLAUDE.md §D-AUTH-1, §D-AUTH-7 — no token props, no raw Bearer literals
+ *
  * Usage:
+ *   const { authenticatedFetch } = useAuth();          // from @spaarke/auth
  *   const {
  *     isOpen, result, isLoading, error,
  *     openScoring, closeScoring, retry,
- *   } = useTodoScoring({ bffBaseUrl, accessToken });
+ *   } = useTodoScoring({ bffBaseUrl, authenticatedFetch });
  *
  *   // Open dialog for a to-do event
  *   openScoring(event.sprk_eventid, event.sprk_eventname);
  */
 
 import { useState, useCallback, useRef } from 'react';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,10 +140,15 @@ export interface IUseTodoScoringOptions {
    */
   bffBaseUrl?: string;
   /**
-   * Bearer token for authenticating against the BFF.
-   * Typically obtained from the MSAL auth provider.
+   * Authenticated fetch from `useAuth()` (in `@spaarke/auth`). Attaches the
+   * Bearer header, retries 401 with backoff, and never exposes the token to
+   * caller code. Required for live BFF calls.
+   *
+   * When omitted, the hook falls back to mock data (same as when `bffBaseUrl`
+   * is absent) — useful for tests and for consumers that haven't yet wired up
+   * the auth provider.
    */
-  accessToken?: string;
+  authenticatedFetch?: AuthenticatedFetchFn;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +210,7 @@ const mockScoringResult: Omit<ITodoScoringResult, 'isMockData'> = {
 // ---------------------------------------------------------------------------
 
 export function useTodoScoring(options: IUseTodoScoringOptions = {}): IUseTodoScoringResult {
-  const { bffBaseUrl, accessToken } = options;
+  const { bffBaseUrl, authenticatedFetch } = options;
 
   const [isOpen, setIsOpen]                 = useState<boolean>(false);
   const [eventContext, setEventContext]      = useState<ITodoScoringEventContext | null>(null);
@@ -214,8 +233,11 @@ export function useTodoScoring(options: IUseTodoScoringOptions = {}): IUseTodoSc
       setError(null);
       setResult(null);
 
-      // --- No BFF configured: use mock fallback after simulated delay ---
-      if (!bffBaseUrl) {
+      // --- No BFF configured OR no authenticatedFetch: use mock fallback after simulated delay ---
+      // authenticatedFetch is the only sanctioned way to hit the BFF (Spaarke
+      // Auth v2 contract — no raw Bearer literals). Without it, behave the
+      // same as the no-BFF path: deterministic mock data.
+      if (!bffBaseUrl || !authenticatedFetch) {
         mockTimerRef.current = setTimeout(() => {
           setResult({ ...mockScoringResult, isMockData: true });
           setIsLoading(false);
@@ -223,7 +245,7 @@ export function useTodoScoring(options: IUseTodoScoringOptions = {}): IUseTodoSc
         return;
       }
 
-      // --- BFF path: POST scoring endpoint ---
+      // --- BFF path: POST scoring endpoint via authenticatedFetch ---
       if (abortRef.current) {
         abortRef.current.abort();
       }
@@ -231,12 +253,12 @@ export function useTodoScoring(options: IUseTodoScoringOptions = {}): IUseTodoSc
       abortRef.current = controller;
 
       const url = `${bffBaseUrl.replace(/\/$/, '')}${SCORES_ENDPOINT_TEMPLATE.replace('{id}', encodeURIComponent(context.eventId))}`;
-      const headers: HeadersInit = { 'Content-Type': 'application/json' };
-      if (accessToken) {
-        headers['Authorization'] = `Bearer ${accessToken}`;
-      }
 
-      fetch(url, { method: 'POST', headers, signal: controller.signal })
+      authenticatedFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      })
         .then(async (response) => {
           if (!response.ok) {
             let message = `Scoring data unavailable (HTTP ${response.status})`;
@@ -269,7 +291,7 @@ export function useTodoScoring(options: IUseTodoScoringOptions = {}): IUseTodoSc
           setIsLoading(false);
         });
     },
-    [bffBaseUrl, accessToken]
+    [bffBaseUrl, authenticatedFetch]
   );
 
   // ---------------------------------------------------------------------------

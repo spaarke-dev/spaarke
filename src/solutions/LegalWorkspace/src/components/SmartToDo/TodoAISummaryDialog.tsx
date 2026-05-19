@@ -63,9 +63,20 @@ import type { FluentIcon } from '@fluentui/react-icons';
 import { PriorityScoreCard } from './PriorityScoreCard';
 import { EffortScoreCard } from './EffortScoreCard';
 import type {
+  ITodoPriorityScore,
+  ITodoEffortScore,
   ITodoScoringResult,
   ITodoScoringAction,
-} from '../../hooks/useTodoScoring';
+} from './todoScoringTypes';
+export type {
+  ITodoPriorityScore,
+  ITodoEffortScore,
+  ITodoScoringResult,
+  ITodoScoringAction,
+  ITodoScoringPriorityFactor,
+  ITodoScoringMultiplier,
+  ITodoScoringEventContext,
+} from './todoScoringTypes';
 
 // ---------------------------------------------------------------------------
 // Icon resolution

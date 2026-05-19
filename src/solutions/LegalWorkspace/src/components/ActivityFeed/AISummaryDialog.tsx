@@ -57,7 +57,35 @@ import {
   CheckmarkCircleRegular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
-import type { IAISuggestedAction, IAISummaryResult } from '../../hooks/useAISummary';
+
+// ---------------------------------------------------------------------------
+// AI Summary types — inlined (previously imported from the unused
+// useAISummary hook, removed during the auth v2 cleanup). The dialog itself
+// stays so the wiring can be re-introduced later via a hook that consumes
+// @spaarke/auth's authenticatedFetch.
+// ---------------------------------------------------------------------------
+
+/** A single suggested action item with its icon identifier */
+export interface IAISuggestedAction {
+  /** Display label */
+  label: string;
+  /** Action type key used by the dialog to dispatch the action */
+  type: 'reply' | 'create-task' | 'open-matter' | 'review' | 'approve';
+  /** Icon name from @fluentui/react-icons (as string key for lazy resolution) */
+  iconKey: 'ArrowReplyRegular' | 'TaskListSquareRegular' | 'FolderOpenRegular' | 'DocumentCheckmarkRegular' | 'CheckmarkCircleRegular';
+}
+
+/** AI Summary result — mirrors the BFF IAiSummaryResponse shape */
+export interface IAISummaryResult {
+  /** AI-generated summary text */
+  summary: string;
+  /** Suggested actions relevant to the event type */
+  suggestedActions: IAISuggestedAction[];
+  /** Confidence score (0-1) from the AI model */
+  confidence: number;
+  /** Whether this result came from mock data (true) or the live BFF (false) */
+  isMockData: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Icon resolution
@@ -356,7 +384,7 @@ export interface IAISummaryDialogProps {
   /** Event subject/title shown in the dialog title area */
   eventTitle: string;
   /** AI Summary result from useAISummary hook */
-  result: import('../../hooks/useAISummary').IAISummaryResult | null;
+  result: IAISummaryResult | null;
   /** True while fetching */
   isLoading: boolean;
   /** Error message from the hook */

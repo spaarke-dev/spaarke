@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 23/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11)
-> **Status**: Phase B COMPLETE. Awaiting MSAL regression test after wave deploys. Phase C next.
+> **Total Tasks**: 23/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11). Plus B-addendum: 1 deferred (task 031, wizard payload bugs — non-blocking).
+> **Status**: Phase B SIGNED OFF (deployed + regression-verified on BOTH envs). Phase C (server hardening) NEXT.
 > **Last Updated**: 2026-05-19
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
 

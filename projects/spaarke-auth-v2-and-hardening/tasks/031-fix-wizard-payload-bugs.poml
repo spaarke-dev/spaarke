@@ -1,0 +1,67 @@
+<task id="AUTHV2-031" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Fix 3 pre-existing Dataverse-payload bugs in Create wizards</title>
+    <phase>B-addendum (deferred from Wave 5 testing)</phase>
+    <tags>dataverse, wizard, bugfix, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>none (independent of Phase B/C/D/E/F)</dependencies>
+    <parallel-safe>false (cross-cutting payload fixes in shared wizard services)</parallel-safe>
+  </metadata>
+  <prompt>
+    Three pre-existing wizard bugs were surfaced during Phase B Wave 5 testing on 2026-05-19. These are NOT Phase B regressions — git log confirms the affected wizard service files (matterService.ts, projectService.ts, workAssignmentService.ts) were last modified BEFORE Phase B in unrelated work (commits 15920c95, 844bf7e9, d791c759, 6c73f250). Phase B only rebuilt the wizards against @spaarke/auth v2; their createRecord payload code was untouched.
+
+    User chose to defer these to a separate task rather than block Phase B sign-off. Phase B itself is complete and verified.
+  </prompt>
+  <role>Dataverse / OData / TypeScript engineer with @spaarke/ui-components familiarity.</role>
+  <goal>
+    All 3 Create wizards (Matter, Project, WorkAssignment) successfully create their records on spaarkedev1 + spaarke-demo, including the N:N association for Create Matter.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx (associateToRecord, lines 67-119)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts (createRecord at line 276-346; console.info payload log at line 327)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts (createRecord at line 363-466; console.info payload log at line 452)</file>
+    </files>
+    <patterns>
+      <pattern>Wave 4 task 029 carryover memory feedback_third_party_sdk_accesstoken_is_ok demonstrates the pattern of capturing real payloads before fixing</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step>USER: Re-run each failing wizard on spaarkedev1 with browser DevTools console open. Capture:
+      - CreateMatter: full `[CreateMatterWizard] N:N association response not OK:` warning (includes the actual Dataverse error text returned in `resp.text()`)
+      - CreateProject: `[ProjectService] createRecord payload:` log (the JSON being sent)
+      - CreateWorkAssignment: `[WorkAssignmentService] createRecord payload:` log
+      Paste in next session's context.</step>
+    <step>Run Dataverse metadata queries to verify entity-set names + field LogicalNames:
+      - Confirm `sprk_issecure` field is deployed on `sprk_project` (or not)
+      - Confirm entity set names for `sprk_projecttype_ref`, `sprk_practicearea_ref` lookups
+      - Confirm any polymorphic lookup nav-prop names on `sprk_workassignment`</step>
+    <step>For CreateMatter (Bug 1): the N:N URL/body code at CreateMatterWizard.tsx:80-85 is CORRECT per Dataverse schema (verified during Phase B sign-off). The 400 may be a permissions issue (AppendTo on sprk_project + Append on sprk_matter), or a duplicate-association error (the matter create payload may set a project lookup that auto-associates). Investigate by capturing the actual response body text.</step>
+    <step>For CreateProject (Bug 2): most likely culprit is `entity['sprk_issecure'] = true` at projectService.ts:295 — field may not be deployed. Secondary: wrong entity set names in @odata.bind values for the project type / practice area lookups. Fix the actual root cause once payload + metadata confirm it.</step>
+    <step>For CreateWorkAssignment (Bug 3): same payload-malformation class. Capture log, identify field that's malformed, fix.</step>
+    <step>After fixes: rebuild + deploy the 3 wizards to BOTH envs (sprk_creatematterwizard, sprk_createprojectwizard, sprk_createworkassignmentwizard) via Deploy-WebResourceInline.ps1. Hash-verify.</step>
+    <step>USER smoke-tests each wizard on both envs to confirm successful create + association.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>CreateMatter creates the matter AND successfully links to the selected project via N:N (no 400).</criterion>
+    <criterion>CreateProject createRecord succeeds with no "Bad Request - Error in query syntax".</criterion>
+    <criterion>CreateWorkAssignment createRecord succeeds with no "Bad Request - Error in query syntax".</criterion>
+    <criterion>Source-level: the 3 service files have justified, narrow edits scoped to the bug. No drive-by changes to other createRecord call sites or to the wizard component shell.</criterion>
+    <criterion>Deploys land on BOTH spaarkedev1 and spaarke-demo with hash-verify MATCH.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Investigation outcomes from the Phase B sign-off session (2026-05-19):
+
+    Bug 1 schema verification: Dataverse query confirmed `sprk_Project_Matter_nn` IS both the SchemaName AND the collection NavigationProperty name on both Entity1 (sprk_matter) and Entity2 (sprk_project). So the hardcoded URL in CreateMatterWizard.tsx:80 is structurally correct. The 400 must originate from something other than wrong nav-prop — permissions or duplicate-association most likely.
+
+    Bug 2 + 3: Both already log the outbound payload via console.info BEFORE the fetch — capturing those logs gives definitive root-cause data and avoids guessing.
+
+    Risk: low to medium per fix. Each is localized to one service file in @spaarke/ui-components. After fixing, only the 3 affected wizards need rebuild + redeploy (other wizards / consumers are unaffected).
+  </notes>
+</task>

@@ -109,14 +109,21 @@ Spaarke.Document._getEnvironmentVariable = function(schemaName) {
     return Xrm.WebApi.retrieveMultipleRecords(
         "environmentvariabledefinition",
         "?$filter=schemaname eq '" + schemaName + "'" +
-        "&$select=environmentvariabledefinitionid" +
+        "&$select=environmentvariabledefinitionid,defaultvalue" +
         "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
     ).then(function(result) {
         if (result.entities && result.entities.length > 0) {
             var definition = result.entities[0];
+            // Override value (if set) takes precedence over defaultvalue. Match the
+            // resolution pattern used by @spaarke/auth's resolveRuntimeConfig.ts and
+            // by sprk_emailactions.js — falling back to defaultvalue is REQUIRED
+            // because in dev/demo envs, sprk_TenantId only has a defaultvalue set.
             var values = definition.environmentvariabledefinition_environmentvariablevalue;
             if (values && values.length > 0 && values[0].value) {
                 return values[0].value;
+            }
+            if (definition.defaultvalue) {
+                return definition.defaultvalue;
             }
         }
         return null;

@@ -126,13 +126,19 @@ Spaarke.SubgridRollup.onLoad = function (executionContext, configJson) {
     try {
         var formContext = executionContext.getFormContext();
 
-        // Parse configuration
+        // Parse configuration. Some Power Apps form designers pre-parse the OnLoad
+        // parameter and pass the JSON as an already-parsed object; others pass the
+        // raw string. Accept both.
         var config;
-        try {
-            config = JSON.parse(configJson || "{}");
-        } catch (parseError) {
-            console.error("[SubgridRollup] Invalid config JSON:", configJson);
-            return;
+        if (configJson && typeof configJson === "object") {
+            config = configJson;
+        } else {
+            try {
+                config = JSON.parse(configJson || "{}");
+            } catch (parseError) {
+                console.error("[SubgridRollup] Invalid config JSON:", configJson, parseError);
+                return;
+            }
         }
 
         // Validate required fields

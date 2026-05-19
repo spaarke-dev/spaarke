@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.UI.Components"
            constructor="UniversalDatasetGrid"
-           version="2.3.0"
+           version="2.3.1"
            display-name-key="Universal Dataset Grid"
-           description-key="Virtual PCF: React/Fluent externalized via platform-library; auth init in React useEffect (v2.3.0)"
+           description-key="Virtual PCF: React/Fluent externalized via platform-library; auth init in React useEffect (v2.3.1)"
            control-type="virtual">
 
     <external-service-usage enabled="false" />
