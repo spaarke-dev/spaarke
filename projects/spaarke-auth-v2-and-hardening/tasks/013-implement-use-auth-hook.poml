@@ -3,7 +3,7 @@
     <title>Implement useAuth() React hook — function-based public API</title>
     <phase>A — Core library rebuild</phase>
     <tags>auth, library, react, hook, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>011, 012</dependencies>
     <parallel-safe>false</parallel-safe>
@@ -41,4 +41,44 @@
     <criterion>ESLint rule active: bans Authorization Bearer template literals outside authenticatedFetch.ts.</criterion>
     <criterion>Unit test for useAuth passes.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. `useAuth()` is a plain function (no React state) returning
+    `{ isAuthenticated, getAccessToken, authenticatedFetch, tenantId, logout }`. By
+    design it is NOT reactive in Phase A — consumers re-call on each render. Task
+    015 will add a `BroadcastChannel` listener that requires React `useState` /
+    `useEffect`; React devDeps will be added then.
+
+    `AuthenticatedFetchFn` type added to `types.ts` so component props and hook
+    returns can type-annotate without importing the function (avoids circular
+    imports via `useAuth`).
+
+    `logout()` is a stub: calls `provider.clearAllCaches()` + emits a console.warn
+    referencing task 014. This gives consumers something to wire up now without
+    silently claiming a complete logout — full server-side OBO invalidation +
+    BroadcastChannel notification lands in 014.
+
+    ESLint setup: installed `eslint@8.57`, `@typescript-eslint/parser@8`,
+    `@typescript-eslint/eslint-plugin@8` (the plugin is needed only to make the
+    `@typescript-eslint/no-explicit-any` rule REFERENCEABLE in the existing
+    `eslint-disable-next-line` comments — the rule itself never fires). The
+    `no-restricted-syntax` rule uses selector
+    `TemplateLiteral[quasis.0.value.raw=/Bearer\\s+$/]` which catches the realistic
+    cases `\`Bearer ${token}\`` and `\`Authorization: Bearer ${token}\``. Override
+    on `src/authenticatedFetch.ts` is the sanctioned site. Positive sanity check
+    confirmed the rule fires on a probe file.
+
+    Tests: 6/6 useAuth.test.ts pass (shape, no token-string fields, isAuthenticated
+    delegation, tenantId, getAccessToken delegation, logout stub clears caches).
+    Total package suite: 23/24 passing; the 1 failure remains the pre-existing
+    `config.test.ts` baseline (stale default-clientId fixture) — candidate for
+    task 016 cleanup.
+
+    Out-of-scope cleanup deferred to task 016:
+    - Orphaned legacy types `ITokenResult`, `ITokenStrategy`, `TokenCacheEntry`,
+      `TokenSource` in `types.ts` (no internal consumers after task 012 deletion)
+    - Stale `src/**/*.d.ts` / `src/**/*.js` build outputs tracked in git
+      (tsconfig emits to `dist/`; the in-`src` artifacts predate v2)
+
+    Quality gates deferred per D-AUTH-QUALITY-GATE-DEFERRAL.
+  </notes>
 </task>

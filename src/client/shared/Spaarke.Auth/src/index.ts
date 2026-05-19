@@ -1,5 +1,14 @@
 // Types
-export type { IAuthConfig, ITokenResult, ITokenStrategy, IProblemDetails, TokenCacheEntry, TokenSource, TokenResult } from './types';
+export type {
+  IAuthConfig,
+  ITokenResult,
+  ITokenStrategy,
+  IProblemDetails,
+  TokenCacheEntry,
+  TokenSource,
+  TokenResult,
+  AuthenticatedFetchFn,
+} from './types';
 
 // Errors
 export { AuthError, ApiError } from './errors';
@@ -26,6 +35,10 @@ export { buildBffApiUrl } from './buildBffApiUrl';
 
 // Public init API
 export { initAuth, getAuthProvider } from './initAuth';
+
+// Function-based React hook (v2 — task 013). Primary public API for Phase B consumers.
+export { useAuth } from './useAuth';
+export type { UseAuthResult } from './useAuth';
 
 // Synchronous tenant ID resolution (for click handlers — cannot await async getTenantId)
 export { resolveTenantIdSync } from './resolveTenantIdSync';

@@ -57,6 +57,13 @@ export interface ITokenStrategy {
   tryAcquireToken(): Promise<ITokenResult | null>;
 }
 
+/**
+ * Signature of `authenticatedFetch`. Exposed as a type so React hook return
+ * shapes and component props can reference it without importing the function
+ * (avoids circular import patterns through `useAuth`).
+ */
+export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+
 /** RFC 7807 ProblemDetails shape returned by the BFF API. */
 export interface IProblemDetails {
   type?: string;
