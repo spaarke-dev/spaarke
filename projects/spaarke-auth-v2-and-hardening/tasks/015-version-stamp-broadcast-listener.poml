@@ -3,7 +3,7 @@
     <title>Add version stamp + BroadcastChannel invalidation listener</title>
     <phase>A — Core library rebuild</phase>
     <tags>auth, library, observability, STANDARD</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>013</dependencies>
     <parallel-safe>A-Parallel-2 (with 014, 016)</parallel-safe>
@@ -34,4 +34,40 @@
     <criterion>BroadcastChannel listener triggers cache clear cross-tab.</criterion>
     <criterion>Dispose cleans up the channel.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. Small task — much of the broadcast wiring was
+    already laid down in task 014; 015 refactored ownership and added the
+    version surface.
+
+    Changes:
+    - New src/version.ts exporting VERSION = '2.0.0' (bumped from 1.0.0
+      to align with v2 refactor). Kept a hardcoded literal rather than
+      importing from package.json — avoids bundler-config fragility and a
+      runtime JSON fetch in browser builds. Comment documents the manual
+      sync requirement.
+    - package.json version bumped to 2.0.0.
+    - VERSION exported from src/index.ts.
+    - Broadcast listener wiring MOVED from initAuth.ts → SpaarkeAuthProvider
+      constructor per task POML wording. Provider is now self-contained:
+      console.info version log + onAuthBroadcast subscription happen at
+      construction; dispose() cleans both up alongside the proactive-refresh
+      interval.
+    - Listener now calls `this.clearAllCaches()` (cascading) per POML, where
+      task 014 had used `provider.clearCache()` (in-memory only). The
+      cascade is mildly redundant (originating tab's MSAL.logoutPopup
+      already nuked the shared localStorage refresh token) but defensive
+      and matches the POML literally.
+    - initAuth.ts simplified: no longer registers a listener itself; just
+      manages the singleton provider + warms the cache on init.
+
+    Verification: tsc clean, jest 27/28 passing (1 pre-existing
+    config.test.ts failure, deferred to task 016), lint clean.
+
+    No tests added for the version log itself — it's a console.info, of
+    diagnostic value only. The broadcast listener behavior (now in the
+    constructor) is already covered by broadcastChannel.test.ts from
+    task 014.
+
+    Quality gates deferred per D-AUTH-QUALITY-GATE-DEFERRAL.
+  </notes>
 </task>

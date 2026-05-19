@@ -4,7 +4,8 @@ import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
 import type { AuthStrategy } from './strategies/AuthStrategy';
 import { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';
 import { InMemoryCache } from './strategies/InMemoryCache';
-import { broadcastLogout } from './broadcastChannel';
+import { broadcastLogout, onAuthBroadcast } from './broadcastChannel';
+import { VERSION } from './version';
 
 /**
  * Core auth provider (v2 — tasks 010, 011, 012).
@@ -21,6 +22,7 @@ export class SpaarkeAuthProvider {
   private readonly _config: Required<IAuthConfig>;
   private readonly _cache: InMemoryCache;
   private _refreshInterval: ReturnType<typeof setInterval> | null = null;
+  private _disposeBroadcastListener: (() => void) | null = null;
 
   /**
    * @param userConfig Optional config overrides — merged with defaults via resolveConfig().
@@ -37,6 +39,18 @@ export class SpaarkeAuthProvider {
 
     const inner = strategy ?? new BrowserMsalStrategy(this._config);
     this._cache = new InMemoryCache(inner);
+
+    console.info(`[SpaarkeAuth] v${VERSION} initialized`);
+
+    // Listen for cross-context logout broadcasts. When another tab/iframe logs
+    // out, cascade-clear our caches so MSAL state, in-memory state, and the
+    // strategy's local state all match the user-intended outcome.
+    this._disposeBroadcastListener = onAuthBroadcast((msg) => {
+      if (msg.type === 'logout') {
+        console.info('[SpaarkeAuth] Received logout broadcast; cascading clearAllCaches');
+        this.clearAllCaches();
+      }
+    });
 
     if (this._config.proactiveRefresh) {
       this._startProactiveRefresh();
@@ -157,11 +171,15 @@ export class SpaarkeAuthProvider {
     return '';
   }
 
-  /** Stop proactive refresh (cleanup). */
+  /** Stop proactive refresh + remove broadcast listener (cleanup). */
   dispose(): void {
     if (this._refreshInterval) {
       clearInterval(this._refreshInterval);
       this._refreshInterval = null;
+    }
+    if (this._disposeBroadcastListener) {
+      this._disposeBroadcastListener();
+      this._disposeBroadcastListener = null;
     }
   }
 

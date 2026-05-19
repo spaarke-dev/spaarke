@@ -1,6 +1,6 @@
 {
   "name": "@spaarke/auth",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Spaarke shared authentication library - token acquisition, authenticated fetch, token bridge",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

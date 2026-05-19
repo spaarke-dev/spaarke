@@ -16,6 +16,9 @@ export { AuthError, ApiError } from './errors';
 // Config
 export { resolveConfig, TOKEN_EXPIRY_BUFFER_MS, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
 
+// Library version (logged on init; surfaces INV-8 bundling-reality regressions)
+export { VERSION } from './version';
+
 // Runtime config (Dataverse environment variable resolution)
 export { resolveRuntimeConfig, clearRuntimeConfigCache } from './resolveRuntimeConfig';
 export type { IRuntimeConfig } from './resolveRuntimeConfig';
