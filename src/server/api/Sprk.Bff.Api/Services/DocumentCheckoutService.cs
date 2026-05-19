@@ -50,15 +50,10 @@ public class DocumentCheckoutService
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? configuration["Dataverse:EnvironmentUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl or Dataverse:EnvironmentUrl configuration is required");
-        var tenantId = configuration["TENANT_ID"]
-            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
-        var clientId = configuration["API_APP_ID"]
-            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["Dataverse:ClientSecret"]
-            ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
 
         _dataverseApiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
+        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_dataverseApiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

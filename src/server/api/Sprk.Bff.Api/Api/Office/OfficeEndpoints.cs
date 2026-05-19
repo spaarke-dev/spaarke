@@ -72,7 +72,9 @@ public static class OfficeEndpoints
             .WithName("GetOfficeHealth")
             .WithDescription("Health check endpoint for Office add-in connectivity testing")
             .AllowAnonymous()
-            .Produces<OfficeHealthResponse>(StatusCodes.Status200OK);
+            .RequireRateLimiting("anonymous") // Task AUTHV2-049 — anonymous health check; 10/min per IP
+            .Produces<OfficeHealthResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
 
     /// <summary>

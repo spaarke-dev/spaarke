@@ -359,14 +359,8 @@ public class SessionRestoreService : ISessionRestoreService
 
     private async Task<string> AcquireDataverseTokenAsync(string dataverseUrl, CancellationToken ct)
     {
-        var tenantId = _configuration["TENANT_ID"]
-            ?? throw new InvalidOperationException("TENANT_ID configuration is required for Dataverse ETag check");
-        var clientId = _configuration["API_APP_ID"]
-            ?? throw new InvalidOperationException("API_APP_ID configuration is required for Dataverse ETag check");
-        var clientSecret = _configuration["API_CLIENT_SECRET"]
-            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required for Dataverse ETag check");
-
-        var credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
+        var credential = new DefaultAzureCredential();
         var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
         var tokenResponse = await credential.GetTokenAsync(
             new TokenRequestContext([scope]),

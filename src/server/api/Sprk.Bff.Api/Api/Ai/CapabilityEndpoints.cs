@@ -35,6 +35,7 @@ public static class CapabilityEndpoints
         // scheme rather than Azure AD Bearer token (plugin → BFF server-to-server).
         app.MapPost("/api/ai/capabilities/refresh", HandleWebhookRefreshAsync)
             .AllowAnonymous()
+            .RequireRateLimiting("webhook-graph") // Task AUTHV2-049 — 600/min per source IP (Dataverse plugin webhook)
             .WithTags("AI Capabilities")
             .WithName("RefreshCapabilityManifest")
             .WithSummary("Trigger an immediate capability manifest refresh")
@@ -43,7 +44,8 @@ public static class CapabilityEndpoints
                 "Requires the X-Webhook-Secret header matching AiCapabilities:WebhookSecret. " +
                 "Returns 204 on success, 401 when the secret is missing or incorrect.")
             .Produces(StatusCodes.Status204NoContent)
-            .ProducesProblem(StatusCodes.Status401Unauthorized);
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         return app;
     }

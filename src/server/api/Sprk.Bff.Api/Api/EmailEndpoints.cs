@@ -78,12 +78,14 @@ public static class EmailEndpoints
                 signatureHeader: "X-Dataverse-Signature",
                 signingKeyAccessor: sp => sp.GetRequiredService<IOptions<EmailProcessingOptions>>().Value.WebhookSigningKey,
                 filterName: "Email")
+            .RequireRateLimiting("webhook-graph") // Task AUTHV2-049 — 600/min per source IP (defense in depth)
             .WithName("EmailWebhookTrigger")
             .WithTags("Email Conversion")
             .WithDescription("Receive Dataverse webhook notifications for new email activities (HMAC-signed)")
             .Produces<WebhookTriggerResponse>(StatusCodes.Status202Accepted)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         // Admin endpoints for email processing management

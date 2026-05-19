@@ -11,9 +11,9 @@ namespace Sprk.Bff.Api.Services.Ai.Capabilities;
 /// Loads <see cref="CapabilityManifestEntry"/> records from the Dataverse
 /// <c>sprk_aicapability</c> table via the Web API (OData v4).
 ///
-/// Authentication follows the same client-credential pattern used by
+/// Authentication follows the same managed-identity pattern used by
 /// <see cref="Sprk.Bff.Api.Services.Ai.PlaybookService"/>:
-/// ClientSecretCredential → Bearer token → Refreshed before expiry.
+/// DefaultAzureCredential → Bearer token → Refreshed before expiry.
 ///
 /// Column mapping:
 /// <list type="table">
@@ -68,16 +68,11 @@ public sealed class DataverseCapabilityManifestLoader : ICapabilityManifestLoade
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
-        var tenantId = configuration["TENANT_ID"]
-            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
-        var clientId = configuration["API_APP_ID"]
-            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["API_CLIENT_SECRET"]
-            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required");
 
         // IMPORTANT: BaseAddress must end with trailing slash so relative URLs append correctly.
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
+        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

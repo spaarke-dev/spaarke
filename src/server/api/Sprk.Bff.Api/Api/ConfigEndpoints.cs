@@ -38,6 +38,7 @@ public static class ConfigEndpoints
         // GET /api/config/client — anonymous, returns MSAL client config
         app.MapGet("/api/config/client", GetClientConfig)
             .AllowAnonymous()
+            .RequireRateLimiting("anonymous") // Task AUTHV2-049 — 10/min per IP
             .WithName("GetMsalClientConfig")
             .WithTags("Configuration")
             .WithSummary("Get non-sensitive client configuration for MSAL bootstrap")
@@ -45,7 +46,8 @@ public static class ConfigEndpoints
                 "Returns MSAL client ID, authority, scopes, and BFF base URL. " +
                 "Anonymous — used by the Code Page when Xrm context is unavailable " +
                 "(direct URL access without the Dataverse MDA shell).")
-            .Produces<ClientConfigResponse>(200);
+            .Produces<ClientConfigResponse>(200)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         return app;
     }

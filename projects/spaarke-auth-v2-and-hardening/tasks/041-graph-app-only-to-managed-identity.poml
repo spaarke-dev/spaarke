@@ -3,10 +3,12 @@
     <title>Migrate Graph app-only auth to DefaultAzureCredential (managed identity)</title>
     <phase>C — Server hardening</phase>
     <tags>auth, server, managed-identity, graph, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>040</dependencies>
     <parallel-safe>C-Parallel-1</parallel-safe>
+    <completed-date>2026-05-19</completed-date>
+    <completed-by>Claude Code (Opus 4.7, FULL rigor sub-agent in Phase C Wave 2, parallel with 042 + 049)</completed-by>
   </metadata>
   <prompt>GraphClientFactory.cs:90 uses ClientSecretCredential for Graph app-only flows (background jobs, SpeAdminGraphService). Migrate to DefaultAzureCredential so App Service managed identity is used. Eliminates a secret rotation surface.</prompt>
   <role>Senior .NET engineer.</role>
@@ -29,4 +31,221 @@
     <criterion>App Service MI has all required Graph permissions.</criterion>
     <criterion>SpeAdminGraphService endpoints work in deployed dev.</criterion>
   </acceptance-criteria>
+  <notes>
+============================================================================
+COMPLETED 2026-05-19 — Phase C Wave 2 (parallel with 042 + 049)
+============================================================================
+
+PRE-FLIGHT CONTEXT: Task 040 (secret rotation / Key Vault migration) was DEFERRED by
+user (dev env, low blast radius). Per the unblock analysis, this task makes 040
+substantially moot for Graph: by replacing ClientSecretCredential with
+DefaultAzureCredential, the app-only Graph path no longer reads
+`AzureAd__ClientSecret` (and never did — it read `API_CLIENT_SECRET`). OBO flow
+still uses `API_CLIENT_SECRET` (intentional — OBO cannot use MI).
+
+============================================================================
+FILES MODIFIED (3)
+============================================================================
+
+1. src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs
+   - Added two new fields: `_managedIdentityEnabled` (bool, default false),
+     `_managedIdentityClientId` (string?, optional UAMI client id)
+   - Constructor reads `Graph:ManagedIdentity:Enabled` and
+     `Graph:ManagedIdentity:ClientId` from IConfiguration directly (same pattern
+     as existing TENANT_ID reads — no new DI wiring required)
+   - Added startup log line summarizing the chosen auth mode
+   - `CreateAppOnlyClient()`: now branches on `_managedIdentityEnabled`:
+       * Enabled  → `DefaultAzureCredential` (with optional UAMI clientId pinning)
+       * Disabled → `ClientSecretCredential` (legacy local-dev fallback, with
+                    improved error message pointing at the MI option)
+   - Refreshed class-level + method-level XML docs
+
+2. src/server/api/Sprk.Bff.Api/appsettings.template.json
+   - Added a new `Graph` section with `_ManagedIdentity_comment` documenting the
+     flag + operator prerequisites
+   - `ManagedIdentity.Enabled` defaults to `false` (preserves existing local-dev
+     behavior unchanged for environments that haven't opted in)
+   - Production should set `Graph__ManagedIdentity__Enabled=true` via App Service
+     config / Bicep / Key Vault references — NOT in the template file (the deploy
+     substitution pattern handles per-env overrides)
+
+3. projects/spaarke-auth-v2-and-hardening/tasks/041-graph-app-only-to-managed-identity.poml
+   - Status: not-started → completed + completion metadata
+   - This notes block
+
+NOT MODIFIED (out of scope per task POML "OBO flow stays — only app-only changes"):
+   - `GraphClientFactory.CreateOnBehalfOfClientAsync()` and `_cca` —
+     OBO still uses `API_CLIENT_SECRET` (cannot use MI; per OAuth OBO spec the
+     middle-tier MUST authenticate with a confidential client credential)
+   - `Infrastructure/Graph/SpeAdminGraphService.cs` — TWO additional
+     `ClientSecretCredential` usages remain (line 3699 in
+     `RegisterContainerTypeAsync`, line 3829 in `CreateGraphClient`). These are
+     PER-TENANT container-type configs — they use the *customer's* app registration
+     secret (fetched from Key Vault per `ContainerTypeConfig.SecretKeyVaultName`),
+     NOT the BFF's secret. The BFF's MI cannot impersonate per-customer app
+     registrations, so these MUST remain ClientSecretCredential. This is an
+     architectural constraint, not a regression.
+   - `Configuration/GraphOptions.cs` / `GraphOptionsValidator.cs` — exist as
+     dead code (not bound in DI). Left unchanged for minimal scope; future
+     work can wire them up if needed.
+   - `appsettings.Production.json.template` — only contains logging overrides;
+     the production Graph__ManagedIdentity__Enabled flag is set at deploy time
+     (App Service config), not in JSON.
+
+============================================================================
+AUTH MODE SUMMARY
+============================================================================
+
+GraphClientFactory.CreateAppOnlyClient() now supports two modes via flag:
+
+| Mode             | Trigger                                 | Credential                                 |
+|------------------|-----------------------------------------|--------------------------------------------|
+| ManagedIdentity  | Graph:ManagedIdentity:Enabled = true    | DefaultAzureCredential (+ optional UAMI)   |
+| ClientSecret     | Graph:ManagedIdentity:Enabled = false   | ClientSecretCredential (legacy)            |
+| (legacy default) | flag absent / unparseable               | ClientSecretCredential (legacy)            |
+
+DefaultAzureCredential chain (when Enabled=true) — devs running locally don't
+need code changes:
+  EnvironmentCredential → WorkloadIdentityCredential → ManagedIdentityCredential
+  → SharedTokenCacheCredential → VisualStudioCredential → AzureCliCredential
+  → AzurePowerShellCredential → AzureDeveloperCliCredential → InteractiveBrowser
+
+OBO flow (unchanged):
+  Still uses `IConfidentialClientApplication` with API_CLIENT_SECRET — required
+  by OAuth OBO spec.
+
+============================================================================
+CONFIG KEY IMPACT
+============================================================================
+
+Still needed (no change):
+  - TENANT_ID, API_APP_ID — needed for `_cca` (OBO ConfidentialClientApplication)
+  - API_CLIENT_SECRET — needed for OBO; also fallback when MI flag is off.
+    Lots of other services in the BFF (Dataverse, AI, Email, Jobs) also read this
+    — see grep results in execution log. Cannot remove from Key Vault yet; out of
+    scope for this task.
+
+New (added by this task):
+  - Graph__ManagedIdentity__Enabled (bool, optional, default false)
+  - Graph__ManagedIdentity__ClientId (string, optional — only for UAMI)
+
+Now obsolete *for Graph app-only* (but still used elsewhere — DO NOT REMOVE
+from Key Vault yet):
+  - API_CLIENT_SECRET (when Graph__ManagedIdentity__Enabled=true): Graph
+    app-only no longer needs it. Other consumers (Dataverse, AI, Email, etc.)
+    still do.
+
+NEVER touched by Graph app-only path:
+  - AzureAd__ClientSecret: per grep results, only `EmailAssociationService.cs:747`
+    reads it. The operator brief's question "is AzureAd__ClientSecret still needed
+    for Graph?" — answer: it never was. This task does not change anything for
+    AzureAd__ClientSecret. (Task 040's rotation scope is unchanged.)
+
+============================================================================
+🚨 OPERATOR ACTION REQUIRED BEFORE DEPLOY
+============================================================================
+
+The new MI path will only work if the App Service's managed identity service
+principal has the same Microsoft Graph application permissions previously
+granted to the BFF app registration. WITHOUT THIS STEP, the deployed code will
+authenticate but fail at the Graph API with 403 Insufficient Privileges.
+
+Required permissions to grant to MI Principal ID
+`56ae2188-c978-4734-ad16-0bc288973f20` (per operator brief):
+  - Microsoft Graph → Application permissions:
+      * FileStorageContainer.Selected (SharePoint Embedded)
+      * Files.Read.All
+      * Files.ReadWrite.All
+      * Sites.Read.All / Sites.ReadWrite.All (if used)
+      * (any other app-only Graph perms currently granted to the BFF app
+         registration `API_APP_ID`)
+
+How to grant (Azure CLI):
+  ```
+  # Get Graph service principal app id
+  GRAPH_SP=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+
+  # For each permission, get the role id from Graph SP and grant to MI:
+  az rest --method POST \
+    --uri "https://graph.microsoft.com/v1.0/servicePrincipals/56ae2188-c978-4734-ad16-0bc288973f20/appRoleAssignments" \
+    --headers Content-Type=application/json \
+    --body '{
+      "principalId": "56ae2188-c978-4734-ad16-0bc288973f20",
+      "resourceId": "<GRAPH_SP_ID>",
+      "appRoleId": "<APP_ROLE_ID_FOR_PERMISSION>"
+    }'
+  ```
+
+Then set App Service config:
+  `Graph__ManagedIdentity__Enabled = true`
+  (and optionally `Graph__ManagedIdentity__ClientId = <UAMI-client-id>` if
+   using User-Assigned MI; leave unset for system-assigned)
+
+Restart App Service to pick up the config change (DefaultAzureCredential is
+cached in the singleton via Lazy&lt;T&gt;, so the new mode applies on the next
+startup).
+
+Defer this Azure-side work to Phase C consolidation (deploy step).
+
+============================================================================
+BUILD VERIFICATION
+============================================================================
+
+`dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` → SUCCESS
+  - 0 errors
+  - 2 warnings (pre-existing NU1903 Kiota CVE warnings, unrelated)
+  - Elapsed: ~1s (incremental build)
+
+============================================================================
+WHAT WAS DELIBERATELY NOT DONE
+============================================================================
+
+- Did NOT modify SpeAdminGraphService (per-tenant container-type configs use
+  per-customer secrets — MI cannot replace these; architectural constraint).
+- Did NOT wire `GraphOptions` into DI (would require populating
+  `Graph:TenantId`/`Graph:ClientId`/`Graph:ClientSecret` which is duplication
+  of existing TENANT_ID/API_APP_ID/API_CLIENT_SECRET keys; out of scope and
+  would force config changes everywhere). The new MI flag is read directly
+  from IConfiguration — same pattern the factory already uses.
+- Did NOT remove `API_CLIENT_SECRET` from anywhere — still used by OBO flow
+  and many other services.
+- Did NOT commit (per operator brief).
+- Did NOT rebuild shared libraries (per operator brief — Spaarke.Core /
+  Spaarke.Dataverse rebuilt incidentally as transitive deps of Sprk.Bff.Api
+  but they were already up to date so no actual rebuild occurred).
+- Did NOT touch any directory outside src/server/api/Sprk.Bff.Api/ (and the
+  task POML itself, which is required by Step 10).
+- Did NOT run MSAL browser regression test (per project CLAUDE.md risk-tier
+  rule: Phase C is server-only; OBO smoke check at deploy is the right gate).
+
+============================================================================
+COORDINATION WITH PARALLEL AGENTS (042, 049)
+============================================================================
+
+- 042 (Dataverse MI) — different files (DataverseService*, DataverseHttp*).
+  Zero overlap with my changes.
+- 049 (rate limiting) — touches RateLimitingModule + endpoint files. Zero
+  overlap with Infrastructure/Graph/.
+- All 3 agents updating current-task.md concurrently — I noticed a write race
+  on my first edit attempt (049 had updated mid-flight). Skipped further
+  current-task.md updates to avoid race; all task state captured in this
+  notes block + TASK-INDEX.md status (the operator will handle the
+  consolidated current-task.md update at Wave 2 close).
+
+============================================================================
+ACCEPTANCE CRITERIA STATUS
+============================================================================
+
+1. ✅ GraphClientFactory uses DefaultAzureCredential for app-only
+   (when `Graph:ManagedIdentity:Enabled = true` — flag-gated, default off so
+   local dev continues unaffected; production opts in via App Service config).
+2. ⏭️ App Service MI has all required Graph permissions
+   — Azure-side step, NOT a code task. Documented above for the deploy step
+   (Phase C consolidation).
+3. ⏭️ SpeAdminGraphService endpoints work in deployed dev
+   — Verification requires deploy + manual smoke; deferred to Phase C deploy
+   step. Code change is functionally equivalent for SpeAdminGraphService.ForApp()
+   callers (returns a GraphServiceClient with the same scopes); only the
+   underlying credential type changes.
+  </notes>
 </task>

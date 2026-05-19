@@ -65,18 +65,10 @@ public class RegistrationDataverseService : IDisposable
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        // S2S auth using same app registration (client credentials — works across all tenant environments)
-        var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["API_CLIENT_SECRET"];
-        var tenantId = configuration["TENANT_ID"];
-
-        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret) || string.IsNullOrEmpty(tenantId))
-        {
-            throw new InvalidOperationException(
-                "RegistrationDataverseService requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration.");
-        }
-
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
+        // App Service MI must be configured as a Dataverse Application User in EACH target environment
+        // (admin Dataverse + every demo provisioning Dataverse referenced by GetAccessTokenForUrlAsync).
+        _credential = new DefaultAzureCredential();
         _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         _httpClient = new HttpClient

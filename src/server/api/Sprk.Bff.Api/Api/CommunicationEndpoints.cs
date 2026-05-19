@@ -94,6 +94,7 @@ public static class CommunicationEndpoints
                 signatureHeader: WebhookSignatureFilter.DefaultSignatureHeader,
                 signingKeyAccessor: sp => sp.GetRequiredService<IOptions<CommunicationOptions>>().Value.WebhookSigningKey,
                 filterName: "Communication")
+            .RequireRateLimiting("webhook-graph") // Task AUTHV2-049 — 600/min per source IP (defense in depth)
             .WithName("CommunicationIncomingWebhook")
             .WithTags("Communications")
             .WithDescription("Receive Microsoft Graph change notifications for new inbound emails (HMAC-signed)")
@@ -101,6 +102,7 @@ public static class CommunicationEndpoints
             .Produces(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         return app;

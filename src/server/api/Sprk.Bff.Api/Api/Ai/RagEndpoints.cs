@@ -134,7 +134,10 @@ public static class RagEndpoints
         // Job handler uses app-only auth (Pattern 6) for SPE file access.
         app.MapPost("/api/ai/rag/enqueue-indexing", EnqueueIndexing)
             .RequireAuthorization(AuthPolicies.RagApiKey)
-            .RequireRateLimiting("ai-batch")
+            // Task AUTHV2-049 — Use api-key-rag (300/min per API-key scheme) instead of ai-batch
+            // (which keys on user oid). API-key callers have no oid claim, so ai-batch would have
+            // bucketed all callers into the same partition under the "unknown" fallback key.
+            .RequireRateLimiting("api-key-rag")
             .WithName("RagEnqueueIndexing")
             .WithTags("AI RAG")
             .WithSummary("Enqueue a file for background RAG indexing")
@@ -142,6 +145,7 @@ public static class RagEndpoints
             .Produces<EnqueueIndexingResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(500);
 
         // ═══════════════════════════════════════════════════════════════════════════

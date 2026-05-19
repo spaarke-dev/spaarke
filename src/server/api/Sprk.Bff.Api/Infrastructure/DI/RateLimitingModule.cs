@@ -102,6 +102,66 @@ public static class RateLimitingModule
                 });
             });
 
+            // 6a. Webhook (HMAC-signed) - Loose per-IP cap for Microsoft Graph / Dataverse
+            //     change notifications. These callers MAY burst (e.g., 100 messages in a
+            //     few seconds when a subscription replays) but are constrained by the source
+            //     platforms' own delivery throttles. We allow 600 req/min per source IP
+            //     so a legitimate burst never trips the limiter, while a hostile sender
+            //     forging the IP cannot DoS the whole service. HMAC validation
+            //     (WebhookSignatureFilter) is the primary gate; this is defense in depth.
+            //     Task AUTHV2-049.
+            options.AddPolicy("webhook-graph", context =>
+            {
+                var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return RateLimitPartition.GetSlidingWindowLimiter(ipAddress, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 600,
+                    QueueLimit = 0,
+                    SegmentsPerWindow = 6
+                });
+            });
+
+            // 6b. API key (admin) - Per-scheme cap for the BuilderAdmin API key.
+            //     Used by admin CLI/scripts that drive the builder-scope import endpoints.
+            //     Keyed on the auth_scheme claim emitted by ApiKeyAuthenticationHandler
+            //     (NOT user oid — these callers have no user identity). Falling back to
+            //     the source IP for any path that uses this policy outside an API-key flow.
+            //     Task AUTHV2-049.
+            options.AddPolicy("api-key-admin", context =>
+            {
+                var partitionKey = context.User?.FindFirst("auth_scheme")?.Value
+                    ?? context.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown";
+                return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 60,
+                    QueueLimit = 5
+                });
+            });
+
+            // 6c. API key (RAG) - Per-scheme cap for the RAG indexing API key.
+            //     Used by background-job enqueue endpoint that drives bulk indexing.
+            //     Higher PermitLimit than api-key-admin because background enqueue is
+            //     legitimately bursty (one-shot bulk runs may enqueue hundreds of items
+            //     in a minute). Keyed on auth_scheme so all callers presenting the same
+            //     key share the bucket — appropriate for a service-to-service contract.
+            //     Task AUTHV2-049.
+            options.AddPolicy("api-key-rag", context =>
+            {
+                var partitionKey = context.User?.FindFirst("auth_scheme")?.Value
+                    ?? context.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown";
+                return RateLimitPartition.GetSlidingWindowLimiter(partitionKey, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 300,
+                    QueueLimit = 10,
+                    SegmentsPerWindow = 6
+                });
+            });
+
             // 7. AI Streaming - Strict limit for costly AI operations
             options.AddPolicy("ai-stream", context =>
             {

@@ -72,7 +72,9 @@ public static class EndpointMappingExtensions
                 logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
                 return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
             }
-        }).AllowAnonymous();
+        })
+            .AllowAnonymous()
+            .RequireRateLimiting("anonymous"); // Task AUTHV2-049 — anonymous + hits Dataverse; 10/min per IP
 
         app.MapGet("/ping", () => Results.Text("pong"))
             .AllowAnonymous()
@@ -89,6 +91,7 @@ public static class EndpointMappingExtensions
             });
         })
             .AllowAnonymous()
+            .RequireRateLimiting("anonymous") // Task AUTHV2-049 — anonymous, prevent spam scraping; 10/min per IP
             .WithTags("Health")
             .WithDescription("Service status with metadata (no sensitive info).");
     }

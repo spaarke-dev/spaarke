@@ -15,28 +15,34 @@ public static class BuilderScopeAdminEndpoints
     {
         // GET /api/admin/builder-scopes/status - Check builder scopes file status (no auth for diagnostics)
         app.MapGet("/api/admin/builder-scopes/status", GetScopeFilesStatus)
+            .AllowAnonymous()
+            .RequireRateLimiting("anonymous") // Task AUTHV2-049 — 10/min per IP (diagnostic endpoint)
             .WithName("GetBuilderScopeFilesStatus")
             .WithSummary("Check builder scope files status")
             .WithDescription("Returns a count of builder scope JSON files available for import. Does not require authentication.")
             .WithTags("Admin")
-            .Produces<BuilderScopeFilesStatus>(StatusCodes.Status200OK);
+            .Produces<BuilderScopeFilesStatus>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // POST /api/admin/builder-scopes/import - Import scopes from JSON directory
         // Accepts either Azure AD bearer or X-Api-Key (BuilderAdmin:ApiKey config) via the
         // named BuilderAdminOrOAuth policy. Replaces prior inline ValidateAuth helper.
         app.MapPost("/api/admin/builder-scopes/import", ImportFromDirectory)
             .RequireAuthorization(AuthPolicies.BuilderAdminOrOAuth)
+            .RequireRateLimiting("api-key-admin") // Task AUTHV2-049 — 60/min per API-key scheme (or per-IP for OAuth callers)
             .WithName("ImportBuilderScopes")
             .WithSummary("Import builder scopes from JSON files")
             .WithDescription("Imports all builder scope JSON files from the default builder-scopes directory into Dataverse. Authentication: Azure AD bearer OR X-Api-Key header.")
             .WithTags("Admin")
             .Produces<BuilderScopeImportResult>(StatusCodes.Status200OK)
             .ProducesProblem(401)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(500);
 
         // POST /api/admin/builder-scopes/import-json - Import a single scope from JSON body
         app.MapPost("/api/admin/builder-scopes/import-json", ImportFromJson)
             .RequireAuthorization(AuthPolicies.BuilderAdminOrOAuth)
+            .RequireRateLimiting("api-key-admin") // Task AUTHV2-049 — 60/min per API-key scheme (or per-IP for OAuth callers)
             .WithName("ImportBuilderScopeJson")
             .WithSummary("Import a single builder scope from JSON")
             .WithDescription("Imports a single builder scope definition from the request body into Dataverse. Authentication: Azure AD bearer OR X-Api-Key header.")
@@ -44,6 +50,7 @@ public static class BuilderScopeAdminEndpoints
             .Produces<BuilderScopeImportResult>(StatusCodes.Status200OK)
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(500);
 
         return app;

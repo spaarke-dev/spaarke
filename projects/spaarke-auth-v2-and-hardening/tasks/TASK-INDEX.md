@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 29/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11, Phase C: 6/10 — task 040 deferred; tasks 041+042+049 pending). Plus B-addendum 031 deferred.
-> **Status**: Phase C Wave 1 (043-048) shipped in code. Wave 2 next: 041, 042, 049. Then deploy + OBO smoke check.
+> **Total Tasks**: 32/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11, Phase C: 9/10 — task 040 deferred). Plus B-addendum 031 deferred.
+> **Status**: Phase C CODE COMPLETE (9 tasks shipped in 2 parallel waves). NEXT: deploy to BOTH envs via Deploy-BffApi.ps1 + OBO smoke check + operator pre-deploy actions (Graph permissions + Dataverse Application User).
 > **Last Updated**: 2026-05-19
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
 
@@ -72,15 +72,15 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 | # | Task | Status | Parallel Group | Dependencies |
 |---|------|--------|----------------|--------------|
 | 040 | Rotate AzureAd__ClientSecret + AgentToken__ClientSecret; convert App Service config to Key Vault references; coordinate App Service restart | :no_entry: deferred | No (deploy) | Phase A. **DEFERRED 2026-05-19**: dev env, no external users, no production data — low blast radius. Revisit at prod-readiness planning. Memory: `feedback-question-urgency-for-dev-only-infra-tasks` |
-| 041 | Migrate Graph app-only from ClientSecretCredential to DefaultAzureCredential (managed identity) | :black_square_button: | C-Parallel-1 | (was 040; UNBLOCKED — MI migration doesn't need 040 first) |
-| 042 | Migrate Dataverse service identity from ClientSecretCredential to DefaultAzureCredential (multiple job handlers) | :black_square_button: | C-Parallel-1 | (was 040; UNBLOCKED — MI migration doesn't need 040 first) |
+| 041 | Migrate Graph app-only from ClientSecretCredential to DefaultAzureCredential (managed identity) — default-off opt-in via `Graph__ManagedIdentity__Enabled`; OBO + SpeAdmin per-tenant ops correctly preserved | :white_check_mark: | C-Parallel-1 | (was 040; UNBLOCKED) |
+| 042 | Migrate Dataverse service identity to DefaultAzureCredential — 13 files (base-class fix cascades to 4 derivatives); OBO/user-context paths preserved | :white_check_mark: | C-Parallel-1 | (was 040; UNBLOCKED) |
 | 043 | Remove /debug/* endpoints — 11 routes removed (POML undercount said 7); DebugEndpointExtensions.cs DELETED | :white_check_mark: | C-Parallel-2 | none |
 | 044 | HMAC-SHA256 webhook validation + removed DEVELOPMENT_MODE bypass (Communication + Email webhooks; new WebhookSignatureFilter) | :white_check_mark: | C-Parallel-2 | none |
 | 045 | Named API key auth scheme (BuilderAdmin + Rag); 3 endpoints migrated; constant-time compare | :white_check_mark: | C-Parallel-2 | none |
 | 046 | PostConfigure<JwtBearerOptions> idempotency guard (Interlocked.CompareExchange + fixed stacked-handler bug) | :white_check_mark: | C-Parallel-2 | none |
 | 047 | appsettings.template.json: TenantId → #{TENANT_ID}#; Copilot UUID → #{COPILOT_SSO_PROVIDER_APP_ID}# | :white_check_mark: | C-Parallel-2 | none |
 | 048 | Audit logging middleware (AuditEnrichmentMiddleware; oid+appid+obo+tenantId+correlationId via BeginScope) | :white_check_mark: | C-Parallel-2 | none |
-| 049 | Rate limiting policies on anonymous + API key endpoints | :black_square_button: | C-Parallel-2 | 045 |
+| 049 | Rate limiting policies on anonymous + API key endpoints — 3 new policies (webhook-graph, api-key-admin, api-key-rag); 10 endpoint changes; fixed latent oid-keyed bug on /enqueue-indexing | :white_check_mark: | C-Parallel-2 | 045 |
 
 **Phase gate**: No plain-text secrets in App Service config. No client secrets in code (managed identity for all server outbound). No /debug/* endpoints reachable. Webhook signatures verified. API key scheme is a named registration.
 

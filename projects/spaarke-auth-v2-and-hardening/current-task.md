@@ -5,15 +5,28 @@
 > **Active Phase**: C — task 043 in-progress (FULL rigor sub-agent)
 > **Last Updated**: 2026-05-19 (task 043 dispatch)
 
-## Task 043 — Remove /debug/* endpoints (in-progress)
+## Task 049 — Rate limit anonymous + API key endpoints (in-progress, FULL rigor)
 
-**Rigor**: FULL · **Tags**: auth, server, security
-**Endpoints discovered**: 11 routes across 3 files
-- `Infrastructure/DI/DebugEndpointExtensions.cs` — 9 routes (delete file entirely)
-- `Infrastructure/DI/EndpointMappingExtensions.cs` — `/debug/token` (delete block) + `MapDebugEndpoints()` registration (narrow Edit)
-- `Api/Ai/VisualizationEndpoints.cs` — `/api/ai/visualization/debug/{documentId}` (delete block, already env-gated to Development)
-- `/status` endpoint references debug routes in its response (update string array)
-**Files modified (in-progress)**: DebugEndpointExtensions.cs (DELETE), EndpointMappingExtensions.cs, VisualizationEndpoints.cs
+**Tags**: auth, server, rate-limiting · **Dispatched**: 2026-05-19 (parallel with 041, 042)
+**Scope**: Add explicit rate-limit policies on anonymous + API key endpoints in BFF API.
+
+**Audit results (Step 4)**:
+- Anonymous endpoints: 14 endpoints across 7 files
+  - Already rate-limited: `/api/registration/demo-request` (anonymous)
+  - **Need policy**: `/api/v1/emails/webhook-trigger`, `/api/communications/incoming-webhook` (webhook-graph), `/api/ai/capabilities/refresh` (webhook-shared-secret), `/api/config/client`, `/api/admin/builder-scopes/status` (use `anonymous`), `/healthz/dataverse/doc/{id}` (use `anonymous`), `/status` (use `anonymous`)
+  - Leave alone: `/healthz`, `/ping`, `/office/health`, `/office/save-debug` (Dev-only)
+- API key endpoints: 3 endpoints
+  - `/api/admin/builder-scopes/import*` (2) — use new `api-key-admin` (60/min per scheme)
+  - `/api/ai/rag/enqueue-indexing` — replace `ai-batch` with `api-key-rag` (per-scheme, not per-user; current keying is bogus because API-key callers have no `oid`/`sub`)
+
+**New policies added to RateLimitingModule.cs**:
+- `webhook-graph` — 600 req/min per IP (Graph + Dataverse webhooks may burst)
+- `api-key-admin` — 60 req/min per API-key scheme (admin CLI)
+- `api-key-rag` — 300 req/min per API-key scheme (background indexing)
+
+**Files modified (in-progress)**:
+- Infrastructure/DI/RateLimitingModule.cs (add 3 new policies)
+- 6 endpoint files (apply `.RequireRateLimiting()`)
 
 ## Quick Recovery (Next Session)
 
