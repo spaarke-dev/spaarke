@@ -1,16 +1,16 @@
 # Current Task - Spaarke Auth v2 + Hardening
 
 > **Project**: spaarke-auth-v2-and-hardening
-> **Status**: Phase B started (1/11). Task 020 complete; 021 next.
+> **Status**: Phase B Wave 1 complete (6/11 of Phase B). Wave 2 next.
 > **Active Phase**: B — Consumer migration
-> **Last Updated**: 2026-05-19
+> **Last Updated**: 2026-05-19 (post-Wave-1)
 
 ## Quick Recovery (Next Session)
 
 | Field | Value |
 |-------|-------|
-| **Status** | Task 020 ✅ — AiSessionProvider migrated to function-based API (useAuth internal, no token prop/field). Tests 40/40 in the affected suites. |
-| **Next Action** | `continue` → task 021 (SpaarkeAi App.tsx — stop snapshotting token in useEffect). Single, no parallel group, depends on 020 ✅. |
+| **Status** | Wave 1 complete + validated: ui-components rebuilds clean; SpaarkeAi vite builds 1.9 MB single-file HTML; all 6 PCFs rebuild prod bundles. Tasks 020, 021, 022, 023, 028, 030 ✅. |
+| **Next Action** | `continue` → dispatch Wave 2: tasks 024 + 025 + 026 + 027 + 029 in parallel (all depend on 023's new SprkChat contract). |
 
 ## How to Resume
 
@@ -18,54 +18,55 @@
 continue
 ```
 
-## Phase B progress
+## Phase B progress (6/11)
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 020 | AiSessionProvider context → function-based API | ✅ | Commit pending |
-| 021 | SpaarkeAi App.tsx — stop snapshotting token | 🔲 | Next — depends on 020 |
-| 022 | SpaarkeAi panes (B-Parallel-1, depends 020) | 🔲 | Parallel-safe after 021 |
-| 023 | SprkChat API refactor (B-Parallel-1, depends 020) | 🔲 | Parallel-safe after 021 |
-| 024 | PlaybookBuilder (B-Parallel-2, depends 023) | 🔲 | |
-| 025 | DocRelationshipViewer (B-Parallel-2, depends 023) | 🔲 | |
-| 026 | AnalysisWorkspace (B-Parallel-2, depends 023) | 🔲 | |
-| 027 | SemanticSearch SPA (B-Parallel-2, depends 023) | 🔲 | |
-| 028 | PCF rebuilds (B-Parallel-2, depends Phase A) | 🔲 | |
-| 029 | bffDataServiceAdapter docs (B-Parallel-2, depends 023) | 🔲 | |
-| 030 | Delete duplicate buildBffApiUrl (B-Parallel-2, depends Phase A) | 🔲 | |
+| 020 | AiSessionProvider context → function-based API | ✅ | Commit `6b6106f6` |
+| 021 | SpaarkeAi App.tsx — stop snapshotting token | ✅ | Wave 1 |
+| 022 | SpaarkeAi panes + FeedbackButtons | ✅ | Wave 1; also deleted 4 R1 legacy files (LeftPane, ChatPanel, OutputPanel, SourcePanel) |
+| 023 | SprkChat API refactor + 3 hooks + useSseStream | ✅ | Wave 1; new prop signature: `authenticatedFetch` + `getAccessToken` (replaces `accessToken`) |
+| 028 | Verify + rebuild all PCFs (6 of them, not 3) | ✅ | Wave 1; all already v2-clean; infra fixes: build:prod scripts on 2 PCFs + eslint devDep on UniversalDatasetGrid |
+| 030 | Delete duplicate buildBffApiUrl | ✅ | Wave 1; duplicate was dead code (no PCF actually imported it) |
+| 024 | PlaybookBuilder (depends 023) | 🔲 | Wave 2 |
+| 025 | DocRelationshipViewer (depends 023) | 🔲 | Wave 2 |
+| 026 | AnalysisWorkspace (depends 023) | 🔲 | Wave 2 |
+| 027 | SemanticSearch SPA (depends 023) | 🔲 | Wave 2 |
+| 029 | bffDataServiceAdapter docs (depends 023) | 🔲 | Wave 2 |
 
-## Files modified this task (020)
+## SprkChat new prop signature (from task 023 — Wave 2 consumers must adopt)
 
-- `src/client/shared/Spaarke.AI.Widgets/src/providers/AiSessionProvider.tsx` — interface + provider rewired to useAuth()
-- `src/client/shared/Spaarke.AI.Widgets/src/providers/useAiSession.ts` — JSDoc updated
-- `src/client/shared/Spaarke.AI.Widgets/src/providers/__tests__/AiSessionProvider.test.tsx` — wrappers drop token props; new auth-surface tests
-- `src/client/shared/Spaarke.AI.Widgets/src/__tests__/sse-event-routing.test.tsx` — renamed from .ts (pre-existing JSX parse failure); wrapper drops token props
-- `src/client/shared/Spaarke.AI.Widgets/src/__mocks__/@spaarke/auth.ts` — adds useAuth + AuthenticatedFetchFn stubs
-- `src/client/shared/Spaarke.AI.Widgets/package.json` — ts-node devDep added (needed for jest TS config)
-- `projects/spaarke-auth-v2-and-hardening/tasks/020-migrate-ai-session-provider.poml` — status: completed
-- `projects/spaarke-auth-v2-and-hardening/tasks/TASK-INDEX.md` — 020 ✅, totals updated to 13/49
+```tsx
+import { useAuth } from '@spaarke/auth';
+const { authenticatedFetch, getAccessToken } = useAuth();
 
-## Predicted consumer breakage to fix in 021/022/023
+<SprkChat
+  apiBaseUrl={bffBaseUrl}
+  authenticatedFetch={authenticatedFetch}  // REQUIRED — replaces accessToken
+  getAccessToken={getAccessToken}          // REQUIRED — used by SSE streams
+  // all other props unchanged
+/>
+```
 
-| File | Line | Pattern | Owner task |
-|---|---|---|---|
-| `src/solutions/SpaarkeAi/src/components/ChatHistoryPanel.tsx` | 155 | `{ bffBaseUrl, token, isAuthenticated, ... } = useAiSession()` | 022 |
-| `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` | 411 | `{ bffBaseUrl, token, ... } = useAiSession()` | 022 |
-| `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx` | 284 | `{ bffBaseUrl, token, ... } = useAiSession()` | 022 |
-| `src/client/shared/Spaarke.AI.Widgets/src/components/FeedbackButtons.tsx` | 76 | `token: string \| null` prop — callers will no longer have a token to pass | 022 (or 023 if API refactor cleanups roll it up) |
-| `src/solutions/SpaarkeAi/src/App.tsx` | wherever it passes `token` to AiSessionProvider | now-removed prop | 021 |
+Types now exported from `@spaarke/ui-components`:
+- `AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>`
+- `AccessTokenGetter   = () => Promise<string>`
 
-## Resume Plan for Task 021
+## Wave 1 carryovers (track for later cleanup tasks)
 
-- Read `src/solutions/SpaarkeAi/src/App.tsx`
-- Remove the `token` / `isAuthenticated` useState/useEffect that snapshots the token
-- Drop the `token` and `isAuthenticated` props passed to `<AiSessionProvider>`
-- App.tsx still calls `ensureAuthInitialized()` (from authInit.ts) before rendering — that's the canonical bootstrap, unchanged
-- Update SpaarkeAi-specific tests if any
+1. **DocumentRelationshipViewer/authInit.ts:55** — sets explicit `authority: https://login.microsoftonline.com/${tenantId}`. All other PCFs intentionally omit this per the 2026-05-13 popup-regression fix. Potential silent SSO regression. Owner: task 025 should audit while migrating that PCF, OR a dedicated audit follow-up.
+2. **SpeDocumentViewer** — residual dead `accessToken: string` props in `useCheckoutFlow.ts:55`, `useDocumentPreview.ts:56`, `types.ts:218`, and deprecated `AuthService.ts`. Not in active data flow (host doesn't pass them). Owner: future cleanup, or rolled into task 029.
+3. **ESLint Bearer-literal rule needs path-based allowlist** for the 4 SSE/XHR exception sites that legitimately need raw `Authorization: Bearer ${token}` because the wrapper APIs can't handle XHR or EventSource: `SprkChat.tsx` (handlePlanProceed + handleEditorRefine), `SprkChatUploadZone.tsx` (2 XHR uploads), `useSseStream.ts` (main fetch). Each carries a `// Auth v2 (D-AUTH-7):` justification comment. Owner: the ESLint rule task (task 070 area).
+4. **Pre-existing test infra issue in @spaarke/ui-components** — package has React 16 peer deps but `@testing-library/react@14` requires React 18's `react-dom/client`. Jest tests cannot run there as a result. Confirmed pre-existing (not caused by Wave 1). Owner: infra fix follow-up.
+5. **Pre-existing dead import** `SseStreamStatus` removed from `useAiSummary.ts:12` during Wave 1 integration to unblock ui-components build (single-line scoped fix).
 
 ## 🚨 CRITICAL CARRYOVER — DON'T REPEAT THESE BUGS (still applies)
 
-When a consumer (post-Phase-A) wires `tenantId: getRuntimeTenantId()` into initAuth, MUST use import alias to avoid name collision with locally exported async getTenantId. See memory `feedback_name_collision_in_consumer_authinit` + `project_auth_v2_baseline_msal_bug`.
+When a consumer wires `tenantId: getRuntimeTenantId()` into `initAuth({...})`, MUST use import alias to avoid name collision with locally-exported async `getTenantId`. See memory `feedback_name_collision_in_consumer_authinit` + `project_auth_v2_baseline_msal_bug`. Wave 2 consumers (024-027) — read their `authInit.ts` and grep for the name-collision pattern FIRST.
+
+## Wave 2 dispatch plan (next)
+
+Parallel batch of 5: tasks 024 + 025 + 026 + 027 + 029. All depend on 023's new SprkChat contract (now landed). All touch different Code Pages or shared adapter docs — file-disjoint. Dispatch via Agent sub-agents same as Wave 1.
 
 ## State
 
@@ -73,7 +74,14 @@ When a consumer (post-Phase-A) wires `tenantId: getRuntimeTenantId()` into initA
 - Branch: `work/spaarke-auth-v2-and-hardening`
 - Phase 0: 5/5 ✅
 - Phase A: 7/7 ✅ + 2 hotfix commits (`811e98b5`, `48788c1f`)
-- Phase B: 1/11 ✅ (task 020)
-- Overall: 13/49 tasks (27%)
-- Library version: `@spaarke/auth@2.0.0`
-- AI.Widgets tests delta: +16 passing (252 → 268), +1 suite (7 → 8), -1 failing suite (10 → 9)
+- Phase B: 6/11 ✅ (020 + Wave 1: 021/022/023/028/030)
+- Overall: 18/49 tasks (37%)
+- Library versions: `@spaarke/auth@2.0.0`, `@spaarke/ui-components@2.0.0` (rebuilt this wave)
+- Integration verified: ui-components `npm run build` clean; SpaarkeAi `vite build` succeeds (1.9 MB HTML, 2,718 modules)
+- PCFs verified: all 6 (UniversalDatasetGrid, SpeDocumentViewer, SemanticSearchControl, RelatedDocumentCount, EmailProcessingMonitor, DocumentRelationshipViewer) build prod bundles cleanly against @spaarke/auth v2
+
+## After Wave 2
+
+- Phase B will be 11/11 ✅
+- MSAL regression test → user runs after Wave 1+2 deploy (deferred from per-task to per-wave per project CLAUDE.md risk-tier rule)
+- Then Phase C (server hardening 040-049), Phase D (CSP/CAE/security 060-064), Phase E (CI 070-071), Phase F (docs/ADR-027 090)

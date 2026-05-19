@@ -25,6 +25,7 @@ import {
   CheckmarkCircleRegular,
   ErrorCircleRegular,
 } from '@fluentui/react-icons';
+import type { AccessTokenGetter } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -50,8 +51,15 @@ export interface ISprkChatUploadZoneProps {
   sessionId: string;
   /** Base URL for the BFF API (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net"). */
   apiBaseUrl: string;
-  /** Bearer token for API authentication. */
-  accessToken: string;
+  /**
+   * Fresh-token getter — invoked immediately before each XHR upload so the token
+   * is always fresh. NEVER snapshotted into component state (Auth v2 D-AUTH-7).
+   *
+   * The XHR upload path uses `XMLHttpRequest` (not `fetch`) for upload-progress
+   * events, so `authenticatedFetch` cannot be used here. The token is attached
+   * directly to the XHR `Authorization` header after the getter resolves.
+   */
+  getAccessToken: AccessTokenGetter;
   /** Callback fired when a document upload completes successfully. */
   onUploadComplete?: (document: UploadedDocument) => void;
   /** Callback fired when an upload fails (validation error or network error). */
@@ -258,7 +266,7 @@ type UploadPhase = 'idle' | 'dragging' | 'rejected' | 'uploading' | 'success' | 
  *     <SprkChatUploadZone
  *       sessionId={session.sessionId}
  *       apiBaseUrl={apiBaseUrl}
- *       accessToken={accessToken}
+ *       getAccessToken={getAccessToken}
  *       onUploadComplete={handleUploadComplete}
  *       onUploadError={handleUploadError}
  *     />
@@ -270,7 +278,7 @@ type UploadPhase = 'idle' | 'dragging' | 'rejected' | 'uploading' | 'success' | 
 export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
   sessionId,
   apiBaseUrl,
-  accessToken,
+  getAccessToken,
   onUploadComplete,
   onUploadError,
   disabled = false,
@@ -338,64 +346,79 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
     const formData = new FormData();
     formData.append('file', initialFile);
 
-    const xhr = new XMLHttpRequest();
-    xhrRef.current = xhr;
-
-    xhr.upload.addEventListener('progress', event => {
-      if (event.lengthComputable) {
-        const pct = Math.round((event.loaded / event.total) * 100);
-        setUploadProgress(pct);
-      }
-    });
-
-    xhr.addEventListener('load', () => {
-      xhrRef.current = null;
-      if (xhr.status >= 200 && xhr.status < 300) {
-        setPhase('success');
-        try {
-          const response = JSON.parse(xhr.responseText) as UploadedDocument;
-          onUploadComplete?.(response);
-        } catch {
-          onUploadComplete?.({
-            documentId: '',
-            fileName: initialFile.name,
-            fileType: initialFile.type,
-            status: 'processing',
-          });
-        }
-      } else {
-        let msg = `Upload failed (${xhr.status})`;
-        try {
-          const errorBody = JSON.parse(xhr.responseText);
-          if (errorBody?.detail) msg = errorBody.detail;
-          else if (errorBody?.title) msg = errorBody.title;
-        } catch {
-          // Use default message
-        }
+    // Auth v2 (D-AUTH-7): re-acquire a fresh token immediately before opening
+    // the XHR — NEVER snapshot the token into component state.
+    (async () => {
+      let token: string;
+      try {
+        token = await getAccessToken();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to acquire access token';
         setPhase('error');
         setErrorMessage(msg);
         onUploadError?.(msg);
+        return;
       }
-    });
 
-    xhr.addEventListener('error', () => {
-      xhrRef.current = null;
-      const msg = 'Network error — upload failed. Please check your connection and try again.';
-      setPhase('error');
-      setErrorMessage(msg);
-      onUploadError?.(msg);
-    });
+      const xhr = new XMLHttpRequest();
+      xhrRef.current = xhr;
 
-    xhr.addEventListener('abort', () => {
-      xhrRef.current = null;
-      setPhase('dragging');
-    });
+      xhr.upload.addEventListener('progress', event => {
+        if (event.lengthComputable) {
+          const pct = Math.round((event.loaded / event.total) * 100);
+          setUploadProgress(pct);
+        }
+      });
 
-    const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-    const uploadUrl = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`;
-    xhr.open('POST', uploadUrl);
-    xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
-    xhr.send(formData);
+      xhr.addEventListener('load', () => {
+        xhrRef.current = null;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setPhase('success');
+          try {
+            const response = JSON.parse(xhr.responseText) as UploadedDocument;
+            onUploadComplete?.(response);
+          } catch {
+            onUploadComplete?.({
+              documentId: '',
+              fileName: initialFile.name,
+              fileType: initialFile.type,
+              status: 'processing',
+            });
+          }
+        } else {
+          let msg = `Upload failed (${xhr.status})`;
+          try {
+            const errorBody = JSON.parse(xhr.responseText);
+            if (errorBody?.detail) msg = errorBody.detail;
+            else if (errorBody?.title) msg = errorBody.title;
+          } catch {
+            // Use default message
+          }
+          setPhase('error');
+          setErrorMessage(msg);
+          onUploadError?.(msg);
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        xhrRef.current = null;
+        const msg = 'Network error — upload failed. Please check your connection and try again.';
+        setPhase('error');
+        setErrorMessage(msg);
+        onUploadError?.(msg);
+      });
+
+      xhr.addEventListener('abort', () => {
+        xhrRef.current = null;
+        setPhase('dragging');
+      });
+
+      const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+      const uploadUrl = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`;
+      xhr.open('POST', uploadUrl);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.send(formData);
+    })();
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount only — initialFile is stable from parent state
@@ -487,68 +510,83 @@ export const SprkChatUploadZone: React.FC<ISprkChatUploadZoneProps> = ({
       const formData = new FormData();
       formData.append('file', file);
 
-      const xhr = new XMLHttpRequest();
-      xhrRef.current = xhr;
-
-      // Track upload progress
-      xhr.upload.addEventListener('progress', event => {
-        if (event.lengthComputable) {
-          const pct = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(pct);
-        }
-      });
-
-      xhr.addEventListener('load', () => {
-        xhrRef.current = null;
-        if (xhr.status >= 200 && xhr.status < 300) {
-          setPhase('success');
-          try {
-            const response = JSON.parse(xhr.responseText) as UploadedDocument;
-            onUploadComplete?.(response);
-          } catch {
-            // If response isn't JSON, create a minimal result
-            onUploadComplete?.({
-              documentId: '',
-              fileName: file.name,
-              fileType: file.type,
-              status: 'processing',
-            });
-          }
-        } else {
-          let msg = `Upload failed (${xhr.status})`;
-          try {
-            const errorBody = JSON.parse(xhr.responseText);
-            if (errorBody?.detail) msg = errorBody.detail;
-            else if (errorBody?.title) msg = errorBody.title;
-          } catch {
-            // Use default message
-          }
+      // Auth v2 (D-AUTH-7): re-acquire a fresh token immediately before opening
+      // the XHR — NEVER snapshot the token into component state.
+      (async () => {
+        let token: string;
+        try {
+          token = await getAccessToken();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to acquire access token';
           setPhase('error');
           setErrorMessage(msg);
           onUploadError?.(msg);
+          return;
         }
-      });
 
-      xhr.addEventListener('error', () => {
-        xhrRef.current = null;
-        const msg = 'Network error — upload failed. Please check your connection and try again.';
-        setPhase('error');
-        setErrorMessage(msg);
-        onUploadError?.(msg);
-      });
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
 
-      xhr.addEventListener('abort', () => {
-        xhrRef.current = null;
-        setPhase('dragging');
-      });
+        // Track upload progress
+        xhr.upload.addEventListener('progress', event => {
+          if (event.lengthComputable) {
+            const pct = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(pct);
+          }
+        });
 
-      const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-      const uploadUrl = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`;
-      xhr.open('POST', uploadUrl);
-      xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
-      xhr.send(formData);
+        xhr.addEventListener('load', () => {
+          xhrRef.current = null;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setPhase('success');
+            try {
+              const response = JSON.parse(xhr.responseText) as UploadedDocument;
+              onUploadComplete?.(response);
+            } catch {
+              // If response isn't JSON, create a minimal result
+              onUploadComplete?.({
+                documentId: '',
+                fileName: file.name,
+                fileType: file.type,
+                status: 'processing',
+              });
+            }
+          } else {
+            let msg = `Upload failed (${xhr.status})`;
+            try {
+              const errorBody = JSON.parse(xhr.responseText);
+              if (errorBody?.detail) msg = errorBody.detail;
+              else if (errorBody?.title) msg = errorBody.title;
+            } catch {
+              // Use default message
+            }
+            setPhase('error');
+            setErrorMessage(msg);
+            onUploadError?.(msg);
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          xhrRef.current = null;
+          const msg = 'Network error — upload failed. Please check your connection and try again.';
+          setPhase('error');
+          setErrorMessage(msg);
+          onUploadError?.(msg);
+        });
+
+        xhr.addEventListener('abort', () => {
+          xhrRef.current = null;
+          setPhase('dragging');
+        });
+
+        const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+        const uploadUrl = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`;
+        xhr.open('POST', uploadUrl);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.send(formData);
+      })();
     },
-    [sessionId, apiBaseUrl, accessToken, disabled, onUploadComplete, onUploadError]
+    [sessionId, apiBaseUrl, getAccessToken, disabled, onUploadComplete, onUploadError]
   );
 
   // ── Overlay class based on phase ───────────────────────────────────────────

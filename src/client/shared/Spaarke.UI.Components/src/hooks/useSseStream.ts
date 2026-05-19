@@ -9,12 +9,19 @@
  *
  * URL CONSTRUCTION: Callers MUST pass pre-built URLs from ChatApiClient.buildMessagesUrl()
  * or buildBffApiUrl() — never raw template literals. This hook receives fully-constructed
- * URLs and forwards auth tokens for the streaming fetch call.
+ * URLs and re-acquires a fresh access token for each streaming fetch call.
  *
- * NOTE: authenticatedFetch() cannot be used here because SSE requires streaming the
- * ReadableStream body. Instead, the caller provides the access token and this hook
- * attaches the Authorization header directly (matching the authenticatedFetch pattern
- * for token extraction and X-Tenant-Id header).
+ * Auth v2 (D-AUTH-7): `startStream` accepts an `AccessTokenGetter` (`() => Promise<string>`)
+ * rather than a token string. The getter is invoked ONCE per stream open, immediately
+ * before issuing the fetch — so the token is always fresh for THIS stream. The token
+ * is NEVER snapshotted in React state and NEVER reused across stream opens. This
+ * eliminates the class of bugs where a token was captured at mount time, expired
+ * mid-session, and then attached to an SSE stream that consequently 401'd silently
+ * (EventSource has no auto-401 retry).
+ *
+ * NOTE: `authenticatedFetch` cannot be used here because SSE requires streaming the
+ * ReadableStream body, which the wrapper function does not expose. The hook
+ * replicates the same token-attachment + X-Tenant-Id derivation pattern internally.
  *
  * CONSOLIDATION NOTE (AIPU2-082):
  * Two prior implementations were merged here:
@@ -43,6 +50,7 @@ import type {
   IAiPaneEvent,
   IUseSseStreamResult,
   ICitationSseItem,
+  AccessTokenGetter,
 } from '../components/SprkChat/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,8 +284,10 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
  * Handles cancellation via AbortController.
  *
  * Callers provide the full URL (built via ChatApiClient.buildMessagesUrl() or
- * buildBffApiUrl()) and a valid access token (from getAccessToken() or
- * authenticatedFetch provider).
+ * buildBffApiUrl()) and a `getAccessToken` function (typically the `getAccessToken`
+ * value from `useAuth()`). The function is invoked ONCE per stream open,
+ * immediately before opening the fetch, so the token is always fresh for THIS
+ * stream open (Auth v2 D-AUTH-7).
  *
  * @returns SSE stream state and control functions
  *
@@ -287,7 +297,8 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
  *
  * const handleSend = () => {
  *   const url = client.buildMessagesUrl(session.sessionId);
- *   startStream(url, { message: "Hello" }, accessToken);
+ *   // getAccessToken is re-invoked on every stream open — never snapshot it.
+ *   startStream(url, { message: "Hello" }, getAccessToken);
  * };
  * ```
  */
@@ -356,7 +367,7 @@ export function useSseStream(): IUseSseStreamResult {
   }, []);
 
   const startStream = useCallback(
-    (url: string, body: Record<string, unknown>, token: string) => {
+    (url: string, body: Record<string, unknown>, getAccessToken: AccessTokenGetter) => {
       // Cancel any existing stream
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -379,6 +390,9 @@ export function useSseStream(): IUseSseStreamResult {
 
       const fetchStream = async () => {
         try {
+          // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
+          // Never snapshot the token; never reuse across stream opens.
+          const token = await getAccessToken();
           const tenantId = extractTenantId(token);
 
           const response = await fetch(url, {

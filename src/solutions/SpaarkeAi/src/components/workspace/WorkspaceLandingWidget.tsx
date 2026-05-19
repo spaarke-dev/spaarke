@@ -36,7 +36,7 @@ import {
   HistoryRegular,
   SparkleRegular,
 } from "@fluentui/react-icons";
-import { buildBffApiUrl } from "@spaarke/auth";
+import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 
 // ---------------------------------------------------------------------------
@@ -190,22 +190,24 @@ const useStyles = makeStyles({
 
 function useRecentWork(
   bffBaseUrl: string,
-  token: string | null
+  authenticatedFetch: AuthenticatedFetchFn,
+  isAuthenticated: boolean
 ): { items: RecentWorkItem[]; isLoading: boolean } {
   const [items, setItems] = React.useState<RecentWorkItem[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
 
   React.useEffect(() => {
-    if (!token || !bffBaseUrl) return;
+    if (!isAuthenticated || !bffBaseUrl) return;
     let cancelled = false;
     setIsLoading(true);
 
     const fetchRecent = async (): Promise<void> => {
       try {
+        // authenticatedFetch attaches Bearer header automatically — the token
+        // never crosses a component boundary (Spaarke Auth v2 §H-4).
         const url = buildBffApiUrl(bffBaseUrl, "/ai/chat/sessions?limit=5");
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
           headers: {
-            Authorization: `Bearer ${token}`,
             Accept: "application/json",
           },
         });
@@ -238,7 +240,10 @@ function useRecentWork(
 
     void fetchRecent();
     return () => { cancelled = true; };
-  }, [bffBaseUrl, token]);
+    // authenticatedFetch is a stable module-level function in @spaarke/auth and
+    // does not need to be a dep — including it would re-fire on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bffBaseUrl, isAuthenticated]);
 
   return { items, isLoading };
 }
@@ -281,10 +286,11 @@ function formatEntityType(entityType: string): string {
 
 export function WorkspaceLandingWidget(): React.JSX.Element {
   const styles = useStyles();
-  const { bffBaseUrl, token, setChatSessionId } = useAiSession();
+  // Function-based auth surface per Spaarke Auth v2 §H-4 — no token snapshot.
+  const { bffBaseUrl, authenticatedFetch, isAuthenticated, setChatSessionId } = useAiSession();
   const dispatch = useDispatchPaneEvent();
 
-  const { items, isLoading } = useRecentWork(bffBaseUrl, token);
+  const { items, isLoading } = useRecentWork(bffBaseUrl, authenticatedFetch, isAuthenticated);
 
   const handleResumeWork = React.useCallback(
     (sessionId: string): void => {

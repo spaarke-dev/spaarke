@@ -3,21 +3,27 @@
  *
  * Provider tree (per ADR-021, ADR-022):
  *   FluentProvider (theme detection — resolveCodePageTheme + setupCodePageThemeListener)
- *     └─ AppWithAuth (acquires BFF token via @spaarke/auth)
+ *     └─ AppWithAuth (gates render on auth-ready, no token snapshot)
  *          └─ ThreePaneShell (R2 root shell — PaneEventBus + stage lifecycle + ThreePaneLayout)
  *
- * Auth pattern: no React AuthProvider component — @spaarke/auth is a class-based
- * provider initialized in main.tsx (ensureAuthInitialized). App acquires the token
- * via getAuthProvider().getAccessToken() in a useEffect and passes it to ThreePaneShell.
+ * Auth pattern (Spaarke Auth v2, post-task-021):
+ *   - @spaarke/auth is initialized in main.tsx via ensureAuthInitialized().
+ *   - App.tsx does NOT snapshot the access token. It only verifies the provider
+ *     can mint a token at mount (sets isAuthenticated=true on success) for UI
+ *     gating; downstream BFF calls go through authenticatedFetch / useAuth(),
+ *     which always asks the provider for a fresh token.
+ *   - This eliminates the H-5 snapshot bug (App.tsx:81-105 in pre-v2 code) where
+ *     useEffect captured a token once at mount and never refreshed → 401 after
+ *     ~80min idle.
  *
  * R2 change: AppShell + StandaloneAiProvider replaced by ThreePaneShell.
- * AiSessionProvider (AIPU2-076) will be added inside ThreePaneShell once implemented.
+ * AiSessionProvider (AIPU2-076) lives inside ThreePaneShell.
  *
  * @see ADR-021 - Fluent v9, dark mode required, semantic tokens only
  * @see ADR-022 - React 19 createRoot for Code Pages
  * @see ADR-026 - Single-file Vite build for Dataverse web resource
  * @see ThreePaneShell — R2 shell with PaneEventBus + stage lifecycle
- * @see .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md — auth bootstrap (DEPRECATED — superseded by Spaarke Auth v2 useAuth(); see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
+ * @see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §H-5 — root-cause snapshot bug fixed by this file
  */
 
 import * as React from "react";
@@ -73,31 +79,32 @@ export interface AppProps {
 function AppWithAuth(props: AppProps): React.JSX.Element {
   const styles = useStyles();
 
-  const [token, setToken] = React.useState<string | null>(null);
+  // UI-gating flag only — NOT the token. Downstream BFF calls acquire fresh
+  // tokens per-request via authenticatedFetch / useAuth() (Spaarke Auth v2).
+  // This effect probes the provider once at mount so the shell can render
+  // auth-aware UI; it does NOT store the token string in React state, which
+  // was the root cause of the 401-after-idle bug (audit §H-5).
   const [isAuthenticated, setIsAuthenticated] = React.useState<boolean>(false);
 
-  // Acquire BFF access token after auth is initialized (non-blocking for render).
-  // ThreePaneShell handles partial states (isAuthenticated=false → skips BFF calls).
   React.useEffect(() => {
     let cancelled = false;
 
-    const acquireToken = async (): Promise<void> => {
+    const probeAuth = async (): Promise<void> => {
       try {
         const provider = getAuthProvider();
         const accessToken = await provider.getAccessToken();
         if (!cancelled && accessToken) {
-          setToken(accessToken);
           setIsAuthenticated(true);
         }
       } catch (err) {
         if (!cancelled) {
-          console.warn("[SpaarkeAi] Token acquisition failed:", err);
+          console.warn("[SpaarkeAi] Auth probe failed:", err);
           setIsAuthenticated(false);
         }
       }
     };
 
-    void acquireToken();
+    void probeAuth();
 
     return () => {
       cancelled = true;
@@ -117,7 +124,6 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
       <div className={styles.layoutShell}>
         <ThreePaneShell
           bffBaseUrl={bffBaseUrl}
-          token={token}
           isAuthenticated={isAuthenticated}
           entityLogicalName={props.entityLogicalName}
           entityId={props.entityId}

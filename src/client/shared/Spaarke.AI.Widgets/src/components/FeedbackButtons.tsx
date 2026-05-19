@@ -47,6 +47,7 @@ import {
   ThumbLikeRegular,
 } from '@fluentui/react-icons';
 import { buildBffApiUrl } from '@spaarke/auth';
+import { useAiSession } from '../providers/useAiSession';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,10 +71,6 @@ export interface FeedbackButtonsProps {
    * The BFF uses this to correlate ratings with specific model outputs.
    */
   turnIndex: number;
-  /** BFF API base URL (HOST only). Passed from AiSessionProvider via useAiSession(). */
-  bffBaseUrl: string;
-  /** Bearer access token for BFF API calls. */
-  token: string | null;
   /** Optional playbook ID — forwarded to the BFF for analytics segmentation. */
   playbookId?: string;
   /** Optional capability ID — forwarded to the BFF for analytics segmentation. */
@@ -236,23 +233,25 @@ const useStyles = makeStyles({
  *   <FeedbackButtons
  *     sessionId={chatSessionId}
  *     turnIndex={turnIndex}
- *     bffBaseUrl={bffBaseUrl}
- *     token={token}
  *     playbookId={playbookId}
  *   />
  * )}
+ *
+ * Spaarke Auth v2 §H-4: this component reads `bffBaseUrl` and
+ * `authenticatedFetch` from `useAiSession()` internally — no token / no URL
+ * crosses a component boundary as props. Must be rendered inside an
+ * AiSessionProvider tree.
  */
 export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
   sessionId,
   turnIndex,
-  bffBaseUrl,
-  token,
   playbookId,
   capabilityId,
   onSubmit,
   className,
 }) => {
   const styles = useStyles();
+  const { bffBaseUrl, authenticatedFetch } = useAiSession();
 
   // ── State machine ────────────────────────────────────────────────────────
   const [feedbackState, setFeedbackState] = useState<FeedbackState>('idle');
@@ -308,16 +307,13 @@ export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
         if (playbookId) body.playbookId = playbookId;
         if (capabilityId) body.capabilityId = capabilityId;
 
-        const headers: HeadersInit = {
-          'Content-Type': 'application/json',
-        };
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const response = await fetch(url, {
+        // authenticatedFetch attaches Bearer header internally; no token
+        // ever crosses a component boundary (Spaarke Auth v2 §H-4).
+        const response = await authenticatedFetch(url, {
           method: 'POST',
-          headers,
+          headers: {
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify(body),
         });
 
@@ -345,7 +341,10 @@ export const FeedbackButtons: React.FC<FeedbackButtonsProps> = ({
         isSubmittingRef.current = false;
       }
     },
-    [bffBaseUrl, capabilityId, onSubmit, playbookId, selectedRating, sessionId, token, turnIndex]
+    // authenticatedFetch is a stable module-level reference in @spaarke/auth;
+    // omitting it from deps avoids re-creating the callback every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bffBaseUrl, capabilityId, onSubmit, playbookId, selectedRating, sessionId, turnIndex]
   );
 
   // ── Interaction handlers ─────────────────────────────────────────────────

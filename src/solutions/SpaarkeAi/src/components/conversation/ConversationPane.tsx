@@ -379,10 +379,14 @@ const useStyles = makeStyles({
 export function ConversationPane(): React.JSX.Element {
   const styles = useStyles();
 
-  // ── R2 session state — from AiSessionProvider ──────────────────────────
+  // ── R2 session state — from AiSessionProvider (function-based auth, §H-4) ──
+  //
+  // No `token: string` is destructured. SprkChat receives `authenticatedFetch`
+  // and `getAccessToken` instead — the token never crosses a component boundary.
   const {
-    token,
     isAuthenticated,
+    authenticatedFetch,
+    getAccessToken,
     bffBaseUrl,
     chatSessionId,
     setChatSessionId,
@@ -668,7 +672,9 @@ export function ConversationPane(): React.JSX.Element {
   //
   // Show a loading spinner while auth is resolving. This mirrors R1 ChatPanel.tsx
   // behaviour (spinner with "Initializing AI Chat..." label).
-  if (!isAuthenticated || !token) {
+  // Spaarke Auth v2: gate purely on `isAuthenticated` (sync getter against the
+  // provider's in-memory cache) — never on a snapshotted token string.
+  if (!isAuthenticated) {
     return (
       <div className={styles.root}>
         <div className={styles.loadingContainer}>
@@ -811,14 +817,13 @@ export function ConversationPane(): React.JSX.Element {
           // via its own internal context consumption (R2 updated version).
           <ChatHistoryPanel />
         ) : showWelcomePanel ? (
-          // Chat tab — Welcome state: no session, no entity, no pending message, no playbook
+          // Chat tab — Welcome state: no session, no entity, no pending message, no playbook.
+          // WelcomePanel reads auth surface from useAiSession() internally; no
+          // token/bffBaseUrl props (Spaarke Auth v2 §H-4 — no token snapshots).
           <div className={styles.welcomeWrapper}>
             <WelcomePanel
               onPromptSelected={handlePromptSelected}
               onResumeSession={handleResumeSession}
-              bffBaseUrl={bffBaseUrl}
-              token={token}
-              isAuthenticated={isAuthenticated}
             />
           </div>
         ) : (
@@ -900,10 +905,17 @@ export function ConversationPane(): React.JSX.Element {
             )}
 
             {/* ── SprkChat — fills remaining height below the chip bar ── */}
+            {/*
+              Spaarke Auth v2 §H-4: pass `authenticatedFetch` (for one-shot BFF
+              calls) and `getAccessToken` (escape hatch for SSE ReadableStream)
+              instead of a snapshotted `accessToken: string`. Task 023 owns the
+              SprkChat API change that consumes these props.
+            */}
             <div className={mergeClasses(styles.sprkChatFlex)}>
               <SprkChat
                 apiBaseUrl={bffBaseUrl}
-                accessToken={token}
+                authenticatedFetch={authenticatedFetch}
+                getAccessToken={getAccessToken}
                 sessionId={chatSessionId ?? undefined}
                 playbookId={playbookId}
                 onSessionCreated={handleSessionCreated}

@@ -408,14 +408,18 @@ interface SessionRestoreManagerProps {
  *   6. On 404: shows toast and lets Stage 1 render
  */
 function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerProps): React.JSX.Element {
-  const { bffBaseUrl, token, setChatSessionId, setPlaybookId } = useAiSession();
+  // Spaarke Auth v2 §H-4: function-based auth surface. SessionRestoreManager
+  // uses `authenticatedFetch` from useAiSession() — never a snapshotted token.
+  const { bffBaseUrl, authenticatedFetch, isAuthenticated, setChatSessionId, setPlaybookId } =
+    useAiSession();
   const dispatch = useDispatchPaneEvent();
   const { toActiveChat } = useShellStage();
 
   const { restoreSpec, isRestoring, restoreError, isNotFound } = useSessionRestore(
     sessionId,
     bffBaseUrl,
-    token
+    authenticatedFetch,
+    isAuthenticated
   );
 
   // Toast for restore failure
@@ -519,12 +523,10 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
  * AiSessionProvider (AIPU2-076) will wrap ThreePaneLayout once implemented.
  *
  * @example
- * // From App.tsx:
+ * // From App.tsx (token prop retained for backwards compat until task 021 deletes it):
  * <FluentProvider theme={theme}>
  *   <ThreePaneShell
  *     bffBaseUrl={bffBaseUrl}
- *     token={token}
- *     isAuthenticated={isAuthenticated}
  *     entityLogicalName={entityLogicalName}
  *     entityId={entityId}
  *     matterId={matterId}
@@ -533,7 +535,11 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
  */
 export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   const styles = useStyles();
-  const { bffBaseUrl, token, isAuthenticated, entityLogicalName, entityId, matterId, sessionId } = props;
+  // Spaarke Auth v2 §H-4: `token` and `isAuthenticated` props are no longer
+  // consumed by this shell — auth state is read via useAiSession() (which
+  // wraps useAuth()) inside the panes. The props on ThreePaneShellProps are
+  // retained for now to avoid churning App.tsx; task 021 removes them entirely.
+  const { bffBaseUrl, entityLogicalName, entityId, matterId, sessionId } = props;
 
   // Build the entity context for AiSessionProvider from URL params.
   // R2: entityContext is resolved at the shell level and passed down via
@@ -551,8 +557,6 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
     <PaneEventBusProvider>
       <AiSessionProvider
         bffBaseUrl={bffBaseUrl}
-        token={token}
-        isAuthenticated={isAuthenticated}
         entityContext={entityContext}
       >
         <ShellStageManager>

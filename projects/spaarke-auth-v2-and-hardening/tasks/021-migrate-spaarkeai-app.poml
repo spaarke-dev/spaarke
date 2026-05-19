@@ -3,7 +3,7 @@
     <title>Migrate SpaarkeAi App.tsx — eliminate one-shot useEffect token snapshot</title>
     <phase>B — Consumer migration</phase>
     <tags>auth, code-page, react, spaarkeai, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>020</dependencies>
     <parallel-safe>false</parallel-safe>
@@ -34,4 +34,39 @@
     <criterion>Vite build succeeds.</criterion>
     <criterion>SpaarkeAi loads and renders without console errors.</criterion>
   </acceptance-criteria>
+  <notes date="2026-05-19">
+    Completed by parallel sub-agent in B-wave 1 (021 + 022 + 023 + 028 + 030 in flight). Working tree left dirty for main-session wave commit per caller instructions; no commit from this agent.
+
+    Changes made (single file):
+    - src/solutions/SpaarkeAi/src/App.tsx:
+      - Removed `const [token, setToken] = useState&lt;string | null&gt;(null);` (smoking-gun snapshot, audit §H-5).
+      - Kept `isAuthenticated` state for UI gating only.
+      - Renamed `acquireToken` → `probeAuth` since we no longer store the token — we just verify the provider can mint one at mount.
+      - Removed `setToken(accessToken)` call; kept `setIsAuthenticated(true)` on successful probe.
+      - Removed `token={token}` prop from `&lt;ThreePaneShell&gt;`. `isAuthenticated` still passed.
+      - Updated file header JSDoc: replaced "acquires token via useEffect and passes to ThreePaneShell" with v2 description (gates on auth-ready, no snapshot). Replaced DEPRECATED-spaarke-auth-initialization.md cross-reference with `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` §H-5 (the canonical v2 source).
+
+    Acceptance criteria status:
+    - ✅ App.tsx no longer has token in useState or as a prop on ThreePaneShell.
+    - ✅ isAuthenticated state remains.
+    - ⏳ Vite build succeeds — DEFERRED. Per POML step 4 ("defer to task 022 if ThreePaneShell change is non-trivial, just remove the prop here"), ThreePaneShellProps still has `token: string | null` as a required field. Standalone tsc on SpaarkeAi reports exactly the predicted error: `src/App.tsx(125,10): error TS2741: Property 'token' is missing ... but required in type 'ThreePaneShellProps'`. Task 022 (running concurrently in another agent) removes the `token` field from ThreePaneShellProps and rewires SessionRestoreManager + AiSessionProvider call site. Once 022 lands in the wave commit, vite build will pass cleanly.
+    - ⏳ SpaarkeAi loads/renders without console errors — DEFERRED until wave compiles.
+
+    Predicted breakage now confirmed:
+    - `src/App.tsx(125,10)`: missing `token` prop on ThreePaneShell — owned by task 022 (rewriting ThreePaneShellProps signature + removing token plumbing from SessionRestoreManager + AiSessionProvider call site).
+    - `src/components/ChatHistoryPanel.tsx(155,23)`: `Property 'token' does not exist on type 'AiSessionContextValue'` — pre-existing from task 020 commit 6b6106f6, owned by task 022.
+
+    Wave coordination:
+    - Single file modified: src/solutions/SpaarkeAi/src/App.tsx.
+    - No `.claude/` writes.
+    - No commit from this agent.
+    - No TASK-INDEX.md update from this agent (main session handles after wave validation).
+    - current-task.md updated to reflect task 021 in-progress + parallel wave context.
+
+    Quality gate posture:
+    - Change adheres to project CLAUDE.md MUST-NOT rules (no `token` snapshot, no `token` prop, no `Bearer ${...}` literal, no Bridge/Xrm refs).
+    - Change implements audit §H-5 fix exactly as prescribed (stop snapshotting; provider exposes functions; UI components call them per-request).
+    - No ADR violations (ADR-021 Fluent v9, ADR-022 React 19, ADR-026 single-file Vite all unaffected — no UI/build/theme changes).
+    - No new dependencies or imports.
+  </notes>
 </task>

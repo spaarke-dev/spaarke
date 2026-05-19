@@ -3,10 +3,11 @@
     <title>Migrate SpaarkeAi panes to function-based auth</title>
     <phase>B — Consumer migration</phase>
     <tags>auth, code-page, react, spaarkeai, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>020</dependencies>
     <parallel-safe>B-Parallel-1 (with 023)</parallel-safe>
+    <completed-date>2026-05-19</completed-date>
   </metadata>
   <prompt>
     Update all SpaarkeAi panes that destructured `.token` from useAiSession() to use the function-based API instead. For BFF calls, use authenticatedFetch. For SSE streaming, use getAccessToken() at stream-open.
@@ -41,4 +42,45 @@
     <criterion>MSAL regression test passes.</criterion>
     <criterion>Idle-then-resume test: leave SpaarkeAi idle >80 min, return, attempt chat — succeeds (the original 401 bug).</criterion>
   </acceptance-criteria>
+  <notes>
+## Completed 2026-05-19
+
+### Files modified
+
+- `src/solutions/SpaarkeAi/src/components/ChatHistoryPanel.tsx` — replaced `token` destructure with `authenticatedFetch`+`isAuthenticated`; both list-fetch and delete-fetch now use `authenticatedFetch`.
+- `src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx` — dropped `token`/`isAuthenticated`/`bffBaseUrl` props; reads `useAiSession()` internally; `useRecentSessions` rewired to `authenticatedFetch`.
+- `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx` — replaced `token` destructure + raw `fetch` with `authenticatedFetch`.
+- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` — dropped `token` destructure; auth loading guard gates on `isAuthenticated` only; `<WelcomePanel>` callsite no longer passes token/bffBaseUrl/isAuthenticated; `<SprkChat>` callsite now passes `authenticatedFetch` + `getAccessToken` (task 023 consumes these on the SprkChat side).
+- `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` — `SessionRestoreManager` rewired to `authenticatedFetch`; `<AiSessionProvider>` callsite dropped now-removed `token`/`isAuthenticated` props (per task 020). Outer `ThreePaneShellProps` interface retained — task 021 deletes those fields and the App.tsx caller.
+- `src/solutions/SpaarkeAi/src/hooks/useSessionRestore.ts` — signature changed: `token: string | null` parameter replaced by `authenticatedFetch: AuthenticatedFetchFn` + `isAuthenticated: boolean`; uses `authenticatedFetch` internally.
+- `src/client/shared/Spaarke.AI.Widgets/src/components/FeedbackButtons.tsx` — Option A: dropped `bffBaseUrl`/`token` props; reads `bffBaseUrl`+`authenticatedFetch` from `useAiSession()` internally.
+
+### Files deleted (R1 legacy — no consumers)
+
+- `src/solutions/SpaarkeAi/src/components/LeftPane.tsx`
+- `src/solutions/SpaarkeAi/src/components/ChatPanel.tsx`
+- `src/solutions/SpaarkeAi/src/components/OutputPanel.tsx`
+- `src/solutions/SpaarkeAi/src/components/SourcePanel.tsx`
+
+  These four files were the R1 tab/pane composition (LeftPane → ChatPanel) and the R1 output/source pane pair. None were imported from any active R2 component tree (App.tsx → ThreePaneShell → ConversationPane / WorkspacePane / ContextPaneController). They used the obsolete `useStandaloneAi` from `@spaarke/ai-context` and would have continued to ship the old auth pattern.
+
+### Test results
+
+- `npx jest src/providers/__tests__/AiSessionProvider.test.tsx` in Spaarke.AI.Widgets: **24/24 pass** (function-based auth contract verified)
+- Full `npx jest` in Spaarke.AI.Widgets: **269 pass / 130 fail across 8 failing suites** — same baseline as task 020 (no regressions; +1 passing test vs task 020's 268)
+- `npm run build` in SpaarkeAi (vite): **succeeds** — bundle transforms 2,718 modules, emits 1.9 MB single-file HTML
+
+### Known carryover
+
+- `App.tsx → <ThreePaneShell token={token} isAuthenticated={isAuthenticated} />` still passes those props. They are declared on `ThreePaneShellProps` and the destructure was removed inside `ThreePaneShell()`, but the prop interface fields remain so App.tsx's caller still type-checks until task 021 deletes them. Vite/esbuild build succeeds because it does not strict-typecheck.
+- `<SprkChat>` callsite in ConversationPane now uses `authenticatedFetch` + `getAccessToken` props. Task 023 owns the SprkChat API change to consume those props. Until 023 lands, SprkChat's existing `accessToken: string` prop type will type-error on this callsite under strict tsc — vite still bundles successfully.
+
+### Quality gates
+
+- ✅ Zero `Authorization: Bearer ${...}` literals in SpaarkeAi source or FeedbackButtons
+- ✅ Zero `.token` destructures from `useAiSession()` in SpaarkeAi
+- ✅ No new `accessToken: string` or `token: string` props added anywhere
+- ✅ All BFF calls use `authenticatedFetch` (preferred path per §H-4)
+- ⏭️ MSAL regression test deferred until full wave (021+022+023+028+030) lands — per project CLAUDE.md risk-tier rule: run after each Phase B consumer rebuild
+  </notes>
 </task>

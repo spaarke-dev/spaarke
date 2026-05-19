@@ -54,7 +54,8 @@ import {
   HistoryRegular,
   ArrowRightRegular,
 } from "@fluentui/react-icons";
-import { buildBffApiUrl } from "@spaarke/auth";
+import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
+import { useAiSession } from "@spaarke/ai-widgets";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,12 +90,6 @@ export interface WelcomePanelProps {
   onPromptSelected: (message: string) => void;
   /** Called when the user clicks a recent session card — provides the session ID to resume */
   onResumeSession: (sessionId: string) => void;
-  /** BFF API base URL (for fetching recent sessions) */
-  bffBaseUrl: string;
-  /** Bearer token for BFF API auth (null when not authenticated yet) */
-  token: string | null;
-  /** Whether the user is authenticated */
-  isAuthenticated: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -326,13 +321,14 @@ interface UseRecentSessionsResult {
 
 function useRecentSessions(
   bffBaseUrl: string,
-  token: string | null
+  authenticatedFetch: AuthenticatedFetchFn,
+  isAuthenticated: boolean
 ): UseRecentSessionsResult {
   const [sessions, setSessions] = React.useState<RecentSession[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
 
   React.useEffect(() => {
-    if (!token || !bffBaseUrl) {
+    if (!isAuthenticated || !bffBaseUrl) {
       setSessions([]);
       return;
     }
@@ -342,11 +338,12 @@ function useRecentSessions(
 
     const fetchSessions = async (): Promise<void> => {
       try {
-        // All BFF URL construction MUST use buildBffApiUrl() per auth.md constraint
+        // All BFF URL construction MUST use buildBffApiUrl() per auth.md constraint.
+        // authenticatedFetch attaches Bearer header automatically — the token never
+        // crosses a component boundary (Spaarke Auth v2 §H-4).
         const url = buildBffApiUrl(bffBaseUrl, "/ai/chat/sessions?limit=5");
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
         });
@@ -390,7 +387,10 @@ function useRecentSessions(
     return () => {
       cancelled = true;
     };
-  }, [bffBaseUrl, token]);
+    // authenticatedFetch is a stable module-level function in @spaarke/auth and
+    // does not need to be a dep — including it would re-fire on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bffBaseUrl, isAuthenticated]);
 
   return { sessions, isLoading };
 }
@@ -459,15 +459,17 @@ function formatEntityTypeBadge(entityType: string): string {
 export function WelcomePanel({
   onPromptSelected,
   onResumeSession,
-  bffBaseUrl,
-  token,
-  isAuthenticated,
 }: WelcomePanelProps): React.JSX.Element {
   const styles = useStyles();
 
+  // Auth surface comes from AiSessionProvider via useAiSession() — no token
+  // is ever materialised in props or React state (Spaarke Auth v2 §H-4).
+  const { bffBaseUrl, authenticatedFetch, isAuthenticated } = useAiSession();
+
   const { sessions, isLoading } = useRecentSessions(
     bffBaseUrl,
-    isAuthenticated ? token : null
+    authenticatedFetch,
+    isAuthenticated
   );
 
   return (

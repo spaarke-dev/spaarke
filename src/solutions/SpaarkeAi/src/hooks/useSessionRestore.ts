@@ -11,8 +11,8 @@
  * @see AIPU2-106 — session restore E2E task
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { buildBffApiUrl } from "@spaarke/auth";
+import { useEffect, useRef, useState } from "react";
+import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Restore response types (mirrors BFF SessionRestoreResponse)
@@ -49,13 +49,19 @@ export interface UseSessionRestoreResult {
 /**
  * Fetches session restore state from the BFF.
  *
- * Only fires when sessionId, bffBaseUrl, and token are all present.
+ * Only fires when sessionId + bffBaseUrl are present and auth is ready.
  * The fetch runs exactly once per sessionId (guarded by a ref).
+ *
+ * Spaarke Auth v2 §H-4: receives `authenticatedFetch` (which attaches Bearer
+ * headers internally) instead of a snapshotted token string. The token never
+ * crosses a component boundary, and an idle-then-resume session restore picks
+ * up a freshly-refreshed token automatically without needing a re-render.
  */
 export function useSessionRestore(
   sessionId: string | undefined,
   bffBaseUrl: string,
-  token: string | null
+  authenticatedFetch: AuthenticatedFetchFn,
+  isAuthenticated: boolean
 ): UseSessionRestoreResult {
   const [restoreSpec, setRestoreSpec] = useState<SessionRestoreSpec | null>(null);
   const [isRestoring, setIsRestoring] = useState<boolean>(false);
@@ -66,7 +72,7 @@ export function useSessionRestore(
   const fetchedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!sessionId || !bffBaseUrl || !token) return;
+    if (!sessionId || !bffBaseUrl || !isAuthenticated) return;
     if (fetchedRef.current === sessionId) return;
     fetchedRef.current = sessionId;
 
@@ -80,11 +86,10 @@ export function useSessionRestore(
 
       try {
         const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${sessionId}/restore`);
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
           method: "GET",
           headers: {
             Accept: "application/json",
-            Authorization: `Bearer ${token}`,
           },
         });
 
@@ -141,7 +146,11 @@ export function useSessionRestore(
     return () => {
       cancelled = true;
     };
-  }, [sessionId, bffBaseUrl, token]);
+    // authenticatedFetch is a stable module-level function in @spaarke/auth
+    // (re-emitted by useAuth() on every render but identical reference). Adding
+    // it to deps would re-fire the effect on every render — undesired.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, bffBaseUrl, isAuthenticated]);
 
   return { restoreSpec, isRestoring, restoreError, isNotFound };
 }
