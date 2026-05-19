@@ -3,7 +3,7 @@
 <one-liner of what changed>
 
 ## ADRs referenced
-- [ ] ADR-001: Minimal API + BackgroundService (no Azure Functions)
+- [ ] ADR-001: Minimal API + BackgroundService for BFF (Azure Functions permitted only for out-of-band integration)
 - [ ] ADR-002: Keep Dataverse plugins thin
 - [ ] ADR-003: Lean authorization seams
 - [ ] ADR-004: Async job contract
@@ -20,7 +20,7 @@
 - [ ] Tests added/updated (unit + integration)
 - [ ] Protected endpoints have authorization filters (ADR-008)
 - [ ] No Graph SDK types outside SpeFileStore or Infrastructure/Graph (ADR-007)
-- [ ] No Azure Functions/Durable Functions (ADR-001)
+- [ ] BFF endpoints in Minimal API (no Functions hosting BFF endpoints); no Durable Functions; any Functions used are out-of-band integration only (ADR-001)
 - [ ] Redis-only cross-request caching; no IMemoryCache across requests (ADR-009)
 - [ ] Expensive resources registered as Singleton (ADR-010)
 - [ ] All I/O methods accept CancellationToken

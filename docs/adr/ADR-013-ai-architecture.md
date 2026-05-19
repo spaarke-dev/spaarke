@@ -191,20 +191,28 @@ AI work frequently introduces **temporary shortcuts** (e.g., temporarily disable
 
 **Decision:** Rejected - significant security concerns.
 
-### Alternative 3: Azure Functions for AI
+### Alternative 3: Azure Functions for AI BFF endpoints
 
-**Description:** Use Azure Functions for AI processing.
+**Description:** Host AI BFF endpoints (chat, analysis, RAG search) in Azure Functions instead of `Sprk.Bff.Api`.
 
 **Pros:**
 - Consumption-based scaling
 - Independent deployment
 
 **Cons:**
-- Cold start latency
-- Different deployment model than BFF
-- Inconsistent patterns
+- Cold start latency on user-facing AI requests
+- Duplicates BFF cross-cutting concerns (auth, correlation, ProblemDetails) in a parallel runtime
+- Inconsistent patterns vs. the rest of the BFF
 
-**Decision:** Rejected - prefer unified BFF approach per ADR-001.
+**Decision:** Rejected for AI BFF endpoints — unified BFF approach per ADR-001.
+
+**Note (2026-05-19):** This rejection applies only to BFF endpoints. Azure Functions ARE permitted for **out-of-band AI integration work** that meets the criteria in ADR-001 — examples relevant to the AI subsystem include:
+- Dataverse → AI Search sync (event-driven + scheduled reconciliation)
+- Closure-extraction pipelines triggered by matter-lifecycle events
+- Scheduled re-indexers and embedding refresh jobs
+- Webhook receivers from external AI services
+
+These workloads are genuinely independent of the BFF request pipeline. See ADR-001 for the full criteria.
 
 ---
 

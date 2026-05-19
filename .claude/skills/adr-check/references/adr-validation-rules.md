@@ -5,26 +5,41 @@
 
 ---
 
-## ADR-001: Minimal API + BackgroundService
+## ADR-001: Minimal API + BackgroundService (BFF runtime); Functions permitted for out-of-band integration
 
-**Constraint**: No Azure Functions - use Minimal API + BackgroundService instead.
+**Constraint**: BFF endpoints in Minimal API. BFF-coupled async in BackgroundService + Service Bus. Azure Functions are PERMITTED for out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction). Durable Functions are NOT permitted — use Service Bus + state machine.
 
 ### Check For (Violations)
 
 ```bash
-# Azure Functions packages in .csproj
-grep -r "Microsoft.Azure.WebJobs\|Microsoft.Azure.Functions\|DurableTask" --include="*.csproj"
+# DurableTask is always a violation
+grep -r "Microsoft.Azure.WebJobs.Extensions.DurableTask\|DurableTask\.Core" --include="*.csproj"
 
-# Azure Functions attributes in C#
-grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[QueueTrigger\]\|\[ServiceBusTrigger\]\|\[HttpTrigger\]" --include="*.cs"
+# [HttpTrigger] on BFF endpoints (BFF endpoints belong in Minimal API)
+grep -r "\[HttpTrigger\]" --include="*.cs"
+
+# Azure Functions attributes inside Sprk.Bff.Api (BFF should never host Functions)
+grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[QueueTrigger\]\|\[ServiceBusTrigger\]\|\[HttpTrigger\]" src/server/api/Sprk.Bff.Api/ --include="*.cs"
 ```
+
+### Check For (Acceptable — verify intent)
+
+```bash
+# Azure Functions outside the BFF project (could be legitimate out-of-band integration — review)
+grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[ServiceBusTrigger\]" --include="*.cs" | grep -v "src/server/api/Sprk.Bff.Api/"
+```
+
+For each Function found outside the BFF:
+- ✅ Confirm it's out-of-band integration work (sync, indexer, webhook receiver, extraction pipeline)
+- ✅ Confirm it's Bicep-deployable with the BFF and shares App Insights correlation
+- ❌ Reject if it duplicates BFF auth, correlation, or ProblemDetails infrastructure
+- ❌ Reject if it's hosting endpoints that belong in the BFF
 
 ### Fix
 
-Remove Azure Functions packages. Convert to:
-- **HTTP triggers** → Minimal API endpoints
-- **Queue/Timer triggers** → BackgroundService workers
-- **Durable Functions** → State machine with Service Bus
+- **Functions hosting BFF endpoints** → move to Minimal API endpoints in `Sprk.Bff.Api`
+- **Durable Functions orchestrations** → State machine with Service Bus
+- **Functions duplicating BFF cross-cutting concerns** → consolidate into BFF, share correlation/auth/ProblemDetails infrastructure
 
 ---
 
@@ -479,8 +494,14 @@ For comprehensive check, run all patterns:
 
 Write-Host "=== ADR Quick Check ==="
 
-Write-Host "`n--- ADR-001: Azure Functions ---"
-Get-ChildItem -Recurse -Include *.csproj,*.cs | Select-String -Pattern "Microsoft.Azure.WebJobs|Microsoft.Azure.Functions|\[FunctionName\]" | Select-Object -First 200
+Write-Host "`n--- ADR-001: Functions hosting BFF endpoints (violation) ---"
+Get-ChildItem -Recurse -Path src/server/api/Sprk.Bff.Api -Include *.cs | Select-String -Pattern "\[FunctionName\]|\[HttpTrigger\]|\[ServiceBusTrigger\]" | Select-Object -First 200
+
+Write-Host "`n--- ADR-001: Durable Functions (always violation) ---"
+Get-ChildItem -Recurse -Include *.csproj | Select-String -Pattern "Microsoft.Azure.WebJobs.Extensions.DurableTask|DurableTask.Core" | Select-Object -First 200
+
+Write-Host "`n--- ADR-001: Functions outside BFF (review — likely out-of-band integration, verify) ---"
+Get-ChildItem -Recurse -Include *.cs | Select-String -Pattern "\[FunctionName\]" | Where-Object { $_.Path -notmatch "Sprk\.Bff\.Api" } | Select-Object -First 200
 
 Write-Host "`n--- ADR-007: Graph Leakage (broad scan) ---"
 Get-ChildItem -Recurse -Include *.cs | Select-String -Pattern "using Microsoft.Graph" | Where-Object { $_.Path -notmatch "\\Infrastructure\\" -and $_.Path -notmatch "SpeFileStore" } | Select-Object -First 200

@@ -31,7 +31,7 @@ Extend **Sprk.Bff.Api** with AI endpoints following established patterns. Use Az
 
 - **MUST NOT** create separate AI microservice
 - **MUST NOT** call Azure AI services directly from PCF
-- **MUST NOT** use Azure Functions for AI processing
+- **MUST NOT** host AI BFF endpoints in Azure Functions (Functions are permitted only for out-of-band integration work — see ADR-001)
 - **MUST NOT** expose API keys to clients
 
 ---

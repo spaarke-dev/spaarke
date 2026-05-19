@@ -56,7 +56,7 @@ Quick reference of key constraints:
 
 | ADR | Key Constraint | Check For |
 |-----|----------------|-----------|
-| ADR-001 | No Azure Functions | `Microsoft.Azure.Functions`, `[FunctionName]` |
+| ADR-001 | BFF endpoints in Minimal API (Functions OK for narrow out-of-band integration) | `[FunctionName]` on BFF endpoints; Durable Functions; Functions duplicating BFF auth/correlation |
 | ADR-002 | Thin plugins | `HttpClient` in plugins, >50ms operations |
 | ADR-006 | PCF over webresources | New `.js` files in webresources |
 | ADR-007 | Graph isolation | `Microsoft.Graph` outside Infrastructure |

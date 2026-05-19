@@ -146,7 +146,7 @@ Reference this table for common constraints. The source of truth is:
 
 | ADR | Title | Key Constraint | Violation Pattern |
 |-----|-------|----------------|-------------------|
-| ADR-001 | Minimal API + Workers | No Azure Functions | `[FunctionName]`, `Microsoft.Azure.Functions` |
+| ADR-001 | Minimal API + Workers (BFF runtime) | BFF endpoints in Minimal API; Functions OK only for out-of-band integration; no Durable Functions | `[FunctionName]`/`[HttpTrigger]` inside `Sprk.Bff.Api`; `DurableTask` packages |
 | ADR-002 | Thin Plugins | No HTTP in plugins; <50ms | `HttpClient` in Plugin class |
 | ADR-003 | Authorization Seams | Two seams only: UAC + Storage | Multiple `IAuthorizationXxx` interfaces |
 | ADR-004 | Async Job Contract | Uniform job processing | Ad-hoc `Task.Run` for async work |

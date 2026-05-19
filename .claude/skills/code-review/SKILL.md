@@ -593,7 +593,7 @@ See: .claude/skills/code-review/references/review-checklist.md -> "AI Code Smell
 RUN subset of adr-check skill:
 
 CRITICAL ADRs to always check:
-  - ADR-001: No Azure Functions
+  - ADR-001: BFF endpoints in Minimal API (no Functions hosting BFF endpoints; Functions OK for out-of-band integration)
   - ADR-002: Thin plugins (<50ms, no HTTP)
   - ADR-007: Graph types isolated
   - ADR-008: Endpoint filters for auth
