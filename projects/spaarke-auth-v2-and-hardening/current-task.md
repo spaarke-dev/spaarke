@@ -9,27 +9,26 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 003 - Verify + finalize project CLAUDE.md prohibition section |
-| **Step** | Begin Step 1 of task 003 |
+| **Task** | 004 - Update root CLAUDE.md §15 Pointers to reference AUDIT-FINDINGS-AUTH-SYSTEM.md |
+| **Step** | Begin Step 1 of task 004 |
 | **Status** | not-started |
-| **Next Action** | `work on task 003` |
+| **Next Action** | `work on task 004` |
 
 ## State
 
 - Worktree: `c:\code_files\spaarke-wt-spaarke-auth-v2-and-hardening`
 - Branch: `work/spaarke-auth-v2-and-hardening`
-- Phase 0 progress: 2/5 tasks complete (001 ✅, 002 ✅; 003–005 remaining)
-- Overall: 2/49 tasks complete
+- Phase 0 progress: 3/5 tasks complete (001 ✅, 002 ✅, 003 ✅; 004–005 remaining)
+- Overall: 3/49 tasks complete
 
-## Handoff Notes (from task 002)
+## Handoff Notes (from task 003)
 
-- 7 files got STOP banners (5 partial-canonical + 2 full-deprecation). All 7 banners verified via grep `🛑 STOP`.
-- Banner format from `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 Layer 2` was used verbatim. Per-file canonical exceptions follow the PF-4..PF-10 table.
-- Task 003 next: verify the project CLAUDE.md prohibition section (already present per `projects/spaarke-auth-v2-and-hardening/CLAUDE.md` "🚨 ACTIVE AUTH V2 REFACTOR" section). Task may be mostly a verification + minor edits.
-- Phase 0 tasks 003–005 remain main-session-only (.claude/ paths). No parallelism until Phase A.
+- Task 003 was verification-only — no edits to project CLAUDE.md required.
+- Project CLAUDE.md "🚨 ACTIVE AUTH V2 REFACTOR" section already satisfies all §8.2 Layer 3 (PF-11) requirements plus several extras (stricter than spec).
+- Logged observation: audit doc §8.2 Layer 3 PF-11 row references the old worktree path `projects/spaarke-ai-platform-unification-r2/CLAUDE.md`. Could be reconciled in Phase F (when ADR-027 finalizes the docs), but out of scope for Phase 0.
+- Task 004 next: update root CLAUDE.md §15 Pointers — adds a row pointing at `AUDIT-FINDINGS-AUTH-SYSTEM.md`. Root CLAUDE.md is at worktree root.
 
 ## Key Learnings
 
-- The `---` ... `---` banner sandwich pattern from §8.2 works cleanly with the existing `# Title` content below — no markdown rendering conflicts observed.
-- Box-drawing chars (═) are preserved as UTF-8 by both the Edit tool and git (no encoding warnings).
-- For files that have been renamed (e.g., DEPRECATED-spaarke-auth-initialization.md), each post-rename path needs its own Read before Edit — the harness tracks the renamed file as a distinct entity even if content is unchanged.
+- Verification tasks can resolve to "no change needed" — still commit the metadata to keep TASK-INDEX accurate per-task.
+- Cross-checking spec ↔ actual via a side-by-side matrix in the task notes makes the verification reviewable later.
