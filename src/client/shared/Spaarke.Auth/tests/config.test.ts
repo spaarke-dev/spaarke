@@ -45,6 +45,38 @@ describe('resolveConfig', () => {
     }
   });
 
+  it('builds tenant-specific authority from tenantId', () => {
+    const config = resolveConfig({
+      clientId: 'custom-id',
+      tenantId: 'a221a95e-1234-5678-90ab-cdef01234567',
+    });
+    expect(config.authority).toBe('https://login.microsoftonline.com/a221a95e-1234-5678-90ab-cdef01234567');
+    expect(config.tenantId).toBe('a221a95e-1234-5678-90ab-cdef01234567');
+  });
+
+  it('explicit authority overrides tenantId', () => {
+    const config = resolveConfig({
+      clientId: 'custom-id',
+      authority: 'https://login.microsoftonline.com/explicit-tenant',
+      tenantId: 'ignored-tenant',
+    });
+    expect(config.authority).toBe('https://login.microsoftonline.com/explicit-tenant');
+  });
+
+  it('falls back to /organizations when neither authority nor tenantId provided', () => {
+    const config = resolveConfig({ clientId: 'custom-id' });
+    expect(config.authority).toBe('https://login.microsoftonline.com/organizations');
+    expect(config.tenantId).toBe('');
+  });
+
+  it('ignores whitespace-only tenantId', () => {
+    const config = resolveConfig({
+      clientId: 'custom-id',
+      tenantId: '   ',
+    });
+    expect(config.authority).toBe('https://login.microsoftonline.com/organizations');
+  });
+
   it('prefers user config over window global', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__SPAARKE_MSAL_CLIENT_ID__ = 'from-window';

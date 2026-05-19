@@ -13,7 +13,7 @@
  */
 
 import { initAuth, authenticatedFetch as sharedAuthFetch, getAuthProvider } from "@spaarke/auth";
-import { getBffBaseUrl, getBffOAuthScope, getMsalClientId } from "../config/runtimeConfig";
+import { getBffBaseUrl, getBffOAuthScope, getMsalClientId, getTenantId } from "../config/runtimeConfig";
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -31,6 +31,11 @@ export function ensureAuthInitialized(): Promise<void> {
       try {
         await initAuth({
           clientId: getMsalClientId(),
+          // tenantId from sprk_TenantId env var → library constructs tenant-specific
+          // authority `login.microsoftonline.com/{tenantId}`. Without this the
+          // authority falls back to `/organizations` and ssoSilent can't
+          // disambiguate the session cookie → popup-on-every-startup.
+          tenantId: getTenantId(),
           bffBaseUrl: getBffBaseUrl(),
           bffApiScope: getBffOAuthScope(),
           proactiveRefresh: true,

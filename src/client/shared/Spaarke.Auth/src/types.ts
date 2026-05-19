@@ -2,8 +2,26 @@
 export interface IAuthConfig {
   /** Azure AD client ID. Defaults to window.__SPAARKE_MSAL_CLIENT_ID__ or built-in dev ID. */
   clientId?: string;
-  /** Azure AD authority. Defaults to 'https://login.microsoftonline.com/organizations'. */
+  /**
+   * Azure AD authority URL.
+   *
+   * If both `authority` and `tenantId` are provided, `authority` wins.
+   * If only `tenantId` is provided, authority is built as
+   * `https://login.microsoftonline.com/{tenantId}`.
+   * If neither is provided, falls back to `resolveDefaultAuthority()` which
+   * tries `Xrm.organizationSettings.tenantId` via frame-walk and finally to
+   * `https://login.microsoftonline.com/organizations` (degraded — triggers
+   * popup-on-first-acquire because AAD can't disambiguate which tenant cookie
+   * to use).
+   */
   authority?: string;
+  /**
+   * Azure AD tenant GUID. Preferred over `authority` for consumers who already
+   * have a tenant ID (e.g., from `resolveRuntimeConfig().tenantId`); the
+   * library constructs the authority URL for them. Avoids leaking the
+   * `login.microsoftonline.com/{tenant}` URL convention into every consumer.
+   */
+  tenantId?: string;
   /** Redirect URI for MSAL. Defaults to window.location.origin. */
   redirectUri?: string;
   /** BFF API scope. Defaults to 'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'. */

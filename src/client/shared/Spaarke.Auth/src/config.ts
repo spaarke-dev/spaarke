@@ -72,9 +72,24 @@ export function resolveConfig(userConfig?: IAuthConfig): Required<IAuthConfig> {
     );
   }
 
+  // Authority resolution priority:
+  //   1. userConfig.authority (full URL) — explicit override; always wins
+  //   2. userConfig.tenantId — preferred consumer path; library builds the URL
+  //   3. resolveDefaultAuthority() — Xrm frame-walk; falls back to /organizations
+  //      (degraded — see IAuthConfig.authority docs)
+  let authority: string;
+  if (userConfig?.authority) {
+    authority = userConfig.authority;
+  } else if (userConfig?.tenantId && userConfig.tenantId.trim()) {
+    authority = `https://login.microsoftonline.com/${userConfig.tenantId.trim()}`;
+  } else {
+    authority = resolveDefaultAuthority();
+  }
+
   return {
     clientId,
-    authority: userConfig?.authority ?? resolveDefaultAuthority(),
+    authority,
+    tenantId: userConfig?.tenantId ?? '',
     redirectUri: userConfig?.redirectUri ?? (typeof window !== 'undefined' ? window.location.origin : ''),
     bffApiScope: bffApiScope ?? '',
     bffBaseUrl,

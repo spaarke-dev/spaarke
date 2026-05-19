@@ -20,9 +20,20 @@ const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
  *   1. MSAL's own `getAllAccounts()[0].username` (UPN — authoritative when MSAL
  *      has any cached account)
  *   2. `Xrm.userSettings.userPrincipalName` via frame-walk (UPN per Dataverse SDK)
- *   3. `Xrm.userSettings.userName` (display name — last-resort, expected to fail
- *      AAD match on most tenants; included for compatibility with old hosts where
- *      `userName` happens to equal the UPN)
+ *
+ * If neither source yields a UPN, returns `undefined` — `ssoSilent` will then
+ * try to resolve the user via the Entra session cookie alone. Returning a
+ * non-UPN value (e.g. `userSettings.userName`, which is the display name in
+ * most Dataverse contexts) would trigger AADSTS50058 and force a popup;
+ * `undefined` is strictly better.
+ *
+ * NOTE on the pre-v2 bug: the original code in `MsalSilentStrategy` read
+ * `userSettings.userName` as the hint, which is the display name. The first
+ * v2 implementation (task 011) preserved a display-name fallback "for
+ * compatibility with old hosts where userName happened to equal the UPN" —
+ * but that fallback re-triggered the same AADSTS50058 in Code Page contexts
+ * where `userPrincipalName` is undefined. Fix (task 011 post-mortem): the
+ * fallback is removed entirely.
  */
 function resolveLoginHint(msal: PublicClientApplication | null): string | undefined {
   if (msal) {
@@ -45,8 +56,7 @@ function resolveLoginHint(msal: PublicClientApplication | null): string | undefi
       const settings = xrm?.Utility?.getGlobalContext?.()?.userSettings;
       const upn = settings?.userPrincipalName;
       if (upn && typeof upn === 'string') return upn;
-      const userName = settings?.userName;
-      if (userName && typeof userName === 'string') return userName;
+      // INTENTIONALLY NO fallback to userSettings.userName — see header comment.
     } catch {
       /* cross-origin */
     }
