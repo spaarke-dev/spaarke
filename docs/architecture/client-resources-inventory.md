@@ -7,13 +7,13 @@
 > - **Deployment signal**: live `systemform.formxml` LIKE queries against Dataverse (via MCP `read_query`). Also queried `savedquery.layoutxml` + `customcontroldefaultconfig.controldescriptionxml` — both returned zero PCF bindings, confirming PCFs in this environment are bound only via forms.
 > - Tenant queried: Spaarke Dev environment (484bc857-...) — re-run against other environments if they may differ.
 
-> **🚨 CRITICAL FINDING**: 3 PCFs are **deployed on production forms but their source is missing from the repo** (no `ControlManifest.Input.xml`). See §2.1 for the list and remediation. If those forms need updates, the PCFs cannot be rebuilt without source recovery.
+> **Status of "missing source" PCFs**: confirmed via git history (commit `ded4e037`, 2026-03-15, "remove 10 deprecated PCF controls"). The 3 PCFs still referenced on forms (AnalysisBuilder, EventCalendarFilter, EventAutoAssociate) were **intentionally deleted because they were replaced by HTML Code Pages**. The form bindings are orphaned leftovers from incomplete cleanup, not lost source. See §2.1 — action is to remove the dead bindings from Dataverse forms, NOT to recover source.
 
 ## Summary
 
-| Category | Source-present + form-bound | Source-present + no form binding | Source-MISSING but form-bound (🚨) | Source-missing + no binding |
+| Category | Source-present + form-bound | Source-present + no form binding | Source-deleted (orphaned form binding) | Source-missing + no binding |
 |---|---|---|---|---|
-| **PCF controls** | **5** (verified live) | 9 (deployed but no form binding found — verify usage) | **3** (CRITICAL — recover source or retire) | 7 (safe to remove folder) |
+| **PCF controls** | **5** (verified live) | 9 (deployed but no form binding found — verify usage) | 3 (clean up form bindings; PCFs intentionally retired per commit `ded4e037`) | 7 (safe to remove folder) |
 
 | Category | Active | Archived/Replaced | Total folders |
 |---|---|---|---|
@@ -72,21 +72,26 @@
 > Folder exists under `src/client/pcf/` but **no `ControlManifest.Input.xml` source file**. Build artifacts (`generated/`, `out/`) may remain.
 > Dataverse query results split these into two very different groups: §2.1 are CRITICAL (deployed but unbuildable); §2.2 are safe to remove.
 
-### 2.1 🚨 CRITICAL — DEPLOYED on production forms but source missing
+### 2.1 Orphaned form bindings — PCFs intentionally deleted but Dataverse forms still reference them
 
-> These PCFs are bound to live forms in Dataverse but have NO source in the repo. **They cannot be rebuilt or modified without source recovery.** If a binding breaks (e.g., manifest version mismatch on solution import), there is no fix path without either (a) recovering the source from another location or (b) removing the binding and replacing the PCF with an alternative.
+> **Resolved 2026-05-19 via git history**: commit [`ded4e037`](https://github.com/spaarke-dev/spaarke/commit/ded4e037) ("feat(quality): remove 10 deprecated PCF controls, version bump + rebuild 4 modified controls", 2026-03-15) intentionally deleted these PCFs because they were replaced by HTML Code Pages. The form bindings in Dataverse were not cleaned up at the same time and remain as orphaned `<customControl>` references in form XML.
+>
+> **Action is form-binding cleanup, NOT source recovery.** These PCF source folders should be deleted entirely; the live forms should have the orphaned bindings removed.
 
-| Folder | Last commit | Forms it's bound to (Dataverse) | Likely remediation |
+| Folder | Forms with orphaned binding | Likely Code Page replacement | Cleanup action |
 |---|---|---|---|
-| `pcf/AnalysisBuilder` | 2026-03-15 | **Analysis main form** | (a) recover source from git history / dev machine; (b) remove from form and re-implement as Code Page extension |
-| `pcf/EventAutoAssociate` | 2026-03-15 | **Event quick create form** | (a) recover source; (b) replace with form script or different control |
-| `pcf/EventCalendarFilter` | 2026-03-15 | **Event main form, Event modal form, Event Assign Work main form** (3 forms) | (a) recover source — this is high-value; (b) build replacement before retiring |
+| `pcf/AnalysisBuilder` | Analysis main form (sprk_analysis) | `code-pages/AnalysisWorkspace` (2026-05-16) | Remove `<customControl>` element from Analysis main form XML; replace with default field control or the AnalysisWorkspace Code Page surface |
+| `pcf/EventAutoAssociate` | Event quick create form (sprk_event) | `CreateEventWizard` Code Page (2026-04-03) handles event creation with associations | Remove `<customControl>` from form XML; rely on CreateEventWizard for event creation |
+| `pcf/EventCalendarFilter` | Event main form / Event modal form / Event Assign Work main form (3 forms on sprk_event) | Calendar functionality moved to Code Pages (`CalendarSidePane`, `EventsPage`) | Remove `<customControl>` from all 3 Event forms |
 
-**Immediate action items**:
-1. Search Spaarke developers' local machines for these PCF source folders (someone likely has them)
-2. If found: commit back to repo as the new authoritative source
-3. If not found: scan git history (`git log --all -- src/client/pcf/AnalysisBuilder`) to find the last commit that contained the manifest; cherry-pick if possible
-4. Add a `pre-commit` hook that fails CI if any PCF used in production has no source (long-term prevention)
+**Cleanup procedure**:
+1. In Power Apps maker, open each form listed above
+2. Find the dead control (it likely renders as a blank/error placeholder today since the PCF source has been gone since 2026-03-15)
+3. Remove the customControl override → field reverts to default control
+4. Save + publish the form
+5. Once all bindings are removed, delete the PCF folder from the repo (`git rm -rf src/client/pcf/AnalysisBuilder src/client/pcf/EventAutoAssociate src/client/pcf/EventCalendarFilter`)
+
+**Why this got missed**: commit `ded4e037` deleted source + solution packages, but it didn't remove the bindings from the live forms in Dataverse. The Code Page replacements were deployed separately, and the old form bindings became silent dead weight. Worth adding to the PCF retirement checklist: "Step N: remove all `<customControl>` bindings from production form XML BEFORE deleting source."
 
 ### 2.2 Source missing AND no form binding — safe to clean up
 
@@ -315,13 +320,15 @@ To prevent "source missing but deployed" drift in the future, consider:
 
 > Many items resolved 2026-05-19 via Dataverse query (§12.1). Remaining open items:
 
-### 13.1 🚨 URGENT — source recovery for 3 deployed PCFs (§2.1)
+### 13.1 Orphaned form binding cleanup (§2.1) — not urgent, but tidy
 
-| # | PCF | Action |
+> Resolved 2026-05-19: source was intentionally deleted in commit `ded4e037`; Code Page replacements exist. Action is form-XML cleanup in Dataverse, not source recovery.
+
+| # | PCF | Form cleanup |
 |---|---|---|
-| Q1 | `pcf/AnalysisBuilder` (Analysis main form) | Search dev machines for source; if not found, plan replacement |
-| Q2 | `pcf/EventCalendarFilter` (Event main + modal + Assign Work forms) | High-value — 3 form bindings — prioritize source recovery |
-| Q3 | `pcf/EventAutoAssociate` (Event quick create form) | Search for source; if absent, replace with form script |
+| Q1 | `pcf/AnalysisBuilder` | Remove customControl binding from Analysis main form |
+| Q2 | `pcf/EventCalendarFilter` | Remove customControl bindings from 3 Event forms (Event main, Event modal, Event Assign Work main) |
+| Q3 | `pcf/EventAutoAssociate` | Remove customControl binding from Event quick create form |
 
 ### 13.2 Verify "source present but no form binding" PCFs (§1.2)
 
