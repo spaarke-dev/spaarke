@@ -12,14 +12,14 @@
 |-------|-------|
 | **Task** | none |
 | **Step** | — |
-| **Status** | none |
-| **Next Action** | Run `/task-execute projects/sdap-bff-api-remediation-fix/tasks/001-owner-signoff-resolved-decisions.poml` to begin Phase 0 |
+| **Status** | waiting — sequenced after `spaarke-ai-platform-unification-r2` refinement |
+| **Next Action** | When operator signals r2 refinement testing is complete: run `/task-execute projects/sdap-bff-api-remediation-fix/tasks/001-owner-signoff-resolved-decisions.poml` to begin Phase 0 |
 
 ### Files Modified This Session
 *No tasks have been executed yet — pipeline scaffolding only.*
 
 ### Critical Context
-Project scaffolding (README, plan, CLAUDE.md, ~55 POML tasks) was generated 2026-05-20 by `/project-pipeline`. No phase work has begun. Phase 0 carries 7 open questions (UQ-01…UQ-07) that gate Phase 1 start.
+Project scaffolding (README, plan, CLAUDE.md, 60 POML tasks) was generated 2026-05-20 by `/project-pipeline`. No phase work has begun. **Sequencing**: Owner decided 2026-05-20 to wait for `spaarke-ai-platform-unification-r2` refinement testing to complete before starting Phase 0 (avoids dev-environment contention + Outcome E file conflicts). Phase 0 carries 7 open questions (UQ-01…UQ-07) that gate Phase 1 start.
 
 ---
 

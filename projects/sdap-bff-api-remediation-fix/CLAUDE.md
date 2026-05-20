@@ -160,6 +160,7 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 - **2026-05-20**: Keep AI in BFF (no extraction). Rationale: latency budgets <50ms/<100ms/<500ms; transactional Cosmos coupling; 100% streaming AI per extraction assessment. — Refined ADR-013 + assessment.
 - **2026-05-20**: Outcome E uses small focused facade interfaces (`IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi`) per UQ-07 default. Owner confirms in Phase 0 task 007.
 - **2026-05-20**: Master pulled into work branch at pipeline pre-flight (PF-1 resolution). Build verified passing (0 errors, 17 warnings).
+- **2026-05-20**: **Sequencing decision (owner)** — `spaarke-ai-platform-unification-r2` finishes initial test-feedback refinements FIRST; THEN this BFF remediation project starts Phase 0. Rationale: r2 just deployed and is in active refinement testing on the same dev environment (`spe-api-dev-67e2xz`); r2 touches many Outcome E target files (`Services/Ai/Chat/`, `Api/Ai/ChatEndpoints.cs`, etc.); Phase 3 48h App Insights baseline + Phase 4 24-48h bake windows need a quiet dev environment. Sequential avoids merge conflicts in Outcome E and ensures clean observation windows. Operator signals "r2 refinement complete" before invoking `/task-execute 001`.
 
 ---
 
