@@ -165,7 +165,27 @@ For the full decision tree, see `.claude/skills/task-execute/SKILL.md` Step 0.5.
 
 ---
 
-## 10. Build Commands
+## 10. BFF Hygiene — Binding Governance (READ BEFORE ADDING TO `Sprk.Bff.Api`)
+
+**The BFF is the single backend for every Spaarke client surface.** Past projects (R1, R2, R3, Insights Engine, others) each added features without holistic consideration of overall BFF quality. The 2026-05-19 publish-size jump (65 → 75+ MB) and the 20 inbound CRUD→AI direct dependencies are downstream consequences. This stops here.
+
+When a task adds NEW endpoints, services, DI registrations, packages, or background work to `src/server/api/Sprk.Bff.Api/` (or to `Spaarke.Core` / `Spaarke.Dataverse` consumed by BFF), you MUST:
+
+1. **Load [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md)** before designing the addition. It is the binding pre-merge checklist + decision criteria.
+2. **State the placement decision explicitly** — even if the answer is "in BFF" — in the PR description or design doc. Cite the decision criteria from `bff-extensions.md`.
+3. **Use the `Services/Ai/PublicContracts/` facade** for any CRUD code that needs AI capability. Do NOT inject `IOpenAiClient`, `IPlaybookService`, or other AI-internal types directly into CRUD code (per refined ADR-013, 2026-05-20).
+4. **Verify publish-size impact** before merging if adding NuGet packages. Baseline is ~60 MB compressed per [`.claude/constraints/azure-deployment.md`](.claude/constraints/azure-deployment.md).
+5. **Verify no new HIGH-severity CVE** from `dotnet list package --vulnerable --include-transitive`.
+
+**Project-level imperative**: every project that adds code to the BFF MUST have a `design.md` section titled **Placement Justification** answering the decision criteria for each major component. Projects skipping this section will be flagged in code review.
+
+**Evidence base**: [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) — the 2026-05-20 BFF AI extraction assessment found the codebase structurally AI-dominant (69% of `Services/` LOC) but operationally justified to keep unified. It also surfaced the process debt this section addresses.
+
+This is **not advisory**. It is a binding workflow rule for every BFF-touching task.
+
+---
+
+## 11. Build Commands
 
 | Action | Command |
 |---|---|
@@ -182,7 +202,7 @@ Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm 
 
 ---
 
-## 11. System Entry Points (where to start reading)
+## 12. System Entry Points (where to start reading)
 
 | Subsystem | Start here | Shows |
 |---|---|---|
@@ -195,7 +215,7 @@ Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm 
 | Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | OBO + app-only Graph auth |
 | Background Jobs | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` | Service Bus job processing |
 
-## 12. Context Layer Hierarchy
+## 13. Context Layer Hierarchy
 
 | Layer | Contains | When to load |
 |---|---|---|
@@ -213,7 +233,7 @@ Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm 
 
 ---
 
-## 13. Knowledge Repository for Rapidly-Evolving Topics
+## 14. Knowledge Repository for Rapidly-Evolving Topics
 
 Claude's training data has a knowledge cutoff. For rapidly-evolving Microsoft/AI platform topics where Claude's context may be stale (Azure AI Foundry, Power Platform updates, Dataverse MCP, Office Add-ins SDK, SharePoint Embedded), use the **`researcher` subagent**:
 
@@ -226,13 +246,13 @@ Claude's training data has a knowledge cutoff. For rapidly-evolving Microsoft/AI
 
 ---
 
-## 14. Hooks — Current Guidance
+## 15. Hooks — Current Guidance
 
 Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Quality enforcement runs via (1) skill-level checks (`task-execute`, `adr-check`, `code-review`), (2) CI/CD (`.github/workflows/sdap-ci.yml`), and (3) the `doc-drift-audit` skill at project transitions. Reconsider hooks only for narrow, high-frequency automations that run in <5s with zero false positives.
 
 ---
 
-## 15. Pointers — Where to find everything
+## 16. Pointers — Where to find everything
 
 | Topic | Pointer |
 |---|---|
@@ -241,6 +261,8 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 | ADRs (full history) | [`docs/adr/`](docs/adr/) |
 | Code patterns (25-line pointer files) | [`.claude/patterns/`](.claude/patterns/) |
 | Cross-cutting constraints | [`.claude/constraints/`](.claude/constraints/) |
+| **BFF additions governance (binding)** | [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md) — load before adding to `Sprk.Bff.Api` |
+| **BFF AI extraction assessment (evidence base)** | [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) |
 | Cross-cutting failure modes (anti-patterns + gotchas) | [`.claude/FAILURE-MODES.md`](.claude/FAILURE-MODES.md) |
 | Procedure-surface changelog | [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md) |
 | Architecture (subsystems, design) | [`docs/architecture/`](docs/architecture/) — includes `AI-ARCHITECTURE.md`, `auth-azure-resources.md` |
@@ -260,6 +282,6 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 
 ---
 
-## 16. Footer
+## 17. Footer
 
 **Maintained by** the project owner. To extend this file: follow the rules in `.claude/skills/ai-procedure-maintenance/SKILL.md`. When in doubt about whether content belongs here vs in `docs/`: if it's a binding rule the agent must apply every turn → here; if it's reference/tutorial → `docs/`. Every PR touching this file MUST add an entry to [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md).
