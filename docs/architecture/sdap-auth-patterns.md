@@ -89,7 +89,7 @@ Authorization is enforced at the endpoint level via endpoint filters (ADR-008) �
 | 5 | **OBO for Dataverse authorization** | AI authorization checks — `RetrievePrincipalAccess` does NOT work with OBO tokens; use direct query pattern | OBO (delegated) |
 | 6 | **App-only for email processing** | Webhooks and background jobs — no HttpContext, no user context | App-only |
 | 7 | **MSAL ssoSilent for Code Pages** | React Code Pages embedded as iframe or opened via `navigateTo` — dual strategy: Xrm platform first, MSAL ssoSilent fallback | Delegated |
-| 8 | **Parent-to-Child token bridge** | Parent page shares `window.__SPAARKE_BFF_TOKEN__` with child dialog — eliminates 500-1300ms MSAL init | Token pass-through |
+| 8 | **MSAL localStorage cache sharing (v2)** | Same-origin tabs/iframes share MSAL's `localStorage` cache via browser SOP — eliminates 500-1300ms MSAL init per context. **Replaces the retired `window.__SPAARKE_BFF_TOKEN__` bridge** (Spaarke Auth v2 / ADR-028). | Cache reuse |
 | 9 | **resolveRuntimeConfig + initAuth for wizard code pages** | Standalone dialog code pages under `src/solutions/` — `fetch.bind(window)` returns 401; must use `authenticatedFetch` from `@spaarke/auth` | Delegated |
 
 ---
@@ -164,18 +164,18 @@ AI analysis services **must use OBO** (`DownloadFileAsUserAsync(httpContext, ...
 
 **Critical bug that was fixed**: After OBO exchange, the token must be explicitly set on the HttpClient (`_httpClient.DefaultRequestHeaders.Authorization = Bearer {oboToken}`). Forgetting this causes subsequent requests to use the old service principal token and return 401.
 
-### Pattern 7: `SpaarkeAuthProvider` 6-Strategy Chain (Updated 2026-05-12)
+### Pattern 7: `SpaarkeAuthProvider` Two-Layer Token Acquisition (Spaarke Auth v2 — ADR-028)
 
-Token acquisition for all internal Spaarke surfaces (PCFs + Code Pages) routes through `SpaarkeAuthProvider.getAccessToken()`, which tries six strategies in order. The first non-expired token wins.
+Token acquisition for all internal Spaarke surfaces (PCFs + Code Pages + Office Add-ins) routes through `SpaarkeAuthProvider.getAccessToken()`, which composes a JWT-aware in-memory cache around a pluggable `AuthStrategy`.
 
-| # | Strategy | Returns | When it succeeds |
-|---|---|---|---|
-| 1 | `CacheStrategy` | In-memory (per provider instance) | Same provider already acquired this session |
-| 2 | `SessionStorageStrategy` | `__spaarke_bff_token_cache__` | Same-origin neighbor (another PCF/iframe) stored a token |
-| 3 | `BridgeStrategy` | Parent frame `window.__SPAARKE_BFF_TOKEN__` | We're an iframe and the host set the bridge |
-| 4 | `XrmStrategy` | Xrm.WebApi token | Dataverse-scoped only — **NEVER for BFF API calls** |
-| 5 | `MsalSilentStrategy` | `acquireTokenSilent` then `ssoSilent` | Fresh refresh token + cookie state present |
-| 6 | `MsalPopupStrategy` | Interactive popup | All silent strategies failed. **Firing this is a regression.** |
+| Layer | Component | Behavior |
+|-------|-----------|----------|
+| 1 | `InMemoryCache` wrapper | Validates JWT `exp` with 5-min buffer; returns cached token if fresh, otherwise delegates. |
+| 2 | `AuthStrategy` (pluggable) | `BrowserMsalStrategy` (Dataverse) or `OfficeNaaStrategy` (Office Add-ins). Calls MSAL `acquireTokenSilent` → `ssoSilent` → `acquireTokenPopup` in order. |
+
+Cross-tab/iframe sharing is handled by MSAL's `localStorage` cache (same-origin browser SOP); no separate sharing layer. `BroadcastChannel('spaarke-auth-events')` carries logout/invalidation messages only — never tokens.
+
+> **Pre-v2 historical**: The original 6-strategy cascade (CacheStrategy → SessionStorageStrategy → BridgeStrategy → XrmStrategy → MsalSilentStrategy → MsalPopupStrategy) was deleted in Spaarke Auth v2 (Phase A). `BridgeStrategy` (`window.__SPAARKE_BFF_TOKEN__`) and `SessionStorageStrategy` (`__spaarke_bff_token_cache__`) were retired because MSAL's `localStorage` cache covers their use cases through browser-enforced same-origin policy, without a window-global token transport surface. `XrmStrategy` was retired because Xrm tokens are Dataverse-scoped only and never work for BFF API calls. See [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md) §"What was retired".
 
 **Required MSAL config (binding, 2026-05-12)**:
 - `cacheLocation: 'localStorage'` — must survive tab close so neighbor tabs don't re-prompt

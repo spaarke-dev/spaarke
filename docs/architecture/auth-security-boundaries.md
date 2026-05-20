@@ -99,13 +99,16 @@ SDAP has 7 security trust boundaries: Browser↔Dataverse, Dataverse↔PCF, PCF�
 | **Validation** | Dataverse Application User |
 | **Risk** | App has elevated permissions |
 
-### Boundary 7: Form Page ↔ Code Page Iframe
+### Boundary 7: Form Page ↔ Code Page Iframe (v2 — ADR-028)
 | Aspect | Detail |
 |--------|--------|
 | **Protocol** | Same-origin DOM access |
-| **Authentication** | Parent-to-child token bridge (`window.__SPAARKE_BFF_TOKEN__`) |
-| **Key constraint** | Same-origin policy — child iframe must be on same Dataverse domain as parent |
-| **Token responsibility** | Parent acquires and shares; child validates expiry before use |
+| **Authentication** | MSAL `localStorage` cache shared across same-origin tabs/iframes via the browser's same-origin policy. Child iframe runs its own `BrowserMsalStrategy` which reads from the same MSAL cache the parent populated. |
+| **Key constraint** | Same-origin policy — child iframe must be on same Dataverse domain as parent for MSAL cache to be shared. |
+| **Token responsibility** | Each context acquires its own token through `useAuth()`/`getAuthProvider()`. The InMemoryCache wrapper validates JWT `exp` with 5-min buffer; expired tokens trigger silent MSAL refresh. |
+| **Invalidation** | `BroadcastChannel('spaarke-auth-events')` broadcasts `logout`/`revocation` messages so all listeners in the same browser context clear their caches simultaneously. |
+
+> **Pre-v2 historical**: The retired parent-to-child token bridge (`window.__SPAARKE_BFF_TOKEN__` + `BridgeStrategy`) was a window-global token-transport mechanism that any frame in the window hierarchy could read. It was deleted in Spaarke Auth v2 (Phase A) and replaced with MSAL's own `localStorage` (browser-enforced same-origin) for sharing, plus BroadcastChannel for invalidation events only — never for token transport.
 
 ---
 

@@ -186,21 +186,20 @@ const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.a
 
 ---
 
-## Token Acquisition Strategy (6-Strategy Cascade)
+## Token Acquisition (Spaarke Auth v2 — ADR-028)
 
-`SpaarkeAuthProvider.getAccessToken()` tries these in order (updated 2026-05-12; canonical reference: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md)):
+`SpaarkeAuthProvider.getAccessToken()` uses a simplified two-layer model. Canonical references: [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md), [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
 
-| # | Strategy | Speed | When It Works |
-|---|----------|-------|---------------|
-| 1 | **In-memory cache** | ~0.1ms | Token already acquired this session |
-| 2 | **SessionStorage cache** | ~0.5ms | Same-origin neighbor stored `__spaarke_bff_token_cache__` |
-| 3 | **Bridge token** | ~0.1ms | Parent iframe published `window.__SPAARKE_BFF_TOKEN__` (dialog scenarios) |
-| 4 | **Xrm platform** | ~10-50ms | `Xrm.WebApi` token — **Dataverse-scoped only, NOT for BFF API** |
-| 5 | **MSAL silent** | ~100-200ms | Existing Azure AD session (`acquireTokenSilent` / `ssoSilent`); requires `cacheLocation: 'localStorage'` + `storeAuthStateInCookie: true` + tenant-specific authority |
-| 6 | **MSAL popup** | ~500-1300ms | Interactive login (last resort — firing this is a regression) |
+| Layer | Speed | Behavior |
+|-------|-------|----------|
+| **InMemoryCache wrapper** | ~0.1ms | Validates JWT `exp` with 5-min buffer. Returns cached token if fresh; otherwise delegates to strategy. |
+| **AuthStrategy (pluggable)** | varies | `BrowserMsalStrategy` (Dataverse PCFs + Code Pages) or `OfficeNaaStrategy` (Office Add-ins) |
 
-If all strategies return null, `getAccessToken()` returns empty string `""`.
-`authenticatedFetch()` will then send a request without a valid Bearer token → BFF returns 401.
+`BrowserMsalStrategy.acquire()` tries MSAL `acquireTokenSilent` → `ssoSilent` → `acquireTokenPopup` in order. MSAL's `localStorage` cache handles cross-tab/iframe sharing (same-origin browser SOP). Required MSAL config (INV-1..INV-3): `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific authority via `resolveDefaultAuthority()`.
+
+> **Pre-v2 historical**: The original 6-strategy cascade (CacheStrategy → SessionStorageStrategy → BridgeStrategy → XrmStrategy → MsalSilentStrategy → MsalPopupStrategy) was **deleted in Phase A of Spaarke Auth v2** (commits leading up to `e649f244`). Cross-iframe sharing via `window.__SPAARKE_BFF_TOKEN__` (BridgeStrategy) and `__spaarke_bff_token_cache__` (SessionStorageStrategy) were retired because MSAL's `localStorage` cache covers their use cases with less complexity. `XrmStrategy` was retired because Xrm tokens are Dataverse-scoped only and never work for BFF API calls. See ADR-028 §"What was retired" for the full rationale.
+
+If all silent paths fail, `BrowserMsalStrategy` falls back to `acquireTokenPopup`. Firing the popup in steady state is a regression (likely INV-3 violation — authority `/organizations` or `/common`).
 
 **Diagnostic logging** (enabled in current build):
 ```

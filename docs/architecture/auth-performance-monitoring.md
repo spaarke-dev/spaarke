@@ -38,11 +38,12 @@ Auth flow adds ~200-400ms latency (Azure AD OBO ~150ms, cold token ~100ms). Cach
 | PCF → BFF API Call | ~50ms | ~50ms |
 | BFF → Azure AD OBO | ~150ms | ~0ms (cached) |
 | BFF → Graph API | ~100-500ms | ~100-500ms |
-| Code Page MSAL silent | ~300-800ms (MSAL init + `acquireTokenSilent`/`ssoSilent`) | ~5ms (in-memory cache) |
-| Code Page SessionStorage strategy | ~0.5ms (reads same-origin `__spaarke_bff_token_cache__`) | ~0.5ms |
-| Code Page Bridge strategy | ~0.1ms (reads parent frame's `window.__SPAARKE_BFF_TOKEN__`) | ~0.1ms |
+| Code Page MSAL silent (`BrowserMsalStrategy`) | ~300-800ms (MSAL init + `acquireTokenSilent`/`ssoSilent`) | ~5ms (InMemoryCache wrapper, JWT exp validated) |
+| Cross-tab/iframe sharing (MSAL `localStorage`) | ~5ms (read from MSAL's own cache) | ~5ms |
 | Dataverse OBO exchange | ~200-500ms (Azure AD token exchange) | ~0ms (cached) |
 | **Total Auth Overhead** | ~300-400ms | ~55ms |
+
+> **Pre-v2 historical**: Earlier docs measured `SessionStorageStrategy` (~0.5ms reads of `__spaarke_bff_token_cache__`) and `BridgeStrategy` (~0.1ms reads of `window.__SPAARKE_BFF_TOKEN__`). Both strategies were retired in Spaarke Auth v2 (Phase A) — MSAL's built-in `localStorage` cache provides the same cross-tab/iframe sharing through the browser's same-origin policy without a separate strategy layer. See [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md).
 
 ### Token Caching Impact
 
