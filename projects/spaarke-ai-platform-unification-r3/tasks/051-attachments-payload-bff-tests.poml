@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>BFF unit tests for ChatEndpoints attachments[] payload — CONDITIONAL</title>
+    <phase>Phase E — Backend (conditional on spike 001 outcome)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, testing, unit-test, conditional</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Adds unit tests for new validation paths in ChatEndpoints. Tests-only changes — STANDARD rigor per the task-execute decision tree (test files, no production code changes).</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 050's DTO and validation code existing in `ChatEndpoints.cs`. Must run after 050 build is green.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    ONLY EXECUTE if task 050 executed (i.e., spike 001 concluded the BFF endpoint needed
+    extension). Otherwise mark this task SKIPPED in TASK-INDEX.md.
+
+    Add BFF unit tests for the ChatEndpoints attachments[] payload extended by task 050.
+    Cover the happy paths (1, 3, 5 attachments accepted) and each validation rejection
+    (6th attachment → 400; oversized textContent → 400; disallowed MIME → 400). All tests
+    must pass via `dotnet test` without breaking existing tests.
+  </prompt>
+
+  <role>
+    .NET 8 test developer comfortable with the existing test framework used by
+    Sprk.Bff.Api unit tests (likely xUnit + WebApplicationFactory or direct handler
+    invocation). Familiar with RFC 7807 ProblemDetails assertions and the conventions
+    already established in the project's BFF test suite.
+  </role>
+
+  <goal>
+    A test class targeting `ChatEndpoints.cs` exercises the new attachments validation
+    logic with at minimum five new tests: (a) 1 attachment accepted, (b) 3 attachments
+    accepted, (c) 5 attachments accepted, (d) 6 attachments rejected with 400, (e)
+    oversized textContent rejected with 400, (f) disallowed MIME type rejected with 400.
+    All assertions verify RFC 7807 ProblemDetails shape on the rejection paths. `dotnet test`
+    against the BFF test project passes 100% (new + pre-existing tests).
+  </goal>
+
+  <context>
+    <background>
+      Task 050 extended `ChatEndpoints.cs` to accept `attachments: ChatAttachmentDto[]` with
+      validation rules (max 5; max 10 MB textContent; allow-list MIME). This task locks in
+      those rules with unit tests so regressions are caught at CI time. Per CLAUDE.md §10,
+      every BFF change needs validated coverage — this task supplies that for FR-07 backend.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>tests/ (locate existing ChatEndpoints test class)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">Rejection assertions must verify RFC 7807 problem-details shape (title, status, detail), not bespoke error shapes.</constraint>
+    <constraint source="project">Tests must not depend on a live BFF or external services — use the existing in-memory test host pattern already established in the BFF test project.</constraint>
+    <constraint source="project">CONDITIONAL: if task 050 was SKIPPED, mark this task SKIPPED in TASK-INDEX.md and do not proceed.</constraint>
+    <constraint source="project">Do not modify production code in `Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` from this task — production changes belong to task 050. If a missing edge case surfaces, open a follow-up task rather than editing here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm task 050 status">
+      Read TASK-INDEX.md. If task 050 is SKIPPED, mark this task SKIPPED and stop. If task
+      050 is COMPLETE, proceed.
+    </step>
+    <step order="2" name="Locate existing ChatEndpoints test class">
+      Grep the `tests/` tree for the existing ChatEndpoints test fixture. Identify the
+      test-host setup pattern (likely `WebApplicationFactory&lt;Program&gt;` or a custom test
+      fixture). Read one or two existing tests to match conventions (naming, assertions,
+      assertion library).
+    </step>
+    <step order="3" name="Add happy-path tests (1, 3, 5 attachments accepted)">
+      Add three tests asserting that `POST /api/ai/chat/sessions/{sessionId}/messages` with
+      1, 3, and 5 attachments each returns 2xx (likely 200 OK). Use realistic but minimal
+      payloads (e.g., `text/plain` with short textContent).
+    </step>
+    <step order="4" name="Add 6-attachment rejection test">
+      Add a test asserting that 6 attachments returns 400 ProblemDetails with title or
+      detail mentioning "too many" / "max 5" / equivalent.
+    </step>
+    <step order="5" name="Add oversized-textContent rejection test">
+      Add a test asserting that a single attachment with `TextContent.Length &gt; 10 * 1024 * 1024`
+      returns 400 ProblemDetails. (Use a streaming/generated string to avoid bloating the
+      test file — e.g., `new string('x', 10 * 1024 * 1024 + 1)`.)
+    </step>
+    <step order="6" name="Add disallowed-MIME rejection test">
+      Add a test asserting that an attachment with `ContentType = "image/png"` (or similar
+      outside the allow-list) returns 400 ProblemDetails.
+    </step>
+    <step order="7" name="Run dotnet test">
+      Run `dotnet test` against the BFF test project. Verify all new tests pass AND all
+      pre-existing tests still pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing ChatEndpoints test fixture, ChatEndpoints.cs</tool>
+    <tool name="Grep">Find existing test class, ProblemDetails assertion helpers</tool>
+    <tool name="Edit">Add new test methods to the existing test class</tool>
+    <tool name="Bash">`dotnet test` against the BFF test project</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">Test class file under `tests/` (extended with 5+ new test methods)</output>
+    <output type="report">Task completion report confirming all new tests pass + no pre-existing tests broken</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Task 050 status was verified before proceeding; if SKIPPED, this task is SKIPPED.</criterion>
+    <criterion testable="true">Test class has new methods for: 1-attachment accepted, 3-attachments accepted, 5-attachments accepted.</criterion>
+    <criterion testable="true">Test class has a new method asserting 6 attachments → 400 ProblemDetails.</criterion>
+    <criterion testable="true">Test class has a new method asserting oversized textContent → 400 ProblemDetails.</criterion>
+    <criterion testable="true">Test class has a new method asserting disallowed MIME → 400 ProblemDetails.</criterion>
+    <criterion testable="true">`dotnet test` passes 100% — all new + all pre-existing tests green.</criterion>
+    <criterion testable="true">Rejection-path tests assert RFC 7807 ProblemDetails shape (title/status/detail) per ADR-019.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 051" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md.
+  </execution>
+</task>

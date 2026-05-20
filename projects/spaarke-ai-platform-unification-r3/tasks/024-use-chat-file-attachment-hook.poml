@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Build useChatFileAttachment hook with lazy PDF.js/mammoth extraction (FR-07 hook)</title>
+    <phase>Phase B — Assistant pane</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>025, 026</blocks>
+    <tags>react, frontend, shared-components, file-handling</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates a net-new hook in `@spaarke/ui-components` consumed across the AI assistant. Handles file I/O, lazy bundle loading (NFR-12), MIME validation, and error telemetry (FR-24). High failure-mode surface area. FULL rigor mandatory.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build a new React 19 hook `useChatFileAttachment` inside `@spaarke/ui-components`'s
+    SprkChat module. The hook drives the multi-file attach UX for FR-07: validates count
+    (max 5), size (max 10 MB per file), and MIME type (`text/plain`, `text/markdown`,
+    `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`);
+    extracts text content client-side using lazy-loaded `pdfjs-dist` (PDF) and `mammoth`
+    (DOCX), or raw `File.text()` for txt/md. Returns an `attachments` array
+    (`{filename, contentType, textContent}`) for the outbound chat-message payload (wiring
+    in task 026). Emits error telemetry on extraction failure per FR-24.
+  </prompt>
+
+  <role>
+    Senior React 19 developer with experience in client-side document parsing, lazy bundle
+    loading (dynamic `import()` for tree-shaking + NFR-12 bundle budget), and
+    error-resilient hook design.
+  </role>
+
+  <goal>
+    A net-new file
+    `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts`
+    exporting a `useChatFileAttachment` hook with the API:
+    `{ files: AttachmentChip[]; attachments: ChatAttachment[]; errors: AttachmentError[]; addFiles(fileList: FileList): Promise&lt;void&gt;; removeFile(index: number): void; clearAll(): void }`.
+    `pdfjs-dist` and `mammoth` are dynamic `import()`'d on first `addFiles` call (NFR-12).
+    Unit tests cover each validation rule and each MIME extraction path. PDF max 200 pages
+    or 10 MB whichever smaller (NFR-04). Extraction failures emit
+    `logTelemetryError('Attachment.ExtractionFailure', { mimeType, sizeBytes, errorMessage })`.
+  </goal>
+
+  <context>
+    <background>
+      FR-07 is the multi-file attach feature for the Assistant `+` button. The hook is the
+      contract between (a) the toolbar `+` button (task 025) which calls `addFiles`, (b) the
+      chip strip UI which renders `files[]` and binds `×` to `removeFile`, and (c) the
+      outbound payload wiring (task 026) which consumes `attachments[]`. Lazy-loading
+      `pdfjs-dist` and `mammoth` is non-negotiable for NFR-12 (bundle &lt;250 KB gzip delta vs
+      R2 baseline; both libs absent from the initial chunk). Error telemetry is the only
+      App Insights event allowed in this project per OC-09 / FR-24.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/__tests__/useChatFileAttachment.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Hook lives in `@spaarke/ui-components` (shared lib) — context-agnostic. No SpaarkeAi-specific imports. Re-exported from the SprkChat module barrel.</constraint>
+    <constraint source="ADR-021">Any UI affordances in chip components consumed downstream must use Fluent v9 tokens. This hook itself is logic-only — no styling.</constraint>
+    <constraint source="ADR-022">React 19 hook patterns only. Use `useState` + `useCallback` + dynamic `import()`. No `useMemo` cache for the file list (state-of-truth is `useState`).</constraint>
+    <constraint source="ADR-028">If any backend call is made from the hook (it should NOT — extraction is fully client-side), it MUST use `authenticatedFetch`. Do not snapshot tokens.</constraint>
+    <constraint source="spec">FR-07 limits: max 5 files per message; max 10 MB per file. NFR-04 MIME types: `text/plain`, `text/markdown`, `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`. PDF page cap: 200 pages or 10 MB whichever smaller.</constraint>
+    <constraint source="spec">FR-24 / OC-09: emit `Attachment.ExtractionFailure` (error-only) on per-file extraction failure with MIME type + size. No happy-path events.</constraint>
+    <constraint source="project">Extracted text content is in-memory only — MUST NOT create SPE Document entities (FR-07 boundary per OC-02). Do not call any Dataverse / SPE endpoint from this hook.</constraint>
+    <constraint source="project">NFR-12: `pdfjs-dist` and `mammoth` MUST be lazy-imported (`await import('pdfjs-dist')`) inside `addFiles`, not statically imported at module scope. Bundle analyzer must show both absent from the initial chunk.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Install npm deps">
+      Add `pdfjs-dist` and `mammoth` as dependencies of `@spaarke/ui-components`'s package.json
+      via `npm install --legacy-peer-deps --no-audit --no-fund pdfjs-dist mammoth`. Run a clean
+      build to confirm no peer-dep failures.
+    </step>
+    <step order="2" name="Define hook types">
+      In `useChatFileAttachment.ts`, export types:
+      `interface ChatAttachment { filename: string; contentType: string; textContent: string }`
+      `interface AttachmentChip { id: string; filename: string; sizeBytes: number; mimeType: string; status: 'extracting' | 'ready' | 'error'; error?: string }`
+      `interface AttachmentError { id: string; reason: 'too-many' | 'too-large' | 'unsupported-mime' | 'extraction-failed' | 'pdf-too-many-pages'; message: string }`
+    </step>
+    <step order="3" name="Implement validation gates">
+      In `addFiles(fileList)`: (a) reject if existing chips + new count &gt; 5 (push
+      `too-many` error). (b) Per-file: reject if &gt; 10 MB (`too-large`). (c) Per-file:
+      reject if MIME not in allowlist (`unsupported-mime`). All rejections produce
+      `AttachmentError` entries; accepted files become chips with status `'extracting'`.
+    </step>
+    <step order="4" name="Implement lazy extraction">
+      On first accepted file, lazy-import the appropriate lib:
+      - `text/plain` / `text/markdown` → `await file.text()`
+      - `application/pdf` → `const pdfjsLib = await import('pdfjs-dist'); ...` use `getDocument` + iterate pages (cap 200; if `numPages &gt; 200`, push `pdf-too-many-pages`). Concatenate page text.
+      - `application/vnd.openxmlformats-officedocument.wordprocessingml.document` → `const mammoth = await import('mammoth'); await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })` → `.value`.
+      On exception, push `extraction-failed` error AND call
+      `logTelemetryError('Attachment.ExtractionFailure', { mimeType, sizeBytes, errorMessage: e.message })`.
+    </step>
+    <step order="5" name="Maintain state + derived attachments">
+      `files` state: array of chips. `attachments` derived: chips with `status === 'ready'`
+      mapped to `{ filename, contentType, textContent }`. `removeFile(index)` splices both.
+      `clearAll()` empties both (used by task 026 after successful send).
+    </step>
+    <step order="6" name="Write unit tests">
+      In `__tests__/useChatFileAttachment.test.ts`, test:
+      - 6th file rejected with `too-many` error
+      - 11 MB file rejected with `too-large` error
+      - `application/octet-stream` rejected with `unsupported-mime` error
+      - PDF with 201 pages rejected with `pdf-too-many-pages` error
+      - `text/plain` extraction returns raw text
+      - `application/pdf` extraction calls pdfjs-dist (mock the dynamic import)
+      - `application/vnd.openxmlformats-officedocument.wordprocessingml.document` extraction calls mammoth (mock the dynamic import)
+      - Extraction exception emits `logTelemetryError` event (mock the helper)
+      - `removeFile(0)` removes the first chip and its corresponding attachment
+      - `clearAll()` empties state
+    </step>
+    <step order="7" name="Bundle-budget sanity check">
+      Run `npm run build:prod` on SpaarkeAi (consumer). Verify that the initial chunk does
+      NOT include `pdfjs-dist` or `mammoth` (check the bundle output filenames + sizes).
+      The libs should be in separate lazy chunks named to reflect the dynamic import.
+      Record findings in `notes/perf/024-bundle-lazy.md`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create `useChatFileAttachment.ts` + test file</tool>
+    <tool name="Bash">Run `npm install --legacy-peer-deps`, `npm test`, `npm run build:prod`</tool>
+    <tool name="Read">Reference existing hooks in `@spaarke/ui-components` for pattern parity</tool>
+    <tool name="Grep">Find an existing telemetry helper export (task 013) to model the call</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/__tests__/useChatFileAttachment.test.ts</output>
+    <output type="config">src/client/shared/Spaarke.UI.Components/package.json (dependency additions for pdfjs-dist + mammoth)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r3/notes/perf/024-bundle-lazy.md</output>
+    <output type="report">Task completion report citing unit-test results + bundle-lazy verification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`useChatFileAttachment.ts` exists and exports the hook with the documented API (`files`, `attachments`, `errors`, `addFiles`, `removeFile`, `clearAll`).</criterion>
+    <criterion testable="true">`pdfjs-dist` and `mammoth` are imported via `await import(...)` inside `addFiles` — NOT at module top-level. Verified by reading the source and by bundle-analyzer output.</criterion>
+    <criterion testable="true">Validation: 6th file rejected; &gt;10 MB rejected; unsupported MIME rejected; PDF &gt;200 pages rejected. Each rejection produces an `AttachmentError` entry.</criterion>
+    <criterion testable="true">Extraction success cases (txt, md, pdf, docx) all return non-empty `textContent` in the corresponding chip's derived `attachments` entry.</criterion>
+    <criterion testable="true">Extraction failure emits `logTelemetryError('Attachment.ExtractionFailure', { mimeType, sizeBytes, errorMessage })` exactly once per failure.</criterion>
+    <criterion testable="true">All 10+ unit tests pass via `npm test`.</criterion>
+    <criterion testable="true">Bundle analysis confirms `pdfjs-dist` and `mammoth` are in lazy chunks, absent from the initial SpaarkeAi bundle (recorded in `notes/perf/024-bundle-lazy.md`).</criterion>
+    <criterion testable="true">No `accessToken` props or state introduced; no backend calls made by the hook.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="add up to 5 files (FR-07)">
+      In a host consuming this hook (e.g., a Storybook story or task-025 integration), drag
+      5 valid files in. Verify 5 chips appear with `status === 'ready'` after extraction.
+    </test>
+    <test name="6th file rejection">
+      Add 5 files, then add a 6th. Verify the 6th is rejected with a UI-visible "Maximum 5
+      files per message" message; no chip added for it.
+    </test>
+    <test name="corrupted PDF triggers telemetry (FR-24)">
+      Add a corrupted PDF file. Verify (a) chip shows `status === 'error'` with red indicator,
+      (b) App Insights receives `Attachment.ExtractionFailure` event with mimeType
+      `application/pdf` and the underlying error message.
+    </test>
+    <test name="dark-mode compliance for chip strip (NFR-06, ADR-021)">
+      Wherever this hook is consumed and a chip strip is rendered (task 025), the chips use
+      Fluent v9 tokens for background/border. Toggle dark mode and verify no hex literal
+      leaks. (Smoke for the hook layer is logic-only; UI verification lives at task 025.)
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 024" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

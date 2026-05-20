@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Auth audit — verify FR-23 / NFR-08 / ADR-028 compliance across all new code</title>
+    <phase>Phase F — Integration &amp; Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020, 021, 022, 023, 024, 025, 026, 030, 031, 032, 033, 034, 035, 040, 041, 042, 043, 044, 045</dependencies>
+    <blocks>070</blocks>
+    <tags>auth, code-review, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit producing a report. STANDARD rigor per task-execute decision tree — no production code changes unless violations are found (which open follow-up tasks). The audit itself is a verification gate, not a code implementation.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only audit. Can run in parallel with other Phase F audits (061, 062, 063) — they touch independent verification surfaces.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Audit every file authored or modified by Phases B / C / D / E (tasks 020–045 and 050–051
+    where applicable) for compliance with FR-23, NFR-08, and ADR-028 INV-1..INV-8. Three
+    checks: (a) zero `accessToken` props or state snapshots anywhere in new code; (b) every
+    BFF fetch uses `authenticatedFetch` from `@spaarke/auth` — no direct `fetch(` calls
+    against BFF URLs; (c) the function-based auth contract is honored — no references to
+    retired patterns (`tokenBridge.ts`, `BridgeStrategy`). Produce a verification memo. If
+    violations exist, open remediation tasks BEFORE Phase G begins.
+  </prompt>
+
+  <role>
+    Senior code reviewer specialized in Spaarke Auth v2 invariants (ADR-028 INV-1..INV-8).
+    Comfortable with `git diff master..HEAD` enumeration, ripgrep audit patterns, and the
+    authenticatedFetch / useAuth() function-based contract. Bias toward zero tolerance on
+    token-snapshot anti-patterns.
+  </role>
+
+  <goal>
+    A verification memo at
+    `projects/spaarke-ai-platform-unification-r3/notes/audit-auth-2026-XX-XX.md` lists every
+    new file in Phase B/C/D/E, the audit result per file (PASS / FAIL with line numbers),
+    and a roll-up status (CLEAN / VIOLATIONS-FOUND). If VIOLATIONS-FOUND, follow-up
+    remediation tasks are opened before Phase G is permitted to start. If CLEAN, the memo
+    explicitly states "no violations; Phase G unblocked."
+  </goal>
+
+  <context>
+    <background>
+      ADR-028 (Spaarke Auth v2) defines a function-based auth contract: `authenticatedFetch`
+      and per-request `getAccessToken()` are the ONLY sanctioned BFF call paths. Token props
+      and state snapshots are explicitly prohibited (INV-3, INV-4). Retired patterns
+      `tokenBridge.ts` and `BridgeStrategy` are removed. This project added many React
+      components across Phases B/C/D and possibly a BFF endpoint extension in Phase E;
+      every one of them must follow the contract. This audit is the project-level gate
+      before deployment.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/ (all Phase B/C/D files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/ (Phase A)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (Phase E, if executed)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">INV-3: no token props. INV-4: no state snapshots. INV-1..INV-2: per-request `getAccessToken()` via `authenticatedFetch`. INV-5..INV-8: no static auth state.</constraint>
+    <constraint source="spec">FR-23 — function-based auth contract across all new code. NFR-08 — zero token-snapshot patterns.</constraint>
+    <constraint source="project">This is a READ-ONLY audit. Do not edit production code in this task. If violations are found, open follow-up tasks and BLOCK Phase G until remediated.</constraint>
+    <constraint source="project">Audit memo location: `projects/spaarke-ai-platform-unification-r3/notes/audit-auth-2026-XX-XX.md` (date in filename = today, YYYY-MM-DD).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Enumerate all new/modified files">
+      Run `git diff --name-only master..HEAD` to enumerate every file added or modified on
+      the project worktree branch. Filter to source files under `src/` — exclude `projects/`,
+      `docs/`, `.claude/`, `notes/`.
+    </step>
+    <step order="2" name="Grep for accessToken props/state">
+      Across the enumerated files, grep for: `accessToken` (case-sensitive), `access_token`,
+      `Authorization\s*:\s*['\"]Bearer`, `useState.*[Tt]oken`. Capture any hit with file +
+      line number.
+    </step>
+    <step order="3" name="Grep for direct fetch() calls bypassing authenticatedFetch">
+      Across the enumerated files, grep for `\bfetch\(` (excluding within `authenticatedFetch`
+      implementation files in `@spaarke/auth` itself). Inspect each hit: if the target URL
+      points at a BFF endpoint and `authenticatedFetch` is NOT in scope, flag as violation.
+    </step>
+    <step order="4" name="Grep for retired patterns">
+      Across the enumerated files, grep for `tokenBridge`, `BridgeStrategy`, `TokenBridge`.
+      Any hit is a violation (these patterns are retired per ADR-028).
+    </step>
+    <step order="5" name="Write audit memo">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/audit-auth-{today}.md` with:
+      <list>
+        <item>Header: date, scope (Phases B/C/D/E), auditor (claude-code task 060)</item>
+        <item>Files audited: full list from step 1</item>
+        <item>Findings: per check (accessToken / direct fetch / retired patterns) with file + line + verdict</item>
+        <item>Roll-up: CLEAN or VIOLATIONS-FOUND</item>
+        <item>If VIOLATIONS-FOUND: list of follow-up remediation task IDs to open</item>
+        <item>Gate decision: "Phase G unblocked" or "Phase G BLOCKED pending remediation tasks NNN"</item>
+      </list>
+    </step>
+    <step order="6" name="Open remediation tasks if needed">
+      If violations are found, draft remediation task POMLs (one per violation cluster) and
+      add them to TASK-INDEX.md. Phase G (tasks 070+) cannot begin until remediation tasks
+      are COMPLETE.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">`git diff --name-only master..HEAD`</tool>
+    <tool name="Grep">Audit for accessToken, direct fetch, retired patterns</tool>
+    <tool name="Read">Inspect ambiguous matches in their file context</tool>
+    <tool name="Write">Audit memo</tool>
+    <tool name="Edit">TASK-INDEX.md (if opening remediation tasks)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/audit-auth-{today}.md</output>
+    <output type="report">Task completion report with CLEAN or VIOLATIONS-FOUND verdict + Phase G gate status</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit memo exists at `projects/spaarke-ai-platform-unification-r3/notes/audit-auth-{today}.md` and is dated.</criterion>
+    <criterion testable="true">Memo lists every file modified across Phases B/C/D/E (verified against `git diff --name-only master..HEAD`).</criterion>
+    <criterion testable="true">Memo records the three audit checks (accessToken, direct fetch, retired patterns) per file with verdict.</criterion>
+    <criterion testable="true">Memo issues a single CLEAN or VIOLATIONS-FOUND roll-up verdict.</criterion>
+    <criterion testable="true">If VIOLATIONS-FOUND: remediation tasks exist in TASK-INDEX.md and Phase G is documented as BLOCKED until they complete.</criterion>
+    <criterion testable="true">If CLEAN: memo explicitly states "Phase G unblocked" — this is the gate that authorizes deployment task 070.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+  </execution>
+</task>

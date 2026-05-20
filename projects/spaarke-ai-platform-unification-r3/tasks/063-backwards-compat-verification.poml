@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Backwards compatibility + NFR-09 persistence verification (FR-25, NFR-10, NFR-09)</title>
+    <phase>Phase F — Integration &amp; Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030, 031, 032, 033, 034, 035</dependencies>
+    <blocks>070</blocks>
+    <tags>frontend, refactoring, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only verification + manual smoke testing of existing user layouts and tab persistence. STANDARD rigor — no production code changes unless gaps surface, in which case follow-up tasks are opened.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only verification using deployed/dev environment. Parallel with other Phase F audits (060, 061, 062).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Verify three backwards-compatibility / persistence guarantees: (a) FR-25 + NFR-10 —
+    standalone LegalWorkspace code page continues to function identically (9 layout templates
+    visible in wizard, existing user layouts render unchanged); (b) FR-11 / OC-04 — the
+    LegalWorkspace embedded as the Workspace pane Home tab in SpaarkeAi reuses primitives
+    and preserves user layouts; (c) NFR-09 — open 3 non-Home tabs in SpaarkeAi, refresh the
+    page, verify all 3 tabs (and the active selection) are restored. If NFR-09 fails (UQ-03
+    gap surfaces), open a follow-up SessionPersistenceService extension task BEFORE Phase G
+    is permitted to start.
+  </prompt>
+
+  <role>
+    Frontend QA reviewer comfortable manually exercising deployed Code Pages, with knowledge
+    of WorkspaceShell / useWorkspaceLayouts primitives, the SessionPersistenceService
+    write-through Cosmos pattern (D-06 from R2), and the data-refreshed restore policy
+    (D-08).
+  </role>
+
+  <goal>
+    A verification memo at
+    `projects/spaarke-ai-platform-unification-r3/notes/backwards-compat-verification.md`
+    documents the three checks with PASS / FAIL per check, screenshots or text evidence
+    where applicable, and a roll-up verdict. PASS unblocks Phase G; any FAIL opens a
+    follow-up task and BLOCKS Phase G until remediated.
+  </goal>
+
+  <context>
+    <background>
+      FR-25 + NFR-10 require the standalone LegalWorkspace code page to remain unchanged
+      after R3 ships. Task 030 embeds LegalWorkspace into SpaarkeAi's Workspace pane via
+      `WorkspaceShell`, and there's a risk the embedding pulls or modifies shared primitives
+      in a way that breaks the standalone experience. FR-19 + 033 introduce a `templateFilter`
+      prop so SpaarkeAi sees only 6 templates while standalone still sees 9.
+
+      NFR-09 governs tab persistence across page refresh — the R2 SessionPersistenceService
+      (D-06 write-through Cosmos) handles top-level state but may not extend to per-tab
+      Workspace state. The R3 design assumes it does; this verification confirms or surfaces
+      the UQ-03 gap. If the gap exists, a follow-up task to extend SessionPersistenceService
+      must precede Phase G.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/ (standalone)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/components/LayoutWizard/ (template list logic)</file>
+      <file>R2 SessionPersistenceService source for tab-state surface area</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-25 — standalone LegalWorkspace MUST continue to function identically. NFR-10 — no regression in standalone experience.</constraint>
+    <constraint source="spec">FR-11 / OC-04 — Workspace pane in SpaarkeAi embeds LegalWorkspace by reusing primitives, not by reimplementation.</constraint>
+    <constraint source="spec">NFR-09 — open tabs (non-Home) and active selection must persist across page refresh, p95 restore latency &lt;500 ms (D-08 R2 invariant inherited).</constraint>
+    <constraint source="project">This is a READ-ONLY verification. Do not modify production code. If NFR-09 fails, open a SessionPersistenceService extension follow-up task and BLOCK Phase G.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Test standalone LegalWorkspace — Layout Wizard 9 templates">
+      Open the standalone LegalWorkspace code page in the deployed environment. Launch the
+      Layout Wizard. Verify EXACTLY 9 templates are listed (the full set; SpaarkeAi shows
+      only 6 via `templateFilter`). Capture screenshot or list of template names.
+    </step>
+    <step order="2" name="Test standalone LegalWorkspace — existing user layouts render unchanged">
+      Open at least 3 existing user-saved layouts in standalone LegalWorkspace. Verify field
+      placements, section dividers, widget positions are identical to the pre-change baseline.
+      (If a pre-change reference is unavailable, document current rendering as the new
+      baseline and note it.)
+    </step>
+    <step order="3" name="Test SpaarkeAi Workspace pane — embedded LegalWorkspace + 6 templates">
+      Open SpaarkeAi. Navigate to the Workspace pane Home tab. Verify it shows the embedded
+      LegalWorkspace experience (renders the same widgets as standalone). Launch its Layout
+      Wizard. Verify EXACTLY 6 templates are listed (filtered subset per FR-19 / task 033).
+    </step>
+    <step order="4" name="Test NFR-09 — tab persistence across refresh">
+      In SpaarkeAi: open 3 non-Home tabs in the Workspace pane (e.g., 3 different widgets via
+      Open menu). Select tab #2 as active. Refresh the page (F5 / browser reload). Verify all
+      3 tabs (Home + 3 opened tabs = 4 total) are restored AND tab #2 is the active selection.
+      Repeat 3 times to verify reproducibility. Measure restore latency informally (visual
+      &quot;less than 500 ms&quot;).
+    </step>
+    <step order="5" name="If NFR-09 fails — open follow-up task">
+      If any tab is lost on refresh, or the active selection is not restored, this is a UQ-03
+      gap. Draft a follow-up POML task (e.g., `065-extend-sessionpersistence-tab-state.poml`)
+      to extend SessionPersistenceService to write-through tab state. Add it to TASK-INDEX.md
+      as a Phase F blocker for Phase G.
+    </step>
+    <step order="6" name="Write verification memo">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/backwards-compat-verification.md`
+      with PASS/FAIL per check, evidence (screenshots or descriptions), gap analysis if any,
+      and the Phase G gate status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">SessionPersistenceService source if NFR-09 gap surfaces</tool>
+    <tool name="Bash">Browser open commands if needed</tool>
+    <tool name="Write">Verification memo, follow-up task POML if needed</tool>
+    <tool name="Edit">TASK-INDEX.md if opening follow-up task</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/backwards-compat-verification.md</output>
+    <output type="docs">Follow-up POML task file (if NFR-09 gap surfaces)</output>
+    <output type="report">Task completion report with PASS/FAIL per check + Phase G gate status</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Verification memo exists at `projects/spaarke-ai-platform-unification-r3/notes/backwards-compat-verification.md`.</criterion>
+    <criterion testable="true">Standalone LegalWorkspace wizard shows EXACTLY 9 templates (full set) — documented with evidence.</criterion>
+    <criterion testable="true">At least 3 existing user layouts render identically in standalone LegalWorkspace (no field shifts, no broken sections).</criterion>
+    <criterion testable="true">SpaarkeAi Workspace pane Home tab shows the embedded LegalWorkspace and its wizard shows EXACTLY 6 templates (filtered).</criterion>
+    <criterion testable="true">In SpaarkeAi: opening 3 non-Home tabs + page refresh restores all 3 tabs AND the active selection (NFR-09 PASS), OR a follow-up SessionPersistenceService extension task is opened and Phase G is BLOCKED.</criterion>
+    <criterion testable="true">Memo issues a final gate verdict — Phase G unblocked OR Phase G BLOCKED pending task NNN.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+  </execution>
+</task>

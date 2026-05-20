@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Add error-only telemetry helper module for SpaarkeAi</title>
+    <phase>Phase A — Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>027, 035, 023</blocks>
+    <tags>frontend, telemetry</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates a small new helper file that wires to existing App Insights — no architectural changes, no new modules, no boundary-spanning code. STANDARD rigor sufficient: tests required, but full code-review + adr-check gate is not needed for a thin wrapper.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a small error-only telemetry helper module in SpaarkeAi that wraps the existing
+    App Insights channel. The helper exposes a single typed function
+    `logTelemetryError(eventName: string, properties: Record&lt;string, unknown&gt;)` used
+    by three FR-24 error-emission sites: Daily Briefing 429 responses, file-extraction
+    failures, and HistoryOverlay session-list load failures. No happy-path events are in
+    scope for this project.
+  </prompt>
+
+  <role>
+    Frontend developer comfortable with App Insights instrumentation and small typed
+    helper modules. Bias toward a tiny API surface, a no-op fallback if AppInsights is
+    absent, and a colocated unit test.
+  </role>
+
+  <goal>
+    A new file `src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts` exporting
+    `logTelemetryError(eventName, properties)` that emits to the existing App Insights
+    instance and no-ops if AppInsights is unavailable. The 3 error event names
+    FR-24 will emit are documented at the top of the file as exported constants.
+    Unit tests cover: properties pass-through, event-name prefixing, no-op fallback.
+  </goal>
+
+  <context>
+    <background>
+      FR-24 + OC-09 constrain telemetry to error-only events. Rather than scatter
+      `appInsights.trackEvent(...)` calls across 3 distant call sites with different
+      shapes, this task centralizes the boundary into one helper that downstream tasks
+      (027 Daily Briefing 429, 035 file-extraction failures, 023 HistoryOverlay load
+      failure) consume. The helper is intentionally tiny — there is no plan to add
+      happy-path events to it later in this project.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/</file>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/telemetry/ (to be created if absent)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Error-only scope per FR-24 / OC-09. Do NOT add happy-path tracking helpers in this module. If a future project wants happy-path events, that's a separate change.</constraint>
+    <constraint source="ADR-028">If the helper ever needs to call a BFF endpoint (it currently does not), it MUST use `authenticatedFetch` from `@spaarke/auth`. Today this helper writes only to the local App Insights channel.</constraint>
+    <constraint source="ADR-012">If this helper later proves useful to other solutions (LegalWorkspace, WorkspaceLayoutWizard), it should be lifted to a shared package. For now it stays SpaarkeAi-local because the 3 call sites all live in SpaarkeAi.</constraint>
+    <constraint source="project">The helper MUST no-op safely if the App Insights instance is undefined (e.g., in unit tests, in dev environments without instrumentation key). It must not throw.</constraint>
+    <constraint source="project">Event names emitted by this helper MUST share a consistent prefix (e.g., `spaarke-ai-error.*`) so they can be filtered in App Insights queries.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate existing App Insights setup">
+      Search SpaarkeAi for the existing App Insights instance. Likely locations:
+      `src/solutions/SpaarkeAi/src/telemetry/appInsights.ts`, `src/solutions/SpaarkeAi/src/main.tsx`,
+      or a module under `src/client/shared/`. Confirm the export shape (likely an
+      `ApplicationInsights` instance from `@microsoft/applicationinsights-web`) and how
+      consumers currently call `trackEvent`. If no instance exists, document this and
+      proceed with a safe no-op fallback as the default behavior.
+    </step>
+    <step order="2" name="Create the telemetry folder if absent">
+      Create `src/solutions/SpaarkeAi/src/telemetry/` if it doesn't already exist as a
+      sibling to existing top-level SpaarkeAi folders.
+    </step>
+    <step order="3" name="Implement errorTelemetry.ts">
+      Write `src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts` containing:
+      (a) Three exported event-name constants for the 3 FR-24 call sites, e.g.
+          `export const TELEMETRY_DAILY_BRIEFING_429 = 'spaarke-ai-error.daily-briefing.rate-limited';`
+          `export const TELEMETRY_FILE_EXTRACTION_FAILURE = 'spaarke-ai-error.chat.file-extraction-failure';`
+          `export const TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE = 'spaarke-ai-error.history-overlay.load-failure';`
+      (b) `export function logTelemetryError(eventName: string, properties: Record&lt;string, unknown&gt;): void`
+          that resolves the App Insights instance, calls `trackEvent({ name: eventName }, properties)`,
+          and silently returns if the instance is unavailable. Properties pass through
+          unchanged (no PII scrubbing in this task — that's downstream policy).
+      (c) The function MUST be safe to call from anywhere in SpaarkeAi without setup.
+    </step>
+    <step order="4" name="Add unit test">
+      Create a colocated unit test (`errorTelemetry.test.ts`) covering:
+      (a) When AppInsights is available, calling `logTelemetryError(name, props)` invokes
+          `trackEvent` with the same name and properties (mock the instance).
+      (b) When AppInsights is undefined / not initialized, the helper returns silently
+          without throwing.
+      (c) All three exported event-name constants have the `spaarke-ai-error.` prefix.
+    </step>
+    <step order="5" name="Document the 3 emission sites">
+      Add a JSDoc block at the top of `errorTelemetry.ts` listing the 3 downstream tasks
+      that will consume each event constant: Daily Briefing 429 (task 027 / FR-16 / NFR-11),
+      file-extraction failure (task 035 inside FR-07 wiring), HistoryOverlay session-list
+      load failure (task 023 / FR-03). This makes the FR-24 contract auditable.
+    </step>
+    <step order="6" name="Build and verify">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` if needed, then
+      `npm run build` for SpaarkeAi. Run the test suite. Confirm clean build + green test.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Find existing App Insights setup</tool>
+    <tool name="Grep">Search SpaarkeAi for existing telemetry usage and import paths</tool>
+    <tool name="Write">Create errorTelemetry.ts and its test</tool>
+    <tool name="Bash">npm build + test in SpaarkeAi</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts</output>
+    <output type="test">src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`logTelemetryError(eventName, properties)` is exported from `src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts`.</criterion>
+    <criterion testable="true">When the App Insights instance is available, properties pass through to `trackEvent` unchanged and the event name matches the input.</criterion>
+    <criterion testable="true">When the App Insights instance is undefined, the helper returns silently without throwing.</criterion>
+    <criterion testable="true">Three event-name constants are exported, all prefixed with `spaarke-ai-error.`, one for each FR-24 emission site.</criterion>
+    <criterion testable="true">No happy-path tracking helpers are exported from this module (error-only per OC-09).</criterion>
+    <criterion testable="true">`npm run build` of SpaarkeAi succeeds and the colocated unit test passes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor applies — quality gate (code-review + adr-check at Step 9.5) is skipped, but
+    knowledge-file loading, current-task tracking, and proactive checkpointing remain mandatory.
+  </execution>
+</task>

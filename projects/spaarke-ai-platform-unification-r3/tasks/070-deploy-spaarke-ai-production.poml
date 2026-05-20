@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Deploy SpaarkeAi production bundle + smoke-verify deployment</title>
+    <phase>Phase G — Deploy + Smoke</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>060, 061, 062, 063</dependencies>
+    <blocks>071, 072, 073, 074</blocks>
+    <tags>deploy, dataverse, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production deployment — modifies the deployed environment. Per task-execute decision tree, deployment-related tasks run at FULL rigor with the deployment skill orchestrating safety checks. Touches `dataverse-deploy` / `code-page-deploy` skill boundaries.</rigor-reason>
+    <parallel-group>G-deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single deployment event — must complete before smoke tests can run.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the SpaarkeAi production bundle to the target Dataverse environment using
+    `scripts/Build-ViteSolutionsDirect.ps1` (for build) + `scripts/Deploy-SpaarkeAi.ps1`
+    (for solution import). Verify the deployment with `scripts/Test-Deployment.ps1`. Record
+    deployment result, environment, commit SHA, and timestamp in
+    `projects/spaarke-ai-platform-unification-r3/notes/deploys/{date}-deploy.md`. This task
+    is the gate for Phase G smoke testing — no smoke test runs until this task PASSES.
+  </prompt>
+
+  <role>
+    Spaarke deployment operator comfortable with the canonical Code Page deploy scripts
+    (`scripts/Build-ViteSolutionsDirect.ps1`, `scripts/Deploy-SpaarkeAi.ps1`,
+    `scripts/Test-Deployment.ps1`) and the `code-page-deploy` skill. Familiar with Power
+    Apps environment selection and PAC CLI authentication.
+  </role>
+
+  <goal>
+    SpaarkeAi is built (production mode) and deployed to the target Dataverse environment.
+    `scripts/Test-Deployment.ps1` reports the deployment as healthy. A deploy memo records
+    environment name, target URL, commit SHA, build artifact hash (if available), and
+    timestamp. Smoke tasks 071-074 can now run against the deployed surface.
+  </goal>
+
+  <context>
+    <background>
+      All Phase F verification gates have passed (auth audit CLEAN, bundle size PASS,
+      dark-mode audit CLEAN, backwards-compat PASS). This task ships the validated build to
+      the target environment so the Phase G smoke battery (071-074) can verify it. The
+      project uses Code Page deployment (NOT PCF) — `code-page-deploy` skill, not
+      `pcf-deploy`.
+    </background>
+    <relevant-files>
+      <file>scripts/Build-ViteSolutionsDirect.ps1</file>
+      <file>scripts/Deploy-SpaarkeAi.ps1</file>
+      <file>scripts/Test-Deployment.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All Phase F audits (060, 061, 062, 063) MUST be COMPLETE with PASS/CLEAN verdicts before this task runs. Verify by reading each verification memo before invoking deployment.</constraint>
+    <constraint source="project">Use the canonical scripts (`Build-ViteSolutionsDirect.ps1`, `Deploy-SpaarkeAi.ps1`, `Test-Deployment.ps1`). Do not invent ad-hoc deploy invocations.</constraint>
+    <constraint source="ADR-026">SpaarkeAi is a full-page Code Page (NOT PCF). Use `code-page-deploy` skill semantics, not `pcf-deploy`.</constraint>
+    <constraint source="ADR-028">No auth code or token paths are exercised by deployment scripts themselves; deployment auth uses PAC CLI / service-principal flow per environment standard.</constraint>
+    <constraint source="project">Capture deployment evidence in `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md` — date in filename, environment + commit SHA + timestamp + verification output in body.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify Phase F gates">
+      Read each Phase F verification memo
+      (`notes/audit-auth-{date}.md`, `notes/bundle-size-verification.md`,
+      `notes/dark-mode-audit.md`, `notes/backwards-compat-verification.md`). Confirm each
+      issues a CLEAN / PASS verdict and explicitly unblocks Phase G. If any is missing or
+      FAIL, STOP and report — do not deploy.
+    </step>
+    <step order="2" name="Confirm target environment + capture commit SHA">
+      Read the project README + recent decisions to identify the target environment. Run
+      `git rev-parse HEAD` and record the deployment commit SHA.
+    </step>
+    <step order="3" name="Build production bundle">
+      Run `scripts/Build-ViteSolutionsDirect.ps1` for SpaarkeAi. Verify build succeeds with
+      zero errors. Capture build output summary.
+    </step>
+    <step order="4" name="Deploy to target environment">
+      Run `scripts/Deploy-SpaarkeAi.ps1` against the target environment. Confirm the
+      deployment-confirmation prompt; capture all output (success/failure, solution name,
+      version).
+    </step>
+    <step order="5" name="Run Test-Deployment.ps1">
+      Run `scripts/Test-Deployment.ps1` against the target environment. Verify it reports
+      healthy. Capture output.
+    </step>
+    <step order="6" name="Record deploy memo">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md`
+      with: environment, target URL, commit SHA, build output summary, deploy output, test
+      output, timestamp. Mark this task COMPLETE only after the memo exists.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Phase F verification memos</tool>
+    <tool name="Bash">PowerShell to run `scripts/Build-ViteSolutionsDirect.ps1`, `scripts/Deploy-SpaarkeAi.ps1`, `scripts/Test-Deployment.ps1`, `git rev-parse HEAD`</tool>
+    <tool name="Write">Deploy memo</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md</output>
+    <output type="report">Task completion report confirming deployment success + Test-Deployment.ps1 healthy result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All four Phase F verification memos (060, 061, 062, 063) were read and confirmed PASS/CLEAN before this task began.</criterion>
+    <criterion testable="true">`scripts/Build-ViteSolutionsDirect.ps1` succeeded for SpaarkeAi with zero errors.</criterion>
+    <criterion testable="true">`scripts/Deploy-SpaarkeAi.ps1` ran against the target environment and reported success.</criterion>
+    <criterion testable="true">`scripts/Test-Deployment.ps1` reports the deployment as healthy.</criterion>
+    <criterion testable="true">Deploy memo at `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md` records environment, commit SHA, timestamp, and tool output.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The deployment itself is orchestrated via the `code-page-deploy` skill — task-execute
+    invokes it at the appropriate step. Do not bypass either skill.
+  </execution>
+</task>

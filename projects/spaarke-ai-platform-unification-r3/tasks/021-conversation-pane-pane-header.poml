@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Migrate ConversationPane to shared PaneHeader (FR-02)</title>
+    <phase>Phase B — Assistant pane</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>022</blocks>
+    <tags>react, frontend, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a load-bearing .tsx file (ConversationPane) shared across the Assistant pane; replaces tab UI with consumption of new shared PaneHeader (ADR-012 load-bearing). FR-mapping with dark-mode + auth invariants requires FULL protocol.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Replace the existing `Chat | History` tab buttons inside `ConversationPane.tsx` with the
+    shared `<PaneHeader title="Assistant" icon={ChatRegular}>` primitive from
+    `@spaarke/ui-components` (Phase A task 010). The pane header's right-slot is reserved
+    for the History overlay trigger button — wired in task 022. This task does NOT build
+    the overlay; it only swaps the header and removes the tab-related state/handlers.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer experienced refactoring three-pane shell
+    surfaces, comfortable removing local UI state cleanly without breaking the
+    PaneEventBus subscriber graph.
+  </role>
+
+  <goal>
+    `ConversationPane.tsx` no longer renders any `Chat | History` tab buttons. At the top of
+    the pane, `<PaneHeader title="Assistant" icon={ChatRegular}>` is rendered with its icon
+    in `tokens.colorBrandForeground1`. The `rightSlot` prop is reserved for the History
+    button (added in task 022 — leave a clearly labelled comment placeholder). All tab-state
+    related local React state, handlers, and unused imports are removed.
+  </goal>
+
+  <context>
+    <background>
+      FR-02 replaces a custom two-tab control (Chat / History) with the unified `<PaneHeader>`
+      primitive established in Phase A (task 010). The History tab itself becomes a side-overlay
+      (OC-01, Claude-Code style) wired in task 022. This sequencing keeps the PaneHeader
+      adoption simple here; task 022 then plugs in the HistoryRegular button + overlay into
+      the rightSlot. Visual style must match ContextPaneController's existing header (canonical
+      reference per plan §2 Discovered Resources).
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">PaneHeader is consumed from `@spaarke/ui-components` — do NOT duplicate the component locally. Import via the package path, not a relative file path.</constraint>
+    <constraint source="ADR-021">Icon color must use `tokens.colorBrandForeground1`. No hex literals, no `rgba(...)` literals, no Fluent v8.</constraint>
+    <constraint source="ADR-022">React 19 only. No React 16 fallbacks. Do not add `useEffect` dependency array workarounds for removed state.</constraint>
+    <constraint source="ADR-025">ChatRegular icon comes from `@fluentui/react-icons` (Fluent v9). No new SVG web resources.</constraint>
+    <constraint source="ADR-028">No `accessToken` props or state introduced. Any BFF calls in the pane continue to use `authenticatedFetch`. Do not snapshot tokens.</constraint>
+    <constraint source="spec">PaneHeader visual style MUST match ContextPaneController's existing header (canonical reference); icon color = brand foreground 1; "Assistant" title uses Fluent v9 typography.</constraint>
+    <constraint source="project">This task touches ONLY `ConversationPane.tsx`. Task 022 separately edits the same file to wire rightSlot — coordinate the rightSlot placeholder so 022 lands cleanly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ConversationPane.tsx">
+      Open `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`. Locate
+      (a) the `Chat | History` tab button JSX, (b) the local React state controlling active tab,
+      (c) handlers that switch tabs, (d) the existing import block. Make a mental map of what
+      to delete vs. retain.
+    </step>
+    <step order="2" name="Add PaneHeader + ChatRegular imports">
+      Import `PaneHeader` from `@spaarke/ui-components` (the export added by task 010) and
+      `ChatRegular` from `@fluentui/react-icons`. Use the package path, not a relative import.
+    </step>
+    <step order="3" name="Remove tab buttons + related state">
+      Delete the `Chat | History` tab button JSX block. Delete the React state and handlers
+      that tracked the active tab. Remove now-orphaned imports.
+    </step>
+    <step order="4" name="Insert PaneHeader at the top of the pane">
+      At the top of the pane content, render `<PaneHeader title="Assistant" icon={&lt;ChatRegular /&gt;} rightSlot={/* placeholder for task 022 */} /&gt;`. Use a TODO comment to mark the placeholder so task 022 can swap it in without re-discovery.
+    </step>
+    <step order="5" name="Verify icon color via tokens">
+      The PaneHeader internal styling (built in task 010) must already apply
+      `tokens.colorBrandForeground1` to the icon. Confirm visually — no inline color overrides
+      added in this file.
+    </step>
+    <step order="6" name="Light + dark mode visual diff">
+      In Vite dev or Power Apps host, compare the new ConversationPane header against
+      ContextPaneController's existing header in both light and dark modes. Spacing,
+      typography, and icon alignment must match. Capture screenshots if available; commit
+      a short visual-diff note in `notes/visual-diffs/021-pane-header.md` if any subtle
+      discrepancies surface.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ConversationPane.tsx + ContextPaneController.tsx for visual reference</tool>
+    <tool name="Edit">Remove tab JSX + state, add PaneHeader + import</tool>
+    <tool name="Grep">Find any external consumers of removed tab-state exports (should be none)</tool>
+    <tool name="Bash">Run `npm run build` against SpaarkeAi to verify no TS / lint errors</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="report">Task completion report confirming Chat/History tabs removed and PaneHeader integrated; rightSlot placeholder noted for task 022</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ConversationPane.tsx` imports `PaneHeader` from `@spaarke/ui-components` and `ChatRegular` from `@fluentui/react-icons`.</criterion>
+    <criterion testable="true">`ConversationPane.tsx` does not contain any "Chat" / "History" tab button JSX or related local state hooks.</criterion>
+    <criterion testable="true">`&lt;PaneHeader title="Assistant" icon={...}&gt;` is rendered at the top of the pane content.</criterion>
+    <criterion testable="true">A `rightSlot` placeholder (TODO comment) exists for task 022 to wire the History button.</criterion>
+    <criterion testable="true">Visual diff vs ContextPaneController's existing header shows matching typography, spacing, and brand-colored icon in both light and dark modes.</criterion>
+    <criterion testable="true">`npm run build` succeeds with no new TS / lint errors.</criterion>
+    <criterion testable="true">No `accessToken` props introduced (ADR-028 invariants preserved).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="PaneHeader parity — light mode">
+      In SpaarkeAi welcome state, verify the Assistant pane shows `<PaneHeader>` with
+      ChatRegular icon in brand color, title "Assistant", and a placeholder rightSlot
+      (empty until task 022). Compare against the Context pane header for typography
+      and spacing parity.
+    </test>
+    <test name="PaneHeader parity — dark mode (NFR-06, ADR-021)">
+      Toggle to dark mode. Confirm icon color shifts via Fluent v9 tokens (no hex leaks),
+      title remains legible, header background uses correct neutral-background tokens.
+    </test>
+    <test name="No tab control regression">
+      Confirm no Chat / History tab buttons render; no clickable tab-like affordances
+      remain in the header band.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 021" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

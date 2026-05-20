@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Spike: Verify FR-07 chat-message attachments[] payload support</title>
+    <phase>Phase 0 — Spike</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>026, 050, 051</blocks>
+    <tags>bff-api, spike, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Timeboxed 30-min spike producing a decision memo only; no code committed to src/. STANDARD rigor is appropriate (no FULL quality gate needed) but task-execute discipline is required because the outcome gates Phase E and task 026.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Determine in ≤30 minutes of focused investigation whether the existing BFF endpoint
+    `POST /api/ai/chat/sessions/{sessionId}/messages` already accepts an
+    `attachments: Array&lt;{filename, contentType, textContent}&gt;` field on its request body,
+    or whether FR-07 will require a Phase E backend schema extension. Record the decision
+    in a short spike memo. This is the blocking foundation task for all downstream
+    multi-file attachment work.
+  </prompt>
+
+  <role>
+    Senior .NET developer comfortable reading ASP.NET Core Minimal API endpoints, model
+    binding, and request DTO contracts. Bias toward fast investigation and a clearly
+    captured YES/NO decision; do not start implementation work.
+  </role>
+
+  <goal>
+    A spike memo at `projects/spaarke-ai-platform-unification-r3/notes/spikes/001-fr07-attachments-payload.md`
+    that states (a) whether the current endpoint accepts `attachments[]` today,
+    (b) the exact request DTO type name and location, (c) evidence supporting the
+    decision (DTO snippet + a curl/REST sample), and (d) whether Phase E (tasks 050/051)
+    is REQUIRED or SKIPPED. TASK-INDEX is updated by the main session afterwards.
+  </goal>
+
+  <context>
+    <background>
+      FR-07 requires the Assistant pane to send up to 5 files with extracted text content
+      attached to a chat message. The frontend (`useChatFileAttachment` hook + payload
+      wiring in task 026) needs to know the exact JSON shape the BFF accepts. If the
+      endpoint already accepts an `attachments[]` array (e.g., because R2 added it), no
+      backend work is needed and Phase E is skipped. If not, Phase E (tasks 050/051) opens
+      to extend the schema with validation per ADR-008 + ADR-013.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI features extend the BFF in-process; no new service. Any payload extension must remain within `Sprk.Bff.Api`.</constraint>
+    <constraint source="ADR-008">Any new or modified BFF endpoint inherits the existing endpoint-filter pipeline (auth, rate limit, validation). The spike must NOT introduce a bypass of these filters.</constraint>
+    <constraint source="project">This task is timeboxed at 30 minutes of investigation. Do not start implementation. Output is a decision memo, not code in `src/`.</constraint>
+    <constraint source="project">Do not modify `src/` files. The only file written is the spike memo under `notes/spikes/`.</constraint>
+    <constraint source="spec">Spike must produce a definitive YES (extension needed) or NO (already supported) decision. "Inconclusive" is not acceptable — escalate to the user if evidence is missing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ChatEndpoints.cs">
+      Open `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` and locate the route
+      handler for `POST /api/ai/chat/sessions/{sessionId}/messages`. Identify the request
+      DTO type bound to the request body and the file/line it is defined in.
+    </step>
+    <step order="2" name="Examine the request DTO">
+      Read the DTO type definition. Enumerate its properties. Check whether a property
+      named `Attachments` (or any analogous name) exists, and whether it is a collection
+      of an object with `Filename`, `ContentType`, and `TextContent` (or equivalent).
+      Note any required-vs-optional annotations and validation attributes.
+    </step>
+    <step order="3" name="Validate by request shape (no live call required)">
+      Construct a sample JSON request body that includes an `attachments[]` array with one
+      entry. Compare its shape against the DTO. If the DTO has `Attachments`, document
+      the exact field casing the model binder will accept (camelCase via JSON options).
+      If a local BFF instance is already running, a one-shot curl/REST sample is welcome
+      but NOT required — the source-code evidence is sufficient.
+    </step>
+    <step order="4" name="Write the decision memo">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/spikes/001-fr07-attachments-payload.md`
+      with sections: Decision (YES/NO), Evidence (DTO snippet + file:line citation),
+      Sample payload, Phase E Impact (REQUIRED vs SKIPPED), and any follow-up notes for
+      task 026.
+    </step>
+    <step order="5" name="Report decision">
+      Report the YES/NO decision in the task completion summary so the main session can
+      mark Phase E status in `TASK-INDEX.md`. If YES: tasks 050 and 051 stay active. If
+      NO: tasks 050 and 051 should be marked SKIPPED.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read C# source files and the request DTO definition</tool>
+    <tool name="Grep">Search for the route handler and DTO references</tool>
+    <tool name="Write">Create the spike memo</tool>
+    <tool name="Bash">Optional curl against a running local BFF (not required)</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r3/notes/spikes/001-fr07-attachments-payload.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A file exists at `projects/spaarke-ai-platform-unification-r3/notes/spikes/001-fr07-attachments-payload.md`.</criterion>
+    <criterion testable="true">The memo states a definitive YES or NO decision (not "inconclusive") on whether `POST /api/ai/chat/sessions/{sessionId}/messages` accepts `attachments[]` today.</criterion>
+    <criterion testable="true">The memo cites the DTO type name and the file:line where it is defined in `src/server/api/Sprk.Bff.Api/`.</criterion>
+    <criterion testable="true">The memo states Phase E impact: REQUIRED (unblocks tasks 050/051) or SKIPPED.</criterion>
+    <criterion testable="true">No files under `src/` are modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 001" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, current-task.md is tracked, and the
+    blocking decision is recorded for downstream consumers.
+  </execution>
+</task>

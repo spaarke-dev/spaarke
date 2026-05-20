@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Bundle-size verification — NFR-12 (&lt;250 KB gzip delta vs R2 baseline; PDF.js + mammoth lazy-loaded)</title>
+    <phase>Phase F — Integration &amp; Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020, 021, 022, 023, 024, 025, 026, 030, 031, 032, 033, 034, 035, 040, 041, 042, 043, 044, 045</dependencies>
+    <blocks>070</blocks>
+    <tags>frontend, performance, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only verification — runs a production build and inspects the chunk graph. STANDARD rigor; no production code changes unless violations are found.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only verification. Parallel with other Phase F audits (060, 062, 063) — they touch independent verification surfaces.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Verify NFR-12: a production build of SpaarkeAi (`npm run build:prod` or
+    `scripts/Build-ViteSolutionsDirect.ps1`) produces an initial gzipped bundle whose delta
+    versus the R2 baseline is less than 250 KB, AND PDF.js + mammoth are NOT present in the
+    initial chunk (they must be lazy-loaded as separate async chunks per FR-07). Document
+    results in a verification memo. If NFR-12 fails, open a follow-up optimization task and
+    BLOCK Phase G until resolved.
+  </prompt>
+
+  <role>
+    Frontend performance reviewer comfortable with Vite/Rollup chunk analysis,
+    webpack-bundle-analyzer (or rollup-plugin-visualizer equivalent), gzip-size measurement,
+    and dynamic-import patterns for large libraries (PDF.js, mammoth). Familiar with the
+    `scripts/Build-ViteSolutionsDirect.ps1` build pipeline used by Spaarke Code Pages.
+  </role>
+
+  <goal>
+    A verification memo at
+    `projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md` records:
+    (a) the exact R2 baseline gzipped initial-bundle size in KB, (b) the new R3 gzipped
+    initial-bundle size in KB, (c) the delta with sign, (d) the chunk graph confirming
+    PDF.js + mammoth live in separate async chunks (not the initial bundle), and (e) a PASS
+    or FAIL verdict for NFR-12. PASS unblocks Phase G; FAIL opens a follow-up optimization
+    task and blocks Phase G.
+  </goal>
+
+  <context>
+    <background>
+      NFR-12 caps the cold-load bundle growth at &lt;250 KB gzip versus the R2 baseline.
+      FR-07 introduces client-side PDF + DOCX text extraction via PDF.js + mammoth — both
+      are large libraries that MUST be dynamic-imported on demand so they don't inflate the
+      initial chunk. R2's bundle size is the comparison baseline (the predecessor project
+      shipped at commit b40dc3e6 — that build's gzipped initial-bundle size is the reference).
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>scripts/Build-ViteSolutionsDirect.ps1</file>
+      <file>projects/spaarke-ai-platform-unification-r2/notes/ (look for R2 final bundle-size baseline)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-12 — &lt;250 KB gzip delta versus R2 baseline. PASS or FAIL is the verdict.</constraint>
+    <constraint source="spec">FR-07 — PDF.js + mammoth MUST be lazy-loaded as separate async chunks. Their presence in the initial bundle is an automatic FAIL.</constraint>
+    <constraint source="project">This is a READ-ONLY verification. Do not modify production code in this task. If NFR-12 fails, open a follow-up optimization task and BLOCK Phase G until that task completes.</constraint>
+    <constraint source="project">Use `scripts/Build-ViteSolutionsDirect.ps1` for SpaarkeAi (the canonical build script per repo conventions); do not invent a new build invocation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate R2 baseline">
+      Read `projects/spaarke-ai-platform-unification-r2/notes/` for the final bundle-size
+      record. If absent, run the R2 build at commit `b40dc3e6` and capture the gzipped
+      initial-bundle size as the baseline. Record the exact number in the memo.
+    </step>
+    <step order="2" name="Run R3 production build">
+      Execute `scripts/Build-ViteSolutionsDirect.ps1` (or `npm run build:prod` for SpaarkeAi
+      solution) on the current worktree branch. Capture build output including chunk
+      manifest. Verify build succeeds with zero errors.
+    </step>
+    <step order="3" name="Measure gzipped initial-bundle size">
+      Inspect `dist/` (or solution output). Identify the initial chunk (entry chunk).
+      Measure gzipped size (e.g., via `gzip -c file.js | wc -c` or Vite's reported
+      `gzip:` annotation). Record exact bytes / KB.
+    </step>
+    <step order="4" name="Verify PDF.js + mammoth in async chunks">
+      Inspect the chunk manifest. Confirm `pdfjs-dist` (or PDF.js bundle name) and `mammoth`
+      live in separate async chunks (filename suffixed with the async chunk hash, NOT in
+      the entry chunk's module graph). If either is in the initial bundle, automatic FAIL.
+    </step>
+    <step order="5" name="Compute delta + verdict">
+      Delta = R3 size − R2 baseline. If delta &lt; 250 KB gzip AND PDF.js + mammoth are
+      async-only → PASS. Otherwise FAIL.
+    </step>
+    <step order="6" name="Write verification memo">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md`
+      with the baseline, R3 size, delta, chunk evidence, and PASS/FAIL verdict. If FAIL,
+      list specific oversize chunks and open a follow-up optimization task; block Phase G.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PowerShell to run `scripts/Build-ViteSolutionsDirect.ps1`</tool>
+    <tool name="Read">Vite build output, chunk manifest</tool>
+    <tool name="Grep">Find PDF.js / mammoth references in chunk manifest</tool>
+    <tool name="Write">Verification memo</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md</output>
+    <output type="report">Task completion report with PASS or FAIL verdict for NFR-12 + Phase G gate status</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Verification memo exists at `projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md` with R2 baseline, R3 size, delta, and verdict.</criterion>
+    <criterion testable="true">R2 baseline gzipped initial-bundle size is recorded as a specific number (not estimated).</criterion>
+    <criterion testable="true">R3 production build (`scripts/Build-ViteSolutionsDirect.ps1`) succeeded with zero errors.</criterion>
+    <criterion testable="true">Delta versus R2 baseline is &lt;250 KB gzip (NFR-12 PASS), OR memo opens follow-up optimization task and blocks Phase G.</criterion>
+    <criterion testable="true">PDF.js and mammoth are confirmed present in separate async chunks (not the initial bundle).</criterion>
+    <criterion testable="true">Memo issues PASS or FAIL verdict — if PASS, explicitly states "Phase G unblocked from a bundle-size standpoint."</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+  </execution>
+</task>

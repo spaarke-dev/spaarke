@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Dark-mode token audit — NFR-06 + ADR-021 compliance across new components</title>
+    <phase>Phase F — Integration &amp; Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020, 021, 022, 030, 032, 034, 035, 040, 041</dependencies>
+    <blocks>070</blocks>
+    <tags>frontend, fluent-ui, code-review, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit + visual verification of new components. STANDARD rigor — no production code edits unless violations are found (which trigger immediate inline fixes).</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only audit (with optional visual inspection in deployed env). Parallel with other Phase F audits (060, 061, 063).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Audit all new React components authored in Phases A / B / C / D for ADR-021 + NFR-06
+    compliance: (a) zero hex color literals (`#RRGGBB`, `#RGB`, `#RRGGBBAA`), (b) zero
+    `rgba(...)` literals, (c) all colors via Fluent v9 `tokens.*` semantic tokens, (d) manual
+    side-by-side light/dark visual comparison of every new component in the deployed Power
+    Apps host (or Vite dev environment with theme toggle). Document results in a verification
+    memo. Fix any violations inline; re-audit after fixes; do not allow Phase G to start with
+    open violations.
+  </prompt>
+
+  <role>
+    Frontend reviewer with deep Fluent v9 token expertise. Comfortable mapping
+    `colorBrandForeground1`, `colorNeutralBackground1`, `colorNeutralStroke1`, etc., to
+    the correct usage sites. Bias toward zero hex/rgba tolerance and pixel-precise visual
+    parity between light and dark themes.
+  </role>
+
+  <goal>
+    A verification memo at
+    `projects/spaarke-ai-platform-unification-r3/notes/dark-mode-audit.md` documents: (a)
+    grep results for hex + rgba in new code, (b) per-component visual inspection results
+    (light + dark), (c) PASS / FAIL roll-up. PASS unblocks Phase G; any FAIL is fixed
+    inline and re-audited until CLEAN.
+  </goal>
+
+  <context>
+    <background>
+      ADR-021 mandates Fluent v9 tokens only across all UI. NFR-06 requires dark-mode parity
+      with light mode. This project authored at least eleven new/modified React components
+      (welcome panel, conversation pane, history overlay, workspace pane, workspace menus,
+      context pane, get-started cards, wizard widgets, etc.) — every one must pass token
+      compliance. The existing ContextPaneController header style was the canonical PaneHeader
+      reference, so PaneHeader's token usage is also under review.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/ (all new .tsx/.ts files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">No hex literals (`#[0-9a-fA-F]{3,8}`). No `rgba(...)`. No Fluent v8. All colors via `tokens.*` from `@fluentui/react-components`.</constraint>
+    <constraint source="spec">NFR-06 — dark-mode parity with light mode across every new component. Side-by-side visual diff is the acceptance bar.</constraint>
+    <constraint source="project">If violations are found, fix inline AND re-audit. Do not allow Phase G to begin with open dark-mode violations.</constraint>
+    <constraint source="project">Visual inspection MUST cover every new component, not just a sample. Use the deployed env or Vite dev theme toggle.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Enumerate new .tsx/.ts files">
+      Run `git diff --name-only master..HEAD` and filter to `.tsx` / `.ts` under `src/`.
+      Exclude test files and generated output.
+    </step>
+    <step order="2" name="Grep for hex + rgba literals">
+      Grep each enumerated file for `#[0-9a-fA-F]{3,8}` and `rgba\s*\(`. Capture file + line
+      for any hit. (Note: hex literals INSIDE comments are still violations — do not
+      whitelist them.)
+    </step>
+    <step order="3" name="Grep for Fluent v8 imports">
+      Grep for `@fluentui/react([^-]|$)` (i.e., the v8 package). Any hit is a violation;
+      Fluent v9 is `@fluentui/react-components`.
+    </step>
+    <step order="4" name="Manual visual inspection — light mode">
+      Load the deployed SpaarkeAi env in light mode. Walk through every new component:
+      welcome panel, conversation pane, history overlay, workspace pane (PaneHeader + Home tab),
+      WorkspacePaneMenu sections, context pane, GetStarted cards (welcome stage), wizard
+      widgets (create-matter, assign-work where applicable). Capture screenshots if useful.
+    </step>
+    <step order="5" name="Manual visual inspection — dark mode">
+      Toggle dark mode (Power Apps user settings OR Vite dev theme toggle). Repeat the
+      walkthrough. Compare side-by-side with light. Any contrast/visibility regression is a
+      FAIL.
+    </step>
+    <step order="6" name="Fix violations inline">
+      For each violation found in steps 2-5, edit the offending file to use `tokens.*`
+      semantic tokens. Rebuild SpaarkeAi (`scripts/Build-ViteSolutionsDirect.ps1`) and
+      re-verify.
+    </step>
+    <step order="7" name="Write audit memo">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/dark-mode-audit.md`. Record:
+      grep results (before + after fixes), visual inspection findings per component (light +
+      dark), and final CLEAN verdict (or list remaining work).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">`git diff --name-only master..HEAD` to enumerate touched files</tool>
+    <tool name="Grep">Hex / rgba / Fluent v8 import patterns</tool>
+    <tool name="Read">Inspect ambiguous hits in their file context</tool>
+    <tool name="Edit">Apply inline fixes when violations are found</tool>
+    <tool name="Write">Audit memo</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/dark-mode-audit.md</output>
+    <output type="code">Inline fixes to any component with hex/rgba/Fluent-v8 violations (modifications recorded in memo)</output>
+    <output type="report">Task completion report with CLEAN verdict + Phase G gate status</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit memo at `projects/spaarke-ai-platform-unification-r3/notes/dark-mode-audit.md` enumerates every new `.tsx` / `.ts` file.</criterion>
+    <criterion testable="true">Grep results show ZERO hex literals AND ZERO `rgba(...)` literals across all new files (after any inline fixes).</criterion>
+    <criterion testable="true">Grep results show ZERO Fluent v8 imports (`@fluentui/react` without `-components` suffix).</criterion>
+    <criterion testable="true">Manual visual inspection covered every new component in BOTH light and dark mode with documented results.</criterion>
+    <criterion testable="true">If violations were found, they were fixed inline and re-audited until CLEAN.</criterion>
+    <criterion testable="true">Memo issues a CLEAN verdict — "Phase G unblocked from a dark-mode standpoint."</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+  </execution>
+</task>

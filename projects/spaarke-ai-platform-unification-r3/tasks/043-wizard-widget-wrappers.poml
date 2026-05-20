@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Thin wizard widget wrappers — CreateProjectWizardWidget + FindSimilarWizardWidget (FR-19)</title>
+    <phase>Phase D — Context pane</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Two net-new widget wrappers that bridge GetStartedCards card clicks (via workspace PaneEventBus channel) into existing dialog components. Registry update touches the shared WorkspaceWidgetRegistry. OC-04 + ADR-012 (load-bearing) reuse-existing-dialogs invariant requires careful "wrap, don't re-author" discipline. ADR-028 auth invariants apply to anything the wrapped dialogs touch.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build two thin widget wrappers around EXISTING dialogs per FR-19 and OC-04 (reuse, do
+    not re-author):
+    (a) `CreateProjectWizardWidget` — wraps the existing `CreateProjectWizardDialog`.
+    (b) `FindSimilarWizardWidget` — wraps the existing `FindSimilarWizardDialog`.
+    Both register in `WorkspaceWidgetRegistry` so they can be opened as top-tabs in the
+    Workspace pane when `widget_load` events arrive on the `workspace` PaneEventBus channel.
+    Follow the `code-page-wizard-wrapper.md` pattern. Do NOT modify the underlying dialog
+    components — only wrap them.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer experienced with widget wrappers, dialog
+    composition, and widget-registry registration patterns. Comfortable with the
+    code-page-wizard-wrapper.md pattern and ADR-012 "consume existing components, do not
+    re-author" rule.
+  </role>
+
+  <goal>
+    Two new files exist:
+    (1) `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateProjectWizardWidget.tsx`
+        exports `CreateProjectWizardWidget` — a thin React component that renders
+        `&lt;CreateProjectWizardDialog /&gt;` with appropriate open/close state management for
+        widget-tab lifecycle.
+    (2) `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/FindSimilarWizardWidget.tsx`
+        exports `FindSimilarWizardWidget` — analogous wrapper around `FindSimilarWizardDialog`.
+    Both wrappers are registered in `WorkspaceWidgetRegistry` under widget types
+    `create-project-wizard` and `find-similar-wizard` respectively. Each wrapper imports
+    the underlying dialog from its existing location (no copy-paste). When a `widget_load`
+    event with the matching type fires on the `workspace` channel, the wrapper renders and
+    the dialog opens.
+  </goal>
+
+  <context>
+    <background>
+      FR-19 routes GetStartedCards card clicks (built in tasks 041 + 042) to widgets in the
+      Workspace pane via `widget_load` events on the `workspace` PaneEventBus channel. Of
+      the 7 cards, two map to existing dialogs that haven't been wrapped as widgets yet:
+      Create Project (existing `CreateProjectWizardDialog`) and Find Similar (existing
+      `FindSimilarWizardDialog`). OC-04 + ADR-012 mandate REUSE — wrap the dialogs as widgets,
+      do not duplicate their logic. The wrapper is a thin shim that presents the dialog
+      inside a workspace tab and manages its open/close state via the widget lifecycle.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateProjectWizardWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/FindSimilarWizardWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Underlying dialogs (`CreateProjectWizardDialog`, `FindSimilarWizardDialog`) are CONSUMED as-is from their existing locations. Do NOT copy-paste their internals. Do NOT modify their source. The wrapper is purely composition.</constraint>
+    <constraint source="ADR-021">No hex literals, no `rgba(...)` literals, no Fluent v8. Wrappers add minimal styling (likely just layout container) — all spacing via `tokens.*`.</constraint>
+    <constraint source="ADR-022">React 19 only. No React 16 fallbacks.</constraint>
+    <constraint source="ADR-028">No `accessToken` props or state in the wrappers. The underlying dialogs already use `authenticatedFetch` per ADR-028 — verify by grep before wrapping. If a dialog snapshots a token, that is a separate fix outside this task's scope (flag as a finding).</constraint>
+    <constraint source="spec">FR-19 widget_type strings MUST match exactly: `create-project-wizard` and `find-similar-wizard`. These are the strings dispatched by task 042's onCardClick handler.</constraint>
+    <constraint source="project">Follow the `code-page-wizard-wrapper.md` pattern. Both widgets register in `WorkspaceWidgetRegistry` (NOT ContextWidgetRegistry — these are Workspace-pane widgets).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate existing dialogs">
+      Grep the repo for `CreateProjectWizardDialog` and `FindSimilarWizardDialog`. Note exact
+      file paths and their public prop signatures (especially open/onClose / open/onOpenChange
+      shape). Read each dialog file briefly to understand its lifecycle expectations.
+    </step>
+    <step order="2" name="Look up existing widget wrapper examples">
+      Open `CreateMatterWizardWidget` and `DocumentUploadWizardWidget` (already in
+      `WorkspaceWidgetRegistry`). Use them as the structural blueprint for the new wrappers.
+      Verify they follow `code-page-wizard-wrapper.md`.
+    </step>
+    <step order="3" name="Create CreateProjectWizardWidget.tsx">
+      Scaffold the file. Import `CreateProjectWizardDialog` from its existing path. Define a
+      thin component that renders the dialog with `open={true}` (or whatever the widget
+      lifecycle expects) and routes `onClose` → widget-tab close. Add ARIA labels and
+      tab-title metadata if the widget interface requires it.
+    </step>
+    <step order="4" name="Create FindSimilarWizardWidget.tsx">
+      Analogous to step 3, wrapping `FindSimilarWizardDialog`.
+    </step>
+    <step order="5" name="Register both in WorkspaceWidgetRegistry">
+      Open `src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts`.
+      Add registrations using the existing pattern (lazy-import factory). Widget types:
+      `create-project-wizard` and `find-similar-wizard` — these MUST match task 042's
+      dispatched strings exactly.
+    </step>
+    <step order="6" name="Smoke-test via widget_load event">
+      Build the Spaarke.AI.Widgets package and consuming solution. In Vite dev or Power Apps
+      host, dispatch `widget_load` on `workspace` channel with `widgetType: 'create-project-wizard'`.
+      Confirm CreateProjectWizardDialog opens. Repeat for `find-similar-wizard`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing dialog files + existing wizard widget wrappers as blueprint</tool>
+    <tool name="Write">Create two new wrapper files</tool>
+    <tool name="Edit">Update WorkspaceWidgetRegistry to register both wrappers</tool>
+    <tool name="Grep">Find dialog file paths + verify auth pattern (authenticatedFetch usage) before wrapping</tool>
+    <tool name="Bash">Run `npm run build` against Spaarke.AI.Widgets</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateProjectWizardWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/FindSimilarWizardWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</output>
+    <output type="report">Task completion report confirming both wrappers exist, are registered, and route widget_load events correctly</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CreateProjectWizardWidget.tsx` exists, imports `CreateProjectWizardDialog` from its existing path, and renders the dialog as a widget-tab content.</criterion>
+    <criterion testable="true">`FindSimilarWizardWidget.tsx` exists, imports `FindSimilarWizardDialog` from its existing path, and renders the dialog as a widget-tab content.</criterion>
+    <criterion testable="true">Underlying dialog source files are UNCHANGED (no edits to CreateProjectWizardDialog or FindSimilarWizardDialog).</criterion>
+    <criterion testable="true">`WorkspaceWidgetRegistry` registers both wrappers under widget types `create-project-wizard` and `find-similar-wizard` exactly.</criterion>
+    <criterion testable="true">Dispatching `widget_load` on `workspace` channel with `create-project-wizard` opens the Create Project dialog as a new top-tab.</criterion>
+    <criterion testable="true">Dispatching `widget_load` on `workspace` channel with `find-similar-wizard` opens the Find Similar dialog as a new top-tab.</criterion>
+    <criterion testable="true">No `accessToken` props introduced (ADR-028 invariants preserved). Dialogs continue to use `authenticatedFetch`.</criterion>
+    <criterion testable="true">No hex literals, no `rgba(...)` literals in new code.</criterion>
+    <criterion testable="true">`npm run build` succeeds with no new TS / lint errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="CreateProjectWizardWidget opens via widget_load">
+      In SpaarkeAi welcome state, click the Create Project card. Confirm CreateProjectWizardDialog
+      opens as a new top-tab in the Workspace pane (becomes active). Confirm the dialog UI matches
+      its standalone behavior.
+    </test>
+    <test name="FindSimilarWizardWidget opens via widget_load">
+      Click the Find Similar card. Confirm FindSimilarWizardDialog opens as a new top-tab. Confirm
+      dialog UI matches its standalone behavior.
+    </test>
+    <test name="Dialog close returns control to Workspace pane">
+      Open each wizard, then close (Cancel button or X). Confirm the tab is removed and focus returns
+      to the previously active tab.
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, NFR-06)">
+      Toggle dark mode. Confirm both wrapped dialogs adapt correctly (inherited from underlying dialog
+      via Fluent v9 tokens).
+    </test>
+    <test name="No console errors during widget mount and close">
+      Open browser devtools, open and close each wizard, confirm zero errors.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 043" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

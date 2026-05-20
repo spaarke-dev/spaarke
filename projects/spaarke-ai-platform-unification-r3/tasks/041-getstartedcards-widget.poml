@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Build GetStartedCardsWidget — 7-card 2-col grid (FR-18)</title>
+    <phase>Phase D — Context pane</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>042</blocks>
+    <tags>react, frontend, fluent-ui, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Net-new context widget that becomes the welcome-state landing in the Context pane. Consumes the ActionCard primitive (potentially lifted to @spaarke/ui-components in task 012) — ADR-012 (load-bearing) compliance is in scope. Touches the PaneEventBus dispatch path (wiring detail completed in task 042). Multi-FR composite (FR-18) with accessibility + dark-mode bars.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the new `GetStartedCardsWidget` per FR-18: a 7-card, 2-column scrollable grid
+    rendered on the Context pane's welcome stage. Each card reuses the LegalWorkspace
+    `ActionCard` primitive (import path determined by task 012 outcome — either lifted to
+    `@spaarke/ui-components` or still in LegalWorkspace). Cards: Create Matter, Create
+    Project, Assign Work, Summarize Files, Find Similar, Send Email, Schedule Meeting.
+    Each card onClick will eventually dispatch a `widget_load` event on the `workspace`
+    PaneEventBus channel — wire onClick callbacks now, but the actual dispatch wiring is
+    completed in task 042. Keyboard navigation (arrow keys + Enter), Fluent v9 tokens
+    only, dark-mode safe.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer experienced with `makeStyles` + Fluent design
+    tokens, CSS grid layouts, accessible keyboard navigation, and composable widget
+    primitives. Familiar with the @spaarke/ui-components consumption pattern and ADR-012
+    "shared components live in the shared lib" rule.
+  </role>
+
+  <goal>
+    A new file `src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx`
+    exists and exports `GetStartedCardsWidget` (a React component). It renders 7 ActionCard
+    instances in a CSS grid with `gridTemplateColumns: '1fr 1fr'` and `gap: tokens.spacingHorizontalS`,
+    vertically scrollable on overflow. Each card has a Fluent v9 icon + label per the FR-19
+    mapping. Each card accepts an optional `onCardClick(widgetType: string)` callback (wired in
+    task 042). Cards are keyboard-navigable (arrow keys + Enter to activate). The widget
+    matches LegalWorkspace ActionCard styling exactly. Works in both light and dark modes
+    via Fluent v9 tokens.
+  </goal>
+
+  <context>
+    <background>
+      FR-18 introduces the GetStartedCardsWidget that replaces PlaybookGalleryWidget on the
+      welcome stage of the Context pane. Per OC-04 + ADR-012, the ActionCard primitive is
+      reused (lifted to @spaarke/ui-components in task 012 if needed; otherwise imported
+      from LegalWorkspace). The 7 cards each trigger a different wizard widget in the
+      Workspace pane via PaneEventBus `widget_load` events on the `workspace` channel — the
+      wiring is finalized in task 042 (which also registers this widget in
+      ContextWidgetRegistry). This task focuses on the widget component itself (markup,
+      styling, accessibility) — the event-dispatch wiring is a thin callback that task 042
+      plugs in.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">ActionCard primitive is consumed from `@spaarke/ui-components` if task 012 lifted it there, OR from the LegalWorkspace path if task 012 verified it as context-agnostic without lifting. Do NOT copy-paste ActionCard logic. Read task 012 completion notes / `current-task.md` to determine the correct import path.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only. Grid spacing uses `tokens.spacingHorizontalS`. No hex literals, no `rgba(...)` literals, no Fluent v8. Card icon colors use semantic Fluent tokens (typically `colorBrandForeground1`).</constraint>
+    <constraint source="ADR-022">React 19 only. Use `makeStyles` from `@fluentui/react-components` for styling. No CSS-in-JS libraries outside Fluent.</constraint>
+    <constraint source="ADR-025">All card icons come from `@fluentui/react-icons` (Fluent v9). Suggested icons: `DocumentAddRegular` (Create Matter), `FolderAddRegular` (Create Project), `TaskListSquareLtrRegular` or `PeopleAddRegular` (Assign Work), `DocumentMultipleRegular` (Summarize Files), `SearchRegular` (Find Similar), `MailRegular` (Send Email), `CalendarLtrRegular` (Schedule Meeting). No new SVG web resources.</constraint>
+    <constraint source="ADR-028">No `accessToken` props or state. This widget does NOT make BFF calls directly — it only dispatches PaneEventBus events. Any future BFF interaction MUST go through `authenticatedFetch`.</constraint>
+    <constraint source="spec">2-column CSS grid layout (`gridTemplateColumns: '1fr 1fr'`); `gap: spacingHorizontalS`; vertical scroll on overflow; keyboard-navigable; matches LegalWorkspace card styling exactly.</constraint>
+    <constraint source="project">This task creates the widget COMPONENT only. Registration in `ContextWidgetRegistry` and the welcome-stage swap are in task 042. Wire `onCardClick` as a callback prop now; task 042 plugs in the PaneEventBus dispatcher.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Determine ActionCard import path from task 012">
+      Read `projects/spaarke-ai-platform-unification-r3/current-task.md` AND task 012 completion
+      notes. If task 012 lifted ActionCard to `@spaarke/ui-components`, import from there.
+      Otherwise import from the LegalWorkspace path (`src/solutions/LegalWorkspace/src/components/GetStarted/ActionCard.tsx`).
+      Document the decision in the file header comment.
+    </step>
+    <step order="2" name="Scaffold the widget file">
+      Create `src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx`.
+      Export `GetStartedCardsWidget` as a default + named export. Define a prop type
+      `{ onCardClick?: (widgetType: string) => void }` (defaults to no-op).
+    </step>
+    <step order="3" name="Define the 7-card configuration">
+      Create a constant array of 7 card definitions: `{ widgetType: string, label: string, icon: ReactNode, description?: string }`. Use the FR-19 mapping:
+      Create Matter → `create-matter-wizard`,
+      Create Project → `create-project-wizard`,
+      Assign Work → `assign-work` (special-cased — invokes Xrm.Navigation in task 045),
+      Summarize Files → `document-upload-wizard`,
+      Find Similar → `find-similar-wizard`,
+      Send Email → `email-compose`,
+      Schedule Meeting → `meeting-schedule`.
+    </step>
+    <step order="4" name="Render 2-column scrollable grid via makeStyles">
+      Use `makeStyles` to define the container: `display: 'grid'`, `gridTemplateColumns: '1fr 1fr'`,
+      `gap: tokens.spacingHorizontalS`, `overflowY: 'auto'`, `padding: tokens.spacingHorizontalM`.
+      Render 7 ActionCard instances mapping over the config array. Pass `onClick` to each card
+      so it calls `props.onCardClick?.(card.widgetType)`.
+    </step>
+    <step order="5" name="Implement keyboard navigation">
+      Wire `onKeyDown` at the grid container level: arrow keys move focus across cards (visual
+      focus + DOM focus follow tab index); Enter / Space activates the focused card's onClick.
+      Each card should have `tabIndex={0}` and proper ARIA role="button" (likely already inherited
+      from ActionCard — verify and don't double-up).
+    </step>
+    <step order="6" name="Add ARIA labels + role for accessibility">
+      Container has `role="grid"` + `aria-label="Get Started actions"`. Each card has clear,
+      action-oriented `aria-label` like "Create Matter — start a new matter workspace". Verify
+      screen reader hears the labels (manual smoke).
+    </step>
+    <step order="7" name="Dark-mode parity check + build">
+      Run `npm run build` against the Spaarke.AI.Widgets package. In Vite dev (or after deploying
+      to test env), confirm cards look correct in both light and dark mode. Match LegalWorkspace
+      card styling exactly (compare side-by-side at the GetStarted section of standalone
+      LegalWorkspace).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read task 012 notes, ActionCard source, LegalWorkspace GetStarted section for visual reference</tool>
+    <tool name="Write">Create new GetStartedCardsWidget.tsx</tool>
+    <tool name="Grep">Find ActionCard exports + Fluent v9 icon imports used in LegalWorkspace</tool>
+    <tool name="Bash">Run `npm run build` against Spaarke.AI.Widgets</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/GetStartedCardsWidget.tsx</output>
+    <output type="report">Task completion report confirming widget renders 7 cards with FR-18 layout + accessibility</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GetStartedCardsWidget.tsx` exists at the specified path and exports the component.</criterion>
+    <criterion testable="true">Component imports `ActionCard` from the path determined by task 012 — NOT a copy-pasted local implementation.</criterion>
+    <criterion testable="true">Renders exactly 7 cards in CSS grid with `gridTemplateColumns: '1fr 1fr'` and `gap: tokens.spacingHorizontalS`.</criterion>
+    <criterion testable="true">Container is vertically scrollable (`overflowY: 'auto'`).</criterion>
+    <criterion testable="true">Each card has a Fluent v9 `@fluentui/react-icons` icon + label matching the FR-19 mapping.</criterion>
+    <criterion testable="true">Each card has `onClick` wired to `props.onCardClick?.(widgetType)`.</criterion>
+    <criterion testable="true">Keyboard navigation works: arrow keys move focus, Enter activates.</criterion>
+    <criterion testable="true">Container has `role="grid"` + `aria-label="Get Started actions"`; each card has descriptive `aria-label`.</criterion>
+    <criterion testable="true">No hex literals, no `rgba(...)` literals; all styling via `tokens.*`.</criterion>
+    <criterion testable="true">Visual parity with LegalWorkspace GetStarted ActionCards in both light and dark modes.</criterion>
+    <criterion testable="true">`npm run build` succeeds with no new TS / lint errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="7 cards render in 2-column grid">
+      Mount GetStartedCardsWidget in a test harness or in the Context pane (after task 042 swaps it in).
+      Confirm 7 cards are visible, arranged in 2 columns. Verify labels: Create Matter, Create Project,
+      Assign Work, Summarize Files, Find Similar, Send Email, Schedule Meeting.
+    </test>
+    <test name="Vertical scroll on narrow viewport">
+      Resize the Context pane to narrow width. Confirm the grid scrolls vertically when cards exceed
+      visible area; horizontal layout (2 columns) is preserved.
+    </test>
+    <test name="Keyboard navigation">
+      Tab into the widget. Use arrow keys to move focus across cards. Press Enter on a focused card
+      — confirm onClick callback fires with the correct widgetType (verify via console.log in dev
+      harness).
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, NFR-06)">
+      Toggle dark mode. Confirm:
+      <steps>
+        <step>Card backgrounds adapt via Fluent v9 neutral-background tokens (no white in dark mode)</step>
+        <step>Card text adapts via neutral-foreground tokens (no black in dark mode)</step>
+        <step>Card icons use brand foreground 1 (visible in both themes)</step>
+        <step>Card hover / focus rings use Fluent v9 stroke / focus-stroke tokens</step>
+      </steps>
+    </test>
+    <test name="ARIA + screen-reader smoke">
+      Activate a screen reader. Tab to the widget. Confirm container is announced as "Get Started actions, grid"
+      and each card is announced with its full aria-label.
+    </test>
+    <test name="No console errors">
+      Open browser devtools. Confirm zero JavaScript errors or React warnings on mount and interaction.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 041" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

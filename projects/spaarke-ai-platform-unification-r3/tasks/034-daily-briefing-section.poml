@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Register Daily Briefing LegalWorkspace section + useDailyBriefing hook</title>
+    <phase>Phase C — Workspace Pane</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>035</blocks>
+    <tags>react, frontend, ai, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Net-new files (section component + hook + registration) consuming a BFF AI endpoint. ADR-013 (AI architecture), ADR-014 (AI caching — TTL cache), ADR-016 (AI rate limits), ADR-021 (Fluent v9 tokens), ADR-028 (authenticatedFetch) all apply. Touches AI integration surface and is consumed by BOTH standalone LegalWorkspace AND SpaarkeAi per FR-25. FULL rigor with code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Register a new "Daily Briefing" LegalWorkspace section type. The section renders a Fluent v9
+    Card with AI-curated bullets fetched from `POST /api/ai/daily-briefing/narrate`, consumed via
+    a new `useDailyBriefing()` hook. The hook uses `authenticatedFetch` from `@spaarke/auth` and
+    implements a per-user ~5-minute TTL cache per ADR-014 (resolving UQ-02 conservatively from the
+    frontend). The section is selectable in `WorkspaceLayoutWizard` Step 2 (Section Selection) with
+    default height `'medium'`, and is available in BOTH standalone LegalWorkspace and SpaarkeAi per
+    FR-25. Implements FR-15.
+  </prompt>
+
+  <role>
+    React 19 + Fluent UI v9 frontend developer building an AI-data-consuming widget. Bias toward
+    clean separation: a pure hook (`useDailyBriefing`) for data + caching, a presentational
+    component (`DailyBriefingSection`) for the Card UI, and a registration peer (matching the
+    sibling `*.registration.ts` files in `sectionRegistry.ts`). Every BFF call uses
+    `authenticatedFetch`; no `accessToken` snapshots.
+  </role>
+
+  <goal>
+    Three net-new files exist under
+    `src/solutions/LegalWorkspace/src/sections/dailyBriefing/`:
+    `useDailyBriefing.ts` (hook with TTL cache + auth), `DailyBriefingSection.tsx` (Card UI),
+    `dailyBriefing.registration.ts` (section registration). `sectionRegistry.ts` is updated to
+    include the new registration. The section is selectable in `WorkspaceLayoutWizard` Step 2 and
+    renders successfully when included in a layout, in both standalone LegalWorkspace and SpaarkeAi.
+  </goal>
+
+  <context>
+    <background>
+      FR-15 introduces "Daily Briefing" as a new selectable LegalWorkspace section type. The data
+      source is the existing BFF endpoint `POST /api/ai/daily-briefing/narrate`. Per ADR-014, AI
+      responses should be cached per-user with a short TTL (~5 min) to avoid hammering the LLM on
+      tab switches; per UQ-02 the existing endpoint may or may not implement this server-side — we
+      mitigate from the frontend with a TTL cache in the hook. Per FR-25, this section is
+      available in BOTH the standalone LegalWorkspace and the SpaarkeAi WorkspacePane embed (it's a
+      LegalWorkspace section, not a SpaarkeAi-local one).
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Section components and their hooks live with LegalWorkspace sections (not lifted to `@spaarke/ui-components`) because they couple to the LegalWorkspace section-registration contract.</constraint>
+    <constraint source="ADR-013">Daily Briefing is consumed via the existing `POST /api/ai/daily-briefing/narrate` BFF endpoint. NO new BFF service. NO direct calls to Azure OpenAI from the frontend.</constraint>
+    <constraint source="ADR-014">AI response caching — the `useDailyBriefing` hook MUST implement a per-user TTL cache (~5 min) to avoid hammering the LLM on tab switches. UQ-02 resolves to "add frontend cache" conservatively.</constraint>
+    <constraint source="ADR-016">Rate-limit handling — the hook must surface 429 responses to the section component so that task 035 can render the graceful degraded state (NFR-11). Do not retry server errors automatically (no exponential backoff in this task).</constraint>
+    <constraint source="ADR-021">Use Fluent v9 tokens only. NO hex literals, NO `rgba(...)` literals. Use Fluent v9 `Card` (or whatever the existing section components use — match the canonical sibling section style).</constraint>
+    <constraint source="ADR-025">Icons (if any in the Card header) from `@fluentui/react-icons` (v9). No new SVG web resources.</constraint>
+    <constraint source="ADR-028">All BFF calls (narrate endpoint) go through `authenticatedFetch` from `@spaarke/auth`. NO `accessToken` props or state snapshots. Per-request `getAccessToken()` per INV-1..INV-8.</constraint>
+    <constraint source="project">FR-25 — the new section must be available in BOTH the standalone LegalWorkspace AND the SpaarkeAi WorkspacePane embed. Since it's registered in LegalWorkspace's `sectionRegistry.ts`, both consumers pick it up automatically — confirm both at acceptance time.</constraint>
+    <constraint source="project">FR-15 — section default height is `'medium'`; selectable in WorkspaceLayoutWizard Step 2 (Section Selection) without wizard modification if the registration pattern is followed correctly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/WORKSPACE-AI-PREFILL-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read sectionRegistry + sibling section pattern">
+      Open `src/solutions/LegalWorkspace/src/sectionRegistry.ts` and a sibling `*.registration.ts`
+      file from an existing section to capture the canonical registration pattern (default height,
+      label, icon, component reference, lifecycle hooks). Match this exactly.
+    </step>
+    <step order="2" name="Create useDailyBriefing.ts hook">
+      Create `src/solutions/LegalWorkspace/src/sections/dailyBriefing/useDailyBriefing.ts`. The hook:
+      - Calls `POST /api/ai/daily-briefing/narrate` via `authenticatedFetch` from `@spaarke/auth`.
+      - Builds the URL via `buildBffApiUrl()` per `bff-url-normalization.md`.
+      - Implements a per-user TTL cache (~5 min) per ADR-014 — use a module-scoped `Map` keyed by
+        user (or a `useRef`-based cache scoped to the hook session). Skip the network call when a
+        cached value within TTL exists.
+      - Returns `{ data, isLoading, error }` (where `error` distinguishes 429 from other errors —
+        the 429 case surfaces a typed `{ kind: 'rate-limit' }` for task 035).
+      - Does NOT retry on error.
+    </step>
+    <step order="3" name="Create DailyBriefingSection.tsx component">
+      Create `src/solutions/LegalWorkspace/src/sections/dailyBriefing/DailyBriefingSection.tsx`.
+      Use Fluent v9 `Card` (or the canonical section container — match siblings) with brand
+      styling. Render the AI-curated bullets from `useDailyBriefing().data` as a list. Handle
+      loading (Spinner) and error states (the 429 + empty-state UX comes from task 035; this task
+      renders a simple error message as a placeholder that task 035 will refine).
+    </step>
+    <step order="4" name="Create dailyBriefing.registration.ts">
+      Create `src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts`
+      following the sibling `*.registration.ts` pattern. Set:
+      - `id: 'daily-briefing'` (or whatever the canonical key shape is — match existing IDs)
+      - `label: 'Daily Briefing'`
+      - `defaultHeight: 'medium'`
+      - `component: DailyBriefingSection`
+      - any `icon` per the registration contract.
+    </step>
+    <step order="5" name="Update sectionRegistry.ts">
+      Edit `src/solutions/LegalWorkspace/src/sectionRegistry.ts` to import and include the new
+      registration in the registry's exported map (or list). Match the existing pattern — likely a
+      `.set(id, registration)` call or an array entry.
+    </step>
+    <step order="6" name="Confirm wizard pickup without wizard change">
+      Per spec, the WorkspaceLayoutWizard Step 2 (Section Selection) is driven by the registry — so
+      adding to `sectionRegistry.ts` SHOULD automatically make Daily Briefing selectable in the
+      wizard. Verify this by opening the wizard from standalone LegalWorkspace and confirming
+      "Daily Briefing" appears in the section list. If a wizard change IS required, surface that
+      as a deviation and open a follow-up — DO NOT modify the wizard in this task.
+    </step>
+    <step order="7" name="Verify availability in both consumers">
+      Open the standalone LegalWorkspace code page → include Daily Briefing in a layout → confirm
+      bullets render. Open the SpaarkeAi WorkspacePane (Home tab via task 030's embed) using a
+      default layout that includes Daily Briefing → confirm bullets render in the embedded view too.
+      Both must work (FR-25 / FR-15).
+    </step>
+    <step order="8" name="Verify TTL cache behavior">
+      In dev tools, switch between Workspace tabs quickly. Confirm `POST /api/ai/daily-briefing/narrate`
+      is NOT called on every switch — only once per TTL window per user. Use the Network tab to
+      confirm.
+    </step>
+    <step order="9" name="Update TASK-INDEX and commit">
+      Update `projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md`: this task's status
+      to ✅ completed. Commit changes per project conventions.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read sectionRegistry.ts + sibling *.registration.ts files</tool>
+    <tool name="Write">Create new hook, component, and registration files</tool>
+    <tool name="Edit">Update sectionRegistry.ts to include the new registration</tool>
+    <tool name="Grep">Confirm zero accessToken snapshots; zero hex/rgba literals</tool>
+    <tool name="Bash">npm build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/useDailyBriefing.ts (new)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/DailyBriefingSection.tsx (new)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts (new)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sectionRegistry.ts (modified — adds Daily Briefing entry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Daily Briefing" appears in WorkspaceLayoutWizard Step 2 (Section Selection) without modifying the wizard code.</criterion>
+    <criterion testable="true">Including Daily Briefing in a layout causes the section to render a Fluent v9 Card with bullets fetched from `POST /api/ai/daily-briefing/narrate`.</criterion>
+    <criterion testable="true">Daily Briefing is available in BOTH the standalone LegalWorkspace AND the SpaarkeAi WorkspacePane embed (FR-25 / FR-15).</criterion>
+    <criterion testable="true">All BFF calls go through `authenticatedFetch`; grep for `accessToken` in `useDailyBriefing.ts` returns zero matches.</criterion>
+    <criterion testable="true">Per-user TTL cache (~5 min) is implemented in the hook — verified via DevTools Network tab (no repeat call on tab-switch within TTL window).</criterion>
+    <criterion testable="true">The hook returns a typed error shape that distinguishes 429 from other errors (for task 035 to consume).</criterion>
+    <criterion testable="true">Source contains zero hex literals and zero `rgba(...)` literals; all colors via `tokens.*`.</criterion>
+    <criterion testable="true">`npm run build` succeeds in the LegalWorkspace workspace with zero TypeScript errors and zero new lint warnings.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Daily Briefing Renders in Standalone LegalWorkspace">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=spaarke_legalworkspace</url>
+      <steps>
+        <step>Navigate to the standalone LegalWorkspace code page</step>
+        <step>Open the WorkspaceLayoutWizard; verify "Daily Briefing" is in the Section Selection list</step>
+        <step>Create a layout that includes Daily Briefing; save</step>
+        <step>Return to the workspace; verify Daily Briefing renders as a Fluent v9 Card with AI bullets</step>
+        <step>Switch to another tab and back; verify Daily Briefing does NOT re-fetch (TTL cache active per ADR-014)</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Daily Briefing selectable in wizard, renders bullets, cache prevents repeated fetches within TTL.</expected>
+    </test>
+
+    <test name="Daily Briefing Renders in SpaarkeAi Workspace Pane (FR-25)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=spaarke_spaarkeai</url>
+      <steps>
+        <step>Navigate to the SpaarkeAi code page</step>
+        <step>Ensure the user's default layout includes Daily Briefing (set this up via standalone LegalWorkspace first if needed)</step>
+        <step>Verify Daily Briefing renders inside the WorkspacePane Home tab (via task 030's WorkspaceShell embed)</step>
+        <step>Verify visual parity with standalone LegalWorkspace</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Daily Briefing renders inside SpaarkeAi WorkspacePane identically to standalone LegalWorkspace.</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify Daily Briefing Card background, header, and bullet text all adapt to dark theme</step>
+        <step>Verify no hardcoded white/black colors in dark mode</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021. Dark mode renders correctly.</expected>
+    </test>
+
+    <test name="authenticatedFetch + Token Per-Request (ADR-028)">
+      <steps>
+        <step>Open browser DevTools → Network tab</step>
+        <step>Render Daily Briefing</step>
+        <step>Locate the `POST /api/ai/daily-briefing/narrate` request</step>
+        <step>Verify `Authorization: Bearer ...` header present</step>
+        <step>Verify React DevTools shows no `accessToken` in component state</step>
+      </steps>
+      <expected>Narrate request authenticated via per-request token; no snapshots stored in component state.</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    FULL rigor applies — net-new code touching the AI integration surface, with caching + auth + Fluent
+    v9 + dual-consumer (standalone LegalWorkspace + SpaarkeAi) considerations. Code-review + adr-check
+    at Step 9.5.
+  </execution>
+</task>

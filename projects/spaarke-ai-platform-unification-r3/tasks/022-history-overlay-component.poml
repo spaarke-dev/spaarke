@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Build HistoryOverlay (Claude-Code-style session list) and wire rightSlot button (FR-03)</title>
+    <phase>Phase B — Assistant pane</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010, 021</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, fluent-ui, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates a net-new component touching auth (BFF call) and a load-bearing .tsx file (ConversationPane). Performance NFR-03 (open &lt;200 ms, populate &lt;300 ms p95) + telemetry (FR-24) + ADR-028 auth invariants. FULL rigor required.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the `HistoryOverlay` component (Claude-Code-style right-side overlay) and wire it
+    into the ConversationPane's PaneHeader rightSlot via a `HistoryRegular` icon button.
+    The overlay lists up to 50 most recent chat sessions fetched from
+    `GET /api/ai/chat/sessions?limit=50` via `authenticatedFetch`. Selecting a session calls
+    `setChatSessionId(sessionId)` to load that session into SprkChat; overlay then closes.
+    Open animation MUST land in &lt;200 ms and the list MUST populate within &lt;300 ms p95
+    (NFR-03). Error telemetry per FR-24.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 developer comfortable building overlay/drawer surfaces, integrating
+    with `@spaarke/auth` for BFF calls, and emitting App Insights telemetry through the
+    error-only helper introduced in Phase A task 013.
+  </role>
+
+  <goal>
+    A net-new `HistoryOverlay.tsx` component in
+    `src/solutions/SpaarkeAi/src/components/conversation/` that renders a right-side overlay
+    listing up to 50 chat sessions (most recent first) with click-to-resume behavior. The
+    ConversationPane PaneHeader (from task 021) has its `rightSlot` populated with a
+    HistoryRegular icon button that toggles the overlay. Errors loading the session list
+    emit an App Insights event via the Phase A task 013 helper. The overlay open animation
+    is &lt;200 ms; list populated &lt;300 ms p95 for 50 items.
+  </goal>
+
+  <context>
+    <background>
+      FR-03 implements Owner Clarification OC-01: a Claude-Code-style side overlay (not a
+      popover or full-pane swap) replaces the previous "History" tab. Selecting a session
+      uses the existing `setChatSessionId` flow already provided by `useChatSession`
+      (preserves the data-refreshed restore semantics from R2 D-08). Auth must flow through
+      `authenticatedFetch` per ADR-028 INV-1..INV-8 — no token props, no snapshots. Error
+      telemetry uses the helper module from task 013 (`logTelemetryError`) — error-only per
+      FR-24 / OC-09.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">If overlay/drawer patterns are needed across multiple panes (currently only Assistant), keep `HistoryOverlay` solution-local UNTIL a second consumer surfaces. Reuse Fluent v9 `Drawer` / `OverlayDrawer` from `@fluentui/react-components`.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only. Overlay surface must use `tokens.colorNeutralBackground1` (or correct surface token); divider/border via `tokens.colorNeutralStroke1`. No hex, no `rgba()`.</constraint>
+    <constraint source="ADR-022">React 19. Use `useState` + `useTransition` (if appropriate) for the open/close animation. No legacy React patterns.</constraint>
+    <constraint source="ADR-025">`HistoryRegular` from `@fluentui/react-icons`. No new SVG web resources.</constraint>
+    <constraint source="ADR-028">All BFF calls use `authenticatedFetch` from `@spaarke/auth`. No `accessToken` props in `HistoryOverlay` API. Per-request `getAccessToken()` is opaque to this component — `authenticatedFetch` handles it.</constraint>
+    <constraint source="spec">NFR-03: Overlay open animation &lt;200 ms; list populated &lt;300 ms p95 for 50 items. NFR-05: WCAG 2.1 AA — keyboard-navigable, ARIA labels on the icon button + overlay.</constraint>
+    <constraint source="project">Error-only telemetry (OC-09 / FR-24). Emit ONE error event on session-list load failure with event name `History.LoadFailure`, properties include HTTP status + correlation id (if available). No happy-path events.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Scaffold HistoryOverlay.tsx">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx`. Use
+      Fluent v9 `OverlayDrawer` (or `Drawer` with `position="end"`). Export a props
+      interface: `{ open: boolean; onClose: () =&gt; void; onSelectSession: (sessionId: string) =&gt; void }`.
+      No `accessToken` prop. ARIA label "Chat history".
+    </step>
+    <step order="2" name="Fetch sessions via authenticatedFetch">
+      Inside the overlay, on `open === true`, call
+      `authenticatedFetch('/api/ai/chat/sessions?limit=50')` via the helper from
+      `@spaarke/auth` (use `buildBffApiUrl` from `.claude/patterns/auth/bff-url-normalization.md`).
+      Parse the response into a list of `{ sessionId, title, lastMessageAt }` (adapt to actual schema).
+      Store in local state with a `loading` flag.
+    </step>
+    <step order="3" name="Render session list with click handler">
+      Render the list using Fluent v9 list primitives or a simple stack of buttons. Each
+      item shows title + relative timestamp. Click handler: `onSelectSession(sessionId)`
+      followed by `onClose()`. Keyboard-navigable: Tab through items, Enter to select.
+    </step>
+    <step order="4" name="Error telemetry on load failure">
+      On `fetch` rejection or non-2xx response, call
+      `logTelemetryError('History.LoadFailure', { status, correlationId? })` from the helper
+      introduced by task 013. Render an inline error state in the overlay ("Couldn't load
+      history. Try again.") with a retry button.
+    </step>
+    <step order="5" name="Wire ConversationPane rightSlot">
+      Open `ConversationPane.tsx` (modified in task 021) and replace the placeholder
+      rightSlot with a `Button icon={&lt;HistoryRegular /&gt;}` that toggles a local
+      `historyOpen` state. Pass `historyOpen`, `onClose`, and `onSelectSession={setChatSessionId}`
+      to `&lt;HistoryOverlay /&gt;`. Render the overlay sibling-to the PaneHeader.
+    </step>
+    <step order="6" name="Performance verification">
+      In Vite dev, measure overlay open time via DevTools Performance tab (target &lt;200 ms
+      from click to fully painted overlay). Measure list populate time via Network tab + a
+      `performance.mark` around the fetch (target &lt;300 ms p95 for 50 items). Document
+      measurements in `notes/perf/022-history-overlay.md`.
+    </step>
+    <step order="7" name="Accessibility verification">
+      Tab through: trigger button receives focus and shows focus ring; Enter opens overlay;
+      overlay autofocuses the first session; Tab cycles within the overlay; Escape closes.
+      Screen-reader announces "Chat history, dialog" on open. Verify ARIA labels on the
+      icon button ("Show chat history") and overlay container.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ConversationPane.tsx + Phase A task 013 telemetry helper</tool>
+    <tool name="Write">Create HistoryOverlay.tsx</tool>
+    <tool name="Edit">Wire rightSlot in ConversationPane.tsx</tool>
+    <tool name="Grep">Find `authenticatedFetch` usages in the repo to model the call pattern</tool>
+    <tool name="Bash">Run `npm run build` against SpaarkeAi to verify no TS / lint errors</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r3/notes/perf/022-history-overlay.md</output>
+    <output type="report">Task completion report citing perf measurements and accessibility checks</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`HistoryOverlay.tsx` exists and exports a default React component with the props interface `{ open, onClose, onSelectSession }` — no `accessToken` prop.</criterion>
+    <criterion testable="true">The overlay fetches `/api/ai/chat/sessions?limit=50` via `authenticatedFetch` (verified by reading the code, not by snapshotting tokens).</criterion>
+    <criterion testable="true">Clicking a session in the overlay calls `onSelectSession(sessionId)` and then `onClose()` to close the overlay.</criterion>
+    <criterion testable="true">On fetch failure, `logTelemetryError('History.LoadFailure', { status, ... })` is called and an inline error state is rendered with a retry control.</criterion>
+    <criterion testable="true">`ConversationPane.tsx` renders a HistoryRegular icon button in its PaneHeader `rightSlot` that toggles the overlay.</criterion>
+    <criterion testable="true">Performance measurement (DevTools Performance + perf marks) shows overlay open &lt;200 ms and list populate &lt;300 ms p95 for 50 items — recorded in `notes/perf/022-history-overlay.md`.</criterion>
+    <criterion testable="true">Accessibility: keyboard-navigable (Tab/Enter/Escape), ARIA labels on the button and overlay; screen-reader announces "Chat history, dialog" on open.</criterion>
+    <criterion testable="true">Light + dark mode visual diff shows no token regressions; no hex/rgba literals in new code.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="overlay open + populate (FR-03)">
+      Click HistoryRegular in the Assistant PaneHeader rightSlot. Overlay slides in from
+      the right edge in &lt;200 ms; list of up to 50 sessions populates within &lt;300 ms p95.
+      Click a session: conversation in SprkChat replaces with that session's history;
+      overlay closes.
+    </test>
+    <test name="dark-mode compliance (NFR-06)">
+      Toggle dark mode and re-open the overlay. Verify surface background, dividers, and
+      text colors use Fluent v9 tokens — no hex literals leak. Contrast passes WCAG 2.1 AA.
+    </test>
+    <test name="error telemetry (FR-24)">
+      Force a 500 response from `/api/ai/chat/sessions?limit=50` (e.g., via DevTools network
+      override). Open the overlay; verify (a) inline error state with retry button,
+      (b) App Insights receives `History.LoadFailure` event with HTTP status property,
+      (c) no happy-path event is fired.
+    </test>
+    <test name="accessibility (NFR-05)">
+      Keyboard-only test: Tab to HistoryRegular → Enter opens overlay → first session
+      autofocused → Tab cycles → Enter selects → overlay closes. Escape from anywhere in
+      overlay closes it. Screen-reader announces correct ARIA labels.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 022" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

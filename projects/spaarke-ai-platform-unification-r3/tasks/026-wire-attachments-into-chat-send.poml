@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Wire attachments[] into outbound chat-message payload (FR-07 payload wiring)</title>
+    <phase>Phase B — Assistant pane</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001, 024, 025</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, ai, shared-components, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wires user-supplied content into an outbound BFF payload — directly affects AI prompt context. Auth + payload schema + telemetry surfaces all converge here. Gated by spike 001 outcome. FULL rigor mandatory.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire the `attachments` array from `useChatFileAttachment` (task 024) into the outbound
+    chat-message payload sent to `POST /api/ai/chat/sessions/{sessionId}/messages` from
+    `SprkChat.tsx` (post task 025). Behavior depends on the spike 001 memo at
+    `notes/spikes/001-fr07-attachments-payload.md`:
+    - IF spike says current endpoint already accepts `attachments[]`: send directly in this
+      task.
+    - IF spike says backend schema extension needed: stage the frontend wiring against the
+      planned schema, but DEFER the payload-send portion until Phase E (tasks 050/051) lands;
+      record this in `current-task.md` and mark this task BLOCKED pending Phase E.
+    Either way: clear attachments state after a successful send via `clearAll()`.
+  </prompt>
+
+  <role>
+    Full-stack engineer comfortable reading a BFF DTO contract, constructing a frontend
+    payload to match, and reasoning about spike-gated branching execution paths.
+  </role>
+
+  <goal>
+    `SprkChat.tsx`'s send-message handler includes an `attachments: ChatAttachment[]` field
+    in the outbound `POST /api/ai/chat/sessions/{sessionId}/messages` body when chips are
+    present. After a successful send, `clearAll()` resets the attachment state. End-to-end
+    test in Vite dev: attach 2 `.txt` files + ask "summarize" → AI reply references both
+    file contents. Error path: send failure with attachments still emits the existing error
+    telemetry properly, attachments are NOT cleared (user can retry).
+  </goal>
+
+  <context>
+    <background>
+      FR-07's full acceptance criterion is end-to-end: user picks 5 files → backend receives
+      `attachments` array of 5 → AI reply demonstrates knowledge of all 5. The hook (task
+      024) and toolbar (task 025) handle the UX side; this task is the wire that connects
+      them to the BFF. Spike 001 is the gatekeeper: if the endpoint already supports
+      `attachments[]`, this task is straightforward. If not, Phase E (tasks 050/051) extends
+      the endpoint first; this task stages the frontend wiring against the agreed schema
+      so it lands cleanly when Phase E completes.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/spikes/001-fr07-attachments-payload.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Wiring lives in `SprkChat.tsx` (shared lib). Do not introduce a SpaarkeAi-specific code path — the wiring must work for all consumers of SprkChat that opt into attachments.</constraint>
+    <constraint source="ADR-013">AI features extend the BFF in-process. Do not introduce a new service or a parallel send path. The single outbound call is `POST /api/ai/chat/sessions/{sessionId}/messages` with attachments included.</constraint>
+    <constraint source="ADR-021">No styling changes in this task. Logic-only edit.</constraint>
+    <constraint source="ADR-022">React 19. Use the existing send handler pattern; no parallel hooks.</constraint>
+    <constraint source="ADR-028">The send call uses `authenticatedFetch` (or whatever `useChatSession` / `sendMessage` already uses). MUST NOT pass `accessToken` as a parameter. Per-request token acquisition is opaque to this task.</constraint>
+    <constraint source="spec">FR-07 acceptance: AI reply demonstrates knowledge of attached file contents. NFR-04 caps (max 5, max 10 MB, allowed MIME) enforced at the hook (task 024) and reaffirmed on the backend per Phase E.</constraint>
+    <constraint source="project">Single-LLM-call invariant (D-01 from R2 lessons): exactly ONE LLM call per user turn. `attachments[]` flow into the single chat-message body — do NOT trigger a separate extraction LLM call.</constraint>
+    <constraint source="project">Spike 001 outcome is BLOCKING. If memo says backend extension needed, mark this task BLOCKED in TASK-INDEX (via the main session) and surface to user before proceeding past frontend staging.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read spike memo">
+      Open `projects/spaarke-ai-platform-unification-r3/notes/spikes/001-fr07-attachments-payload.md`.
+      Determine: YES (endpoint already accepts `attachments[]` — proceed end-to-end here) or
+      NO (backend extension needed — stage frontend only and surface block). Confirm the
+      exact field name + casing the backend expects.
+    </step>
+    <step order="2" name="Locate the send-message call site">
+      In `SprkChat.tsx`, find where `useChatSession.sendMessage` (or equivalent) is called.
+      Identify the payload object being constructed.
+    </step>
+    <step order="3" name="Add attachments to payload">
+      Extend the payload constructor to include `attachments: ChatAttachment[]` when
+      `attachments.length &gt; 0`. Field name + casing must match what the spike memo
+      identified. Omit the field entirely when no attachments (avoid sending `[]` if the
+      backend treats absent as "no attachments").
+    </step>
+    <step order="4" name="Branch on spike outcome">
+      IF spike = YES: leave the wiring active; proceed to end-to-end test in step 5.
+      IF spike = NO: wrap the new field in a feature flag (`ATTACHMENTS_PAYLOAD_ENABLED`)
+      defaulted to `false`; mark the task BLOCKED on Phase E in the completion report; do
+      not enable the flag until task 050 ships. Either way, the frontend code is committed.
+    </step>
+    <step order="5" name="Clear state on successful send">
+      After `sendMessage` resolves successfully, call `clearAll()` on the hook to reset
+      chips + attachments. On error, do NOT clear — leave the chips intact so the user can
+      retry. Confirm the existing error telemetry path (from task 022's helper) still fires
+      correctly when send fails.
+    </step>
+    <step order="6" name="End-to-end test (if spike = YES)">
+      In Vite dev with a running BFF: cold load → attach 2 .txt files referencing distinct
+      content (e.g., "the sky is blue" and "fish are gold") → send "Summarize the attached
+      files". Confirm the AI reply mentions both pieces of content. Repeat with 5 files +
+      mixed MIME types (txt, md, pdf, docx).
+    </step>
+    <step order="7" name="Frontend-only test (if spike = NO)">
+      In Vite dev with feature flag forced ON (locally), capture the outgoing request in
+      DevTools network tab. Confirm the payload includes `attachments[]` with the agreed
+      schema. Backend will reject — that's expected and documented; the task is staged for
+      Phase E.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spike memo + SprkChat.tsx send call site</tool>
+    <tool name="Edit">Extend payload constructor + add clearAll call</tool>
+    <tool name="Grep">Find the chat-message DTO type if needed for field-name confirmation</tool>
+    <tool name="Bash">Run `npm test` + smoke in Vite dev against running BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</output>
+    <output type="report">Task completion report stating (a) spike branch (YES / NO), (b) wiring lands active or staged behind flag, (c) end-to-end test result or staged-status note</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SprkChat.tsx` send handler includes an `attachments` field in the outbound payload when chips are present, using the exact field name + casing identified by spike 001.</criterion>
+    <criterion testable="true">After successful send, `clearAll()` resets the hook state; chips disappear from the UI.</criterion>
+    <criterion testable="true">After failed send, attachments state is NOT cleared; chips remain visible so user can retry.</criterion>
+    <criterion testable="true">IF spike = YES: end-to-end test with 5 mixed-MIME files passes — AI reply references content from all 5 files.</criterion>
+    <criterion testable="true">IF spike = NO: payload is constructed correctly per the agreed schema (verified in DevTools); feature flag default is OFF; task marked BLOCKED on Phase E.</criterion>
+    <criterion testable="true">Single-LLM-call invariant preserved: exactly ONE backend call per send (verified in network tab).</criterion>
+    <criterion testable="true">No `accessToken` props introduced; auth contract unchanged.</criterion>
+    <criterion testable="true">`npm run build` succeeds; existing tests pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="end-to-end FR-07 acceptance (if spike = YES)">
+      Cold load SpaarkeAi. Attach 5 .txt files with distinct content. Send "What's in each
+      file?". Verify (a) one outbound POST to `/api/ai/chat/sessions/{sessionId}/messages`
+      with `attachments` array of 5 items, (b) AI reply references content from all 5
+      files, (c) chips clear after send completes, (d) no second LLM call triggered.
+    </test>
+    <test name="payload-staged verification (if spike = NO)">
+      Force feature flag ON locally. Attach 2 .txt files. Send. Capture outbound request
+      in DevTools. Verify payload schema matches the agreed Phase E DTO. Backend rejection
+      is expected — document and move on.
+    </test>
+    <test name="error preserves attachments">
+      Force a 500 response (via DevTools override). Send a message with 2 attachments.
+      Verify (a) chips remain visible, (b) error telemetry fires, (c) user can retry.
+    </test>
+    <test name="single LLM call invariant (D-01)">
+      Attach 3 files + send. Verify exactly ONE backend call to the chat-messages endpoint
+      (no separate extraction call, no parallel preprocessing call).
+    </test>
+    <test name="dark-mode compliance (NFR-06, ADR-021)">
+      Toggle dark mode. Attach files. Send. Verify chip clear animation + send UX use
+      Fluent v9 tokens correctly. No hex leaks.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 026" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor. Spike 001 memo MUST be read
+    at Step 1 before any payload edits.
+  </execution>
+</task>

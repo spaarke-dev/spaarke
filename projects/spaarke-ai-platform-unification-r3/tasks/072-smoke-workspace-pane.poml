@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>UI smoke — Workspace pane FR-10..FR-16 in deployed Power Apps host</title>
+    <phase>Phase G — Deploy + Smoke</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>090</blocks>
+    <tags>pcf, frontend, e2e-test, fluent-ui, ui-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Manual + automated UI smoke testing in deployed environment. STANDARD rigor — no production code edits; FAILs spawn follow-up tasks.</rigor-reason>
+    <parallel-group>G-smoke</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Smoke against deployed environment — read-only. Parallel with sibling smoke tasks 071, 073, 074.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run UI smoke testing of the Workspace pane against FR-10..FR-16 acceptance criteria in
+    the deployed Power Apps host (deployed via task 070). Use the `ui-test` skill. Record
+    pass/fail per sub-criterion in
+    `projects/spaarke-ai-platform-unification-r3/notes/smoke-workspace.md`. Open follow-up
+    remediation tasks for any FAIL.
+  </prompt>
+
+  <role>
+    Frontend QA tester with `ui-test` skill familiarity and knowledge of the Workspace pane
+    layout (PaneHeader + embedded LegalWorkspace as Home tab + WorkspacePaneMenu sections +
+    Daily Briefing widget + empty-state message + 9-tab FIFO eviction + 6-template filtered
+    wizard).
+  </role>
+
+  <goal>
+    A smoke report at
+    `projects/spaarke-ai-platform-unification-r3/notes/smoke-workspace.md` records pass/fail
+    for each of the 7 Workspace pane sub-criteria (FR-10..FR-16). All sub-criteria PASS OR
+    follow-up remediation tasks exist for each FAIL.
+  </goal>
+
+  <context>
+    <background>
+      FR-10..FR-16 specify the Workspace pane layout: AppsListRegular icon + "Workspace"
+      title in PaneHeader; embedded LegalWorkspace as default Home tab; WorkspacePaneMenu
+      with Open/Home/Switch/Edit sections + dividers; FIFO eviction of oldest non-Home tab
+      when 9th widget opens; Layout Wizard launched from SpaarkeAi shows 6 templates while
+      standalone shows 9; Daily Briefing renders content; empty-state shows
+      "Nothing to see right now — enjoy your day"; dark-mode parity.
+    </background>
+    <relevant-files>
+      <file>Deployed SpaarkeAi instance (from task 070)</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md (FR-10..FR-16)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All 7 sub-criteria below must be PASS for this task to PASS. Any FAIL opens a remediation follow-up task and blocks task 090 wrap-up.</constraint>
+    <constraint source="project">Use the `ui-test` skill for automated checks; manual verification is acceptable for visual judgment items.</constraint>
+    <constraint source="spec">FR-25 / NFR-10 backwards compat: standalone LegalWorkspace must show 9 templates (this smoke task verifies the SpaarkeAi-side filtered 6 templates; the standalone 9 was verified in task 063).</constraint>
+    <constraint source="spec">FR-13 — MAX_WORKSPACE_TABS = 8 non-Home tabs. Opening a 9th widget triggers FIFO eviction of the oldest non-Home tab. Home tab is exempt from the cap.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm task 070 deploy success">
+      Read latest deploy memo at `projects/spaarke-ai-platform-unification-r3/notes/deploys/`.
+      Confirm success.
+    </step>
+    <step order="2" name="Open deployed SpaarkeAi Workspace pane">
+      Navigate to SpaarkeAi welcome state. Focus on the Workspace pane region.
+    </step>
+    <step order="3" name="Invoke ui-test per sub-criterion">
+      For each of the 7 sub-criteria, invoke `ui-test` skill or perform manual verification.
+      Capture evidence.
+    </step>
+    <step order="4" name="Aggregate results">
+      Write smoke report to `projects/spaarke-ai-platform-unification-r3/notes/smoke-workspace.md`.
+    </step>
+    <step order="5" name="Open remediation tasks for FAILs">
+      For any sub-criterion that FAILs, draft follow-up POML and add to TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Deploy memo, spec</tool>
+    <tool name="Skill">`ui-test` skill</tool>
+    <tool name="Write">Smoke report; follow-up POMLs</tool>
+    <tool name="Edit">TASK-INDEX.md if opening follow-up tasks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/smoke-workspace.md</output>
+    <output type="docs">Follow-up POML tasks for any FAIL</output>
+    <output type="report">Task completion report with roll-up verdict</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-10: Workspace PaneHeader icon is `AppsListRegular`.</criterion>
+    <criterion testable="true">FR-11: LegalWorkspace experience embedded as default Home tab — renders the same widgets as standalone.</criterion>
+    <criterion testable="true">FR-12: WorkspacePaneMenu shows Open / Home / Switch / Edit sections with dividers between sections.</criterion>
+    <criterion testable="true">FR-13: Opening a 9th widget evicts the oldest non-Home tab (FIFO); Home tab is preserved.</criterion>
+    <criterion testable="true">FR-14: Layout Wizard launched from SpaarkeAi shows EXACTLY 6 templates (standalone shows 9 per task 063 verification).</criterion>
+    <criterion testable="true">FR-15: Daily Briefing widget renders content (calls the BFF endpoint successfully).</criterion>
+    <criterion testable="true">FR-16: Empty state displays the literal text "Nothing to see right now — enjoy your day".</criterion>
+    <criterion testable="true">Dark-mode parity: theme toggle produces no contrast regressions on the Workspace pane.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="AppsListRegular icon in PaneHeader">
+      Confirm the Workspace PaneHeader displays `AppsListRegular` in
+      `tokens.colorBrandForeground1`.
+    </test>
+    <test name="LegalWorkspace embedded as Home tab">
+      Confirm the Workspace pane shows a "Home" tab containing the embedded LegalWorkspace
+      experience (widgets identical to the standalone code page rendering at this width).
+    </test>
+    <test name="WorkspacePaneMenu sections + dividers">
+      Open the WorkspacePaneMenu. Confirm four sections appear in order: Open, Home, Switch,
+      Edit, with dividers between each.
+    </test>
+    <test name="FIFO eviction at 9th widget">
+      <steps>
+        <step>Open 8 non-Home widgets (so 9 tabs total including Home).</step>
+        <step>Open a 9th non-Home widget.</step>
+        <step>Confirm the OLDEST non-Home widget is evicted (no longer in the tab strip).</step>
+        <step>Confirm Home tab is still present.</step>
+      </steps>
+    </test>
+    <test name="Layout Wizard shows 6 templates from SpaarkeAi">
+      Launch the Layout Wizard from inside SpaarkeAi (not standalone). Confirm EXACTLY 6
+      templates are visible.
+    </test>
+    <test name="Daily Briefing renders content">
+      Verify Daily Briefing widget on welcome state renders content (not an empty/error
+      state). Confirm BFF call succeeds (network tab shows 200).
+    </test>
+    <test name="Empty state message">
+      Trigger an empty state (e.g., no recent activity / appropriate test scenario per spec).
+      Confirm the literal text "Nothing to see right now — enjoy your day" renders.
+    </test>
+    <test name="Dark-mode parity">
+      Toggle dark mode. Confirm Workspace pane background, text, dividers, and embedded
+      LegalWorkspace adapt via Fluent v9 tokens. No contrast regression.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill. Smoke checks invoke the
+    `ui-test` skill.
+  </execution>
+</task>
