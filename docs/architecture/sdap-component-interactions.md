@@ -97,10 +97,10 @@ Sequence: Dataverse Session → PCF/Code Page (MSAL.js) → BFF API (validate JW
 
 | Component | Path | Role |
 |-----------|------|------|
-| PCF MSAL config | `src/client/pcf/*/services/auth/msalConfig.ts` | Token acquisition config |
-| Code Page auth | `src/client/shared/` (`@spaarke/auth`) | Bootstrap: resolveRuntimeConfig → ensureAuthInitialized |
+| PCF + Code Page auth (v2 canonical) | `src/client/shared/Spaarke.Auth/` (`@spaarke/auth`) | Bootstrap: `await initAuth({...})` once in main.tsx/index.tsx; components consume via `useAuth()` + `authenticatedFetch` (ADR-028). 3 of 4 PCFs migrated; `UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts` is the V3 cleanup target. |
 | JWT validation | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs` | Auth middleware registration |
-| Graph client factory | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | OBO exchange + app-only |
+| Graph client factory | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | OBO (delegated) + Managed Identity via `DefaultAzureCredential` (app-only canonical per ADR-028 when `Graph__ManagedIdentity__Enabled=true`); `ClientSecretCredential` is local-dev fallback |
+| Audit enrichment | `src/server/api/Sprk.Bff.Api/Middleware/AuditEnrichmentMiddleware.cs` | Per-request enrichment with `oid`, `appid`, `obo`, `tenantId`, `correlationId` (Phase C) |
 
 **Change impact:**
 
@@ -368,9 +368,11 @@ Changing a Service Bus queue name requires updates in both `appsettings.json` co
 
 Endpoint filters execute in registration order. Authorization filters must run before business logic filters (e.g., `IdempotencyFilter`). Adding a filter in the wrong position can cause authorization bypasses or duplicate processing.
 
-### 9. Code Page Auth Bootstrap Ordering
+### 9. Code Page Auth Bootstrap Ordering (Auth v2 — [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))
 
-Code Pages using `@spaarke/auth` must follow strict initialization order: `resolveRuntimeConfig()` → `setRuntimeConfig()` → `ensureAuthInitialized()` → render. Calling runtime config getters at module level (before bootstrap) throws because the config is not yet loaded.
+Code Pages using `@spaarke/auth` must `await initAuth({...})` once before `createRoot().render`. Calling runtime config getters at module level (before `initAuth`) throws because the config is not yet loaded.
+
+**Known gotcha**: sync vs async name collisions in consumer `authInit.ts` — every consumer migration that adds a new field to `initAuth()` MUST check the consumer's local `runtimeConfig.ts` exports (e.g., a sync `getTenantId`) for name collisions with `initAuth()` parameters. TypeScript does NOT flag this; runtime fails with `Promise where string expected`. Use import aliases (e.g., `import { getTenantId as getRuntimeTenantId } from './runtimeConfig'`).
 
 ### 10. DI Module Registration Dependencies
 

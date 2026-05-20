@@ -16,8 +16,6 @@
 | [dataverse-obo.md](dataverse-obo.md) | Dataverse OBO token exchange | 2026-04-05 | Verified |
 | [service-principal.md](service-principal.md) | App-only auth. Note: v2 migrated most app-only flows to `DefaultAzureCredential` (managed identity) — see ADR-028. | 2026-05-19 | Verified (v2) |
 | [token-caching.md](token-caching.md) | Token caching — Redis OBO (server) canonical; client-side cascade RETIRED in v2 | 2026-05-19 | Verified (server portion only) |
-| ⛔ DEPRECATED-msal-client | Archived 2026-05-19 — see [`.claude/archive/2026-05-19/DEPRECATED-msal-client.md`](../../archive/2026-05-19/DEPRECATED-msal-client.md). Pattern superseded by ADR-028 (function-based `useAuth()`). | — | Archived |
-| ⛔ DEPRECATED-spaarke-auth-initialization | Archived 2026-05-19 — see [`.claude/archive/2026-05-19/DEPRECATED-spaarke-auth-initialization.md`](../../archive/2026-05-19/DEPRECATED-spaarke-auth-initialization.md). Bootstrap superseded by `useAuth()` in ADR-028. | — | Archived |
 | [xrm-webapi-vs-bff-auth.md](xrm-webapi-vs-bff-auth.md) | Decision: Xrm.WebApi vs BFF auth | 2026-04-05 | Verified |
 | [bff-url-normalization.md](bff-url-normalization.md) | **CRITICAL**: BFF URL construction via `buildBffApiUrl()` — unchanged in v2 | 2026-05-19 | Verified (v2) |
 

@@ -35,6 +35,24 @@ Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 | Resource Group | `spe-infrastructure-westus2` |
 | Health Check | `https://spe-api-dev-67e2xz.azurewebsites.net/healthz` |
 | Deploy Script | `scripts/Deploy-BffApi.ps1` |
+| Auth setup (operator runbook) | [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) — 10-section runbook incl. §7 Exchange ApplicationAccessPolicy |
+| Canonical auth ADR | [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — function-based contract, MI, HMAC webhooks, named API keys |
+
+---
+
+## Auth Setup (post-deploy verification)
+
+After every fresh-env deploy OR cutover involving MI/auth changes, verify per [`auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §9 smoke tests:
+- §9a `/healthz` returns 200
+- §9b OBO endpoint round-trip (proves JWT validation + OBO exchange)
+- §9c `/healthz/dataverse/doc/{id}` (proves MI → Dataverse)
+- §9d EXO mailbox access — no 403 in `InboundPollingBackupService` logs (if Email/Communication enabled)
+- §9e Browser MSAL regression on any Spaarke PCF/Code Page (no popup, tenant-specific authority)
+
+**Common post-deploy auth failure modes** (not deploy-script issues):
+- MI deploy succeeds but Graph 403 → MI missing `Sites.Selected` or other app role grants. See `auth-deployment-setup.md` §5.
+- MI deploy succeeds but Dataverse 401 → MI not registered as Dataverse Application User in the target env. See §6.
+- Graph `Mail.*` returns `ErrorAccessDenied` → Exchange `ApplicationAccessPolicy` not configured for BFF MI or app reg. See §7.
 
 ---
 

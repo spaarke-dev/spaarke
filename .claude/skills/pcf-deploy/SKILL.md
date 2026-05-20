@@ -76,26 +76,38 @@ Every deployment MUST increment the version in ALL 5 files:
 
 **If you forget #1 (ControlManifest.Input.xml), Dataverse silently keeps the old control.**
 
-### Async Init in ReactControl — Auth Must Live in the Component (CRITICAL)
+### Async Init in ReactControl — Auth Must Live in the Component (CRITICAL — per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md))
 
 For `ComponentFramework.ReactControl` (virtual controls), `notifyOutputChanged()` does **NOT** reliably trigger `updateView()`. If the control has no two-way bound field, the framework may ignore the call entirely.
 
-**Rule**: Any async initialization (auth, config fetching) that needs to trigger a re-render MUST use `useState` + `useEffect` inside the React component — NOT the PCF class `init()`.
+**Rule**: Any async initialization (auth, config fetching) that needs to trigger a re-render MUST use `useState` + `useEffect` inside the React component — NOT the PCF class `init()`. Use the v2 contract from `@spaarke/auth`.
 
 ```typescript
-// ✅ CORRECT — auth in React component useEffect
+// ✅ CORRECT — Spaarke Auth v2 contract in React component useEffect
+import { initAuth, useAuth, authenticatedFetch } from '@spaarke/auth';
+
 const [isAuthInitialized, setIsAuthInitialized] = useState(false);
 useEffect(() => {
-  initializeAuth(...).then(() => setIsAuthInitialized(true));
+  initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope })
+    .then(() => setIsAuthInitialized(true));
 }, []);
+// Inside components: const { getAccessToken } = useAuth();
+// For BFF calls: await authenticatedFetch('/api/...', { method: 'POST', body: ... })
+
+// ❌ WRONG — instantiating PublicClientApplication directly
+// new PublicClientApplication({...})  // bypasses @spaarke/auth singleton (INV-7)
 
 // ❌ WRONG — auth in PCF class, triggers notifyOutputChanged()
 // this._authInitialized = true;
 // this.notifyOutputChanged(); // ← updateView() is NOT called for read-only ReactControl
+
+// ❌ WRONG — passing accessToken as a typed prop (function-based contract retired this)
+// <MyComponent accessToken={token} />  // use authenticatedFetch instead
 ```
 
-**Full pattern**: See `.claude/patterns/pcf/control-initialization.md` § "Async Initialization"
-**Canonical implementations**: `SemanticSearchControl.tsx`, `RelatedDocumentCount.tsx`
+**Full pattern**: See `.claude/patterns/pcf/control-initialization.md` § "Async Initialization" + `.claude/patterns/auth/spaarke-sso-binding.md` (INV-1..INV-8) + `.claude/adr/ADR-028-spaarke-auth-architecture.md`
+**Canonical implementations**: `SemanticSearchControl.tsx`, `DocumentRelationshipViewer.tsx`, `RelatedDocumentCount.tsx`
+**Pre-v2 holdout (V3 cleanup target)**: `UniversalQuickCreate` still uses its own local `MsalAuthProvider.ts` — do NOT copy this pattern for new PCFs.
 
 ---
 

@@ -245,13 +245,13 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 | Procedure-surface changelog | [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md) |
 | Architecture (subsystems, design) | [`docs/architecture/`](docs/architecture/) — includes `AI-ARCHITECTURE.md`, `auth-azure-resources.md` |
 | Coding standards (cross-cutting conventions) | [`docs/standards/`](docs/standards/) — `CODING-STANDARDS.md`, `INTEGRATION-CONTRACTS.md`, `ANTI-PATTERNS.md` |
-| Operational guides (deploy, configure, troubleshoot) | [`docs/guides/`](docs/guides/) — 40+ guides incl. `PCF-DEPLOYMENT-GUIDE.md`, `DATAVERSE-MCP-INTEGRATION-GUIDE.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md` |
+| Operational guides (deploy, configure, troubleshoot) | [`docs/guides/`](docs/guides/) — 40+ guides incl. `auth-deployment-setup.md`, `PCF-DEPLOYMENT-GUIDE.md`, `DATAVERSE-MCP-INTEGRATION-GUIDE.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md` |
 | Development procedures (test, CI/CD, code review) | [`docs/procedures/`](docs/procedures/) — `testing-and-code-quality.md`, `ci-cd-workflow.md`, `context-recovery.md` |
 | Dataverse data model (entity schemas, ERD) | [`docs/data-model/`](docs/data-model/) |
 | Azure resources (endpoints, names, conventions) | [`docs/architecture/auth-azure-resources.md`](docs/architecture/auth-azure-resources.md) |
 | Project initialization workflow | [`/design-to-spec`](.claude/skills/design-to-spec/) → [`/project-pipeline`](.claude/skills/project-pipeline/) |
 | Active project state | `projects/{name}/current-task.md` |
-| Active auth v2 design (pre-ADR-027) | [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md) — supersedes auth patterns marked `DEPRECATED-*` |
+| Auth architecture (Spaarke Auth v2 — canonical) | [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](.claude/adr/ADR-028-spaarke-auth-architecture.md), [`docs/guides/auth-deployment-setup.md`](docs/guides/auth-deployment-setup.md), [`.claude/patterns/auth/spaarke-sso-binding.md`](.claude/patterns/auth/spaarke-sso-binding.md) (design rationale archive: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)) |
 | Active skill audit + sign-off | [`.claude/AUDIT-FINDINGS-SKILLS.md`](.claude/AUDIT-FINDINGS-SKILLS.md), [`.claude/AUDIT-FINDINGS-CLAUDEMD.md`](.claude/AUDIT-FINDINGS-CLAUDEMD.md) |
 | Researcher subagent (deep-dive Microsoft platform topics) | [`.claude/agents/researcher.md`](.claude/agents/researcher.md) |
 | Reversibility archive (removed content preserved by date) | [`.claude/archive/`](.claude/archive/) |

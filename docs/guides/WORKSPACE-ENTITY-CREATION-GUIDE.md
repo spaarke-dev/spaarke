@@ -57,8 +57,8 @@ The Legal Workspace provides multi-step wizards for creating Dataverse entity re
 | **MatterService** | `components/CreateMatter/matterService.ts` | Matter-specific orchestrator (entity payload, follow-on actions) |
 | **ProjectService** | `components/CreateProject/projectService.ts` | Project-specific orchestrator |
 | **xrmProvider.ts** | `services/xrmProvider.ts` | Frame-walk to find Xrm global, user ID, SPE container resolution |
-| **bffAuthProvider.ts** | `services/bffAuthProvider.ts` | OBO token acquisition for BFF API calls |
-| **runtimeConfig.ts** | `config/runtimeConfig.ts` | BFF base URL and MSAL configuration |
+| **`@spaarke/auth`** | shared library | OBO token acquisition for BFF API calls — wizards call `authenticatedFetch` from `@spaarke/auth` per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md). The legacy `services/bffAuthProvider.ts` was deleted in Auth v2 task 031. |
+| **runtimeConfig.ts** | `config/runtimeConfig.ts` | BFF base URL and MSAL configuration (typed accessors consumed by `initAuth()`) |
 
 ---
 
@@ -207,9 +207,9 @@ Results are cached per entity for the session. The `_resolveNavProp()` helper fa
 
 ### BFF API (SPE + AI Operations)
 
-- `bffAuthProvider.ts → authenticatedFetch()` acquires an OBO token
-- Token flow: User's Entra ID token → BFF → Graph API (OBO exchange)
-- BFF base URL configured in `runtimeConfig.ts`
+- `authenticatedFetch` from `@spaarke/auth` (v2 contract per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)) acquires the user JWT; BFF performs OBO exchange to Graph
+- Token flow: User's Entra ID token (via MSAL) → BFF (validates JWT) → Graph API (OBO exchange)
+- BFF base URL configured in `runtimeConfig.ts` (typed accessor consumed by `initAuth()`)
 
 ### Required Permissions
 
@@ -356,10 +356,10 @@ components/CreateProject/
 │   └── projectService.ts        # Project-specific orchestrator
 services/
 │   ├── EntityCreationService.ts  # Re-export from shared lib
-│   ├── xrmProvider.ts            # Xrm frame-walk, userId, container resolution
-│   └── bffAuthProvider.ts        # OBO token acquisition for BFF
+│   └── xrmProvider.ts            # Xrm frame-walk, userId, container resolution
+                                  # Auth: @spaarke/auth (authenticatedFetch) per ADR-028 — legacy bffAuthProvider.ts deleted in v2 task 031
 config/
-│   └── runtimeConfig.ts              # BFF base URL configuration
+│   └── runtimeConfig.ts              # BFF base URL + typed accessors for initAuth()
 ```
 
 ### BFF API (Server-Side)

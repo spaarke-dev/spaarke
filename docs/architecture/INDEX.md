@@ -11,13 +11,15 @@ This directory contains comprehensive architecture documentation covering system
 
 ### Authentication & Authorization
 
+> **Canonical v2 references**: [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (architecture + constraints), [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) (operator runbook with §7 Exchange ApplicationAccessPolicy), [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) (MSAL INV-1..INV-8). The architecture docs below were updated 2026-05-19/20 to align with Auth v2.
+
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
-| [auth-security-boundaries.md](auth-security-boundaries.md) | Security boundary definitions and trust zones | 2026-04-05 | 2026-04-05 | Current |
-| [AUTH-AND-BFF-URL-PATTERN.md](AUTH-AND-BFF-URL-PATTERN.md) | BFF URL normalization, auth cascade, PCF/Code Page auth init, authenticatedFetch retry semantics | 2026-04-02 | 2026-04-05 | Verified |
-| [auth-performance-monitoring.md](auth-performance-monitoring.md) | Auth performance metrics and monitoring (illustrative — see doc for actual OBO cache implementation) | 2026-04-05 | 2026-04-05 | Current |
+| [auth-security-boundaries.md](auth-security-boundaries.md) | Security boundary definitions and trust zones (Boundary 7 updated to v2 MSAL.localStorage model) | 2026-05-19 | 2026-05-19 | Verified (v2) |
+| [AUTH-AND-BFF-URL-PATTERN.md](AUTH-AND-BFF-URL-PATTERN.md) | BFF URL normalization + v2 two-layer token acquisition (replaces 6-strategy cascade) | 2026-05-19 | 2026-05-19 | Verified (v2) |
+| [auth-performance-monitoring.md](auth-performance-monitoring.md) | Auth performance metrics + monitoring (retired strategy rows removed) | 2026-05-19 | 2026-05-19 | Verified (v2) |
 | [auth-AI-azure-resources.md](auth-AI-azure-resources.md) | AI resource endpoints, models, CLI commands | 2026-04-05 | 2026-04-05 | Current |
-| [auth-azure-resources.md](auth-azure-resources.md) | Full Azure resource inventory | 2026-04-05 | 2026-04-05 | Current |
+| [auth-azure-resources.md](auth-azure-resources.md) | Full Azure resource inventory (server-side MI guidance) | 2026-04-05 | 2026-05-20 | Verified (v2) |
 | [uac-access-control.md](uac-access-control.md) | UAC access control patterns | 2026-03-16 | 2026-04-05 | Verified |
 
 ### SDAP (SharePoint Document Access Platform)

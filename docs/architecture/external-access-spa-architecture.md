@@ -16,6 +16,8 @@ External users are **Azure AD B2B guests** in the main Spaarke workforce tenant.
 
 The SPA source lives at `src/client/external-spa/`. It is built with Vite, inlined into a single HTML file via `vite-plugin-singlefile`, and deployed as a Dataverse web resource (`sprk_externalworkspace`).
 
+> **Documented exception to [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)**: This SPA intentionally uses MSAL directly with `sessionStorage` rather than `@spaarke/auth` with `localStorage` (the internal v2 contract). Rationale: external B2B guest threat model differs from internal users (kiosk-shared devices possible, shorter session expectations, separate consent flow). Do NOT migrate this SPA to `@spaarke/auth`. Do NOT replicate this `sessionStorage` + direct-MSAL pattern in internal Spaarke surfaces.
+
 ---
 
 ## Component Structure

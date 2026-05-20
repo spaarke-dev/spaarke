@@ -73,6 +73,7 @@ public class SpeFileStore
 | [ADR-003](ADR-003-authorization-seams.md) | Storage seam for authorization |
 | [ADR-005](ADR-005-flat-storage.md) | Flat storage model |
 | [ADR-010](ADR-010-di-minimalism.md) | Concrete registration |
+| [ADR-028](ADR-028-spaarke-auth-architecture.md) | Graph client constructed by `IGraphClientFactory` uses `DefaultAzureCredential` (managed identity) for app-only; OBO for delegated |
 
 ---
 

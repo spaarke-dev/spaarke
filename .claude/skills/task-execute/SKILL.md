@@ -326,7 +326,7 @@ FOR each pattern in <knowledge><patterns>:
 |-----------|-------------------|
 | `bff-api`, `api` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` |
 | `pcf`, `react` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` |
-| `auth`, `oauth` | `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` |
+| `auth`, `oauth` | `.claude/patterns/auth/spaarke-sso-binding.md` (canonical v2), `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` + ADR-028 + `docs/guides/auth-deployment-setup.md` |
 | `dataverse`, `plugin` | `.claude/patterns/dataverse/plugin-structure.md` |
 | `cache` | `.claude/patterns/caching/distributed-cache.md` |
 | `testing` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` |

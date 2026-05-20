@@ -48,18 +48,20 @@ Each Code Page follows this layout:
 
 ## Data Flow
 
-### Auth Bootstrap Sequence
+### Auth Bootstrap Sequence (Spaarke Auth v2 — [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))
 
 Every Code Page follows the same async bootstrap pattern before rendering. The sequence resolves runtime configuration from Dataverse Environment Variables -- no build-time `.env.production` values are used for BFF URL or MSAL client ID.
 
 1. **Parse URL parameters**: Unwrap Dataverse `?data=encodedString` envelope into flat params
 2. **Resolve record context**: Extract entity IDs from URL params, Dataverse form pass-through (`?id=`), or parent Xrm frame-walk
-3. **`resolveRuntimeConfig()`**: Queries Dataverse Environment Variables for BFF base URL, MSAL client ID, and OAuth scope (from `@spaarke/auth`)
-4. **Set window globals**: `window.__SPAARKE_MSAL_CLIENT_ID__` and `window.__SPAARKE_BFF_BASE_URL__` so `@spaarke/auth` internal `resolveConfig()` picks them up
-5. **Initialize MSAL via `@spaarke/auth`**: Calls `initAuth()` with the runtime-resolved config. **DO NOT** instantiate `PublicClientApplication` directly — all Code Pages share `SpaarkeAuthProvider` so tokens flow through the 6-strategy chain (Cache, SessionStorage, Bridge, Xrm, MsalSilent, MsalPopup). MSAL config (binding 2026-05-12): `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific `authority` resolved via `resolveTenantFromXrm()`. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
-6. **`createRoot(container).render(<ThemeRoot />)`**: React 19 render with FluentProvider theme wrapper
+3. **Resolve runtime config**: Read Dataverse Environment Variables for BFF base URL, MSAL client ID, OAuth scope, **and `sprk_TenantId` (required in v2 — Xrm frame-walk is fallback only)** via `@spaarke/auth` typed accessors
+4. **`await initAuth({...})`**: Single call to `initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope })` from `@spaarke/auth`. Library derives `authority` from `tenantId` (omit authority per INV-3/INV-6). **DO NOT** instantiate `PublicClientApplication` directly. **DO NOT** set `window.__SPAARKE_BFF_TOKEN__` or any token-transport globals (retired in Phase A). Internally `@spaarke/auth` composes `InMemoryCache` (JWT exp validated with 5-min buffer) over `BrowserMsalStrategy`. MSAL config is binding (INV-1..INV-8): `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific authority. Cross-tab/iframe sharing via MSAL's `localStorage` cache (browser SOP). See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
+5. **`createRoot(container).render(<ThemeRoot />)`**: React 19 render with FluentProvider theme wrapper
+6. **Inside components**: use `useAuth()` for token access; use `authenticatedFetch` for BFF calls (handles bearer + 401 retry). Never `accessToken: string` props.
 
-> **Bundling reality**: `@spaarke/auth` is bundled at build time into each Code Page's `index.html`. Changes to the library require rebuild + redeploy of every consumer — see canonical doc for the rebuild procedure.
+> **Bundling reality (INV-8)**: `@spaarke/auth` is bundled at build time into each Code Page's `index.html`. Changes to the library require rebuild + redeploy of every consumer — see canonical doc for the rebuild procedure.
+
+> **Pre-v2 historical**: The retired 3-step bootstrap (`resolveRuntimeConfig` → `setRuntimeConfig` → `ensureAuthInitialized`) and the 6-strategy cascade (`CacheStrategy` → `SessionStorageStrategy` → `BridgeStrategy` → `XrmStrategy` → `MsalSilentStrategy` → `MsalPopupStrategy`) were deleted in Spaarke Auth v2 Phase A. MSAL `localStorage` covers what `SessionStorageStrategy` + `BridgeStrategy` provided via browser SOP. See [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) §"What was retired".
 
 ### Theme Detection
 

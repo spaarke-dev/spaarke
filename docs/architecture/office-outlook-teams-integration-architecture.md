@@ -14,6 +14,8 @@ The SDAP Office Add-ins provide integration between Microsoft Office application
 
 The add-ins are React 18 task pane applications hosted on Azure Static Web Apps. They authenticate via MSAL.js using the Dialog API (not NAA), call the BFF API for all backend operations, and use a multi-stage Service Bus pipeline for asynchronous file processing, AI profiling, and search indexing. A Host Adapter pattern (`IHostAdapter`) abstracts differences between Outlook and Word, making UI components portable across both hosts.
 
+> **Documented exception to [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)**: Office Add-ins use MSAL Dialog API + in-memory token cache, rather than the `@spaarke/auth` `useAuth()` + `localStorage` pattern used by internal PCFs and Code Pages. Rationale: Office task pane lifecycle is transient (created/destroyed per session); `localStorage` cross-tab sharing has no analog in the Office host process model. Phase B4 added `OfficeNaaStrategy` to `@spaarke/auth` for future migration to Nested App Authentication; tasks 081/082 fixed token-staleness via per-call `getAccessToken()`. Full migration to `useAuth()` is deferred to V3 Phase H — see [`projects/spaarke-auth-v3-and-hardening/design.md`](../../projects/spaarke-auth-v3-and-hardening/design.md).
+
 ### Key Capabilities
 
 - **Email Artifact Capture**: Save emails with full metadata (sender, recipients, dates, subjects)

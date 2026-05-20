@@ -1,8 +1,16 @@
 # Spaarke Document Intelligence - Customer Deployment Guide
 
 > **Version**: 2.1
-> **Date**: 2026-04-05
+> **Date**: 2026-04-05 (Auth v2 callout added 2026-05-20)
 > **Audience**: IT Administrators and Technical Staff
+
+---
+
+> **⚠️ Auth v2 Update (2026-05-19, per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))**
+>
+> Spaarke Auth v2 changed the canonical auth model. For the **auth-specific** portion of customer deployment (Dataverse env vars including `sprk_TenantId`, App Service `Graph__ManagedIdentity__Enabled=true`, webhook signing keys, MI Graph permission grants, Dataverse Application User registration of the MI, Exchange ApplicationAccessPolicy when Email/Communication modules enabled), follow [`auth-deployment-setup.md`](auth-deployment-setup.md) as the canonical operator runbook. The MI-first model **supersedes** the `Dataverse__ClientSecret` Key Vault patterns shown in this guide for production environments.
+>
+> This guide remains canonical for: SPE container provisioning, Dataverse solution import, Power Pages portal setup, end-user training. The "Step 3 / Step 4" auth/secret sections are pre-v2 reference and should be cross-checked against `auth-deployment-setup.md`.
 
 ---
 
@@ -135,7 +143,7 @@ Spaarke uses an **environment-agnostic build** strategy. All client-side compone
 
 **How runtime resolution works:**
 
-At startup, each client component calls `resolveRuntimeConfig()` (from the `@spaarke/auth` shared library), which:
+At startup, each client component calls `await initAuth({...})` from the `@spaarke/auth` shared library (per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)), passing values resolved from typed accessors. Internally, the library:
 1. Queries the Dataverse Web API to read all `sprk_*` Environment Variables
 2. Caches the result in memory for the session lifetime
 3. Throws a clear error if any required variable is missing (no silent dev fallbacks)

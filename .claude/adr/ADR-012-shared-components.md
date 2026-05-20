@@ -72,8 +72,8 @@ Supporting types: `UploadOptions`, `UploadResult`, `DialogOptions`, `DialogResul
 | `createXrmDataService()` | Xrm.WebApi (Code Pages in Dataverse) |
 | `createXrmUploadService(bffBaseUrl)` | BFF API upload endpoints |
 | `createXrmNavigationService()` | Xrm.Navigation |
-| `createBffDataService(authFetch, bffBaseUrl)` | BFF API (Power Pages SPA) |
-| `createBffUploadService(authFetch, bffBaseUrl)` | BFF API (SPA) |
+| `createBffDataService(authenticatedFetch, bffBaseUrl)` | BFF API (Power Pages SPA) |
+| `createBffUploadService(authenticatedFetch, bffBaseUrl)` | BFF API (SPA) |
 | `createBffNavigationService(navigate?)` | SPA router |
 | `createMockDataService()` | jest.fn() stubs for unit tests |
 | `createMockUploadService()` | jest.fn() stubs |
@@ -206,6 +206,7 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 | [ADR-021](ADR-021-fluent-design-system.md) | All components use Fluent v9 tokens |
 | [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF uses React 16 (platform); Code Pages use React 19 (bundled) |
 | [ADR-026](ADR-026-full-page-custom-page-standard.md) | Build tooling for Code Pages (Vite + singlefile) |
+| [ADR-028](ADR-028-spaarke-auth-architecture.md) | BFF service factories accept `authenticatedFetch` from `@spaarke/auth` per function-based contract |
 
 ---
 

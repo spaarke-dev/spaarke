@@ -377,7 +377,7 @@ Is this a full production release to existing environments?
 | `-SkipPhase` | string[] | none | `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation` |
 | `-SkipBuild` | switch | $false | Shortcut for `-SkipPhase Build` |
 | `-StopOnFailure` | bool | $true | Stop remaining environments on failure |
-| `-ClientSecret` | string | from env var | Service principal secret for Dataverse |
+| `-ClientSecret` | string | (none — uses Managed Identity by default per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md)) | Service principal secret for Dataverse — **only required when MI is not configured** for the target environment (local dev fallback). On Azure-hosted environments with `Graph__ManagedIdentity__Enabled=true`, the BFF MI is the Dataverse Application User. See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §6. |
 | `-WhatIf` | switch | $false | Preview without executing |
 
 ---

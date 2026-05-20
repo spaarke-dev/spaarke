@@ -20,6 +20,6 @@ Opening dialogs, side panels, or standalone pages from PCF controls or Dataverse
 ## Key Rules
 - Open Code Page: `Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: "sprk_pagename", data: params }, { target: 2 })`
 - Pass data via URL params (`data` field) — parse with `new URLSearchParams(window.location.search)`
-- Code Page bootstrap: `resolveRuntimeConfig()` → `setRuntimeConfig()` → `ensureAuthInitialized()` → `render`
+- Code Page bootstrap: `await initAuth({...})` from `@spaarke/auth` before `createRoot().render` (v2 contract per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md)); consume tokens via `useAuth()` / `authenticatedFetch`
 - Side panels: `Xrm.App.sidePanes.createPane()` with `webresourceName`
 - MUST NOT use custom page + PCF wrapper pattern for standalone dialogs

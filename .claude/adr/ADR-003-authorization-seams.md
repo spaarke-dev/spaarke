@@ -77,6 +77,7 @@ public class TeamMembershipRule : IAuthorizationRule
 | [ADR-007](ADR-007-spefilestore.md) | SpeFileStore as storage seam |
 | [ADR-008](ADR-008-endpoint-filters.md) | Endpoint filters call auth |
 | [ADR-009](ADR-009-redis-caching.md) | Cache data, not decisions |
+| [ADR-028](ADR-028-spaarke-auth-architecture.md) | Spaarke Auth v2 supplies the validated user identity (`oid`, `tenantId`, `appid`, OBO flag) that feeds `AuthContext` consumed by `IAuthorizationRule` |
 
 ---
 

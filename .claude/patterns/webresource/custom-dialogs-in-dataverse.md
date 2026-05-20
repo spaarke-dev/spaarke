@@ -23,4 +23,4 @@ Use when a web resource needs a rich multi-option dialog (icons, styled buttons,
 - Use `z-index: 10000` or higher — Dataverse UI uses high z-index values
 - Wrap `window.top` access in try/catch for cross-origin fallback to `Xrm.Navigation`
 - Register `beforeunload` listener if cleanup is critical when user navigates away
-- WizardShell auth: standalone wizard Code Pages MUST initialize `resolveRuntimeConfig()` + `initAuth()` before rendering
+- WizardShell auth: standalone wizard Code Pages MUST call `await initAuth({...})` from `@spaarke/auth` before rendering; inside the tree, consume tokens via `useAuth()` or `authenticatedFetch` from `@spaarke/auth` — never raw `fetch(url, { headers: { Authorization: 'Bearer ...' } })` and never `accessToken: string` props (v2 contract per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md))

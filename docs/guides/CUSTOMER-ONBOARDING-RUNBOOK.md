@@ -286,7 +286,7 @@ The script exits with code 0 (pass) or 1 (fail). In CI/CD pipelines, a non-zero 
 | `sprk_ShareLinkBaseUrl` | Base URL for document share links |
 | `sprk_SharePointEmbeddedContainerId` | SPE Container ID for this customer |
 
-> **How they're used**: At page load, all client components (code pages, PCF controls, Office add-ins) call `resolveRuntimeConfig()` from `@spaarke/auth`. This function queries these Dataverse env vars via the REST API using session cookie auth, caches the result in memory, and makes the values available to all components. No hardcoded URLs ship in the solution package.
+> **How they're used (Auth v2 / [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))**: At page load, all client components (Code Pages, PCF controls, Office Add-ins) call `await initAuth({...})` from `@spaarke/auth`, which internally queries these Dataverse env vars via the REST API (session-cookie auth), caches the result, and makes the values available to all components via `useAuth()` + `authenticatedFetch`. No hardcoded URLs ship in the solution package. **v2 requires `sprk_TenantId`** to be populated per environment (missing → 401-after-refresh bugs). See [`auth-deployment-setup.md`](auth-deployment-setup.md) for full operator setup.
 
 ### 4b. Automated Smoke Tests
 
