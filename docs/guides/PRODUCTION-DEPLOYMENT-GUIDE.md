@@ -192,7 +192,7 @@ Spaarke uses an **environment-agnostic build** strategy. All client-side compone
 **How it works:**
 
 1. **Build artifacts are identical** across dev, UAT, staging, and production. The same compiled PCF controls, Code Pages, and solution ZIPs are promoted through environments without rebuilding.
-2. **Runtime configuration resolution** — At startup, client components call `resolveRuntimeConfig()` (from `@spaarke/auth`) which queries Dataverse Environment Variables via the Web API and caches the result.
+2. **Runtime configuration resolution (Auth v2 — [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))** — At startup, client components call `await initAuth({...})` from `@spaarke/auth` with values from typed Dataverse env-var accessors. Internally `@spaarke/auth` queries Dataverse Environment Variables via the Web API and caches the result. **v2 requires `sprk_TenantId`** to be populated per environment. See [`auth-deployment-setup.md`](auth-deployment-setup.md) §3 for full operator setup.
 3. **Seven canonical environment variables** define the complete runtime configuration per environment (see [Dataverse Environment Variables Reference](#dataverse-environment-variables-reference) below).
 4. **No dev defaults** — If an environment variable is missing, components fail loudly with a clear error message rather than silently falling back to dev values.
 

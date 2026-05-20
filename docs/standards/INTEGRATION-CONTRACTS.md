@@ -30,13 +30,14 @@
 - **SSE Streaming**: AI chat and analysis endpoints use `text/event-stream` with `{type:'token',content:'...'} ... {type:'done'}` event shape
 - **Serialization**: camelCase JSON (`JsonNamingPolicy.CamelCase`)
 
-### Authentication
+### Authentication (Spaarke Auth v2 — [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))
 
-- **Internal callers** (PCF controls, Code Pages): Azure AD JWT with scope `api://{bff-client-id}/user_impersonation`
-  - PCF controls resolve BFF URL from Dataverse environment variable `sprk_BffApiBaseUrl`
-  - Token acquired via MSAL `acquireTokenSilent` with popup fallback
-- **External callers** (Power Pages SPA): Azure AD B2B guest JWT validated by ASP.NET Core middleware, then `ExternalCallerAuthorizationFilter` resolves Contact + participation context
-- **Header**: `Authorization: Bearer {token}`
+- **Internal callers** (PCF controls, Code Pages, Office Add-ins): Azure AD JWT with scope `api://{bff-client-id}/SDAP.Access`
+  - Clients resolve BFF URL from Dataverse environment variable `sprk_BffApiBaseUrl`
+  - Clients MUST use `useAuth()` (React) or `authenticatedFetch` (non-React) from `@spaarke/auth`. The internal `BrowserMsalStrategy` calls MSAL `acquireTokenSilent` → `ssoSilent` → redirect fallback on `InteractionRequiredAuthError`. Tenant-specific authority is mandatory (INV-3/INV-6) — never `/common` or `/organizations`.
+  - PCFs MUST call `await initAuth({...})` once at startup (e.g., React `useEffect`). NEVER instantiate `PublicClientApplication` directly.
+- **External callers** (Power Pages SPA): Azure AD B2B guest JWT validated by ASP.NET Core middleware, then `ExternalCallerAuthorizationFilter` resolves Contact + participation context. (External SPA is documented out-of-scope for `@spaarke/auth` per D-AUTH-7.)
+- **Header**: `Authorization: Bearer {token}` (added automatically by `authenticatedFetch`)
 
 ### Error Response Shape
 
@@ -59,7 +60,7 @@ All errors return RFC 7807 ProblemDetails. Domain-specific variants add extensio
 
 ### Retry / Timeout Policy
 
-- **Client-side**: No built-in retry in `authenticatedFetch`; callers handle 401 by clearing MSAL cache and reacquiring token
+- **Client-side**: `authenticatedFetch` (Auth v2 / ADR-028) handles 401 retry automatically — invalidates `InMemoryCache`, re-acquires via strategy, retries the request once. Callers do NOT need to manually clear MSAL cache.
 - **Rate limiting**: BFF applies per-endpoint rate limiting via named policies (`graph-read`, `graph-write`, `ai-stream`, `ai-batch`)
 - **429 response**: Clients SHOULD back off; AI endpoints include `retryAfterSeconds` in ProblemDetails
 
@@ -79,6 +80,7 @@ All errors return RFC 7807 ProblemDetails. Domain-specific variants add extensio
 
 - [ADR-001](../../docs/adr/ADR-001-minimal-api-and-workers.md) -- Minimal API, no controllers
 - [ADR-008](../../docs/adr/ADR-008-authorization-endpoint-filters.md) -- Endpoint filters for auth
+- [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) -- Spaarke Auth v2 (function-based client contract, MI for outbound, HMAC webhooks, named API keys)
 
 ---
 
@@ -97,7 +99,7 @@ Two authentication strategies via `GraphClientFactory`:
 | Method | Factory Call | Use Case | Token Source |
 |--------|-------------|----------|-------------|
 | **OBO (delegated)** | `ForUserAsync(ctx)` | User-initiated file operations | User JWT exchanged via MSAL `AcquireTokenOnBehalfOf` with scope `https://graph.microsoft.com/.default` |
-| **App-only** | `ForApp()` | Background jobs, admin operations | `ClientSecretCredential` with `https://graph.microsoft.com/.default` |
+| **App-only** | `ForApp()` | Background jobs, admin operations | **`DefaultAzureCredential` (managed identity) when `Graph:ManagedIdentity:Enabled=true`** — canonical per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md). `ClientSecretCredential` is local-dev fallback only. Scope: `https://graph.microsoft.com/.default`. For mailbox-scoped operations (`Mail.*`), Exchange `ApplicationAccessPolicy` must scope the MI to allowed mailboxes (Phase C). |
 
 - OBO tokens cached in Redis for 55 minutes (5-minute buffer before 60-minute expiration) per ADR-009
 - App-only client is a cached singleton (`Lazy<GraphServiceClient>`)

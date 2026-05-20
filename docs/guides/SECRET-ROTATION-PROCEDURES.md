@@ -18,14 +18,27 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 
 ## Secret Inventory
 
+> **Auth v2 (ADR-028, 2026-05-19)**: For new-environment auth secret provisioning, follow [`auth-deployment-setup.md`](auth-deployment-setup.md) §4 as the canonical operator runbook. This page covers ongoing rotation cadence.
+
 ### Platform Secrets (sprk-platform-{env}-kv)
 
 | Secret Name | Type | Source Resource | Rotation Method |
 |-------------|------|-----------------|-----------------|
-| `BFF-API-ClientSecret` | Entra ID client secret | Entra ID app registration | Automated (`Rotate-Secrets.ps1 -SecretType EntraId`) |
+| `BFF-API-ClientSecret` | Entra ID client secret | Entra ID app registration | Automated (`Rotate-Secrets.ps1 -SecretType EntraId`). **Auth v2**: retained for OBO only — Graph + Dataverse app-only use MI per ADR-028. |
+| `Communication-WebhookSigningKey` | HMAC-SHA256 key (48-byte base64) | Generated via `openssl rand -base64 48` | Manual (every 12 months or on incident) — rotate key in KV, restart App Service. Sender (Graph subscription) must be re-registered with the new key. |
+| `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key (48-byte base64) | Generated via `openssl rand -base64 48` | Manual (every 12 months or on incident) — rotate key in KV, restart App Service. Dataverse Service Endpoint must be re-registered with the new key. |
+| `Communication-WebhookClientState` | Graph subscription validation secret | Generated random string | Manual (every 90 days or on Graph subscription renewal) |
 | `ServiceBus-ConnectionString` | Service Bus access key | sprk-platform-{env}-sb | Automated (`Rotate-Secrets.ps1 -SecretType ServiceBus`) |
 | `Redis-ConnectionString` | Redis access key | sprk-platform-{env}-redis | Automated (`Rotate-Secrets.ps1 -SecretType Redis`) |
 | `BFF-API-ClientId` | Entra ID application ID | Entra ID app registration | Not rotated (immutable identifier) |
+
+### Deprecated / To-Be-Removed (Auth v2)
+
+| Secret | Status | When safe to delete |
+|---|---|---|
+| `Dataverse-ClientSecret` | No longer consumed by production code when `Graph__ManagedIdentity__Enabled=true` (BFF MI is the Dataverse Application User per ADR-028) | After the MI cutover is verified by smoke test ([`auth-deployment-setup.md`](auth-deployment-setup.md) §9c). Keep for local-dev environments only. |
+| `Email-WebhookSecret` | Superseded by `Email-WebhookSigningKey` (HMAC-SHA256 per Phase C) | After verifying Dataverse Service Endpoint is re-registered with the HMAC key |
+| `communication-webhook-secret` (HMAC pre-v2) | Superseded by `communication-webhook-signing-key` (HMAC-SHA256 per Phase C) | After verifying Graph subscription is re-registered with the HMAC key |
 
 ### Customer Secrets (sprk-{customerId}-{env}-kv)
 

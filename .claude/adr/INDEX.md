@@ -46,7 +46,7 @@ Load concise ADRs proactively when creating new components:
 - Creating PCF → Load ADR-006, ADR-012, ADR-022 (React 16 compatibility), **ADR-028** (auth)
 - Creating Code Page (dialog, wizard, full page) → Load ADR-006, ADR-026, ADR-021 (React 19), **ADR-028** (auth)
 - Creating Plugin → Load ADR-002
-- **Working with auth → Load ADR-028 (canonical) + ADR-003 (server seams) + ADR-004 (OBO) + ADR-008 (filters) + ADR-009 (Redis caching)**
+- **Working with auth → Load ADR-028 (canonical) + ADR-003 (server seams + OBO) + ADR-008 (filters) + ADR-009 (Redis caching) + `.claude/constraints/auth.md` (operational MUST/MUST NOT)**
 - Working with SPE → Load ADR-007, ADR-019
 - Working with UI/UX → Load ADR-021, ADR-022
 - Working with shared components → Load ADR-012 (service architecture, portability tiers)

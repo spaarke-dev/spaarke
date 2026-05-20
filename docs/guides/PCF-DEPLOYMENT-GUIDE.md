@@ -177,7 +177,7 @@ stat -c '%y' src/components/YourChanged/YourChanged.tsx    # Than this
 
 ### Step 1.6: Compile @spaarke/auth (if imported by the control)
 
-**If the PCF control imports from `@spaarke/auth`**, the auth library's `dist/` directory must exist before the PCF build. This is a local file reference (`file:../../shared/Spaarke.Auth`) that needs compilation.
+**If the PCF control imports from `@spaarke/auth`** (canonical for v2 per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)), the auth library's `dist/` directory must exist before the PCF build. This is a local file reference (`file:../../shared/Spaarke.Auth`) that needs compilation.
 
 ```bash
 cd src/client/shared/Spaarke.Auth
@@ -187,7 +187,11 @@ npm run build
 
 **Verify `dist/` exists** — if `dist/index.js` is missing, the PCF build will fail with module resolution errors.
 
-**Controls that import @spaarke/auth**: UniversalDatasetGrid, SpeFileViewer, SpeDocumentViewer (and potentially others — check `package.json` for `@spaarke/auth` in dependencies/devDependencies).
+**Controls that import @spaarke/auth**: UniversalDatasetGrid, SpeFileViewer, SpeDocumentViewer, SemanticSearchControl, DocumentRelationshipViewer, RelatedDocumentCount (and potentially others — check `package.json` for `@spaarke/auth`).
+
+> **Auth v2 contract (ADR-028)**: PCFs consuming `@spaarke/auth` MUST use `await initAuth({...})` once in the React `useEffect`, then consume tokens via `useAuth()` or `authenticatedFetch`. NEVER instantiate `PublicClientApplication` directly. NEVER pass `accessToken: string` as a typed prop. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) for INV-1..INV-8 and [`auth-deployment-setup.md`](auth-deployment-setup.md) for env-var setup.
+>
+> **Pre-v2 holdout**: `UniversalQuickCreate` still uses its own local `MsalAuthProvider.ts` (V3 cleanup target). Do NOT copy this pattern for new PCFs.
 
 **Note**: When building individual controls (not using the root `npm run build`), you may also need to install dependencies in the control directory first:
 ```bash

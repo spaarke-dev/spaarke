@@ -597,6 +597,7 @@ CRITICAL ADRs to always check:
   - ADR-002: Thin plugins (<50ms, no HTTP)
   - ADR-007: Graph types isolated
   - ADR-008: Endpoint filters for auth
+  - ADR-028: Spaarke Auth v2 contract — client: useAuth() + authenticatedFetch (no raw fetch with Authorization headers, no accessToken: string props, no tokenBridge/__SPAARKE_BFF_TOKEN__, no PublicClientApplication outside @spaarke/auth); server: DefaultAzureCredential (MI) for Graph/Dataverse when MI enabled; HMAC webhook signing; tenant-specific MSAL authority (INV-3/INV-6)
 
 IF violations found:
   LINK to full adr-check skill for details

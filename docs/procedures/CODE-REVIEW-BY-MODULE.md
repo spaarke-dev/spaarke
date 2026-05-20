@@ -84,7 +84,7 @@ Identify which module(s) the changed files belong to, then apply the correspondi
 - [ ] **Shared Component Library (ADR-012)**: Reusable components imported from `@spaarke/ui-components`, not duplicated locally
 - [ ] **No `any` Types**: TypeScript strict mode; no `any` without explicit justification comment
 - [ ] **Destroy Cleanup**: `destroy()` method calls `ReactDOM.unmountComponentAtNode(container)` and removes event listeners
-- [ ] **MSAL Singleton**: `MsalAuthProvider` uses singleton pattern; no multiple MSAL instances
+- [ ] **Auth Singleton (Auth v2 / [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))**: PCF controls that authenticate to BFF use `await initAuth({...})` from `@spaarke/auth` once (typically in a React `useEffect`); NEVER construct `PublicClientApplication` directly. `SpaarkeAuthProvider` enforces the singleton internally (INV-7). UniversalQuickCreate is the only PCF still using a local `MsalAuthProvider.ts` — V3 cleanup target; do not pattern new PCFs on it.
 - [ ] **Icon Accessibility**: Icon-only buttons have `aria-label` attributes
 - [ ] **PCF Entry Point**: Uses `ReactDOM.render()` (React 16), not `createRoot()` (React 18)
 
@@ -97,6 +97,9 @@ Identify which module(s) the changed files belong to, then apply the correspondi
 | `style={{ color: '#0078D4' }}` | `style={{ color: tokens.colorBrandForeground1 }}` |
 | Missing `destroy()` cleanup | `ReactDOM.unmountComponentAtNode(this.container)` |
 | `@xyflow/react` (React 18 required) | `react-flow-renderer` v10 (React 16 compatible) |
+| `new PublicClientApplication(msalConfig)` directly | `await initAuth({...})` from `@spaarke/auth` once at startup (ADR-028) |
+| `import { tokenBridge } from '...'` or `window.__SPAARKE_BFF_TOKEN__` | Use `authenticatedFetch` from `@spaarke/auth` (retired in v2) |
+| `props: { accessToken: string }` or `getAccessToken: () => Promise<string>` | Pass `authenticatedFetch` (function), or use `useAuth()` hook inside the component |
 
 ---
 
@@ -105,7 +108,7 @@ Identify which module(s) the changed files belong to, then apply the correspondi
 ### Checklist
 
 - [ ] **React 18+ (ADR-022)**: Uses `createRoot()` from `react-dom/client`; React 18/19 APIs are allowed
-- [ ] **Auth Bootstrap**: Follows bootstrap sequence: `resolveRuntimeConfig()` -> `setRuntimeConfig()` -> `ensureAuthInitialized()` -> render
+- [ ] **Auth Bootstrap (Auth v2 / [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))**: Calls `await initAuth({...})` from `@spaarke/auth` once at top-level (before `createRoot().render`). React components consume tokens via `useAuth()` or `authenticatedFetch`. NEVER instantiate `PublicClientApplication` directly. NEVER add `accessToken: string` props.
 - [ ] **No Module-Level Config Calls**: Runtime config getters must be called inside lazy functions, not at module scope (throws before bootstrap completes)
 - [ ] **Fluent UI v9 (ADR-021)**: Same as PCF -- semantic tokens, dark mode, FluentProvider wrapper
 - [ ] **Webpack Bundle Size**: Check bundle output; flag if significantly larger than existing code pages

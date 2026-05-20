@@ -948,7 +948,7 @@ In Bicep, the Function's UAMI gets role assignments to each target resource (Ser
 | #042 — Managed identity for Dataverse outbound | Same | Re-fetch in `InsightsSyncFunction` uses `DefaultAzureCredential` |
 | #044 — HMAC-SHA256 webhook signature validation | Ship Phase 1 with `clientState`; HMAC drops in when #044 lands | Copy validator code; do not fork |
 | #047 — Non-`common` `TenantId` in template | Insights Engine adopts the fix from day one | Per-tenant explicit TenantId in every Bicep deployment |
-| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Active auth design canon until ADR-027 lands | Engine auth design must be consistent with this canon |
+| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Pre-v2 audit doc; canonical auth ADR is now [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Engine auth design must be consistent with this canon |
 
 ---
 
@@ -1320,7 +1320,7 @@ These curated knowledge documents informed the Engine's design and are reference
 | [ADR-013](../adr/ADR-013-ai-architecture.md) | AI architecture; Engine is an extension of this |
 | [ADR-016](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md) | Rate limiting on Insight endpoints |
 | [ADR-019](../adr/ADR-019-problemdetails.md) | ProblemDetails error envelope |
-| ADR-027 (forthcoming) | Will codify auth design canon currently in `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`; Engine auth design must remain consistent |
+| [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Canonical Spaarke Auth v2 architecture (accepted 2026-05-19); Engine auth design must remain consistent |
 
 ### 17.6 Other Spaarke projects coordinating with this Engine
 
@@ -1451,13 +1451,13 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 
 | Decision | Choice | Rationale | ADR |
 |---|---|---|---|
-| Trust boundary | Intake Function — only external entry — D-22 | Dataverse native SBus integration is SAS-only. | ADR-027 (pending) |
-| Dataverse → Intake | `clientState` (transitional) → HMAC-SHA256 (target, Phase C #044). **Copy validator from BFF** — D-23 | Documented Dataverse webhook auth options. | ADR-027 (pending) |
-| All other hops | Managed Identity + Azure RBAC (UAMI). Zero SAS at target — D-24 | Transitional `clientState` is the only secret; gone post #044. | ADR-027 (pending) |
-| Non-webhook endpoints on Function App | `Microsoft.Identity.Web.AddMicrosoftIdentityWebApi`. NOT `@spaarke/auth` (client-side only) — D-25 | Canonical .NET inbound JWT validator. | ADR-027 (pending) |
-| TenantId | Explicit GUID, never `common` or `organizations` — D-26 | Per-tenant deployment threat model. Coordinate with Phase C #047. | ADR-027 (pending) |
-| Outbound | `DefaultAzureCredential` only. No `ClientSecretCredential` in new Functions — D-27 | Aligns with Phase C #041 + #042. | ADR-027 (pending) |
-| JWT validation | Local (no auth-service hop) — D-28 | `Microsoft.Identity.Web` validates locally with cached AAD metadata; extra hop adds latency without security benefit. | ADR-027 (pending) |
+| Trust boundary | Intake Function — only external entry — D-22 | Dataverse native SBus integration is SAS-only. | ADR-028 |
+| Dataverse → Intake | `clientState` (transitional) → HMAC-SHA256 (target, Phase C #044). **Copy validator from BFF** — D-23 | Documented Dataverse webhook auth options. | ADR-028 |
+| All other hops | Managed Identity + Azure RBAC (UAMI). Zero SAS at target — D-24 | Transitional `clientState` is the only secret; gone post #044. | ADR-028 |
+| Non-webhook endpoints on Function App | `Microsoft.Identity.Web.AddMicrosoftIdentityWebApi`. NOT `@spaarke/auth` (client-side only) — D-25 | Canonical .NET inbound JWT validator. | ADR-028 |
+| TenantId | Explicit GUID, never `common` or `organizations` — D-26 | Per-tenant deployment threat model. Coordinate with Phase C #047. | ADR-028 |
+| Outbound | `DefaultAzureCredential` only. No `ClientSecretCredential` in new Functions — D-27 | Aligns with Phase C #041 + #042. | ADR-028 |
+| JWT validation | Local (no auth-service hop) — D-28 | `Microsoft.Identity.Web` validates locally with cached AAD metadata; extra hop adds latency without security benefit. | ADR-028 |
 
 ### 19.7 Identity resolution, privilege, packagability
 
@@ -1725,7 +1725,7 @@ Phase 1 is split into **Track A (auth-independent, in scope NOW)** and **Track B
 | #042 — MI for Dataverse outbound | Same | Re-fetch in `InsightsSyncFunction` uses `DefaultAzureCredential` |
 | #044 — HMAC-SHA256 webhook validation | Ship Phase 1 with `clientState`; HMAC drops in when #044 lands | Copy the same validator code; do not fork |
 | #047 — Non-`common` `TenantId` in template | Insights Engine Function appsettings adopt the fix from day one | Per-tenant explicit TenantId in every Bicep deployment |
-| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Active auth design canon until ADR-027 lands | Engine auth design must remain consistent |
+| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Pre-v2 audit doc; canonical auth ADR is now [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Engine auth design must remain consistent |
 
 ---
 
@@ -1874,7 +1874,7 @@ This requires the production metrics infrastructure to be running and the corpus
 - [ADR-013 — AI Architecture](../adr/ADR-013-ai-architecture.md)
 - [ADR-016 — AI Cost, Rate Limit, and Backpressure](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md)
 - [ADR-019 — ProblemDetails](../adr/ADR-019-problemdetails.md)
-- ADR-027 (forthcoming) — Will codify the auth canon currently in [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
+- [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Canonical Spaarke Auth v2 architecture (accepted 2026-05-19). Engine auth design must remain consistent.
 
 ### 23.4 Knowledge base (researcher-authored, 2026-05-19)
 

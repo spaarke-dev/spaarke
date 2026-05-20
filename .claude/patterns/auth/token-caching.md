@@ -1,18 +1,8 @@
 ---
-🛑 STOP — DO NOT USE THIS DOCUMENT FOR NEW AUTH WORK 🛑
-═══════════════════════════════════════════════════════════════════════════
-PRE-V2 CONTENT. Spaarke Auth v2 + Hardening is in active development.
-Canonical v2 source: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md
-ADR-027 will become canonical when v2 ships.
-
-DO NOT add `accessToken: string` props anywhere.
-DO NOT write raw fetch() with `Authorization: Bearer ${...}` headers.
-DO NOT reference BridgeStrategy, XrmStrategy, or window.__SPAARKE_BFF_TOKEN__.
-DO use `authenticatedFetch()` from @spaarke/auth.
-DO use `useAuth()` hook (after v2 ships).
-When in doubt: STOP and consult the audit doc above.
-
-What IS still canonical in this file: Server-side Redis OBO caching content (§"Server-side (Redis)") remains canonical. Client-side cache cascade (§"Client-side (MSAL)" — the 6-strategy chain references) is pre-v2.
+> **Auth v2 / ADR-028 status (2026-05-19)**
+> - Server-side (§"Server-side (Redis)") — **canonical** in v2 (OBO cache pattern unchanged).
+> - Client-side (§"Client-side (MSAL — v2)") — **rewritten for v2**: MSAL `localStorage` cache + JWT exp validation + `BroadcastChannel` for invalidation events only. The retired 6-strategy cascade (`BridgeStrategy`, `XrmStrategy`, `MsalSilentStrategy`, `__spaarke_bff_token_cache__`, `window.__SPAARKE_BFF_TOKEN__`) is gone.
+> - Canonical client contract: [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — `useAuth()` + `authenticatedFetch` from `@spaarke/auth`. Never raw `fetch(... Authorization: Bearer ...)` or `accessToken: string` props.
 ═══════════════════════════════════════════════════════════════════════════
 ---
 

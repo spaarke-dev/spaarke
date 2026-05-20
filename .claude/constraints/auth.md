@@ -90,7 +90,7 @@ Load when:
 - ❌ **MUST NOT** add `@spaarke/auth` bootstrap to Code Pages that only use `Xrm.WebApi` (unnecessary overhead)
 - ❌ **MUST NOT** create new `msalConfig.ts` files with module-level MSAL configuration constants
 
-> See: [`.claude/patterns/auth/spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md), [`xrm-webapi-vs-bff-auth.md`](../patterns/auth/xrm-webapi-vs-bff-auth.md), [`.claude/archive/2026-05-19/`](../archive/2026-05-19/) (retired pre-v2 docs)
+> See: [`.claude/patterns/auth/spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md), [`xrm-webapi-vs-bff-auth.md`](../patterns/auth/xrm-webapi-vs-bff-auth.md)
 
 ### Server hardening (Spaarke Auth v2 Phase C — ADR-028)
 
@@ -206,13 +206,12 @@ Examples:
 
 ## Pattern Files (Complete Examples)
 
-- [Spaarke SSO Binding](../patterns/auth/spaarke-sso-binding.md) - **Canonical** — binding requirements + 6-strategy chain
+- [Spaarke SSO Binding](../patterns/auth/spaarke-sso-binding.md) - **Canonical** — MSAL invariants (INV-1..INV-8) + v2 token acquisition model
 - [OAuth Scopes](../patterns/auth/oauth-scopes.md) - Scope format and configuration
 - [OBO Flow](../patterns/auth/obo-flow.md) - On-Behalf-Of token exchange
-- [Token Caching](../patterns/auth/token-caching.md) - Server & client token caching
-- [MSAL Client](../patterns/auth/DEPRECATED-msal-client.md) — ⛔ DEPRECATED, superseded by Spaarke Auth v2 (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md))
-- [Spaarke Auth Initialization](../patterns/auth/DEPRECATED-spaarke-auth-initialization.md) — ⛔ DEPRECATED, bootstrap superseded by `useAuth()` (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md))
+- [Token Caching](../patterns/auth/token-caching.md) - Server-side Redis OBO cache (client-side cascade retired in v2)
 - [Xrm WebApi vs BFF Auth](../patterns/auth/xrm-webapi-vs-bff-auth.md) - Decision matrix
+- [auth-deployment-setup.md](../../docs/guides/auth-deployment-setup.md) - Operator runbook for new-environment setup
 
 ---
 

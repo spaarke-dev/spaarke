@@ -190,6 +190,39 @@ export const MyComponent: React.FC<IProps> = ({ items, onSelect }) => {
 };
 ```
 
+### Auth v2 client contract (ADR-028)
+
+```typescript
+// ✅ DO: Bootstrap once, consume via useAuth() or authenticatedFetch
+import { initAuth, useAuth, authenticatedFetch } from '@spaarke/auth';
+
+// Top-level (main.tsx / index.tsx) — call ONCE before render
+await initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope });
+
+// In React components — use the hook
+const { getAccessToken } = useAuth();
+
+// For BFF calls — use authenticatedFetch (handles bearer + 401 retry automatically)
+const response = await authenticatedFetch('/api/...', { method: 'POST', body });
+
+// ❌ DON'T: Raw fetch with manual Authorization header
+const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } }); // WRONG
+
+// ❌ DON'T: Pass accessToken as a typed prop or constructor arg
+<MyComponent accessToken={token} />  // WRONG (use authenticatedFetch)
+new ApiClient(baseUrl, getAccessToken)  // WRONG (factory should accept authenticatedFetch)
+
+// ❌ DON'T: Instantiate PublicClientApplication directly outside @spaarke/auth
+const msal = new PublicClientApplication(config);  // WRONG (violates INV-7)
+
+// ❌ DON'T: Reference retired token-transport symbols
+window.__SPAARKE_BFF_TOKEN__  // WRONG — deleted in Phase A
+import { tokenBridge } from '...';  // WRONG — deleted in Phase A
+new BridgeStrategy() / new XrmStrategy() / new MsalSilentStrategy()  // WRONG — deleted in Phase A
+```
+
+**Canonical reference**: [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../adr/ADR-028-spaarke-auth-architecture.md), [`.claude/patterns/auth/spaarke-sso-binding.md`](../../patterns/auth/spaarke-sso-binding.md), [`.claude/constraints/auth.md`](../../constraints/auth.md).
+
 ### Dataverse Plugins
 
 ```csharp
@@ -371,3 +404,5 @@ When generating or reviewing code, automatically check:
 | Code injects `GraphServiceClient` directly into controller | Author bypassed the SpeFileStore facade | Per ADR-007: never let Graph SDK types leak above SpeFileStore. Inject the facade, not the underlying client. |
 | New webresource (`.js` or `.html`) created instead of PCF/Code Page | Author followed legacy Dataverse customization pattern | Per ADR-006: field-bound controls → PCF (`pcf-deploy`); standalone dialogs → React Code Pages (`code-page-deploy`). No new legacy JS webresources. |
 | Project-scoped CLAUDE.md and root CLAUDE.md disagree on a convention | Both updated separately; drift introduced | Root CLAUDE.md is canonical for cross-cutting standards. Project CLAUDE.md may NARROW (add stricter rules) but not RELAX or CONTRADICT. |
+| Raw `fetch(url, { headers: { Authorization: 'Bearer ...' } })` or `window.__SPAARKE_BFF_TOKEN__` / `tokenBridge` regression | Author copied snippet from pre-v2 code or external tutorial | Per ADR-028 (Spaarke Auth v2): use `authenticatedFetch` from `@spaarke/auth`. Tokens are managed by `useAuth()` hook. Never snapshot. `/adr-check` catches raw fetch patterns and retired symbols. |
+| Per-PCF `MsalAuthProvider.ts` / direct `new PublicClientApplication(...)` | Author bypassed `@spaarke/auth` singleton | Per ADR-028 INV-7: all consumers share ONE PCA via `@spaarke/auth`. The only remaining pre-v2 PCF is `UniversalQuickCreate` (V3 cleanup target — do NOT pattern new PCFs on it). |

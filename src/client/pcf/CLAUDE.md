@@ -163,36 +163,45 @@ import { authenticatedFetch } from '@spaarke/auth';
 const response = await authenticatedFetch('/ai/search/...'); // relative path; resolver adds /api/
 ```
 
-**Why this matters**: the 6-strategy chain inside `SpaarkeAuthProvider` (Cache → SessionStorage → Bridge → Xrm → MsalSilent → MsalPopup) lets neighbor PCFs and Code Pages share tokens silently. Direct `PublicClientApplication` usage bypasses the chain and fires the "Pick an account" popup on every tab open.
+**Why this matters**: `@spaarke/auth` v2 wraps a single `PublicClientApplication` (`BrowserMsalStrategy`) with MSAL's `localStorage` cache (INV-1) for cross-tab/iframe SSO, plus an `InMemoryCache` layer that validates JWT `exp` (5-min buffer) before returning cached tokens. Direct `new PublicClientApplication(...)` in a consumer = isolated MSAL cache = silent SSO failure (INV-7 violation = popup on every tab open).
 
-**Canonical reference**: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../../.claude/patterns/auth/spaarke-sso-binding.md)
+**Canonical reference**: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../../.claude/patterns/auth/spaarke-sso-binding.md) (INV-1..INV-8) + [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../../.claude/adr/ADR-028-spaarke-auth-architecture.md) (function-based contract) + [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) (env-var setup).
 
-### API Client Pattern
+**⛔ ANTI-PATTERN — Never do these (ADR-028 violations):**
+- Pass `accessToken: string` or `getAccessToken: () => Promise<string>` as a typed prop/constructor arg
+- Reference `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge`, `BridgeStrategy`, `XrmStrategy`, `MsalSilentStrategy` (all retired in Phase A)
+- Write `fetch(url, { headers: { Authorization: \`Bearer ${token}\` }})` — use `authenticatedFetch` instead
+- Instantiate `PublicClientApplication` outside `@spaarke/auth`
+
+### API Client Pattern (Auth v2 — ADR-028)
+
 ```typescript
-// services/SdapApiClient.ts
+// services/SdapApiClient.ts — accept authenticatedFetch (NOT a token-returning function)
+import { authenticatedFetch } from '@spaarke/auth';
+
 export class SdapApiClient {
     constructor(
         private baseUrl: string,
-        private getAccessToken: () => Promise<string>,
         private timeout: number = 300000
     ) {}
 
     async uploadFile(request: FileUploadRequest): Promise<SpeFileMetadata> {
-        const token = await this.getAccessToken();
-        const response = await fetch(`${this.baseUrl}/obo/containers/${request.containerId}/files`, {
-            method: 'PUT',
-            headers: { 'Authorization': `Bearer ${token}` },
-            body: request.file
-        });
-        
+        // authenticatedFetch handles bearer header acquisition + 401 retry automatically
+        const response = await authenticatedFetch(
+            `/obo/containers/${request.containerId}/files`,
+            { method: 'PUT', body: request.file }
+        );
+
         if (!response.ok) {
             throw new Error(await this.getErrorMessage(response));
         }
-        
+
         return response.json();
     }
 }
 ```
+
+> Do NOT pass an `accessToken` prop or a `getAccessToken` callback into your API client — `authenticatedFetch` handles all token acquisition, refresh, and 401-retry. This is the v2 function-based contract (ADR-028).
 
 ## TypeScript Guidelines
 
@@ -301,7 +310,7 @@ describe('DocumentGrid', () => {
 | Handle loading and error states | Show raw errors to users |
 | Use logger utility for debugging | Use `console.log` in production |
 | Clean up in `destroy()` method | Leave event listeners attached |
-| Use singleton for MSAL | Create multiple MSAL instances |
+| Bootstrap via `initAuth()` from `@spaarke/auth` then consume via `useAuth()` / `authenticatedFetch` (ADR-028) | Instantiate `PublicClientApplication` directly, wire your own MSAL singleton, or pass `accessToken: string` props |
 | **Include version footer in UI** | Deploy without visible version |
 
 ## Version Footer Requirement (MANDATORY)
@@ -431,23 +440,32 @@ The v2.0 architecture eliminates:
 
 ## Common Issues
 
-### MSAL Not Initialized
+### MSAL Not Initialized (Auth v2 — ADR-028)
 ```typescript
-// ✅ CORRECT: Wait for initialization
-if (!authProvider.isInitializedState()) {
-    await authProvider.initialize();
-}
-const token = await authProvider.getToken(scopes);
+// ✅ CORRECT: Wait for v2 bootstrap (initAuth from @spaarke/auth)
+import { initAuth, useAuth } from '@spaarke/auth';
+
+const [authReady, setAuthReady] = useState(false);
+useEffect(() => {
+    initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope })
+        .then(() => setAuthReady(true));
+}, []);
+
+if (!authReady) return <Spinner label="Initializing auth..." />;
+
+// Inside components — use the hook:
+const { getAccessToken } = useAuth();
 ```
 
-### Token Expired During Request
+### Token Expired During Request (Auth v2 — ADR-028)
 ```typescript
-// ✅ CORRECT: Auto-retry on 401
-if (response.status === 401) {
-    authProvider.clearCache();
-    const newToken = await authProvider.getToken(scopes);
-    // Retry with new token
-}
+// ✅ CORRECT: authenticatedFetch handles 401 retry automatically
+import { authenticatedFetch } from '@spaarke/auth';
+
+const response = await authenticatedFetch('/api/...', { method: 'POST', body });
+// 401 → InMemoryCache invalidated → strategy.acquire() re-tries → retry the request
+// No manual cache-clearing needed. Manual `authProvider.clearCache()` bypasses
+// the v2 InMemoryCache exp-validation behavior.
 ```
 
 ---

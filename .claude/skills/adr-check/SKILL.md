@@ -64,6 +64,7 @@ Quick reference of key constraints:
 | ADR-009 | Redis-first | `IMemoryCache` for cross-request caching |
 | ADR-010 | DI minimalism | Interfaces with single implementation |
 | ADR-021 | Fluent v9 design system | `@fluentui/react` (v8), hard-coded colors, missing FluentProvider |
+| ADR-028 | Spaarke Auth v2 client contract | Raw `fetch(... headers: { Authorization: \`Bearer ${...}\` })`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, `BridgeStrategy`/`XrmStrategy`/`MsalSilentStrategy` references, `accessToken: string` typed props, `PublicClientApplication` instantiated outside `@spaarke/auth`, `ClientSecretCredential` for Graph when MI available, MSAL authority `/common` or `/organizations` |
 
 Note: This table is not exhaustive. Validate against the full ADR index in `docs/adr/README-ADRs.md`.
 
