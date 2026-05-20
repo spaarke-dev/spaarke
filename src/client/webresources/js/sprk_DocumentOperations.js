@@ -2262,13 +2262,23 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
                     : data.totalRequested + " documents successfully sent to search index.";
             } else if (data.successCount === 0) {
                 resultMsg = "Failed to index documents. Please try again.";
-                if (data.results && data.results.length > 0 && data.results[0].error) {
-                    resultMsg += "\n\nError: " + data.results[0].error;
+                // Response field is `errorMessage` (per RagEndpoints.cs SendToIndexDocumentResult),
+                // not `error`. The old `data.results[0].error` was always undefined so the user
+                // never saw the actual cause. Fixed 2026-05-19.
+                if (data.results && data.results.length > 0 && data.results[0].errorMessage) {
+                    resultMsg += "\n\nError: " + data.results[0].errorMessage;
                 }
             } else {
                 resultMsg = data.successCount + " of " + data.totalRequested + " documents indexed successfully.";
                 if (data.failedCount > 0) {
                     resultMsg += "\n" + data.failedCount + " document(s) failed.";
+                    if (data.results) {
+                        for (var i = 0; i < data.results.length; i++) {
+                            if (!data.results[i].success && data.results[i].errorMessage) {
+                                resultMsg += "\n  - " + data.results[i].errorMessage;
+                            }
+                        }
+                    }
                 }
             }
 

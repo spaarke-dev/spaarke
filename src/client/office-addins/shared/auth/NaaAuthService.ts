@@ -1,4 +1,18 @@
 /**
+ * @deprecated since 2026-05-19 (Spaarke Auth v2, task 080).
+ *
+ * Superseded by `OfficeNaaStrategy` in `@spaarke/auth` — same NAA + fallback
+ * acquisition logic, but composed into the unified `SpaarkeAuthProvider` /
+ * `initAuth` / `useAuth` surface so Office Add-ins use the same hook contract
+ * as PCFs and Code Pages.
+ *
+ * Retained TEMPORARILY (task 080 scope) so existing Add-in entry points
+ * continue to build. Deletion is scheduled for tasks 081 (Outlook) and
+ * 082 (Word). DO NOT add new consumers — call `initAuth({ strategy: new
+ * OfficeNaaStrategy(config) })` then use `useAuth()` / `authenticatedFetch()`.
+ *
+ * ---
+ *
  * NAA (Nested App Authentication) Service for Office Add-ins
  *
  * Implements the Microsoft-recommended authentication pattern for Office Add-ins

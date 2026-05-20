@@ -3,10 +3,12 @@
     <title>Write docs/guides/auth-deployment-setup.md</title>
     <phase>F — Engineering canonical docs</phase>
     <tags>docs, guides, deployment, env-independence, MINIMAL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30 minutes</estimated-effort>
     <dependencies>090</dependencies>
     <parallel-safe>F-Parallel-1</parallel-safe>
+    <completed-date>2026-05-19</completed-date>
+    <completed-by>Claude Code (Opus 4.7, STANDARD rigor, Phase F docs)</completed-by>
   </metadata>
   <prompt>Document the mechanical setup for deploying Spaarke auth to a new customer tenant. 4 client Dataverse env vars + 8 App Service settings + Key Vault secret names + verification steps. Goal: anyone with the tenant's resources can deploy auth with no architectural decisions.</prompt>
   <role>Operations writer.</role>
@@ -30,4 +32,95 @@
     <criterion>Verification steps included.</criterion>
     <criterion>Customer responsibilities explicit.</criterion>
   </acceptance-criteria>
+  <notes>
+============================================================================
+COMPLETED 2026-05-19 — Phase F (docs)
+============================================================================
+
+DELIVERABLE
+-----------
+docs/guides/auth-deployment-setup.md (new file, ~330 lines)
+
+Mechanical operator checklist for deploying Spaarke Auth v2 to a fresh
+customer tenant. Converts the 2026-05-19 dev cutover steps (recorded in
+current-task.md "Operator actions performed" + commit 939e0392) into a
+generic, per-env guide with `{placeholder}` substitution markers throughout.
+
+SECTIONS
+--------
+ 1. Prerequisites (resources + tooling that must already exist)
+ 2. Dataverse environment variables (4 vars — sprk_BffApiBaseUrl,
+    sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId) with set-via paths
+    (Maker portal + PAC CLI mention)
+ 3. App Service configuration (8 settings) with copy-paste az-cli block
+    that uses Key Vault references and runs in a single restart cycle
+ 4. Key Vault secrets inventory (8 named secrets, rotation cadence noted)
+ 5. Azure AD permissions for MI — three-step recipe:
+    5a enumerate BFF app reg's Graph appRoleAssignments
+    5b map appRoleId GUIDs to human-readable names
+    5c grant each to MI service principal via az rest POST
+    5d verify counts match
+    (Did NOT hardcode the 11 permission names since the exact list is
+    env-dependent; pointed operators at the BFF app reg as canonical source
+    and listed the typical 7-8 baseline names. Source data — commit 939e0392
+    and the appsettings.template.json _ManagedIdentity_comment only list 4-5
+    explicit names; the "11 granted" number from the dev cutover is asserted
+    but the discrete list is not in any committed file.)
+ 6. Dataverse Application User for MI (Power Platform admin center +
+    least-privilege role recommendation; multi-env reminder)
+ 7. Deploy + restart (cross-link to bff-deploy skill)
+ 8. Verification smoke tests (4 tests — /healthz, OBO endpoint, MI →
+    Dataverse via /healthz/dataverse/doc, browser MSAL regression)
+    Smoke 8b + 8c are literal copies of the dev-cutover smoke tests that
+    passed on 2026-05-19.
+ 9. Customer responsibilities (CA, MFA, secret rotation cadence, IGA,
+    audit log retention, network egress, backup/DR) — per per-tenant model
+10. Appendix A — value cheat sheet template (fill-in-the-blank runbook
+    sheet for the operator's secrets manager)
+
+SCOPE BOUNDARIES (deferred / outside scope)
+-------------------------------------------
+- Bicep / IaC templates for the resources themselves — outside scope;
+  ENVIRONMENT-DEPLOYMENT-GUIDE.md sections 2-7 cover that ground.
+- Exhaustive Graph permission list — operator should enumerate the BFF
+  app reg (Step 5a) since the set varies per-module (Email module needs
+  Mail.* perms, etc.). Typical 7-8 baseline names listed; total "11"
+  count documented as env-specific.
+- Discrete CA policy recommendations — customer-owned per per-tenant
+  model; we surface that they're customer-owned without prescribing.
+- ADR-027 architectural rationale — explicitly out of scope and
+  cross-linked as forthcoming (task 090 / Phase F1).
+
+CROSS-LINKS ADDED
+-----------------
+- docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md (broader env build)
+- docs/guides/SECRET-ROTATION-PROCEDURES.md (rotation cadence)
+- src/server/api/Sprk.Bff.Api/appsettings.template.json (token substitution)
+- .claude/skills/bff-deploy/SKILL.md (deploy script)
+- docs/adr/ (ADR-027 forthcoming)
+
+FORMAT CONFORMANCE
+------------------
+Header block matches ENVIRONMENT-DEPLOYMENT-GUIDE.md + SECRET-ROTATION-
+PROCEDURES.md style (Version, Last Updated, Status, Applies To, Audience).
+TOC + numbered sections + tables for k/v references throughout.
+
+ACCEPTANCE CRITERIA
+-------------------
+1. ✅ Mechanical and complete — every setting has a copy-paste source/path
+2. ✅ All 4 client vars + 8 server settings listed (§2 + §3, table form)
+3. ✅ Verification steps included (§8 — 4 smoke tests)
+4. ✅ Customer responsibilities explicit (§9 — 7 explicit owners table)
+
+PROJECT RULES COMPLIANCE
+------------------------
+- Did NOT touch .claude/ paths (sub-agent boundary — docs-only)
+- Did NOT touch source code (docs-only)
+- Did NOT commit
+- DID read current-task.md "Operator actions performed (2026-05-19)" + commit
+  939e0392 + appsettings.template.json for source material
+- DID use {placeholder} substitution markers throughout (env-independent)
+- DID mark secret values as "generate per env; never commit"
+- DID update this task POML <status> to completed with this <notes> block
+  </notes>
 </task>

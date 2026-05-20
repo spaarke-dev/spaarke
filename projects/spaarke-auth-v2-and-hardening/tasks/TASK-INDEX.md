@@ -1,8 +1,9 @@
 # TASK-INDEX — Spaarke Auth v2 + Hardening
 
-> **Total Tasks**: 32/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11, Phase C: 9/10 — task 040 deferred). Plus B-addendum 031 deferred.
-> **Status**: Phase C SIGNED OFF (code shipped + deployed + OBO smoke check PASS). NEXT: Phase D (CSP/CAE/security 060-064).
-> **Last Updated**: 2026-05-19
+> **Total Tasks**: 41/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11, Phase C: 9/10 — task 040 deferred to V3 Phase G; Phase B4: 4/4; Phase F: 5/5). Plus B-addendum 031 deferred (not auth-related).
+> **Status**: PROJECT COMPLETE 2026-05-19. All auth-scoped work shipped + deployed. Office Add-ins deployed + route prefix bug fixed during close-out testing.
+> **NEXT PROJECT**: [`spaarke-auth-v3-and-hardening`](../../spaarke-auth-v3-and-hardening/design.md) — Phase D (CSP/CAE/claims/step-up/RT rotation), Phase E (CI hygiene: gitleaks/Playwright/Dependabot), Phase G (secret + KV consolidation incl. task 040), Phase H (auth residual cleanup).
+> **Last Updated**: 2026-05-19 (project close-out)
 > **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
 
 ## Status Legend
@@ -116,10 +117,10 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 
 | # | Task | Status | Parallel Group | Dependencies |
 |---|------|--------|----------------|--------------|
-| 080 | Implement OfficeNaaStrategy in @spaarke/auth; deprecate parallel authConfig.ts | :black_square_button: | No | Phase A |
-| 081 | Fix Office Add-in SseClient.ts:78 staleness (EventSource cannot auto-retry on 401) | :black_square_button: | B4-Parallel-1 | 080 |
-| 082 | Fix Office Add-in useSaveFlow.ts:526,864 staleness (snapshot from hook closure) | :black_square_button: | B4-Parallel-1 | 080 |
-| 083 | Rebuild + deploy Outlook + Word Add-in bundles | :black_square_button: | No | 081, 082 |
+| 080 | Implement OfficeNaaStrategy in @spaarke/auth; deprecate parallel authConfig.ts | :white_check_mark: | No | Phase A |
+| 081 | Fix Office Add-in SseClient.ts:78 staleness (EventSource cannot auto-retry on 401) | :white_check_mark: | B4-Parallel-1 | 080 |
+| 082 | Fix Office Add-in useSaveFlow.ts:526,864 staleness (snapshot from hook closure) | :white_check_mark: | B4-Parallel-1 | 080 |
+| 083 | Rebuild + deploy Outlook + Word Add-in bundles — DEPLOYED 2026-05-19, manifest 1.0.15.0 on SWA. Surfaced pre-existing /office vs /api/office route mismatch (fixed in same commit). | :white_check_mark: | No | 081, 082 |
 
 **Phase gate**: Office Add-ins use @spaarke/auth useAuth() API. No standalone authConfig.ts MSAL setup. Add-in bundles rebuilt and deployed.
 
@@ -129,11 +130,11 @@ Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently
 
 | # | Task | Status | Parallel Group | Dependencies |
 |---|------|--------|----------------|--------------|
-| 090 | Draft ADR-027: Spaarke Auth Architecture | :black_square_button: | Main-Only (.claude/) | All prior phases |
-| 091 | Update .claude/patterns/auth/spaarke-sso-binding.md: cascade section retired; INV-1..INV-7 stay; point to ADR-027 | :black_square_button: | Main-Only (.claude/) | 090 |
-| 092 | Update .claude/constraints/auth.md: function-based contract MUST rule; cascade MUST rules retired | :black_square_button: | Main-Only (.claude/) | 090 |
-| 093 | Write docs/guides/auth-deployment-setup.md: new-environment setup checklist | :black_square_button: | F-Parallel-1 | 090 |
-| 094 | Retire DEPRECATED-* files (delete or move to .claude/archive/); update CHANGELOG | :black_square_button: | Main-Only (.claude/) | 091, 092 |
+| 090 | Draft ADR-028: Spaarke Auth Architecture (renumbered from ADR-027 — slot taken by subscription-isolation ADR) | :white_check_mark: | Main-Only (.claude/) | All prior phases |
+| 091 | Update .claude/patterns/auth/spaarke-sso-binding.md: cascade section retired; INV-1..INV-8 stay; point to ADR-028 | :white_check_mark: | Main-Only (.claude/) | 090 |
+| 092 | Update .claude/constraints/auth.md: function-based contract MUST rule; cascade MUST rules retired | :white_check_mark: | Main-Only (.claude/) | 090 |
+| 093 | Write docs/guides/auth-deployment-setup.md: new-environment setup checklist + Exchange ApplicationAccessPolicy section | :white_check_mark: | F-Parallel-1 | 090 |
+| 094 | Retire DEPRECATED-* files (moved to .claude/archive/2026-05-19/); update CHANGELOG | :white_check_mark: | Main-Only (.claude/) | 091, 092 |
 
 **Phase gate**: ADR-027 approved. Patterns and constraints aligned with v2. Deployment guide complete and mechanically followable.
 

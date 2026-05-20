@@ -202,7 +202,10 @@ public class KnowledgeDocument
     /// </summary>
     [SimpleField(IsFilterable = true)]
     [JsonPropertyName("privilege_group_ids")]
-    public IList<string>? PrivilegeGroupIds { get; set; }
+    // Default to empty list — Azure Search Collection(Edm.String) is implicitly Nullable=False
+    // and rejects null writes (400 Bad Request). Empty list correctly signals "public document"
+    // to the privilege filter (matches "not privilege_group_ids/any()" clause).
+    public IList<string>? PrivilegeGroupIds { get; set; } = new List<string>();
 }
 
 /// <summary>

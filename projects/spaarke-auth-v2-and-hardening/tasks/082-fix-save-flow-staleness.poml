@@ -3,7 +3,7 @@
     <title>Fix Office Add-in useSaveFlow staleness</title>
     <phase>B4 — Office Add-ins consolidation</phase>
     <tags>auth, office-addins, hook, FULL</tags>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>080</dependencies>
     <parallel-safe>B4-Parallel-1</parallel-safe>
@@ -27,4 +27,31 @@
     <criterion>No Bearer literals.</criterion>
     <criterion>Save flow works in deployed dev.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 (NOT committed per parent instructions).
+
+    Approach: per-call `getAccessToken()` (NOT full `useAuth()` migration). Office Add-in
+    package does not depend on `@spaarke/auth` and `initAuth()` has not been called in
+    bootstrap, so `useAuth()` adoption was deferred to a future Office Add-in bootstrap
+    migration task. Per-call token acquisition fully eliminates the named staleness bug
+    (Bearer literals stay as documented D-AUTH-7 exception sites, with fresh per-call
+    tokens immediately above them).
+
+    Sites fixed in `src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts`:
+      - pollJobStatus: dropped accessToken param; per-call await getAccessToken()
+      - startJobTracking: dropped accessToken param; closes over getAccessToken getter
+      - startSave POST: inline await getAccessToken() immediately before fetch (was a
+        top-level snapshot reused for POST + tracking)
+      - startJobTracking call: no longer passes accessToken
+
+    Coordination with task 081: SseClient already accepts getAccessToken: AccessTokenGetter
+    (task 081 landed first). My fix dropped the upstream snapshot in startJobTracking so
+    the SSE call site no longer receives stale wiring.
+
+    tsc --noEmit: 0 new diagnostics in useSaveFlow.ts (15 pre-existing, same after edit;
+    confirmed via stash baseline diff). Pre-existing errors are all exactOptionalPropertyTypes
+    + responseData-typed-unknown narrowing issues that pre-date 082 and are out of scope.
+
+    Deferred to deploy (task 083): end-to-end Outlook Add-in save smoke test.
+  </notes>
 </task>

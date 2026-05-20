@@ -1,4 +1,18 @@
 /**
+ * @deprecated since 2026-05-19 (Spaarke Auth v2, task 080).
+ *
+ * This barrel re-exports the legacy NAA / Dialog auth services. Superseded by
+ * `OfficeNaaStrategy` in `@spaarke/auth`. New code MUST consume:
+ *
+ *   ```ts
+ *   import { initAuth, OfficeNaaStrategy, useAuth, authenticatedFetch } from '@spaarke/auth';
+ *   ```
+ *
+ * Retained TEMPORARILY (task 080 scope). Scheduled for removal by tasks
+ * 081 (Outlook entry-point rewrite) and 082 (Word entry-point rewrite).
+ *
+ * ---
+ *
  * NAA (Nested App Authentication) Module
  *
  * Provides authentication services for Office Add-ins using MSAL.js 3.x

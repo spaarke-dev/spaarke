@@ -6,7 +6,30 @@
  * while supporting bearer token authentication.
  *
  * Per spec.md: MUST use fetch + ReadableStream for SSE (not EventSource)
+ *
+ * Auth v2 (D-AUTH-7): Accepts a `getAccessToken` getter rather than a token string.
+ * The getter is invoked ONCE per stream open (and again on 401 mid-stream retry),
+ * immediately before the fetch is issued — so the token is always fresh for THIS
+ * connection. The token is NEVER snapshotted at construction time and NEVER reused
+ * across reconnects. This eliminates the class of bug where a token captured at
+ * mount time would expire mid-session, producing silent 401 failures on streams
+ * that have no token-refresh path (mirrors the SprkChat `useSseStream.ts`
+ * Wave 1 fix from task AUTHV2-023).
+ *
+ * NOTE: `authenticatedFetch` cannot be used here because SSE requires streaming
+ * the ReadableStream body, which the wrapper function does not expose. The
+ * raw `Authorization: Bearer ${token}` header below is an intentional
+ * D-AUTH-7 exception site.
  */
+
+/**
+ * Function that resolves to a fresh BFF access token.
+ *
+ * Implementations MUST acquire a fresh token per invocation (typically via MSAL's
+ * own cache, which handles silent refresh) and MUST NOT cache the resolved string
+ * outside MSAL.
+ */
+export type AccessTokenGetter = () => Promise<string>;
 
 export interface SseEvent {
   /** Event type (e.g., 'stage-update', 'job-complete') */
@@ -20,8 +43,12 @@ export interface SseEvent {
 }
 
 export interface SseClientOptions {
-  /** Access token for Authorization header */
-  accessToken: string;
+  /**
+   * Function returning a fresh BFF access token. Invoked immediately before each
+   * fetch (initial connect and any 401 reconnect) so the token is always fresh
+   * for THIS stream open. Never snapshotted.
+   */
+  getAccessToken: AccessTokenGetter;
   /** Called when an event is received */
   onEvent: (event: SseEvent) => void;
   /** Called when an error occurs */
@@ -34,6 +61,8 @@ export interface SseClientOptions {
   lastEventId?: string;
   /** Request timeout in ms (default: 30000) */
   timeout?: number;
+  /** Maximum 401 reconnect attempts (default: 3) */
+  maxAuthRetries?: number;
 }
 
 export interface SseConnection {
@@ -46,14 +75,21 @@ export interface SseConnection {
 /**
  * Creates an SSE connection using fetch + ReadableStream.
  *
+ * Token freshness contract:
+ *   - `options.getAccessToken()` is invoked immediately before each `fetch` call
+ *   - On 401 from the server, the connection auto-reconnects with a freshly
+ *     acquired token (up to `maxAuthRetries` times, default 3)
+ *   - The token string is never stored on the closure beyond the lifetime of
+ *     a single fetch call
+ *
  * @param url The SSE endpoint URL
- * @param options Connection options including auth token and callbacks
+ * @param options Connection options including auth-token getter and callbacks
  * @returns Connection object with close method
  *
  * @example
  * ```typescript
  * const connection = createSseConnection('/office/jobs/123/stream', {
- *   accessToken: 'Bearer token',
+ *   getAccessToken: () => authService.getAccessToken(['user_impersonation']),
  *   onEvent: (event) => console.log('Event:', event),
  *   onError: (error) => console.error('Error:', error),
  * });
@@ -63,24 +99,45 @@ export interface SseConnection {
  * ```
  */
 export function createSseConnection(url: string, options: SseClientOptions): SseConnection {
-  const { accessToken, onEvent, onError, onClose, onOpen, lastEventId, timeout = 30000 } = options;
+  const {
+    getAccessToken,
+    onEvent,
+    onError,
+    onClose,
+    onOpen,
+    lastEventId: initialLastEventId,
+    timeout = 30000,
+    maxAuthRetries = 3,
+  } = options;
 
   let abortController: AbortController | null = new AbortController();
   let isConnected = false;
+  let authRetries = 0;
+  // Track the last-seen event ID across reconnects so the server can resume from
+  // the right place. Seeded from caller's `lastEventId`, then updated as events
+  // arrive.
+  let currentLastEventId = initialLastEventId;
 
   const connect = async (): Promise<void> => {
     if (!abortController) {
       return;
     }
 
+    // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
+    // Never snapshot; never reuse across reconnects.
+    const accessToken = await getAccessToken();
+
     const headers: HeadersInit = {
       Accept: 'text/event-stream',
+      // Auth v2 (D-AUTH-7): raw Bearer header is required because SSE streams
+      // the ReadableStream body, which `authenticatedFetch` does not expose.
+      // The token comes from a fresh `getAccessToken()` call above.
       Authorization: `Bearer ${accessToken}`,
       'Cache-Control': 'no-cache',
     };
 
-    if (lastEventId) {
-      headers['Last-Event-ID'] = lastEventId;
+    if (currentLastEventId) {
+      headers['Last-Event-ID'] = currentLastEventId;
     }
 
     try {
@@ -91,6 +148,20 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
         cache: 'no-store',
       });
 
+      // Auth v2 (D-AUTH-7): on 401, close current stream, re-fetch fresh token,
+      // and reopen. Capped at `maxAuthRetries` to avoid infinite loops if the
+      // user's account is genuinely revoked.
+      if (response.status === 401 && authRetries < maxAuthRetries && abortController) {
+        authRetries += 1;
+        // Drain the body to release the underlying connection before reconnecting.
+        // (Failing to consume the body of a 401 can leak the socket on some hosts.)
+        await response.body?.cancel().catch(() => {
+          /* best-effort drain */
+        });
+        // Re-enter connect — `getAccessToken()` at the top will fetch a new token.
+        return connect();
+      }
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => response.statusText);
         throw new Error(`SSE connection failed: ${response.status} - ${errorText}`);
@@ -99,6 +170,10 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
       if (!response.body) {
         throw new Error('SSE response has no body');
       }
+
+      // Stream opened successfully — reset the auth retry budget so a 401
+      // *later* in the session can still trigger a fresh reconnect.
+      authRetries = 0;
 
       isConnected = true;
       onOpen?.();
@@ -118,6 +193,11 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
               parsedData = typeof currentEvent.data === 'string' ? JSON.parse(currentEvent.data) : currentEvent.data;
             } catch {
               parsedData = currentEvent.data;
+            }
+
+            // Track latest event ID for reconnect resumption
+            if (currentEvent.id) {
+              currentLastEventId = currentEvent.id;
             }
 
             onEvent({

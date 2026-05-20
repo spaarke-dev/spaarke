@@ -23,6 +23,11 @@ export type { IRuntimeConfig } from './resolveRuntimeConfig';
 export type { AuthStrategy } from './strategies/AuthStrategy';
 export { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';
 
+// Office Add-in strategy (v2 — task 080). Consumed by Outlook + Word Add-ins
+// once tasks 081/082 swap their bootstrap to `initAuth({ strategy: new OfficeNaaStrategy(config) })`.
+export { OfficeNaaStrategy } from './strategies/OfficeNaaStrategy';
+export type { IOfficeNaaConfig } from './strategies/OfficeNaaStrategy';
+
 // Core provider
 export { SpaarkeAuthProvider } from './SpaarkeAuthProvider';
 

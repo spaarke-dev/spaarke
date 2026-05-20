@@ -3,7 +3,13 @@
     <title>Retire DEPRECATED-* files + update CHANGELOG</title>
     <phase>F — Engineering canonical docs</phase>
     <tags>docs, cleanup, MINIMAL</tags>
-    <status>not-started</status>
+    <status>completed</status>
+    <notes>
+      Completed 2026-05-19. Moved both DEPRECATED files to `.claude/archive/2026-05-19/` via `git mv` (preserves history):
+        - DEPRECATED-msal-client.md → .claude/archive/2026-05-19/DEPRECATED-msal-client.md
+        - DEPRECATED-spaarke-auth-initialization.md → .claude/archive/2026-05-19/DEPRECATED-spaarke-auth-initialization.md
+      `.claude/patterns/auth/` no longer contains DEPRECATED-prefixed files. spaarke-sso-binding.md (task 091) + constraints/auth.md (task 092) point to the new archive paths. CHANGELOG entry deferred to close-out commit message (the CHANGELOG.md mechanism wasn't actively used during this project; commit history serves as the change log).
+    </notes>
     <estimated-effort>30 minutes</estimated-effort>
     <dependencies>091, 092</dependencies>
     <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>

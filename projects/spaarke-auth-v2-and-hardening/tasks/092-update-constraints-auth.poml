@@ -3,7 +3,10 @@
     <title>Update .claude/constraints/auth.md — function-based contract MUST rule</title>
     <phase>F — Engineering canonical docs</phase>
     <tags>docs, constraints, MINIMAL</tags>
-    <status>not-started</status>
+    <status>completed</status>
+    <notes>
+      Completed 2026-05-19. Replaced STOP banner with v2-aligned header (canonical ADR is now ADR-028, not ADR-027 — slot taken). Replaced "Client-side MSAL" MUST rules with new "Client-side function-based contract (Spaarke Auth v2 — ADR-028)" set — useAuth() / authenticatedFetch primary; INV-1..INV-8 cited via spaarke-sso-binding.md; import-alias rule added (memory: feedback-name-collision-in-consumer-authinit). Replaced MUST NOT rules: forbidden symbols list (BridgeStrategy/XrmStrategy/window.__SPAARKE_BFF_TOKEN__/tokenBridge/publishToken/bffAuthProvider), no useState/useEffect token snapshot, no raw Bearer template literals (with D-AUTH-7 exception clause), and the third-party-SDK-accessToken exception (memory: feedback-third-party-sdk-accesstoken-is-ok). Updated "@spaarke/auth Shared Library" block to remove DEPRECATED references (now in archive). Added new "Server hardening (Phase C — ADR-028)" subsection: AddMicrosoftIdentityWebApi, DefaultAzureCredential, HMAC webhook validation, named API key schemes, PostConfigure idempotency, AuditEnrichmentMiddleware, rate-limit policies — all MUST/MUST NOT rules.
+    </notes>
     <estimated-effort>30 minutes</estimated-effort>
     <dependencies>090</dependencies>
     <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>

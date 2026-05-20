@@ -37,7 +37,9 @@ export interface AuthStrategy {
    * this completes, both `acquireTokenSilent` and `ssoSilent` will fail until
    * the user re-authenticates.
    *
-   * OfficeNaaStrategy (task 080): TBD — Office NAA broker logout.
+   * OfficeNaaStrategy: `MSAL.logoutPopup` routed through the Office NAA broker
+   * (under NAA) or as a real popup (under fallback PCA). Same fallback to
+   * `clearCache()` as BrowserMsalStrategy if logoutPopup throws.
    *
    * Implementations should swallow non-fatal errors and at minimum cascade to
    * `clearCache()` so the local cache state matches the user-intended outcome.

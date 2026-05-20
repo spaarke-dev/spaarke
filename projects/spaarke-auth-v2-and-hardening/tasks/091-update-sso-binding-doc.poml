@@ -3,7 +3,10 @@
     <title>Update spaarke-sso-binding.md — retire cascade section, keep INV-1..INV-8</title>
     <phase>F — Engineering canonical docs</phase>
     <tags>docs, patterns, MINIMAL</tags>
-    <status>not-started</status>
+    <status>completed</status>
+    <notes>
+      Completed 2026-05-19. Replaced STOP banner with v2-aligned header (points to ADR-028). Retired the 6-strategy cascade section — replaced with brief "v2 token acquisition model" subsection explaining the simplified InMemoryCache + pluggable AuthStrategy design and why the cascade was deleted. Promoted invariants to numbered INV-1..INV-8 with explicit rationale per invariant. Added INV-4 (tenant resolution via sprk_TenantId env var primary), INV-5 (UPN over display-name as loginHint), INV-6 (omit authority field for library defaults), INV-7 (one PCA shared via getAuthProvider). "See Also" updated: ADR-028 canonical, constraints/auth.md, deployment guide (task 093), AUDIT-FINDINGS-AUTH-SYSTEM.md, archived DEPRECATED-* files.
+    </notes>
     <estimated-effort>30 minutes</estimated-effort>
     <dependencies>090</dependencies>
     <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>

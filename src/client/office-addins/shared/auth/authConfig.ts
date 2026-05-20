@@ -1,4 +1,28 @@
 /**
+ * @deprecated since 2026-05-19 (Spaarke Auth v2, task 080).
+ *
+ * Superseded by `OfficeNaaStrategy` from `@spaarke/auth`. New Office Add-in code
+ * MUST NOT call `createNaaMsalConfig` / `DEFAULT_AUTH_CONFIG` / `getBffApiScopes`
+ * directly — instead bootstrap via:
+ *
+ *   ```ts
+ *   import { initAuth, OfficeNaaStrategy, resolveConfig } from '@spaarke/auth';
+ *
+ *   const cfg = resolveConfig({
+ *     clientId: ADDIN_CLIENT_ID,
+ *     tenantId: TENANT_ID,
+ *     bffApiScope: `api://${BFF_API_CLIENT_ID}/user_impersonation`,
+ *   });
+ *   await initAuth({ ...cfg, /* IAuthConfig fields *\/ }, /* via task 081/082 wiring *\/);
+ *   ```
+ *
+ * This file is retained TEMPORARILY (task 080 scope) so existing
+ * `NaaAuthService` + `DialogAuthService` + Add-in entry points continue to build.
+ * Deletion is scheduled for tasks 081 (Outlook bootstrap rewrite) and
+ * 082 (Word bootstrap rewrite). DO NOT add new consumers.
+ *
+ * ---
+ *
  * NAA (Nested App Authentication) Configuration
  *
  * Configuration for MSAL.js 3.x with Nested App Authentication support.

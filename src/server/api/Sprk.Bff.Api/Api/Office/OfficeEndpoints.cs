@@ -31,7 +31,7 @@ public static class OfficeEndpoints
     /// <returns>The endpoint route builder for chaining.</returns>
     public static IEndpointRouteBuilder MapOfficeEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/office")
+        var group = app.MapGroup("/api/office")
             .WithTags("Office")
             .RequireAuthorization();
 
