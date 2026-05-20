@@ -43,6 +43,7 @@ This directory contains comprehensive architecture documentation covering system
 | [scope-architecture.md](scope-architecture.md) | Scope management: resolution chain, SYS-/CUST- ownership, single-level inheritance, gap detection | 2026-04-05 | 2026-04-05 | New |
 | [ai-semantic-relationship-graph.md](ai-semantic-relationship-graph.md) | Multi-modal document discovery combining Dataverse structural lookups with AI Search vector similarity | 2026-02-23 | 2026-04-05 | Verified |
 | [M365-COPILOT-INTEGRATION-ARCHITECTURE.md](M365-COPILOT-INTEGRATION-ARCHITECTURE.md) | M365 Copilot integration: Declarative Agent, API Plugin, agent gateway layer, Adaptive Cards | 2026-03-26 | 2026-04-05 | Verified |
+| [INSIGHTS-ENGINE-ARCHITECTURE.md](INSIGHTS-ENGINE-ARCHITECTURE.md) | Insights Engine: Fact/Observation/Inference taxonomy, Insight Index + Cosmos graph + Live Facts substrate, Insights Agent synthesis, sync/extraction Functions, per-tenant isolation | 2026-05-20 | 2026-05-20 | Pre-implementation |
 
 > For document processing and summarization pipeline (which consolidates former ai-document-summary-architecture.md), see [sdap-document-processing-architecture.md](sdap-document-processing-architecture.md) in the SDAP section above.
 

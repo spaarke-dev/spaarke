@@ -1,6 +1,6 @@
-# Current Task State - Document Relationship Viewer UX Fixes
+# Current Task State - SemanticSearch PCF Enhancements
 
-> **Last Updated**: 2026-04-05 21:00 (by context-handoff)
+> **Last Updated**: 2026-04-05 22:30 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,87 +9,51 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | DocumentRelationshipViewer UX fixes — title, grid columns, graph layout |
+| **Task** | SemanticSearch PCF UX enhancements — filter toggle, full viewer button, icon cleanup |
 | **Step** | 0 of 3: Not yet started |
 | **Status** | Ready to implement |
-| **Next Action** | Make 3 UX fixes in DocumentRelationshipViewer code page + bump RelatedDocumentCount PCF to v1.20.9 |
+| **Next Action** | Implement 3 changes in SemanticSearch PCF, bump to v1.1.29, rebuild + pack zip |
 
-### Files Modified This Session (for this task — none yet)
-- None — about to start
+### Files to Modify
+- `src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/FilterPanel.tsx` — replace "Document Type" dropdown with "Associated Only" toggle
+- `src/client/pcf/SemanticSearchControl/SemanticSearchControl/components/SearchInput.tsx` — change "+ Add Document" to icon-only button
+- `src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx` — add full viewer toolbar button, filter logic, toolbar layout
+- `src/client/pcf/SemanticSearchControl/SemanticSearchControl/hooks/useSemanticSearch.ts` — or filter in component
 
-### Critical Context
-The DocumentRelationshipViewer is opened two ways:
-1. From RelatedDocumentCount PCF → FindSimilarDialog (Fluent Dialog, iframe) — title change goes in `@spaarke/ui-components/FindSimilarDialog/FindSimilarDialog.tsx`
-2. From Corporate Workspace → Xrm.Navigation.navigateTo → sprk_documentrelationshipviewer
+### Three Changes Required
+1. **Replace "Document Type" filter with "Associated Only" toggle** — simple boolean filter on search results. When ON, only show documents whose parentEntityId matches the current record. The search response already includes parent entity data. No new Dataverse query needed — just client-side filtering.
+2. **Add "Open Full Viewer" icon button** in toolbar (next to refresh) — opens DocumentRelationshipViewer via Xrm.Navigation.navigateTo with the current record's context
+3. **Change "+ Add Document" text button to icon-only** with tooltip
 
-Three fixes needed:
-1. **Add title "Similar Documents"** to FindSimilarDialog (Fluent Dialog wrapper in @spaarke/ui-components)
-2. **Fix grid column overlap** — columns overlap when resized/dragged in RelationshipGrid
-3. **Graph default positions** — source document upper-left, matter hub upper-right (not covered by settings panel)
+### Version Bump
+- Current deployed: v1.1.27 (user hasn't imported v1.1.28 zip yet)
+- v1.1.28 zip exists with doc counter + auth fix
+- Next version for these changes: v1.1.29
 
-After changes: rebuild @spaarke/ui-components dist → rebuild RelatedDocumentCount PCF v1.20.9 → pack zip for user. Also rebuild DocumentRelationshipViewer code page and deploy.
-
-### Key File Locations
-- FindSimilarDialog: `src/client/shared/Spaarke.UI.Components/src/components/FindSimilarDialog/FindSimilarDialog.tsx`
-- RelationshipGrid: `src/client/code-pages/DocumentRelationshipViewer/src/components/RelationshipGrid.tsx`
-- DocumentGraph: `src/client/code-pages/DocumentRelationshipViewer/src/components/DocumentGraph.tsx`
-- Graph layout: `src/client/code-pages/DocumentRelationshipViewer/src/hooks/useForceLayout.ts` or similar
-- RelatedDocumentCount PCF: `src/client/pcf/RelatedDocumentCount/` (bump to v1.20.9)
+### Key Context
+- SemanticSearch PCF queries BFF `/api/ai/search` — returns AI Search index results scoped by entity
+- The 68 results are ALL indexed documents above similarity threshold, not just the 26 Dataverse-associated ones
+- "Associated Only" toggle = client-side filter on existing results, not a new API call
+- DocumentRelationshipViewer code page changes (title, grid, graph) were deployed earlier today
 
 ---
 
 ## Session Summary (2026-04-03 to 2026-04-05)
 
-### Major Work Completed This Session
+### Completed This Session (condensed)
 
-#### Find Similar Wizard MVP
-1. BFF endpoint: `POST /api/ai/visualization/related-from-content` (text extract → embed → temp AI Search entry)
-2. FindSimilarCodePage: document lookup + file upload dialog with @spaarke/auth bootstrap
-3. Deployed BFF + code page to Dataverse
+**Find Similar Wizard MVP**: BFF endpoint + frontend + deployed
+**Auth Overhaul**: sessionStorage strategy, full frame walk, loginHint on ssoSilent
+**BFF URL /api Fix**: buildBffApiUrl() helper + ALL legacy JS normalized (4 files)
+**RAG Indexing Fix**: missing tenantId in upload orchestrator → documents now index
+**Dead Code Removal**: removed legacy /api/ai/tools/document-profile/enqueue call
+**VisualHost v1.3.6**: "No data available for this measure" for null fields
+**RelatedDocumentCount**: v1.20.6→v1.20.9 (badge removal, /api fix, auth, viewer title)
+**SemanticSearch v1.1.28**: doc counter + auth (zip ready, not yet imported by user)
+**DocumentRelationshipViewer**: title, grid overlap fix, graph positions
+**Ribbon Fix**: Send to Index double /api fixed in sprk_DocumentOperations.js
 
-#### SSO Silent Token Fix
-4. Added `loginHint` from Xrm context to `ssoSilent()` in ALL 8 auth files (shared lib + PCFs + Code Pages)
-
-#### BFF URL `/api` Fix (Once and For All)
-5. Created `buildBffApiUrl()` helper in `@spaarke/auth` + PCF shared utils — idempotent, prevents missing/duplicated `/api`
-6. Fixed 2 production bugs (NextStepsStep.tsx, matterService.ts)
-7. Enhanced `authenticatedFetch` resolveUrl to route through helper as safety net
-8. Migrated RelatedDocumentCount hooks to use helper
-9. Updated 3 documentation files (constraint, pattern, architecture doc)
-
-#### Auth Architecture Overhaul
-10. **SessionStorageStrategy** — new strategy #2 in 6-strategy cascade. Shared across ALL same-origin iframes via sessionStorage. User authenticates once; every other component reads token instantly.
-11. **tokenBridge full frame walk** — readBridgeToken now walks entire frame tree (parent → grandparent → top) instead of just 1 level
-12. Rebuilt and deployed DocumentRelationshipViewer code page with all auth fixes
-13. Rebuilt RelatedDocumentCount v1.20.8 + SemanticSearch v1.1.27 PCFs with sessionStorage auth
-
-#### VisualHost PCF v1.3.6
-14. Added `isNull` flag to IAggregatedDataPoint in FieldPivotService
-15. GaugeVisual + HorizontalStackedBar show "No data available for this measure" when all source fields are null
-
-#### Document Form Fix
-16. Diagnosed RelatedDocumentCount PCF unbound field issue (form save error) — control on form missing `datafieldname`
-
-### Commits on master (this session)
-- `9cee57cd` — feat(auth): add loginHint to ssoSilent
-- `eeda645b` — fix(pcf): remove blue Badge from RelationshipCountCard (v1.20.6)
-- `a3dfc473` — fix(auth): centralize BFF API URL construction with buildBffApiUrl helper
-- `00366d06` — chore(pcf): bump RelatedDocumentCount to v1.20.8 with buildBffApiUrl migration
-- `697a0585` → rebased — feat(auth): add sessionStorage token cache + full frame walk
-- `0e446938` → rebased — fix(pcf): VisualHost v1.3.6 no data available
-- `fa1a14a8` → `aa67de82` → rebased — chore(pcf): rebuild RDC + SemanticSearch with sessionStorage auth
-
-### Deployed to Dataverse
-- sprk_documentrelationshipviewer (code page) — auth fixes
-- sprk_corporateworkspace (code page) — /api bug fix + auth
-- sprk_documentuploadwizard + all wizard code pages — /api bug fix + auth
-- sprk_findsimilar (code page) — Find Similar Wizard MVP
-- VisualHost v1.3.6 PCF — user uploaded zip
-- RelatedDocumentCount v1.20.8 PCF — user uploaded zip
-- SemanticSearch v1.1.27 PCF — user uploaded zip
-- BFF API — deployed with Find Similar endpoint
-
-### PCF Zips Provided to User
+### All PCF Zips Available
 - `VisualHostSolution_v1.3.6.zip` — uploaded ✅
-- `SpaarkeRelatedDocumentCount_v1.20.8.zip` — uploaded ✅
-- `SpaarkeSemanticSearch_v1.1.27.zip` — uploaded ✅
+- `SpaarkeRelatedDocumentCount_v1.20.9.zip` — ready for upload
+- `SpaarkeSemanticSearch_v1.1.28.zip` — ready for upload (will be superseded by v1.1.29)
