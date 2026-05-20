@@ -1,0 +1,53 @@
+<task id="AIPU2-035" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build PromptLibraryService with 4-tier ownership</title>
+    <phase>2C</phase>
+    <tags>bff-api, cosmos-db, prompts</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-002, AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a PromptLibraryService that enables users to save, reuse, and share prompt templates
+    across four ownership tiers: personal (user-owned, private), team (shared within a team),
+    org (organization-wide read-only, admin-managed), and system (built-in read-only, shipped
+    with the product). Personal and team templates are stored in Cosmos DB `prompts` container.
+    Org and system templates are stored in Dataverse (sprk_prompttemplate table) for admin
+    tooling compatibility. Templates support variable substitution with entity-reference pickers
+    (e.g., {{matter.name}}, {{document.title}}). Expose full CRUD API endpoints for personal
+    and team tiers; read-only endpoints for org and system tiers.
+  </prompt>
+  <role>Senior .NET developer familiar with Cosmos DB, Dataverse OData, and .NET Minimal API endpoint design.</role>
+  <goal>
+    Users can save a prompt template, retrieve it later, share it with their team, and use
+    variable placeholders that resolve to live Dataverse entity values. CRUD endpoints work
+    for personal and team tiers. Org and system templates are read-only via the same API.
+    Template variables are documented and validated.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read data.md constraints to confirm storage patterns for user-scoped vs org-scoped data before implementing.</step>
+    <step>Create PromptLibraryService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Prompts/. Define IPromptLibraryService with GetTemplatesAsync(userId, teamId, scope), GetTemplateByIdAsync(id, userId), CreateTemplateAsync(template, userId), UpdateTemplateAsync(id, template, userId), DeleteTemplateAsync(id, userId), and RenderTemplateAsync(template, variables) methods.</step>
+    <step>Define PromptTemplate record: Id, Title, Description, Body (string with {{variable}} placeholders), Tier (enum: Personal/Team/Org/System), OwnerId (userId or teamId), Tags (list of string), Variables (list of TemplateVariable: name, description, entityType?), CreatedAt, UpdatedAt.</step>
+    <step>Implement Cosmos DB CRUD for Personal and Team tiers: partition key /ownerId. Personal templates: ownerId = userId. Team templates: ownerId = teamId. Use DefaultAzureCredential.</step>
+    <step>Implement Dataverse read for Org and System tiers: query sprk_prompttemplate via OData filter on sprk_tier field. Map to PromptTemplate record.</step>
+    <step>Implement RenderTemplateAsync: replace {{variable.field}} placeholders with resolved values from a provided Dictionary of string to string. Return rendered string. Validate all required variables are provided; return ValidationResult listing missing variables if not.</step>
+    <step>Add Minimal API endpoints in a PromptLibraryEndpoints.cs file: GET /api/ai/prompts (list by scope), GET /api/ai/prompts/{id}, POST /api/ai/prompts, PUT /api/ai/prompts/{id}, DELETE /api/ai/prompts/{id}, POST /api/ai/prompts/{id}/render. Apply DocumentAuthorizationFilter for ownership checks.</step>
+    <step>Register PromptLibraryService in AddAiPersistenceModule. Map endpoints in Program.cs.</step>
+    <step>Write unit tests: (a) list returns personal + team + org + system templates merged, (b) create/update/delete only allowed for personal/team, (c) org/system are read-only (delete throws Forbidden), (d) render resolves variables correctly, (e) render returns validation error for missing variables.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Four tiers are supported: Personal and Team (Cosmos CRUD), Org and System (Dataverse read-only).</criterion>
+    <criterion>Template variables use {{variable.field}} syntax and are resolved by RenderTemplateAsync.</criterion>
+    <criterion>Attempting to update or delete an Org or System template returns HTTP 403 Forbidden.</criterion>
+    <criterion>CRUD endpoints are registered and return correct HTTP status codes (201 Created, 204 No Content, 404 Not Found).</criterion>
+    <criterion>Cosmos documents partition by /ownerId (userId or teamId) — not by tenantId alone.</criterion>
+    <criterion>Service registered in AddAiPersistenceModule and resolves cleanly.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

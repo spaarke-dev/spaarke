@@ -1,0 +1,32 @@
+<task id="AUTHV2-062" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Identity claims hardening — use oid as canonical user ID everywhere</title>
+    <phase>D — Reasonable security hardening</phase>
+    <tags>security, server, identity, claims, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>D-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>`email`/`upn`/`preferred_username` claims are mutable. `oid` (Azure AD object ID) is immutable per user per tenant. Audit codebase for any place where mutable claims are used as canonical identity (audit logs, authorization checks, user lookups).</prompt>
+  <role>Senior security engineer.</role>
+  <goal>oid is the only canonical user identifier. Audit logs + authorization checks reference oid. Lookups (e.g., Contact resolution) may still use email but the result is the lookup key (Contact GUID), not email itself.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/ (grep for email claim usage)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authorization/ExternalCallerAuthorizationFilter.cs (line 78-91 email lookup is OK; result must be Contact GUID)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Grep server src for `.Identity.Name`, `email`, `upn`, `preferred_username` claim usages.</step>
+    <step>For each: classify as (a) canonical identity use [must change to oid] or (b) lookup-only [OK, but result must be persistent ID].</step>
+    <step>Replace canonical uses with oid claim extraction.</step>
+    <step>Add helper extension method `HttpContext.GetUserOid()` to make pattern consistent.</step>
+    <step>Verify audit log emissions use oid (after task 048).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No `.Identity.Name` used as canonical ID for persistent records.</criterion>
+    <criterion>oid extraction helper exists and is used consistently.</criterion>
+    <criterion>Audit log fields show oid.</criterion>
+  </acceptance-criteria>
+</task>

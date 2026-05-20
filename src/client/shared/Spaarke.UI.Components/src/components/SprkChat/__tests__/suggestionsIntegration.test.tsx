@@ -142,10 +142,23 @@ const SESSION_RESPONSE = {
 
 const PLAYBOOKS_RESPONSE = { playbooks: [] };
 
+// Auth v2 (D-AUTH-1): SprkChat takes authenticatedFetch + getAccessToken instead
+// of a snapshotted accessToken string. Both are wired to the mocked global fetch.
+const mockAuthenticatedFetch = (url: string, init?: RequestInit) =>
+  mockFetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: 'Bearer test-access-token',
+    },
+  });
+const mockGetAccessToken = () => Promise.resolve('test-access-token');
+
 const defaultProps = {
   playbookId: 'test-playbook-id',
   apiBaseUrl: 'https://api.example.com',
-  accessToken: 'test-access-token',
+  authenticatedFetch: mockAuthenticatedFetch,
+  getAccessToken: mockGetAccessToken,
 };
 
 // ---------------------------------------------------------------------------

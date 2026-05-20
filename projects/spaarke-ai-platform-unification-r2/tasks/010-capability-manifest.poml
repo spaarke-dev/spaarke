@@ -1,0 +1,52 @@
+<task id="AIPU2-010" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build CapabilityManifest Singleton</title>
+    <phase>2A</phase>
+    <tags>bff-api, ai, capabilities</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a CapabilityManifest singleton that caches all AI capabilities from Dataverse in memory at startup.
+    This is the central registry that the capability router (Layer 1, 2, 3) and the orchestrator prompt builder
+    both depend on. It must load synchronously before any AI request is served and expose sub-millisecond
+    read access. All subsequent Phase 2A and 2B tasks read from this manifest, so correctness and low-latency
+    access are the top priorities.
+  </prompt>
+  <role>Senior .NET backend engineer familiar with Spaarke BFF API patterns, Dataverse, and AI orchestration.</role>
+  <goal>
+    CapabilityManifest singleton loads all active capabilities from Dataverse on BFF startup, exposes a
+    thread-safe in-memory dictionary, and returns any capability by name in under 1ms. Contains at minimum:
+    capability display name, description, keyword hints, associated playbook ID, tool set, and enabled flag.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ServiceCollectionExtensions.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SprkChatAgentFactory.cs and the existing AI service registration in ServiceCollectionExtensions.cs to understand current capability loading patterns.</step>
+    <step>Create CapabilityManifestEntry.cs record in Services/Ai/Capabilities/ with properties: CapabilityName (string), Description (string), KeywordHints (IReadOnlyList&lt;string&gt;), PlaybookId (Guid?), ToolNames (IReadOnlyList&lt;string&gt;), IsEnabled (bool), TenantRestrictions (IReadOnlyList&lt;string&gt;).</step>
+    <step>Create ICapabilityManifest.cs interface with: TryGet(string name, out CapabilityManifestEntry entry), GetAll(), LastRefreshedUtc property.</step>
+    <step>Create CapabilityManifest.cs implementing ICapabilityManifest as a singleton backed by ImmutableDictionary&lt;string, CapabilityManifestEntry&gt; (swap-on-refresh pattern using Interlocked.Exchange).</step>
+    <step>Create ICapabilityManifestLoader.cs interface with LoadAsync(CancellationToken) returning IReadOnlyList&lt;CapabilityManifestEntry&gt;.</step>
+    <step>Create DataverseCapabilityManifestLoader.cs implementing ICapabilityManifestLoader, querying the sprk_aicapability Dataverse table via the existing IDataverseService (or direct OData client). Map columns to CapabilityManifestEntry fields.</step>
+    <step>In CapabilityManifest, add InitializeAsync(CancellationToken) called from an IHostedService startup hook (or existing startup pipeline). Throw if Dataverse is unreachable and no cached snapshot exists.</step>
+    <step>Register ICapabilityManifest (singleton), ICapabilityManifestLoader, and DataverseCapabilityManifestLoader in AddAiCapabilitiesModule() extension method on IServiceCollection.</step>
+    <step>Write unit tests in tests/ covering: TryGet returns correct entry, GetAll returns all enabled entries, swap-on-refresh replaces dictionary atomically, disabled entries are excluded from GetAll.</step>
+    <step>Verify BFF startup sequence: run `dotnet build src/server/api/Sprk.Bff.Api/` and confirm no build errors.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>CapabilityManifest is registered as a singleton and populated before the first HTTP request is handled.</criterion>
+    <criterion>TryGet and GetAll complete in under 1ms on a loaded manifest (verified by unit test stopwatch assertion).</criterion>
+    <criterion>Disabled capabilities (IsEnabled = false) are excluded from GetAll() results.</criterion>
+    <criterion>ImmutableDictionary swap is atomic — no lock required on the read path.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "CapabilityManifest"`.</criterion>
+    <criterion>Build succeeds with no new warnings: `dotnet build src/server/api/Sprk.Bff.Api/`.</criterion>
+  </acceptance-criteria>
+</task>

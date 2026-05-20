@@ -29,7 +29,7 @@ import {
   Card,
   mergeClasses,
 } from '@fluentui/react-components';
-import type { ITodoPriorityScore } from '../../hooks/useTodoScoring';
+import type { ITodoPriorityScore } from './todoScoringTypes';
 
 // ---------------------------------------------------------------------------
 // Styles

@@ -1,0 +1,50 @@
+<task id="AIPU2-086" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build PlaybookGalleryWidget for Context Pane</title>
+    <phase>4D</phase>
+    <tags>frontend, widgets, playbooks</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-073</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    When the SpaarkeAi shell is in the Welcome stage, the Context pane should show a gallery of
+    available playbooks so users can browse and select one before starting a chat. This was not
+    possible in R1 (the context pane only showed source documents after a chat turn). The
+    PlaybookGalleryWidget implements ContextWidget and renders available playbooks as Fluent v9
+    cards with descriptions and capability badges. When a user selects a playbook, the widget
+    dispatches a playbook_selected event to the PaneEventBus 'conversation' channel so
+    ConversationPane and AiSessionProvider can initialize the session with that playbook.
+  </prompt>
+  <role>Frontend developer with React 19, Fluent v9, and event-driven architecture experience.</role>
+  <goal>
+    Users can browse and select playbooks from the Context pane before starting a chat.
+    Playbook selection dispatches a typed event to PaneEventBus. Widget registered in
+    ContextWidgetRegistry.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 to confirm Fluent v9 Card component usage and design token constraints.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PlaybookGalleryWidget.tsx implementing ContextWidget.</step>
+    <step>Define PlaybookGalleryData type: { playbooks: PlaybookSummary[] } where PlaybookSummary has id, name, description, capabilityBadges (string[]), iconName.</step>
+    <step>Render each playbook as a Fluent v9 Card with: playbook name as card title, description body text, capability badges rendered as Fluent v9 Badge components.</step>
+    <step>On card selection (click): call useDispatchPaneEvent() to dispatch to the 'conversation' channel a playbook_selected event carrying the selected playbook id and name.</step>
+    <step>Visually highlight the currently selected card (Fluent v9 selected state or border token).</step>
+    <step>Handle empty playbook list: render a Fluent v9 EmptyState illustration with instructional text.</step>
+    <step>Register PlaybookGalleryWidget in ContextWidgetRegistry.</step>
+    <step>Write unit tests: (a) playbooks render as cards with correct content; (b) clicking a card dispatches playbook_selected to 'conversation' channel; (c) empty list renders EmptyState.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Available playbooks render as Fluent v9 Cards with name, description, and capability badges.</criterion>
+    <criterion>Clicking a playbook card dispatches playbook_selected event to the 'conversation' PaneEventBus channel.</criterion>
+    <criterion>Selected card is visually highlighted using Fluent v9 tokens (no hard-coded colors).</criterion>
+    <criterion>Empty playbook list renders an EmptyState, not a blank pane.</criterion>
+    <criterion>Widget registered in ContextWidgetRegistry and renders in ContextPaneController during playbook-gallery stage.</criterion>
+    <criterion>Unit tests for card rendering, selection dispatch, and empty state pass.</criterion>
+  </acceptance-criteria>
+</task>

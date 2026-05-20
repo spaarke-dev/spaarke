@@ -18,16 +18,23 @@
  * const navService = createXrmNavigationService();
  * ```
  *
- * @example BFF adapters (Power Pages SPA):
+ * @example BFF adapters (Code Page SPA, PCF, Add-in — any Spaarke Auth v2 consumer):
  * ```typescript
+ * import { useAuth } from "@spaarke/auth";
  * import {
  *   createBffDataService,
  *   createBffUploadService,
  *   createBffNavigationService,
  * } from "@spaarke/ui-components";
  *
+ * const { authenticatedFetch, getAccessToken } = useAuth();
+ *
  * const dataService = createBffDataService(authenticatedFetch, "https://spe-api-dev-67e2xz.azurewebsites.net");
- * const uploadService = createBffUploadService(authenticatedFetch, "https://spe-api-dev-67e2xz.azurewebsites.net");
+ * const uploadService = createBffUploadService(
+ *   authenticatedFetch,
+ *   "https://spe-api-dev-67e2xz.azurewebsites.net",
+ *   getAccessToken  // only needed if callers pass onProgress (XHR path)
+ * );
  * const navService = createBffNavigationService((path) => router.push(path));
  * ```
  */

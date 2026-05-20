@@ -68,14 +68,8 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         }
         else
         {
-            var tenantId = configuration["TENANT_ID"]
-                ?? throw new InvalidOperationException("TENANT_ID configuration is required");
-            var clientId = configuration["API_APP_ID"]
-                ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-            var clientSecret = configuration["Dataverse:ClientSecret"]
-                ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
-
-            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
+            _credential = new DefaultAzureCredential();
         }
 
         _httpClient.BaseAddress = new Uri(_apiUrl);

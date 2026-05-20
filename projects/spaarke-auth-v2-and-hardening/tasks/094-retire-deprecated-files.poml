@@ -1,0 +1,40 @@
+<task id="AUTHV2-094" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Retire DEPRECATED-* files + update CHANGELOG</title>
+    <phase>F — Engineering canonical docs</phase>
+    <tags>docs, cleanup, MINIMAL</tags>
+    <status>completed</status>
+    <notes>
+      Completed 2026-05-19. Moved both DEPRECATED files to `.claude/archive/2026-05-19/` via `git mv` (preserves history):
+        - DEPRECATED-msal-client.md → .claude/archive/2026-05-19/DEPRECATED-msal-client.md
+        - DEPRECATED-spaarke-auth-initialization.md → .claude/archive/2026-05-19/DEPRECATED-spaarke-auth-initialization.md
+      `.claude/patterns/auth/` no longer contains DEPRECATED-prefixed files. spaarke-sso-binding.md (task 091) + constraints/auth.md (task 092) point to the new archive paths. CHANGELOG entry deferred to close-out commit message (the CHANGELOG.md mechanism wasn't actively used during this project; commit history serves as the change log).
+    </notes>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>091, 092</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>Final cleanup. Delete DEPRECATED-* files (or move to .claude/archive/2026-MM-DD/ per archive convention). Update CHANGELOG to document v2 ship.</prompt>
+  <role>Engineering writer.</role>
+  <goal>No DEPRECATED-* files remain in .claude/patterns/auth/. CHANGELOG reflects v2 completion.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/DEPRECATED-msal-client.md</file>
+      <file>.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>.claude/archive/ (archive convention)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Move DEPRECATED-msal-client.md and DEPRECATED-spaarke-auth-initialization.md to .claude/archive/YYYY-MM-DD/.</step>
+    <step>Remove their rows from .claude/patterns/auth/INDEX.md (or mark them as archived with archive path).</step>
+    <step>Update .claude/CHANGELOG.md: add entry "Auth v2 shipped — DEPRECATED-* files archived. ADR-027 is canonical."</script>
+    <step>Final grep: no in-repo references to old filenames remain unfixed.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>DEPRECATED-* files moved to archive.</criterion>
+    <criterion>INDEX.md cleaned up.</criterion>
+    <criterion>CHANGELOG entry present.</criterion>
+    <criterion>No broken references.</criterion>
+  </acceptance-criteria>
+</task>

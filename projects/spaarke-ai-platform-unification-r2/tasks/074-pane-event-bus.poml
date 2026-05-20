@@ -1,0 +1,50 @@
+<task id="AIPU2-074" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build PaneEventBus for Unified Cross-Pane Communication</title>
+    <phase>4A</phase>
+    <tags>frontend, events, architecture</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-070</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1 used two parallel DOM CustomEvent buses (cross-pane-events.ts) which had a single-subscriber
+    limitation — the last subscriber per event type won, silently dropping earlier subscriptions.
+    R2 replaces both buses with a single typed PaneEventBus supporting multi-subscriber channels.
+    The bus has four typed channels: workspace (workspace_widget, workspace_action events),
+    context (context_update, context_highlight events), conversation (user input, playbook
+    selection events), and safety (safety_annotation, capability_change events). React hooks
+    (usePaneEvent, useDispatchPaneEvent) make subscription and dispatch ergonomic from components.
+  </prompt>
+  <role>Frontend developer with event bus, React context, and React hooks design experience.</role>
+  <goal>
+    PaneEventBus supports multiple simultaneous subscribers per channel with no last-write-wins
+    drop. React hooks usePaneEvent and useDispatchPaneEvent work correctly. R1's dual DOM
+    CustomEvent buses are fully replaced. Unit tests verify multi-subscriber behavior.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Outputs/src/cross-pane/cross-pane-events.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read cross-pane-events.ts to understand all R1 event types that need to be migrated and the single-subscriber limitation to be fixed.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts with a typed channel map: Record&lt;PaneChannel, Set&lt;PaneEventHandler&gt;&gt; where PaneChannel = 'workspace' | 'context' | 'conversation' | 'safety'.</step>
+    <step>Define typed event union types per channel: WorkspacePaneEvent (workspace_widget | workspace_action), ContextPaneEvent (context_update | context_highlight), ConversationPaneEvent (user_input | playbook_selected), SafetyPaneEvent (safety_annotation | capability_change).</step>
+    <step>Implement subscribe(channel, handler) returning an unsubscribe function; dispatch(channel, event) calls all handlers in the channel's Set (multi-subscriber, no drop).</step>
+    <step>Create PaneEventBusContext (React context) and PaneEventBusProvider wrapping children with a stable bus instance.</step>
+    <step>Create usePaneEvent(channel, handler) hook: subscribes on mount, unsubscribes on unmount, stable ref for handler to avoid infinite effect loops.</step>
+    <step>Create useDispatchPaneEvent() hook: returns a stable dispatch function from the bus context.</step>
+    <step>Export PaneEventBusProvider, usePaneEvent, useDispatchPaneEvent, and all event types from src/index.ts.</step>
+    <step>Write unit tests: (a) multiple subscribers on same channel all receive dispatched event; (b) unsubscribed handler no longer receives events; (c) dispatch on channel with no subscribers does not throw.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>PaneEventBus supports multiple simultaneous subscribers per channel — all receive every dispatched event.</criterion>
+    <criterion>usePaneEvent hook subscribes on mount and unsubscribes on unmount without memory leaks.</criterion>
+    <criterion>useDispatchPaneEvent returns a stable function reference (no unnecessary re-renders).</criterion>
+    <criterion>R1 cross-pane-events.ts dual-bus pattern is fully replaced — no DOM CustomEvent usage in new code.</criterion>
+    <criterion>Unit tests for multi-subscriber, unsubscribe, and empty-channel-dispatch pass.</criterion>
+    <criterion>All four typed channels and their event unions are defined and exported.</criterion>
+  </acceptance-criteria>
+</task>

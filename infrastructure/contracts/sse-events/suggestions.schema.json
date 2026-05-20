@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/contracts/sse-events/suggestions.schema.json",
+  "title": "suggestions SSE Event",
+  "description": "Delivers a batch of follow-up suggestions to display in the SprkChat suggestion bar after a model response. Suggestions are categorised as actions, questions, or insights.",
+  "allOf": [
+    { "$ref": "_shared-defs.json#/$defs/SseEnvelope" }
+  ],
+  "required": ["type", "suggestions", "maxSuggestions"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "suggestions",
+      "description": "Discriminator — always 'suggestions'."
+    },
+    "suggestions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered list of suggestions to display. Length must equal maxSuggestions.",
+      "items": {
+        "type": "object",
+        "required": ["suggestionId", "text", "confidence", "category"],
+        "properties": {
+          "suggestionId": {
+            "type": "string",
+            "description": "Stable ID for telemetry and click-tracking."
+          },
+          "text": {
+            "type": "string",
+            "description": "The suggestion text displayed as a pill/button."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Model confidence score for relevance of this suggestion."
+          },
+          "category": {
+            "type": "string",
+            "enum": ["action", "question", "insight"],
+            "description": "Category used to determine icon and ordering in the suggestion bar."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "maxSuggestions": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Expected number of suggestions in this event. Must match suggestions array length."
+    }
+  },
+  "additionalProperties": true
+}

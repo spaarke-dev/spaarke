@@ -107,8 +107,12 @@ export interface UseActionMenuDataOptions {
   entityType: string | undefined;
   /** Base URL for the BFF API */
   apiBaseUrl: string;
-  /** Bearer token for API authentication */
-  accessToken: string;
+  /**
+   * Authenticated fetch function (typically from `@spaarke/auth` or `useAuth()`).
+   * MUST attach a fresh Bearer token on every call. Replaces the previous
+   * `accessToken: string` snapshot prop (Auth v2 D-AUTH-1).
+   */
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,12 +153,12 @@ export interface IUseActionMenuDataResult {
  *   sessionId: session?.sessionId,
  *   entityType: hostContext?.entityType,
  *   apiBaseUrl: "https://spe-api-dev-67e2xz.azurewebsites.net",
- *   accessToken: token,
+ *   authenticatedFetch, // from @spaarke/auth / useAuth()
  * });
  * ```
  */
 export function useActionMenuData(options: UseActionMenuDataOptions): IUseActionMenuDataResult {
-  const { sessionId, entityType, apiBaseUrl, accessToken } = options;
+  const { sessionId, entityType, apiBaseUrl, authenticatedFetch } = options;
 
   const [actions, setActions] = useState<IChatAction[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -168,21 +172,6 @@ export function useActionMenuData(options: UseActionMenuDataOptions): IUseAction
 
   // Normalize URL: strip trailing slashes.
   const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-
-  /**
-   * Extract tenant ID from JWT access token for X-Tenant-Id header.
-   * Azure AD tokens include 'tid' claim with the tenant GUID.
-   */
-  const extractTenantId = (token: string): string | null => {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const payload = JSON.parse(atob(parts[1]));
-      return payload.tid || null;
-    } catch {
-      return null;
-    }
-  };
 
   /**
    * Fetches actions from the API.
@@ -216,14 +205,9 @@ export function useActionMenuData(options: UseActionMenuDataOptions): IUseAction
         const queryString = params.toString();
         const url = `${baseUrl}/api/ai/chat/actions${queryString ? `?${queryString}` : ''}`;
 
-        const tenantId = extractTenantId(accessToken);
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-            ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-          },
+          headers: { 'Content-Type': 'application/json' },
         });
 
         if (!response.ok) {
@@ -263,7 +247,7 @@ export function useActionMenuData(options: UseActionMenuDataOptions): IUseAction
         setIsLoading(false);
       }
     },
-    [sessionId, entityType, baseUrl, accessToken]
+    [sessionId, entityType, baseUrl, authenticatedFetch]
   );
 
   /**

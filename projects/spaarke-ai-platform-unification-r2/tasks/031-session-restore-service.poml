@@ -1,0 +1,51 @@
+<task id="AIPU2-031" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build SessionRestoreService (load, staleness check, context reconstruction)</title>
+    <phase>2C</phase>
+    <tags>bff-api, cosmos-db, session</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-030</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a SessionRestoreService that loads a persisted AI chat session and reconstructs
+    usable context for the LLM. Restoration must: (1) load the session document from Cosmos DB
+    by session ID, (2) check whether any Dataverse entities referenced in the session have
+    changed since the session was saved (ETag-based staleness check), (3) reconstruct the
+    context window by combining an LLM-generated summary (if one exists) with the last 10
+    verbatim messages, and (4) return a structured RestoredSession object ready for injection
+    into the next streaming request. Total restore time must be under 500ms p95.
+  </prompt>
+  <role>Senior .NET developer familiar with Cosmos DB SDK v3, Dataverse OData, and LLM context window management.</role>
+  <goal>
+    Session restore completes in under 500ms p95. Stale Dataverse entity references are
+    flagged in the restored session so downstream code can refresh or warn the user. The
+    reconstructed context (summary + last 10 messages) is ready for injection into the LLM
+    system prompt without further transformation.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ChatSessionManager.cs to understand session schema, entity reference storage, and existing restore hooks before designing SessionRestoreService.</step>
+    <step>Create SessionRestoreService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Persistence/. Define ISessionRestoreService with RestoreSessionAsync(sessionId, tenantId) returning RestoredSession.</step>
+    <step>Define RestoredSession record: SessionId, TenantId, ReconstructedContext (string), StaleEntityRefs (IReadOnlyList of EntityRef), RestoredAt (DateTimeOffset), WasSummarized (bool).</step>
+    <step>Implement load step: fetch session document from Cosmos DB by sessionId + tenantId partition key. If not found, return null (caller handles new-session path).</step>
+    <step>Implement staleness check: for each entity reference stored in the session (entityType + id + savedETag), issue a lightweight HEAD or single-field OData GET to Dataverse and compare ETags. Collect mismatches into StaleEntityRefs. Run entity checks in parallel (Task.WhenAll) to keep latency low.</step>
+    <step>Implement context reconstruction: if a summary exists in the session document, use it as the base. Append the last 10 verbatim messages from the full message list. Concatenate into ReconstructedContext string with clear section delimiters.</step>
+    <step>Register SessionRestoreService in AddAiPersistenceModule (created in AIPU2-030).</step>
+    <step>Write unit tests covering: (a) normal restore with summary, (b) restore without summary (last 10 messages only), (c) stale entity detection, (d) session not found returns null, (e) restore latency mock verifies parallelism of entity checks.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>RestoreSessionAsync returns a populated RestoredSession within 500ms p95 in load tests against a mock Cosmos and Dataverse.</criterion>
+    <criterion>Entity staleness is detected by ETag comparison and surfaced in StaleEntityRefs — not silently ignored.</criterion>
+    <criterion>ReconstructedContext contains the LLM summary (when present) followed by the last 10 verbatim messages with clear delimiters.</criterion>
+    <criterion>Entity staleness checks run in parallel (Task.WhenAll), not sequentially.</criterion>
+    <criterion>Session not found returns null — no exception thrown.</criterion>
+    <criterion>Service is registered in AddAiPersistenceModule and resolves cleanly.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

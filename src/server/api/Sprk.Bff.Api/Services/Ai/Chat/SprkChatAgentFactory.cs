@@ -7,10 +7,12 @@ using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Ai.Foundry;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
@@ -43,16 +45,25 @@ public sealed class SprkChatAgentFactory
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SprkChatAgentFactory> _logger;
 
+    // ── AIPU2-061: Per-turn capability routing ────────────────────────────────
+    // ICapabilityRouter is a singleton (in-memory keyword + LLM classifier).
+    // Injected here so CreateAgentAsync can call RouteAsync before tool resolution.
+    // When null (pre-AIPU2-010 environments), the factory falls back to the existing
+    // static tool resolution path (backward-compatible).
+    private readonly ICapabilityRouter? _capabilityRouter;
+
     public SprkChatAgentFactory(
         IChatClient chatClient,
         [FromKeyedServices("raw")] IChatClient rawChatClient,
         IServiceProvider serviceProvider,
-        ILogger<SprkChatAgentFactory> logger)
+        ILogger<SprkChatAgentFactory> logger,
+        ICapabilityRouter? capabilityRouter = null)
     {
         _chatClient = chatClient;
         _rawChatClient = rawChatClient;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _capabilityRouter = capabilityRouter;
     }
 
     /// <summary>
@@ -61,6 +72,15 @@ public sealed class SprkChatAgentFactory
     /// A new agent instance is returned on every call.  Callers (e.g. ChatSessionManager)
     /// are responsible for caching the agent for the duration of a session and replacing it
     /// when a context switch occurs (different document or playbook).
+    ///
+    /// AIPU2-061: Per-turn tool injection via CapabilityRouter.
+    /// When <paramref name="latestUserMessage"/> is provided and <see cref="ICapabilityRouter"/> is
+    /// registered, the factory calls <c>RouteAsync</c> to select the minimal tool set for the turn,
+    /// then validates those capabilities via <see cref="ICapabilityValidator"/>.  Only tools whose
+    /// capability appears in the validated set are injected into the agent.  If routing produces no
+    /// confident result (Layer 3 fallback), the full backward-compatible tool set is used.
+    /// A <c>capability_change</c> SSE event is emitted when the routed tool set differs from the
+    /// <paramref name="previousTurnToolNames"/> set passed by the caller.
     /// </summary>
     /// <param name="sessionId">Opaque session identifier (used for logging/tracing).</param>
     /// <param name="documentId">Dataverse sprk_document ID for the active document.</param>
@@ -77,15 +97,22 @@ public sealed class SprkChatAgentFactory
     /// May be null for non-streaming contexts (e.g., background processing).
     /// </param>
     /// <param name="sseWriter">
-    /// Optional SSE writer delegate for out-of-band events (progress, document_replace).
-    /// Used by <see cref="AnalysisExecutionTools.RerunAnalysisAsync"/> to emit progress and
-    /// document replacement events during re-analysis. Null when SSE is not available.
+    /// Optional SSE writer delegate for out-of-band events (progress, document_replace,
+    /// capability_change). Used by tools and by AIPU2-061 to emit <c>capability_change</c>
+    /// events when the per-turn tool set differs from the previous turn.
+    /// Null when SSE is not available.
     /// </param>
     /// <param name="latestUserMessage">
-    /// The most recent user message text for conversation-aware document chunk re-selection (FR-03).
-    /// When provided, <see cref="DocumentContextService"/> uses embedding similarity to select
-    /// the most relevant document chunks for this specific question rather than defaulting to
-    /// position-based selection. Null on initial session creation or when not applicable.
+    /// The most recent user message text. Used for:
+    ///   1. Conversation-aware document chunk re-selection (FR-03).
+    ///   2. AIPU2-061: Per-turn capability routing — passed to CapabilityRouter.RouteAsync
+    ///      to classify intent and select the minimal tool set for this turn.
+    /// Null on initial session creation or when not applicable (falls back to full tool set).
+    /// </param>
+    /// <param name="previousTurnToolNames">
+    /// AIPU2-061: Names of tools that were active in the previous turn (from the caller's
+    /// session state). When provided, a <c>capability_change</c> SSE event is emitted if
+    /// the current turn's routed tool set differs. Null on the first turn (no comparison).
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
@@ -103,6 +130,7 @@ public sealed class SprkChatAgentFactory
         HttpContext? httpContext = null,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
         string? latestUserMessage = null,
+        IReadOnlyList<string>? previousTurnToolNames = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -172,6 +200,118 @@ public sealed class SprkChatAgentFactory
             ? await GetPlaybookCapabilitiesAsync(scope.ServiceProvider, playbookId.Value, cancellationToken)
             : (IReadOnlySet<string>)new HashSet<string>(PlaybookCapabilities.CoreCapabilities);
 
+        // === AIPU2-061: Per-turn capability routing via CapabilityRouter ===
+        // When a user message and the capability router are available, run the three-tier router
+        // to select the minimal tool set for this specific turn rather than injecting the full
+        // capability-gated set every time.  The routing result drives tool resolution below.
+        //
+        // Routing pipeline:
+        //   1. RouteAsync(userMessage, playbookName, ct)   → CapabilityRoutingResult
+        //   2. ICapabilityValidator.FilterAsync(candidates) → removes kill-switch / tenant / role
+        //   3. ResolveTools with routing result            → only tools for this turn's capabilities
+        //   4. Emit capability_change SSE if tool set differs from previous turn (FR-801)
+        //
+        // Fallback: when the router is unavailable or routing produces no tools (Layer 3 with
+        // empty superset), fall back to the full playbook-capabilities-gated tool set so no
+        // regression occurs on environments that have not yet deployed AiCapabilitiesModule.
+        CapabilityRoutingResult? routingResult = null;
+        IReadOnlySet<string>? routedCapabilities = null;
+
+        if (_capabilityRouter is not null && !string.IsNullOrWhiteSpace(latestUserMessage))
+        {
+            try
+            {
+                // Derive the active playbook name from the context if available.
+                // PlaybookChatContextProvider populates SystemPrompt with the playbook name
+                // but there's no dedicated field — pass null when not resolvable.
+                // Future: AIPU2-013/014 may add PlaybookName to ChatContext.
+                var activePlaybookName = context.PlaybookId.HasValue
+                    ? context.PlaybookId.Value.ToString("N")
+                    : null;
+
+                routingResult = await _capabilityRouter
+                    .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken)
+                    .ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "AIPU2-061: CapabilityRouter result — session={SessionId}, layer={Layer}, " +
+                    "confident={IsConfident}, capabilities=[{Capabilities}], toolNames=[{ToolNames}]",
+                    sessionId,
+                    routingResult.Layer,
+                    routingResult.IsConfident,
+                    string.Join(",", routingResult.SelectedCapabilities),
+                    string.Join(",", routingResult.SelectedToolNames));
+
+                // Validate the router-selected capabilities: apply kill-switch, tenant,
+                // permission, and context checks via ICapabilityValidator.
+                // ICapabilityValidator is scoped — resolve from the per-request scope.
+                if (routingResult.SelectedCapabilities.Length > 0)
+                {
+                    var validator = scope.ServiceProvider.GetService<ICapabilityValidator>();
+                    if (validator is not null)
+                    {
+                        var manifest = scope.ServiceProvider.GetService<ICapabilityManifest>();
+                        if (manifest is not null)
+                        {
+                            // Build candidate list from router-selected capability names.
+                            var candidates = routingResult.SelectedCapabilities
+                                .Select(name =>
+                                {
+                                    manifest.TryGet(name, out var entry);
+                                    return entry;
+                                })
+                                .OfType<CapabilityManifestEntry>()
+                                .ToList();
+
+                            if (candidates.Count > 0)
+                            {
+                                // Build validation context from available request data.
+                                // ClaimsPrincipal is not available in the factory (factory is
+                                // singleton; httpContext carries the principal per-request).
+                                var principal = httpContext?.User
+                                    ?? new System.Security.Claims.ClaimsPrincipal();
+                                var tenantEnvUrl = $"https://{tenantId}.crm.dynamics.com";
+                                var convContext = new Dictionary<string, string>(
+                                    StringComparer.OrdinalIgnoreCase);
+
+                                var validationCtx = new CapabilityValidationContext(
+                                    User: principal,
+                                    TenantEnvironmentUrl: tenantEnvUrl,
+                                    ConversationContext: convContext);
+
+                                var validated = await validator
+                                    .FilterAsync(candidates, validationCtx, cancellationToken)
+                                    .ConfigureAwait(false);
+
+                                // Build the routed capability set intersected with the
+                                // playbook capabilities (belt-and-suspenders security gate).
+                                routedCapabilities = new HashSet<string>(
+                                    validated.Select(e => e.CapabilityName)
+                                             .Where(c => capabilities.Contains(c)),
+                                    StringComparer.OrdinalIgnoreCase);
+
+                                _logger.LogDebug(
+                                    "AIPU2-061: validated routed capabilities=[{Capabilities}]",
+                                    string.Join(",", routedCapabilities));
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Soft failure — routing is enhancing, not required.
+                // Fall through to the existing full-capability tool set.
+                _logger.LogWarning(ex,
+                    "AIPU2-061: CapabilityRouter failed for session={SessionId}; " +
+                    "falling back to full playbook capability set",
+                    sessionId);
+                routingResult = null;
+                routedCapabilities = null;
+            }
+        }
+        // === End AIPU2-061 routing ===
+
         // Create a shared CitationContext for search tools to populate with source metadata.
         // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
         // can register citations during tool execution. The SprkChatAgent resets it before
@@ -183,11 +323,26 @@ public sealed class SprkChatAgentFactory
         // from the Analysis Workspace with full context (task 002, task 020).
         var analysisId = context.AnalysisMetadata?.GetValueOrDefault("analysisId");
 
-        // Resolve registered AIFunction tools from DI, passing tenant ID, knowledge scope,
-        // and playbook capabilities so tools are gated to only those the playbook declares.
+        // Resolve AIFunction tools.
+        // AIPU2-061: when a validated routed capability set is available, pass the routing
+        // result so ResolveTools restricts to only the capabilities selected for this turn.
+        // Otherwise fall back to the full playbook capability set (backward compatible).
+        var effectiveCapabilities = routedCapabilities ?? capabilities;
         var tools = ResolveTools(
-            scope.ServiceProvider, tenantId, context.KnowledgeScope, capabilities,
-            playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext);
+            scope.ServiceProvider, tenantId, context.KnowledgeScope, effectiveCapabilities,
+            playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
+            routingResult);
+
+        // === AIPU2-061: capability_change SSE event ===
+        // Emit when the routed tool set for this turn differs from the previous turn's tool set.
+        // This notifies the client (FR-801) that the active capability profile has changed so
+        // the UI can update affordances (e.g., hide/show tool pills in the chat bar).
+        if (sseWriter is not null && previousTurnToolNames is not null)
+        {
+            await EmitCapabilityChangesIfDifferentAsync(
+                tools, previousTurnToolNames, sseWriter, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         _logger.LogInformation(
             "SprkChatAgent created: playbook={PlaybookId}, toolCount={ToolCount}, hasDocSummary={HasDocSummary}",
@@ -380,6 +535,13 @@ public sealed class SprkChatAgentFactory
     /// (DocumentSearchTools, AnalysisQueryTools, KnowledgeRetrievalTools, TextRefinementTools)
     /// are registered based on service availability — task 047 will refactor these to be
     /// capability-gated as well.
+    ///
+    /// AIPU2-061: When <paramref name="routingResult"/> is provided and confident (Layer 1 or 2),
+    /// only tools whose names appear in the router-selected tool set are included. This implements
+    /// the per-turn tool injection contract: the LLM sees only the minimal tool set for the
+    /// classified intent, reducing token cost and hallucination risk.
+    /// When <paramref name="routingResult"/> is null, uncertain, or a Layer 3 fallback, all tools
+    /// enabled by <paramref name="capabilities"/> are included (backward-compatible behaviour).
     /// </summary>
     /// <param name="scopedProvider">The scoped DI provider for this agent creation call.</param>
     /// <param name="tenantId">Tenant ID from the authenticated session — injected into tool constructors (ADR-014).</param>
@@ -388,7 +550,8 @@ public sealed class SprkChatAgentFactory
     /// Null when the playbook has no knowledge sources configured.
     /// </param>
     /// <param name="capabilities">
-    /// Playbook capabilities governing which tools are available. Tools gated behind a capability
+    /// Effective capability set for this turn: either the playbook capabilities (full set)
+    /// or the router-validated subset (per-turn minimum). Tools gated behind a capability
     /// are only registered when the capability is present in this set. See <see cref="PlaybookCapabilities"/>.
     /// </param>
     /// <param name="playbookId">The playbook ID — passed to AnalysisExecutionTools for re-analysis.</param>
@@ -404,6 +567,12 @@ public sealed class SprkChatAgentFactory
     /// Shared citation context for search tools to populate with source metadata (chunk IDs, source names, excerpts).
     /// Passed to DocumentSearchTools and KnowledgeRetrievalTools so they register citations during execution.
     /// </param>
+    /// <param name="routingResult">
+    /// AIPU2-061: Optional routing result from <see cref="ICapabilityRouter.RouteAsync"/>.
+    /// When provided and confident (Layer 1 or 2), tools are post-filtered so that only those
+    /// whose AIFunction name appears in <see cref="CapabilityRoutingResult.SelectedToolNames"/>
+    /// or in the capabilities' tool name lists are included. Null = full set (backward compat).
+    /// </param>
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
     private IReadOnlyList<AIFunction> ResolveTools(
         IServiceProvider scopedProvider,
@@ -415,22 +584,35 @@ public sealed class SprkChatAgentFactory
         string? analysisId,
         HttpContext? httpContext,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter,
-        CitationContext? citationContext)
+        CitationContext? citationContext,
+        CapabilityRoutingResult? routingResult = null)
     {
-        try
+        // Resolve services that tool classes depend on from DI.
+        // IRagService and IAnalysisOrchestrationService are registered in Program.cs.
+        // IChatClient is registered in AiModule.cs (AIPL-050).
+        var ragService = scopedProvider.GetService<IRagService>();
+        var analysisService = scopedProvider.GetService<IAnalysisOrchestrationService>();
+
+        var tools = new List<AIFunction>();
+
+        // Per-tool error isolation (AIPU2-063): each tool group is wrapped in its own
+        // try-catch so that a failure in one group (constructor throws, missing config,
+        // transient dependency fault) never prevents other healthy tools from resolving.
+        // Failed groups are logged as warnings and excluded from the returned tool list.
+        // The agent executes normally with whatever subset of tools resolved successfully —
+        // an empty tool list is a valid (if degraded) operating state.
+        int attempted = 0;
+        int resolved = 0;
+        var failedTools = new List<string>();
+
+        // --- DocumentSearchTools ---
+        // Requires IRagService, accepts knowledge scope for domain filtering.
+        // sseWriter is forwarded so both search methods can emit output_pane SSE events with
+        // structured SearchResults widget data alongside their text responses (Gap 1 fix).
+        attempted++;
+        if (ragService != null)
         {
-            // Resolve services that tool classes depend on from DI.
-            // IRagService and IAnalysisOrchestrationService are registered in Program.cs.
-            // IChatClient is registered in AiModule.cs (AIPL-050).
-            var ragService = scopedProvider.GetService<IRagService>();
-            var analysisService = scopedProvider.GetService<IAnalysisOrchestrationService>();
-
-            var tools = new List<AIFunction>();
-
-            // DocumentSearchTools — requires IRagService, accepts knowledge scope for domain filtering.
-            // sseWriter is forwarded so both search methods can emit output_pane SSE events with
-            // structured SearchResults widget data alongside their text responses (Gap 1 fix).
-            if (ragService != null)
+            try
             {
                 var documentSearchTools = new DocumentSearchTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
                 tools.Add(AIFunctionFactory.Create(
@@ -441,14 +623,26 @@ public sealed class SprkChatAgentFactory
                     documentSearchTools.SearchDiscoveryAsync,
                     name: "SearchDiscovery",
                     description: "Perform a broad discovery search across all indexed documents for the tenant."));
+                resolved++;
             }
-            else
+            catch (Exception ex)
             {
-                _logger.LogWarning("IRagService not available; DocumentSearchTools will not be registered");
+                _logger.LogWarning(ex, "Failed to resolve DocumentSearchTools — skipping");
+                failedTools.Add(nameof(DocumentSearchTools));
             }
+        }
+        else
+        {
+            _logger.LogWarning("IRagService not available; DocumentSearchTools will not be registered");
+            failedTools.Add(nameof(DocumentSearchTools));
+        }
 
-            // AnalysisQueryTools — requires IAnalysisOrchestrationService
-            if (analysisService != null)
+        // --- AnalysisQueryTools ---
+        // Requires IAnalysisOrchestrationService.
+        attempted++;
+        if (analysisService != null)
+        {
+            try
             {
                 var analysisQueryTools = new AnalysisQueryTools(analysisService, tenantId);
                 tools.Add(AIFunctionFactory.Create(
@@ -459,16 +653,28 @@ public sealed class SprkChatAgentFactory
                     analysisQueryTools.GetAnalysisSummaryAsync,
                     name: "GetAnalysisSummary",
                     description: "Retrieve the executive summary of a document analysis."));
+                resolved++;
             }
-            else
+            catch (Exception ex)
             {
-                _logger.LogWarning("IAnalysisOrchestrationService not available; AnalysisQueryTools will not be registered");
+                _logger.LogWarning(ex, "Failed to resolve AnalysisQueryTools — skipping");
+                failedTools.Add(nameof(AnalysisQueryTools));
             }
+        }
+        else
+        {
+            _logger.LogWarning("IAnalysisOrchestrationService not available; AnalysisQueryTools will not be registered");
+            failedTools.Add(nameof(AnalysisQueryTools));
+        }
 
-            // KnowledgeRetrievalTools — requires IRagService, accepts knowledge scope for domain filtering.
-            // sseWriter is forwarded so GetKnowledgeSourceAsync can emit source_pane SSE events with
-            // structured DocumentViewer widget data alongside the text response (Gap 1 fix).
-            if (ragService != null)
+        // --- KnowledgeRetrievalTools ---
+        // Requires IRagService, accepts knowledge scope for domain filtering.
+        // sseWriter is forwarded so GetKnowledgeSourceAsync can emit source_pane SSE events with
+        // structured DocumentViewer widget data alongside the text response (Gap 1 fix).
+        attempted++;
+        if (ragService != null)
+        {
+            try
             {
                 var knowledgeRetrievalTools = new KnowledgeRetrievalTools(ragService, tenantId, knowledgeScope, citationContext, sseWriter);
                 tools.Add(AIFunctionFactory.Create(
@@ -479,9 +685,25 @@ public sealed class SprkChatAgentFactory
                     knowledgeRetrievalTools.SearchKnowledgeBaseAsync,
                     name: "SearchKnowledgeBase",
                     description: "Search the knowledge base for reference information relevant to the query."));
+                resolved++;
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve KnowledgeRetrievalTools — skipping");
+                failedTools.Add(nameof(KnowledgeRetrievalTools));
+            }
+        }
+        else
+        {
+            _logger.LogDebug("IRagService not available; KnowledgeRetrievalTools will not be registered");
+            failedTools.Add(nameof(KnowledgeRetrievalTools));
+        }
 
-            // TextRefinementTools — requires IChatClient
+        // --- TextRefinementTools ---
+        // Requires IChatClient (always available — constructor arg, not DI lookup).
+        attempted++;
+        try
+        {
             var textRefinementTools = new TextRefinementTools(_chatClient);
             tools.Add(AIFunctionFactory.Create(
                 textRefinementTools.RefineTextAsync,
@@ -495,20 +717,30 @@ public sealed class SprkChatAgentFactory
                 textRefinementTools.GenerateSummaryAsync,
                 name: "GenerateSummary",
                 description: "Generate a concise summary of text in bullet, paragraph, or tldr format."));
+            resolved++;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve TextRefinementTools — skipping");
+            failedTools.Add(nameof(TextRefinementTools));
+        }
 
-            // WorkingDocumentTools — gated behind "write_back" capability (task 073).
-            // Requires IAnalysisOrchestrationService + IWorkingDocumentService + IChatClient.
-            // Only available when the playbook declares the "write_back" capability, preventing
-            // document mutation tools from appearing in read-only playbooks.
-            //
-            // WriteBackToWorkingDocumentAsync is included here and is listed in
-            // CompoundIntentDetector.WriteBackToolNames, ensuring it always triggers the
-            // plan preview gate before execution (spec FR-11, FR-12).
-            //
-            // Note: The document stream SSE writer is stubbed as a no-op for this task (073).
-            // Streaming token delivery for EditWorkingDocument and AppendSection will be wired
-            // in a follow-up task when the SSE plumbing for DocumentStreamEvent is connected.
-            if (capabilities.Contains(PlaybookCapabilities.WriteBack) && analysisService != null)
+        // --- WorkingDocumentTools ---
+        // Gated behind "write_back" capability (task 073).
+        // Requires IAnalysisOrchestrationService + IWorkingDocumentService + IChatClient.
+        // Only available when the playbook declares the "write_back" capability, preventing
+        // document mutation tools from appearing in read-only playbooks.
+        //
+        // WriteBackToWorkingDocumentAsync is included here and is listed in
+        // CompoundIntentDetector.WriteBackToolNames, ensuring it always triggers the
+        // plan preview gate before execution (spec FR-11, FR-12).
+        //
+        // Document stream SSE writer: streaming token delivery for EditWorkingDocument
+        // and AppendSection is wired via the DocumentStreamEvent SSE plumbing below.
+        if (capabilities.Contains(PlaybookCapabilities.WriteBack) && analysisService != null)
+        {
+            attempted++;
+            try
             {
                 var workingDocumentService = scopedProvider.GetService<IWorkingDocumentService>();
                 if (workingDocumentService != null)
@@ -530,20 +762,32 @@ public sealed class SprkChatAgentFactory
                         _logger,
                         analysisId);
                     tools.AddRange(workingDocumentTools.GetTools());
+                    resolved++;
                 }
                 else
                 {
                     _logger.LogWarning("IWorkingDocumentService not available; WorkingDocumentTools will not be registered");
+                    failedTools.Add(nameof(WorkingDocumentTools));
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve WorkingDocumentTools — skipping");
+                failedTools.Add(nameof(WorkingDocumentTools));
+            }
+        }
 
-            // AnalysisExecutionTools — gated behind "reanalyze" capability (task 079).
-            // Requires IAnalysisOrchestrationService + IChatClient.
-            // Only available when the playbook declares the "reanalyze" capability, preventing
-            // re-analysis from appearing in lightweight playbooks (e.g., "Quick Q&A").
-            // Task 080: Now wired with real orchestration — requires httpContext for OBO auth
-            // and sseWriter for progress/document_replace SSE events during re-analysis.
-            if (capabilities.Contains(PlaybookCapabilities.Reanalyze) && analysisService != null)
+        // --- AnalysisExecutionTools ---
+        // Gated behind "reanalyze" capability (task 079).
+        // Requires IAnalysisOrchestrationService + IChatClient.
+        // Only available when the playbook declares the "reanalyze" capability, preventing
+        // re-analysis from appearing in lightweight playbooks (e.g., "Quick Q&A").
+        // Task 080: Now wired with real orchestration — requires httpContext for OBO auth
+        // and sseWriter for progress/document_replace SSE events during re-analysis.
+        if (capabilities.Contains(PlaybookCapabilities.Reanalyze) && analysisService != null)
+        {
+            attempted++;
+            try
             {
                 var analysisExecutionTools = new AnalysisExecutionTools(
                     analysisService, _chatClient,
@@ -553,18 +797,29 @@ public sealed class SprkChatAgentFactory
                     httpContext: httpContext,
                     sseWriter: sseWriter);
                 tools.AddRange(analysisExecutionTools.GetTools());
+                resolved++;
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve AnalysisExecutionTools — skipping");
+                failedTools.Add(nameof(AnalysisExecutionTools));
+            }
+        }
 
-            // WebSearchTools — gated behind "web_search" capability (task 089).
-            // Only available when the playbook explicitly enables web search. Many playbooks
-            // deal with confidential internal documents and should not reach out to the public
-            // internet. The "web_search" capability provides admin control over which contexts
-            // allow external web queries (ADR-015: external content governance).
-            //
-            // R2-017: Real Bing Web Search v7 API integration with scope-guided search (FR-10),
-            // citation generation, and graceful mock fallback when API key is not configured.
-            // Factory-instantiated (ADR-010): reads config directly, no new DI registration.
-            if (capabilities.Contains(PlaybookCapabilities.WebSearch))
+        // --- WebSearchTools ---
+        // Gated behind "web_search" capability (task 089).
+        // Only available when the playbook explicitly enables web search. Many playbooks
+        // deal with confidential internal documents and should not reach out to the public
+        // internet. The "web_search" capability provides admin control over which contexts
+        // allow external web queries (ADR-015: external content governance).
+        //
+        // R2-017: Real Bing Web Search v7 API integration with scope-guided search (FR-10),
+        // citation generation, and graceful mock fallback when API key is not configured.
+        // Factory-instantiated (ADR-010): reads config directly, no new DI registration.
+        if (capabilities.Contains(PlaybookCapabilities.WebSearch))
+        {
+            attempted++;
+            try
             {
                 var httpClientFactory = scopedProvider.GetRequiredService<IHttpClientFactory>();
                 var configuration = scopedProvider.GetRequiredService<IConfiguration>();
@@ -585,15 +840,26 @@ public sealed class SprkChatAgentFactory
                     webSearchTools.SearchWebAsync,
                     name: "SearchWeb",
                     description: "Search the web for information relevant to the user's query. Use when the question cannot be answered from internal documents alone."));
+                resolved++;
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve WebSearchTools — skipping");
+                failedTools.Add(nameof(WebSearchTools));
+            }
+        }
 
-            // CodeInterpreterTools — gated behind "code_interpreter" capability (AIPU-070).
-            // Only available when the playbook explicitly enables sandbox code execution.
-            // Data governance (ADR-015): tools only accept caller-supplied data excerpts.
-            // Kill switch (ADR-018): CodeInterpreterOptions.Enabled checked before every invocation.
-            // Rate limiting (ADR-016): static SemaphoreSlim bounded by MaxConcurrency.
-            // Factory-instantiated (ADR-010): CodeInterpreterBridge resolved from DI; no new registration.
-            if (capabilities.Contains(PlaybookCapabilities.CodeInterpreter))
+        // --- CodeInterpreterTools ---
+        // Gated behind "code_interpreter" capability (AIPU-070).
+        // Only available when the playbook explicitly enables sandbox code execution.
+        // Data governance (ADR-015): tools only accept caller-supplied data excerpts.
+        // Kill switch (ADR-018): CodeInterpreterOptions.Enabled checked before every invocation.
+        // Rate limiting (ADR-016): static SemaphoreSlim bounded by MaxConcurrency.
+        // Factory-instantiated (ADR-010): CodeInterpreterBridge resolved from DI; no new registration.
+        if (capabilities.Contains(PlaybookCapabilities.CodeInterpreter))
+        {
+            attempted++;
+            try
             {
                 var codeInterpreterBridge = scopedProvider.GetService<CodeInterpreterBridge>();
                 var codeInterpreterOptions = scopedProvider.GetService<IOptions<CodeInterpreterOptions>>();
@@ -609,28 +875,40 @@ public sealed class SprkChatAgentFactory
                         codeInterpreterTools.GenerateChartAsync,
                         name: "GenerateChart",
                         description: "Generate a chart image (bar, line, or pie) from a JSON data series. Use when the user wants a visual chart from structured data."));
+                    resolved++;
                 }
                 else
                 {
                     _logger.LogWarning("CodeInterpreterBridge or CodeInterpreterOptions not available; CodeInterpreterTools will not be registered");
+                    failedTools.Add(nameof(CodeInterpreterTools));
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve CodeInterpreterTools — skipping");
+                failedTools.Add(nameof(CodeInterpreterTools));
+            }
+        }
 
-            // LegalResearchTools — gated behind "legal_research" capability (AIPU-071).
-            // Only available when the playbook explicitly enables legal research. Legal research
-            // tools invoke Azure AI Foundry Bing Grounding (not the Bing Web Search REST API),
-            // requiring both the AgentServiceClient and BingGroundingOptions to be configured.
-            //
-            // ADR-015 CRITICAL: Legal queries may contain client names, matter references, and PII.
-            // QuerySanitizer.Sanitize() is applied inside each tool method before the query is
-            // forwarded to Bing. Only query length, result count, and timing are logged.
-            //
-            // ADR-018: BingGroundingOptions.Enabled kill switch is checked inside each tool method;
-            // when disabled, a user-readable string is returned immediately without any network call.
-            //
-            // Factory-instantiated (ADR-010): no new DI registration; AgentServiceClient and
-            // IOptions<BingGroundingOptions> are resolved from the scoped DI provider.
-            if (capabilities.Contains(PlaybookCapabilities.LegalResearch))
+        // --- LegalResearchTools ---
+        // Gated behind "legal_research" capability (AIPU-071).
+        // Only available when the playbook explicitly enables legal research. Legal research
+        // tools invoke Azure AI Foundry Bing Grounding (not the Bing Web Search REST API),
+        // requiring both the AgentServiceClient and BingGroundingOptions to be configured.
+        //
+        // ADR-015 CRITICAL: Legal queries may contain client names, matter references, and PII.
+        // QuerySanitizer.Sanitize() is applied inside each tool method before the query is
+        // forwarded to Bing. Only query length, result count, and timing are logged.
+        //
+        // ADR-018: BingGroundingOptions.Enabled kill switch is checked inside each tool method;
+        // when disabled, a user-readable string is returned immediately without any network call.
+        //
+        // Factory-instantiated (ADR-010): no new DI registration; AgentServiceClient and
+        // IOptions<BingGroundingOptions> are resolved from the scoped DI provider.
+        if (capabilities.Contains(PlaybookCapabilities.LegalResearch))
+        {
+            attempted++;
+            try
             {
                 var agentServiceClient = scopedProvider.GetService<AgentServiceClient>();
                 var bingGroundingOptions = scopedProvider.GetService<IOptions<BingGroundingOptions>>();
@@ -654,6 +932,7 @@ public sealed class SprkChatAgentFactory
                         name: "LookupCase",
                         description: "Look up a specific legal case by its standard citation (e.g., 123 F.3d 456 " +
                                      "(9th Cir. 2020)). Returns the case holding and a source URL from an authoritative legal database."));
+                    resolved++;
                 }
                 else
                 {
@@ -661,16 +940,251 @@ public sealed class SprkChatAgentFactory
                         "LegalResearchTools requires AgentServiceClient and BingGroundingOptions — " +
                         "one or both are not registered. LegalResearchTools will not be available. " +
                         "Ensure AgentService and BingGrounding configuration sections are present.");
+                    failedTools.Add(nameof(LegalResearchTools));
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve LegalResearchTools — skipping");
+                failedTools.Add(nameof(LegalResearchTools));
+            }
+        }
 
-            _logger.LogDebug("Resolved {ToolCount} AIFunction tools for agent session", tools.Count);
-            return tools;
+        // --- VerifyCitationsTool ---
+        // Gated behind "verify_citations" capability (AIPU2-024).
+        // Exposes the "verify_citations" AI function so the LLM can verify legal citations
+        // when the user explicitly asks to check references, case validity, or regulatory
+        // citations in a passage of text.
+        //
+        // The automatic post-LLM citation check (CitationSafetyCheck) runs unconditionally
+        // after every response regardless of this capability — this gate only controls whether
+        // the LLM can explicitly invoke the tool during a turn.
+        //
+        // Requires ICitationVerificationService (singleton registered in AiSafetyModule).
+        // Factory-instantiated (ADR-010): no new DI registration.
+        if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))
+        {
+            attempted++;
+            try
+            {
+                var citationVerificationService = scopedProvider.GetService<ICitationVerificationService>();
+                if (citationVerificationService != null)
+                {
+                    var verifyCitationsTool = new VerifyCitationsTool(citationVerificationService, _logger);
+                    tools.Add(AIFunctionFactory.Create(
+                        verifyCitationsTool.VerifyCitationsAsync,
+                        name: "verify_citations",
+                        description: "Verifies legal citations found in the provided text against authoritative sources. " +
+                                     "Returns verification status, confidence, and source URLs for each citation. " +
+                                     "Use when the user asks to verify references, check case validity, or confirm " +
+                                     "regulatory citations."));
+                    resolved++;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "VerifyCitationsTool requires ICitationVerificationService — service not registered. " +
+                        "Ensure AddAiSafetyModule is called before AddAiChatModule.");
+                    failedTools.Add(nameof(VerifyCitationsTool));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve VerifyCitationsTool — skipping");
+                failedTools.Add(nameof(VerifyCitationsTool));
+            }
+        }
+
+        // Summary log: resolved vs. attempted so operators can detect partial degradation
+        // without grepping individual warning entries.
+        if (failedTools.Count > 0)
+        {
+            _logger.LogWarning(
+                "Tool resolution partial: {ResolvedGroups}/{AttemptedGroups} tool groups resolved. " +
+                "Failed groups: [{FailedTools}]. Agent will execute with {ToolCount} AIFunction(s).",
+                resolved, attempted, string.Join(", ", failedTools), tools.Count);
+        }
+        else
+        {
+            _logger.LogDebug(
+                "Tool resolution complete: {ResolvedGroups}/{AttemptedGroups} tool groups resolved, " +
+                "{ToolCount} AIFunction(s) registered.",
+                resolved, attempted, tools.Count);
+        }
+
+        // === AIPU2-061: Per-turn tool filtering by routing result ===
+        // When the capability router produced a confident result (Layer 1 or 2), apply a
+        // post-filter so the agent only receives the tools selected for this specific turn.
+        //
+        // Filtering uses the union of:
+        //   (a) CapabilityRoutingResult.SelectedToolNames — explicit tool names from Layer 3
+        //       superset (populated by Layer 3 only; Layers 1 and 2 leave this empty).
+        //   (b) The tool names listed in each selected capability's manifest entry
+        //       (populated by Layers 1 and 2 via SelectedCapabilities → ToolNames lookup).
+        //
+        // Layer 3 fallback (IsConfident = false, SelectedToolNames may be non-empty):
+        //   SelectedToolNames carries the broad superset; filter by that list when non-empty.
+        //   When SelectedToolNames is also empty (empty manifest), return full set unchanged.
+        //
+        // Backward compat: when routingResult is null, skip filtering entirely.
+        if (routingResult is not null)
+        {
+            var allowedToolNames = BuildAllowedToolNames(routingResult, scopedProvider);
+            if (allowedToolNames.Count > 0)
+            {
+                var filtered = tools
+                    .Where(t => allowedToolNames.Contains(t.Name ?? string.Empty))
+                    .ToList();
+
+                _logger.LogDebug(
+                    "AIPU2-061: per-turn tool filter applied — " +
+                    "before={Before}, after={After}, layer={Layer}, confident={Confident}",
+                    tools.Count, filtered.Count, routingResult.Layer, routingResult.IsConfident);
+
+                tools = filtered;
+            }
+            else
+            {
+                // Empty allowed set means routing was uncertain (Layer 3 with empty manifest).
+                // Return the full capability-gated set unchanged (backward compatible).
+                _logger.LogDebug(
+                    "AIPU2-061: routing produced empty tool filter — returning full capability set ({Count} tools)",
+                    tools.Count);
+            }
+        }
+        // === End AIPU2-061 ===
+
+        return tools;
+    }
+
+    /// <summary>
+    /// AIPU2-061: Builds the set of AIFunction tool names that are permitted for this turn
+    /// based on the capability routing result.
+    ///
+    /// Resolution order:
+    ///   1. If the routing result has <see cref="CapabilityRoutingResult.SelectedToolNames"/>
+    ///      (Layer 3 superset), use those directly.
+    ///   2. Otherwise expand <see cref="CapabilityRoutingResult.SelectedCapabilities"/> to tool
+    ///      names by looking up each capability in the <see cref="ICapabilityManifest"/>.
+    ///   3. If neither produces a non-empty set, return empty — caller uses full set.
+    ///
+    /// Returns an empty set when routing produced no confident tool selection (full-set fallback).
+    /// </summary>
+    private HashSet<string> BuildAllowedToolNames(
+        CapabilityRoutingResult routingResult,
+        IServiceProvider scopedProvider)
+    {
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Layer 3 superset: SelectedToolNames is pre-computed by ComputeLayer3Superset.
+        if (routingResult.SelectedToolNames.Length > 0)
+        {
+            foreach (var toolName in routingResult.SelectedToolNames)
+            {
+                if (!string.IsNullOrWhiteSpace(toolName))
+                    allowed.Add(toolName);
+            }
+            return allowed;
+        }
+
+        // Layers 1 and 2: expand capability names to tool names via the manifest.
+        if (routingResult.SelectedCapabilities.Length > 0)
+        {
+            var manifest = scopedProvider.GetService<ICapabilityManifest>();
+            if (manifest is not null)
+            {
+                foreach (var capName in routingResult.SelectedCapabilities)
+                {
+                    if (manifest.TryGet(capName, out var entry) && entry is not null)
+                    {
+                        foreach (var toolName in entry.ToolNames)
+                        {
+                            if (!string.IsNullOrWhiteSpace(toolName))
+                                allowed.Add(toolName);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogDebug(
+                            "AIPU2-061: routing selected capability '{CapabilityName}' " +
+                            "not found in manifest — skipping tool name expansion.",
+                            capName);
+                    }
+                }
+            }
+        }
+
+        return allowed;
+    }
+
+    /// <summary>
+    /// AIPU2-061: Emits <c>capability_change</c> SSE events when the current turn's tool set
+    /// differs from the previous turn's tool set.
+    ///
+    /// Emits one event per tool that was added or removed:
+    ///   - Added tool   → status "available"
+    ///   - Removed tool → status "unavailable"
+    ///
+    /// This satisfies the FR-801 contract: clients can update affordances (tool pills, etc.)
+    /// in real time when the active capability profile changes between turns.
+    ///
+    /// ADR-015: only tool names are emitted — no user message content.
+    /// </summary>
+    private async Task EmitCapabilityChangesIfDifferentAsync(
+        IReadOnlyList<AIFunction> currentTools,
+        IReadOnlyList<string> previousToolNames,
+        Func<Api.Ai.ChatSseEvent, CancellationToken, Task> sseWriter,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var currentNames = new HashSet<string>(
+                currentTools.Select(t => t.Name ?? string.Empty).Where(n => n.Length > 0),
+                StringComparer.OrdinalIgnoreCase);
+
+            var previousNames = new HashSet<string>(
+                previousToolNames.Where(n => !string.IsNullOrWhiteSpace(n)),
+                StringComparer.OrdinalIgnoreCase);
+
+            if (currentNames.SetEquals(previousNames))
+                return; // No change — skip event emission.
+
+            _logger.LogDebug(
+                "AIPU2-061: tool set changed between turns — emitting capability_change events. " +
+                "Previous=[{Prev}], Current=[{Curr}]",
+                string.Join(",", previousNames),
+                string.Join(",", currentNames));
+
+            // Emit "available" for tools newly present this turn.
+            foreach (var added in currentNames.Except(previousNames, StringComparer.OrdinalIgnoreCase))
+            {
+                // Use anonymous object for the Data payload — ChatSseEvent.Data is object?.
+                // The SSE serialiser (WriteChatSSEAsync in ChatEndpoints) serialises via
+                // System.Text.Json which handles anonymous types correctly.
+                var payload = new { capability = added, status = "available" };
+
+                await sseWriter(
+                    new Api.Ai.ChatSseEvent("capability_change", null, payload),
+                    cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // Emit "unavailable" for tools absent this turn.
+            foreach (var removed in previousNames.Except(currentNames, StringComparer.OrdinalIgnoreCase))
+            {
+                var payload = new { capability = removed, status = "unavailable" };
+
+                await sseWriter(
+                    new Api.Ai.ChatSseEvent("capability_change", null, payload),
+                    cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to resolve AIFunction tools; agent will run without tools");
-            return [];
+            // Soft failure — SSE event emission must never break agent creation.
+            _logger.LogWarning(ex,
+                "AIPU2-061: failed to emit capability_change SSE events; continuing without");
         }
     }
 

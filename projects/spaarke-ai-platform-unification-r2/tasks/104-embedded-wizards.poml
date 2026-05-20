@@ -1,0 +1,54 @@
+<task id="AIPU2-104" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Adapt existing WizardDialog components for embedded Workspace rendering</title>
+    <phase>5</phase>
+    <tags>frontend, wizards, workspace</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-077</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The existing WizardDialog components (CreateMatterWizard, DocumentUploadWizard,
+    SearchSelectDialog) currently render as modal overlays. In the three-pane layout,
+    wizards should be embeddable directly as WorkspaceWidgets so users can complete
+    multi-step workflows without losing their document or chat context. The chat in
+    ConversationPane should be able to drive wizard step progression via PaneEventBus
+    events (e.g. "set the matter name to..."), and the Context pane should show
+    relevant information for the current wizard step. ADR-012 applies: shared components
+    from @spaarke/ui-components must be reused.
+  </prompt>
+  <role>Frontend developer with familiarity with the shared WizardDialog component library and WorkspaceWidget patterns.</role>
+  <goal>
+    CreateMatterWizard, DocumentUploadWizard, and SearchSelectDialog can render as
+    WorkspaceWidgets (embedded in workspace tabs) in addition to their existing modal mode.
+    Chat can advance wizard steps via PaneEventBus WizardStepEvent. The Context pane shows
+    step-relevant help or data during the wizard flow.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Wizard</file>
+      <file>src/solutions/SpaarkeAi/src/components/WorkspacePane</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Audit CreateMatterWizard, DocumentUploadWizard, and SearchSelectDialog in the shared component library. Identify what props/state need to be extracted to make them embeddable (remove modal chrome, expose step control externally).</step>
+    <step>Add an embeddable prop to each wizard component. When true: render without Dialog wrapper, expose onStepChange callback, expose currentStep and totalSteps as controlled props.</step>
+    <step>Create WorkspaceWidgetWizard wrapper: implements WorkspaceWidget interface, renders the wizard in embedded mode, serializes step progress for session restore.</step>
+    <step>Define WizardStepEvent on PaneEventBus: { type: 'wizard-step', wizardId: string, action: 'next' | 'back' | 'set-field', fieldName?: string, fieldValue?: unknown }. ConversationPane can dispatch this when the AI suggests advancing a step.</step>
+    <step>In WorkspaceWidgetWizard, subscribe to WizardStepEvent and apply the action to the wizard state (advance step, set field value).</step>
+    <step>On wizard step change, dispatch TabChangedEvent (from AIPU2-103) with step metadata so ContextPaneController can show step-relevant context (e.g. required fields, help text).</step>
+    <step>Define context widget mappings for each wizard step type in ContextPaneController's contextWidgetMap.</step>
+    <step>Verify existing modal behavior is unchanged when embeddable prop is false — no regression on existing wizard usage.</step>
+    <step>Test: open DocumentUploadWizard as a workspace tab, have chat send a WizardStepEvent to advance to step 2, verify Context pane updates to show step 2 help.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>CreateMatterWizard, DocumentUploadWizard, and SearchSelectDialog render correctly as WorkspaceWidgets (embedded, no modal chrome).</criterion>
+    <criterion>WizardStepEvent dispatched from ConversationPane advances the wizard to the correct step.</criterion>
+    <criterion>Wizard field values can be set programmatically via WizardStepEvent set-field action.</criterion>
+    <criterion>Context pane updates to show step-relevant information on each step change.</criterion>
+    <criterion>Wizard step progress is included in WorkspaceWidget serialized state for session restore.</criterion>
+    <criterion>Existing modal usage of all three wizards is unchanged (no regression).</criterion>
+  </acceptance-criteria>
+</task>

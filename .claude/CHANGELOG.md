@@ -26,16 +26,31 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 ### Added
 - `.claude/AUDIT-FINDINGS-CLAUDEMD.md` — Phase 3a audit of root `CLAUDE.md` against community best practices + Phase 0 inventory (75-section sign-off table + proposed skeleton + open questions). Commit `0c11cd43`.
 - `.claude/archive/2026-05-17/CLAUDE.md` — preserved copy of the 1190-line OLD root `CLAUDE.md` before Phase 3b rewrite (reversibility per NF-1).
+- **Auth v2 pre-flight** — STOP banners on 5 partially-superseded docs (`.claude/patterns/auth/spaarke-sso-binding.md`, `.claude/patterns/auth/token-caching.md`, `.claude/constraints/auth.md`, `docs/architecture/AUTH-AND-BFF-URL-PATTERN.md`, `docs/architecture/sdap-auth-patterns.md`) + full-deprecation banners on 2 DEPRECATED-* files. Each banner names what stays canonical (INV-1..INV-7, server-side OBO, `buildBffApiUrl()`, etc.). PF-4..PF-10. Commit `281f7210`.
+- **Auth v2 pre-flight** — Pointer row in root `CLAUDE.md` §15 directing all agents (any worktree) to `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` as the active auth v2 design until ADR-027 ships. PF-12. Commit `5b04b6ff`.
 
 ### Changed
 - **Root `CLAUDE.md` rewritten** from 1190 → 264 lines (78% reduction) per Phase 3b. Applies community best practices: project-specific operational rules only; tutorials/marketing/long reference tables moved out; pointer-heavy structure. User-locked decisions: §1 identity updated to "enterprise AI-directed legal operations intelligence platform"; §11 System Entry Points + §12 Context Layer Hierarchy kept inline (user judgment); §13 Knowledge Repository section added pointing at `spaarke/knowledge/` + `researcher` subagent for rapidly-evolving Microsoft platform topics; Rigor Level template kept inline; Hooks: Current Guidance compressed to one paragraph.
 - 5 internal contradictions resolved in the rewrite (Hooks System vs Current Guidance; trigger phrases in 2 places; Before-Starting-Work vs Working-Checklist; etc.).
+- **Auth v2 pre-flight** — 11 in-scope references updated to point at the new `DEPRECATED-*` filenames with "⛔ DEPRECATED — superseded by Spaarke Auth v2" markers: `.claude/patterns/auth/INDEX.md`, `.claude/patterns/INDEX.md`, `.claude/constraints/auth.md`, `.claude/patterns/auth/spaarke-sso-binding.md`, `.claude/patterns/webresource/{code-page-wizard-wrapper.md, full-page-custom-page.md}`, `.claude/skills/code-page-deploy/SKILL.md`, `docs/architecture/sdap-auth-patterns.md`, `CROSS-REFERENCE-MAP.md`, `src/solutions/SpaarkeAi/src/App.tsx`, `src/solutions/Reporting/{main.tsx, services/authInit.ts, config/runtimeConfig.ts, config/reportingConfig.ts}`. Historical `projects/*` references, `.claude/archive/`, and the audit doc's rename-action narrative left intentionally unchanged. PF-3. Commit `c2198007`.
+
+### Deprecated
+- **Auth v2 pre-flight** — Two fully-superseded auth pattern docs renamed with `DEPRECATED-` prefix so the filename itself is a stop signal in Grep/Glob output:
+  - `.claude/patterns/auth/msal-client.md` → `.claude/patterns/auth/DEPRECATED-msal-client.md`
+  - `.claude/patterns/auth/spaarke-auth-initialization.md` → `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md`
+  Both files will be removed when v2 ships (Workstream F4, task 094). PF-1, PF-2. Commit `c2198007`.
 
 ### Removed
 - The 22 extract-candidate sections totaling ~720 lines from old `CLAUDE.md`. Content remains preserved in `.claude/archive/2026-05-17/CLAUDE.md`. Topics removed: detailed Adaptive Thinking tutorial, Permission Modes tutorial, Hooks System tutorial, Headless Mode, Agent Teams (experimental), Component Skills note (now in `.claude/skills/INDEX.md`), Trigger Phrases table, Slash Commands table, Coding Standards code samples (in `docs/standards/`), Repository Structure tree (in `README.md`), ADR summary table (in `.claude/adr/INDEX.md`), Quality Gates with Hooks (feature not configured), and dated/duplicate sections.
 
 ### Fixed
 - N/A — Phase 3a/3b are restructuring; no behavioral fixes in this scope.
+
+### Verified
+- **Auth v2 pre-flight** — `projects/spaarke-auth-v2-and-hardening/CLAUDE.md` "🚨 ACTIVE AUTH V2 REFACTOR — DO NOT REGRESS" section cross-checked against audit §8.2 Layer 3 (PF-11) requirements. All MUST/MUST NOT bullets present plus extras (/debug endpoint ban, plain-text secret ban, INV-1..INV-8 preservation). No edits required. PF-11. Commit `f58317b0`.
+
+### Retirement note
+- All "Auth v2 pre-flight" entries above (PF-1..PF-13) are transitional. They will be retired during Workstream F (Engineering canonical docs): F1 ships ADR-027, F2 partial-rewrites `spaarke-sso-binding.md`, F3 ships `docs/guides/auth-deployment-setup.md`, F4 deletes the `DEPRECATED-*` files and removes the STOP banners + project CLAUDE.md prohibition + root CLAUDE.md pointer row. See `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` §8.4–§8.5.
 
 ---
 

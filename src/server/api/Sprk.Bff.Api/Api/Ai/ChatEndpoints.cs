@@ -8,6 +8,9 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
+using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
+using Sprk.Bff.Api.Telemetry;
 
 // Explicit alias to avoid ChatMessage ambiguity between domain model and AI framework.
 // Sprk.Bff.Api.Models.Ai.Chat.ChatMessage is the Dataverse persistence record.
@@ -44,6 +47,15 @@ public static class ChatEndpoints
         var group = app.MapGroup("/api/ai/chat")
             .RequireAuthorization()
             .WithTags("AI Chat");
+
+        // GET /api/ai/chat/sessions — list recent sessions for the current user
+        group.MapGet("/sessions", ListRecentSessionsAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("ListRecentSessions")
+            .WithSummary("List recent chat sessions")
+            .WithDescription("Returns the most recent sessions for the current tenant, ordered by last activity descending. Use ?limit=N to control count (default 10).")
+            .Produces<IReadOnlyList<RecentSessionDto>>()
+            .ProducesProblem(401);
 
         // POST /api/ai/chat/sessions — create a new chat session
         group.MapPost("/sessions", CreateSessionAsync)
@@ -117,6 +129,16 @@ public static class ChatEndpoints
             .Produces(204)
             .ProducesProblem(401)
             .ProducesProblem(403)
+            .ProducesProblem(404);
+
+        // GET /api/ai/chat/sessions/{sessionId}/restore — restore session state for three-pane UI
+        group.MapGet("/sessions/{sessionId}/restore", RestoreSessionAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("RestoreSession")
+            .WithSummary("Restore a persisted session for the three-pane UI")
+            .WithDescription("Loads session from Cosmos DB, checks entity staleness, reconstructs LLM context, and returns widget states for UI restoration. Target: <500ms p95.")
+            .Produces<SessionRestoreResponse>()
+            .ProducesProblem(401)
             .ProducesProblem(404);
 
         // GET /api/ai/chat/playbooks — discover available playbooks (no session required)
@@ -262,6 +284,9 @@ public static class ChatEndpoints
         PendingPlanManager pendingPlanManager,
         IChatClient chatClient,
         [FromServices] IWorkingDocumentService workingDocumentService,
+        [FromServices] IMatterContextDetector matterContextDetector,
+        [FromServices] IConversationHistorySanitizer conversationHistorySanitizer,
+        [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
@@ -297,12 +322,100 @@ public static class ChatEndpoints
             "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, document={DocumentId}",
             sessionId, tenantId, request.Message.Length, request.DocumentId ?? session.DocumentId);
 
+        // === AIPU2-028: Cross-Matter Conversation Safety (FR-408) ===
+        // Before building the agent or AI history, detect whether the session has pivoted
+        // from one matter to another.  If a pivot is detected, strip retrieved document
+        // passages from the domain history and emit a matter_context_change SSE event so
+        // the user is notified that prior document references are no longer available.
+        var incomingMatterId = session.HostContext?.EntityType == "matter"
+            ? session.HostContext.EntityId
+            : string.Empty;
+
+        var matterChange = matterContextDetector.DetectChange(session.Messages, incomingMatterId);
+        if (matterChange is not null)
+        {
+            var sanitized = conversationHistorySanitizer.StripRetrievedContent(
+                session.Messages,
+                matterChange.ChangeDetectedAtTurnIndex);
+
+            // Update the session in Redis with the sanitized history so subsequent
+            // turns no longer see the stripped content (write-through pattern).
+            if (sanitized.WasModified)
+            {
+                var sanitizedSession = session with { Messages = sanitized.Messages };
+                await sessionManager.UpdateSessionCacheAsync(sanitizedSession, cancellationToken);
+                session = sanitizedSession;
+            }
+
+            // Embed a new matter marker system message so future turns can detect the
+            // current matter boundary correctly.
+            var markerContent = MatterContextDetector.BuildMatterMarker(matterChange.NewMatterId);
+            var markerMessage = new DvChatMessage(
+                MessageId: Guid.NewGuid().ToString("N"),
+                SessionId: sessionId,
+                Role: ChatMessageRole.System,
+                Content: markerContent,
+                TokenCount: 0,
+                CreatedAt: DateTimeOffset.UtcNow,
+                SequenceNumber: session.Messages.Count + 1);
+            session = await historyManager.AddMessageAsync(session, markerMessage, cancellationToken);
+
+            // Emit matter_context_change SSE event before the turn is processed.
+            // The client uses this to notify the user that prior document references are gone.
+            var contextChangeData = new ChatSseMatterContextChangeData(
+                PreviousMatterId: matterChange.PreviousMatterId,
+                NewMatterId: matterChange.NewMatterId,
+                Message: sanitized.NotificationMessage);
+
+            await WriteChatSSEAsync(
+                response,
+                new ChatSseEvent("matter_context_change", null, contextChangeData),
+                cancellationToken);
+
+            // Emit OTEL counters (ADR-015: counts only, no matter IDs in metric labels).
+            crossMatterTelemetry.RecordPivot(sanitized.WasModified);
+            crossMatterTelemetry.RecordContentStripped(sanitized.RemovedDocumentCount);
+
+            logger.LogInformation(
+                "CrossMatterSafety: pivot handled for session={SessionId}, strippedMessages={StrippedCount}",
+                sessionId, sanitized.RemovedDocumentCount);
+        }
+        else if (!string.IsNullOrEmpty(incomingMatterId))
+        {
+            // No pivot — but if no matter marker exists yet, embed one now so future
+            // turns have a baseline to compare against.
+            var hasMarker = session.Messages.Any(m =>
+                m.Role == ChatMessageRole.System &&
+                m.Content.Contains(MatterContextDetector.MatterMarkerPrefix, StringComparison.Ordinal));
+
+            if (!hasMarker)
+            {
+                var markerContent = MatterContextDetector.BuildMatterMarker(incomingMatterId);
+                var markerMessage = new DvChatMessage(
+                    MessageId: Guid.NewGuid().ToString("N"),
+                    SessionId: sessionId,
+                    Role: ChatMessageRole.System,
+                    Content: markerContent,
+                    TokenCount: 0,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    SequenceNumber: session.Messages.Count + 1);
+                session = await historyManager.AddMessageAsync(session, markerMessage, cancellationToken);
+            }
+        }
+        // === End AIPU2-028 ===
+
         var fullResponse = new System.Text.StringBuilder();
 
         try
         {
             // Create SSE writer delegate for out-of-band events (progress, document_replace)
             var sseWriter = CreateSseWriter(response);
+
+            // === R2: Create the R2 SSE emitter for the six new event types.
+            // Available to the response pipeline for duration of this request.
+            // R1 events (token, done, error, etc.) continue to be emitted via WriteChatSSEAsync
+            // — this emitter is purely additive and does not alter the R1 flow.
+            var r2Emitter = CreateR2Emitter(sseWriter, logger);
 
             // Create agent for this session — pass the user's message for conversation-aware
             // document chunk re-selection (FR-03, R2-054). When a document exceeds the 30K
@@ -318,7 +431,7 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: request.Message,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
             var history = BuildAiHistory(session.Messages);
@@ -968,7 +1081,7 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: lastUserMessage,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             var history = BuildAiHistory(session.Messages);
 
@@ -1471,6 +1584,118 @@ public static class ChatEndpoints
     }
 
     // =========================================================================
+    // Session Restore DTOs
+    // =========================================================================
+
+    /// <summary>
+    /// DTO for recent session list items.
+    /// </summary>
+    internal record RecentSessionDto(
+        string Id,
+        string Title,
+        string? EntityType,
+        string? EntityName,
+        string? PlaybookName,
+        DateTimeOffset UpdatedAt);
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions — lists recent sessions for the current tenant.
+    /// </summary>
+    private static async Task<IResult> ListRecentSessionsAsync(
+        HttpContext httpContext,
+        ISessionPersistenceService persistenceService,
+        int limit = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        // Load recent sessions from Cosmos via the persistence service.
+        // SessionPersistenceService doesn't have a list method yet, so we return
+        // an empty list for now. The frontend handles empty gracefully.
+        // TODO: Add ListRecentSessionsAsync to ISessionPersistenceService
+        var sessions = new List<RecentSessionDto>();
+
+        return Results.Ok(sessions);
+    }
+
+    /// <summary>
+    /// Response payload for the session restore endpoint.
+    /// Maps RestoredSession to a frontend-friendly JSON contract.
+    /// </summary>
+    internal record SessionRestoreResponse(
+        string SessionId,
+        Guid? PlaybookId,
+        string Stage,
+        IReadOnlyDictionary<string, string> WidgetStates,
+        string? ConversationSummary,
+        IReadOnlyList<SessionRestoreMessageDto> RecentMessages,
+        bool HasStaleEntities,
+        long RestoreLatencyMs);
+
+    /// <summary>
+    /// A single message in the restore response — minimal projection of SessionMessage.
+    /// </summary>
+    internal record SessionRestoreMessageDto(
+        string Role,
+        string Content,
+        DateTimeOffset Timestamp);
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions/{sessionId}/restore
+    /// Restores a persisted session for the three-pane SpaarkeAi UI.
+    /// </summary>
+    private static async Task<IResult> RestoreSessionAsync(
+        string sessionId,
+        HttpContext httpContext,
+        ISessionRestoreService restoreService,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var restored = await restoreService.RestoreSessionAsync(tenantId, sessionId, cancellationToken);
+        if (restored is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
+
+        // Recent messages are now included in RestoredSession (single Cosmos read)
+        var recentMessages = restored.RecentMessages
+            .Select(m => new SessionRestoreMessageDto(m.Role, m.Content, m.Timestamp))
+            .ToList();
+
+        var stage = restored.WidgetStates.Count > 0 ? "active-chat" : "loading";
+
+        var response = new SessionRestoreResponse(
+            SessionId: restored.SessionId,
+            PlaybookId: restored.PlaybookId,
+            Stage: stage,
+            WidgetStates: restored.WidgetStates,
+            ConversationSummary: restored.WasSummarized ? restored.ReconstructedContext : null,
+            RecentMessages: recentMessages,
+            HasStaleEntities: restored.StaleEntityRefs.Count > 0,
+            RestoreLatencyMs: restored.RestoreLatencyMs);
+
+        return Results.Ok(response);
+    }
+
+    // =========================================================================
     // Private Helpers
     // =========================================================================
 
@@ -1795,6 +2020,27 @@ public static class ChatEndpoints
     }
 
     /// <summary>
+    /// Creates an <see cref="R2SseEventEmitter"/> scoped to the current HTTP response.
+    ///
+    /// The emitter wraps the SSE writer delegate produced by <see cref="CreateSseWriter"/>
+    /// and exposes typed emit methods for the six R2 event types (workspace_widget,
+    /// context_update, context_highlight, workspace_action, capability_change,
+    /// safety_annotation). All R1 event types remain unchanged and are NOT routed through
+    /// this emitter.
+    ///
+    /// Callers inject the emitter into services or tool handlers that need to push R2 events
+    /// during a streaming turn without holding a direct reference to <see cref="HttpResponse"/>.
+    /// </summary>
+    /// <param name="sseWriter">The SSE writer delegate from <see cref="CreateSseWriter"/>.</param>
+    /// <param name="logger">Logger used for validation failure warnings (ADR-015: payload content is never logged).</param>
+    internal static R2SseEventEmitter CreateR2Emitter(
+        Func<ChatSseEvent, CancellationToken, Task> sseWriter,
+        ILogger logger)
+    {
+        return new R2SseEventEmitter(sseWriter, logger);
+    }
+
+    /// <summary>
     /// Writes a single <see cref="DocumentStreamEvent"/> as an SSE frame.
     ///
     /// The event type discriminator (<c>document_stream_start</c>, <c>document_stream_token</c>,
@@ -1886,6 +2132,34 @@ public record ActionConfirmRequest(string ActionId, Dictionary<string, string>? 
 /// <param name="Message">Human-readable result message.</param>
 /// <param name="ActionId">The action identifier that was confirmed.</param>
 public record ActionConfirmResult(bool Success, string Message, string ActionId);
+
+/// <summary>
+/// Data payload for the <c>matter_context_change</c> SSE event (AIPU2-028, FR-408).
+///
+/// Emitted by <see cref="ChatEndpoints.SendMessageAsync"/> when the session pivots from one
+/// legal matter to another.  The client uses this event to notify the user that retrieved
+/// document references from the previous matter are no longer available in this conversation.
+///
+/// Wire format (camelCase JSON inside the SSE <c>data</c> field):
+/// <code>
+/// {
+///   "type": "matter_context_change",
+///   "content": null,
+///   "data": {
+///     "previousMatterId": "matter-a-guid",
+///     "newMatterId": "matter-b-guid",
+///     "message": "Matter context changed. Prior document details cleared from context for privilege protection."
+///   }
+/// }
+/// </code>
+/// </summary>
+/// <param name="PreviousMatterId">The matter ID from the previous conversation context.</param>
+/// <param name="NewMatterId">The matter ID of the new (incoming) context.</param>
+/// <param name="Message">Human-readable notification for the user.</param>
+public record ChatSseMatterContextChangeData(
+    string PreviousMatterId,
+    string NewMatterId,
+    string Message);
 
 /// <summary>Response body for GET /sessions/{id}/history.</summary>
 /// <param name="SessionId">The session identifier.</param>

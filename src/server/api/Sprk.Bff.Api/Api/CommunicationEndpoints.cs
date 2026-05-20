@@ -79,18 +79,30 @@ public static class CommunicationEndpoints
             .Produces<VerificationResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // POST /api/communications/incoming-webhook - Graph webhook receiver (AllowAnonymous with clientState validation)
+        // POST /api/communications/incoming-webhook - Graph webhook receiver (AllowAnonymous + HMAC + clientState)
         // Registered on app (not group) to avoid RequireAuthorization from the group.
-        // Graph webhook delivery does not carry Bearer tokens; clientState validation replaces standard auth (ADR-008).
+        // Defense-in-depth (task 044):
+        //   1. WebhookSignatureFilter validates X-Hub-Signature-256 (HMAC-SHA256 over body)
+        //      using Communication:WebhookSigningKey. Subscription-validation handshakes
+        //      (?validationToken=...) bypass HMAC since Graph does not sign that probe.
+        //   2. Handler validates the body-level clientState in constant time against
+        //      Communication:WebhookClientState (the Graph-native shared secret).
+        // Both checks are mandatory — there is no DEVELOPMENT_MODE bypass anywhere.
         app.MapPost("/api/communications/incoming-webhook", HandleIncomingWebhookAsync)
             .AllowAnonymous()
+            .RequireWebhookSignature(
+                signatureHeader: WebhookSignatureFilter.DefaultSignatureHeader,
+                signingKeyAccessor: sp => sp.GetRequiredService<IOptions<CommunicationOptions>>().Value.WebhookSigningKey,
+                filterName: "Communication")
+            .RequireRateLimiting("webhook-graph") // Task AUTHV2-049 — 600/min per source IP (defense in depth)
             .WithName("CommunicationIncomingWebhook")
             .WithTags("Communications")
-            .WithDescription("Receive Microsoft Graph change notifications for new inbound emails")
+            .WithDescription("Receive Microsoft Graph change notifications for new inbound emails (HMAC-signed)")
             .Produces<IncomingWebhookResponse>(StatusCodes.Status202Accepted)
             .Produces(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         return app;
@@ -391,32 +403,39 @@ public static class CommunicationEndpoints
                     statusCode: StatusCodes.Status400BadRequest);
             }
 
-            // ─── Step 4: Validate clientState on each notification ───
+            // ─── Step 4: Validate clientState on each notification (constant-time) ───
+            // Fail-closed: clientState is required in every environment. The HMAC
+            // signature check ran in the endpoint filter; the body-level clientState
+            // is the second layer of defense (task 044). DEVELOPMENT_MODE bypass removed.
             var expectedClientState = communicationOptions.Value.WebhookClientState;
-
             if (string.IsNullOrEmpty(expectedClientState))
             {
-                logger.LogWarning(
-                    "Communication:WebhookClientState not configured - " +
-                    "skipping clientState validation (DEVELOPMENT MODE), TraceId={TraceId}",
+                logger.LogError(
+                    "Communication:WebhookClientState not configured — rejecting webhook batch. TraceId={TraceId}",
                     traceId);
+                return Results.Problem(
+                    title: "Server Misconfigured",
+                    detail: "Webhook clientState validation is not configured on this server.",
+                    statusCode: StatusCodes.Status500InternalServerError);
             }
 
+            var expectedClientStateBytes = Encoding.UTF8.GetBytes(expectedClientState);
             var enqueued = 0;
 
             foreach (var notification in notifications.Value)
             {
-                // Validate clientState if configured
-                if (!string.IsNullOrEmpty(expectedClientState)
-                    && !string.Equals(notification.ClientState, expectedClientState, StringComparison.Ordinal))
+                // Constant-time clientState comparison (prevents timing side channels).
+                // Reject the entire batch if any notification has a mismatched clientState
+                // (per Graph webhook spec).
+                var providedClientStateBytes = Encoding.UTF8.GetBytes(notification.ClientState ?? string.Empty);
+                if (providedClientStateBytes.Length != expectedClientStateBytes.Length
+                    || !CryptographicOperations.FixedTimeEquals(providedClientStateBytes, expectedClientStateBytes))
                 {
                     logger.LogWarning(
                         "Invalid clientState on notification for subscription {SubscriptionId}, " +
                         "rejecting, TraceId={TraceId}",
                         notification.SubscriptionId, traceId);
 
-                    // Per Graph webhook spec: if ANY notification in the batch has invalid
-                    // clientState, reject the entire batch.
                     return Results.Problem(
                         title: "Unauthorized",
                         detail: "Invalid clientState in notification",

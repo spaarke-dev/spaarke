@@ -1,0 +1,50 @@
+<task id="AIPU2-199" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Project wrap-up (README status, lessons learned, repo cleanup)</title>
+    <phase>7</phase>
+    <tags>project-management, wrap-up</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-120, AIPU2-121, AIPU2-122, AIPU2-123, AIPU2-124</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Close out the Spaarke AI Platform Unification R2 project cleanly. Update the project
+    README.md to reflect completed status, write a lessons-learned document capturing key
+    decisions and insights for future AI platform projects, run /repo-cleanup to remove
+    ephemeral files and validate repository structure, archive project artifacts, and update
+    TASK-INDEX.md to final status. This is the last task in the project — it should only
+    be started after all Phase 7 deployment tasks are complete and verified.
+  </prompt>
+  <role>Project manager or lead developer responsible for project closure.</role>
+  <goal>
+    Project README.md status is "Complete". A lessons-learned document exists at
+    notes/lessons-learned.md. /repo-cleanup runs without issues. TASK-INDEX.md shows all
+    tasks as complete. The project is ready for branch merge to master.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/README.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/tasks/TASK-INDEX.md</file>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Update projects/spaarke-ai-platform-unification-r2/README.md: change status badge to "Complete", add completion date (2026-05-17 or actual date), add a summary of what was delivered in R2 (three-pane shell, capability router, safety pipeline, session persistence, feedback collection).</step>
+    <step>Write projects/spaarke-ai-platform-unification-r2/notes/lessons-learned.md: capture (a) what went well in R2 (architecture decisions that paid off), (b) what was harder than expected, (c) decisions that should inform future AI platform work (e.g. widget serialization design, PaneEventBus pattern), (d) technical debt items created and where they are tracked, (e) ADR candidates arising from R2 work.</step>
+    <step>Run /repo-cleanup and address any issues found: remove ephemeral files from notes/ that are no longer needed (temp scripts, scratch files), verify no uncommitted changes to .claude/ paths, confirm folder structure matches expected layout.</step>
+    <step>Update TASK-INDEX.md: verify all task statuses are accurate — all completed tasks show the checkmark emoji, no tasks remain in-progress or failed. If any tasks were deferred or descoped, mark them with a deferred status and note.</step>
+    <step>Commit all final changes with message: "chore(ai-platform): project wrap-up — R2 complete".</step>
+    <step>Load the merge-to-master skill and prepare the PR: confirm all Phase 7 deployments are verified, confirm TASK-INDEX.md is final, run the merge-to-master pre-flight checklist. Create the PR to merge work/spaarke-ai-platform-unification-r2 into master.</step>
+    <step>Notify the team that R2 is complete and the PR is ready for review.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>README.md status is updated to "Complete" with completion date and R2 delivery summary.</criterion>
+    <criterion>notes/lessons-learned.md exists with sections covering successes, challenges, decisions, technical debt, and ADR candidates.</criterion>
+    <criterion>/repo-cleanup runs without reporting any structural issues.</criterion>
+    <criterion>TASK-INDEX.md shows all tasks as complete (or explicitly deferred with notes).</criterion>
+    <criterion>All changes are committed with the correct wrap-up commit message.</criterion>
+    <criterion>PR is created to merge the feature branch into master following the merge-to-master skill procedure.</criterion>
+  </acceptance-criteria>
+</task>

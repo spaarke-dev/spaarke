@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-008" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Define ISprkAgent Interface and DirectOpenAiAgent Stub Implementation</title>
+    <phase>1</phase>
+    <tags>bff-api, architecture, ai</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-006, AIPU2-007</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    The R2 AI platform introduces a provider-agnostic agent abstraction. FR-701 requires that the system can route AI requests to different agent implementations (Azure OpenAI direct, Foundry Agent Service, future providers) without the chat orchestration layer knowing which provider is in use. FR-702 requires that the initial implementation uses Azure OpenAI directly (not Foundry) for the dev environment.
+
+    Define the ISprkAgent interface that all agent implementations must satisfy, create a DirectOpenAiAgent stub that will be built out in Phase 2, and register it in the AiChatModule created in AIPU2-006. The interface must use the SSE event types defined in AIPU2-007. This establishes the provider-agnostic boundary that the entire R2 chat system will be built around.
+  </prompt>
+  <role>Senior .NET architect with streaming API and AI agent design expertise.</role>
+  <goal>
+    ISprkAgent.cs interface exists in src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ and defines the complete contract for agent implementations. DirectOpenAiAgent.cs exists as a compilable stub that implements ISprkAgent with NotImplementedException placeholders. AiChatModule.cs registers DirectOpenAiAgent as the ISprkAgent implementation. The build passes with zero errors.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiChatModule.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>infrastructure/contracts/sse-events/manifest.json</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs to understand the current agent factory pattern, what types it works with, and what namespace conventions apply to the Chat services directory.</step>
+    <step>Read .claude/adr/ADR-013-ai-architecture.md to understand the AI architecture constraints: tool orchestration pattern, streaming requirements, provider abstraction rules.</step>
+    <step>Read projects/spaarke-ai-platform-unification-r2/spec.md focusing on FR-701 (provider agnosticism), FR-702 (DirectOpenAI as initial implementation), and any specified method signatures or context types for agents.</step>
+    <step>Read docs/architecture/AI-ARCHITECTURE.md for the canonical description of how the AI pipeline works and where the agent fits in the orchestration flow.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiChatModule.cs (created in AIPU2-006) to understand its current skeleton and where to add the ISprkAgent registration.</step>
+    <step>Define the AgentRequest record/class in src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentRequest.cs:
+      - SessionId: string
+      - UserId: string
+      - TenantId: string
+      - UserMessage: string
+      - ConversationHistory: IReadOnlyList&lt;ConversationTurn&gt;
+      - ContextDocuments: IReadOnlyList&lt;DocumentReference&gt; (nullable/optional)
+      - RequestedCapabilities: IReadOnlyList&lt;string&gt; (nullable/optional)
+      - CancellationToken: (passed to ProcessAsync, not in record)</step>
+    <step>Define the ConversationTurn record in src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ConversationTurn.cs:
+      - Role: enum AgentRole { User, Assistant, System }
+      - Content: string
+      - Timestamp: DateTimeOffset</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ISprkAgent.cs:
+      - Interface ISprkAgent
+      - Method: IAsyncEnumerable&lt;SseEvent&gt; ProcessAsync(AgentRequest request, CancellationToken cancellationToken)
+      - Property: string ProviderId { get; } (identifies the agent implementation, e.g., "azure-openai-direct", "foundry")
+      - Property: bool SupportsStreaming { get; }
+      - XML doc comments on each member explaining its contract
+      Note: SseEvent should be the existing SSE event envelope type from the codebase; if one does not exist, create a minimal SseEvent record with Type (string) and Data (JsonElement) in the Chat directory.</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DirectOpenAiAgent.cs:
+      - Class DirectOpenAiAgent implementing ISprkAgent
+      - Constructor: accepts IConfiguration and ILogger&lt;DirectOpenAiAgent&gt; (placeholders for the Azure OpenAI client to be added in Phase 2)
+      - ProviderId: returns "azure-openai-direct"
+      - SupportsStreaming: returns true
+      - ProcessAsync: async iterator method that immediately throws NotImplementedException with message "DirectOpenAiAgent.ProcessAsync will be implemented in Phase 2 (AIPU2-xxx)"
+      - XML doc comments on class noting it is the Phase 1 stub</step>
+    <step>Update src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiChatModule.cs to register DirectOpenAiAgent:
+      services.AddSingleton&lt;ISprkAgent, DirectOpenAiAgent&gt;();
+      Remove the placeholder TODO comment and replace with this registration plus a comment referencing AIPU2-008.</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ and confirm zero errors and zero new warnings.</step>
+    <step>Verify the interface design satisfies FR-701 by confirming no Azure OpenAI-specific types appear in the ISprkAgent interface signature — it must be fully provider-agnostic.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ISprkAgent.cs exists in src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ and defines ProcessAsync returning IAsyncEnumerable&lt;SseEvent&gt;, ProviderId, and SupportsStreaming.</criterion>
+    <criterion>AgentRequest.cs and ConversationTurn.cs exist in the same directory with the specified fields.</criterion>
+    <criterion>DirectOpenAiAgent.cs exists, implements ISprkAgent, and compiles without errors.</criterion>
+    <criterion>DirectOpenAiAgent.ProcessAsync throws NotImplementedException with a message referencing Phase 2 implementation.</criterion>
+    <criterion>DirectOpenAiAgent.ProviderId returns "azure-openai-direct".</criterion>
+    <criterion>AiChatModule.cs registers services.AddSingleton&lt;ISprkAgent, DirectOpenAiAgent&gt;().</criterion>
+    <criterion>The ISprkAgent interface signature contains no Azure OpenAI SDK types, Foundry types, or any other provider-specific types — it is fully provider-agnostic.</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ exits with code 0 and zero warnings.</criterion>
+    <criterion>XML doc comments are present on ISprkAgent members and on the DirectOpenAiAgent class.</criterion>
+  </acceptance-criteria>
+</task>

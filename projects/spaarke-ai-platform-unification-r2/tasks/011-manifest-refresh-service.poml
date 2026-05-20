@@ -1,0 +1,52 @@
+<task id="AIPU2-011" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build ManifestRefreshService Background Poller</title>
+    <phase>2A</phase>
+    <tags>bff-api, ai, background-job</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-010</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a ManifestRefreshService BackgroundService that keeps the CapabilityManifest fresh via two mechanisms:
+    (1) a 15-minute polling loop for resilient eventual consistency, and (2) a webhook endpoint that Dataverse
+    plugins call whenever a capability is created, updated, or deactivated, triggering an immediate refresh.
+    This ensures the routing layer always has an accurate view of available capabilities without requiring
+    an API restart.
+  </prompt>
+  <role>Senior .NET backend engineer familiar with Spaarke BackgroundService patterns and Dataverse plugins.</role>
+  <goal>
+    Manifest refreshes within 15 minutes on schedule and within seconds of a Dataverse change (via webhook).
+    Refresh failures are logged and retried; the manifest is never cleared on a failed refresh (stale-on-error).
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ServiceBusJobProcessor.cs and the existing background-workers pattern to understand the BackgroundService lifecycle conventions used in the BFF.</step>
+    <step>Create ManifestRefreshService.cs in Services/Ai/Capabilities/ extending BackgroundService. Inject ICapabilityManifest, ICapabilityManifestLoader, ILogger, and IOptions&lt;ManifestRefreshOptions&gt;.</step>
+    <step>Create ManifestRefreshOptions.cs with: PollingIntervalMinutes (default 15), WebhookPath (default "/api/ai/capabilities/refresh").</step>
+    <step>Implement ExecuteAsync: loop with PeriodicTimer(TimeSpan.FromMinutes(options.PollingIntervalMinutes)), call ICapabilityManifestLoader.LoadAsync, swap manifest via ICapabilityManifest (add internal Refresh method), log success/failure, never rethrow — stale manifest on error.</step>
+    <step>Add POST /api/ai/capabilities/refresh minimal API endpoint in AiCapabilityEndpoints.cs. Endpoint must validate a shared secret header (from IConfiguration["AiCapabilities:WebhookSecret"]), then trigger an immediate refresh by calling a new TriggerRefreshAsync() method on ManifestRefreshService (exposed via an IManifestRefreshTrigger interface).</step>
+    <step>Implement IManifestRefreshTrigger on ManifestRefreshService using a Channel&lt;bool&gt; — posting to the channel wakes the background loop for an immediate out-of-schedule refresh.</step>
+    <step>Add OpenTelemetry counter ai_capability_manifest_refresh_total (labels: trigger=scheduled|webhook, result=success|failure).</step>
+    <step>Register ManifestRefreshService as a hosted service and IManifestRefreshTrigger as a singleton in AddAiCapabilitiesModule().</step>
+    <step>Write unit tests: polling fires on schedule (mock PeriodicTimer or use TestClock), webhook trigger wakes loop, stale manifest retained on loader failure.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "ManifestRefresh"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ManifestRefreshService registered as IHostedService and starts without error.</criterion>
+    <criterion>Polling loop fires every 15 minutes (configurable); does not drift on slow Dataverse responses.</criterion>
+    <criterion>POST /api/ai/capabilities/refresh returns 204 when secret matches and triggers an immediate refresh.</criterion>
+    <criterion>POST /api/ai/capabilities/refresh returns 401 when secret is missing or incorrect.</criterion>
+    <criterion>A Dataverse loader failure leaves the existing manifest intact (stale-on-error).</criterion>
+    <criterion>OTEL counter ai_capability_manifest_refresh_total incremented on every refresh attempt.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "ManifestRefresh"`.</criterion>
+  </acceptance-criteria>
+</task>

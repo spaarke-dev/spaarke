@@ -1,0 +1,44 @@
+<task id="AUTHV2-046" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Add idempotency guard in PostConfigure JwtBearerOptions</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, robustness, STANDARD</tags>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>AuthorizationModule.cs:29-48 PostConfigure mutates TokenValidationParameters. If called twice (DI quirk) or chained incorrectly, audience list could be lost. Add idempotency guard + log warning if audience list ends up empty.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>PostConfigure is safe to call multiple times. Empty audience list triggers loud warning at startup.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs (lines 29-48)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read existing PostConfigure logic.</step>
+    <step>Add guard: at start of PostConfigure delegate, check if a marker key is already set in options.TokenValidationParameters; if so, skip. Set marker after first run.</step>
+    <step>After mutating audiences, log: if (audiences.Count == 0) logger.LogCritical("JWT audience list is empty after PostConfigure — all tokens will fail validation").</step>
+    <step>Unit test: call PostConfigure twice; verify audiences are added only once.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>PostConfigure is idempotent.</criterion>
+    <criterion>Empty audience list triggers critical log.</criterion>
+    <criterion>Unit test passes.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 (Phase C parallel wave).
+
+    Implementation:
+    - Added private static `int _jwtPostConfigureApplied` field at top of AuthorizationModule class.
+    - At entry of the PostConfigure&lt;JwtBearerOptions&gt; delegate, `Interlocked.CompareExchange(ref _jwtPostConfigureApplied, 1, 0)` checks the marker; if it was already 1, the delegate returns immediately. This protects BOTH the audience-merge logic (lines 51-66) AND the OnAuthenticationFailed event wiring (lines 82-104) from running twice — the original PostConfigure had the latter issue (each call would re-chain a new handler on top of the previous one via the `existingOnFailed` closure).
+    - After audience mutation, added a final-state check: if `ValidAudiences.Count == 0 AND ValidAudience is null/empty`, emit `[CRITICAL] JWT audience list is empty after PostConfigure — all tokens will fail validation. Check AzureAd:ClientId and AgentToken:CopilotAudience configuration.` to `Console.Error`. Used Console.Error (not ILogger) because PostConfigure runs during host build before logging providers are guaranteed wired, and resolving ILogger via `services.BuildServiceProvider()` is an anti-pattern (creates a second container, leaks scoped services). App Service / container stdout pipelines capture Console.Error.
+
+    Build: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors, 17 pre-existing warnings (none introduced by this change; all in unrelated Agent/Registration/Chat files + 1 pre-existing NU1903 Kiota vulnerability).
+
+    Unit test deferred: the parallel-execution coordination scoped this to a single-file edit. Adding a unit test would require touching `Sprk.Bff.Api.Tests` which is outside scope. Recommend a follow-up if the test infra is reachable: invoke the PostConfigure&lt;JwtBearerOptions&gt;.Action delegate via `IPostConfigureOptions&lt;JwtBearerOptions&gt;` resolved from the DI container, then call its `.PostConfigure(JwtBearerDefaults.AuthenticationScheme, optionsInstance)` method twice and assert that the `ValidAudiences` set is identical after both invocations and that `OnAuthenticationFailed` references the same delegate instance.
+
+    Files modified: `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs` (added field + guard + critical log).
+  </notes>
+</task>

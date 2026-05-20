@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/contracts/sse-events/_shared-defs.json",
+  "title": "Spaarke SSE Shared Definitions",
+  "description": "Shared $defs referenced by all R2 SSE event schemas. Import via $ref.",
+  "$defs": {
+    "SseEnvelope": {
+      "type": "object",
+      "description": "Base envelope present on every R2 SSE event.",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "SSE event type discriminator string (e.g. 'workspace_widget')."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp when the event was generated on the server."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Chat session ID that produced this event."
+        },
+        "traceId": {
+          "type": "string",
+          "description": "Distributed trace ID for correlating server-side logs (HttpContext.TraceIdentifier)."
+        }
+      }
+    },
+    "DocumentReference": {
+      "type": "object",
+      "description": "A reference to a document known to the Spaarke platform.",
+      "required": ["documentId"],
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "description": "Unique identifier of the document (SPE drive item ID or Dataverse record ID)."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable document title."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct URL to open the document."
+        }
+      }
+    },
+    "RangeHighlight": {
+      "type": "object",
+      "description": "A text range selection within a document for highlighting or citation purposes.",
+      "required": ["startOffset", "endOffset"],
+      "properties": {
+        "startOffset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based character offset of the highlight start (inclusive)."
+        },
+        "endOffset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based character offset of the highlight end (exclusive)."
+        },
+        "text": {
+          "type": "string",
+          "description": "The highlighted text content (informational; client should verify against document)."
+        }
+      }
+    }
+  }
+}

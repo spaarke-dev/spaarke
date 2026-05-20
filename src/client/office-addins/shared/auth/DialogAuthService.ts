@@ -1,4 +1,19 @@
 /**
+ * @deprecated since 2026-05-19 (Spaarke Auth v2, task 080).
+ *
+ * The Dialog API path is no longer maintained as a separate service. Spaarke Auth
+ * v2 collapses NAA + fallback PCA acquisition into a single `OfficeNaaStrategy`
+ * in `@spaarke/auth`; the fallback path inside `OfficeNaaStrategy` uses a
+ * standard `PublicClientApplication` (popup flow) rather than the legacy Dialog
+ * API. Hosts that genuinely require the Dialog API are out of scope for v2 —
+ * see project audit doc.
+ *
+ * Retained TEMPORARILY (task 080 scope) so existing Add-in entry points
+ * continue to build. Deletion is scheduled for tasks 081 (Outlook) and
+ * 082 (Word). DO NOT add new consumers.
+ *
+ * ---
+ *
  * Dialog API Authentication Service for Office Add-ins
  *
  * Provides fallback authentication for older Office clients that don't support

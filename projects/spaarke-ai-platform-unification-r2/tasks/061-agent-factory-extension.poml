@@ -1,0 +1,49 @@
+<task id="AIPU2-061" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Extend SprkChatAgentFactory for Per-Turn Tool Injection via CapabilityRouter</title>
+    <phase>3</phase>
+    <tags>bff-api, ai, routing</tags>
+    <status>not-started</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>AIPU2-010, AIPU2-012, AIPU2-060</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1's SprkChatAgentFactory used a static ResolveTools method that returned the same tool list
+    for every turn regardless of user intent. R2 requires per-turn tool injection driven by
+    CapabilityRouter (AIPU2-010) and the model tier manifest (AIPU2-012). Extend
+    SprkChatAgentFactory so that CreateAgentAsync accepts the current ChatTurnRequest, calls
+    CapabilityRouter to select the appropriate tools, and injects them into the ISprkAgent before
+    the turn executes. Middleware wrapping order (auth filter, rate limiter, safety pre-check)
+    must be preserved around the per-turn resolved tool set.
+  </prompt>
+  <role>Senior .NET developer familiar with factory pattern, dependency injection, and the Azure OpenAI tool-use API.</role>
+  <goal>
+    Tools vary per turn based on user intent as determined by CapabilityRouter. The static
+    ResolveTools method is replaced by manifest-driven resolution. Existing middleware wrapping
+    order is preserved. Integration tests verify that different intents produce different tool
+    sets injected into the agent.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SprkChatAgentFactory.cs in full to map the current CreateAgentAsync signature and all call sites.</step>
+    <step>Modify CreateAgentAsync signature to accept ChatTurnRequest (or relevant intent fields) alongside existing parameters.</step>
+    <step>Inject ICapabilityRouter (AIPU2-010) into SprkChatAgentFactory constructor via DI.</step>
+    <step>Replace the static ResolveTools call with CapabilityRouter.ResolveToolsAsync(turnRequest, modelTier) using the manifest from AIPU2-012.</step>
+    <step>Pass the resolved IReadOnlyList&lt;AiTool&gt; into ISprkAgent.ExecuteTurnAsync per the interface defined in AIPU2-060.</step>
+    <step>Preserve existing middleware wrapping order: auth filter wraps rate limiter wraps safety pre-check wraps agent call.</step>
+    <step>Add per-turn tool injection into the Azure OpenAI call — tools must be set on the request object, not cached at factory creation time.</step>
+    <step>Write integration tests: low-complexity intent resolves minimal tools; document-analysis intent resolves full tool set; capability_change SSE event emitted when tool set changes between turns.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Static ResolveTools method is removed or marked obsolete; all tool resolution goes through CapabilityRouter.</criterion>
+    <criterion>Different chat intents produce different injected tool sets (verified by integration tests).</criterion>
+    <criterion>Middleware wrapping order is unchanged — no auth or rate limit regression.</criterion>
+    <criterion>capability_change SSE event is emitted when the resolved tool set differs from the previous turn.</criterion>
+    <criterion>Factory compiles and all existing tests pass without modification to test intent.</criterion>
+  </acceptance-criteria>
+</task>

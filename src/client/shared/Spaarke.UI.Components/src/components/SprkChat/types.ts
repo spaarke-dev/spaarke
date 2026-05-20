@@ -373,6 +373,30 @@ export interface IPredefinedPrompt {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Auth Function Types (Auth v2 — function-based contract; no token snapshots)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Authenticated fetch function — matches `AuthenticatedFetchFn` from `@spaarke/auth`.
+ * Caller-supplied so this library does not take a runtime dependency on @spaarke/auth.
+ * The function MUST attach a fresh Bearer token (and X-Tenant-Id when applicable)
+ * to every call and re-acquire on 401. See `@spaarke/auth/authenticatedFetch`.
+ *
+ * Auth v2 (D-AUTH-1, D-AUTH-7): tokens are NEVER snapshotted as strings in component
+ * state; callers always go through this function.
+ */
+export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Token getter for code paths that cannot use `authenticatedFetch` (e.g., SSE streams
+ * opened via `fetch()` + `ReadableStream`, or XHR uploads that need progress events).
+ * MUST be called immediately before opening each stream — never snapshotted into
+ * component state. Callers of `useSseStream.startStream` pass this through so the
+ * hook can re-fetch a fresh token on every stream open.
+ */
+export type AccessTokenGetter = () => Promise<string>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component Props
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -399,8 +423,27 @@ export interface ISprkChatProps {
   playbookId?: string;
   /** Base URL for the BFF API (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net") */
   apiBaseUrl: string;
-  /** Bearer token for API authentication */
-  accessToken: string;
+  /**
+   * Authenticated fetch function — typically `authenticatedFetch` from `@spaarke/auth`
+   * (or the `authenticatedFetch` value returned by `useAuth()`). MUST attach a fresh
+   * Bearer token on every call and re-acquire on 401. SprkChat passes this to its
+   * internal hooks (useChatSession, useChatPlaybooks, useChatContextMapping,
+   * useDynamicSlashCommands) so every JSON API call goes through it.
+   *
+   * Auth v2 (D-AUTH-1, D-AUTH-7): replaces the old `accessToken: string` prop, which
+   * was a token snapshot trap — any token captured at mount time would expire mid-session.
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
+  /**
+   * Fresh-token getter for SSE / XHR code paths (`useSseStream`, `SprkChatUploadZone`,
+   * editor-refine streams, plan-approve streams, document-persist calls). These cannot
+   * use `authenticatedFetch` directly because they need the raw `fetch()`+`ReadableStream`
+   * or `XMLHttpRequest` plumbing. Callers MUST re-invoke `getAccessToken()` immediately
+   * before opening each stream — the token MUST NOT be cached in component state.
+   *
+   * Typically wired to the `getAccessToken` value returned by `useAuth()`.
+   */
+  getAccessToken: AccessTokenGetter;
   /** Callback fired when a new session is created */
   onSessionCreated?: (session: IChatSession) => void;
   /**
@@ -966,8 +1009,15 @@ export interface IUseSseStreamResult {
     type: 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate';
     data: IChatSseEventData;
   } | null;
-  /** Start a new SSE stream */
-  startStream: (url: string, body: Record<string, unknown>, token: string) => void;
+  /**
+   * Start a new SSE stream.
+   *
+   * Auth v2 (D-AUTH-7): callers pass an `AccessTokenGetter` (NOT a token string).
+   * The hook invokes the getter once, immediately before opening the stream, so the
+   * token is always fresh for THIS stream open. The token is never snapshotted in
+   * React state and never reused across stream opens.
+   */
+  startStream: (url: string, body: Record<string, unknown>, getAccessToken: AccessTokenGetter) => void;
   /** Cancel the active stream */
   cancelStream: () => void;
   /** Clear stored suggestions (called when user sends a new message) */

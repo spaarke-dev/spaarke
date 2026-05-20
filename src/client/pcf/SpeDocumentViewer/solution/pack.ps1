@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.0.25"
+$version = "1.0.26"
 $solutionName = "SpaarkeSpeDocumentViewer"
 $schemaName = "sprk_Spaarke.SpeDocumentViewer"
 $zipPath = "bin\${solutionName}_v$version.zip"

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-002" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Create Cosmos DB Bicep Module and Provision spaarke-ai Database</title>
+    <phase>1</phase>
+    <tags>infrastructure, cosmos-db</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The R2 AI platform requires a durable, multi-container Cosmos DB database named `spaarke-ai` to store AI sessions, prompts, audit records, memory snapshots, and user feedback. No Cosmos DB resource currently exists in the dev environment. A reusable Bicep module is needed so the same infrastructure-as-code pattern can be promoted to staging and production without manual configuration.
+
+    Create a cosmos-db.bicep module following the existing module patterns in infrastructure/bicep/modules/, wire it into the platform.bicep main template, create a provisioning script, and deploy to the dev environment. The database must use serverless capacity mode to avoid fixed provisioning costs during development.
+  </prompt>
+  <role>Azure infrastructure engineer with Bicep and Cosmos DB expertise.</role>
+  <goal>
+    A cosmos-db.bicep Bicep module exists in infrastructure/bicep/modules/, is integrated into platform.bicep, and has been successfully deployed to the dev resource group (spe-infrastructure-westus2). The spaarke-ai database contains exactly five containers: sessions, prompts, audit, memory, feedback — each with appropriate partition keys and TTL settings. A provisioning script exists in scripts/ for repeatable deployment.
+  </goal>
+  <knowledge>
+    <files>
+      <file>infrastructure/bicep/modules/</file>
+      <file>infrastructure/bicep/platform.bicep</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read all existing files in infrastructure/bicep/modules/ to understand the naming conventions, parameter patterns, output conventions, and tagging strategy used by the existing modules.</step>
+    <step>Read infrastructure/bicep/platform.bicep to understand how modules are composed, what shared parameters are passed (location, environmentName, tags), and where the new module should be inserted.</step>
+    <step>Read .claude/constraints/azure-deployment.md to confirm any constraints on resource naming, SKU selection, or deployment approach.</step>
+    <step>Create infrastructure/bicep/modules/cosmos-db.bicep with:
+      - Parameters: location, accountName, databaseName, tags
+      - Serverless capacity mode (no throughput provisioning)
+      - Cosmos DB account with public network access disabled (use private endpoint or allow Azure services)
+      - Database: spaarke-ai
+      - Container: sessions (partitionKey: /userId, TTL: 7776000 seconds / 90 days)
+      - Container: prompts (partitionKey: /sessionId, TTL: 7776000 seconds / 90 days)
+      - Container: audit (partitionKey: /tenantId, TTL: -1 / no expiry, analyticalStorageTtl: -1)
+      - Container: memory (partitionKey: /userId, TTL: 7776000 seconds / 90 days)
+      - Container: feedback (partitionKey: /userId, TTL: -1 / no expiry)
+      - Outputs: accountName, accountEndpoint, databaseName</step>
+    <step>Add the cosmos-db module reference to infrastructure/bicep/platform.bicep, passing the shared location, environmentName-derived account name (e.g., spaarke-cosmos-{env}), databaseName=spaarke-ai, and tags parameters.</step>
+    <step>Create scripts/Provision-CosmosDb.ps1 that: accepts -Environment parameter (dev/staging/prod), resolves the resource group name, and runs az deployment group create with the cosmos-db.bicep module using a what-if flag first, then applies on confirmation.</step>
+    <step>Run the provisioning script targeting the dev environment (spe-infrastructure-westus2) with -WhatIf first to validate the template, then deploy if the what-if output is correct.</step>
+    <step>Verify deployment success: run az cosmosdb sql container list and confirm all 5 containers exist with correct partition keys.</step>
+    <step>Update docs/architecture/auth-azure-resources.md to add the new Cosmos DB account under the dev environment resource inventory.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>infrastructure/bicep/modules/cosmos-db.bicep exists, is valid Bicep, and passes az bicep build without errors.</criterion>
+    <criterion>platform.bicep references the cosmos-db module with the correct parameter bindings.</criterion>
+    <criterion>scripts/Provision-CosmosDb.ps1 exists and includes -WhatIf support and -Environment parameter.</criterion>
+    <criterion>The spaarke-ai Cosmos DB database exists in the spe-infrastructure-westus2 resource group in the dev Azure subscription.</criterion>
+    <criterion>All five containers (sessions, prompts, audit, memory, feedback) exist with the specified partition keys and TTL settings.</criterion>
+    <criterion>The audit container has TTL=-1 (no automatic expiry) and analyticalStorageTtl=-1.</criterion>
+    <criterion>Serverless capacity mode is confirmed via az cosmosdb show output.</criterion>
+    <criterion>docs/architecture/auth-azure-resources.md contains the new Cosmos DB account entry.</criterion>
+  </acceptance-criteria>
+</task>

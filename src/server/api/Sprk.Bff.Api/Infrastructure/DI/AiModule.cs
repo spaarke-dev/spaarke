@@ -1,10 +1,13 @@
 using Azure.AI.OpenAI;
 using Azure.Identity;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -195,11 +198,17 @@ public static class AiModule
         // the repository limits its visibility to a single request).
         services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
 
-        // ChatSessionManager — scoped per ADR-010 (AIPL-052).
-        // Manages session lifecycle (create / get / delete) with Redis hot path and
-        // Dataverse cold path.  Scoped: IDistributedCache is a singleton; scoping the manager
-        // ensures clear per-request state and natural cancellation token boundaries.
-        services.AddScoped<ChatSessionManager>();
+        // ChatSessionManager — scoped per ADR-010 (AIPL-052, AIPU2-064).
+        // Manages session lifecycle (create / get / delete) with Redis hot path,
+        // optional Cosmos DB warm path (D-06 write-through), and Dataverse cold path.
+        // ISessionPersistenceService is resolved optionally — when AiPersistenceModule is
+        // registered (production) it is injected; when absent (environments without Cosmos)
+        // it resolves to null and the manager falls back to Redis + Dataverse only.
+        services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
+            cache:                sp.GetRequiredService<IDistributedCache>(),
+            dataverseRepository:  sp.GetRequiredService<IChatDataverseRepository>(),
+            logger:               sp.GetRequiredService<ILogger<ChatSessionManager>>(),
+            persistence:          sp.GetService<ISessionPersistenceService>()));   // optional — null when Cosmos not configured
 
         // ChatHistoryManager — scoped per ADR-010 (AIPL-052).
         // Manages message addition, history retrieval, summarisation (15 messages), and

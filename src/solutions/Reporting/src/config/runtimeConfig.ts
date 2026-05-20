@@ -12,7 +12,7 @@
  * MUST NOT use module-level constants that call these getters — they will
  * throw "Runtime config not initialized" before bootstrap completes.
  *
- * @see .claude/patterns/auth/spaarke-auth-initialization.md
+ * @see .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md (DEPRECATED — superseded by Spaarke Auth v2 useAuth(); see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
  * @see ADR-006 - Code Pages for standalone surfaces
  */
 

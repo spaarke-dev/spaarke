@@ -8,6 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.23" />
+    <!-- Cosmos DB SDK — required to mock CosmosClient in SessionPersistenceService tests (AIPU2-030) -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <!-- MimeKit 4.15.1: fixes CVE-2026-30227 (CRLF injection in SMTP envelope address) -->
     <PackageReference Include="MimeKit" Version="4.15.1" />
@@ -36,6 +38,9 @@
     <PackageReference Include="MimeKitLite" Version="4.15.1">
       <ExcludeAssets>all</ExcludeAssets>
     </PackageReference>
+
+    <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for CapabilityRouter tests (AIPU2-013/014) -->
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />

@@ -4,18 +4,35 @@
  * Manages chat session creation, history loading, context switching, and deletion.
  * All API calls target the ChatEndpoints.cs API contract.
  *
+ * Auth v2 (D-AUTH-1, D-AUTH-7):
+ * - Accepts `authenticatedFetch` from the caller instead of a snapshotted `accessToken: string`.
+ * - `authenticatedFetch` re-fetches a fresh Bearer token on every call and handles
+ *   X-Tenant-Id / 401 retry internally, so this hook no longer parses JWTs or
+ *   constructs Authorization headers directly.
+ *
  * @see ADR-022 - React 16 APIs only (useState, useEffect, useRef, useCallback)
  * @see ChatEndpoints.cs - POST /sessions, GET /history, PATCH /context, DELETE /sessions
  */
 
 import { useState, useCallback } from 'react';
-import { IChatSession, IChatMessage, IChatMessageMetadata, IUseChatSessionResult, IHostContext } from '../types';
+import {
+  IChatSession,
+  IChatMessage,
+  IChatMessageMetadata,
+  IUseChatSessionResult,
+  IHostContext,
+  AuthenticatedFetchFn,
+} from '../types';
 
 interface UseChatSessionOptions {
   /** Base URL for the BFF API */
   apiBaseUrl: string;
-  /** Bearer token for API authentication */
-  accessToken: string;
+  /**
+   * Authenticated fetch function (typically from `@spaarke/auth` or `useAuth()`).
+   * MUST attach a fresh Bearer token on every call. Replaces the previous
+   * `accessToken: string` snapshot prop.
+   */
+  authenticatedFetch: AuthenticatedFetchFn;
   /** Pre-loaded messages to show before any session is created (e.g. from sprk_chathistory) */
   initialMessages?: IChatMessage[];
 }
@@ -32,11 +49,14 @@ interface UseChatSessionOptions {
  *   session, messages, isLoading, error,
  *   createSession, loadHistory, switchContext, deleteSession,
  *   addMessage, updateLastMessage
- * } = useChatSession({ apiBaseUrl: "https://api.example.com", accessToken: "token" });
+ * } = useChatSession({
+ *   apiBaseUrl: "https://api.example.com",
+ *   authenticatedFetch, // from @spaarke/auth / useAuth()
+ * });
  * ```
  */
 export function useChatSession(options: UseChatSessionOptions): IUseChatSessionResult {
-  const { apiBaseUrl, accessToken, initialMessages } = options;
+  const { apiBaseUrl, authenticatedFetch, initialMessages } = options;
 
   const [session, setSession] = useState<IChatSession | null>(null);
   const [messages, setMessages] = useState<IChatMessage[]>(() => initialMessages ?? []);
@@ -45,41 +65,6 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
 
   // Normalize: strip trailing slashes.
   const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-
-  /**
-   * Make an authenticated API request.
-   */
-  /**
-   * Extract tenant ID from JWT access token for X-Tenant-Id header.
-   * Azure AD tokens include 'tid' claim with the tenant GUID.
-   */
-  const extractTenantId = (token: string): string | null => {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const payload = JSON.parse(atob(parts[1]));
-      return payload.tid || null;
-    } catch {
-      return null;
-    }
-  };
-
-  const apiRequest = useCallback(
-    async (url: string, init?: RequestInit): Promise<Response> => {
-      const tenantId = extractTenantId(accessToken);
-      const response = await fetch(url, {
-        ...init,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-          ...(init?.headers || {}),
-        },
-      });
-      return response;
-    },
-    [accessToken]
-  );
 
   /**
    * Create a new chat session.
@@ -91,8 +76,9 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
       setError(null);
 
       try {
-        const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions`, {
+        const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             documentId: documentId || null,
             playbookId: playbookId || null,
@@ -122,7 +108,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
         setIsLoading(false);
       }
     },
-    [apiRequest, baseUrl, initialMessages]
+    [authenticatedFetch, baseUrl, initialMessages]
   );
 
   /**
@@ -138,7 +124,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     setError(null);
 
     try {
-      const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`);
+      const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -161,7 +147,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     } finally {
       setIsLoading(false);
     }
-  }, [session, apiRequest, baseUrl]);
+  }, [session, authenticatedFetch, baseUrl]);
 
   /**
    * Switch the document/playbook context for the current session.
@@ -199,8 +185,9 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
           body.additionalDocumentIds = additionalDocumentIds;
         }
 
-        const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
+        const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/context`, {
           method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
 
@@ -215,7 +202,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
         setIsLoading(false);
       }
     },
-    [session, apiRequest, baseUrl]
+    [session, authenticatedFetch, baseUrl]
   );
 
   /**
@@ -231,7 +218,9 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     setError(null);
 
     try {
-      const response = await apiRequest(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, { method: 'DELETE' });
+      const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}`, {
+        method: 'DELETE',
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -246,7 +235,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     } finally {
       setIsLoading(false);
     }
-  }, [session, apiRequest, baseUrl]);
+  }, [session, authenticatedFetch, baseUrl]);
 
   /**
    * Add a message to the local history (used when sending/receiving messages).

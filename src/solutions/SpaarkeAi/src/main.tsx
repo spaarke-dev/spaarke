@@ -216,6 +216,12 @@ async function bootstrap(): Promise<void> {
     dataParams.get("matterId") ??
     undefined;
 
+  // Session restore: ?sessionId=<guid> triggers the restore flow (AIPU2-106).
+  const sessionId =
+    searchParams.get("sessionId") ??
+    dataParams.get("sessionId") ??
+    undefined;
+
   // -------------------------------------------------------------------------
   // 4. Render the app
   // -------------------------------------------------------------------------
@@ -232,6 +238,7 @@ async function bootstrap(): Promise<void> {
         entityLogicalName={entityLogicalName}
         entityId={entityId}
         matterId={matterId}
+        sessionId={sessionId}
       />
     </React.StrictMode>
   );

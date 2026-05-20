@@ -1,0 +1,54 @@
+<task id="AIPU2-105" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Implement four-stage pane lifecycle (Landing, Playbook Selected, Active Work, Multi-Task)</title>
+    <phase>5</phase>
+    <tags>frontend, shell, lifecycle</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-075, AIPU2-079, AIPU2-077, AIPU2-078</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    The ThreePaneShell must implement a four-stage state machine that controls what content
+    each pane shows as the user progresses through a work session. Stage 1 (Landing): user
+    arrives, sees recent work and playbook gallery. Stage 2 (Playbook Selected): user has
+    chosen an agent, workspace shows playbook defaults, chat is initialized. Stage 3 (Active
+    Work): user has loaded a document/search, all three panes are in full working mode.
+    Stage 4 (Multi-Task): user has multiple workspace tabs open, context adapts to active tab.
+    Transitions are triggered by user actions (playbook selection, document load, tab addition).
+    Per design.md Section 2.3.
+  </prompt>
+  <role>Frontend developer responsible for shell architecture and pane lifecycle state management.</role>
+  <goal>
+    ThreePaneShell implements a four-stage state machine. Each stage configures pane content
+    per design.md Section 2.3 diagrams. Transitions are triggered by well-defined events and
+    are fully reversible (user can navigate back). All four stages render correctly and the
+    current stage is reflected in shell state for use by sub-components.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/Shell</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Define the PaneStage enum: Landing | PlaybookSelected | ActiveWork | MultiTask. Store current stage in ThreePaneShell state (or a dedicated StageContext React context).</step>
+    <step>Implement Stage 1 (Landing): Workspace shows "What would you like to work on?" prompt + recent work cards. Context shows PlaybookGalleryWidget. Conversation shows welcome message + prompt suggestion buttons.</step>
+    <step>Implement Stage 1 -> Stage 2 transition trigger: PlaybookSelectedEvent received (from AIPU2-102). Stage 2: Workspace initializes with playbook defaultWidgets. Context switches to playbook-specific context widget. Chat shows initialized agent.</step>
+    <step>Implement Stage 2 -> Stage 3 transition trigger: first document loaded or first search result opened in Workspace. Stage 3: all panes in full working mode per design.md Section 2.3 Stage 3 diagram.</step>
+    <step>Implement Stage 3 -> Stage 4 transition trigger: second workspace tab opened. Stage 4: WorkspaceTabManager shows multi-tab header, Context uses TabChangedEvent (AIPU2-103) to adapt per active tab, Conversation stays stable.</step>
+    <step>Implement reverse transitions: closing all but one tab reverts Stage 4 -> Stage 3. "Change playbook" reverts to Stage 1.</step>
+    <step>Expose currentStage via StageContext so any sub-component can read the stage without prop drilling.</step>
+    <step>Verify all four stages render the correct pane configurations by stepping through the state machine manually and comparing to design.md Section 2.3 diagrams.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ThreePaneShell implements a PaneStage enum with all four stages and stores current stage in StageContext.</criterion>
+    <criterion>Stage 1 renders: welcome workspace, playbook gallery in context, welcome message in conversation.</criterion>
+    <criterion>Stage 2 activates on PlaybookSelectedEvent: workspace shows playbook defaults, chat is initialized with agent.</criterion>
+    <criterion>Stage 3 activates when the first document or search result is loaded into the workspace.</criterion>
+    <criterion>Stage 4 activates when a second workspace tab is opened and the tab bar becomes visible.</criterion>
+    <criterion>Reverse transitions work correctly: closing tabs reverts stage, changing playbook reverts to Stage 1.</criterion>
+    <criterion>StageContext is accessible to all child components without prop drilling.</criterion>
+  </acceptance-criteria>
+</task>

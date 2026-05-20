@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.Logging;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -133,6 +134,11 @@ public static class MiddlewarePipelineExtensions
         // Authentication & Authorization
         app.UseAuthentication();
         app.UseAuthorization();
+
+        // Audit enrichment (task AUTHV2-048): pushes oid/appid/obo/tenantId/correlationId
+        // into the structured log scope for every AUTHENTICATED request. Must run AFTER
+        // UseAuthentication so HttpContext.User is populated.
+        app.UseAuditEnrichment();
 
         // Rate Limiting (must come after Authentication)
         app.UseRateLimiter();

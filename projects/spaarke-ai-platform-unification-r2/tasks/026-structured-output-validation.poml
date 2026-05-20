@@ -1,0 +1,54 @@
+<task id="AIPU2-026" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build SSE Event Payload Validation — JSON Schema Guard</title>
+    <phase>2B</phase>
+    <tags>bff-api, sse, validation</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-007</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build SseEventValidator, a validation layer that checks all SSE tool output payloads against their
+    registered JSON Schemas before the events are written to the response stream. If a tool returns malformed
+    or schema-violating JSON, the validator catches it and substitutes a safe fallback event (a generic_widget
+    event with an error message) rather than letting invalid data reach the PCF control UI. This prevents
+    UI crashes caused by unexpected tool output shapes. The schemas are the ones defined in task AIPU2-007.
+  </prompt>
+  <role>Senior .NET backend engineer with JSON Schema validation and SSE streaming experience.</role>
+  <goal>
+    Every SSE tool output event is validated against its registered JSON Schema before emission. Invalid
+    payloads are replaced with a generic_widget fallback event. Valid payloads pass through unchanged.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>projects/spaarke-ai-platform-unification-r2/tasks/007-sse-event-schema.poml</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the streaming-endpoints pattern and the SSE pipeline code to understand where tool output events are assembled before being written to the HTTP response stream.</step>
+    <step>Read task 007 (007-sse-event-schema.poml) to understand the schema file locations and the event type registry established in that task.</step>
+    <step>Add NuGet reference to JsonSchema.Net (NJsonSchema or Json.Schema.Net — whichever is already in the solution; check the .csproj). Do not add a second schema library if one exists.</step>
+    <step>Create ISseEventValidator.cs interface with: SseEventValidationResult Validate(string eventType, string jsonPayload).</step>
+    <step>Create SseEventValidationResult.cs record: IsValid (bool), ValidationErrors (IReadOnlyList&lt;string&gt;), FallbackPayload (string? — only set when IsValid=false).</step>
+    <step>Create SseEventValidator.cs implementing ISseEventValidator. In the constructor, load all JSON Schema files from the schemas directory (established in task 007) keyed by event type string. Cache compiled schema objects (JsonSchema.Parse or equivalent) in a Dictionary&lt;string, JsonSchema&gt;.</step>
+    <step>In Validate: look up the schema by eventType. If no schema registered for this event type, return IsValid=true (unknown event types pass through — only validate known types). If schema found, validate jsonPayload against it. On failure, build FallbackPayload: { "type": "generic_widget", "title": "Response", "body": "An AI tool returned an unexpected response format.", "errorCode": "SSE_SCHEMA_VIOLATION" }.</step>
+    <step>Integrate SseEventValidator into the SSE emit pipeline: before each tool-output event is written to the response stream, call Validate. If IsValid=false, write FallbackPayload instead and log a warning with the original eventType and ValidationErrors.</step>
+    <step>Emit OTEL counter ai_sse_validation_failures_total (label: event_type).</step>
+    <step>Register ISseEventValidator as singleton in AddAiSafetyModule() (or the appropriate SSE module).</step>
+    <step>Write unit tests: valid payload for known type passes, invalid payload replaced with generic_widget, unknown event type passes through, schema load failure logged and event passes through.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "SseEvent"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Valid payloads pass through the validator unchanged.</criterion>
+    <criterion>Invalid payloads (schema violations) are replaced with the generic_widget fallback event.</criterion>
+    <criterion>Fallback event payload follows the defined generic_widget schema exactly.</criterion>
+    <criterion>Unknown event types (no registered schema) pass through without error.</criterion>
+    <criterion>Validation failure is logged at Warning level with eventType and error details.</criterion>
+    <criterion>OTEL counter ai_sse_validation_failures_total incremented on each validation failure.</criterion>
+    <criterion>Schema files are loaded at startup (not per-request) — validated by checking constructor-time loading.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "SseEvent"`.</criterion>
+  </acceptance-criteria>
+</task>

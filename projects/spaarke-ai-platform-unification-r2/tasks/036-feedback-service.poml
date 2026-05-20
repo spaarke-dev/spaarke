@@ -1,0 +1,52 @@
+<task id="AIPU2-036" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build FeedbackService (per-response feedback storage and aggregation)</title>
+    <phase>2C</phase>
+    <tags>bff-api, cosmos-db, feedback</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-002, AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a FeedbackService that captures per-response user feedback (thumbs up/down plus
+    optional free-text comment) and stores it in a Cosmos DB `feedback` container. Each
+    feedback entry is linked to both the session and the specific turn (message index) within
+    that session. Aggregation queries must be supported: aggregate by playbook ID (to measure
+    which playbooks produce better responses) and by capability/tool (to identify which AI
+    tools are most/least useful). Expose API endpoints for submitting feedback and retrieving
+    aggregated stats.
+  </prompt>
+  <role>Senior .NET developer familiar with Cosmos DB aggregation queries, .NET Minimal API, and feedback analytics patterns.</role>
+  <goal>
+    Users can submit thumbs up/down feedback on any AI response. Feedback is stored and
+    linked to session + turn. Aggregation endpoints return per-playbook and per-capability
+    sentiment scores queryable by admins and product teams.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read data.md constraints to confirm Cosmos partitioning and retention rules before implementing.</step>
+    <step>Create FeedbackService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Feedback/. Define IFeedbackService with SubmitFeedbackAsync(feedback), GetAggregateByPlaybookAsync(playbookId, dateRange), and GetAggregateByCapabilityAsync(capabilityId, dateRange) methods.</step>
+    <step>Define FeedbackEntry record: Id (Guid), SessionId (string), TurnIndex (int), UserId (string), TenantId (string), PlaybookId (string), CapabilityId (string, the tool/action name), Rating (enum: ThumbsUp/ThumbsDown), Comment (string?, optional, max 500 chars), SubmittedAt (DateTimeOffset).</step>
+    <step>Define FeedbackAggregate record: EntityId (string), EntityType (string: "playbook" or "capability"), TotalCount (int), ThumbsUpCount (int), ThumbsDownCount (int), ThumbsUpPercentage (double), DateRange (DateRange record).</step>
+    <step>Implement SubmitFeedbackAsync: write FeedbackEntry to Cosmos `feedback` container using CreateItemAsync, partition key /tenantId.</step>
+    <step>Implement GetAggregateByPlaybookAsync: query Cosmos with GROUP BY playbookId + rating, aggregate counts, return FeedbackAggregate. Use Cosmos SQL query with COUNT() aggregation.</step>
+    <step>Implement GetAggregateByCapabilityAsync: same pattern, GROUP BY capabilityId + rating.</step>
+    <step>Add Minimal API endpoints in FeedbackEndpoints.cs: POST /api/ai/feedback (submit), GET /api/ai/feedback/playbook/{id}?from=&to= (aggregate by playbook), GET /api/ai/feedback/capability/{id}?from=&to= (aggregate by capability). Apply auth filter.</step>
+    <step>Register FeedbackService in AddAiPersistenceModule. Map endpoints in Program.cs.</step>
+    <step>Write unit tests: (a) submit stores entry with correct fields, (b) aggregate by playbook returns correct counts, (c) aggregate by capability returns correct counts, (d) comment truncated at 500 chars if over limit.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>FeedbackEntry stores sessionId, turnIndex, userId, playbookId, capabilityId, rating, and optional comment.</criterion>
+    <criterion>Comment is capped at 500 characters — longer inputs are truncated before storage.</criterion>
+    <criterion>Aggregation returns ThumbsUpPercentage correctly calculated as (ThumbsUpCount / TotalCount * 100).</criterion>
+    <criterion>Aggregate endpoints accept from/to date range query parameters and filter results accordingly.</criterion>
+    <criterion>POST /api/ai/feedback returns 201 Created with the entry Id.</criterion>
+    <criterion>Service registered in AddAiPersistenceModule and resolves cleanly.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

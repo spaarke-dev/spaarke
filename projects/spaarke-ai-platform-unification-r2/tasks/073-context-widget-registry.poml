@@ -1,0 +1,45 @@
+<task id="AIPU2-073" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build ContextWidgetRegistry with Lazy-Load Dynamic Import</title>
+    <phase>4A</phase>
+    <tags>frontend, widgets, registry</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-071</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    ContextPaneController (AIPU2-078) needs to resolve context widget implementations on demand
+    without bundling all widget code upfront. ContextWidgetRegistry mirrors the pattern of
+    WorkspaceWidgetRegistry (AIPU2-072) but for the simpler ContextWidget interface. Unknown
+    context widget types should return null rather than a fallback widget — the Context pane
+    renders nothing for unknown types rather than a generic placeholder, because context widgets
+    are always server-driven and unknown types indicate a version mismatch, not user error.
+  </prompt>
+  <role>Frontend developer with TypeScript dynamic imports and registry pattern experience.</role>
+  <goal>
+    ContextWidgetRegistry is built, exported from @spaarke/ai-widgets, and resolveContextWidget()
+    returns the correct lazy-loaded widget or null for unknown types. No crash on unknown types.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Outputs/src/registry/source-registry.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read source-registry.ts in Spaarke.AI.Outputs to understand the R1 source widget registration pattern.</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/registry/ContextWidgetRegistry.ts.</step>
+    <step>Define ContextWidgetRegistration type: { factory: () => Promise&lt;{ default: new() => ContextWidget }&gt; }.</step>
+    <step>Implement ContextWidgetRegistry with registerContextWidget(type, registration) and resolveContextWidget(type) returning Promise&lt;ContextWidget | null&gt;.</step>
+    <step>resolveContextWidget: on unknown type return null (log a warning with the unknown type name); on factory failure return null (log error); cache resolved constructors after first load.</step>
+    <step>Export resolveContextWidget and registerContextWidget from src/index.ts.</step>
+    <step>Write unit tests: known type resolves correctly; unknown type returns null (no throw); factory failure returns null (no throw).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ContextWidgetRegistry.ts exists with registerContextWidget and resolveContextWidget exported.</criterion>
+    <criterion>Lazy-load via dynamic import — context widget code is not bundled until first resolution.</criterion>
+    <criterion>Unknown types return null, not throw.</criterion>
+    <criterion>Factory failures return null with error logged, not throw.</criterion>
+    <criterion>Unit tests for known, unknown, and failed-factory cases pass.</criterion>
+  </acceptance-criteria>
+</task>

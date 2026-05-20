@@ -1,0 +1,29 @@
+<task id="AUTHV2-061" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Enable Continuous Access Evaluation (CAE) on Microsoft.Identity.Web</title>
+    <phase>D — Reasonable security hardening</phase>
+    <tags>security, server, cae, STANDARD</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>D-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>CAE: tokens evaluated mid-session for revocation/disable. Free upgrade. Configure via `ClientCapabilities = ["cp1"]` on Microsoft.Identity.Web.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>CAE active. Admin disable of user account causes token failure within minutes.</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>In AuthorizationModule.cs, configure `AddMicrosoftIdentityWebApi(opts => { opts.TokenValidationParameters = ...; }, opts => { opts.ClientCapabilities = new[] {"cp1"}; })`.</step>
+    <step>Verify CAE-capable token issued (Azure AD inserts xms_cc claim).</step>
+    <step>Test: disable a test user in Azure AD; verify their existing token fails within ~5 min.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ClientCapabilities ["cp1"] configured.</criterion>
+    <criterion>xms_cc claim observed in tokens.</criterion>
+    <criterion>Admin user-disable propagates within minutes.</criterion>
+  </acceptance-criteria>
+</task>

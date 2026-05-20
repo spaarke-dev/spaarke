@@ -105,6 +105,15 @@
       "filterable": true,
       "sortable": false,
       "facetable": true
+    },
+    {
+      "name": "privilege_group_ids",
+      "type": "Collection(Edm.String)",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": false
     }
   ],
   "vectorSearch": {

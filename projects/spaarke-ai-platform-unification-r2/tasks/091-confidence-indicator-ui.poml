@@ -1,0 +1,48 @@
+<task id="AIPU2-091" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build Confidence Indicator UI</title>
+    <phase>4E</phase>
+    <tags>frontend, ai-safety, ui</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-074</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The safety pipeline (AIPU2-065) produces a composite confidence score per AI response.
+    Users need a clear, non-intrusive visual indicator of how confident the AI is in its
+    response. A ConfidenceBar component renders per-response below the message content: green
+    for high confidence, yellow for medium, orange for low — all using Fluent v9 design tokens
+    so they work in dark mode. Low confidence responses additionally show a disclaimer text
+    ("This response may contain uncertain information — please verify key claims") to ensure
+    users are appropriately cautious. The bar appears after the safety_annotation event is
+    received (same timing as AIPU2-090 annotations).
+  </prompt>
+  <role>Frontend developer with React 19 and Fluent v9 component experience.</role>
+  <goal>
+    Visual confidence level renders per AI response: green/yellow/orange bar using Fluent v9
+    tokens, with disclaimer text for low confidence. Appears after safety_annotation event.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 for Fluent v9 ProgressBar component and status color tokens (colorStatusSuccessForeground1 for high, colorStatusWarningForeground1 for medium, colorStatusDangerForeground1 for low or nearest semantic equivalents).</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/conversation/ConfidenceBar.tsx accepting props: confidence (0.0–1.0), label ('high' | 'medium' | 'low').</step>
+    <step>Render a Fluent v9 ProgressBar with value = confidence, colored by the label using a token map (high: success token, medium: warning token, low: danger token). Width is constrained to 120px to stay non-intrusive.</step>
+    <step>For low confidence (label === 'low'): render disclaimer text below the bar in muted Fluent text style: "This response may contain uncertain information — please verify key claims."</step>
+    <step>For high and medium confidence: no additional text — bar only.</step>
+    <step>Integrate ConfidenceBar into the message rendering within ConversationPane: after the safety_annotation event arrives and annotations are applied (same 200ms delay as AIPU2-090), render ConfidenceBar below the annotated message.</step>
+    <step>Write unit tests: (a) high confidence renders green token bar with no disclaimer; (b) medium renders yellow token bar with no disclaimer; (c) low renders orange/danger token bar with disclaimer text; (d) confidence value 0.85 maps to 'high' correctly.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ConfidenceBar renders with correct Fluent v9 color token per confidence label (success/warning/danger).</criterion>
+    <criterion>Dark mode: all confidence colors use Fluent v9 tokens and are distinguishable.</criterion>
+    <criterion>Low confidence renders disclaimer text; high and medium do not.</criterion>
+    <criterion>ConfidenceBar appears below the annotated message after the same 200ms delay as safety annotations.</criterion>
+    <criterion>No hard-coded colors — Fluent v9 tokens only (ADR-021).</criterion>
+    <criterion>Unit tests for all three confidence levels and disclaimer presence pass.</criterion>
+  </acceptance-criteria>
+</task>

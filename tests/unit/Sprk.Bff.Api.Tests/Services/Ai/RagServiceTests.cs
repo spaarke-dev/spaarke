@@ -8,6 +8,7 @@ using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Security;
 using Xunit;
 
 // Disambiguate between our pipeline result type and the Azure SDK indexing result type.
@@ -24,6 +25,7 @@ public class RagServiceTests
     private readonly Mock<IKnowledgeDeploymentService> _deploymentServiceMock;
     private readonly Mock<IOpenAiClient> _openAiClientMock;
     private readonly Mock<IEmbeddingCache> _embeddingCacheMock;
+    private readonly Mock<IPrivilegeGroupResolver> _privilegeGroupResolverMock;
     private readonly Mock<ILogger<RagService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
 
@@ -35,6 +37,7 @@ public class RagServiceTests
         _deploymentServiceMock = new Mock<IKnowledgeDeploymentService>();
         _openAiClientMock = new Mock<IOpenAiClient>();
         _embeddingCacheMock = new Mock<IEmbeddingCache>();
+        _privilegeGroupResolverMock = new Mock<IPrivilegeGroupResolver>();
         _loggerMock = new Mock<ILogger<RagService>>();
         _options = Options.Create(new AnalysisOptions
         {
@@ -42,6 +45,11 @@ public class RagServiceTests
             MaxKnowledgeResults = 5,
             MinRelevanceScore = 0.7f
         });
+
+        // Default: user has no groups — privilege filter will apply public-only clause
+        _privilegeGroupResolverMock
+            .Setup(r => r.ResolveGroupIdsAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<string>());
 
         // Create a test embedding vector (3072 dimensions for text-embedding-3-large)
         var embedding = new float[3072];
@@ -58,6 +66,7 @@ public class RagServiceTests
             _deploymentServiceMock.Object,
             _openAiClientMock.Object,
             _embeddingCacheMock.Object,
+            _privilegeGroupResolverMock.Object,
             _options,
             _loggerMock.Object);
     }

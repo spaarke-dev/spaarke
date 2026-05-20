@@ -25,6 +25,8 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{RECORD_MATCHING_ENABLED}#` | Enable record matching (boolean) | `true` or `false` |
 | `#{ANALYSIS_ENABLED}#` | Enable analysis features (boolean) | `true` or `false` |
 | `#{MULTI_DOCUMENT_ENABLED}#` | Enable multi-doc analysis (boolean) | `true` or `false` |
+| `#{COPILOT_SSO_PROVIDER_APP_ID}#` | M365 Copilot SSO provider app ID (Teams Developer Portal). Used in `AgentToken:CopilotAudience` as `api://#{COPILOT_SSO_PROVIDER_APP_ID}#/#{API_APP_ID}#`. | `auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb` |
+| `#{COPILOT_AGENT_APP_ID}#` | Spaarke Copilot Agent app registration ID (`AgentToken:AgentAppId`) | GUID |
 
 ## Key Vault Secrets Required
 
@@ -99,4 +101,11 @@ CUSTOMER_TENANT_ID=null
 RECORD_MATCHING_ENABLED=false
 ANALYSIS_ENABLED=true
 MULTI_DOCUMENT_ENABLED=false
+COPILOT_SSO_PROVIDER_APP_ID=auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb
+COPILOT_AGENT_APP_ID=<set per environment>
 ```
+
+## Notes
+
+- **`#{COPILOT_SSO_PROVIDER_APP_ID}#`** — Was hardcoded as `auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb` in `appsettings.template.json` line 226 prior to task 047. This identifier is the Teams Developer Portal SSO bridge app ID owned by Microsoft. The same value is used by all current Spaarke deployments; the placeholder exists to enable cross-tenant re-pointing if Microsoft ships a successor provider app or per-deployment requirements differ. If `COPILOT_SSO_PROVIDER_APP_ID` is unset in CI/CD, use the default value shown above.
+

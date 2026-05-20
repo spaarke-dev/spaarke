@@ -1,3 +1,21 @@
+---
+🛑 STOP — DO NOT USE THIS DOCUMENT FOR NEW AUTH WORK 🛑
+═══════════════════════════════════════════════════════════════════════════
+PRE-V2 CONTENT. Spaarke Auth v2 + Hardening is in active development.
+Canonical v2 source: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md
+ADR-027 will become canonical when v2 ships.
+
+DO NOT add `accessToken: string` props anywhere.
+DO NOT write raw fetch() with `Authorization: Bearer ${...}` headers.
+DO NOT reference BridgeStrategy, XrmStrategy, or window.__SPAARKE_BFF_TOKEN__.
+DO use `authenticatedFetch()` from @spaarke/auth.
+DO use `useAuth()` hook (after v2 ships).
+When in doubt: STOP and consult the audit doc above.
+
+What IS still canonical in this file: `buildBffApiUrl()` URL construction (§"The Golden Rule") is unchanged in v2. The token acquisition / auth pattern sections are pre-v2.
+═══════════════════════════════════════════════════════════════════════════
+---
+
 # BFF Authentication & URL Construction Pattern
 
 > **Last Updated**: 2026-04-05

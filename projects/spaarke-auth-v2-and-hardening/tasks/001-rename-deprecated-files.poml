@@ -1,0 +1,66 @@
+<task id="AUTHV2-001" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Rename DEPRECATED auth pattern files + update INDEX references</title>
+    <phase>0 — Pre-flight</phase>
+    <tags>docs, pre-flight, deprecation</tags>
+    <status>completed</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>
+    Two auth pattern files are fully superseded by Spaarke Auth v2 and must be visibly marked as DEPRECATED so agents and humans don't follow them as guidance during the refactor. Rename them with DEPRECATED- prefix so the filename itself appears in tool output (Grep, Glob, file references). Update the INDEX.md to reflect the new names and add a "DEPRECATED — v2 supersedes" status column.
+
+    Files to rename:
+    - .claude/patterns/auth/msal-client.md → .claude/patterns/auth/DEPRECATED-msal-client.md
+    - .claude/patterns/auth/spaarke-auth-initialization.md → .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md
+
+    Then grep the rest of the repo for references to the OLD filenames and update them to point at the new ones (or, where appropriate, redirect to the audit doc / forthcoming ADR-027).
+  </prompt>
+  <role>Senior engineer doing precise pre-flight cleanup. Care + double-check on file moves; no auth code changes in this task.</role>
+  <goal>
+    Both files are renamed with DEPRECATED- prefix. INDEX.md is updated. All in-repo references to the old names are updated to either (a) the new names where appropriate, or (b) the audit doc as the canonical replacement. No broken links.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 (PF-1, PF-2, PF-3)</file>
+      <file>.claude/patterns/auth/INDEX.md (the index file to update)</file>
+      <file>.claude/patterns/auth/msal-client.md (file to rename)</file>
+      <file>.claude/patterns/auth/spaarke-auth-initialization.md (file to rename)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>git mv .claude/patterns/auth/msal-client.md .claude/patterns/auth/DEPRECATED-msal-client.md</step>
+    <step>git mv .claude/patterns/auth/spaarke-auth-initialization.md .claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md</step>
+    <step>Edit .claude/patterns/auth/INDEX.md: update the two row entries to reference DEPRECATED-* filenames; add a status note "DEPRECATED — fully superseded by Spaarke Auth v2 (see AUDIT-FINDINGS-AUTH-SYSTEM.md and forthcoming ADR-027)". Keep the entries in the table for discoverability.</step>
+    <step>Grep the entire repo for `msal-client.md` and `spaarke-auth-initialization.md` (case-insensitive). For each match: (a) if the file is in projects/{historical-project}/ — leave alone (historical context). (b) If the file is in .claude/ or docs/ or src/ — update reference to new filename + add a footnote/comment that the doc is deprecated.</step>
+    <step>Verify rename via `git status` — should show two renames (R) and any updated linker files (M).</step>
+    <step>Commit with message: "docs(auth): rename DEPRECATED-* auth pattern files (PF-1, PF-2)" and the project's standard Co-Authored-By footer.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>.claude/patterns/auth/DEPRECATED-msal-client.md exists; .claude/patterns/auth/msal-client.md does not.</criterion>
+    <criterion>.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md exists; .claude/patterns/auth/spaarke-auth-initialization.md does not.</criterion>
+    <criterion>.claude/patterns/auth/INDEX.md references the new filenames and indicates DEPRECATED status.</criterion>
+    <criterion>No in-repo links to the old filenames remain unfixed (verified by grep).</criterion>
+    <criterion>git log shows a single commit for this task.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+    - Both files renamed via `git mv` (R status in `git status`).
+    - 11 in-scope reference updates across `.claude/`, `docs/`, `src/solutions/`, and `CROSS-REFERENCE-MAP.md`.
+    - All other matches (historical project POMLs/plans, `.claude/archive/`, `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` PF-1/PF-2/PF-8 rename-action descriptions, this project's own planning artifacts) left as-is per task step 4(a).
+    - Files modified:
+      - `.claude/patterns/auth/DEPRECATED-msal-client.md` (renamed + fixed internal cross-link to DEPRECATED-spaarke-auth-initialization.md)
+      - `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md` (renamed)
+      - `.claude/patterns/auth/INDEX.md` (2 row updates + DEPRECATED status)
+      - `.claude/patterns/auth/spaarke-sso-binding.md` (1 link update)
+      - `.claude/patterns/INDEX.md` (1 loading-strategy row)
+      - `.claude/patterns/webresource/{code-page-wizard-wrapper.md, full-page-custom-page.md}` (1 each)
+      - `.claude/skills/code-page-deploy/SKILL.md` (1 troubleshooting row)
+      - `.claude/constraints/auth.md` (2 references)
+      - `CROSS-REFERENCE-MAP.md` (1 row)
+      - `docs/architecture/sdap-auth-patterns.md` (1 related-link)
+      - `src/solutions/SpaarkeAi/src/App.tsx` (1 @see comment)
+      - `src/solutions/Reporting/src/{main.tsx, services/authInit.ts, config/runtimeConfig.ts, config/reportingConfig.ts}` (1 each)
+  </notes>
+</task>

@@ -1,0 +1,49 @@
+<task id="AIPU2-066" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Latency Monitoring with Azure Monitor Metrics</title>
+    <phase>3</phase>
+    <tags>bff-api, monitoring, observability</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-061</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    The agent pipeline now has a clear structure (AIPU2-061) with measurable latency boundaries:
+    Time-to-First-Token (TTFT), Time-Between-Tokens (TBT), Time-to-Last-Token (TTLT), and the
+    prompt token count feeding the model tier routing decision. This task instruments those
+    boundaries with OpenTelemetry metrics exported to Azure Monitor, adds alert thresholds
+    (TTFT greater than 1.5s, prompt tokens greater than 9000), and creates a dashboard. Route
+    layer distribution (which model tier handled each request) must also be tracked so the
+    CapabilityRouter's tier assignment can be validated in production.
+  </prompt>
+  <role>DevOps/SRE developer with OpenTelemetry, Azure Monitor, and Application Insights experience.</role>
+  <goal>
+    TTFT, TBT, TTLT, prompt token count, and route layer distribution are tracked as Azure Monitor
+    metrics. Alerts fire when TTFT exceeds 1.5 seconds or prompt tokens exceed 9000. A dashboard
+    is created and accessible in the dev Azure Monitor workspace.
+  </goal>
+  <knowledge>
+    <files>
+      <file>docs/guides/AI-MONITORING-DASHBOARD.md</file>
+      <file>docs/guides/MONITORING-AND-ALERTING-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read AI-MONITORING-DASHBOARD.md and MONITORING-AND-ALERTING-GUIDE.md to understand existing metric naming conventions, OTEL setup, and dashboard tooling in use.</step>
+    <step>Add OTEL Histogram instruments: ai.chat.ttft (milliseconds), ai.chat.tbt (milliseconds), ai.chat.ttlt (milliseconds), ai.chat.prompt_tokens (count).</step>
+    <step>Add OTEL Counter instrument: ai.chat.route_tier with dimension model_tier (e.g., "fast", "balanced", "deep") so route layer distribution is trackable.</step>
+    <step>Record TTFT at the point the first token byte is written to the SSE response stream; TBT between each subsequent token; TTLT when the done event is emitted.</step>
+    <step>Record prompt_tokens and model_tier from the CapabilityRouter's resolution result (available post AIPU2-061).</step>
+    <step>Configure Azure Monitor alert rules: TTFT P95 greater than 1500ms (severity 2), prompt_tokens P95 greater than 9000 (severity 3).</step>
+    <step>Create an Azure Monitor workbook or dashboard with panels: TTFT/TBT/TTLT percentile charts (P50, P95, P99), prompt token distribution histogram, route tier pie chart, active alert list.</step>
+    <step>Verify metrics appear in Application Insights Live Metrics and custom metrics blade in the dev environment.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>TTFT, TBT, TTLT, prompt_tokens, and route_tier metrics are emitted via OTEL and visible in Azure Monitor.</criterion>
+    <criterion>Alert rule for TTFT P95 greater than 1500ms is configured and testable.</criterion>
+    <criterion>Alert rule for prompt_tokens P95 greater than 9000 is configured and testable.</criterion>
+    <criterion>Dashboard or workbook with latency percentiles, token distribution, and tier distribution panels exists in the dev workspace.</criterion>
+    <criterion>Metric naming follows existing conventions documented in AI-MONITORING-DASHBOARD.md.</criterion>
+  </acceptance-criteria>
+</task>

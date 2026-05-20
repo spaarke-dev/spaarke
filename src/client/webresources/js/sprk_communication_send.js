@@ -160,15 +160,23 @@ Sprk.Communication.Send._resolveConfig = function () {
             "schemaname eq 'sprk_BffApiAppId' or " +
             "schemaname eq 'sprk_MsalClientId' or " +
             "schemaname eq 'sprk_TenantId'" +
-        "&$select=schemaname,environmentvariabledefinitionid" +
+        "&$select=schemaname,environmentvariabledefinitionid,defaultvalue" +
         "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
     ).then(function (result) {
         var resolved = {};
         if (result.entities) {
             result.entities.forEach(function (def) {
+                // Override value (if set) takes precedence over defaultvalue.
+                // Falling back to defaultvalue is REQUIRED — in dev/demo envs,
+                // sprk_TenantId only has a defaultvalue set (no current value
+                // override). Same pattern as @spaarke/auth/resolveRuntimeConfig.ts
+                // and sprk_emailactions.js; matches the sprk_DocumentOperations.js
+                // fix shipped earlier today.
                 var vals = def.environmentvariabledefinition_environmentvariablevalue;
                 if (vals && vals.length > 0 && vals[0].value) {
                     resolved[def.schemaname] = vals[0].value;
+                } else if (def.defaultvalue) {
+                    resolved[def.schemaname] = def.defaultvalue;
                 }
             });
         }

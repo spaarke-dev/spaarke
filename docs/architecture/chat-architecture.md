@@ -1,9 +1,9 @@
 # Chat Architecture
 
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: New
+> **Last Updated**: 2026-05-17
+> **Last Reviewed**: 2026-05-17
+> **Reviewed By**: ai-platform-unification-r2
+> **Status**: Current
 > **Purpose**: Describes the SprkChat conversational AI subsystem — session management, playbook dispatch, compound intent detection, and streaming response pipeline.
 
 ---
@@ -102,6 +102,77 @@ The key architectural decision is the **Agent Framework pattern** — each chat 
 - **Stage 2 timeout fallback**: When PlaybookDispatcher LLM refinement times out (500ms budget), it falls back to the top Stage 1 vector search candidate rather than failing.
 - **PendingPlan race condition**: The two-step get+delete in PendingPlanManager is not truly atomic via IDistributedCache. This is acceptable because plan approval is a low-frequency user action and planId validation provides an additional idempotency check.
 - **Summarisation placeholder**: Phase 1 summarisation generates a placeholder summary. Real LLM-based summarisation is deferred to AIPL-054.
+
+## R2: ConversationPane as Chat Host
+
+In R2, the `ConversationPane` component replaces the direct SprkChat mounting used in R1 (LeftPane + ChatPanel). ConversationPane is the left slot of the `ThreePaneShell` and provides:
+
+| Responsibility | R1 | R2 |
+|---------------|----|----|
+| Chat host | ChatPanel mounts SprkChat directly | ConversationPane wraps SprkChat with tab bar, playbook header, selection chip |
+| Session state | `useStandaloneAi()` (StandaloneAiProvider) | `useAiSession()` (AiSessionProvider) |
+| SSE event routing | Single-subscriber ref (`streaming?.onPaneEvent`) | `PaneEventBus` multi-subscriber channels via `streaming.onPaneEvent` |
+| Playbook selection | In-SprkChat only | PlaybookGalleryWidget dispatches `playbook-selected` on conversation channel |
+| Text selection refinement | Not supported | `selection_changed` event on workspace channel drives "Refine this?" chip |
+
+**Source**: `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`
+
+---
+
+## R2: PaneEventBus Cross-Pane Communication
+
+R2 replaces R1's single-listener DOM CustomEvent bus with a typed, multi-subscriber, DOM-free `PaneEventBus`. Each channel carries a discriminated union of event payloads with compile-time type checking.
+
+**4 channels**:
+
+| Channel | Purpose | Event Types |
+|---------|---------|-------------|
+| `workspace` | Widget lifecycle, tab navigation, text selection, wizard control | `widget_load`, `widget_update`, `widget_action`, `tab_change`, `tab_count_change`, `selection_changed`, `tabs_clear`, `wizard_step`, `entity_resolved`, `session_reset` |
+| `context` | Document context updates, citation highlights | `context_update`, `context_highlight`, `stage_change` |
+| `conversation` | User input, playbook changes, first message | `suggestion`, `playbook_change`, `playbook-selected`, `refine_request`, `first_message` |
+| `safety` | Groundedness annotations, capability changes | `safety_annotation`, `capability_change` |
+
+**Total**: 20 event types across 4 channels.
+
+**Key source files**:
+
+| File | Path |
+|------|------|
+| PaneEventBus | `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts` |
+| PaneEventTypes | `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts` |
+| usePaneEvent (subscribe hook) | `src/client/shared/Spaarke.AI.Widgets/src/events/usePaneEvent.ts` |
+| useDispatchPaneEvent (dispatch hook) | `src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts` |
+| PaneEventBusContext (React provider) | `src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBusContext.tsx` |
+
+**Design**: A single shared `PaneEventBus` instance is created and provided to the React tree via `PaneEventBusContext`. Components interact through `usePaneEvent` (subscribe) and `useDispatchPaneEvent` (dispatch). Subscribers are stored in per-channel `Set` collections for O(1) add/delete and automatic deduplication.
+
+---
+
+## R2: Three-Pane Lifecycle Stages
+
+The `ThreePaneShell` manages a four-stage lifecycle that controls pane visibility and widget rendering. Stage transitions are driven by PaneEventBus events and direct function calls.
+
+| Stage | Name | Trigger (entry) | Description |
+|-------|------|-----------------|-------------|
+| Stage 1 | `welcome` | Initial load / `session_reset` | Landing: no session or playbook. ConversationPane shows WelcomePanel; ContextPane shows PlaybookGalleryWidget. |
+| Stage 2 | `loading` | `playbook_change` / `first_message` / `playbook-selected` | Playbook selected: gathering context. ConversationPane mounts SprkChat; ContextPane shows entity info or loading spinner. |
+| Stage 3 | `active-chat` | `widget_load` (first tab) / `entity_resolved` | Active work: first document/widget loaded. Full three-pane working mode. |
+| Stage 4 | `review` | `tab_count_change` with `tabCount >= 2` | Multi-task: two or more workspace tabs open. Review-oriented layout. |
+
+**Transitions**:
+```
+welcome → loading        conversation/playbook_change OR conversation/first_message
+loading → active-chat    workspace/widget_load (first resolved tab)
+active-chat → review     workspace/tab_count_change with tabCount >= 2
+review → active-chat     workspace/tab_count_change with tabCount === 1
+any → welcome            workspace/session_reset (session cleared/deleted)
+```
+
+**ShellStageManager** subscribes to PaneEventBus events, maintains a `SessionState` snapshot, and recomputes the stage on each event. Stage is propagated to all child panes via `ShellStageContext`.
+
+**Source**: `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx`
+
+---
 
 ## Related
 

@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version       = "1.1.0"
+$version       = "1.1.1"
 $solutionName  = "EmailProcessingMonitorSolution"
 $zipPath       = "bin/${solutionName}_v$version.zip"
 $controlsRoot  = "Controls/sprk_Spaarke.EmailProcessingMonitor"

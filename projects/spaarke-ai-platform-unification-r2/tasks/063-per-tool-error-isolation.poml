@@ -1,0 +1,46 @@
+<task id="AIPU2-063" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Per-Tool Error Isolation in ResolveTools</title>
+    <phase>3</phase>
+    <tags>bff-api, ai, resilience</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-061</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    After AIPU2-061 moves tool resolution to CapabilityRouter, individual tool registrations can
+    throw during resolution (missing configuration, failed capability check, transient dependency
+    failure). Without isolation, one broken tool kills the entire tool set for the turn. Implement
+    per-tool error isolation in the tool resolution path so that each tool is resolved in its own
+    try-catch: failures return a typed error result recorded in the audit log, and remaining tools
+    continue to resolve and execute normally.
+  </prompt>
+  <role>Senior .NET developer with resilience pattern experience (try-catch isolation, structured logging).</role>
+  <goal>
+    One broken tool does not kill all tools. Failed tools produce an error result in the audit log
+    and are excluded from the turn's tool set. Healthy tools are unaffected. Unit tests confirm
+    partial-failure scenarios behave correctly.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>.claude/patterns/api/resilience.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SprkChatAgentFactory.cs (post AIPU2-061) and resilience.md to understand the expected isolation pattern used elsewhere in the BFF.</step>
+    <step>Wrap each individual tool resolution call in an isolated try-catch within the CapabilityRouter resolution loop.</step>
+    <step>On catch: log the exception with tool name and turn correlation ID using the structured logger; return a ToolResolutionError record instead of throwing.</step>
+    <step>Filter out ToolResolutionError entries before passing the tool list to ISprkAgent.ExecuteTurnAsync so only healthy tools reach the LLM.</step>
+    <step>Write the list of failed tool names to the audit log entry for the turn (so operators can diagnose).</step>
+    <step>Write unit tests: (a) all tools healthy — normal path unchanged; (b) one tool throws — others still resolve; (c) all tools throw — agent executes with empty tool list (no crash).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Each tool resolution is wrapped in an isolated try-catch — exception in one does not propagate to others.</criterion>
+    <criterion>Failed tools are logged with tool name and correlation ID; excluded from the resolved tool list.</criterion>
+    <criterion>Agent executes successfully even if all tools fail (empty tool list is valid input to ISprkAgent).</criterion>
+    <criterion>Unit tests for partial-failure and total-failure scenarios pass.</criterion>
+    <criterion>No changes to the resilience.md pattern contract — implementation follows established BFF conventions.</criterion>
+  </acceptance-criteria>
+</task>

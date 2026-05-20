@@ -1,0 +1,69 @@
+<task id="AUTHV2-029" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Update bffDataServiceAdapter docs to function-based pattern</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, ui-components, docs, MINIMAL</tags>
+    <status>completed</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <dependencies>023</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>bffDataServiceAdapter.ts contains example code in JSDoc comments that teaches the OLD snapshot pattern (per audit). Rewrite the example to use authenticatedFetch.</prompt>
+  <role>Engineering writer.</role>
+  <goal>Adapter example documentation shows function-based pattern. No `accessToken: string` in examples.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffDataServiceAdapter.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the example JSDoc in bffDataServiceAdapter.ts (around lines 48-52 per audit).</step>
+    <step>Rewrite example to show: pass authenticatedFetch from useAuth() into the adapter constructor; adapter uses it for fetch calls. Remove any `headers: { Authorization: \`Bearer \${token}\` }` pattern.</step>
+    <step>Verify tsc clean.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Example shows authenticatedFetch usage.</criterion>
+    <criterion>No `accessToken` or Bearer literal in adapter docs.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 as part of Phase B Wave 2 (alongside tasks 024-027).
+
+    Scope notes:
+    - Adapter signature was ALREADY on the function-based pattern
+      (`createBffDataService(authenticatedFetch, bffBaseUrl)` — no `accessToken: string` ever existed).
+      The audit-cited issue was that the JSDoc EXAMPLE taught consumers how to build
+      their own `authFetch` from scratch using `Authorization: Bearer ${token.accessToken}`
+      literals — exactly the D-AUTH-7 anti-pattern. Fix was docs-only, no signature change.
+    - Same JSDoc anti-pattern existed in the sibling `bffUploadServiceAdapter.ts` (its
+      example showed building authFetch + getToken from msalInstance). Updated both files
+      in one pass for consistency (both are paired in the BFF adapter barrel and a consumer
+      typically wires them together).
+    - Also updated `adapters/index.ts` barrel-export JSDoc to source `authenticatedFetch`
+      and `getAccessToken` from `useAuth()` (was previously appearing without provenance).
+
+    Files modified (3 — all docs only):
+    - src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffDataServiceAdapter.ts
+      (top-of-file JSDoc + factory JSDoc example rewritten; added ADR-027 reference;
+       documented `AuthenticatedFetch` type as structural alias of `AuthenticatedFetchFn`
+       from `@spaarke/auth` — kept as local alias to avoid runtime dep on the auth library)
+    - src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffUploadServiceAdapter.ts
+      (top-of-file JSDoc + factory JSDoc example rewritten; documented that the XHR
+       `getBearerToken` path is a D-AUTH-7 exception site requiring `getAccessToken`
+       from `useAuth()`)
+    - src/client/shared/Spaarke.UI.Components/src/utils/adapters/index.ts
+      (BFF adapter usage example now sources from `useAuth()`)
+
+    Build verification:
+    - `npm run build` in src/client/shared/Spaarke.UI.Components → CLEAN (tsc exit 0)
+
+    NOT in scope (carryover candidates for later cleanup):
+    - `services/document-upload/SdapApiClient.ts`, `ODataDataverseClient.ts`, `NavMapClient.ts`
+      all still build their own Bearer headers internally. These are existing services not
+      addressed by task 029 (which targets adapter docs). Should be evaluated by a future
+      services migration task or rolled into Phase B carryover #2 work.
+
+    Quality gates: skipped (documentation-only change; no logic, no new code paths).
+    Per task POML tag `MINIMAL` and task-execute SKILL §9.5 "SKIP quality gates IF
+    Task is documentation-only".
+  </notes>
+</task>

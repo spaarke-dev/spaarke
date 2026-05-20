@@ -26,7 +26,7 @@ let _provider: SpaarkeAuthProvider | null = null;
  * ```
  */
 export async function initAuth(config?: IAuthConfig): Promise<SpaarkeAuthProvider> {
-  // Dispose previous instance if re-initializing
+  // Dispose previous instance (cleans up its broadcast listener + proactive refresh interval)
   if (_provider) {
     _provider.dispose();
   }

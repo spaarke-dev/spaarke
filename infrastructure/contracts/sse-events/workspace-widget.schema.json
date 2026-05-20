@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/contracts/sse-events/workspace-widget.schema.json",
+  "title": "workspace_widget SSE Event",
+  "description": "Instructs the AI shell to render or update a widget in the workspace pane. Emitted by the BFF when a tool result requires a visual widget (document preview, action panel, suggestion list, or capability status indicator).",
+  "allOf": [
+    { "$ref": "_shared-defs.json#/$defs/SseEnvelope" }
+  ],
+  "required": ["type", "widgetId", "widgetType", "payload", "priority"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "workspace_widget",
+      "description": "Discriminator — always 'workspace_widget'."
+    },
+    "widgetId": {
+      "type": "string",
+      "description": "Stable identifier for this widget instance. The client uses this to upsert (not duplicate) the widget."
+    },
+    "widgetType": {
+      "type": "string",
+      "enum": ["document-preview", "action-panel", "suggestion-list", "capability-status"],
+      "description": "Determines which React widget component to render and which payload variant to expect."
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Rendering priority (1 = lowest, 10 = highest). Higher-priority widgets displace lower-priority ones when pane space is limited."
+    },
+    "payload": {
+      "description": "Widget-specific payload. Shape is discriminated by widgetType.",
+      "oneOf": [
+        {
+          "title": "DocumentPreviewPayload",
+          "description": "Payload for widgetType='document-preview'.",
+          "required": ["document"],
+          "properties": {
+            "document": { "$ref": "_shared-defs.json#/$defs/DocumentReference" },
+            "initialPage": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number to scroll to on open."
+            },
+            "highlights": {
+              "type": "array",
+              "items": { "$ref": "_shared-defs.json#/$defs/RangeHighlight" },
+              "description": "Optional text ranges to highlight in the preview."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "ActionPanelPayload",
+          "description": "Payload for widgetType='action-panel'.",
+          "required": ["actions"],
+          "properties": {
+            "actions": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["actionId", "label"],
+                "properties": {
+                  "actionId": { "type": "string" },
+                  "label": { "type": "string" },
+                  "icon": { "type": "string", "description": "Fluent UI icon name." },
+                  "destructive": { "type": "boolean", "default": false }
+                },
+                "additionalProperties": false
+              }
+            },
+            "title": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "SuggestionListPayload",
+          "description": "Payload for widgetType='suggestion-list'.",
+          "required": ["suggestions"],
+          "properties": {
+            "suggestions": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["suggestionId", "text"],
+                "properties": {
+                  "suggestionId": { "type": "string" },
+                  "text": { "type": "string" },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "CapabilityStatusPayload",
+          "description": "Payload for widgetType='capability-status'.",
+          "required": ["capabilities"],
+          "properties": {
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "status"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "status": {
+                    "type": "string",
+                    "enum": ["available", "degraded", "unavailable"]
+                  },
+                  "reason": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": true
+}

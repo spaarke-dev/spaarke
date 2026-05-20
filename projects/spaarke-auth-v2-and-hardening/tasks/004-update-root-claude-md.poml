@@ -1,0 +1,44 @@
+<task id="AUTHV2-004" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Update root CLAUDE.md §15 Pointers to reference auth v2 audit doc</title>
+    <phase>0 — Pre-flight</phase>
+    <tags>docs, pre-flight, cross-worktree-awareness</tags>
+    <status>completed</status>
+    <estimated-effort>10 minutes</estimated-effort>
+    <dependencies>003</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>
+    The root CLAUDE.md (CLAUDE.md at repo root) is loaded every session for any work in any worktree. Add a one-line entry to §15 "Pointers" so agents working in OTHER worktrees (not just this auth v2 worktree) are aware that auth patterns are in flux, with a pointer to the canonical audit doc.
+
+    The entry should be subtle — not a full rewrite — but visible enough that an agent doing auth-adjacent work in any worktree sees the pointer.
+  </prompt>
+  <role>Senior engineer adding cross-cutting awareness signal to the most-loaded file in the codebase.</role>
+  <goal>
+    Root CLAUDE.md §15 has a single new row pointing to AUDIT-FINDINGS-AUTH-SYSTEM.md as the active auth design doc. No other content changes.
+  </goal>
+  <knowledge>
+    <files>
+      <file>CLAUDE.md (root, §15 Pointers)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md (target of new pointer)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read CLAUDE.md §15 Pointers table — note the structure (Topic | Pointer format).</step>
+    <step>Add a new row after the "Active project state" row (or similar location): `| Active auth v2 design (pre-ADR-027) | [\`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md\`](.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md) — supersedes auth patterns marked \`DEPRECATED-*\` |`</step>
+    <step>Verify the row renders correctly in the table.</step>
+    <step>Commit with message: "docs: add auth v2 design pointer to root CLAUDE.md §15 (PF-9)" + standard footer.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Root CLAUDE.md §15 has the new pointer row.</criterion>
+    <criterion>Link to audit doc resolves (relative path correct).</criterion>
+    <criterion>Table renders correctly in markdown.</criterion>
+    <criterion>No other content in root CLAUDE.md modified.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+    Added single row to root CLAUDE.md §15 Pointers, positioned immediately after "Active project state" row:
+      | Active auth v2 design (pre-ADR-027) | [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md) — supersedes auth patterns marked `DEPRECATED-*` |
+    No other content modified in root CLAUDE.md. Table renders correctly.
+  </notes>
+</task>

@@ -1,149 +1,75 @@
-import type { Configuration } from '@azure/msal-browser';
-import type { IAuthConfig, ITokenResult } from './types';
+import type { IAuthConfig } from './types';
 import { AuthError } from './errors';
 import { resolveConfig, PROACTIVE_REFRESH_INTERVAL_MS } from './config';
-import { BridgeStrategy } from './strategies/BridgeStrategy';
-import { CacheStrategy } from './strategies/CacheStrategy';
-import { SessionStorageStrategy } from './strategies/SessionStorageStrategy';
-import { XrmStrategy } from './strategies/XrmStrategy';
-import { MsalSilentStrategy } from './strategies/MsalSilentStrategy';
-import { MsalPopupStrategy } from './strategies/MsalPopupStrategy';
-import { publishToken } from './tokenBridge';
+import type { AuthStrategy } from './strategies/AuthStrategy';
+import { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';
+import { InMemoryCache } from './strategies/InMemoryCache';
+import { broadcastLogout, onAuthBroadcast } from './broadcastChannel';
+import { VERSION } from './version';
 
 /**
- * Core auth provider — chains 6 token acquisition strategies:
- *   1. In-memory cache (~0.1ms, per-instance)
- *   2. sessionStorage cache (~0.1ms, shared across ALL same-origin iframes)
- *   3. Bridge token from parent frame walk (~0.1ms)
- *   4. Xrm platform with frame-walk
- *   5. MSAL acquireTokenSilent / ssoSilent
- *   6. MSAL popup (interactive fallback)
+ * Core auth provider (v2 — tasks 010, 011, 012).
  *
- * On success, the token is written to ALL fast caches (in-memory + sessionStorage + bridge)
- * so that subsequent components on the same page or in child iframes get instant access
- * without triggering MSAL.
+ * Composes a single InMemoryCache wrapping a pluggable AuthStrategy. The cache
+ * gates every acquire() by JWT `exp` (5-minute buffer); on miss it delegates to
+ * the strategy and stores the fresh result. Cross-tab/iframe persistence is
+ * provided by MSAL.localStorage at the BrowserMsalStrategy layer (INV-1).
+ *
+ * The strategy parameter is pluggable: BrowserMsalStrategy for PCFs + Code
+ * Pages (default); OfficeNaaStrategy for Office Add-ins (task 080).
  */
 export class SpaarkeAuthProvider {
   private readonly _config: Required<IAuthConfig>;
-  private readonly _cacheStrategy: CacheStrategy;
-  private readonly _sessionStorageStrategy: SessionStorageStrategy;
-  private readonly _bridgeStrategy: BridgeStrategy;
-  private readonly _xrmStrategy: XrmStrategy;
-  private readonly _msalSilentStrategy: MsalSilentStrategy;
-  private readonly _msalPopupStrategy: MsalPopupStrategy;
+  private readonly _cache: InMemoryCache;
   private _refreshInterval: ReturnType<typeof setInterval> | null = null;
+  private _disposeBroadcastListener: (() => void) | null = null;
 
-  constructor(userConfig?: IAuthConfig) {
+  /**
+   * @param userConfig Optional config overrides — merged with defaults via resolveConfig().
+   * @param strategy   Pluggable token acquisition strategy. Defaults to BrowserMsalStrategy
+   *                   for the common browser-hosted case. Pass OfficeNaaStrategy (task 080)
+   *                   for Office Add-ins, or a test stub for unit tests.
+   */
+  constructor(userConfig?: IAuthConfig, strategy?: AuthStrategy) {
     this._config = resolveConfig(userConfig);
 
-    // Validate requireXrm option
     if (this._config.requireXrm && !this._isXrmAvailable()) {
       throw new AuthError('Xrm is required but not available in this context', 'xrm_required');
     }
 
-    const msalConfig: Configuration = {
-      auth: {
-        clientId: this._config.clientId,
-        authority: this._config.authority,
-        redirectUri: this._config.redirectUri,
-      },
-      cache: {
-        // localStorage survives tab close + browser restart so MSAL's account
-        // cache + refresh tokens persist. sessionStorage was wiping on every
-        // fresh PCF tab/iframe, forcing re-auth.
-        cacheLocation: 'localStorage',
-        // Cookie-backed auth state lets ssoSilent succeed even when the browser
-        // blocks 3rd-party cookies for iframes (Chrome/Edge tracking protection
-        // default). Without this, ssoSilent silently fails inside Dataverse PCF
-        // iframes and the chain falls through to MsalPopupStrategy — the user
-        // sees a popup on every load.
-        storeAuthStateInCookie: true,
-      },
-      system: {
-        loggerOptions: {
-          logLevel: 3, // Warning
-          piiLoggingEnabled: false,
-        },
-      },
-    };
+    const inner = strategy ?? new BrowserMsalStrategy(this._config);
+    this._cache = new InMemoryCache(inner);
 
-    this._cacheStrategy = new CacheStrategy();
-    this._sessionStorageStrategy = new SessionStorageStrategy();
-    this._bridgeStrategy = new BridgeStrategy();
-    this._xrmStrategy = new XrmStrategy(this._config.bffApiScope);
-    this._msalSilentStrategy = new MsalSilentStrategy(msalConfig, this._config.bffApiScope);
-    this._msalPopupStrategy = new MsalPopupStrategy(
-      () => this._msalSilentStrategy.getMsalInstance(),
-      this._config.bffApiScope
-    );
+    console.info(`[SpaarkeAuth] v${VERSION} initialized`);
 
-    // Start proactive refresh if configured
+    // Listen for cross-context logout broadcasts. When another tab/iframe logs
+    // out, cascade-clear our caches so MSAL state, in-memory state, and the
+    // strategy's local state all match the user-intended outcome.
+    this._disposeBroadcastListener = onAuthBroadcast((msg) => {
+      if (msg.type === 'logout') {
+        console.info('[SpaarkeAuth] Received logout broadcast; cascading clearAllCaches');
+        this.clearAllCaches();
+      }
+    });
+
     if (this._config.proactiveRefresh) {
       this._startProactiveRefresh();
     }
   }
 
-  /** Acquire a token using the 6-strategy cascade. */
+  /** Acquire a token via the in-memory cache, falling through to the strategy on miss. */
   async getAccessToken(): Promise<string> {
-    // 1. In-memory cache (fastest, per-instance)
-    const cached = await this._cacheStrategy.tryAcquireToken();
-    if (cached) return cached.accessToken;
-
-    // 2. sessionStorage cache (shared across ALL same-origin iframes)
-    // This is the key strategy for eliminating cross-iframe auth failures.
-    // When ANY component on this Dataverse org acquires a token, it writes
-    // to sessionStorage. Every subsequent component reads it instantly.
-    const sessionCached = await this._sessionStorageStrategy.tryAcquireToken();
-    if (sessionCached) {
-      console.info('[SpaarkeAuth] Token acquired via sessionStorage (cross-iframe cache)');
-      this._cacheAndPublish(sessionCached);
-      return sessionCached.accessToken;
-    }
-
-    // 3. Bridge (parent/ancestor frame walk)
-    const bridged = await this._bridgeStrategy.tryAcquireToken();
-    if (bridged) {
-      console.info('[SpaarkeAuth] Token acquired via bridge');
-      this._cacheAndPublish(bridged);
-      return bridged.accessToken;
-    }
-
-    // 4. Xrm platform (frame-walk)
-    const xrmToken = await this._xrmStrategy.tryAcquireToken();
-    if (xrmToken) {
-      console.info('[SpaarkeAuth] Token acquired via Xrm');
-      this._cacheAndPublish(xrmToken);
-      return xrmToken.accessToken;
-    }
-
-    // 5. MSAL silent (acquireTokenSilent + ssoSilent with loginHint)
     try {
-      const msalToken = await this._msalSilentStrategy.tryAcquireToken();
-      if (msalToken) {
-        console.info('[SpaarkeAuth] Token acquired via MSAL silent');
-        this._cacheAndPublish(msalToken);
-        return msalToken.accessToken;
+      const result = await this._cache.acquire();
+      if (result.accessToken) {
+        console.info(`[SpaarkeAuth] Token acquired via ${this._cache.name}`);
+        return result.accessToken;
       }
-      console.warn('[SpaarkeAuth] MSAL silent returned null (no token)');
     } catch (err) {
-      console.warn('[SpaarkeAuth] MSAL silent failed:', err);
+      console.warn(`[SpaarkeAuth] ${this._cache.name} failed:`, err);
     }
 
-    // 6. MSAL popup (interactive — last resort)
-    try {
-      const popupToken = await this._msalPopupStrategy.tryAcquireToken();
-      if (popupToken) {
-        console.info('[SpaarkeAuth] Token acquired via MSAL popup');
-        this._cacheAndPublish(popupToken);
-        return popupToken.accessToken;
-      }
-      console.warn('[SpaarkeAuth] MSAL popup returned null (no token)');
-    } catch (err) {
-      console.warn('[SpaarkeAuth] MSAL popup failed:', err);
-    }
-
-    // All strategies exhausted
-    console.error('[SpaarkeAuth] All 6 token strategies failed. Config:', {
+    console.error('[SpaarkeAuth] All token acquisition exhausted. Config:', {
       clientId: this._config.clientId?.substring(0, 8) + '...',
       bffApiScope: this._config.bffApiScope,
       authority: this._config.authority,
@@ -153,31 +79,39 @@ export class SpaarkeAuthProvider {
   }
 
   /**
-   * Clear the in-memory token cache to force re-acquisition on next call.
-   *
-   * IMPORTANT: Does NOT clear sessionStorage. The sessionStorage token is shared
-   * across all same-origin iframes. Clearing it on a single component's 401 retry
-   * would cascade — every other component would lose its token and trigger MSAL
-   * login prompts. Instead, only the per-instance in-memory cache is cleared,
-   * and the next getAccessToken() call will try sessionStorage (which may still
-   * have a valid token from another component).
+   * Invalidate the in-memory token cache to force re-acquisition on the next call.
+   * Does NOT cascade to the inner strategy. Use clearAllCaches() for explicit logout (INV-7).
    */
   clearCache(): void {
-    this._cacheStrategy.clear();
-    // sessionStorage is NOT cleared here — see JSDoc above.
-    // To force a full re-auth (e.g., on logout), call clearAllCaches().
+    this._cache.invalidate();
   }
 
-  /** Clear ALL caches including shared sessionStorage. Use only for explicit logout. */
+  /** Clear the in-memory cache AND cascade to the strategy. Use for explicit logout. */
   clearAllCaches(): void {
-    this._cacheStrategy.clear();
-    this._sessionStorageStrategy.clear();
+    this._cache.clearCache();
+  }
+
+  /**
+   * Full logout flow:
+   *   1. Broadcast `{type:'logout'}` to all same-origin contexts (so other tabs
+   *      drop their in-memory caches before the user's network of components
+   *      starts firing failed requests).
+   *   2. Clear in-memory + strategy-local cache state in THIS context.
+   *   3. Drive the strategy through its real logout flow (MSAL.logoutPopup for
+   *      BrowserMsalStrategy — clears refresh token + ends Entra session).
+   *
+   * Server-side OBO cache invalidation is intentionally NOT performed (per the
+   * slim Phase A scope decision documented in projects/spaarke-auth-v2-and-hardening
+   * task 014 notes). Real server-side revocation lands with CAE in Phase D task 061.
+   */
+  async logout(): Promise<void> {
+    broadcastLogout();
+    await this._cache.logout();
   }
 
   /** Whether a cached token is currently available (synchronous check). */
   isAuthenticated(): boolean {
-    // Quick sync check — don't trigger async strategies
-    return this._cacheStrategy.tryAcquireToken !== undefined && this._hasValidCache();
+    return this._cache.getCachedToken() !== null;
   }
 
   /** Get the resolved config. */
@@ -188,58 +122,25 @@ export class SpaarkeAuthProvider {
   /**
    * Get the Azure AD tenant ID synchronously.
    *
-   * Resolution order:
-   *   1. Cached token JWT `tid` claim — works for ALL token sources (bridge, MSAL, Xrm)
-   *   2. MSAL accounts[0].tenantId — only populated if MSAL was actually invoked
-   *   3. Empty string
+   * v2 simplification: relies on the JWT `tid` claim of the cached token.
+   * Works regardless of which strategy provided the token (MSAL, NAA, etc.) since
+   * every Entra-issued access token includes `tid`.
    */
   getCachedTenantId(): string {
-    // 1. Extract tid from cached token — works even when bridge provided the token
-    const tid = this._extractTidFromCachedToken();
-    if (tid) return tid;
-
-    // 2. MSAL accounts (only populated if MSAL was used, NOT for bridge tokens)
-    try {
-      const msal = this._msalSilentStrategy.getMsalInstance();
-      if (msal) {
-        const accounts = msal.getAllAccounts();
-        if (accounts.length > 0) {
-          const tenantId = accounts[0].tenantId;
-          if (tenantId && tenantId !== 'common' && tenantId !== 'organizations') {
-            return tenantId;
-          }
-        }
-      }
-    } catch {
-      // MSAL not available
-    }
-    return '';
+    return this._extractTidFromCachedToken();
   }
 
   /**
    * Resolve Azure AD tenant ID (async).
    *
    * Resolution order:
-   *   1. Cached token JWT `tid` claim — works for ALL token sources
-   *   2. MSAL accounts[0].tenantId
-   *   3. Xrm.organizationSettings.tenantId via frame-walk
-   *   4. Empty string
+   *   1. JWT `tid` claim from cached token — universal
+   *   2. Xrm.organizationSettings.tenantId via frame-walk — fallback for Dataverse hosts
    */
   async getTenantId(): Promise<string> {
-    // 1. Extract tid from cached token (bridge, MSAL, Xrm — JWT always has tid)
     const tid = this._extractTidFromCachedToken();
     if (tid) return tid;
 
-    // 2. MSAL account
-    const msal = this._msalSilentStrategy.getMsalInstance();
-    if (msal) {
-      const accounts = msal.getAllAccounts();
-      if (accounts.length > 0 && accounts[0].tenantId) {
-        return accounts[0].tenantId;
-      }
-    }
-
-    // 3. Xrm global context (frame-walk)
     try {
       const frames: Window[] = [window];
       try {
@@ -271,12 +172,26 @@ export class SpaarkeAuthProvider {
   }
 
   /**
-   * Extract the `tid` (tenant ID) claim from the cached access token JWT.
-   * Works for ALL token sources: bridge, cache, Xrm, MSAL.
+   * Cascade-clean all instance state: proactive-refresh interval, broadcast
+   * listener, in-memory cache, and any strategy-local cache. Called by
+   * `initAuth()` on re-initialization to prevent leaks of the prior MSAL
+   * instance and listener.
    */
+  dispose(): void {
+    if (this._refreshInterval) {
+      clearInterval(this._refreshInterval);
+      this._refreshInterval = null;
+    }
+    if (this._disposeBroadcastListener) {
+      this._disposeBroadcastListener();
+      this._disposeBroadcastListener = null;
+    }
+    this._cache.clearCache();
+  }
+
   private _extractTidFromCachedToken(): string {
     try {
-      const token = this._cacheStrategy.getCachedToken();
+      const token = this._cache.getCachedToken();
       if (!token) return '';
       const parts = token.split('.');
       if (parts.length !== 3) return '';
@@ -284,35 +199,6 @@ export class SpaarkeAuthProvider {
       return payload.tid ?? '';
     } catch {
       return '';
-    }
-  }
-
-  /** Stop proactive refresh (cleanup). */
-  dispose(): void {
-    if (this._refreshInterval) {
-      clearInterval(this._refreshInterval);
-      this._refreshInterval = null;
-    }
-  }
-
-  private _cacheAndPublish(result: ITokenResult): void {
-    // Write to ALL fast caches so that every component gets instant access:
-    // 1. In-memory (per-instance, fastest read)
-    this._cacheStrategy.store(result.accessToken, result.expiresOn);
-    // 2. sessionStorage (shared across ALL same-origin iframes — the key sharing mechanism)
-    this._sessionStorageStrategy.store(result.accessToken, result.expiresOn);
-    // 3. Bridge (window global for direct parent-child reads)
-    publishToken(result.accessToken);
-  }
-
-  private _hasValidCache(): boolean {
-    // Synchronous check of cache validity
-    try {
-      // The CacheStrategy.tryAcquireToken is async but CacheStrategy is sync internally
-      // We access the private state pattern via the clear/store methods
-      return this._cacheStrategy !== null;
-    } catch {
-      return false;
     }
   }
 
@@ -330,7 +216,7 @@ export class SpaarkeAuthProvider {
   private _startProactiveRefresh(): void {
     this._refreshInterval = setInterval(async () => {
       try {
-        this._cacheStrategy.clear();
+        this._cache.invalidate();
         await this.getAccessToken();
       } catch {
         // Swallow — proactive refresh is best-effort
@@ -338,3 +224,4 @@ export class SpaarkeAuthProvider {
     }, PROACTIVE_REFRESH_INTERVAL_MS);
   }
 }
+

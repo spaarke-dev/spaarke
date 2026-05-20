@@ -1,0 +1,195 @@
+# TASK-INDEX — Spaarke Auth v2 + Hardening
+
+> **Total Tasks**: 41/49 complete (Phase 0: 5/5, Phase A: 7/7, Phase B: 11/11, Phase C: 9/10 — task 040 deferred to V3 Phase G; Phase B4: 4/4; Phase F: 5/5). Plus B-addendum 031 deferred (not auth-related).
+> **Status**: PROJECT COMPLETE 2026-05-19. All auth-scoped work shipped + deployed. Office Add-ins deployed + route prefix bug fixed during close-out testing.
+> **NEXT PROJECT**: [`spaarke-auth-v3-and-hardening`](../../spaarke-auth-v3-and-hardening/design.md) — Phase D (CSP/CAE/claims/step-up/RT rotation), Phase E (CI hygiene: gitleaks/Playwright/Dependabot), Phase G (secret + KV consolidation incl. task 040), Phase H (auth residual cleanup).
+> **Last Updated**: 2026-05-19 (project close-out)
+> **Authoritative scope**: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
+
+## Status Legend
+- :black_square_button: Not Started
+- :arrows_counterclockwise: In Progress
+- :white_check_mark: Complete
+- :no_entry: Blocked
+
+## Parallel Group Legend
+
+Tasks within the same parallel group (e.g., `B-Parallel-1`) can run concurrently as separate `task-execute` invocations in a single Claude Code message. Sub-agents launched via Agent tool CANNOT write to `.claude/` paths (root CLAUDE.md §3) — tasks marked `Main-Only` must run in the main session.
+
+---
+
+## Phase 0 — Pre-flight (5 tasks, ~90 min)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 001 | Rename DEPRECATED-msal-client.md + DEPRECATED-spaarke-auth-initialization.md; update INDEX references | :white_check_mark: | Main-Only (.claude/) | none |
+| 002 | Apply STOP banners to 5 partially-superseded pattern/constraint/architecture docs | :white_check_mark: | Main-Only (.claude/) | 001 |
+| 003 | Verify + finalize project CLAUDE.md prohibition section | :white_check_mark: | Main-Only (.claude/) | 002 |
+| 004 | Update root CLAUDE.md §15 Pointers to reference AUDIT-FINDINGS-AUTH-SYSTEM.md | :white_check_mark: | Main-Only (.claude/) | 003 |
+| 005 | Add entry to .claude/CHANGELOG.md documenting v2 in-progress markers | :white_check_mark: | Main-Only (.claude/) | 004 |
+
+**Phase gate**: MSAL regression test still passes after PR merge. No agent or human should follow stale guidance during the remaining phases.
+
+---
+
+## Phase A — Core library rebuild (7 tasks, ~11h)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 010 | Define AuthStrategy interface + token result types; preserve MSAL config logic by literal lift | :white_check_mark: | No | Phase 0 |
+| 011 | Implement BrowserMsalStrategy (Dataverse PCFs + Code Pages path) | :white_check_mark: | A-Parallel-1 | 010 |
+| 012 | Implement in-memory cache wrapper with JWT exp validation (5-min buffer) | :white_check_mark: | A-Parallel-1 | 010 |
+| 013 | Implement useAuth() hook returning {isAuthenticated, getAccessToken, authenticatedFetch, tenantId, logout} | :white_check_mark: | No | 011, 012 |
+| 014 | Implement logout() API: MSAL logout + cache clear + BroadcastChannel invalidation (slim; server endpoint deferred to CAE/061) | :white_check_mark: | A-Parallel-2 | 013 |
+| 015 | Add version stamp on SpaarkeAuthProvider + BroadcastChannel invalidation listener | :white_check_mark: | A-Parallel-2 | 013 |
+| 016 | Write strategy + cache unit tests (+ bundled Phase A cleanup + comprehensive review) | :white_check_mark: | A-Parallel-2 | 011, 012 |
+
+**Phase gate**: `@spaarke/auth` v2 builds cleanly. All public exports use function-based contract. `accessToken: string` does not appear in public types. MSAL regression test passes.
+
+---
+
+## Phase B — Consumer migration (11 tasks, ~16h)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 020 | Migrate AiSessionProvider context to function-based API | :white_check_mark: | No | Phase A |
+| 021 | Migrate SpaarkeAi App.tsx (stop snapshotting token in useEffect) | :white_check_mark: | No | 020 |
+| 022 | Migrate SpaarkeAi panes (ConversationPane, WelcomePanel, ChatHistoryPanel, WorkspaceLandingWidget, ChatPanel, FeedbackButtons, ThreePaneShell) | :white_check_mark: | B-Parallel-1 | 020 |
+| 023 | Refactor SprkChat API: drop accessToken prop, require authenticatedFetch + getAccessToken; update 3 hooks (useChatSession, useChatPlaybooks, useChatContextMapping); useSseStream calls getAccessToken() per-stream-open | :white_check_mark: | B-Parallel-1 | 020 |
+| 024 | Migrate PlaybookBuilder Code Page (aiPlaybookService.ts, dataverseClient.ts, templateStore.ts) | :white_check_mark: | B-Parallel-2 | 023 |
+| 025 | Migrate DocumentRelationshipViewer Code Page (VisualizationApiService.ts) | :white_check_mark: | B-Parallel-2 | 023 |
+| 026 | Migrate AnalysisWorkspace Code Page (analysisApi.ts and remaining paths) | :white_check_mark: | B-Parallel-2 | 023 |
+| 027 | Migrate SemanticSearch Code Page + External SPA (MsalAuthProvider, authInit, bff-client) | :white_check_mark: | B-Parallel-2 | 023 |
+| 028 | Verify + rebuild all PCFs (UniversalDatasetGrid, UniversalQuickCreate, SpeDocumentViewer, others) | :white_check_mark: | B-Parallel-2 | Phase A |
+| 029 | Update bffDataServiceAdapter docs/example to function-based pattern | :white_check_mark: | B-Parallel-2 | 023 |
+| 030 | Delete duplicate buildBffApiUrl from PCF environmentVariables.ts; import from @spaarke/auth | :white_check_mark: | B-Parallel-2 | Phase A |
+
+**Phase gate**: No `accessToken: string` or `token: string` props in `src/client/`. All consumers compile + pass tests. MSAL regression test still passes.
+
+---
+
+## Phase C — Server hardening (10 tasks, ~19h)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 040 | Rotate AzureAd__ClientSecret + AgentToken__ClientSecret; convert App Service config to Key Vault references; coordinate App Service restart | :no_entry: deferred | No (deploy) | Phase A. **DEFERRED 2026-05-19**: dev env, no external users, no production data — low blast radius. Revisit at prod-readiness planning. Memory: `feedback-question-urgency-for-dev-only-infra-tasks` |
+| 041 | Migrate Graph app-only from ClientSecretCredential to DefaultAzureCredential (managed identity) — default-off opt-in via `Graph__ManagedIdentity__Enabled`; OBO + SpeAdmin per-tenant ops correctly preserved | :white_check_mark: | C-Parallel-1 | (was 040; UNBLOCKED) |
+| 042 | Migrate Dataverse service identity to DefaultAzureCredential — 13 files (base-class fix cascades to 4 derivatives); OBO/user-context paths preserved | :white_check_mark: | C-Parallel-1 | (was 040; UNBLOCKED) |
+| 043 | Remove /debug/* endpoints — 11 routes removed (POML undercount said 7); DebugEndpointExtensions.cs DELETED | :white_check_mark: | C-Parallel-2 | none |
+| 044 | HMAC-SHA256 webhook validation + removed DEVELOPMENT_MODE bypass (Communication + Email webhooks; new WebhookSignatureFilter) | :white_check_mark: | C-Parallel-2 | none |
+| 045 | Named API key auth scheme (BuilderAdmin + Rag); 3 endpoints migrated; constant-time compare | :white_check_mark: | C-Parallel-2 | none |
+| 046 | PostConfigure<JwtBearerOptions> idempotency guard (Interlocked.CompareExchange + fixed stacked-handler bug) | :white_check_mark: | C-Parallel-2 | none |
+| 047 | appsettings.template.json: TenantId → #{TENANT_ID}#; Copilot UUID → #{COPILOT_SSO_PROVIDER_APP_ID}# | :white_check_mark: | C-Parallel-2 | none |
+| 048 | Audit logging middleware (AuditEnrichmentMiddleware; oid+appid+obo+tenantId+correlationId via BeginScope) | :white_check_mark: | C-Parallel-2 | none |
+| 049 | Rate limiting policies on anonymous + API key endpoints — 3 new policies (webhook-graph, api-key-admin, api-key-rag); 10 endpoint changes; fixed latent oid-keyed bug on /enqueue-indexing | :white_check_mark: | C-Parallel-2 | 045 |
+
+**Phase gate**: No plain-text secrets in App Service config. No client secrets in code (managed identity for all server outbound). No /debug/* endpoints reachable. Webhook signatures verified. API key scheme is a named registration.
+
+---
+
+## Phase D — Reasonable security hardening (5 tasks, ~11h)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 060 | Add CSP + Trusted Types middleware on BFF; strict policy script-src 'self', no inline, no eval | :black_square_button: | D-Parallel-1 | Phase C |
+| 061 | Enable Continuous Access Evaluation (CAE) on Microsoft.Identity.Web | :black_square_button: | D-Parallel-1 | none |
+| 062 | Identity claims hardening: grep + replace email/upn used as canonical identity with oid (Azure AD object ID) | :black_square_button: | D-Parallel-1 | none |
+| 063 | Step-up auth scaffolding: [RequiresStepUp] attribute + middleware; apply to 2-3 sensitive ops as proof points | :black_square_button: | D-Parallel-1 | none |
+| 064 | Refresh token rotation integration test (confirms MSAL issues new RT on each refresh) | :black_square_button: | D-Parallel-1 | Phase A |
+
+**Phase gate**: CSP headers present in responses. CAE configured. Audit log writes use oid everywhere. Step-up middleware returns 401 with claims challenge on tagged endpoints.
+
+---
+
+## Phase E — CI / Bundling hygiene (3 tasks, ~7h)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 070 | Gitleaks GitHub Action workflow; blocks merge on detection | :black_square_button: | E-Parallel-1 | none |
+| 071 | Auth regression test pack: Playwright script that runs spaarke-sso-binding ritual against synthetic consumer | :black_square_button: | E-Parallel-1 | Phase A |
+| 072 | Dependabot config for npm + nuget | :black_square_button: | E-Parallel-1 | none |
+
+**Phase gate**: Every PR runs gitleaks + auth regression test. Dependabot opens PRs for security updates.
+
+---
+
+## Phase B4 — Office Add-ins consolidation (4 tasks, ~5h)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 080 | Implement OfficeNaaStrategy in @spaarke/auth; deprecate parallel authConfig.ts | :white_check_mark: | No | Phase A |
+| 081 | Fix Office Add-in SseClient.ts:78 staleness (EventSource cannot auto-retry on 401) | :white_check_mark: | B4-Parallel-1 | 080 |
+| 082 | Fix Office Add-in useSaveFlow.ts:526,864 staleness (snapshot from hook closure) | :white_check_mark: | B4-Parallel-1 | 080 |
+| 083 | Rebuild + deploy Outlook + Word Add-in bundles — DEPLOYED 2026-05-19, manifest 1.0.15.0 on SWA. Surfaced pre-existing /office vs /api/office route mismatch (fixed in same commit). | :white_check_mark: | No | 081, 082 |
+
+**Phase gate**: Office Add-ins use @spaarke/auth useAuth() API. No standalone authConfig.ts MSAL setup. Add-in bundles rebuilt and deployed.
+
+---
+
+## Phase F — Engineering canonical docs (5 tasks, ~4h)
+
+| # | Task | Status | Parallel Group | Dependencies |
+|---|------|--------|----------------|--------------|
+| 090 | Draft ADR-028: Spaarke Auth Architecture (renumbered from ADR-027 — slot taken by subscription-isolation ADR) | :white_check_mark: | Main-Only (.claude/) | All prior phases |
+| 091 | Update .claude/patterns/auth/spaarke-sso-binding.md: cascade section retired; INV-1..INV-8 stay; point to ADR-028 | :white_check_mark: | Main-Only (.claude/) | 090 |
+| 092 | Update .claude/constraints/auth.md: function-based contract MUST rule; cascade MUST rules retired | :white_check_mark: | Main-Only (.claude/) | 090 |
+| 093 | Write docs/guides/auth-deployment-setup.md: new-environment setup checklist + Exchange ApplicationAccessPolicy section | :white_check_mark: | F-Parallel-1 | 090 |
+| 094 | Retire DEPRECATED-* files (moved to .claude/archive/2026-05-19/); update CHANGELOG | :white_check_mark: | Main-Only (.claude/) | 091, 092 |
+
+**Phase gate**: ADR-027 approved. Patterns and constraints aligned with v2. Deployment guide complete and mechanically followable.
+
+---
+
+## File coverage from audit §8.1
+
+All 30+ code files identified in the audit are addressed. Cross-reference for verification:
+
+| Audit file | Task |
+|---|---|
+| `src/client/shared/Spaarke.Auth/src/strategies/BridgeStrategy.ts`, `XrmStrategy.ts`, `tokenBridge.ts` | 010 (delete during library refactor) |
+| `src/client/shared/Spaarke.Auth/src/SpaarkeAuthProvider.ts` | 010-013 (preserve MSAL config; rewrite cascade) |
+| `src/client/shared/Spaarke.Auth/src/types.ts` | 010 |
+| `src/client/shared/Spaarke.AI.Widgets/src/providers/AiSessionProvider.tsx` | 020 |
+| `src/solutions/SpaarkeAi/src/App.tsx` | 021 |
+| `src/solutions/SpaarkeAi/src/components/{ThreePaneShell, ChatHistoryPanel, ChatPanel, WelcomePanel, WorkspaceLandingWidget, FeedbackButtons}.tsx` | 022 |
+| `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` | 022 |
+| `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/{SprkChat.tsx, types.ts, hooks/useChatSession.ts, hooks/useChatPlaybooks.ts, hooks/useChatContextMapping.ts}` | 023 |
+| `src/client/code-pages/PlaybookBuilder/src/services/aiPlaybookService.ts` | 024 |
+| `src/client/code-pages/PlaybookBuilder/src/services/dataverseClient.ts` | 024 |
+| `src/client/code-pages/PlaybookBuilder/src/stores/templateStore.ts` | 024 |
+| `src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts` | 025 |
+| `src/client/code-pages/AnalysisWorkspace/src/services/analysisApi.ts` | 026 |
+| `src/client/code-pages/SemanticSearch/src/services/auth/MsalAuthProvider.ts` | 027 |
+| `src/client/code-pages/SemanticSearch/src/services/authInit.ts` | 027 |
+| `src/client/external-spa/src/auth/bff-client.ts` | 027 |
+| `src/client/pcf/UniversalDatasetGrid/control/*`, `UniversalQuickCreate`, `SpeDocumentViewer` | 028 |
+| `src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffDataServiceAdapter.ts` | 029 |
+| `src/client/pcf/shared/utils/environmentVariables.ts` | 030 |
+| `src/client/office-addins/shared/auth/{authConfig.ts, DialogAuthService.ts, NaaAuthService.ts}` | 080 |
+| `src/client/office-addins/shared/api/OfficeApiClient.ts` | 080 |
+| `src/client/office-addins/shared/taskpane/services/SseClient.ts` | 081 |
+| `src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts` | 082 |
+| `src/server/api/Sprk.Bff.Api/appsettings.template.json` | 040 + 047 |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/DI/DebugEndpointExtensions.cs` | 043 |
+| `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs` (`/debug/{documentId}`) | 043 |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | 041 |
+| Multiple Dataverse job handlers using `ClientSecretCredential` | 042 |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs` (PostConfigure) | 046 |
+| Communication + Email webhook endpoints | 044 |
+| `/api/admin/builder-scope/import`, `/api/ai/rag/*` API key endpoints | 045 |
+
+---
+
+## Execution guide
+
+**Sequential mode** (single agent, safest):
+- Execute tasks in numerical order, respecting `Dependencies` column
+- Each task via `task-execute` skill (mandatory per root CLAUDE.md §4)
+
+**Parallel mode** (multiple agents per phase batch):
+- Within a phase, group tasks by `Parallel Group` column
+- Tasks in the same group can run concurrently
+- Use ONE Claude Code message with MULTIPLE `Skill` tool invocations (one per task) — see root CLAUDE.md §4 "Parallel Task Execution"
+- Sub-agents can NOT write to `.claude/` paths (root CLAUDE.md §3) — tasks marked `Main-Only` run in main session only
+
+**Phase gates**: after each phase completes, run the MSAL binding regression test from [`spaarke-sso-binding.md`](../../../.claude/patterns/auth/spaarke-sso-binding.md#verification-after-changes). PASS is required before moving to next phase.

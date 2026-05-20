@@ -1,0 +1,56 @@
+<task id="AIPU2-016" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build Capability Validation (Permissions, Kill Switch, Context)</title>
+    <phase>2A</phase>
+    <tags>bff-api, ai, security</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-010</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build BFF-side capability validation that enforces three safety gates before a capability is activated:
+    (1) user permission check — does the caller's Entra ID token contain the required role or group membership
+    for this capability; (2) tenant toggle — is the capability enabled for this specific Dataverse environment;
+    (3) kill switch — is the capability globally disabled via a feature flag. Blocked activations are silently
+    excluded from the active capability set (the user receives a reduced capability set, not an error) but are
+    logged for audit. A fourth check — context compatibility — validates that the conversation's current
+    context (e.g. matter loaded, document present) satisfies the capability's preconditions.
+  </prompt>
+  <role>Senior .NET security-aware backend engineer familiar with Spaarke auth patterns and ADR-008.</role>
+  <goal>
+    Unauthorized or unavailable capabilities are silently excluded from the manifest view presented to the
+    router and prompt builder. Blocked activations are logged with user ID, capability name, and reason.
+    No error is surfaced to the user for a blocked capability.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityManifest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read auth.md and ADR-008 to understand the permission model: roles come from the caller's JWT claims, tenant isolation is enforced via environment URL matching, feature flags come from IConfiguration or a feature management service.</step>
+    <step>Create ICapabilityValidator.cs interface with: Task&lt;IReadOnlyList&lt;CapabilityManifestEntry&gt;&gt; FilterAsync(IReadOnlyList&lt;CapabilityManifestEntry&gt; candidates, CapabilityValidationContext ctx, CancellationToken ct).</step>
+    <step>Create CapabilityValidationContext.cs record: ClaimsPrincipal User, string TenantEnvironmentUrl, IReadOnlyDictionary&lt;string, object&gt; ConversationContext (e.g. MatterLoaded, DocumentPresent).</step>
+    <step>Create CapabilityValidator.cs implementing ICapabilityValidator. Apply four checks in order for each candidate: (a) Kill switch — check IFeatureManager or IConfiguration["AiCapabilities:KillSwitch:{name}"] = "true"; (b) Tenant toggle — check CapabilityManifestEntry.TenantRestrictions (empty list = all tenants allowed); (c) User permission — check required roles against ClaimsPrincipal.IsInRole(); (d) Context compatibility — check required context keys from entry metadata against ConversationContext.</step>
+    <step>For each excluded capability, log at Information level: "Capability '{name}' excluded for user '{userId}': {reason}". Use structured logging with properties CapabilityName, UserId, ExclusionReason.</step>
+    <step>Emit OTEL counter ai_capability_validation_excluded_total with labels capability_name, reason (kill_switch | tenant_toggle | permission | context).</step>
+    <step>Integrate CapabilityValidator into CapabilityRoutingMiddleware: before calling ICapabilityRouter.RouteAsync, call ICapabilityValidator.FilterAsync to produce the effective capability list for this request. Pass the filtered list to the router instead of the full manifest.</step>
+    <step>Register ICapabilityValidator as scoped (per-request, since it uses ClaimsPrincipal) in AddAiCapabilitiesModule().</step>
+    <step>Write unit tests: kill switch excludes capability, tenant mismatch excludes, missing role excludes, missing context key excludes, all checks pass → capability included.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "CapabilityValidat"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Capabilities with active kill switch are excluded for all users.</criterion>
+    <criterion>Capabilities restricted to specific tenant URLs are excluded for users on other tenants.</criterion>
+    <criterion>Capabilities requiring a role not held by the caller are excluded silently.</criterion>
+    <criterion>Capabilities requiring context keys (e.g. MatterLoaded=true) are excluded when context is absent.</criterion>
+    <criterion>Every exclusion is logged at Information level with CapabilityName, UserId, and ExclusionReason.</criterion>
+    <criterion>OTEL counter ai_capability_validation_excluded_total incremented per exclusion.</criterion>
+    <criterion>No HTTP error is returned to the caller when capabilities are excluded.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "CapabilityValidat"`.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,52 @@
+<task id="AIPU2-013" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build Capability Router Layer 2 — GPT-4o-mini Pre-check</title>
+    <phase>2A</phase>
+    <tags>bff-api, ai, routing, gpt4o-mini</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-004, AIPU2-012</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build Layer 2 of the capability router — a GPT-4o-mini pre-check for turns that Layer 1 cannot confidently
+    classify. Layer 2 sends a compact classification prompt (~600 tokens) to the GPT-4o-mini deployment and
+    parses one or more capability names from the structured response. It targets the 20-25% of turns that are
+    too ambiguous for keyword matching but can still be cheaply classified before the full orchestrator LLM call.
+    Total Layer 2 latency budget is under 500ms.
+  </prompt>
+  <role>Senior .NET backend engineer with Azure OpenAI integration experience in the Spaarke BFF.</role>
+  <goal>
+    Layer 2 classifies 20-25% of all turns (those passed through from Layer 1) with a GPT-4o-mini call under
+    500ms. Classification results include an ordered list of candidate capability names with confidence scores.
+  </goal>
+  <knowledge>
+    <files>
+      <file>docs/guides/AI-MODEL-SELECTION-GUIDE.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the existing OpenAI client setup in SprkChatAgentFactory.cs and AI-MODEL-SELECTION-GUIDE.md to understand which deployment names and client instances are available for GPT-4o-mini.</step>
+    <step>Add Layer2ClassifyAsync(string userTurn, IReadOnlyList&lt;CapabilityManifestEntry&gt; candidates, CancellationToken ct) method to CapabilityRouter.cs. This is called from RouteAsync when Layer 1 confidence &lt; threshold.</step>
+    <step>Build the classification prompt in a CapabilityClassificationPromptBuilder helper: system message with role, compressed capability index (name + one-line description, max 20 capabilities), user message with the turn text. Total &lt;= 600 tokens enforced by tiktoken approximation.</step>
+    <step>Call the GPT-4o-mini deployment (use gpt-4o-mini deployment name from configuration) requesting a JSON response: { "capabilities": [{ "name": "...", "confidence": 0.0-1.0 }] }. Use response_format: json_object.</step>
+    <step>Parse the JSON response, map capability names back to CapabilityManifestEntry objects (case-insensitive), return top result as CapabilityRoutingResult with RoutingLayer = Layer2.</step>
+    <step>Handle failure modes: timeout (&gt;500ms) → fall through to Layer 3; parse failure → fall through to Layer 3; OpenAI 429 → fall through to Layer 3 with backoff note in logs.</step>
+    <step>Instrument with OTEL: Activity "capability_router.layer2", tags prompt_tokens, completion_tokens, matched_capability, latency_ms. Emit ai_routing_layer2_hit counter and ai_routing_layer2_latency_ms histogram.</step>
+    <step>Add Layer2Options to CapabilityRouterOptions: TimeoutMs (default 500), MaxCandidates (default 20), Enabled (default true). When Enabled=false, Layer 2 is skipped and falls through to Layer 3.</step>
+    <step>Write unit tests with mocked OpenAI client: successful classification, timeout fall-through, parse error fall-through, disabled Layer 2 bypassed.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "CapabilityRouter"` to confirm all layers covered.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Layer 2 is only invoked when Layer 1 confidence is below threshold.</criterion>
+    <criterion>Classification prompt is under 600 tokens (verified by a token-count assertion in tests).</criterion>
+    <criterion>GPT-4o-mini call completes within 500ms timeout; on timeout, Layer 3 is used instead.</criterion>
+    <criterion>JSON response parsed correctly into ordered capability list.</criterion>
+    <criterion>Layer 2 can be disabled via CapabilityRouterOptions.Layer2Options.Enabled = false.</criterion>
+    <criterion>OTEL Activity "capability_router.layer2" emitted on every Layer 2 call.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "CapabilityRouter"`.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,53 @@
+<task id="AIPU2-092" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build Feedback Collection UI (Thumbs Up/Down + Text)</title>
+    <phase>4E</phase>
+    <tags>frontend, feedback, ui</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-074, AIPU2-036</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    AIPU2-036 implemented the FeedbackService BFF endpoint for recording user ratings.
+    This task builds the non-intrusive UI that allows users to rate every AI response.
+    Thumbs up and thumbs down icons appear on each completed AI message (not during streaming).
+    Clicking thumbs-down reveals an optional free-text input for additional context — thumbs-up
+    submits immediately without text. On submission, the component calls the FeedbackService
+    API endpoint and shows a brief animated confirmation (checkmark for 200ms then the icons
+    return to neutral state). The component must be accessible (keyboard navigable, ARIA labels)
+    and non-intrusive (icons are muted until hovered).
+  </prompt>
+  <role>Frontend developer with React 19, Fluent v9, accessibility, and API integration experience.</role>
+  <goal>
+    Users can rate every completed AI response via thumbs up/down. Thumbs-down reveals text
+    input. Submission calls FeedbackService API and shows animated confirmation. Accessible
+    and non-intrusive.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 for Fluent v9 icon buttons (ThumbLike24Regular, ThumbDislike24Regular from @fluentui/react-icons), Button appearance tokens, and focus/keyboard navigation requirements.</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/conversation/FeedbackControls.tsx accepting props: turnId, sessionId, onSubmit (optional callback after successful submission).</step>
+    <step>Render ThumbLike24Regular and ThumbDislike24Regular as Fluent v9 IconButton components. Default appearance: muted (colorNeutralForeground3 token). Hover: active color (colorNeutralForeground1). No label text — ARIA labels required ("Rate this response as helpful", "Rate this response as not helpful").</step>
+    <step>Thumbs-up click: immediately call FeedbackService API (POST /api/ai/feedback) with { turnId, sessionId, rating: 'positive' }; show success animation (Checkmark icon for 200ms) then return to neutral.</step>
+    <step>Thumbs-down click: reveal a Fluent v9 Textarea below the icons with placeholder "What could be improved? (optional)" and a Submit button. On Submit: call FeedbackService API with { turnId, sessionId, rating: 'negative', comment: textareaValue }; hide textarea; show success animation.</step>
+    <step>Handle API error gracefully: icons return to neutral state; show a brief Fluent v9 Toast notification "Feedback could not be submitted" (non-blocking).</step>
+    <step>Keyboard navigation: Tab moves between thumbs-up and thumbs-down buttons; Enter/Space activates; when textarea is revealed, focus moves to textarea automatically.</step>
+    <step>FeedbackControls renders below each completed AI message in ConversationPane (not during streaming — only after 'done' SSE event).</step>
+    <step>Write unit tests: (a) thumbs-up calls API with rating 'positive' and no comment; (b) thumbs-down reveals textarea; (c) thumbs-down submit calls API with rating 'negative' and comment text; (d) API error shows Toast, not crash.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Thumbs up/down icons render on each completed AI message with muted-until-hover appearance.</criterion>
+    <criterion>Thumbs-up submits immediately with rating 'positive'; thumbs-down reveals optional textarea before submission.</criterion>
+    <criterion>FeedbackService API is called with correct turnId, sessionId, rating, and optional comment.</criterion>
+    <criterion>Submission shows animated Checkmark for 200ms then returns icons to neutral state.</criterion>
+    <criterion>API errors show a non-blocking Toast notification; component remains functional.</criterion>
+    <criterion>Keyboard navigable with correct ARIA labels on both icon buttons.</criterion>
+    <criterion>Feedback UI does not render during streaming — only after 'done' SSE event.</criterion>
+    <criterion>Unit tests for positive submission, negative with comment, and API error handling pass.</criterion>
+  </acceptance-criteria>
+</task>

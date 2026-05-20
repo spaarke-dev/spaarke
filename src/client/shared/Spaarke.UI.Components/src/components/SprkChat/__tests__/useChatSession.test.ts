@@ -3,6 +3,10 @@
  *
  * Tests session creation, history loading, context switching, and deletion.
  *
+ * Auth v2 (D-AUTH-1): the hook now takes `authenticatedFetch` as a prop. Tests
+ * mock it as a wrapper around the global `fetch` that attaches a fixed Bearer
+ * header, mirroring the production `@spaarke/auth` implementation.
+ *
  * @see ADR-022 - React 16 APIs only
  */
 
@@ -26,9 +30,21 @@ function createFetchResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
+// Test-only authenticatedFetch impl — wraps the mocked global fetch and
+// attaches a fixed Bearer header, the same surface real authenticatedFetch
+// presents to caller hooks.
+const mockAuthenticatedFetch = (url: string, init?: RequestInit) =>
+  mockFetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: 'Bearer test-token',
+    },
+  });
+
 const DEFAULT_OPTIONS = {
   apiBaseUrl: 'https://api.example.com',
-  accessToken: 'test-token',
+  authenticatedFetch: mockAuthenticatedFetch,
 };
 
 beforeEach(() => {

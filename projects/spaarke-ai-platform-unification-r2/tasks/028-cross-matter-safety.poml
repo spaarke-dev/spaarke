@@ -1,0 +1,61 @@
+<task id="AIPU2-028" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Implement Cross-Matter Conversation Safety</title>
+    <phase>2B</phase>
+    <tags>bff-api, security, ai</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-027</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Implement cross-matter conversation safety to prevent privilege leakage when a user switches between
+    legal matters within the same AI chat session. When the conversation context changes from Matter A to
+    Matter B, any retrieved document content from Matter A must be stripped from the conversation history
+    sent to the LLM — only AI-generated conclusions and summaries are retained. A user-visible SSE notification
+    informs the user that the context has shifted and that document-specific references from the previous
+    matter are no longer available. See spec.md FR-408 for the full requirements.
+  </prompt>
+  <role>Senior .NET security engineer familiar with Spaarke conversation context and AI session management.</role>
+  <goal>
+    When matter context changes mid-conversation, retrieved document passages from the previous matter are
+    stripped from LLM history. The user is notified via SSE. No document content from Matter A is ever sent
+    to the LLM in a Matter B context.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read spec.md FR-408 for the full cross-matter safety requirements, including what "matter pivot" means in conversation state and what content must be stripped.</step>
+    <step>Read the conversation history management code in Services/Ai/ to understand how chat messages (user, assistant, tool) and retrieved document content are stored per session.</step>
+    <step>Create IMatterContextDetector.cs interface with: MatterContextChange? DetectChange(ConversationHistory history, string incomingMatterId).</step>
+    <step>Create MatterContextChange.cs record: PreviousMatterId (string), NewMatterId (string), ChangeDetectedAtTurnIndex (int).</step>
+    <step>Create MatterContextDetector.cs implementing IMatterContextDetector. Detect change by comparing incomingMatterId against the matterId recorded on the most recent conversation turn. If different and both are non-empty, return a MatterContextChange; otherwise return null.</step>
+    <step>Create IConversationHistorySanitizer.cs interface with: ConversationHistory StripRetrievedContent(ConversationHistory history, int fromTurnIndex).</step>
+    <step>Create ConversationHistorySanitizer.cs implementing IConversationHistorySanitizer. Walk turns from index 0 up to fromTurnIndex. For each turn, identify tool_result messages that contain retrieved document passages (identifiable by a "source_type": "retrieval" metadata field or similar marker established in the RAG pipeline). Replace the content of those messages with a placeholder: "[Document content from previous matter removed for privacy]". Retain all user messages, assistant messages, and tool_result messages that are AI-generated conclusions (not raw retrieved content).</step>
+    <step>Integrate MatterContextDetector and ConversationHistorySanitizer into the AI request pre-processing pipeline: on each turn, call DetectChange. If a change is detected, call StripRetrievedContent on the history, replace the history in the session state with the sanitized version, and emit a matter_context_change SSE event before processing the new turn.</step>
+    <step>Define the matter_context_change SSE event schema: { "type": "matter_context_change", "previousMatterId": string, "newMatterId": string, "message": "Context has shifted to a new matter. Document references from the previous matter are no longer available in this conversation." }.</step>
+    <step>Add OTEL counter ai_safety_cross_matter_pivot_total and ai_safety_cross_matter_content_stripped_total (count of stripped messages).</step>
+    <step>Register IMatterContextDetector and IConversationHistorySanitizer as scoped services.</step>
+    <step>Write unit tests: matter pivot detected → retrieved content stripped from history, AI conclusions retained, matter_context_change event emitted, no pivot → history unchanged, same matter repeated → no event emitted.</step>
+    <step>Write a security-focused test: verify that after sanitization, no string from the stripped document content appears anywhere in the sanitized history that would be sent to the LLM.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "CrossMatter|MatterContext"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Matter pivot is detected when incomingMatterId differs from the last recorded matter in conversation history.</criterion>
+    <criterion>All tool_result messages containing retrieved document passages are replaced with placeholder text upon pivot.</criterion>
+    <criterion>User messages and AI-generated assistant conclusions are retained after sanitization.</criterion>
+    <criterion>matter_context_change SSE event is emitted before the pivoted turn is processed.</criterion>
+    <criterion>SSE event payload matches the defined schema exactly.</criterion>
+    <criterion>Security test confirms no original document text from the previous matter appears in the sanitized history.</criterion>
+    <criterion>No pivot on same matter → history unchanged, no SSE event emitted.</criterion>
+    <criterion>OTEL counters emitted correctly.</criterion>
+    <criterion>Unit and security tests pass: `dotnet test --filter "CrossMatter|MatterContext"`.</criterion>
+    <criterion>Build succeeds with no new warnings.</criterion>
+  </acceptance-criteria>
+</task>

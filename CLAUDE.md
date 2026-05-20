@@ -251,6 +251,7 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 | Azure resources (endpoints, names, conventions) | [`docs/architecture/auth-azure-resources.md`](docs/architecture/auth-azure-resources.md) |
 | Project initialization workflow | [`/design-to-spec`](.claude/skills/design-to-spec/) → [`/project-pipeline`](.claude/skills/project-pipeline/) |
 | Active project state | `projects/{name}/current-task.md` |
+| Active auth v2 design (pre-ADR-027) | [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md) — supersedes auth patterns marked `DEPRECATED-*` |
 | Active skill audit + sign-off | [`.claude/AUDIT-FINDINGS-SKILLS.md`](.claude/AUDIT-FINDINGS-SKILLS.md), [`.claude/AUDIT-FINDINGS-CLAUDEMD.md`](.claude/AUDIT-FINDINGS-CLAUDEMD.md) |
 | Researcher subagent (deep-dive Microsoft platform topics) | [`.claude/agents/researcher.md`](.claude/agents/researcher.md) |
 | Reversibility archive (removed content preserved by date) | [`.claude/archive/`](.claude/archive/) |

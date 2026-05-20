@@ -1,0 +1,50 @@
+<task id="AIPU2-078" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build ContextPaneController with Adaptive Stage-Based Rendering</title>
+    <phase>4B</phase>
+    <tags>frontend, context, widgets</tags>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-073, AIPU2-075</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    R1's SourcePanel.tsx showed a static list of source documents below the chat. R2's Context
+    pane is stage-aware: it renders different context widgets depending on the current workflow
+    stage (playbook gallery while idle, entity info while loading, sources/citations during
+    active chat, progress during multi-step operations, related items after completion). The
+    ContextPaneController subscribes to the 'context' PaneEventBus channel for context_update
+    events that drive stage transitions and widget selection, then resolves the appropriate
+    widget via ContextWidgetRegistry and renders it.
+  </prompt>
+  <role>Frontend developer with React 19, state machines, and Fluent v9 experience.</role>
+  <goal>
+    ContextPaneController adapts automatically to workflow stage by rendering different context
+    widgets. Stage transitions are driven by context_update PaneEventBus events. R1's
+    SourcePanel.tsx is replaced.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/solutions/SpaarkeAi/src/components/SourcePanel.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SourcePanel.tsx to understand the R1 source display model and what state needs to migrate.</step>
+    <step>Create src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx.</step>
+    <step>Define ContextStage type: 'playbook-gallery' | 'entity-info' | 'sources-citations' | 'progress' | 'related-items'.</step>
+    <step>Subscribe to the 'context' PaneEventBus channel via usePaneEvent; context_update events carry a new stage and widget type + data payload; update local stage state accordingly.</step>
+    <step>Implement stage-to-widget-type mapping: playbook-gallery maps to PlaybookGalleryWidget; entity-info to EntityInfoWidget; sources-citations to the appropriate source widget from ContextWidgetRegistry; progress to ProgressTrackerWidget; related-items to a generic list widget.</step>
+    <step>Call resolveContextWidget with the mapped widget type; render the resolved widget passing data from the event payload; if resolveContextWidget returns null, render a Fluent v9 Spinner (loading/unknown state).</step>
+    <step>Handle context_highlight events: call the rendered widget's onHighlight method if it exists, passing the citationId.</step>
+    <step>Place ContextPaneController in the context slot of ThreePaneShell (replace placeholder div).</step>
+    <step>Write unit tests: context_update to 'entity-info' stage resolves EntityInfoWidget; context_highlight calls onHighlight on the current widget; unknown widget type renders Spinner not crash.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ContextPaneController subscribes to 'context' PaneEventBus channel and updates stage on context_update events.</criterion>
+    <criterion>Correct context widget renders for each of the five defined stages.</criterion>
+    <criterion>context_highlight events call onHighlight on the current widget (if it supports it).</criterion>
+    <criterion>Null result from ContextWidgetRegistry renders a Spinner, not a crash or blank pane.</criterion>
+    <criterion>R1's SourcePanel.tsx is replaced by ContextPaneController.</criterion>
+    <criterion>Unit tests for stage transitions and highlight routing pass.</criterion>
+  </acceptance-criteria>
+</task>

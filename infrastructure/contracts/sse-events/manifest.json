@@ -1,0 +1,57 @@
+{
+  "$schema": "https://spaarke.dev/contracts/sse-events/manifest-schema.json",
+  "version": "2.0.0",
+  "description": "Spaarke R2 SSE Event Type Manifest. Lists all server-sent event types emitted by the BFF AI chat streaming endpoints.",
+  "sharedDefs": "_shared-defs.json",
+  "events": [
+    {
+      "eventType": "workspace_widget",
+      "schemaFile": "workspace-widget.schema.json",
+      "description": "Instructs the AI shell to render or update a workspace widget (document-preview, action-panel, suggestion-list, capability-status).",
+      "emittedBy": ["SprkChatAgent", "PlaybookOutputHandler"],
+      "fr": "FR-801"
+    },
+    {
+      "eventType": "context_update",
+      "schemaFile": "context-update.schema.json",
+      "description": "Notifies the client that the agent's active context has changed (document, entity, conversation, or user-intent).",
+      "emittedBy": ["ChatSessionManager", "PlaybookChatContextProvider"],
+      "fr": "FR-801"
+    },
+    {
+      "eventType": "context_highlight",
+      "schemaFile": "context-highlight.schema.json",
+      "description": "Instructs the source pane to highlight text ranges in a document (relevant, cited, or conflicting).",
+      "emittedBy": ["SprkChatAgent", "CitationVerificationService"],
+      "fr": "FR-801"
+    },
+    {
+      "eventType": "workspace_action",
+      "schemaFile": "workspace-action.schema.json",
+      "description": "Asks the shell to perform a workspace action (navigate, open-document, run-playbook, dismiss) with optional HITL confirmation.",
+      "emittedBy": ["PlaybookOutputHandler", "PlaybookDispatcher"],
+      "fr": "FR-801"
+    },
+    {
+      "eventType": "suggestions",
+      "schemaFile": "suggestions.schema.json",
+      "description": "Delivers a batch of follow-up suggestions (action, question, insight) for the SprkChat suggestion bar.",
+      "emittedBy": ["SprkChatAgent"],
+      "fr": "FR-801"
+    },
+    {
+      "eventType": "capability_change",
+      "schemaFile": "capability-change.schema.json",
+      "description": "Notifies the client that an AI capability's availability has changed (available, degraded, unavailable).",
+      "emittedBy": ["CapabilityOrchestrationService"],
+      "fr": "FR-801"
+    },
+    {
+      "eventType": "safety_annotation",
+      "schemaFile": "safety-annotation.schema.json",
+      "description": "Carries safety-layer annotations: groundedness scores, citation verification, and content-policy actions (logged, filtered, blocked).",
+      "emittedBy": ["SafetyPerimeterService"],
+      "fr": "FR-801"
+    }
+  ]
+}

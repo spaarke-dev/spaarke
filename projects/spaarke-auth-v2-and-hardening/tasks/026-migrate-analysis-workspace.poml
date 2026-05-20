@@ -1,0 +1,151 @@
+<task id="AUTHV2-026" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Migrate AnalysisWorkspace Code Page</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, code-page, react, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>023</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>AnalysisWorkspace has mixed code paths — some correct (per-request getAccessToken), some snapshot-based. Find all `Bearer ${token}` literals and replace with authenticatedFetch.</prompt>
+  <role>Senior React engineer.</role>
+  <goal>All AnalysisWorkspace BFF calls use authenticatedFetch. Mixed-pattern problem resolved.</goal>
+  <knowledge>
+    <files>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/analysisApi.ts</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/services/ (all service files)</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/context/AnalysisAiContext.tsx</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Grep AnalysisWorkspace for `Bearer ${` patterns and accessToken/token props.</step>
+    <step>Refactor each service to take authenticatedFetch; remove accessToken params.</step>
+    <step>Update AnalysisAiContext to use useAuth() internally; no token in context value.</step>
+    <step>SprkChat usage in AnalysisWorkspace: pass authenticatedFetch + getAccessToken (new SprkChat API from 023).</step>
+    <step>Vite build. Rebuild + redeploy bundle.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>No Bearer literals in AnalysisWorkspace source.</criterion>
+    <criterion>AnalysisAiContext exposes function-based API.</criterion>
+    <criterion>Build succeeds; loads in dev with SprkChat working.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19 by sub-agent (task-execute FULL rigor, Wave 2 of Phase B).
+
+    ## Files modified (10) + deleted (2)
+
+    Auth bootstrap + library re-exports:
+    1. `src/services/authInit.ts` — full rewrite. `initializeAuth()` now passes
+       `tenantId: config.tenantId` (from resolveRuntimeConfig) so the library
+       constructs a tenant-scoped authority; otherwise authority falls back to
+       `/organizations` and ssoSilent fails → popup-on-every-startup. Did NOT
+       set explicit `authority:` (library composes from tenantId, per D-AUTH-4).
+       Re-exports library `useAuth` as `sharedUseAuth` for the local hook to
+       compose with. No name collision risk: authInit.ts does NOT define a
+       `getTenantId` function locally (AnalysisWorkspace has no separate
+       config/runtimeConfig.ts module — unlike SpaarkeAi where the collision
+       lived). Grep verified: zero `export.*getTenantId` matches.
+    2. `src/context/AuthContext.tsx` — rewritten. Drops `token`, `refreshToken`
+       fields. Drops setInterval-based proactive refresh (library handles it
+       internally). Drops `clearTokenCache` import. Owns the bootstrap state
+       machine (authenticating / authenticated / error) only.
+    3. `src/hooks/useAuth.ts` — rewritten. Combines bootstrap state from
+       AuthContext with the library's function-based surface
+       (authenticatedFetch, getAccessToken, tenantId, logout). NO `token: string`
+       in return shape. Pre-auth phase returns reject-on-call stand-ins to
+       prevent accidental unauthenticated requests.
+
+    API surface (Bearer literals confined to one SSE exception site):
+    4. `src/services/analysisApi.ts` — rewritten. `fetchDocumentMetadata`,
+       `getDocumentViewUrl`, `exportAnalysis` now take `authenticatedFetch:
+       AuthenticatedFetchFn` (no token param). `executeAnalysis` takes
+       `getAccessToken: () => Promise<string>` and awaits it ONCE on the line
+       immediately before SSE fetch (D-AUTH-7 exception site, never
+       snapshotted). buildHeaders() helper deleted (no longer needed —
+       authenticatedFetch attaches Bearer internally).
+
+    Hook consumers:
+    5. `src/hooks/useAnalysisLoader.ts` — drops `token: string | null`; takes
+       `isAuthenticated: boolean` + `authenticatedFetch: AuthenticatedFetchFn`.
+       Re-fires effect when `isAuthenticated` flips true.
+    6. `src/hooks/useExportAnalysis.ts` — same pattern.
+    7. `src/hooks/useAnalysisExecution.ts` — drops `token`; takes
+       `isAuthenticated` + `getAccessToken: () => Promise<string>`.
+
+    Shared context + UI:
+    8. `src/context/AnalysisAiContext.tsx` — drops `token`, `auth`, fields.
+       Now exposes `isAuthenticated`, `authenticatedFetch`, `getAccessToken`.
+       The ChatPanel destructures these and forwards to SprkChat directly.
+    9. `src/App.tsx` — destructures new useAuth() shape. useAnalysisLoader /
+       useAnalysisExecution / useExportAnalysis call sites updated to new
+       function-based options.
+    10. `src/components/ChatPanel.tsx` — FIXES THE WAVE 1 KNOWN BREAKAGE.
+        Drops `accessToken={token ?? ''}`; passes `authenticatedFetch` +
+        `getAccessToken` to SprkChat (matches new ISprkChatProps from task 023).
+
+    Deleted (deprecated orphans, no remaining non-self imports):
+    11. `src/services/authService.ts` — REMOVED. Old multi-strategy Xrm/MSAL
+        token acquisition. Referenced `__SPAARKE_BFF_TOKEN__`, BridgeStrategy
+        patterns, raw Bearer literals — all forbidden by project CLAUDE.md.
+        The empty `src/services/` shell now contains only the v2 files.
+    12. `src/config/msalConfig.ts` — REMOVED. Old MSAL config; `@spaarke/auth`
+        now constructs MSAL from runtime config. Directory `src/config/`
+        removed (was the only file).
+
+    ## Authority setting confirmation
+
+    Did NOT set explicit `authority:` in the initAuth({...}) call. The library
+    composes `https://login.microsoftonline.com/{tenantId}` from the tenantId
+    parameter — per D-AUTH-4 and INV-1..INV-7 invariants. Verified by reading
+    src/services/authInit.ts line-by-line.
+
+    ## authInit.ts import-alias check (per project memory)
+
+    Grep `export.*function getTenantId|export.*getTenantId` in
+    src/client/code-pages/AnalysisWorkspace/src/services/authInit.ts: 0 matches.
+    AnalysisWorkspace does NOT have the SpaarkeAi-style name-collision risk
+    (where local async `getTenantId()` shadowed an import of the same name from
+    a config/runtimeConfig.ts module). No import alias needed here.
+
+    ## Build verification
+
+    Command: `npm run build` after `rm -rf dist out node_modules/.vite .vite`
+    and `npm install --legacy-peer-deps --no-audit --no-fund`.
+
+    Result: webpack 5.105.3 compiled with 5 WARNINGS (no errors). Bundle:
+    `out/bundle.js` = 1.52 MiB. Inline step (`build-webresource.ps1`)
+    succeeded: `out/sprk_analysisworkspace.html` = 1561 KB.
+
+    All 5 warnings are pre-existing and out of task scope:
+    - 2 × `FixedSizeList` import not found in `react-window` (DatasetGrid
+      from @spaarke/ui-components — unrelated transitive issue)
+    - 3 × webpack bundle-size advisory (bundle is large; pre-existing)
+
+    Bundle audit: `grep -c "authService\|__SPAARKE_BFF_TOKEN__"
+    out/bundle.js` → 0. Confirms deprecated artifacts fully tree-shaken /
+    removed.
+
+    ## Bearer literal audit
+
+    Only Bearer literal in our scope is `src/services/analysisApi.ts:372`
+    (SSE exception site, with `await getAccessToken()` immediately above on
+    line 368). All other BFF paths go through `authenticatedFetch`. Comments
+    referencing `token: string` are documentation, not violations.
+
+    ## Tests
+
+    `src/__tests__/useAnalysisLoader.test.ts` still references the old
+    `token: string | null` option shape; test infra is pre-existing-broken
+    in this package per Wave 1 notes (task 023 §"Tests"). Not in scope to
+    fix here. The deprecated `streaming-e2e.test.ts` is unchanged.
+
+    ## Unexpected breakage
+
+    None encountered. Wave 1 SprkChat callsite breakage (ChatPanel.tsx) was
+    fixed as documented above.
+
+    ## Did NOT commit (per user instruction). Did NOT update TASK-INDEX.md
+    (per user instruction).
+  </notes>
+</task>

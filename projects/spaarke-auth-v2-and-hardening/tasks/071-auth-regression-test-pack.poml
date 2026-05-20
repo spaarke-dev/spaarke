@@ -1,0 +1,34 @@
+<task id="AUTHV2-071" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Auth regression test pack — Playwright</title>
+    <phase>E — CI / Bundling hygiene</phase>
+    <tags>ci, tests, playwright, msal, FULL</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>Phase A</dependencies>
+    <parallel-safe>E-Parallel-1</parallel-safe>
+  </metadata>
+  <prompt>Automate the spaarke-sso-binding regression ritual. Playwright test that clears all caches, navigates to a synthetic consumer, verifies no popup + authority contains tenant GUID. Runs on every PR touching @spaarke/auth or consumers. Catches INV-1..INV-7 regressions automatically.</prompt>
+  <role>Test engineer with Playwright + auth expertise.</role>
+  <goal>Automated regression test pack runs in CI. INV violations fail the PR.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md §"Verification After Changes"</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §4.4 (INV-1..INV-8)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Set up Playwright in tests/auth-regression/. Configure for Edge (matches Spaarke target browser).</step>
+    <step>Create synthetic-consumer HTML page that loads @spaarke/auth and exposes a getAccessToken button + console output.</step>
+    <step>Write test: clear localStorage/sessionStorage/cookies → reload → call getAccessToken → assert console log contains `authority: https://login.microsoftonline.com/{tenant-guid}/` (not /organizations or /common) and no popup window opened.</step>
+    <step>Add test variants: idle-then-resume (simulate >60min via time mock), cross-tab sharing (two tabs, second tab uses cached token).</step>
+    <step>Add .github/workflows/auth-regression.yml that runs the pack on PRs touching auth-relevant paths.</step>
+    <step>Mark as required check.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Playwright test pack covers INV-1..INV-7 (or as many as practical).</criterion>
+    <criterion>Runs in CI on every relevant PR.</criterion>
+    <criterion>Required for merge.</criterion>
+    <criterion>Test executes in < 5 min.</criterion>
+  </acceptance-criteria>
+</task>

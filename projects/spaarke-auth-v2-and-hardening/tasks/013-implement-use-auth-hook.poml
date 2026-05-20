@@ -1,0 +1,84 @@
+<task id="AUTHV2-013" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Implement useAuth() React hook — function-based public API</title>
+    <phase>A — Core library rebuild</phase>
+    <tags>auth, library, react, hook, FULL</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>011, 012</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Add the React hook useAuth() that becomes the primary public API for consumers. Returns { isAuthenticated, getAccessToken, authenticatedFetch, tenantId, logout }. NO token: string value anywhere. authenticatedFetch is bound to the singleton provider; getAccessToken is the narrow escape for SSE cases.
+
+    Hook implementation should be simple: read from the singleton getAuthProvider(). The provider's getAccessToken always goes through the in-memory cache + JWT exp validation, so callers automatically get refreshed tokens.
+  </prompt>
+  <role>Senior React + TypeScript engineer. Hook design is the most-used API surface; ergonomics matter.</role>
+  <goal>
+    @spaarke/auth exports a useAuth() hook. Function-based return shape: no token value. All ~30 consumers in Phase B will use this hook.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §4.1 (function-based contract principle)</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §4.2 (target public APIs)</file>
+      <file>src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts (existing — wrap for the hook)</file>
+      <file>src/client/shared/Spaarke.Auth/src/initAuth.ts (singleton provider)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Create src/client/shared/Spaarke.Auth/src/useAuth.ts: import { getAuthProvider } from './initAuth'; export function useAuth() that returns object with isAuthenticated (sync getter from provider), getAccessToken (async, delegates to provider), authenticatedFetch (the existing exported function, NOT bound — the existing impl already uses getAuthProvider internally), tenantId (sync getter from provider.getCachedTenantId()), logout (stub for now, implemented in task 014).</step>
+    <step>Decision on hook reactivity: useAuth does NOT use useState for token (that would be the snapshot bug we're eliminating). isAuthenticated CAN be reactive via useState + an event listener for auth state changes (set up in 015). For now, isAuthenticated returns provider.isAuthenticated() synchronously — consumers re-check on each call.</step>
+    <step>Update src/index.ts: export useAuth, AuthenticatedFetchFn type. Remove any export that returns a token string (verify with grep).</step>
+    <step>Verify no exported function or interface has `accessToken: string` or `token: string` in its type. Use grep over src/ exports.</step>
+    <step>Add an ESLint rule to package.json or eslint config: ban /Authorization:\s*['"`]Bearer\s+\$\{/ regex in any file other than src/authenticatedFetch.ts.</step>
+    <step>Write unit test for useAuth that mounts a component, calls useAuth, and verifies the returned object shape.</step>
+    <step>Run tsc --noEmit. Run tests.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>useAuth() exported from @spaarke/auth.</criterion>
+    <criterion>Return type has NO field that is `token: string` or `accessToken: string`.</criterion>
+    <criterion>Provides getAccessToken (async), authenticatedFetch (function), isAuthenticated (bool), tenantId (string), logout (function).</criterion>
+    <criterion>ESLint rule active: bans Authorization Bearer template literals outside authenticatedFetch.ts.</criterion>
+    <criterion>Unit test for useAuth passes.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-19. `useAuth()` is a plain function (no React state) returning
+    `{ isAuthenticated, getAccessToken, authenticatedFetch, tenantId, logout }`. By
+    design it is NOT reactive in Phase A — consumers re-call on each render. Task
+    015 will add a `BroadcastChannel` listener that requires React `useState` /
+    `useEffect`; React devDeps will be added then.
+
+    `AuthenticatedFetchFn` type added to `types.ts` so component props and hook
+    returns can type-annotate without importing the function (avoids circular
+    imports via `useAuth`).
+
+    `logout()` is a stub: calls `provider.clearAllCaches()` + emits a console.warn
+    referencing task 014. This gives consumers something to wire up now without
+    silently claiming a complete logout — full server-side OBO invalidation +
+    BroadcastChannel notification lands in 014.
+
+    ESLint setup: installed `eslint@8.57`, `@typescript-eslint/parser@8`,
+    `@typescript-eslint/eslint-plugin@8` (the plugin is needed only to make the
+    `@typescript-eslint/no-explicit-any` rule REFERENCEABLE in the existing
+    `eslint-disable-next-line` comments — the rule itself never fires). The
+    `no-restricted-syntax` rule uses selector
+    `TemplateLiteral[quasis.0.value.raw=/Bearer\\s+$/]` which catches the realistic
+    cases `\`Bearer ${token}\`` and `\`Authorization: Bearer ${token}\``. Override
+    on `src/authenticatedFetch.ts` is the sanctioned site. Positive sanity check
+    confirmed the rule fires on a probe file.
+
+    Tests: 6/6 useAuth.test.ts pass (shape, no token-string fields, isAuthenticated
+    delegation, tenantId, getAccessToken delegation, logout stub clears caches).
+    Total package suite: 23/24 passing; the 1 failure remains the pre-existing
+    `config.test.ts` baseline (stale default-clientId fixture) — candidate for
+    task 016 cleanup.
+
+    Out-of-scope cleanup deferred to task 016:
+    - Orphaned legacy types `ITokenResult`, `ITokenStrategy`, `TokenCacheEntry`,
+      `TokenSource` in `types.ts` (no internal consumers after task 012 deletion)
+    - Stale `src/**/*.d.ts` / `src/**/*.js` build outputs tracked in git
+      (tsconfig emits to `dist/`; the in-`src` artifacts predate v2)
+
+    Quality gates deferred per D-AUTH-QUALITY-GATE-DEFERRAL.
+  </notes>
+</task>

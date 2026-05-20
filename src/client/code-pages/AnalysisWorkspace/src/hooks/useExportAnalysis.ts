@@ -4,10 +4,15 @@
  * Handles the complete export flow: API call, blob download, file save dialog.
  * Tracks export state for UI feedback (idle/exporting/completed/error).
  *
+ * Spaarke Auth v2 (task 026): consumes `authenticatedFetch` instead of a
+ * snapshotted token. The hook can be called any time; `doExport` will reject
+ * if the user hasn't authenticated yet (rejectNotReady from useAuth).
+ *
  * @see ADR-007 - Document access through BFF API
  */
 
 import { useCallback, useState } from 'react';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import { exportAnalysis } from '../services/analysisApi';
 import type { ExportState, ExportFormat } from '../types';
 
@@ -18,8 +23,10 @@ import type { ExportState, ExportFormat } from '../types';
 export interface UseExportAnalysisOptions {
   /** GUID of the analysis record to export */
   analysisId: string;
-  /** Bearer auth token for BFF API calls */
-  token: string | null;
+  /** Whether the user is authenticated. */
+  isAuthenticated: boolean;
+  /** Authenticated fetch from useAuth(). */
+  authenticatedFetch: AuthenticatedFetchFn;
   /** Title of the analysis (used as default filename) */
   analysisTitle?: string;
 }
@@ -39,7 +46,6 @@ export interface UseExportAnalysisResult {
 
 /**
  * Trigger a browser download for a Blob.
- * Creates a temporary anchor element, sets the download attribute, and clicks it.
  */
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -50,7 +56,6 @@ function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(anchor);
   anchor.click();
 
-  // Clean up after a brief delay to ensure download starts
   setTimeout(() => {
     URL.revokeObjectURL(url);
     document.body.removeChild(anchor);
@@ -75,32 +80,16 @@ function getMimeType(format: ExportFormat): string {
 // Hook
 // ---------------------------------------------------------------------------
 
-/**
- * Export hook for downloading analysis content as Word or PDF.
- *
- * @example
- * ```tsx
- * const { exportState, exportError, doExport } = useExportAnalysis({
- *     analysisId: "abc-123",
- *     token: authToken,
- *     analysisTitle: "Contract Analysis",
- * });
- *
- * <Button onClick={() => doExport("docx")} disabled={exportState === "exporting"}>
- *     {exportState === "exporting" ? "Exporting..." : "Export to Word"}
- * </Button>
- * ```
- */
 export function useExportAnalysis(options: UseExportAnalysisOptions): UseExportAnalysisResult {
-  const { analysisId, token, analysisTitle } = options;
+  const { analysisId, isAuthenticated, authenticatedFetch, analysisTitle } = options;
 
   const [exportState, setExportState] = useState<ExportState>('idle');
   const [exportError, setExportError] = useState<string | null>(null);
 
   const doExport = useCallback(
     async (format: ExportFormat) => {
-      if (!analysisId || !token) {
-        setExportError('Cannot export: missing analysis ID or authentication token.');
+      if (!analysisId || !isAuthenticated) {
+        setExportError('Cannot export: missing analysis ID or not authenticated.');
         setExportState('error');
         return;
       }
@@ -109,7 +98,7 @@ export function useExportAnalysis(options: UseExportAnalysisOptions): UseExportA
       setExportError(null);
 
       try {
-        const blob = await exportAnalysis(analysisId, format, token);
+        const blob = await exportAnalysis(analysisId, format, authenticatedFetch);
 
         // Generate filename from title or use a default
         const safeName = (analysisTitle ?? 'analysis')
@@ -136,7 +125,7 @@ export function useExportAnalysis(options: UseExportAnalysisOptions): UseExportA
         console.error('[useExportAnalysis] Export failed:', err);
       }
     },
-    [analysisId, token, analysisTitle]
+    [analysisId, isAuthenticated, authenticatedFetch, analysisTitle]
   );
 
   return {

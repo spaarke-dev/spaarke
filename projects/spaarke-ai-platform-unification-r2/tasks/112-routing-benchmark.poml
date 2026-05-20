@@ -1,0 +1,50 @@
+<task id="AIPU2-112" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Capability routing benchmark (layer distribution and latency)</title>
+    <phase>6</phase>
+    <tags>testing, performance, routing</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-061, AIPU2-066</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Benchmark the CapabilityRouter (AIPU2-061) to verify that Layer distribution meets the
+    design targets (greater than 60% Layer 1 fast-path, less than 10% Layer 3 full orchestration)
+    and that latency budgets are met per layer. The key architectural guarantee is that exactly
+    one LLM call is made per turn regardless of which layer handles it (AIPU2-066 ensures this).
+    This benchmark validates both the routing heuristics and the single-LLM-call invariant
+    under a realistic message corpus.
+  </prompt>
+  <role>Performance engineer or AI engineer with knowledge of the capability routing architecture.</role>
+  <goal>
+    A benchmark run of 100+ diverse test messages through CapabilityRouter produces a layer
+    distribution report. Layer 1 handles greater than 60% of messages. Layer 3 handles less
+    than 10%. p50 and p95 latency are measured per layer. The single-LLM-call invariant is
+    confirmed for all 100+ messages. Results are documented in notes/routing-benchmark-report.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Routing</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Orchestration</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Assemble a corpus of 100+ test messages representing realistic legal workspace usage: simple factual lookups (expected Layer 1), document summarization (expected Layer 2), multi-step analysis with tool use (expected Layer 3). Include edge cases and ambiguous queries.</step>
+    <step>Instrument CapabilityRouter to emit telemetry: message ID, routed layer, routing decision timestamp, LLM call count, total response time. Write to a structured log file during the benchmark run.</step>
+    <step>Run the 100+ message corpus through the router in a controlled environment (dev, single-threaded, no concurrent load). Collect timing and routing data.</step>
+    <step>Analyze layer distribution: calculate Layer 1 %, Layer 2 %, Layer 3 % from the log. Verify Layer 1 >= 60% and Layer 3 <= 10%. If not met, review routing heuristics and adjust thresholds.</step>
+    <step>Verify single-LLM-call invariant: for every message in the corpus, assert LLM call count == 1. Any message with LLM call count != 1 is a bug — document and fix.</step>
+    <step>Calculate p50 and p95 latency per layer from the timing data. Compare to design targets (Layer 1: p95 < 800ms, Layer 2: p95 < 2000ms, Layer 3: p95 < 5000ms — adjust per design.md if different).</step>
+    <step>Document findings in notes/routing-benchmark-report.md: corpus size, layer distribution table, latency percentiles per layer, LLM call count verification, any routing adjustments made.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Benchmark corpus contains at least 100 diverse test messages covering all three layer types.</criterion>
+    <criterion>Layer 1 handles at least 60% of corpus messages.</criterion>
+    <criterion>Layer 3 handles no more than 10% of corpus messages.</criterion>
+    <criterion>Every message in the corpus results in exactly one LLM call.</criterion>
+    <criterion>p50 and p95 latency are measured per layer and documented.</criterion>
+    <criterion>Benchmark report written to notes/routing-benchmark-report.md with distribution table and latency data.</criterion>
+  </acceptance-criteria>
+</task>

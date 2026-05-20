@@ -1,0 +1,50 @@
+<task id="AIPU2-065" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Integrate Safety Services into Agent Flow (Pre-LLM + Post-LLM)</title>
+    <phase>3</phase>
+    <tags>bff-api, ai-safety, integration</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-020, AIPU2-021, AIPU2-022, AIPU2-060</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    The individual safety services (PromptShieldService, GroundednessCheckService,
+    CitationVerificationService, ConfidenceScoringService) were implemented in AIPU2-020 through
+    AIPU2-022 but remain disconnected from the live agent flow. This task wires them into the
+    correct positions in the agent pipeline: PromptShieldService runs before the LLM call and
+    blocks prompt-injection attempts; the post-LLM services run after the response stream
+    completes and emit safety_annotation SSE events to the client; all safety results are written
+    to the audit log. The safety perimeter must be operational end-to-end after this task.
+  </prompt>
+  <role>Senior .NET developer with AI safety pipeline and SSE streaming experience.</role>
+  <goal>
+    The safety perimeter is operational end-to-end: prompt injection is blocked before the LLM,
+    groundedness and citation checks run after stream completion, safety_annotation SSE events
+    reach the client, and all safety results appear in the audit log.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SprkChatAgentFactory.cs (post AIPU2-060/061) and ai.md constraints to identify the pre-LLM and post-LLM injection points in the middleware chain.</step>
+    <step>Inject PromptShieldService into the factory/agent pipeline; add a pre-LLM call that evaluates the user message and blocks the turn (returns error SSE event) if injection is detected.</step>
+    <step>After the streaming response completes (last token received), call GroundednessCheckService with the full response text and source documents.</step>
+    <step>Pass GroundednessCheckService results to CitationVerificationService to verify each citation against retrieved source content.</step>
+    <step>Pass the grounded+verified response to ConfidenceScoringService to produce a composite confidence score.</step>
+    <step>Serialize all safety results into a SafetyAnnotation payload and emit a safety_annotation SSE event via the SseWriter delegate (from AIPU2-062).</step>
+    <step>Write the complete SafetyAnnotation (shield result, groundedness scores, citation verification results, confidence score) to the structured audit log with the turn correlation ID.</step>
+    <step>Write integration tests: (a) clean prompt passes shield, response annotated; (b) injected prompt blocked before LLM call; (c) ungrounded response triggers low-confidence annotation.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>PromptShieldService blocks prompt-injection attempts before any LLM call is made.</criterion>
+    <criterion>Post-stream: GroundednessCheckService, CitationVerificationService, and ConfidenceScoringService all run after the last token.</criterion>
+    <criterion>safety_annotation SSE event is emitted to the client with groundedness scores, citation statuses, and confidence score.</criterion>
+    <criterion>All safety results are written to the audit log with turn correlation ID.</criterion>
+    <criterion>Integration tests for clean, injected, and ungrounded scenarios all pass.</criterion>
+    <criterion>ai.md constraints are not violated (no unsafe content reaches client without annotation).</criterion>
+  </acceptance-criteria>
+</task>

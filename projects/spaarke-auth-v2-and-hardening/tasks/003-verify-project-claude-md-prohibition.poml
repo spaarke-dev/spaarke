@@ -1,0 +1,81 @@
+<task id="AUTHV2-003" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Verify project CLAUDE.md prohibition section is correct + complete</title>
+    <phase>0 — Pre-flight</phase>
+    <tags>docs, pre-flight, agent-enforcement</tags>
+    <status>completed</status>
+    <estimated-effort>10 minutes</estimated-effort>
+    <dependencies>002</dependencies>
+    <parallel-safe>false (main-only — .claude/ paths)</parallel-safe>
+  </metadata>
+  <prompt>
+    The project's CLAUDE.md (this file: projects/spaarke-auth-v2-and-hardening/CLAUDE.md) already contains a "🚨 ACTIVE AUTH V2 REFACTOR — DO NOT REGRESS" section that lists MUST NOT and MUST rules. This is the highest-enforcement surface because project CLAUDE.md is auto-loaded every Claude Code session in this worktree.
+
+    Verify the prohibition section is correct and complete. Cross-check against the audit doc §8.2 Layer 3 (project CLAUDE.md prohibition specification). If any items are missing or wrong, fix them.
+
+    Specifically verify:
+    - All MUST NOT items from §8.2 Layer 3 are present
+    - All MUST items from §8.2 Layer 3 are present
+    - References to DEPRECATED-* filenames match the actual files (from task 001)
+    - Reference to the audit doc path is correct
+    - "When in doubt" escalation guidance is present
+  </prompt>
+  <role>Senior engineer verifying agent-enforcement surface. Precision matters; this file is loaded by every agent session.</role>
+  <goal>
+    Project CLAUDE.md prohibition section accurately captures all MUST/MUST NOT rules from audit §8.2 Layer 3. No discrepancies between this file and the canonical audit doc.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 Layer 3 (the spec for this prohibition)</file>
+      <file>projects/spaarke-auth-v2-and-hardening/CLAUDE.md (the file to verify)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §8.2 Layer 3 — note every MUST NOT and MUST bullet listed.</step>
+    <step>Read projects/spaarke-auth-v2-and-hardening/CLAUDE.md — find the "🚨 ACTIVE AUTH V2 REFACTOR — DO NOT REGRESS" section.</step>
+    <step>Cross-check: every bullet in §8.2 Layer 3 must appear in CLAUDE.md. Note discrepancies.</step>
+    <step>If discrepancies exist, edit CLAUDE.md to add missing items or fix wording. If no discrepancies, mark task complete.</step>
+    <step>Verify the DEPRECATED-* file references in CLAUDE.md match actual filenames from task 001.</step>
+    <step>Verify the path to AUDIT-FINDINGS-AUTH-SYSTEM.md is relative and resolves correctly.</step>
+    <step>If edits were made, commit with message: "docs(auth): align project CLAUDE.md prohibition with audit §8.2 (PF-11)" + standard footer.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Every MUST NOT bullet from audit §8.2 Layer 3 appears in project CLAUDE.md prohibition section.</criterion>
+    <criterion>Every MUST bullet from audit §8.2 Layer 3 appears in project CLAUDE.md.</criterion>
+    <criterion>DEPRECATED-* filename references match actual files from task 001.</criterion>
+    <criterion>Path to audit doc resolves correctly (relative path test).</criterion>
+    <criterion>"When in doubt" escalation guidance is present.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-05-18.
+
+    Outcome: VERIFIED — NO EDITS NEEDED.
+
+    Cross-check against audit §8.2 Layer 3 (PF-11 spec):
+      Required (§8.2)                                          | Present in CLAUDE.md?
+      ─────────────────────────────────────────────────────────┼──────────────────────
+      Section "🚨 ACTIVE AUTH V2 REFACTOR — DO NOT REGRESS"   | ✅
+      MUST NOT `accessToken: string` props                    | ✅ (also `token: string`)
+      MUST NOT raw `fetch(Authorization: Bearer ${...})`      | ✅
+      MUST NOT BridgeStrategy / XrmStrategy / window globals  | ✅ (also `tokenBridge.ts`)
+      MUST NOT React-state token snapshots                    | ✅
+      MUST NOT follow `DEPRECATED-*` files                    | ✅
+      Reference to audit doc as canonical until ADR-027       | ✅ (markdown link `../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`)
+      "When in doubt" escalation                              | ✅
+
+    Extra rules already present beyond §8.2 spec (CLAUDE.md is stricter — preferable):
+      - MUST NOT follow 6-strategy cascade in spaarke-sso-binding.md (with INV-1..INV-7 exception)
+      - MUST NOT add new `/debug/*` endpoints (C3 scope)
+      - MUST NOT add plain-text secrets to appsettings*.json (Key Vault references only)
+      - MUST use `authenticatedFetch` for all BFF API calls
+      - MUST use `useAuth()` after Workstream A2 ships
+      - MUST preserve INV-1..INV-7 (MSAL config invariants)
+      - MUST rebuild + redeploy every @spaarke/auth consumer (INV-8 bundling reality)
+
+    Verified relative path: `../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` from project CLAUDE.md → resolves to worktree-root `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` (file exists, `test -f` OK).
+
+    Verified DEPRECATED-* filenames: both `.claude/patterns/auth/DEPRECATED-msal-client.md` and `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md` exist (`ls` confirmed).
+
+    Out-of-scope observation (logged, not fixed by this task): audit doc §8.2 Layer 3 PF-11 row originally targeted `projects/spaarke-ai-platform-unification-r2/CLAUDE.md` (a prior worktree). This project lives at `projects/spaarke-auth-v2-and-hardening/CLAUDE.md`. Divergence is expected (separate worktree), no edit required for task 003.
+  </notes>
+</task>

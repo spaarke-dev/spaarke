@@ -1,22 +1,29 @@
 /**
- * App.tsx — SpaarkeAi root application component.
+ * App.tsx — SpaarkeAi root application component (R2).
  *
- * Provider tree (per ADR-021, ADR-022, task 040):
+ * Provider tree (per ADR-021, ADR-022):
  *   FluentProvider (theme detection — resolveCodePageTheme + setupCodePageThemeListener)
- *     └─ AppWithAuth (acquires BFF token via @spaarke/auth)
- *          └─ StandaloneAiProvider (from @spaarke/ai-context — entity resolution + chat state)
- *               └─ AppShell (ThreePaneLayout with all three pane components)
+ *     └─ AppWithAuth (gates render on auth-ready, no token snapshot)
+ *          └─ ThreePaneShell (R2 root shell — PaneEventBus + stage lifecycle + ThreePaneLayout)
  *
- * Auth pattern: no React AuthProvider component — @spaarke/auth is a class-based
- * provider initialized in main.tsx (ensureAuthInitialized). App acquires the token
- * via getAuthProvider().getAccessToken() in a useEffect and passes it down as a prop
- * to StandaloneAiProvider. This follows the same pattern as AnalysisWorkspace ChatPanel.
+ * Auth pattern (Spaarke Auth v2, post-task-021):
+ *   - @spaarke/auth is initialized in main.tsx via ensureAuthInitialized().
+ *   - App.tsx does NOT snapshot the access token. It only verifies the provider
+ *     can mint a token at mount (sets isAuthenticated=true on success) for UI
+ *     gating; downstream BFF calls go through authenticatedFetch / useAuth(),
+ *     which always asks the provider for a fresh token.
+ *   - This eliminates the H-5 snapshot bug (App.tsx:81-105 in pre-v2 code) where
+ *     useEffect captured a token once at mount and never refreshed → 401 after
+ *     ~80min idle.
+ *
+ * R2 change: AppShell + StandaloneAiProvider replaced by ThreePaneShell.
+ * AiSessionProvider (AIPU2-076) lives inside ThreePaneShell.
  *
  * @see ADR-021 - Fluent v9, dark mode required, semantic tokens only
  * @see ADR-022 - React 19 createRoot for Code Pages
  * @see ADR-026 - Single-file Vite build for Dataverse web resource
- * @see StandaloneAiContext.tsx in @spaarke/ai-context — context provider
- * @see .claude/patterns/auth/spaarke-auth-initialization.md — auth bootstrap
+ * @see ThreePaneShell — R2 shell with PaneEventBus + stage lifecycle
+ * @see .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §H-5 — root-cause snapshot bug fixed by this file
  */
 
 import * as React from "react";
@@ -24,14 +31,10 @@ import { FluentProvider, makeStyles, tokens } from "@fluentui/react-components";
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
-  ThreePaneLayout,
 } from "@spaarke/ui-components";
-import { StandaloneAiProvider } from "@spaarke/ai-context";
 import { getAuthProvider } from "@spaarke/auth";
 import { getBffBaseUrl } from "./config/runtimeConfig";
-import { LeftPane } from "./components/LeftPane";
-import { OutputPanel } from "./components/OutputPanel";
-import { SourcePanel } from "./components/SourcePanel";
+import { ThreePaneShell } from "./components/shell/ThreePaneShell";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -65,76 +68,43 @@ export interface AppProps {
   entityId?: string;
   /** Matter ID shorthand from URL ?matterId= */
   matterId?: string;
+  /** Session ID for restore flow (AIPU2-106). When present, triggers session restore before first render. */
+  sessionId?: string;
 }
 
 // ---------------------------------------------------------------------------
-// AppShell — inner shell rendered inside StandaloneAiProvider
+// AppWithAuth — acquires BFF token, mounts ThreePaneShell
 // ---------------------------------------------------------------------------
 
-const useShellStyles = makeStyles({
-  shell: {
-    display: "flex",
-    width: "100%",
-    height: "100%",
-    overflow: "hidden",
-  },
-});
-
-function AppShell(): React.JSX.Element {
-  const styles = useShellStyles();
-
-  return (
-    <div className={styles.shell}>
-      <ThreePaneLayout
-        leftPane={<LeftPane />}
-        centerPane={<OutputPanel />}
-        rightPane={<SourcePanel />}
-        storageKey="spaarke-ai-workspace"
-        defaultLeftWidthPx={340}
-        defaultRightWidthPx={400}
-        minLeftWidthPx={240}
-        minRightWidthPx={240}
-        minCenterWidthPx={320}
-        leftPaneCollapseLabel="Show AI Chat"
-        rightPaneCollapseLabel="Show Sources"
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AppWithAuth — acquires BFF token, mounts StandaloneAiProvider
-// ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function AppWithAuth(_props: AppProps): React.JSX.Element {
+function AppWithAuth(props: AppProps): React.JSX.Element {
   const styles = useStyles();
 
-  const [token, setToken] = React.useState<string | null>(null);
+  // UI-gating flag only — NOT the token. Downstream BFF calls acquire fresh
+  // tokens per-request via authenticatedFetch / useAuth() (Spaarke Auth v2).
+  // This effect probes the provider once at mount so the shell can render
+  // auth-aware UI; it does NOT store the token string in React state, which
+  // was the root cause of the 401-after-idle bug (audit §H-5).
   const [isAuthenticated, setIsAuthenticated] = React.useState<boolean>(false);
 
-  // Acquire BFF access token after auth is initialized (non-blocking for render).
-  // StandaloneAiProvider handles partial states (isAuthenticated=false → skips BFF calls).
   React.useEffect(() => {
     let cancelled = false;
 
-    const acquireToken = async (): Promise<void> => {
+    const probeAuth = async (): Promise<void> => {
       try {
         const provider = getAuthProvider();
         const accessToken = await provider.getAccessToken();
         if (!cancelled && accessToken) {
-          setToken(accessToken);
           setIsAuthenticated(true);
         }
       } catch (err) {
         if (!cancelled) {
-          console.warn("[SpaarkeAi] Token acquisition failed:", err);
+          console.warn("[SpaarkeAi] Auth probe failed:", err);
           setIsAuthenticated(false);
         }
       }
     };
 
-    void acquireToken();
+    void probeAuth();
 
     return () => {
       cancelled = true;
@@ -152,13 +122,14 @@ function AppWithAuth(_props: AppProps): React.JSX.Element {
   return (
     <div className={styles.appRoot}>
       <div className={styles.layoutShell}>
-        <StandaloneAiProvider
+        <ThreePaneShell
           bffBaseUrl={bffBaseUrl}
-          token={token}
           isAuthenticated={isAuthenticated}
-        >
-          <AppShell />
-        </StandaloneAiProvider>
+          entityLogicalName={props.entityLogicalName}
+          entityId={props.entityId}
+          matterId={props.matterId}
+          sessionId={props.sessionId}
+        />
       </div>
     </div>
   );

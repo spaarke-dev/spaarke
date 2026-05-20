@@ -2,16 +2,24 @@
  * ChatHistoryPanel.tsx — Chat session history panel for SpaarkeAi.
  *
  * Wraps the ChatHistoryPanel component from @spaarke/ai-outputs, wiring it to
- * StandaloneAiContext session state. Handles session data fetching from the BFF
+ * AiSessionContext session state. Handles session data fetching from the BFF
  * API and passes sessions as props to the presentational panel component.
  *
  * Data flow:
- *   useStandaloneAi() → bffBaseUrl + token → fetch BFF sessions list
- *   → ChatHistoryPanel (from @spaarke/ai-outputs) — purely presentational
+ *   useAiSession() → bffBaseUrl + authenticatedFetch + isAuthenticated
+ *     → BFF /ai/chat/sessions list
+ *     → ChatHistoryPanel (from @spaarke/ai-outputs) — purely presentational
+ *
+ * R2 migration: switched from useStandaloneAi() (R1) to useAiSession() (R2)
+ * so this component works inside the AiSessionProvider tree in ConversationPane.
+ *
+ * Auth v2 migration (task 022): the panel no longer destructures `token` from
+ * useAiSession(); instead it uses `authenticatedFetch` (preferred) so the Bearer
+ * token never crosses a component boundary. See AUDIT-FINDINGS-AUTH-SYSTEM §H-4.
  *
  * Resume behavior: clicking "Resume" on a session card calls setChatSessionId()
- * in context, which updates the chatSessionId in StandaloneAiProvider + sessionStorage,
- * causing SprkChat (in ChatPanel) to resume that session on next render.
+ * in context, which updates the chatSessionId in AiSessionProvider + sessionStorage,
+ * causing SprkChat (in ConversationPane) to resume that session on next render.
  *
  * Collapsibility: this panel is toggled by the left pane collapse mechanism in
  * ThreePaneLayout. When the left pane is collapsed, this component unmounts.
@@ -20,13 +28,14 @@
  * @see ADR-021 — Fluent v9 semantic tokens only (no hardcoded colors)
  * @see ADR-022 — React 19, functional components
  * @see ChatHistoryPanel from @spaarke/ai-outputs — presentational component
+ * @see AUDIT-FINDINGS-AUTH-SYSTEM §H-4 — function-based auth contract
  */
 
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { ChatHistoryPanel as LibChatHistoryPanel } from "@spaarke/ai-outputs";
-import { useStandaloneAi } from "@spaarke/ai-context";
-import { buildBffApiUrl } from "@spaarke/auth";
+import { useAiSession } from "@spaarke/ai-widgets";
+import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import type { ChatSession } from "@spaarke/ai-outputs";
 
 // ---------------------------------------------------------------------------
@@ -54,13 +63,17 @@ interface UseSessionHistoryResult {
   reload: () => void;
 }
 
-function useSessionHistory(bffBaseUrl: string, token: string | null): UseSessionHistoryResult {
+function useSessionHistory(
+  bffBaseUrl: string,
+  authenticatedFetch: AuthenticatedFetchFn,
+  isAuthenticated: boolean
+): UseSessionHistoryResult {
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [reloadKey, setReloadKey] = React.useState<number>(0);
 
   React.useEffect(() => {
-    if (!token || !bffBaseUrl) {
+    if (!isAuthenticated || !bffBaseUrl) {
       setSessions([]);
       return;
     }
@@ -70,11 +83,12 @@ function useSessionHistory(bffBaseUrl: string, token: string | null): UseSession
 
     const fetchSessions = async (): Promise<void> => {
       try {
-        // All BFF URL construction MUST use buildBffApiUrl() per auth.md constraint
+        // All BFF URL construction MUST use buildBffApiUrl() per auth.md constraint.
+        // authenticatedFetch attaches Bearer header automatically — the token never
+        // crosses a component boundary (Spaarke Auth v2 §H-4).
         const url = buildBffApiUrl(bffBaseUrl, "/ai/chat/sessions");
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
           headers: {
-            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
         });
@@ -123,7 +137,11 @@ function useSessionHistory(bffBaseUrl: string, token: string | null): UseSession
     return () => {
       cancelled = true;
     };
-  }, [bffBaseUrl, token, reloadKey]);
+    // authenticatedFetch is a stable module-level function in @spaarke/auth and
+    // does not need to be a dep — including it would re-fire on every render
+    // because useAiSession() returns a new object each call.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bffBaseUrl, isAuthenticated, reloadKey]);
 
   const reload = React.useCallback(() => {
     setReloadKey((k) => k + 1);
@@ -149,17 +167,18 @@ function useSessionHistory(bffBaseUrl: string, token: string | null): UseSession
 export function ChatHistoryPanel(): React.JSX.Element {
   const styles = useStyles();
 
-  const { bffBaseUrl, token, isAuthenticated, setChatSessionId } = useStandaloneAi();
+  const { bffBaseUrl, authenticatedFetch, isAuthenticated, setChatSessionId } = useAiSession();
 
   const { sessions, isLoading, reload } = useSessionHistory(
     bffBaseUrl,
-    isAuthenticated ? token : null
+    authenticatedFetch,
+    isAuthenticated
   );
 
   const handleResume = React.useCallback(
     (sessionId: string) => {
       setChatSessionId(sessionId);
-      // The context update propagates to ChatPanel → SprkChat via re-render
+      // The context update propagates to ConversationPane → SprkChat via re-render
       console.info("[ChatHistoryPanel] Resuming session:", sessionId);
     },
     [setChatSessionId]
@@ -167,20 +186,18 @@ export function ChatHistoryPanel(): React.JSX.Element {
 
   const handleDelete = React.useCallback(
     async (sessionId: string) => {
-      if (!token || !bffBaseUrl) return;
+      if (!isAuthenticated || !bffBaseUrl) return;
 
       try {
+        // authenticatedFetch attaches Bearer header automatically (Spaarke Auth v2).
         const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${sessionId}`);
-        await fetch(url, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        await authenticatedFetch(url, { method: "DELETE" });
         reload();
       } catch (err) {
         console.warn("[ChatHistoryPanel] Delete session failed:", err);
       }
     },
-    [bffBaseUrl, token, reload]
+    [bffBaseUrl, authenticatedFetch, isAuthenticated, reload]
   );
 
   return (

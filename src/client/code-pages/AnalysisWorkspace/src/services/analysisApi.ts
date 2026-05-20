@@ -1,20 +1,29 @@
 /**
- * Analysis API Service - BFF API + Dataverse client for AnalysisWorkspace Code Page
+ * Analysis API Service — BFF API + Dataverse client for AnalysisWorkspace.
  *
- * Analysis loading reads directly from Dataverse Web API (same-origin).
- * The analysis record is the source of truth — sprk_workingdocument holds
- * the persisted content. No BFF round-trip is needed for loading.
+ * Spaarke Auth v2 (task 026): all BFF API calls go through `authenticatedFetch`
+ * from @spaarke/auth. NO `token: string` parameters. The SSE streaming path
+ * (executeAnalysis) accepts a `getAccessToken: () => Promise<string>` getter
+ * — the only place where a token string is materialized, and only on the
+ * line that opens the SSE fetch (never snapshotted).
  *
- * BFF API is used for operations that require server-side processing:
- *   - Document metadata (BFF proxies Graph/SPE)
- *   - Save (BFF writes to Dataverse + manages in-memory streaming state)
- *   - Export (BFF generates Word/PDF from content)
+ * Analysis loading reads directly from Dataverse Web API (same-origin, browser
+ * session cookie — no Bearer token needed).
  *
- * @see ADR-007 - Document access through SpeFileStore facade (BFF API)
- * @see ADR-008 - Endpoint filters for auth (Bearer token)
+ * @see ADR-007 — Document access through SpeFileStore facade (BFF API)
+ * @see ADR-008 — Endpoint filters for auth
+ * @see CLAUDE.md §D-AUTH-7 — Bearer literals confined to authenticatedFetch
  */
 
-import type { AnalysisRecord, DocumentMetadata, AnalysisError, ProblemDetails, ExportFormat, IChatMessage } from '../types';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import type {
+  AnalysisRecord,
+  DocumentMetadata,
+  AnalysisError,
+  ProblemDetails,
+  ExportFormat,
+  IChatMessage,
+} from '../types';
 import { getRuntimeConfig } from './authInit';
 
 // ---------------------------------------------------------------------------
@@ -22,13 +31,8 @@ import { getRuntimeConfig } from './authInit';
 // ---------------------------------------------------------------------------
 
 /**
- * Get the BFF API base URL from runtime config.
- *
- * Resolved lazily from Dataverse Environment Variables via resolveRuntimeConfig()
- * (called during auth init). MUST NOT use a relative path like "/api" because
- * the page origin is the Dataverse org, not the BFF API host.
- *
- * @throws Error if called before initializeAuth() completes
+ * Get the BFF API base URL from runtime config (resolved during bootstrap).
+ * @throws Error if called before initializeAuth() completes.
  */
 function getApiBaseUrl(): string {
   return getRuntimeConfig().bffBaseUrl;
@@ -36,7 +40,7 @@ function getApiBaseUrl(): string {
 
 const LOG_PREFIX = '[AnalysisWorkspace:AnalysisApi]';
 
-/** Default request timeout in milliseconds (30 seconds) */
+/** Default request timeout in milliseconds (30 seconds). */
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
@@ -86,17 +90,6 @@ function createTimeoutController(timeoutMs: number = DEFAULT_TIMEOUT_MS): AbortC
   return controller;
 }
 
-/**
- * Build standard headers for BFF API requests.
- */
-function buildHeaders(token: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Response Mapping
 // ---------------------------------------------------------------------------
@@ -139,12 +132,7 @@ function extractExtension(name?: string): string | undefined {
  *
  * The Code Page runs as a web resource on the Dataverse org domain, so
  * /api/data/v9.2/ is same-origin and uses the browser's session cookies.
- * Dataverse is the source of truth — sprk_workingdocument holds the
- * persisted analysis content.
- *
- * @param analysisId - The GUID of the analysis to fetch
- * @returns The analysis record including content
- * @throws AnalysisError on failure
+ * No BFF Bearer token needed.
  */
 export async function fetchAnalysis(analysisId: string): Promise<AnalysisRecord> {
   console.log(`${LOG_PREFIX} Loading analysis from Dataverse: ${analysisId}`);
@@ -218,19 +206,19 @@ export async function fetchAnalysis(analysisId: string): Promise<AnalysisRecord>
  *
  * BFF route: GET /api/v1/documents/{documentId}
  *
- * @param documentId - The GUID of the document
- * @param token - Bearer auth token
- * @returns Document metadata including name, MIME type, and view URL
- * @throws AnalysisError on API failure
+ * @param documentId The GUID of the document.
+ * @param authenticatedFetch Authenticated fetch from useAuth() / @spaarke/auth.
  */
-export async function fetchDocumentMetadata(documentId: string, token: string): Promise<DocumentMetadata> {
+export async function fetchDocumentMetadata(
+  documentId: string,
+  authenticatedFetch: AuthenticatedFetchFn
+): Promise<DocumentMetadata> {
   console.log(`${LOG_PREFIX} Fetching document metadata: ${documentId}`);
 
   const controller = createTimeoutController();
 
-  const response = await fetch(`${getApiBaseUrl()}/api/v1/documents/${documentId}`, {
+  const response = await authenticatedFetch(`${getApiBaseUrl()}/api/v1/documents/${documentId}`, {
     method: 'GET',
-    headers: buildHeaders(token),
     signal: controller.signal,
   });
 
@@ -250,23 +238,17 @@ export async function fetchDocumentMetadata(documentId: string, token: string): 
  * Get a preview/view URL for a document.
  *
  * BFF route: GET /api/documents/{documentId}/preview-url
- *
- * Returns a URL suitable for embedding in an iframe. For PDFs this is a
- * direct URL; for Office documents it may be an Office Online embed URL.
- *
- * @param documentId - The GUID of the document
- * @param token - Bearer auth token
- * @returns The URL for embedding in an iframe
- * @throws AnalysisError on API failure
  */
-export async function getDocumentViewUrl(documentId: string, token: string): Promise<string> {
+export async function getDocumentViewUrl(
+  documentId: string,
+  authenticatedFetch: AuthenticatedFetchFn
+): Promise<string> {
   console.log(`${LOG_PREFIX} Fetching document view URL: ${documentId}`);
 
   const controller = createTimeoutController();
 
-  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/preview-url`, {
+  const response = await authenticatedFetch(`${getApiBaseUrl()}/api/documents/${documentId}/preview-url`, {
     method: 'GET',
-    headers: buildHeaders(token),
     signal: controller.signal,
   });
 
@@ -282,13 +264,7 @@ export async function getDocumentViewUrl(documentId: string, token: string): Pro
 
 /**
  * Save analysis content directly to Dataverse (same-origin Web API).
- *
- * Writes the sprk_workingdocument field on the analysis record via PATCH.
- * No BFF round-trip needed — Dataverse is the source of truth.
- *
- * @param analysisId - The GUID of the analysis to save
- * @param content - Content from the editor to persist
- * @throws AnalysisError on API failure
+ * No BFF round-trip; no Bearer token needed.
  */
 export async function saveAnalysisContent(analysisId: string, content: string): Promise<void> {
   console.log(`${LOG_PREFIX} Saving analysis content: ${analysisId} (${content.length} chars)`);
@@ -328,12 +304,6 @@ export async function saveAnalysisContent(analysisId: string, content: string): 
 
 /**
  * Chunk received from the BFF SSE stream during analysis execution.
- * - `metadata`: stream opened, contains analysisId and documentName
- * - `progress`: pipeline step event, contains step identifier in `step` field
- * - `chunk`: text content token
- * - `done`: analysis complete (backend-sent completion event)
- * - `error`: execution failed
- * - `status`: client-side sentinel emitted when SSE stream ends (content="done")
  */
 export interface AnalysisStreamChunk {
   type: 'metadata' | 'progress' | 'chunk' | 'done' | 'error' | 'status';
@@ -346,6 +316,10 @@ export interface AnalysisStreamChunk {
 
 /**
  * Parameters for triggering analysis execution via the BFF.
+ *
+ * Spaarke Auth v2: no `token: string`. SSE requires a fresh Bearer header at
+ * stream-open; we accept a `getAccessToken: () => Promise<string>` getter and
+ * await it ONCE immediately before the fetch. Never snapshot the result.
  */
 export interface ExecuteAnalysisParams {
   /** Existing analysis record ID in Dataverse */
@@ -356,8 +330,11 @@ export interface ExecuteAnalysisParams {
   actionId?: string;
   /** Playbook ID (from sprk_analysisplaybook) */
   playbookId?: string;
-  /** Bearer auth token for BFF API */
-  token: string;
+  /**
+   * Token getter — called exactly once, just before the fetch. The token
+   * value is never persisted or passed across a component boundary.
+   */
+  getAccessToken: () => Promise<string>;
   /** Called for each SSE chunk received */
   onChunk?: (chunk: AnalysisStreamChunk) => void;
   /** AbortSignal for cancellation */
@@ -367,16 +344,12 @@ export interface ExecuteAnalysisParams {
 /**
  * Execute an analysis via the BFF SSE endpoint.
  *
- * Sends the analysis request to POST /api/ai/analysis/execute and reads
- * the Server-Sent Events stream. The BFF persists the working document
- * to Dataverse as it streams, so the caller just needs to reload the
- * analysis record on completion.
- *
- * @param params - Execution parameters including IDs and token
- * @throws AnalysisError on fetch failure or SSE error chunk
+ * NB: SSE bypasses authenticatedFetch because the ReadableStream lifecycle
+ * doesn't fit fetch's request/response shape. We await getAccessToken() once
+ * on the exact line before fetch(), per CLAUDE.md §D-AUTH-7.
  */
 export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<void> {
-  const { analysisId, documentIds, actionId, playbookId, token, onChunk, signal } = params;
+  const { analysisId, documentIds, actionId, playbookId, getAccessToken, onChunk, signal } = params;
 
   console.log(
     `${LOG_PREFIX} Executing analysis: ${analysisId} (action: ${actionId ?? 'none'}, playbook: ${playbookId ?? 'none'})`
@@ -390,6 +363,9 @@ export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<vo
   if (actionId) body.actionId = actionId;
   if (playbookId) body.playbookId = playbookId;
 
+  // Auth v2 (D-AUTH-7): SSE exception site — token is acquired with fresh
+  // `await getAccessToken()` on every stream open, never snapshotted.
+  const token = await getAccessToken();
   const response = await fetch(`${getApiBaseUrl()}/api/ai/analysis/execute`, {
     method: 'POST',
     headers: {
@@ -486,23 +462,22 @@ export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<vo
  *
  * BFF route: POST /api/ai/analysis/{analysisId}/export
  *
- * Calls the BFF API export endpoint which generates a Word or PDF document
- * from the analysis content. Returns the export result.
- *
- * @param analysisId - The GUID of the analysis to export
- * @param format - Export format: "docx" or "pdf"
- * @param token - Bearer auth token
- * @returns A Blob containing the exported document
- * @throws AnalysisError on API failure
+ * @returns A Blob containing the exported document.
  */
-export async function exportAnalysis(analysisId: string, format: ExportFormat, token: string): Promise<Blob> {
+export async function exportAnalysis(
+  analysisId: string,
+  format: ExportFormat,
+  authenticatedFetch: AuthenticatedFetchFn
+): Promise<Blob> {
   console.log(`${LOG_PREFIX} Exporting analysis: ${analysisId} as ${format}`);
 
   const controller = createTimeoutController(60_000); // 60s timeout for export
 
-  const response = await fetch(`${getApiBaseUrl()}/api/ai/analysis/${analysisId}/export`, {
+  const response = await authenticatedFetch(`${getApiBaseUrl()}/api/ai/analysis/${analysisId}/export`, {
     method: 'POST',
-    headers: buildHeaders(token),
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ format }),
     signal: controller.signal,
   });

@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Proposed** |
+| Status | **Accepted (Amended 2026-05-17)** |
 | Date | 2025-12-12 |
-| Updated | 2025-12-12 |
+| Updated | 2026-05-17 |
 | Authors | Spaarke Engineering |
 | Sprint | TBD |
 
@@ -94,13 +94,82 @@ When implementing an AI feature:
 - Push content handling into a small number of services (single chokepoints).
 - Emit telemetry only for counts/timings/outcomes.
 
+## Governed Data Stores (Amendment — 2026-05-17)
+
+### Rationale
+
+R2 introduces AI work history persistence (Cosmos DB) and compliance audit logging. The original ADR's blanket "no content in logs" rule was designed for application telemetry (App Insights) where content leakage is an uncontrolled privacy risk. Purpose-built governed stores have different characteristics:
+
+- **Compliance audit** (Tier 2): Append-only, immutable, restricted access. Stores metadata + response hashes for tamper detection — never verbatim text. Required for legal malpractice defense and regulatory compliance.
+- **Work history** (Tier 3): User-owned session data with GDPR erasure rights. Stores full conversation for session restore. Access restricted to owning user + admin. Retention-governed with explicit deletion support.
+
+These tiers are **explicit exceptions** to the "no content in logs" constraint. The original constraint remains in full force for Tier 1 (application logs/telemetry).
+
+### Three-Tier Data Governance Model
+
+| Tier | Store | What's Stored | Retention | Access Control | GDPR Art. 17 |
+|------|-------|--------------|-----------|----------------|--------------|
+| **1: App Logs** | App Insights, Azure Monitor, structured logging | Identifiers, sizes, timings, error codes, correlation IDs. **No content.** | 90 days | SRE / platform team | N/A (no PII) |
+| **2: Compliance Audit** | Cosmos DB `audit` container (immutable policy) | Response hash (SHA-256), tool names invoked, document IDs accessed, safety check results (pass/fail/scores), matter context ID. **No verbatim prompts or responses.** | 7 years (configurable per tenant, legal hold override) | Compliance officer role only | No — legal retention obligation supersedes |
+| **3: Work History** | Cosmos DB `sessions`, `prompts`, `memory`, `feedback` containers | Full user + AI messages, widget state snapshots, matter-scoped facts, prompt templates, feedback text. User-owned data. | 90 days default (configurable). User can extend or delete. | Owning user + tenant admin | Yes — user can request deletion of their sessions, prompts, memory, feedback |
+
+### Tier-Specific Constraints
+
+**Tier 1 (App Logs)** — Original ADR-015 constraints apply without modification:
+- MUST NOT log document contents, extracted text, email bodies
+- MUST NOT log full prompts or model responses
+- MUST log only identifiers, sizes, timings, outcome codes
+
+**Tier 2 (Compliance Audit)**:
+- MUST store only structured metadata (never verbatim text)
+- MUST compute SHA-256 hash of full response for tamper detection
+- MUST use append-only container policy (no updates, no deletes)
+- MUST partition by `tenantId` with no cross-tenant query capability
+- MUST configure retention policy at container provisioning (default: 7 years)
+- MUST NOT store verbatim prompts or response text (hash only)
+- MUST NOT allow programmatic deletion (except via retention policy expiry or legal hold release)
+
+**Tier 3 (Work History)**:
+- MUST partition by `tenantId` with no cross-tenant query capability
+- MUST support user-initiated deletion (GDPR right to erasure, Art. 17)
+- MUST define retention policy at container provisioning (default: 90 days)
+- MUST encrypt at rest (Cosmos default) and in transit (TLS)
+- MUST NOT retain data beyond retention period unless user explicitly extends
+- MUST NOT expose Tier 3 data to users other than the owning user and tenant admin
+
+### Cosmos DB Container Mapping
+
+Provisioned by task AIPU2-002 (Cosmos DB infrastructure).
+
+| Container | Tier | Partition Key | Immutable | Purpose |
+|-----------|------|---------------|-----------|---------|
+| `audit` | 2 | `/tenantId` | Yes (append-only) | Compliance log: every AI interaction recorded |
+| `sessions` | 3 | `/tenantId` | No | Work history: messages, widget state, tool results |
+| `prompts` | 3 | `/tenantId` | No | Saved prompt templates (personal/team ownership) |
+| `memory` | 3 | `/tenantId` | No | Matter-scoped AI memory (structured facts) |
+| `feedback` | 3 | `/tenantId` | No | Per-response feedback (thumbs up/down + text) |
+
+### Access Control Matrix
+
+| Role | Tier 1 (Logs) | Tier 2 (Audit) | Tier 3 (History) |
+|------|---------------|----------------|-----------------|
+| End user | No | No | Own data only |
+| Tenant admin | No | Read-only | All tenant data |
+| Compliance officer | No | Read-only | No (unless delegated) |
+| SRE / Platform | Read/Write | No | No |
+
+---
+
 ## Compliance checklist
 
-- [ ] No raw content (document bytes, email bodies, extracted text) in logs.
+- [ ] No raw content (document bytes, email bodies, extracted text) in Tier 1 logs.
 - [ ] Job payloads contain identifiers only (ADR-004).
 - [ ] Any caching of derived content follows ADR-014.
 - [ ] Stored AI outputs have retention and authorization rules.
-- [ ] Prompts/templates are versioned and not logged.
+- [ ] Prompts/templates are versioned and not logged (Tier 1).
+- [ ] Tier 2 audit entries contain hashes only, never verbatim text.
+- [ ] Tier 3 work history supports user-initiated deletion (GDPR Art. 17).
+- [ ] All Cosmos containers have retention policies configured at provisioning.
 
 ## Related ADRs
 

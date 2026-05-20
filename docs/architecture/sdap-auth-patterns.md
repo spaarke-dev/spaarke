@@ -1,3 +1,21 @@
+---
+🛑 STOP — DO NOT USE THIS DOCUMENT FOR NEW AUTH WORK 🛑
+═══════════════════════════════════════════════════════════════════════════
+PRE-V2 CONTENT. Spaarke Auth v2 + Hardening is in active development.
+Canonical v2 source: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md
+ADR-027 will become canonical when v2 ships.
+
+DO NOT add `accessToken: string` props anywhere.
+DO NOT write raw fetch() with `Authorization: Bearer ${...}` headers.
+DO NOT reference BridgeStrategy, XrmStrategy, or window.__SPAARKE_BFF_TOKEN__.
+DO use `authenticatedFetch()` from @spaarke/auth.
+DO use `useAuth()` hook (after v2 ships).
+When in doubt: STOP and consult the audit doc above.
+
+What IS still canonical in this file: OBO flow taxonomy (Patterns 2, 4, 5, 6) + server-side auth patterns (GraphClientFactory, endpoint filter inventory, OBO vs app-only decision matrix, CORS preflight) remain canonical. Client-side cascade/snapshot patterns (Pattern 7 "6-Strategy Chain", Pattern 8 "Parent-to-Child token bridge", Pattern 9 "Wizard Code Pages") are pre-v2.
+═══════════════════════════════════════════════════════════════════════════
+---
+
 # SDAP Authentication Patterns Architecture
 
 > **Last Updated**: 2026-05-14
@@ -324,7 +342,7 @@ Authenticated browser calls from `*.crm.dynamics.com` to the BFF (`api://{BFF-Ap
 ## Related
 
 - [Spaarke SSO Binding](../../.claude/patterns/auth/spaarke-sso-binding.md) — **Canonical reference** for tenant authority, 6-strategy chain, localStorage + cookie binding (2026-05-13)
-- [Spaarke Auth Initialization](../../.claude/patterns/auth/spaarke-auth-initialization.md) — Code Page bootstrap sequence
+- [Spaarke Auth Initialization](../../.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md) — Code Page bootstrap sequence (⛔ deprecated — superseded by Spaarke Auth v2 `useAuth()`; see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md))
 - [Token Caching](../../.claude/patterns/auth/token-caching.md) — Client localStorage + server Redis
 - [OBO Flow](../../.claude/patterns/auth/obo-flow.md) — GraphClientFactory code pointers
 - [Dataverse OBO](../../.claude/patterns/auth/dataverse-obo.md) — Dataverse-specific OBO

@@ -1,0 +1,53 @@
+<task id="AIPU2-121" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Deploy BFF API with all new R2 services</title>
+    <phase>7</phase>
+    <tags>deploy, bff-api</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-120</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Deploy the updated BFF API to the dev App Service with all R2 services active: capability
+    router, safety pipeline, session persistence (Cosmos), conversation history, audit logging,
+    and feedback collection. This is a standard deploy via Deploy-BffApi.ps1. After deployment,
+    verify that the health check passes, new endpoints respond correctly, and the safety services
+    (Azure Content Safety, groundedness check) connect successfully. Cosmos DB must be deployed
+    first (AIPU2-120).
+  </prompt>
+  <role>DevOps engineer following the bff-deploy skill procedure.</role>
+  <goal>
+    BFF API is deployed to spe-api-dev-67e2xz with all R2 services operational. Health check
+    returns 200. New R2 endpoints (/api/session, /api/audit, /api/feedback, /api/ai/route)
+    respond correctly. Safety services connect to Azure Content Safety API. No regressions
+    on existing R1 endpoints.
+  </goal>
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Load the bff-deploy skill and follow its pre-deployment checklist: verify all R2 tests pass (dotnet test), verify no pending migrations, confirm appsettings are updated with Cosmos DB endpoint and container names from AIPU2-120.</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ in Release configuration and confirm build succeeds with no errors or warnings.</step>
+    <step>Run dotnet publish to produce the deployment artifact. Verify the publish output includes all new R2 service assemblies.</step>
+    <step>Execute scripts/Deploy-BffApi.ps1 targeting the dev environment (spe-api-dev-67e2xz). Monitor deployment progress and capture output log.</step>
+    <step>Verify health check: GET https://spe-api-dev-67e2xz.azurewebsites.net/healthz returns 200 OK with all components healthy (including new Cosmos DB health probe).</step>
+    <step>Verify new R2 endpoints: (a) POST /api/session/create returns 201; (b) GET /api/ai/route with a simple message returns a routing decision; (c) POST /api/feedback returns 200; (d) GET /api/audit/recent returns audit entries.</step>
+    <step>Verify safety service connectivity: check Application Insights or logs for successful Azure Content Safety API handshake. Confirm no authentication errors for safety service Managed Identity access.</step>
+    <step>Run a smoke test of existing R1 endpoints: document search, file operations, etc. Confirm no regressions.</step>
+    <step>Record deployment details in notes/deploy-bff-api-log.md: deployment time, version, endpoint verification results.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>BFF API deploys successfully to spe-api-dev-67e2xz with no deployment errors.</criterion>
+    <criterion>GET /healthz returns 200 with all components healthy including Cosmos DB.</criterion>
+    <criterion>All four new R2 endpoints respond correctly (session, routing, feedback, audit).</criterion>
+    <criterion>Safety services connect successfully to Azure Content Safety API — no authentication errors.</criterion>
+    <criterion>Existing R1 endpoints continue to work — no regressions detected in smoke test.</criterion>
+    <criterion>Deployment log written to notes/deploy-bff-api-log.md.</criterion>
+  </acceptance-criteria>
+</task>

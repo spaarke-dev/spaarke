@@ -1,0 +1,48 @@
+<task id="AIPU2-060" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Full ISprkAgent Implementation + DirectOpenAiAgent</title>
+    <phase>3</phase>
+    <tags>bff-api, ai, architecture</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-008, AIPU2-015</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Define the ISprkAgent interface and implement DirectOpenAiAgent so that all R2 chat flows route
+    through a single, well-typed agent abstraction. R1 used ad-hoc service calls scattered across
+    ChatEndpoints; R2 requires every chat turn to go through ISprkAgent so that the factory, router,
+    and safety pipeline all have a stable seam to attach to. DirectOpenAiAgent wraps the Azure OpenAI
+    Responses SDK call (established in AIPU2-008) and exposes the streaming result as an
+    IAsyncEnumerable of SseEvent. AIPU2-015 (CapabilityRouter) provides the tool list injected per
+    turn; this task binds the two together at the interface level.
+  </prompt>
+  <role>Senior .NET developer with Azure OpenAI SDK and streaming API experience.</role>
+  <goal>
+    All R2 chat flows use DirectOpenAiAgent via the ISprkAgent interface. The interface compiles,
+    DirectOpenAiAgent passes unit tests for streaming output, and no chat endpoint calls the Azure
+    OpenAI SDK directly without going through ISprkAgent.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SprkChatAgentFactory.cs and ADR-013 to understand the current agent creation pattern and constraints.</step>
+    <step>Define ISprkAgent interface in Services/Ai/Chat/ISprkAgent.cs with methods: ExecuteTurnAsync(ChatTurnRequest, IReadOnlyList&lt;AiTool&gt;, CancellationToken) returning IAsyncEnumerable&lt;SseEvent&gt;, and GetAgentMetadata() returning AgentMetadata record.</step>
+    <step>Create DirectOpenAiAgent.cs implementing ISprkAgent, wrapping the Azure OpenAI Responses SDK streaming call established in AIPU2-008.</step>
+    <step>Ensure DirectOpenAiAgent accepts injected IReadOnlyList&lt;AiTool&gt; per turn (not a static list) so AIPU2-061 can later drive tool selection via CapabilityRouter.</step>
+    <step>Register ISprkAgent and DirectOpenAiAgent in DI (Program.cs or the AI service registration extension).</step>
+    <step>Write unit tests covering: streaming tokens emitted in order, cancellation token respected, empty tool list handled gracefully.</step>
+    <step>Verify no ChatEndpoints code calls the Azure OpenAI SDK client directly — all calls must go through ISprkAgent.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ISprkAgent interface exists in Services/Ai/Chat/ and compiles cleanly.</criterion>
+    <criterion>DirectOpenAiAgent implements ISprkAgent and is registered in DI.</criterion>
+    <criterion>Unit tests for DirectOpenAiAgent pass (streaming, cancellation, empty tools).</criterion>
+    <criterion>No direct Azure OpenAI SDK calls remain in ChatEndpoints — all routed via ISprkAgent.</criterion>
+    <criterion>ADR-013 constraints are not violated (AI Tool Framework; extend BFF, not separate service).</criterion>
+  </acceptance-criteria>
+</task>

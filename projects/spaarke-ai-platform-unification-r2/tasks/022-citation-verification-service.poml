@@ -1,0 +1,54 @@
+<task id="AIPU2-022" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build CitationVerificationService with IVerificationProvider Interface</title>
+    <phase>2B</phase>
+    <tags>bff-api, ai-safety, citations</tags>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build the CitationVerificationService and its IVerificationProvider abstraction. The service extracts
+    legal citations from AI-generated text using regex patterns, classifies each citation by type (case law,
+    statute, patent, SEC filing, regulation), and routes it to the appropriate provider for verification.
+    This is the backbone of FR-403 (citation verification as a multi-provider capability). The interface
+    must be extensible so new providers (CourtListener, USPTO, EDGAR, eCFR, etc.) can be registered without
+    changing the core service.
+  </prompt>
+  <role>Senior .NET backend engineer with knowledge of legal citation formats and Spaarke AI tool patterns.</role>
+  <goal>
+    CitationVerificationService correctly extracts and type-classifies citations from LLM output text using
+    regex, and routes each to its registered IVerificationProvider. Provider routing is fully covered by tests.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read spec.md section FR-403 for the full citation verification requirements and provider list.</step>
+    <step>Create CitationType.cs enum: CaseLaw, Statute, Patent, SecFiling, Regulation, Unknown.</step>
+    <step>Create Citation.cs record: RawText (string), CitationType (CitationType), NormalizedKey (string — canonical identifier, e.g. "410 U.S. 113" or "35 U.S.C. § 101").</step>
+    <step>Create CitationVerificationResult.cs record: Citation (Citation), IsVerified (bool), ConfidenceScore (float 0-1), SourceUrl (string?), VerifiedText (string?), VerificationProvider (string), LatencyMs (double).</step>
+    <step>Create IVerificationProvider.cs interface with: string ProviderName { get; }, IReadOnlyList&lt;CitationType&gt; SupportedTypes { get; }, Task&lt;CitationVerificationResult&gt; VerifyAsync(Citation citation, CancellationToken ct), Task&lt;IReadOnlyList&lt;Citation&gt;&gt; SearchAsync(string query, CancellationToken ct), Task&lt;string?&gt; GetFullTextAsync(Citation citation, CancellationToken ct).</step>
+    <step>Create ICitationVerificationService.cs interface with: Task&lt;IReadOnlyList&lt;Citation&gt;&gt; ExtractAsync(string text), Task&lt;IReadOnlyList&lt;CitationVerificationResult&gt;&gt; VerifyAllAsync(string text, CancellationToken ct).</step>
+    <step>Create CitationExtractor.cs with regex patterns for each CitationType: case law (e.g. \d+ [A-Z]\.\w+\.?\w*\.? \d+), statute (e.g. \d+ U\.S\.C\.?\s+§\s+\d+), patent (e.g. U\.S\. Patent No\.?\s+[\d,]+), SEC (e.g. \d+-[A-Z]), regulation (e.g. \d+ C\.F\.R\.?\s+§\s+\d+). Extract, normalize, and classify each match.</step>
+    <step>Create CitationVerificationService.cs implementing ICitationVerificationService. Inject IEnumerable&lt;IVerificationProvider&gt; (all registered providers). In VerifyAllAsync: extract citations, for each citation find the first registered provider that supports its type, call VerifyAsync, collect results. Unknown citations → CitationVerificationResult with IsVerified=false, VerificationProvider="none".</step>
+    <step>Register ICitationVerificationService (singleton) and all IVerificationProvider implementations in AddAiSafetyModule().</step>
+    <step>Write unit tests for CitationExtractor: each regex pattern matches expected citations, does not match noise. Write unit tests for CitationVerificationService: correct provider selected per type, unknown type returns unverified result, provider exception handled gracefully.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "Citation"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>CitationExtractor regex correctly identifies all five citation types in test strings.</criterion>
+    <criterion>CitationExtractor normalizes raw text to a canonical NormalizedKey for each type.</criterion>
+    <criterion>IVerificationProvider interface supports all three operations: VerifyAsync, SearchAsync, GetFullTextAsync.</criterion>
+    <criterion>CitationVerificationService routes each citation to the first provider supporting its CitationType.</criterion>
+    <criterion>Citations with no supporting provider return IsVerified=false (not an exception).</criterion>
+    <criterion>Provider exceptions are caught per-citation and result in IsVerified=false with error noted.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "Citation"`.</criterion>
+    <criterion>Build succeeds with no new warnings.</criterion>
+  </acceptance-criteria>
+</task>

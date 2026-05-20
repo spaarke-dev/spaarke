@@ -1,0 +1,50 @@
+<task id="AIPU2-124" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Update architecture and guide documentation</title>
+    <phase>7</phase>
+    <tags>documentation</tags>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-123</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Update the key architecture and deployment documentation to reflect the R2 state of the
+    system. The AI architecture, chat architecture, deployment guide, and Azure resource
+    inventory all need to be updated to include R2 additions: the three-pane shell, capability
+    router, safety pipeline, Cosmos DB persistence, session restore, and feedback collection.
+    Per CLAUDE.md audit stamp convention, all updated files should carry the 2026-05-17 review
+    date. Only update what has changed — do not rewrite stable sections.
+  </prompt>
+  <role>Technical writer with knowledge of the Spaarke architecture and documentation conventions.</role>
+  <goal>
+    Four documentation files are updated to accurately reflect R2 additions. Each updated file
+    carries the current date audit stamp. No stable R1 content is incorrectly modified or
+    removed. A documentation update log is written to notes/documentation-updates-log.md.
+  </goal>
+  <knowledge>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Update docs/architecture/AI-ARCHITECTURE.md: add sections for (a) Capability Router (Layer 1/2/3 description), (b) Safety Pipeline (prompt shields, groundedness, citation verification, privilege filter), (c) Cosmos DB persistence (session, message, audit containers), (d) Feedback Collection. Update the component table and system diagram description. Update Last Reviewed stamp to 2026-05-17.</step>
+    <step>Update docs/architecture/chat-architecture.md: add (a) ConversationPane as the R2 chat host (replacing direct SprkChat mounting), (b) PaneEventBus cross-pane communication, (c) new SSE event types added in R2, (d) three-pane lifecycle stages. Update Last Reviewed stamp to 2026-05-17.</step>
+    <step>Update docs/guides/AI-DEPLOYMENT-GUIDE.md: add deployment steps for (a) Cosmos DB infrastructure (AIPU2-120 procedure), (b) new BFF API services configuration (appsettings keys for Cosmos, Content Safety), (c) SpaarkeAi web resource deployment (Deploy-SpaarkeAi.ps1). Update Last Reviewed stamp to 2026-05-17.</step>
+    <step>Update docs/architecture/auth-azure-resources.md: add Cosmos DB account entry with endpoint, database name, container list, and RBAC assignment. Update Last Reviewed stamp to 2026-05-17.</step>
+    <step>Cross-check each updated document against the design.md and production-verification-report.md to ensure accuracy. No speculative or unimplemented features should appear in architecture docs.</step>
+    <step>Write notes/documentation-updates-log.md: list each file updated, sections changed, and rationale. Flag any documentation debt (things not updated that should be in a future pass).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>AI-ARCHITECTURE.md includes capability router, safety pipeline, Cosmos persistence, and feedback sections with Last Reviewed: 2026-05-17.</criterion>
+    <criterion>chat-architecture.md includes ConversationPane, PaneEventBus, new SSE events, and lifecycle stages with Last Reviewed: 2026-05-17.</criterion>
+    <criterion>AI-DEPLOYMENT-GUIDE.md includes Cosmos DB, new BFF API config, and SpaarkeAi deployment steps with Last Reviewed: 2026-05-17.</criterion>
+    <criterion>auth-azure-resources.md includes Cosmos DB entry with endpoint, database, containers, and RBAC with Last Reviewed: 2026-05-17.</criterion>
+    <criterion>No speculative or unimplemented features are described as implemented in any updated document.</criterion>
+    <criterion>Documentation update log written to notes/documentation-updates-log.md.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,50 @@
+<task id="AIPU2-070" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Create @spaarke/ai-widgets Package Scaffold</title>
+    <phase>4A</phase>
+    <tags>frontend, package, widgets</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    R2 introduces a new @spaarke/ai-widgets package that will house all WorkspaceWidgets and
+    ContextWidgets for the three-pane shell. R1's output and source widgets lived directly in
+    Spaarke.AI.Outputs with no clear separation from the output-registry. R2 separates the
+    widget library into its own package so it can be versioned independently, consumed by both
+    the SpaarkeAi solution and future host applications, and built without pulling in the entire
+    AI context provider. Scaffold the package with correct build config, dependency declarations,
+    and a barrel export before any widget code is written.
+  </prompt>
+  <role>Frontend developer with React 19, TypeScript, and npm package authoring experience.</role>
+  <goal>
+    The @spaarke/ai-widgets package builds successfully and exports its (initially empty) type
+    barrel. It is correctly referenced by the SpaarkeAi solution. No widget implementations are
+    required in this task.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/shared/Spaarke.AI.Outputs/package.json</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-012, ADR-021, and Spaarke.AI.Outputs/package.json to understand naming conventions, peer dependency requirements (Fluent v9, React version), and build tool patterns used in existing shared packages.</step>
+    <step>Create directory src/client/shared/Spaarke.AI.Widgets/ with the following structure: package.json, tsconfig.json, vite.config.ts (or equivalent build config matching the pattern in Spaarke.AI.Outputs), src/index.ts (barrel export, initially empty).</step>
+    <step>Set package name to @spaarke/ai-widgets in package.json; declare peerDependencies for react, react-dom, and @fluentui/react-components matching versions used in Spaarke.AI.Outputs.</step>
+    <step>Add @spaarke/ui-components as a regular dependency (not peer) following ADR-012 shared component reuse requirement.</step>
+    <step>Configure tsconfig.json to extend the root tsconfig and output declarations to dist/types/.</step>
+    <step>Add the package to the SpaarkeAi solution's package.json as a workspace dependency so it can import from @spaarke/ai-widgets.</step>
+    <step>Run the build (npm run build in the new package directory) and verify it completes without errors and produces a dist/ folder.</step>
+    <step>Verify the SpaarkeAi solution resolves the @spaarke/ai-widgets import without errors (import {} from '@spaarke/ai-widgets' in a test file).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>src/client/shared/Spaarke.AI.Widgets/ exists with package.json, tsconfig.json, build config, and src/index.ts.</criterion>
+    <criterion>npm run build in Spaarke.AI.Widgets completes without errors and produces dist/.</criterion>
+    <criterion>@spaarke/ai-widgets is resolvable from the SpaarkeAi solution (workspace dependency configured).</criterion>
+    <criterion>Package follows ADR-012 (reuse @spaarke/ui-components) and ADR-021 (Fluent v9 peer dependency) constraints.</criterion>
+    <criterion>No widget implementations are added — this task is scaffold only.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,53 @@
+<task id="AIPU2-106" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>End-to-end session restore (Cosmos -> widgets -> panes)</title>
+    <phase>5</phase>
+    <tags>frontend, integration, session</tags>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-031, AIPU2-080, AIPU2-081</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Wire the full session restore flow end-to-end: the frontend calls the SessionRestoreService
+    endpoint (AIPU2-031), receives serialized session state from Cosmos DB, and uses it to
+    reconstruct the workspace tabs (with data-refreshed widget content), context pane widget,
+    and conversation pane (summary + last 10 messages). The total restore must complete in
+    under 500ms. This is the capstone integration for the persistence layer (Phase 3) and
+    the widget layer (Phase 4).
+  </prompt>
+  <role>Full-stack developer with experience in React state initialization and .NET Minimal API integration.</role>
+  <goal>
+    On page load with a sessionId parameter, the frontend calls SessionRestoreService, receives
+    the serialized session, and fully reconstructs all three panes with current data (not stale
+    snapshots). Total restore time (Cosmos read + summary + widget restore) is p95 under 500ms
+    in a loaded dev environment.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/Shell</file>
+      <file>src/solutions/SpaarkeAi/src/components/WorkspacePane</file>
+      <file>src/solutions/SpaarkeAi/src/components/ConversationPane</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Session</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Add session restore bootstrap in SpaarkeAi main.tsx: read sessionId from URL params; if present, call GET /api/session/{sessionId}/restore before rendering the shell.</step>
+    <step>Define the restore response schema: { sessionId, playbookId, stage, workspaceWidgets: WidgetRestoreSpec[], contextWidgetType, conversationSummary, recentMessages: Message[] }.</step>
+    <step>In ThreePaneShell, add restoreSession(restoreSpec) method: set stage from spec, initialize WorkspacePaneController with workspaceWidgets, initialize ContextPaneController with contextWidgetType, initialize ConversationPane with conversationSummary and recentMessages.</step>
+    <step>Implement data-refresh in each widget restore: widget receives its serialized identifiers (documentId, searchQuery, etc.), re-fetches current data from BFF API, and renders fresh content (not the snapshot text).</step>
+    <step>Implement conversation restore: render conversationSummary as a collapsed "Previous conversation" block at the top of the message list, then render recentMessages below it.</step>
+    <step>Instrument restore timing: log timestamp at (a) restore request start, (b) Cosmos read complete (server-side), (c) frontend render complete. Assert p95 total end-to-end under 500ms.</step>
+    <step>Handle restore failure gracefully: if SessionRestoreService returns 404, render Stage 1 (Landing) as a fallback with a toast notification.</step>
+    <step>Test with a session containing 25+ messages and 3 workspace widgets. Measure restore time, verify data-freshness of widget content, verify conversation summary and last 10 messages appear.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Navigating to SpaarkeAi with a sessionId param triggers the restore flow before first render.</criterion>
+    <criterion>All three panes restore to their serialized configuration: workspace tabs, context widget, conversation.</criterion>
+    <criterion>Widget content is data-refreshed from BFF API (not stale snapshot text) after restore.</criterion>
+    <criterion>Conversation restore shows summary block + last 10 messages in correct order.</criterion>
+    <criterion>p95 restore time (Cosmos read + render) is under 500ms measured in dev environment.</criterion>
+    <criterion>Restore failure (404) falls back gracefully to Stage 1 Landing with a toast notification.</criterion>
+  </acceptance-criteria>
+</task>

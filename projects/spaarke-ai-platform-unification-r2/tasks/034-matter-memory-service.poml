@@ -1,0 +1,53 @@
+<task id="AIPU2-034" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build MatterMemoryService (persistent per-matter structured facts)</title>
+    <phase>2C</phase>
+    <tags>bff-api, cosmos-db, memory</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>AIPU2-002, AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a MatterMemoryService that stores and retrieves structured, persistent facts about
+    legal matters across sessions. When a user returns to a matter, the AI should "remember"
+    parties, key dates, prior analyses, and other structured facts without requiring the user
+    to re-establish context. Memory is stored in a dedicated Cosmos DB `memory` container,
+    partitioned by tenantId/matterId. On session start, memory is loaded and injected into the
+    LLM system prompt (target: 200-500 tokens to leave room for session context). The service
+    also exposes clear and validate operations so users and admins can manage memory state.
+  </prompt>
+  <role>Senior .NET developer familiar with Cosmos DB, LLM prompt engineering, and legal domain data modelling.</role>
+  <goal>
+    Returning users see AI "remembering" matter context without re-prompting. Matter memory
+    is stored as structured JSON (not freeform text), partitioned correctly, loads in under
+    200ms, and serializes to 200-500 tokens when injected into the system prompt.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read data.md constraints to confirm Cosmos partitioning rules and data sovereignty requirements before designing the memory schema.</step>
+    <step>Create MatterMemoryService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Memory/. Define IMatterMemoryService with GetMemoryAsync(tenantId, matterId), UpdateMemoryAsync(tenantId, matterId, memory), ClearMemoryAsync(tenantId, matterId), and ToSystemPromptFragment(memory) methods.</step>
+    <step>Define MatterMemory record with structured fields: MatterId (string), TenantId (string), Parties (list of PartyRef: name, role, entityId), KeyDates (list of KeyDate: label, date, description), PriorAnalyses (list of AnalysisRef: sessionId, date, summary, conclusions), KeyFacts (list of KeyFact: category, description, confidence), LastUpdated (DateTimeOffset), Version (int for optimistic concurrency).</step>
+    <step>Implement GetMemoryAsync: read from Cosmos `memory` container by partition key (tenantId + "/" + matterId). Return null if not found (new matter, no prior memory).</step>
+    <step>Implement UpdateMemoryAsync: upsert with optimistic concurrency check (ETag). Increment Version on each write.</step>
+    <step>Implement ClearMemoryAsync: delete the document from Cosmos (this is an intentional user/admin action, not a compliance violation — document this distinction with a comment).</step>
+    <step>Implement ToSystemPromptFragment: serialize the memory to a concise, human-readable text block suitable for injection into a system prompt. Target 200-500 tokens. Use structured sections: "Parties:", "Key Dates:", "Prior Analyses:", "Key Facts:". Truncate lowest-confidence facts if over 500 tokens.</step>
+    <step>Hook GetMemoryAsync into the session initialization path in ChatSessionManager: load memory before first LLM call and prepend ToSystemPromptFragment to the system prompt.</step>
+    <step>Register MatterMemoryService in AddAiPersistenceModule.</step>
+    <step>Write unit tests: (a) get returns null for unknown matter, (b) update persists structured data, (c) system prompt fragment is 200-500 tokens for a typical memory payload, (d) optimistic concurrency version increments on update, (e) clear removes the document.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>MatterMemory stores parties, key dates, prior analyses, and key facts as structured JSON — not freeform text.</criterion>
+    <criterion>Cosmos documents are partitioned by tenantId/matterId (composite partition key).</criterion>
+    <criterion>ToSystemPromptFragment output is between 200 and 500 tokens for a typical matter with 3 parties, 5 dates, 2 analyses, and 5 facts.</criterion>
+    <criterion>GetMemoryAsync loads in under 200ms in local tests.</criterion>
+    <criterion>UpdateMemoryAsync uses ETag-based optimistic concurrency and increments Version.</criterion>
+    <criterion>ClearMemoryAsync deletes the document (intentional, documented in comments as distinct from compliance-scoped immutability).</criterion>
+    <criterion>Service registered in AddAiPersistenceModule and resolves cleanly.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

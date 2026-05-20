@@ -50,16 +50,12 @@ public class PlaybookService : IPlaybookService
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
-        var tenantId = configuration["TENANT_ID"]
-            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
-        var clientId = configuration["API_APP_ID"]
-            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["API_CLIENT_SECRET"] // Same app registration as Graph and DataverseAccessDataSource
-            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required");
 
         // IMPORTANT: BaseAddress must end with trailing slash, otherwise relative URLs replace the last segment
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
+        // App Service MI must be configured as a Dataverse Application User in target environment.
+        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

@@ -46,6 +46,10 @@ public class AiTelemetry : IDisposable
     private readonly Histogram<double> _exportDuration;
     private readonly Histogram<long> _exportFileSize;
 
+    // Privilege filter metrics (AIPU2-027)
+    private readonly Counter<long> _privilegeFilterApplied;
+    private readonly Counter<long> _privilegeFilterEmptyResult;
+
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Ai";
 
@@ -56,6 +60,17 @@ public class AiTelemetry : IDisposable
     {
         // Create meter (OpenTelemetry-compatible)
         _meter = new Meter(MeterName, "1.0.0");
+
+        // === Privilege Filter Metrics (AIPU2-027) ===
+        _privilegeFilterApplied = _meter.CreateCounter<long>(
+            name: "ai_retrieval_privilege_filter_applied_total",
+            unit: "{request}",
+            description: "Total number of RAG search requests with privilege_group_ids filter applied");
+
+        _privilegeFilterEmptyResult = _meter.CreateCounter<long>(
+            name: "ai_retrieval_privilege_filter_empty_result_total",
+            unit: "{request}",
+            description: "Total number of RAG search requests where user has no matching groups (public docs only)");
 
         // === Summarization Metrics ===
         _summarizeRequests = _meter.CreateCounter<long>(
@@ -299,6 +314,24 @@ public class AiTelemetry : IDisposable
         _ragEmbeddingDuration.Record(embeddingDurationMs, tags);
         _ragSearchDuration.Record(searchDurationMs, tags);
         _ragResultCount.Record(resultCount, tags);
+    }
+
+    /// <summary>
+    /// Record that a privilege_group_ids filter was applied to a RAG search (AIPU2-027).
+    /// </summary>
+    /// <param name="groupCount">Number of group IDs included in the filter (0 = public-only).</param>
+    public void RecordPrivilegeFilterApplied(int groupCount)
+    {
+        _privilegeFilterApplied.Add(1,
+            new KeyValuePair<string, object?>("ai.privilege_group_count", groupCount));
+    }
+
+    /// <summary>
+    /// Record that a RAG search returned zero results due to the user having no matching groups.
+    /// </summary>
+    public void RecordPrivilegeFilterEmptyResult()
+    {
+        _privilegeFilterEmptyResult.Add(1);
     }
 
     #endregion

@@ -32,6 +32,8 @@
     <PackageReference Include="OpenAI" Version="2.8.0" />
 
     <!-- Azure packages -->
+    <!-- Cosmos DB SDK v3 — AI persistence (AIPU2-030: SessionPersistenceService, AIPU2-033: AuditLogService) -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
     <!-- Azure.AI.OpenAI 2.8.0-beta.1: restores compat with OpenAI 2.8.0 (2.1.0 threw MissingMethodException on SerializedAdditionalRawData) -->
     <PackageReference Include="Azure.AI.OpenAI" Version="2.8.0-beta.1" />

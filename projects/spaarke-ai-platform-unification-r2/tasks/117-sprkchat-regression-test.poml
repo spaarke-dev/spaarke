@@ -1,0 +1,58 @@
+<task id="AIPU2-117" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>SprkChat regression test for all 23 SSE event types</title>
+    <phase>6</phase>
+    <tags>testing, regression, sprkchat</tags>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-079, AIPU2-062</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    SprkChat's SSE event handling is the core streaming UX for the entire platform. The R2
+    ConversationPane integration (AIPU2-079) and the expanded SSE event set (AIPU2-062) must
+    not have broken any of the original event types. This regression test verifies all 23 SSE
+    event types function correctly end-to-end in the R2 ConversationPane context. Each event
+    type must produce the correct UI change, including the new R2 types added during this
+    project. This is a blocking gate before deployment.
+  </prompt>
+  <role>Frontend developer with deep knowledge of the SprkChat SSE streaming protocol.</role>
+  <goal>
+    All 23 SSE event types produce the correct UI behavior in the R2 ConversationPane.
+    A test matrix documents each event type, the trigger condition, the expected UI change,
+    and the actual result. Zero regressions from R1 behavior. All new R2 event types work
+    as designed.
+  </goal>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r2/design.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/SprkChat</file>
+      <file>src/solutions/SpaarkeAi/src/components/ConversationPane</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Streaming</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Document the complete SSE event type list (23 events): token, done, error, suggestions, citations, typing_start, typing_end, plan_preview, plan_step_start, plan_step_complete, document_processing_start, document_processing_complete, document_processing_error, action_confirmation, action_success, action_error, dialog_open, navigate, document_stream_start, document_stream_token, document_stream_end, plus any new R2 event types from AIPU2-062. Confirm the count is 23.</step>
+    <step>For each event type, define: trigger condition (how to produce this event from the backend), expected SprkChat UI change, expected ConversationPane state change.</step>
+    <step>Write a mock SSE server or use existing test infrastructure to produce controlled SSE streams with specific event sequences.</step>
+    <step>Test original R1 event types (token, done, error, suggestions, citations, typing_start/end): verify each produces correct UI in the R2 ConversationPane context. These must be identical to R1 behavior.</step>
+    <step>Test plan events (plan_preview, plan_step_start, plan_step_complete): verify plan steps render correctly in the ConversationPane message thread and that step completion animates correctly.</step>
+    <step>Test document processing events: verify document_processing_start shows a progress indicator, complete hides it, error shows an inline error message.</step>
+    <step>Test action events (action_confirmation, action_success, action_error): verify confirmation prompt appears with approve/reject affordance, success dismisses it, error shows inline error.</step>
+    <step>Test navigation and dialog events (dialog_open, navigate): verify dialog_open triggers the correct dialog widget, navigate triggers workspace tab navigation.</step>
+    <step>Test document stream events (document_stream_start/token/end): verify the document streams into a workspace tab correctly with progressive rendering.</step>
+    <step>Test new R2 event types from AIPU2-062: verify each new event type produces the expected R2-specific UI behavior.</step>
+    <step>Document all 23 results in notes/sprkchat-regression-test-report.md with pass/fail per event type.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 23 SSE event types are documented with trigger condition and expected UI behavior.</criterion>
+    <criterion>All original R1 event types (token, done, error, etc.) produce identical behavior in the R2 ConversationPane.</criterion>
+    <criterion>All plan events render step-by-step progress correctly.</criterion>
+    <criterion>All document processing events show correct progress/error states.</criterion>
+    <criterion>All action events show confirmation prompts and handle approve/reject correctly.</criterion>
+    <criterion>All document stream events produce correct progressive rendering in workspace.</criterion>
+    <criterion>All new R2 event types work as designed.</criterion>
+    <criterion>Zero regressions — all 23 event types pass.</criterion>
+    <criterion>Test report written to notes/sprkchat-regression-test-report.md with per-event-type pass/fail matrix.</criterion>
+  </acceptance-criteria>
+</task>

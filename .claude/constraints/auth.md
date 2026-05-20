@@ -1,16 +1,15 @@
 # Authentication & Authorization Constraints
 
-> **Domain**: OAuth, OBO, Token Management, Access Control
-> **Source ADRs**: ADR-003, ADR-004, ADR-008, ADR-009
-> **Last Updated**: 2026-05-13
-> **Last Reviewed**: 2026-05-13
-> **Status**: Verified
+> **Domain**: OAuth, OBO, Token Management, Access Control, Server Hardening
+> **Source ADRs**: **ADR-028 (canonical — Spaarke Auth v2)**, ADR-003 (server seams), ADR-004 (OBO), ADR-008 (filters), ADR-009 (Redis caching)
+> **Last Updated**: 2026-05-19 (Spaarke Auth v2 + Hardening sign-off)
+> **Last Reviewed**: 2026-05-19
+> **Status**: Verified · v2-aligned
 >
-> **Client-side MSAL binding requirements** for internal Spaarke surfaces are in
-> [`.claude/patterns/auth/spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md) (canonical).
-> The MUST/MUST NOT rules below were updated 2026-05-13 to match. The External
-> Workspace SPA (B2B portal) is out of scope for the internal SSO binding —
-> see [`docs/architecture/external-access-spa-architecture.md`](../../docs/architecture/external-access-spa-architecture.md).
+> **Architecture**: [ADR-028 Spaarke Auth Architecture](../adr/ADR-028-spaarke-auth-architecture.md)
+> **Client-side MSAL invariants**: [`spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md) (INV-1..INV-8)
+> **New-env setup**: [`docs/guides/auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md)
+> **External Workspace SPA (B2B portal) is OUT OF SCOPE** for the internal contract — see [`docs/architecture/external-access-spa-architecture.md`](../../docs/architecture/external-access-spa-architecture.md). The External SPA legitimately uses `sessionStorage` (per-tab, multi-tenant guest isolation) and is allowed one D-AUTH-7 raw Bearer exception site.
 
 ---
 
@@ -35,13 +34,14 @@ Load when:
 - ✅ **MUST** cache OBO tokens with 55-minute TTL (5-minute buffer before expiry)
 - ✅ **MUST** hash user tokens (SHA256) before using as cache keys
 
-### Client-side MSAL (internal Spaarke surfaces; binding 2026-05-12)
+### Client-side function-based contract (Spaarke Auth v2 — ADR-028)
 
-- ✅ **MUST** use `cacheLocation: 'localStorage'` (NOT `sessionStorage`) — survives tab/browser close
-- ✅ **MUST** use `storeAuthStateInCookie: true` — required for `ssoSilent` when 3rd-party cookies are blocked
-- ✅ **MUST** use tenant-specific authority `https://login.microsoftonline.com/{tenantId}` resolved from `Xrm.Utility.getGlobalContext().organizationSettings.tenantId` via frame-walk. Prefer omitting `authority` so `@spaarke/auth` resolves it via `resolveTenantFromXrm()`.
-- ✅ **MUST** route token acquisition through `SpaarkeAuthProvider`'s 6-strategy chain (Cache → SessionStorage → Bridge → Xrm → MsalSilent → MsalPopup). See [`spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md).
-- ✅ **MUST** rebuild AND redeploy every consumer of `@spaarke/auth` when the library changes — bundles are NOT auto-updated.
+- ✅ **MUST** use `useAuth()` (React) or `authenticatedFetch` (non-React) from `@spaarke/auth` — NEVER snapshot the token in component state
+- ✅ **MUST** call `getAccessToken()` per-request (NOT once) when a raw token is needed (SSE/XHR D-AUTH-7 exception sites only) — fresh acquisition routes through MSAL's own cache
+- ✅ **MUST** preserve INV-1..INV-8 MSAL configuration invariants — see [`spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md)
+- ✅ **MUST** resolve tenant via `sprk_TenantId` env var (primary) → Xrm frame-walk (fallback); prefer omitting `authority` so `@spaarke/auth` builds it from the tenant
+- ✅ **MUST** rebuild AND redeploy every consumer of `@spaarke/auth` when the library version changes — INV-8 (Bundling Reality). A missed consumer is the popup-firing component.
+- ✅ **MUST** when adding a NEW consumer with a local `authInit.ts` that exports an async `getTenantId`, use import alias on the runtimeConfig import (`getTenantId as getRuntimeTenantId`) to avoid silent runtime name collision. See memory `feedback-name-collision-in-consumer-authinit`.
 
 ### Authorization Architecture (ADR-003)
 
@@ -61,13 +61,16 @@ Load when:
 - ❌ **MUST NOT** skip MSAL initialization step in MSAL v3+
 - ❌ **MUST NOT** use friendly scope names (use `api://{GUID}/scope` format)
 
-### Client-side MSAL (internal Spaarke surfaces)
+### Client-side (Spaarke Auth v2 — ADR-028)
 
-- ❌ **MUST NOT** use `sessionStorage` for the MSAL cache on internal surfaces (it wipes on tab close → popup every new tab)
-- ❌ **MUST NOT** set `storeAuthStateInCookie: false` — needed for `ssoSilent` under 3rd-party cookie blocking
-- ❌ **MUST NOT** use `/organizations` or `/common` as the MSAL authority — `ssoSilent` can't resolve which tenant's session to use inside iframes. Always tenant-specific from Xrm
-- ❌ **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` — every component must reuse `getAuthProvider()`
-- ❌ **MUST NOT** initialize MSAL in child iframes without first checking the parent token bridge (`window.parent.__SPAARKE_BFF_TOKEN__`)
+- ❌ **MUST NOT** add `accessToken: string` or `token: string` props/fields anywhere in Spaarke code — the root-cause snapshot pattern v2 eliminates. Exception: third-party SDK contracts (Power BI `IReportEmbedConfiguration`, MSAL result objects) — these are NOT Spaarke BFF tokens. See memory `feedback-third-party-sdk-accesstoken-is-ok`.
+- ❌ **MUST NOT** use `useState`/`useEffect` to snapshot a token in React state — the 401-after-refresh bug
+- ❌ **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals. Use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA. Each MUST carry `// Auth v2 (D-AUTH-7):` justification comment.
+- ❌ **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` — all deleted in v2
+- ❌ **MUST NOT** use `sessionStorage` for the MSAL cache on internal surfaces (INV-1 violation; popup every new tab)
+- ❌ **MUST NOT** set `storeAuthStateInCookie: false` (INV-2 violation)
+- ❌ **MUST NOT** use `/organizations` or `/common` as the MSAL authority on internal surfaces (INV-3 violation)
+- ❌ **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` — every component must reuse `getAuthProvider()` (INV-7)
 
 ### Authorization Architecture (ADR-003)
 
@@ -76,18 +79,31 @@ Load when:
 - ❌ **MUST NOT** cache authorization decisions (cache data only)
 - ❌ **MUST NOT** reuse UAC snapshots across requests/jobs
 
-### @spaarke/auth Shared Library (Code Pages)
+### @spaarke/auth Shared Library
 
-- ✅ **MUST** use `@spaarke/auth` (`resolveRuntimeConfig`, `initAuth`, `authenticatedFetch`) for all new Code Pages that call BFF endpoints
-- ✅ **MUST** call `resolveRuntimeConfig()` + `setRuntimeConfig()` before rendering the React app
-- ✅ **MUST** import `authenticatedFetch` from `authInit.ts` (workspace) or `@spaarke/auth` (standalone wizards)
+- ✅ **MUST** use `@spaarke/auth` (`useAuth`, `authenticatedFetch`, `initAuth`, `resolveRuntimeConfig`, `buildBffApiUrl`) for all Code Pages + PCFs + React components that call BFF endpoints
+- ✅ **MUST** call `initAuth()` once before rendering the React app (typically in `main.tsx` / `App.tsx`)
 - ✅ **MUST** use lazy functions (not module-level constants) for any value derived from runtime config
+- ✅ **MUST** when a consumer's `authInit.ts` re-exports an async `getTenantId`, use import alias on runtimeConfig (`getTenantId as getRuntimeTenantId`) — see memory `feedback-name-collision-in-consumer-authinit`
 - ❌ **MUST NOT** use module-level `const X = getMsalClientId()` or `const X = getBffBaseUrl()` — these throw before bootstrap
-- ❌ **MUST NOT** import `authenticatedFetch` from legacy `bffAuthProvider.ts` in new code
+- ❌ **MUST NOT** import auth helpers from legacy `bffAuthProvider.ts` (deleted in v2 task 031)
 - ❌ **MUST NOT** add `@spaarke/auth` bootstrap to Code Pages that only use `Xrm.WebApi` (unnecessary overhead)
 - ❌ **MUST NOT** create new `msalConfig.ts` files with module-level MSAL configuration constants
 
-> See: `.claude/patterns/auth/spaarke-auth-initialization.md` and `.claude/patterns/auth/xrm-webapi-vs-bff-auth.md`
+> See: [`.claude/patterns/auth/spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md), [`xrm-webapi-vs-bff-auth.md`](../patterns/auth/xrm-webapi-vs-bff-auth.md), [`.claude/archive/2026-05-19/`](../archive/2026-05-19/) (retired pre-v2 docs)
+
+### Server hardening (Spaarke Auth v2 Phase C — ADR-028)
+
+- ✅ **MUST** use `Microsoft.Identity.Web`'s `AddMicrosoftIdentityWebApi` for inbound JWT validation (BFF + any new .NET API service)
+- ✅ **MUST** use `DefaultAzureCredential` (managed identity) for ALL server outbound auth — Graph app-only, Dataverse service identity, Cosmos, Key Vault, AI Search, Service Bus. Exception: per-tenant SpeAdmin container-type ops (per-customer secrets from Key Vault) + OBO flow (OAuth spec requires confidential client + secret).
+- ✅ **MUST** validate inbound webhooks via HMAC-SHA256 — fail-closed if signing key is null/empty (Communication + Email Service Endpoint webhooks)
+- ✅ **MUST** route admin + bulk API key endpoints through named `AuthenticationHandler<>` schemes (`AuthSchemes.BuilderAdminApiKey`, `AuthSchemes.RagApiKey`); use `CryptographicOperations.FixedTimeEquals` for compare
+- ✅ **MUST** guard `PostConfigure<JwtBearerOptions>` with `Interlocked.CompareExchange<int>` (or equivalent) to prevent double-application + handler stacking
+- ✅ **MUST** enrich every authenticated server log with `oid`, `appid`, `obo`, `tenantId`, `correlationId` via `ILogger.BeginScope` — see `AuditEnrichmentMiddleware`
+- ✅ **MUST** apply rate-limit policies to anonymous + API-key endpoints — webhook-graph (sliding 600/min IP-keyed), api-key-* (auth_scheme-keyed)
+- ❌ **MUST NOT** add `/debug/*` endpoints on the BFF — all 11 removed in Phase C task 043
+- ❌ **MUST NOT** add plaintext secrets to `appsettings*.json` — Key Vault references only in production; dev OK with plain values (per project's risk tier)
+- ❌ **MUST NOT** use `TenantId: "common"` in appsettings — always tenant-specific; templates use `#{TENANT_ID}#` placeholder for CI/CD substitution
 
 ### BFF Base URL Convention (CRITICAL — Use `buildBffApiUrl()` Helper)
 
@@ -194,8 +210,8 @@ Examples:
 - [OAuth Scopes](../patterns/auth/oauth-scopes.md) - Scope format and configuration
 - [OBO Flow](../patterns/auth/obo-flow.md) - On-Behalf-Of token exchange
 - [Token Caching](../patterns/auth/token-caching.md) - Server & client token caching
-- [MSAL Client](../patterns/auth/msal-client.md) - Client-side MSAL patterns
-- [Spaarke Auth Initialization](../patterns/auth/spaarke-auth-initialization.md) - Bootstrap order in Code Pages
+- [MSAL Client](../patterns/auth/DEPRECATED-msal-client.md) — ⛔ DEPRECATED, superseded by Spaarke Auth v2 (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md))
+- [Spaarke Auth Initialization](../patterns/auth/DEPRECATED-spaarke-auth-initialization.md) — ⛔ DEPRECATED, bootstrap superseded by `useAuth()` (see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md))
 - [Xrm WebApi vs BFF Auth](../patterns/auth/xrm-webapi-vs-bff-auth.md) - Decision matrix
 
 ---

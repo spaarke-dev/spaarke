@@ -1,0 +1,114 @@
+<task id="AUTHV2-028" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Verify + rebuild all PCFs against @spaarke/auth v2</title>
+    <phase>B — Consumer migration</phase>
+    <tags>auth, pcf, STANDARD</tags>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>Phase A</dependencies>
+    <parallel-safe>B-Parallel-2</parallel-safe>
+  </metadata>
+  <prompt>PCFs (UniversalDatasetGrid, UniversalQuickCreate, SpeDocumentViewer, others) already use @spaarke/auth correctly per audit. Verify no compile errors from v2 library changes, rebuild + redeploy each. Critical for INV-8 (bundling reality).</prompt>
+  <role>PCF deployment engineer.</role>
+  <goal>Every PCF rebuilt against @spaarke/auth v2 and redeployed. No PCF stays on old library (would cause popup regression).</goal>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/UniversalDatasetGrid/</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+      <file>src/client/pcf/SpeDocumentViewer/</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md (deploy procedure)</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>List all PCFs in src/client/pcf/. For each: run npm run build:prod (NOT npm run build — see CLAUDE.md AP-1).</step>
+    <step>If any fail compile, fix usage to match v2 API (likely just import path changes).</step>
+    <step>Run pcf-deploy skill for each PCF to push solution ZIP to Dataverse dev environment.</step>
+    <step>Verify in browser that each PCF loads without popup (MSAL regression check).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Every PCF builds with npm run build:prod (production mode).</criterion>
+    <criterion>Every PCF deployed to dev Dataverse environment.</criterion>
+    <criterion>MSAL regression test passes on each PCF.</criterion>
+    <criterion>No PCF references the OLD @spaarke/auth API.</criterion>
+  </acceptance-criteria>
+  <notes>
+Completed 2026-05-19 by sub-agent (main-session-coordinated parallel wave). Build-only verification, no deploys (per user instruction — manual MSAL regression test is per-deploy, not per-PCF).
+
+## Scope discovery (correction vs POML prompt)
+
+Grep across src/client/pcf/* showed SIX active PCFs depend on @spaarke/auth (not three as POML suggested):
+- UniversalDatasetGrid (was in POML)
+- SpeDocumentViewer (was in POML)
+- SemanticSearchControl (NEW — found via grep)
+- RelatedDocumentCount (NEW — found via grep)
+- EmailProcessingMonitor (NEW — found via grep)
+- DocumentRelationshipViewer (NEW — found via grep)
+
+UniversalQuickCreate (in POML) does NOT depend on @spaarke/auth — uses raw @azure/msal-browser. Out of scope for this task; would need full Phase B migration to enter v2.
+
+## v2 cleanliness audit (per-PCF source review)
+
+| PCF | authInit.ts | Removed v1 symbols? | Bearer ${...} literals? | accessToken/token: string props? |
+|---|---|---|---|---|
+| UniversalDatasetGrid | Clean (initAuth + getAuthProvider) | None | Services use `Bearer ${token}` w/ getAccessToken() — uses @spaarke/auth provider, not removed symbols | Pre-existing types/auth.ts file with `AuthToken.accessToken: string` (legacy MSAL adapter type, not in current data flow) |
+| SpeDocumentViewer | Clean (initAuth) | None | BffClient uses authenticatedFetch (clean) | Pre-existing dead-code: hooks/useDocumentPreview.ts and useCheckoutFlow.ts still accept `accessToken: string` param (marked DEPRECATED, no longer used by host). AuthService.ts marked @deprecated. Dead-code cleanup recommended in future pass. |
+| SemanticSearchControl | Clean (initAuth) | None | Uses @spaarke/auth | Clean |
+| RelatedDocumentCount | Clean (initAuth + resolveTenantFromXrm comments) | None | Uses @spaarke/auth | Clean |
+| EmailProcessingMonitor | Clean (initAuth) | None | Uses @spaarke/auth | Clean |
+| DocumentRelationshipViewer | Has `authority: https://login.microsoftonline.com/${tenantId}` (other consumers comment this out per MSAL popup regression fix from 2026-05-13) | None | Uses @spaarke/auth | types/auth.ts has legacy `accessToken: string` type (not in active data flow) |
+
+**No source-code migration required.** All 6 PCFs were already on the v2 contract (function-based, no v1 strategy symbols). Residual pre-existing dead code (deprecated AuthService.ts, accessToken prop fields) is NOT auth-flow-active and is out of task 028 scope.
+
+## Build infrastructure fixes (necessary to run build:prod cleanly)
+
+Applied 3 minimal package.json fixes that this task surfaced:
+1. **EmailProcessingMonitor/package.json**: added `"build:prod": "pcf-scripts build --buildMode production"` (was missing — would have shipped dev-mode bundle, per AP-1 failure mode)
+2. **DocumentRelationshipViewer/package.json**: same fix (was missing build:prod)
+3. **UniversalDatasetGrid/package.json**: added `eslint: ^8.57.1` to devDependencies (pcf-scripts peer-dep was unsatisfied; npm install failed without --legacy-peer-deps AND `Cannot find module 'eslint'` at build time; all other 5 PCFs declare eslint directly)
+
+These are infrastructure-level fixes, not auth changes.
+
+Also: `@spaarke/ui-components/dist/` did not exist when starting; built with selective tsc (per pcf-deploy SKILL.md Step 1.5) using `--strict false` because of pre-existing TypeScript errors in SprkChat/*.tsx (concurrent task 023 territory — will resolve when 023 ships). All 1196 dist files emitted; all PCF-required modules (themeStorage, logger, MiniGraph, RelationshipCountCard, FindSimilarDialog, RecordCardShell, AiSummaryPopover, SendEmailDialog, DocumentEmailWizard, types/*) verified present.
+
+## Build results — all 6 SUCCEEDED
+
+`npm run build:prod` ran successfully for all 6 PCFs. Bundle sizes within expected 400-600 KB range (per pcf-deploy SKILL.md "Expected bundle sizes after build:prod"):
+
+| PCF | Manifest version | bundle.js size | bundle path | v1-symbols-in-bundle |
+|---|---|---|---|---|
+| UniversalDatasetGrid | 2.3.0 | 419 KB (429,895 B) | `out/controls/control/bundle.js` | None (BridgeStrategy / XrmStrategy / tokenBridge absent) |
+| SpeDocumentViewer | 1.0.25 | 414 KB (423,803 B) | `out/controls/control/bundle.js` | None |
+| SemanticSearchControl | 1.1.41 | 510 KB (522,051 B) | `out/controls/SemanticSearchControl/bundle.js` | None |
+| RelatedDocumentCount | 1.21.2 | 406 KB (415,612 B) | `out/controls/RelatedDocumentCount/bundle.js` | None |
+| EmailProcessingMonitor | 1.1.0 | 392 KB (401,057 B) | `out/controls/control/bundle.js` | None |
+| DocumentRelationshipViewer | 1.0.35 | 573 KB (586,317 B) | `out/controls/DocumentRelationshipViewer/bundle.js` | None |
+
+All bundles timestamped 2026-05-19 11:27-11:28 (fresh production builds).
+All bundles verified clean against `BridgeStrategy|XrmStrategy|tokenBridge` greps.
+All consume @spaarke/auth v2.0.0 (verified via `node_modules/@spaarke/auth/dist/version.js` = `VERSION = '2.0.0'`).
+
+## NOT done (per user instruction)
+
+- No `pac solution import` / deployment — user reserves the manual MSAL regression test as a per-deploy gate; PCF deploys staged 1-at-a-time, not as a wave.
+- No PCF version bumps — would be required if deploying; deferred to per-deploy task.
+- No commits — user said "main session commits the wave together."
+
+## Files changed (work-tree only)
+
+- `src/client/pcf/UniversalDatasetGrid/package.json` (+1 line eslint devDep)
+- `src/client/pcf/UniversalDatasetGrid/package-lock.json` (regenerated)
+- `src/client/pcf/EmailProcessingMonitor/package.json` (+1 line build:prod script)
+- `src/client/pcf/DocumentRelationshipViewer/package.json` (+1 line build:prod script)
+- `src/client/pcf/DocumentRelationshipViewer/package-lock.json` (regenerated)
+- `src/client/pcf/{SpeDocumentViewer,SemanticSearchControl,RelatedDocumentCount}/package-lock.json` (regenerated by npm install)
+- `src/client/shared/Spaarke.UI.Components/package-lock.json` (regenerated by npm install)
+
+Output build artifacts at `src/client/pcf/{ControlName}/out/` are git-ignored.
+
+## Recommendations for follow-on tasks
+
+1. Pre-existing dead code cleanup (SpeDocumentViewer): remove `accessToken: string` from useCheckoutFlow / useDocumentPreview options + types.ts SDAP types, delete deprecated AuthService.ts. Owner: future cleanup task or rolled into 029.
+2. DocumentRelationshipViewer should remove the explicit `authority: \`https://login.microsoftonline.com/${tenantId}\`` from authInit.ts (line 55) — all other PCFs intentionally omit this to let @spaarke/auth resolve tenant via resolveTenantFromXrm (per popup regression fix from 2026-05-13). Could be silent SSO regression. Owner: likely task 025 if DocRelViewer is the SPA-side equivalent, or follow-on PCF audit.
+3. After task 023 ships, the full `tsc` build of Spaarke.UI.Components should succeed without `--strict false`. Verify by running `cd src/client/shared/Spaarke.UI.Components && rm -rf dist && npm run build` post-task-023.
+  </notes>
+</task>

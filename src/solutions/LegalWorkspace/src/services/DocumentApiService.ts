@@ -1,9 +1,9 @@
 /**
  * DocumentApiService — BFF API calls for document preview and open links.
  *
- * Uses the existing authenticatedFetch() from bffAuthProvider.ts for Bearer
- * token authentication and getBffBaseUrl() from config/runtimeConfig.ts for
- * API base URL resolution.
+ * Uses authenticatedFetch() from services/authInit.ts (backed by @spaarke/auth)
+ * for Bearer token authentication and getBffBaseUrl() from
+ * config/runtimeConfig.ts for API base URL resolution.
  *
  * API endpoints (same as SemanticSearch PCF):
  *   GET /api/documents/{id}/preview-url  → ephemeral iframe preview URL

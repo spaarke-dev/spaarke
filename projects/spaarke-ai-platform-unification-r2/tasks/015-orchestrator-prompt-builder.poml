@@ -1,0 +1,56 @@
+<task id="AIPU2-015" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build OrchestratorPromptBuilder</title>
+    <phase>2A</phase>
+    <tags>bff-api, ai, prompt</tags>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>AIPU2-010</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build the OrchestratorPromptBuilder that constructs the system prompt sent to the orchestrator LLM on each
+    turn. The prompt has two parts: (1) a stable, cacheable prefix (~2000 tokens) containing the AI persona,
+    capability index, and standing instructions — this is the same across all turns for a given manifest state;
+    (2) a per-turn suffix injecting the selected tool schemas (max 6-8 tools, from the routing result). Total
+    prompt budget must stay within ~9000 tokens to leave headroom for conversation history and the response.
+    Prefix cacheability is critical for cost: identical prefixes enable Azure OpenAI prompt caching.
+  </prompt>
+  <role>Senior .NET backend engineer with deep knowledge of Spaarke AI prompt patterns and token budgeting.</role>
+  <goal>
+    OrchestratorPromptBuilder produces a system prompt within the 9000-token budget. The prefix is identical
+    for all turns sharing the same manifest state (enabling prompt caching). Tool schemas for 6-8 tools are
+    injected per turn from the routing result.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityManifest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRoutingResult.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read PlaybookChatContextProvider.cs fully to understand how the current system prompt is assembled and what sections exist (persona, instructions, tool guidance).</step>
+    <step>Create IOrchestratorPromptBuilder.cs interface with: BuildSystemPrompt(CapabilityRoutingResult routing, OrchestratorPromptContext context) returning OrchestratorPrompt record (Prefix string, PerTurnSuffix string, EstimatedTokens int).</step>
+    <step>Create OrchestratorPromptContext.cs record: MatterName (string?), UserDisplayName (string), TenantId (string), ConversationTurnCount (int).</step>
+    <step>Create OrchestratorPromptBuilder.cs implementing IOrchestratorPromptBuilder. Separate prefix and suffix construction into private methods.</step>
+    <step>Implement BuildPrefix(): persona section ("You are Spaarke, an AI legal workspace assistant..."), capability index (one line per enabled capability: name + description, formatted as a numbered list), standing instructions (tool usage rules, citation requirements, safety reminders, matter isolation notice). Target ~2000 tokens. Hash the manifest state (LastRefreshedUtc + capability count) to detect when prefix needs regeneration.</step>
+    <step>Implement BuildPerTurnSuffix(CapabilityRoutingResult routing): inject selected tool schemas as JSON tool definitions. Limit to MaxToolsPerTurn (default 8, configurable). If SelectedToolNames is empty (Layer 3 broad), include all registered tool schemas up to the cap. Estimate tokens using a simple character/4 approximation.</step>
+    <step>Add token budget guard: if prefix + suffix exceeds 9000 tokens, trim capability index entries (remove descriptions, keep names only) and reduce MaxToolsPerTurn by 2 and log a warning.</step>
+    <step>Add prefix caching: store last computed prefix keyed by manifest hash in a MemoryCache with 20-minute expiry. Cache hit → reuse prefix string without recomputing.</step>
+    <step>Register IOrchestratorPromptBuilder as singleton in AddAiCapabilitiesModule().</step>
+    <step>Write unit tests: prefix stable across calls with same manifest hash, prefix regenerates when manifest changes, token budget exceeded → trim applied, suffix contains only selected tool schemas.</step>
+    <step>Run `dotnet build` and `dotnet test --filter "OrchestratorPrompt"` to verify.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Total prompt (prefix + suffix) is within 9000 tokens for any valid routing result.</criterion>
+    <criterion>Prefix string is byte-identical for two calls with the same manifest hash (enabling prompt cache hits).</criterion>
+    <criterion>Prefix is regenerated when manifest LastRefreshedUtc changes.</criterion>
+    <criterion>Per-turn suffix contains only the tool schemas named in CapabilityRoutingResult.SelectedToolNames.</criterion>
+    <criterion>MaxToolsPerTurn cap enforced; never more than 8 tool schemas in one prompt.</criterion>
+    <criterion>Token budget exceeded → trim logic fires and warning logged.</criterion>
+    <criterion>Unit tests pass: `dotnet test --filter "OrchestratorPrompt"`.</criterion>
+    <criterion>Build succeeds with no new warnings.</criterion>
+  </acceptance-criteria>
+</task>

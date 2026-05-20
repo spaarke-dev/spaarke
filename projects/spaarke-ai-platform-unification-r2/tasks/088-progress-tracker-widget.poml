@@ -1,0 +1,50 @@
+<task id="AIPU2-088" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build ProgressTrackerWidget for Context Pane</title>
+    <phase>4D</phase>
+    <tags>frontend, widgets, progress</tags>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>AIPU2-073</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    Multi-step AI operations (e.g., contract review pipelines, due diligence workflows) run
+    multiple playbook steps sequentially. Users have no visibility into which step is running
+    and how far through the workflow they are. ProgressTrackerWidget renders workflow step
+    progress in the Context pane during the progress stage. It receives step updates via
+    context_update PaneEventBus events and renders a vertical step list: completed steps
+    (checkmark), the active step (spinner), and pending steps (circle). It is intentionally
+    simple — no estimated time, no cancellation — to avoid complexity while providing essential
+    progress visibility.
+  </prompt>
+  <role>Frontend developer with React 19 and Fluent v9 experience.</role>
+  <goal>
+    Workflow step progress renders in the Context pane with completed/active/pending step states.
+    Step states update via PaneEventBus events. Widget registered in ContextWidgetRegistry.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ADR-021 for Fluent v9 icon and token guidance (Checkmark, ProgressBar, Circle icons from @fluentui/react-icons).</step>
+    <step>Create src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ProgressTrackerWidget.tsx implementing ContextWidget.</step>
+    <step>Define ProgressTrackerData type: { steps: WorkflowStep[] } where WorkflowStep has id, label, status ('completed' | 'active' | 'pending'), and optional substepLabel.</step>
+    <step>Render a vertical list of steps using Fluent v9 layout: completed steps show a CheckmarkCircle icon (colorPaletteGreenForeground1 token), active step shows a Spinner, pending steps show an empty Circle icon in muted token color.</step>
+    <step>Subscribe to additional context_update events on the 'context' channel within the widget — when a new progress event arrives, replace the step list state reactively (no cumulative merging, the server sends full state each time).</step>
+    <step>Handle edge cases: empty step list renders a Fluent v9 Spinner only; all steps completed transitions the stage (dispatch context_update to 'related-items' stage via PaneEventBus after a brief delay).</step>
+    <step>Register ProgressTrackerWidget in ContextWidgetRegistry.</step>
+    <step>Write unit tests: completed/active/pending steps render correct icons and colors; context_update replaces step list; all-completed triggers stage transition dispatch.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Completed steps show CheckmarkCircle icon with green Fluent token; active step shows Spinner; pending steps show muted Circle icon.</criterion>
+    <criterion>Step list replaces fully on each context_update event (server sends full state).</criterion>
+    <criterion>All-completed state dispatches a context_update to 'related-items' stage on PaneEventBus.</criterion>
+    <criterion>Empty step list renders a Spinner only — not a blank pane.</criterion>
+    <criterion>Widget registered in ContextWidgetRegistry and renders during progress stage.</criterion>
+    <criterion>No hard-coded colors — Fluent v9 tokens only (ADR-021).</criterion>
+    <criterion>Unit tests for step icon states, replacement, and all-completed transition pass.</criterion>
+  </acceptance-criteria>
+</task>

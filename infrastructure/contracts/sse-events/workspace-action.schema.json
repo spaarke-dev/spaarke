@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/contracts/sse-events/workspace-action.schema.json",
+  "title": "workspace_action SSE Event",
+  "description": "Asks the AI shell to perform a workspace-level action on behalf of the agent (navigate to a document, open a record, run a playbook, or dismiss a widget). Actions that mutate state require requiresConfirmation=true to trigger a HITL confirmation dialog.",
+  "allOf": [
+    { "$ref": "_shared-defs.json#/$defs/SseEnvelope" }
+  ],
+  "required": ["type", "actionId", "actionType", "label", "requiresConfirmation"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "workspace_action",
+      "description": "Discriminator — always 'workspace_action'."
+    },
+    "actionId": {
+      "type": "string",
+      "description": "Stable identifier for this action invocation. Used by the confirm endpoint to look up the pending action."
+    },
+    "actionType": {
+      "type": "string",
+      "enum": ["navigate", "open-document", "run-playbook", "dismiss"],
+      "description": "The class of action to perform."
+    },
+    "label": {
+      "type": "string",
+      "description": "Human-readable action label for display in confirmation dialogs and action panels."
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Action-specific parameters. Shape depends on actionType.",
+      "additionalProperties": true
+    },
+    "requiresConfirmation": {
+      "type": "boolean",
+      "description": "When true, the shell MUST show a HITL confirmation dialog before executing. When false, execute immediately."
+    }
+  },
+  "additionalProperties": true
+}

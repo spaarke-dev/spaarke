@@ -45,7 +45,7 @@ import { SprkChatTypingIndicator } from './SprkChatTypingIndicator';
 import { SprkChatUploadZone } from './SprkChatUploadZone';
 import type { UploadedDocument } from './SprkChatUploadZone';
 import type { InlineAiAction, InlineActionBroadcastEvent } from '../InlineAiToolbar/inlineAiToolbar.types';
-import { useSseStream, parseSseEvent } from './hooks/useSseStream';
+import { useSseStream, parseSseEvent } from '../../hooks/useSseStream';
 import { useChatSession } from './hooks/useChatSession';
 import { useChatPlaybooks } from './hooks/useChatPlaybooks';
 import { useSelectionListener } from './hooks/useSelectionListener';
@@ -88,6 +88,32 @@ const INLINE_ACTION_CHANNEL = 'sprk-inline-action';
  * @see spec-2D - Insert-to-Editor phase requirements
  */
 const DOCUMENT_INSERT_CHANNEL = 'sprk-document-insert';
+
+// ---------------------------------------------------------------------------
+// Auth helpers (Auth v2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the JWT `tid` (tenant ID) claim from a Bearer token, used to attach
+ * the `X-Tenant-Id` header on SSE/XHR code paths that bypass `authenticatedFetch`
+ * (which would set this header internally).
+ *
+ * For JSON API calls, prefer `authenticatedFetch` — this helper is only used
+ * for SSE streams (plan-approve, editor-refine) where we manage the fetch
+ * directly to consume the ReadableStream body.
+ *
+ * Returns `null` on any parse failure; the caller silently omits the header.
+ */
+function extractTidFromToken(token: string): string | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1])) as { tid?: string };
+    return payload.tid ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -159,12 +185,25 @@ const useStyles = makeStyles({
 /**
  * SprkChat - Full-featured chat component with SSE streaming.
  *
+ * Auth v2 (D-AUTH-1, D-AUTH-7): SprkChat takes `authenticatedFetch` and
+ * `getAccessToken` as function-based props — NOT a snapshotted `accessToken: string`.
+ * `authenticatedFetch` is used for all JSON API calls (session lifecycle, playbooks,
+ * context mapping, slash commands, action confirmation, Word export, document
+ * persist). `getAccessToken` is used for code paths that cannot use the fetch
+ * wrapper: SSE streams (`useSseStream`, plan-approve stream, editor-refine stream)
+ * and XHR uploads (`SprkChatUploadZone`). The token is re-acquired on every
+ * stream open and never snapshotted into component state.
+ *
  * @example
  * ```tsx
+ * import { useAuth } from '@spaarke/auth';
+ * const { authenticatedFetch, getAccessToken } = useAuth();
+ *
  * <SprkChat
  *   playbookId="abc-123"
  *   apiBaseUrl="https://spe-api-dev-67e2xz.azurewebsites.net"
- *   accessToken={token}
+ *   authenticatedFetch={authenticatedFetch}
+ *   getAccessToken={getAccessToken}
  *   documentId={docId}
  *   onSessionCreated={(session) => console.log("Session:", session.sessionId)}
  * />
@@ -218,7 +257,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   playbookId,
   analysisId,
   apiBaseUrl,
-  accessToken,
+  authenticatedFetch,
+  getAccessToken,
   onSessionCreated,
   onPlaybookChange,
   className,
@@ -243,7 +283,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // Playbook discovery (fetches available playbooks for quick-action chips)
   const { playbooks: discoveredPlaybooks } = useChatPlaybooks({
     apiBaseUrl,
-    accessToken,
+    authenticatedFetch,
   });
 
   // Analysis context mapping — only active when analysisId is provided (analysis mode)
@@ -252,7 +292,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     analysisId,
     playbookId,
     apiBaseUrl,
-    accessToken,
+    authenticatedFetch,
   });
 
   // Convert API inline actions to InlineAiAction[] for QuickActionChips
@@ -275,7 +315,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   }, [playbooks, discoveredPlaybooks]);
 
   // Session management
-  const chatSession = useChatSession({ apiBaseUrl, accessToken, initialMessages });
+  const chatSession = useChatSession({ apiBaseUrl, authenticatedFetch, initialMessages });
   const {
     session,
     messages,
@@ -295,7 +335,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const { dynamicCommands: dynamicSlashCommands } = useDynamicSlashCommands({
     sessionId: session?.sessionId,
     apiBaseUrl,
-    accessToken,
+    authenticatedFetch,
     playbookId,
     hostContext,
   });
@@ -480,7 +520,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     async (action: IPendingAction) => {
       setIsConfirmingAction(true);
       try {
-        const result = await dispatchConfirmedAction(action, apiBaseUrl, accessToken);
+        const result = await dispatchConfirmedAction(action, apiBaseUrl, authenticatedFetch);
 
         if (result.success) {
           dispatchToast(
@@ -508,7 +548,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         setPendingAction(null);
       }
     },
-    [apiBaseUrl, accessToken, dispatchToast]
+    [apiBaseUrl, authenticatedFetch, dispatchToast]
   );
 
   /**
@@ -766,15 +806,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       addMessage(assistantMessage);
       isStreamingRef.current = true;
 
-      // Start SSE stream
+      // Start SSE stream — useSseStream re-acquires a fresh token via getAccessToken()
+      // at stream-open time (Auth v2 D-AUTH-7), so no token snapshot lives in this closure.
       const baseUrl = apiBaseUrl.replace(/\/+$/, '');
       startStream(
         `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`,
         { message: messageText, documentId },
-        accessToken
+        getAccessToken
       );
     },
-    [session, isStreaming, addMessage, startStream, clearSuggestions, apiBaseUrl, documentId, accessToken]
+    [session, isStreaming, addMessage, startStream, clearSuggestions, apiBaseUrl, documentId, getAccessToken]
   );
 
   // Handle predefined prompt selection
@@ -833,18 +874,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   // ── Plan Preview callbacks (Phase 2F) ──────────────────────────────────────
 
-  // Extract tenant ID from JWT for X-Tenant-Id header (same logic as useSseStream)
-  // NOTE: Must be declared before handlePlanProceed and handleEditorRefineRequest which both call it.
-  const extractTenantIdFromToken = React.useCallback((token: string): string | null => {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return null;
-      const payload = JSON.parse(atob(parts[1]));
-      return payload.tid || null;
-    } catch {
-      return null;
-    }
-  }, []);
+  // Auth v2: extractTenantIdFromToken is gone — JSON calls go through
+  // `authenticatedFetch` (which sets X-Tenant-Id internally), and SSE/XHR streams
+  // re-derive `tid` from the fresh token after `getAccessToken()` resolves.
 
   /**
    * Called when the user clicks Proceed on a PlanPreviewCard.
@@ -913,12 +945,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       const runApprovalStream = async () => {
         try {
-          const tenantId = extractTenantIdFromToken(accessToken);
+          // Auth v2 (D-AUTH-7): fresh token per stream open. We use raw fetch (not
+          // authenticatedFetch) because we need the ReadableStream body for SSE;
+          // attach the Bearer + X-Tenant-Id manually after re-acquiring the token.
+          const token = await getAccessToken();
+          const tenantId = extractTidFromToken(token);
           const response = await fetch(approveUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Bearer ${token}`,
               ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
             },
             body: JSON.stringify({ planId: planIdToApprove }),
@@ -1069,11 +1105,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       pendingPlanId,
       isPlanApproving,
       apiBaseUrl,
-      accessToken,
+      getAccessToken,
       addMessage,
       updateLastMessage,
       updateMessageMetadataAt,
-      extractTenantIdFromToken,
     ]
   );
 
@@ -1207,17 +1242,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       });
 
       try {
-        const tenantId = extractTenantIdFromToken(accessToken);
         const normalizedBase = apiBaseUrl.replace(/\/+$/, '');
         const persistUrl = `${normalizedBase}/api/ai/chat/sessions/${session.sessionId}/documents/${encodeURIComponent(docId)}/persist`;
 
-        const response = await fetch(persistUrl, {
+        // Auth v2 (D-AUTH-1): authenticatedFetch attaches fresh Bearer + X-Tenant-Id
+        const response = await authenticatedFetch(persistUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-            ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             containerId: hostContext.entityId,
           }),
@@ -1263,7 +1294,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         });
       }
     },
-    [session, hostContext, apiBaseUrl, accessToken, extractTenantIdFromToken]
+    [session, hostContext, apiBaseUrl, authenticatedFetch]
   );
 
   /**
@@ -1496,7 +1527,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             operationType: 'diff',
           });
 
-          const tenantId = extractTenantIdFromToken(accessToken);
+          // Auth v2 (D-AUTH-7): fresh token per stream open. Raw fetch is required
+          // here for the ReadableStream body (SSE); authenticatedFetch cannot be used.
+          const token = await getAccessToken();
+          const tenantId = extractTidFromToken(token);
           const baseUrl = apiBaseUrl.replace(/\/+$/, '');
           const refineUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`;
 
@@ -1504,7 +1538,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Bearer ${token}`,
               ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
             },
             body: JSON.stringify({
@@ -1639,9 +1673,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       addMessage,
       updateLastMessage,
       apiBaseUrl,
-      accessToken,
+      getAccessToken,
       clearCrossPaneSelection,
-      extractTenantIdFromToken,
     ]
   );
 
@@ -1672,15 +1705,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       addMessage(assistantMessage);
       isStreamingRef.current = true;
 
-      // Start SSE stream to refine endpoint
+      // Start SSE stream to refine endpoint — useSseStream re-acquires a fresh
+      // token via getAccessToken() at stream-open time (Auth v2 D-AUTH-7).
       const baseUrl = apiBaseUrl.replace(/\/+$/, '');
       startStream(
         `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`,
         { selectedText, instruction },
-        accessToken
+        getAccessToken
       );
     },
-    [session, isStreaming, addMessage, startStream, apiBaseUrl, accessToken]
+    [session, isStreaming, addMessage, startStream, apiBaseUrl, getAccessToken]
   );
 
   /**
@@ -2002,7 +2036,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           <SprkChatUploadZone
             sessionId={session.sessionId}
             apiBaseUrl={apiBaseUrl}
-            accessToken={accessToken}
+            getAccessToken={getAccessToken}
             onUploadComplete={handleUploadComplete}
             onUploadError={handleUploadError}
             disabled={!session}
@@ -2045,7 +2079,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           sessionId={session?.sessionId ?? null}
           messages={messages}
           apiBaseUrl={apiBaseUrl}
-          accessToken={accessToken}
+          authenticatedFetch={authenticatedFetch}
           onError={handleExportWordError}
           onSuccess={handleExportWordSuccess}
         />

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="AIPU2-006" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Create Four AI DI Feature Module Skeletons</title>
+    <phase>1</phase>
+    <tags>bff-api, di, architecture</tags>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>
+    The R2 AI platform will introduce significant new services: content safety, AI capabilities (search, summarization), AI persistence (Cosmos DB), and the AI chat/agent system. Currently all AI services are registered in a single AiModule.cs. ADR-010 limits DI registrations to 15 non-framework services total. As R2 adds 15-20 new services, a single monolithic module will exceed the budget and make the DI graph unreadable.
+
+    Create four focused DI feature module extension methods as skeleton classes, each responsible for registering a cohesive group of R2 services. Wire all four into Program.cs. The skeletons will have placeholder comments indicating which services each future task will register into them. The build must pass with no errors after this task.
+  </prompt>
+  <role>Senior .NET backend engineer with dependency injection and API architecture expertise.</role>
+  <goal>
+    Four new static extension method classes exist in src/server/api/Sprk.Bff.Api/Infrastructure/DI/: AiSafetyModule.cs, AiCapabilitiesModule.cs, AiPersistenceModule.cs, and AiChatModule.cs. Each exposes a correctly-named AddAi*Module(this IServiceCollection, IConfiguration) extension method. All four are called from Program.cs in the correct pipeline order. dotnet build passes with zero errors and zero new warnings.
+  </goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/spaarke-ai-platform-unification-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs to understand the exact namespace, class structure, extension method signature pattern, and coding style used for the existing AI module.</step>
+    <step>Read src/server/api/Sprk.Bff.Api/Program.cs to find where AiModule is currently called in the service registration pipeline and understand the pattern for adding new module calls.</step>
+    <step>Read .claude/adr/ADR-010-di-minimalism.md to confirm the 15 non-framework DI registration budget rule and whether feature modules count as one registration or individually.</step>
+    <step>Read .claude/patterns/api/service-registration.md for the canonical service registration pattern (naming, parameter types, XML doc comments, etc.).</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiSafetyModule.cs:
+      - Namespace matching existing DI classes
+      - Static class AiSafetyModule
+      - Extension method: public static IServiceCollection AddAiSafetyModule(this IServiceCollection services, IConfiguration configuration)
+      - Body: placeholder comment "// TODO AIPU2-xxx: Register ContentSafetyService, PromptShieldService, GroundednessService"
+      - Return services;</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiCapabilitiesModule.cs:
+      - Extension method: AddAiCapabilitiesModule(this IServiceCollection services, IConfiguration configuration)
+      - Body: placeholder comment "// TODO AIPU2-xxx: Register AiSearchService, SummarizationService, CitationService, MultiProviderAiService"
+      - Return services;</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiPersistenceModule.cs:
+      - Extension method: AddAiPersistenceModule(this IServiceCollection services, IConfiguration configuration)
+      - Body: placeholder comment "// TODO AIPU2-xxx: Register CosmosSessionStore, CosmosPromptStore, CosmosAuditStore, CosmosMemoryStore, CosmosFeedbackStore"
+      - Return services;</step>
+    <step>Create src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiChatModule.cs:
+      - Extension method: AddAiChatModule(this IServiceCollection services, IConfiguration configuration)
+      - Body: placeholder comment "// TODO AIPU2-008: Register ISprkAgent implementations, SprkChatAgentFactory, ChatOrchestrationService"
+      - Return services;</step>
+    <step>Update src/server/api/Sprk.Bff.Api/Program.cs to call all four new module methods in the service registration section, after the existing AddAiModule() call. Use the same pattern as the existing call. Order: AddAiSafetyModule, AddAiCapabilitiesModule, AddAiPersistenceModule, AddAiChatModule.</step>
+    <step>Run dotnet build src/server/api/Sprk.Bff.Api/ and confirm zero errors and zero new warnings introduced by this change.</step>
+    <step>Verify ADR-010 compliance: count the total non-framework DI registrations including the 4 new placeholder modules and confirm the budget is not exceeded (note: empty modules count as 0 registrations until services are added in future tasks).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>AiSafetyModule.cs, AiCapabilitiesModule.cs, AiPersistenceModule.cs, and AiChatModule.cs all exist in src/server/api/Sprk.Bff.Api/Infrastructure/DI/.</criterion>
+    <criterion>Each file contains a static class with a correctly-named AddAi*Module extension method accepting IServiceCollection and IConfiguration.</criterion>
+    <criterion>All four extension methods are called in Program.cs in the specified order after the existing AddAiModule() call.</criterion>
+    <criterion>dotnet build src/server/api/Sprk.Bff.Api/ exits with code 0 and reports zero errors.</criterion>
+    <criterion>No new compiler warnings are introduced by this change.</criterion>
+    <criterion>Each module class contains a TODO comment identifying which future AIPU2 task will fill in its service registrations.</criterion>
+    <criterion>The namespace of all four new classes matches the namespace used in the existing AiModule.cs.</criterion>
+  </acceptance-criteria>
+</task>

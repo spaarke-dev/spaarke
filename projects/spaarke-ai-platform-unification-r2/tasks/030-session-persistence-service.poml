@@ -1,0 +1,54 @@
+<task id="AIPU2-030" project="Spaarke AI Platform Unification R2">
+  <metadata>
+    <title>Build SessionPersistenceService (Redis + Cosmos DB write-through)</title>
+    <phase>2C</phase>
+    <tags>bff-api, cosmos-db, redis, persistence</tags>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>AIPU2-002, AIPU2-006</dependencies>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>
+    Build a SessionPersistenceService that implements a Redis + Cosmos DB write-through pattern
+    for AI chat session storage. Every message must be durably persisted to both a hot tier
+    (Redis, for fast session hydration) and a warm tier (Cosmos DB, for long-term compliance
+    retention and cross-node availability). Cosmos DB write failures must be non-blocking —
+    log the error and continue streaming rather than surfacing an error to the user. Redis
+    write failures should be treated the same way. Partition Cosmos documents by tenantId
+    to guarantee tenant isolation. Register the service via AddAiPersistenceModule so it is
+    discoverable by the DI container.
+  </prompt>
+  <role>Senior .NET developer familiar with Cosmos DB SDK v3, Redis (StackExchange.Redis), and Azure AI streaming architectures.</role>
+  <goal>
+    Every chat message is persisted to both Redis (hot) and Cosmos DB (warm) within the request
+    lifecycle. A write failure in either store is logged but never surfaces as a user-visible
+    error or blocks the streaming response. The service is registered in DI and passes unit
+    tests covering dual-write, hot-only fallback, and warm-only fallback scenarios.
+  </goal>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>.claude/constraints/data.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read ChatSessionManager.cs to understand existing session model and message structure before designing the new service interface.</step>
+    <step>Read ADR-009-redis-caching.md and data.md constraints to confirm allowed Redis usage patterns and Cosmos DB partitioning requirements.</step>
+    <step>Create SessionPersistenceService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/Persistence/. Define ISessionPersistenceService interface with PersistMessageAsync(sessionId, tenantId, message) and GetSessionAsync(sessionId, tenantId) methods.</step>
+    <step>Implement dual-write logic: write to Redis first (hot tier, TTL = 24 hours), then write to Cosmos DB asynchronously (warm tier). Wrap each write in try/catch — on failure, log with ILogger at Warning level (include sessionId, tenantId, store name, exception) and continue. Do not re-throw.</step>
+    <step>Configure Cosmos DB client using DefaultAzureCredential (no connection strings). Target the `sessions` container with partition key /tenantId. Use upsert semantics so resume/retry is idempotent.</step>
+    <step>Configure Redis using the existing IConnectionMultiplexer registration (do not re-register). Key schema: sessions:{tenantId}:{sessionId}. Serialize with System.Text.Json.</step>
+    <step>Create AddAiPersistenceModule(this IServiceCollection services) extension method in Infrastructure/DI/AiPersistenceModule.cs and register SessionPersistenceService as a scoped service. Call this from Program.cs.</step>
+    <step>Write unit tests covering: (a) happy-path dual-write, (b) Redis failure — Cosmos still written, (c) Cosmos failure — Redis still written, (d) both fail — no exception thrown, only logs.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>PersistMessageAsync writes to Redis and Cosmos DB on every call in the normal path.</criterion>
+    <criterion>A simulated Redis failure does not throw and does not prevent the Cosmos write.</criterion>
+    <criterion>A simulated Cosmos failure does not throw and does not prevent the Redis write.</criterion>
+    <criterion>Cosmos documents are partitioned by /tenantId (verified by inspecting the CosmosClient call in tests).</criterion>
+    <criterion>DefaultAzureCredential is used for Cosmos authentication — no connection strings in code or config.</criterion>
+    <criterion>Service is registered via AddAiPersistenceModule and resolves without error from the DI container.</criterion>
+    <criterion>All unit tests pass (dotnet test).</criterion>
+  </acceptance-criteria>
+</task>

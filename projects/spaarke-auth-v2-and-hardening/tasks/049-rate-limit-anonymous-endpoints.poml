@@ -1,0 +1,79 @@
+<task id="AUTHV2-049" project="Spaarke Auth v2 + Hardening">
+  <metadata>
+    <title>Rate limiting policies on anonymous + API key endpoints</title>
+    <phase>C — Server hardening</phase>
+    <tags>auth, server, rate-limiting, STANDARD</tags>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>045</dependencies>
+    <parallel-safe>C-Parallel-2</parallel-safe>
+  </metadata>
+  <notes>
+    Completed 2026-05-19 (FULL rigor, dispatched in parallel with 041, 042).
+
+    SCOPE OUT OF AUDIT — 14 anonymous endpoints, 3 API key endpoints. The
+    RateLimitingModule had 13 named policies already; only the per-user-keyed
+    ones (`ai-batch` etc.) were unsafe for API-key endpoints (no `oid`/`sub`
+    claim → all callers bucketed under "unknown"). Three new policies added.
+
+    NEW POLICIES (RateLimitingModule.cs):
+      - webhook-graph (600/min per IP, sliding window) — Graph/Dataverse webhooks
+      - api-key-admin (60/min per auth_scheme, fixed window) — BuilderAdmin CLI
+      - api-key-rag (300/min per auth_scheme, sliding window) — RAG indexing API
+
+    POLICIES APPLIED (7 endpoint changes across 6 files):
+      1. /api/v1/emails/webhook-trigger → webhook-graph (EmailEndpoints.cs)
+      2. /api/communications/incoming-webhook → webhook-graph (CommunicationEndpoints.cs)
+      3. /api/ai/capabilities/refresh → webhook-graph (CapabilityEndpoints.cs)
+      4. /api/config/client → anonymous (ConfigEndpoints.cs)
+      5. /api/admin/builder-scopes/{status,import,import-json} → anonymous + api-key-admin × 2 (BuilderScopeAdminEndpoints.cs; status also gets explicit .AllowAnonymous())
+      6. /api/ai/rag/enqueue-indexing → swap ai-batch → api-key-rag (RagEndpoints.cs) — old policy keyed on user oid which API-key callers don't have
+      7. /healthz/dataverse/doc/{id}, /status → anonymous; /office/health → anonymous (EndpointMappingExtensions.cs, OfficeEndpoints.cs)
+
+    LEFT AS-IS:
+      - /healthz, /ping — high-frequency monitoring; no rate limit needed
+      - /office/save-debug — Dev-only env-gated
+      - /api/registration/demo-request — already had `anonymous` policy
+
+    KEYING JUSTIFICATION:
+      - webhook-* → keyed on Connection.RemoteIpAddress (matches existing
+        `anonymous` policy pattern). HMAC validation is the primary gate;
+        rate limit is DoS protection only.
+      - api-key-* → keyed on `auth_scheme` claim emitted by
+        ApiKeyAuthenticationHandler (line 93 of that handler). All callers
+        presenting the same API key share the bucket — correct for the
+        service-to-service contract. Falls back to source IP if the policy
+        is somehow applied to a non-API-key endpoint.
+
+    BUILD: dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj
+           → Build succeeded. 0 errors, 17 warnings (all pre-existing).
+
+    NOT COMMITTED (per dispatch instructions — main session will batch with
+    the other two Wave 2 sub-agent results).
+
+    DEFENSE IN DEPTH: rate limits are SECONDARY to the existing auth
+    controls (HMAC for webhooks, API key for admin/RAG, shared secret for
+    capabilities refresh). They exist to prevent a stolen secret /
+    compromised webhook URL from being weaponized into a DoS or
+    enumeration vector.
+  </notes>
+  <prompt>RateLimitingModule is registered but no explicit policies on anonymous + API key endpoints. Add per-IP + per-user buckets for /api/registration/*, /api/v1/emails/webhook-trigger, /api/communications/incoming-webhook, /api/admin/builder-scope/import, /api/ai/rag/*.</prompt>
+  <role>Senior .NET engineer.</role>
+  <goal>Brute-force / DoS protection on all anonymous + API key endpoints. Reasonable limits (e.g., 100 req/min per IP for webhooks).</goal>
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md §3 M-? + customer-review §7.3</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Define rate-limit policies in RateLimitingModule: AnonymousWebhook (100/min per IP), Registration (20/hour per IP), ApiKey (1000/min per key), etc.</step>
+    <step>Apply policies via `.RequireRateLimiting("AnonymousWebhook")` on affected endpoints.</step>
+    <step>Test by hitting an endpoint above its limit and verifying 429 response.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Each affected endpoint has an explicit rate-limit policy.</criterion>
+    <criterion>429 response with Retry-After header on excess.</criterion>
+    <criterion>Legitimate traffic unaffected by reasonable limits.</criterion>
+  </acceptance-criteria>
+</task>

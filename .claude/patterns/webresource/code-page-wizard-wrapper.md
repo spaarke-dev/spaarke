@@ -11,7 +11,7 @@ Use when a shared wizard/dialog component from `@spaarke/ui-components` must be 
 1. `src/solutions/CreateMatterWizard/src/main.tsx` — canonical wrapper: theme, params, service adapters, `open={true}` + `embedded={true}`
 2. `src/solutions/CreateMatterWizard/vite.config.ts` — required resolve aliases for `@spaarke/ui-components` and Fluent UI
 3. `src/solutions/CreateMatterWizard/index.html` — CSS reset for Dataverse iframe context
-4. `.claude/patterns/auth/spaarke-auth-initialization.md` — auth bootstrap required before BFF calls
+4. `.claude/patterns/auth/DEPRECATED-spaarke-auth-initialization.md` — auth bootstrap (⛔ deprecated — superseded by Spaarke Auth v2 `useAuth()`; see [AUDIT-FINDINGS-AUTH-SYSTEM.md](../../AUDIT-FINDINGS-AUTH-SYSTEM.md))
 
 ## Constraints
 - **ADR-006**: Standalone dialog surfaces MUST be Code Pages, not PCF controls
