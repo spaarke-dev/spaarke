@@ -1,10 +1,13 @@
 /**
- * ConversationPane.tsx — R2 left pane for the SpaarkeAi three-pane shell.
+ * ConversationPane.tsx — R3 left pane for the SpaarkeAi three-pane shell.
  *
  * Replaces R1's LeftPane + ChatPanel combination. Composes:
- *   - Tab bar: "Chat" and "History" tabs (mirrors R1 LeftPane pattern)
- *   - Chat tab: WelcomePanel (no session, no entity) or SprkChat (session active)
- *   - History tab: ChatHistoryPanel (session list with resume/delete)
+ *   - Pane header: shared <PaneHeader> primitive from @spaarke/ui-components
+ *     (FR-02, task 021) — "Assistant" title + ChatRegular brand-color icon.
+ *     The header's rightSlot is reserved for the History side-overlay trigger
+ *     (FR-03 / OC-01) wired by task 022.
+ *   - Welcome state: WelcomePanel (no session, no entity, no pending message)
+ *   - Active chat: SprkChat (session active, entity context, or playbook selected)
  *
  * Key R1 → R2 migration changes:
  *   - Auth and session state consumed from useAiSession() (R2 AiSessionProvider)
@@ -50,7 +53,9 @@
  * @see AiSessionProvider.tsx — session + streaming + PaneEventBus routing (R2)
  * @see PlaybookGalleryWidget.tsx — dispatches playbook-selected (AIPU2-086/102)
  * @see WelcomePanel.tsx — welcome experience (unchanged from R1)
- * @see ChatHistoryPanel.tsx — history tab panel (now wired to useAiSession)
+ * @see ChatHistoryPanel.tsx — rewired to a side-overlay by task 022 (FR-03 / OC-01)
+ * @see PaneHeader.tsx (@spaarke/ui-components) — shared header primitive (FR-01, task 010)
+ * @see ADR-012 — Shared component library (PaneHeader lives in @spaarke/ui-components)
  * @see ADR-021 — Fluent v9, dark mode via FluentProvider (no hardcoded colors)
  * @see ADR-022 — React 19 Code Pages (hooks, functional components, bundled)
  */
@@ -68,26 +73,28 @@ import {
 } from "@fluentui/react-components";
 import {
   ChatRegular,
-  HistoryRegular,
   EditRegular,
   DismissRegular,
   ArrowResetRegular,
   CheckmarkCircleRegular,
 } from "@fluentui/react-icons";
-import { SprkChat } from "@spaarke/ui-components";
+// PaneHeader is the canonical pane-header primitive lifted into the shared
+// library in Phase A task 010 (ADR-012). It owns the icon brand-color treatment
+// and the right-slot container — see PaneHeader.tsx in @spaarke/ui-components.
+import { PaneHeader, SprkChat } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
-import { ChatHistoryPanel } from "../ChatHistoryPanel";
 import { useShellStage, useRestoreContext } from "../shell/ThreePaneShell";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Which tab is active in the left pane. */
-type LeftPaneView = "chat" | "history";
+// NOTE (task 021, FR-02): The legacy `LeftPaneView` ("chat" | "history") tab
+// model was removed when the Chat/History tab buttons were replaced by the
+// shared <PaneHeader>. History becomes a side-overlay (OC-01) wired in task 022.
 
 /**
  * State for the "Refine this?" selection chip shown above the SprkChat input.
@@ -117,36 +124,11 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
 
-  // ── Tab bar (mirrors R1 LeftPane.tsx tabBar pattern) ─────────────────────
-  tabBar: {
-    flexShrink: 0,
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke1,
-    backgroundColor: tokens.colorNeutralBackground1,
-    paddingLeft: tokens.spacingHorizontalXS,
-    paddingRight: tokens.spacingHorizontalXS,
-    paddingTop: "2px",
-    paddingBottom: "0px",
-    gap: tokens.spacingHorizontalXS,
-    minHeight: "36px",
-  },
-  tabButton: {
-    borderRadius: "0px",
-    height: "36px",
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    fontSize: tokens.fontSizeBase200,
-  },
-  tabButtonActive: {
-    borderBottomWidth: "2px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorBrandStroke1,
-    color: tokens.colorBrandForeground1,
-  },
+  // NOTE (task 021, FR-02): The legacy tab-bar styles (`tabBar`, `tabButton`,
+  // `tabButtonActive`) were removed when the Chat/History tab buttons were
+  // replaced by the shared <PaneHeader> primitive. Visual treatment now lives
+  // inside @spaarke/ui-components/PaneHeader (matches ContextPaneController
+  // header — canonical reference per plan §2).
 
   // ── Pane content area ─────────────────────────────────────────────────────
   content: {
@@ -361,12 +343,13 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * ConversationPane — left slot of ThreePaneLayout for the SpaarkeAi Code Page (R2).
+ * ConversationPane — left slot of ThreePaneLayout for the SpaarkeAi Code Page (R3).
  *
- * Renders a tab bar with "Chat" and "History" tabs, delegating to WelcomePanel
- * or SprkChat (chat tab) and ChatHistoryPanel (history tab). All session and
- * streaming state is consumed from useAiSession() — this component contains
- * no auth or SSE logic of its own.
+ * Renders a shared <PaneHeader> ("Assistant" + ChatRegular brand-color icon)
+ * above either WelcomePanel (welcome state) or SprkChat (active chat). History
+ * is no longer a tab — it becomes a side-overlay (OC-01) wired by task 022 via
+ * the PaneHeader rightSlot. All session and streaming state is consumed from
+ * useAiSession() — this component contains no auth or SSE logic of its own.
  *
  * Welcome → ActiveChat transition:
  *   1. User clicks a prompt button → pendingMessage is set → SprkChat mounts
@@ -409,8 +392,10 @@ export function ConversationPane(): React.JSX.Element {
   // bus-driven equivalent of the direct toLoading() call below.
   const dispatch = useDispatchPaneEvent();
 
-  // ── Tab state ───────────────────────────────────────────────────────────
-  const [activeView, setActiveView] = React.useState<LeftPaneView>("chat");
+  // NOTE (task 021, FR-02): The legacy `activeView` tab state ("chat" | "history")
+  // was removed when the Chat/History tab buttons were replaced by <PaneHeader>.
+  // The History UI becomes a side-overlay (OC-01) wired by task 022 via the
+  // <PaneHeader> rightSlot — see render block below for the placeholder.
 
   // ── Playbook selection state (AIPU2-102) ────────────────────────────────
   //
@@ -732,50 +717,26 @@ export function ConversationPane(): React.JSX.Element {
 
   return (
     <div className={styles.root}>
-      {/* ── Tab bar — Chat / History toggle (mirrors R1 LeftPane.tsx) ───── */}
-      <div className={styles.tabBar} role="tablist" aria-label="AI Chat navigation">
-        <Button
-          appearance="subtle"
-          role="tab"
-          aria-selected={activeView === "chat"}
-          icon={<ChatRegular />}
-          className={
-            activeView === "chat"
-              ? `${styles.tabButton} ${styles.tabButtonActive}`
-              : styles.tabButton
-          }
-          onClick={() => setActiveView("chat")}
-          size="small"
-        >
-          <Text
-            size={200}
-            weight={activeView === "chat" ? "semibold" : "regular"}
-          >
-            Chat
-          </Text>
-        </Button>
-
-        <Button
-          appearance="subtle"
-          role="tab"
-          aria-selected={activeView === "history"}
-          icon={<HistoryRegular />}
-          className={
-            activeView === "history"
-              ? `${styles.tabButton} ${styles.tabButtonActive}`
-              : styles.tabButton
-          }
-          onClick={() => setActiveView("history")}
-          size="small"
-        >
-          <Text
-            size={200}
-            weight={activeView === "history" ? "semibold" : "regular"}
-          >
-            History
-          </Text>
-        </Button>
-      </div>
+      {/* ── Pane header — shared <PaneHeader> primitive (FR-02, task 021) ───── */}
+      {/*
+       * Replaces the legacy Chat/History tab-bar with the canonical pane-header
+       * lifted to @spaarke/ui-components in Phase A task 010 (ADR-012). Icon
+       * color is applied internally by PaneHeader via tokens.colorBrandForeground1
+       * (ADR-021 — no hex / no rgba literals).
+       *
+       * TODO(task 022, FR-03 / OC-01): Wire the History side-overlay trigger
+       * into the rightSlot prop below. Task 022 will:
+       *   - Add a <Button icon={<HistoryRegular />} appearance="subtle" /> as
+       *     rightSlot, plus an overlay component (Claude-Code style).
+       *   - Pass an `onClick` that opens the ChatHistoryPanel as a side overlay
+       *     (no more tab toggle — the History pane slides in over the chat).
+       * Leaving rightSlot undefined here so task 022 lands as a single-prop add.
+       */}
+      <PaneHeader
+        title="Assistant"
+        icon={<ChatRegular />}
+        // rightSlot intentionally omitted — see TODO(task 022) above.
+      />
 
       {/* ── Playbook header strip (AIPU2-102) ──────────────────────────────── */}
       {/*
@@ -807,17 +768,19 @@ export function ConversationPane(): React.JSX.Element {
       )}
 
       {/* ── Active panel content ─────────────────────────────────────────── */}
+      {/*
+       * task 021 (FR-02): the previous `activeView === "history"` branch was
+       * removed. History is no longer a tab — it becomes a side-overlay wired
+       * via the <PaneHeader> rightSlot in task 022 (OC-01). The content area
+       * now always renders either WelcomePanel or SprkChat.
+       */}
       <div
         className={styles.content}
-        role="tabpanel"
-        aria-label={activeView === "chat" ? "AI Chat" : "Chat History"}
+        role="region"
+        aria-label="AI Chat"
       >
-        {activeView === "history" ? (
-          // History tab — ChatHistoryPanel is now wired to useAiSession
-          // via its own internal context consumption (R2 updated version).
-          <ChatHistoryPanel />
-        ) : showWelcomePanel ? (
-          // Chat tab — Welcome state: no session, no entity, no pending message, no playbook.
+        {showWelcomePanel ? (
+          // Welcome state: no session, no entity, no pending message, no playbook.
           // WelcomePanel reads auth surface from useAiSession() internally; no
           // token/bffBaseUrl props (Spaarke Auth v2 §H-4 — no token snapshots).
           <div className={styles.welcomeWrapper}>
@@ -827,7 +790,7 @@ export function ConversationPane(): React.JSX.Element {
             />
           </div>
         ) : (
-          // Chat tab — Active state: session exists, entity context present,
+          // Active state: session exists, entity context present,
           // prompt selected, or a playbook was chosen from the gallery (AIPU2-102).
           //
           // onPaneEvent is wired to streaming.onPaneEvent from AiSessionProvider.

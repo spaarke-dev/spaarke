@@ -144,6 +144,50 @@ export type {
 export { serializeSearchSelectWizardState } from './widgets/workspace/SearchSelectWizardWidget';
 
 // ---------------------------------------------------------------------------
+// Widgets: EmailComposeWidget — Analysis Builder intent dispatcher (task 044)
+//
+// Thin dispatcher that opens the Analysis Builder (Playbook Library Code Page)
+// with the `email-compose` intent pre-configured (FR-19: Send Email card).
+// Registered under 'email-compose' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as EmailComposeWidget } from './widgets/workspace/EmailComposeWidget';
+export type { EmailComposeData } from './widgets/workspace/EmailComposeWidget';
+export { serializeEmailComposeState } from './widgets/workspace/EmailComposeWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: MeetingScheduleWidget — Analysis Builder intent dispatcher (task 044)
+//
+// Thin dispatcher that opens the Analysis Builder (Playbook Library Code Page)
+// with the `meeting-schedule` intent pre-configured (FR-19: Schedule Meeting).
+// Registered under 'meeting-schedule' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as MeetingScheduleWidget } from './widgets/workspace/MeetingScheduleWidget';
+export type { MeetingScheduleData } from './widgets/workspace/MeetingScheduleWidget';
+export { serializeMeetingScheduleState } from './widgets/workspace/MeetingScheduleWidget';
+
+// ---------------------------------------------------------------------------
+// Launchers: AssignWorkWizardLauncher (FR-20, task 045)
+//
+// Thin function-based dispatcher (NOT a widget) that opens the existing
+// Dataverse Code Page wizard `sprk_createworkassignmentwizard` via
+// `Xrm.Navigation.navigateTo`. Feature-detects `window.Xrm` and returns a
+// status object so calling sites can render a Vite-dev placeholder without
+// the launcher having to mutate the DOM. See file header for UQ-05 precedent
+// citations.
+// ---------------------------------------------------------------------------
+
+export {
+  launchAssignWorkWizard,
+  ASSIGN_WORK_WEBRESOURCE_NAME,
+} from './widgets/workspace/AssignWorkWizardLauncher';
+export type {
+  AssignWorkLaunchOptions,
+  AssignWorkLaunchResult,
+} from './widgets/workspace/AssignWorkWizardLauncher';
+
+// ---------------------------------------------------------------------------
 // Widgets: ProgressTrackerWidget (context pane — workflow step progress)
 //
 // Exported so consumers can reference the component directly and type-check

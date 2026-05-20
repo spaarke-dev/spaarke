@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-20 (task 001 complete; Wave 1 ready)
+> **Last Updated**: 2026-05-20 (Wave 1 complete — commit `9b8a72f7`; Wave 2 ready)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 011 — Configure MAX_WORKSPACE_TABS = 8 + FIFO eviction in WorkspaceTabManager — ✅ completed |
-| **Step** | All 5 steps complete; acceptance criteria verified; build + 36 tests green |
-| **Status** | completed |
-| **Next Action** | Wave 1 (Phase A foundations: 010, 011, 012, 013) all ✅. Next: dispatch Wave 2 (Phase B Assistant: 020-026) once parent orchestration directs. |
+| **Task** | none — Wave 1 complete (010, 011, 012, 013 all ✅); Wave 2 ready |
+| **Step** | Wave 1 verified (shared lib `tsc` clean; SpaarkeAi vite build clean — 2721 modules, 508 KB gzip); commit `9b8a72f7` pushed |
+| **Status** | between waves |
+| **Next Action** | Dispatch Wave 2a (Phase B Assistant independent tasks: 020, 021, 023, 024 — 4 parallel agents). See TASK-INDEX Wave 2 table. Wave 2 splits into 2a/2b/2c due to 6-agent cap (12 total tasks across waves 2). |
 
 ### Files Modified This Session
 

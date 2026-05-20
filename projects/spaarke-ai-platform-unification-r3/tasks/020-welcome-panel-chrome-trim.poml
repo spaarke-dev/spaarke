@@ -3,7 +3,7 @@
   <metadata>
     <title>Trim WelcomePanel chrome to prompt + Recent Conversations (FR-04, FR-05)</title>
     <phase>Phase B — Assistant pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001, 010, 011, 012, 013</dependencies>
     <blocks></blocks>

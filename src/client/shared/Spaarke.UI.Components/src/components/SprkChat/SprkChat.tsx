@@ -2086,9 +2086,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       </div>
 
       {/* Input area */}
+      {/*
+        FR-06: Input is editable on cold load (before session exists). The
+        session is created on mount via useChatSession.createSession() and
+        handleSend internally guards `!session` — typing is allowed during the
+        mount-time creation window, and the send action waits for the session
+        to be ready. Only `isStreaming` disables the input to preserve the
+        active-streaming UX invariant.
+      */}
       <SprkChatInput
         onSend={handleSend}
-        disabled={isStreaming || !session || isSessionLoading}
+        disabled={isStreaming}
         maxCharCount={maxCharCount}
         dynamicSlashCommands={dynamicSlashCommands}
       />

@@ -377,6 +377,78 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// 12. email-compose — Analysis Builder intent dispatcher (task 044, FR-19)
+//     Category: ai — opens the Analysis Builder (Playbook Library Code Page)
+//     pre-configured for the compose-email flow.
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may compose multiple emails concurrently.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Send Email Message" card). Renaming this string would break the
+   * GetStartedCards → Analysis Builder routing path.
+   */
+  'email-compose',
+  {
+    displayName: 'Send Email',
+    category: 'ai',
+    icon: 'Mail24Regular',
+    /**
+     * allowMultiple=true: users may have several email-compose dispatcher tabs
+     * if they re-launched the card multiple times.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=100: positioned after the existing wizards (80–90).
+     */
+    defaultOrder: 100,
+  },
+  () =>
+    import('./EmailComposeWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 13. meeting-schedule — Analysis Builder intent dispatcher (task 044, FR-19)
+//     Category: ai — opens the Analysis Builder (Playbook Library Code Page)
+//     pre-configured for the schedule-meeting flow.
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may schedule multiple meetings concurrently.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Schedule New Meeting" card). Renaming this string would break the
+   * GetStartedCards → Analysis Builder routing path.
+   */
+  'meeting-schedule',
+  {
+    displayName: 'Schedule Meeting',
+    category: 'ai',
+    icon: 'CalendarAdd24Regular',
+    /**
+     * allowMultiple=true: users may have several meeting-schedule dispatcher
+     * tabs if they re-launched the card multiple times.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=110: positioned just after email-compose.
+     */
+    defaultOrder: 110,
+  },
+  () =>
+    import('./MeetingScheduleWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from index.ts side-effect import)
 // ---------------------------------------------------------------------------
 

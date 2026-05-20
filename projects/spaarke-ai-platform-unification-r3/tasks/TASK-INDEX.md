@@ -32,11 +32,11 @@
 | 011 | Configure `MAX_WORKSPACE_TABS = 8` + FIFO | A (Foundations) | ✅ | 001 | 032 | A | FULL | 2 |
 | 012 | Lift `ActionCard` to `@spaarke/ui-components` (or verify shared) | A (Foundations) | ✅ | 001 | 041 | A | FULL | 3 |
 | 013 | Error-only telemetry helpers | A (Foundations) | ✅ | 001 | 022, 035 | A | STANDARD | 2 |
-| 020 | WelcomePanel chrome trim | B (Assistant) | 🔲 | 001, 010-013 | — | B | FULL | 2 |
-| 021 | ConversationPane → PaneHeader | B (Assistant) | 🔲 | 010 | 022 | B (serial w/ 022 on ConversationPane.tsx) | FULL | 2 |
+| 020 | WelcomePanel chrome trim | B (Assistant) | ✅ | 001, 010-013 | — | B | FULL | 2 |
+| 021 | ConversationPane → PaneHeader | B (Assistant) | ✅ | 010 | 022 | B (serial w/ 022 on ConversationPane.tsx) | FULL | 2 |
 | 022 | HistoryOverlay component + wiring | B (Assistant) | 🔲 | 010, 021 | — | B (serial w/ 021) | FULL | 3 |
-| 023 | SprkChatInput editable on cold load | B (Assistant) | 🔲 | 010 | 025, 026 | B (serial w/ 025 on SprkChat.tsx) | FULL | 2 |
-| 024 | `useChatFileAttachment` hook + lazy extraction | B (Assistant) | 🔲 | 010 | 025, 026 | B | FULL | 4 |
+| 023 | SprkChatInput editable on cold load | B (Assistant) | ✅ | 010 | 025, 026 | B (serial w/ 025 on SprkChat.tsx) | FULL | 2 |
+| 024 | `useChatFileAttachment` hook + lazy extraction | B (Assistant) | ✅ | 010 | 025, 026 | B | FULL | 4 |
 | 025 | SprkChat toolbar restructure (+, remove Word) | B (Assistant) | 🔲 | 023, 024 | 026 | B (serial w/ 023) | FULL | 3 |
 | 026 | Wire attachments into chat send payload | B (Assistant) | 🔲 | 001, 024, 025 | — | — (serial — gated by spike) | FULL | 3 |
 | 030 | WorkspacePane → PaneHeader + embed LegalWorkspace | C (Workspace) | 🔲 | 010 | 031, 032, 034 | C (serial on WorkspacePane.tsx) | FULL | 4 |
@@ -49,8 +49,8 @@
 | 041 | `GetStartedCardsWidget` (7 cards, 2-col grid) | D (Context) | 🔲 | 012 | 042 | D | FULL | 3 |
 | 042 | Register widget + welcome-stage swap | D (Context) | 🔲 | 040, 041 | — | D (serial on ContextPaneController.tsx) | FULL | 3 |
 | 043 | Wizard widget wrappers (CreateProject, FindSimilar) | D (Context) | 🔲 | 001 | — | D | FULL | 2 |
-| 044 | Analysis Builder intents (email-compose, meeting-schedule) | D (Context) | 🔲 | 001 | — | D | STANDARD | 2 |
-| 045 | `AssignWorkWizardLauncher` (Xrm.Navigation) | D (Context) | 🔲 | 001 | — | D | FULL | 2 |
+| 044 | Analysis Builder intents (email-compose, meeting-schedule) | D (Context) | ✅ | 001 | — | D | STANDARD | 2 |
+| 045 | `AssignWorkWizardLauncher` (Xrm.Navigation) | D (Context) | ✅ | 001 | — | D | FULL | 2 |
 | 050 | Extend ChatEndpoints with attachments[] (CONDITIONAL) | E (Backend) | 🔲 | 001 | 051, 026 | E | FULL | 3 |
 | 051 | BFF unit tests for attachments[] payload (CONDITIONAL) | E (Backend) | 🔲 | 050 | — | E (serial w/ 050) | STANDARD | 2 |
 | 060 | Auth audit (no token snapshots, all via `authenticatedFetch`) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |

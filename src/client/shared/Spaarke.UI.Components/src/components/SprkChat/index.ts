@@ -57,6 +57,25 @@ export type { ISprkChatExportWordProps } from './SprkChatExportWord';
 export { useChatSession } from './hooks/useChatSession';
 export { useChatPlaybooks } from './hooks/useChatPlaybooks';
 
+// FR-07: multi-file chat attachment hook (task 024)
+export {
+  useChatFileAttachment,
+  MAX_ATTACHMENTS,
+  MAX_FILE_BYTES,
+  MAX_PDF_PAGES,
+  ALLOWED_MIME_TYPES,
+} from './hooks/useChatFileAttachment';
+export type {
+  ChatAttachment,
+  AttachmentChip,
+  AttachmentChipStatus,
+  AttachmentError,
+  AttachmentErrorReason,
+  AttachmentExtractionErrorCallback,
+  UseChatFileAttachmentOptions,
+  IUseChatFileAttachmentResult,
+} from './hooks/useChatFileAttachment';
+
 // Hooks (cross-pane selection)
 export { useSelectionListener } from './hooks/useSelectionListener';
 

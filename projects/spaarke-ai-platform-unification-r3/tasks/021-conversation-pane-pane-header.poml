@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate ConversationPane to shared PaneHeader (FR-02)</title>
     <phase>Phase B — Assistant pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>022</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Build useChatFileAttachment hook with lazy PDF.js/mammoth extraction (FR-07 hook)</title>
     <phase>Phase B — Assistant pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>025, 026</blocks>
