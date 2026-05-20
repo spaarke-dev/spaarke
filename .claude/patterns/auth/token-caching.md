@@ -36,9 +36,10 @@ Implementing or debugging token caching for OBO flows (server-side Redis or clie
 - Cache key: `sdap:graph:token:{sha256hash}`
 - Fail gracefully: cache errors should not break the OBO flow
 
-## Client-side (MSAL)
-- MSAL cache: `localStorage` (NOT `sessionStorage` — must survive tab close so neighbor tabs don't re-prompt)
-- Cookie state enabled (`storeAuthStateInCookie: true`) for `ssoSilent` under 3rd-party cookie blocking
-- Cross-iframe sharing via the same-origin key `__spaarke_bff_token_cache__` (used by `SessionStorageStrategy` — strategy #2 in the chain)
-- Parent-frame bridge via `window.__SPAARKE_BFF_TOKEN__` (strategy #3)
-- See `.claude/patterns/auth/spaarke-sso-binding.md` for the full 6-strategy chain and the binding requirements behind these settings.
+## Client-side (MSAL — v2, per ADR-028)
+- MSAL cache: `localStorage` (NOT `sessionStorage` — must survive tab close so neighbor tabs don't re-prompt) — **INV-1**
+- Cookie state enabled (`storeAuthStateInCookie: true`) for `ssoSilent` under 3rd-party cookie blocking — **INV-2**
+- Cross-iframe sharing: **MSAL's built-in `localStorage` cache** is the sharing mechanism (same-origin browser security boundary). The pre-v2 `SessionStorageStrategy` (`__spaarke_bff_token_cache__`) and `BridgeStrategy` (`window.__SPAARKE_BFF_TOKEN__`) were retired in Phase A — MSAL.localStorage covers their use cases more cleanly.
+- BroadcastChannel (`spaarke-auth-events`) is used for **invalidation events only** (logout/revocation broadcasts) — never for token transport.
+- In-memory cache wrapper validates JWT `exp` with 5-min buffer before returning a cached token; otherwise re-acquires via MSAL.
+- See [`.claude/patterns/auth/spaarke-sso-binding.md`](spaarke-sso-binding.md) for the canonical MSAL binding invariants (INV-1..INV-8) and [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) for the full v2 architecture.
