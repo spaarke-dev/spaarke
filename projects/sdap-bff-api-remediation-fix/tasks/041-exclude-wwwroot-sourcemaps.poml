@@ -1,0 +1,76 @@
+<task id="041" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Exclude `wwwroot/**/*.js.map` from publish (FR-A2)</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes active + 24h bake</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, publish, size-reduction, outcome-a, phase-4, deploy</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential by 24h bake window</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Add MSBuild item to exclude `wwwroot/**/*.js.map` from publish output. Pre-flight verified 4
+    sourcemap files: flow-vendor-*.js.map, fluent-vendor-*.js.map, index-*.js.map, react-vendor-*.js.map
+    in `wwwroot/playbook-builder/assets/`. Sourcemaps don't belong in prod.
+
+    Expected savings: small (~few MB uncompressed). Cumulative with FR-A1.
+  </prompt>
+
+  <role>.NET publish engineer + frontend asset awareness.</role>
+
+  <goal>`find publish/wwwroot -name "*.map" | wc -l` returns 0. Source files (sourcemaps) remain in source tree; only publish-time exclusion. 24h bake passes.</goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="wwwroot">src/server/api/Sprk.Bff.Api/wwwroot/playbook-builder/assets/</file>
+    <file purpose="baseline">projects/sdap-bff-api-remediation-fix/BASELINE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-A2">Exclude from publish only; keep in source</constraint>
+    <constraint source=".claude/constraints/azure-deployment.md">Publish hygiene rules</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>4 sourcemaps confirmed at pre-flight: ~MB scale (smaller than spec's "~7 MB" estimate). FR-A2 still applicable.</background>
+    <dependencies><dependency task="040" status="not-started">FR-A1 stable (linux-x64 baseline)</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Add MSBuild `<Content Remove="wwwroot/**/*.js.map" />` or equivalent `<ItemGroup>` excluding from publish</step>
+    <step order="2">Single git commit with only this change</step>
+    <step order="3">build + test + publish + verify `find publish/wwwroot -name "*.map" | wc -l` returns 0</step>
+    <step order="4">Verify source tree still has the 4 .map files (`find src/.../wwwroot -name "*.map"` shows them)</step>
+    <step order="5">Deploy to dev; smoke test; 24h bake</step>
+    <step order="6">Log to EXECUTION-LOG.md; mark ✅ on stable bake</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+    <tool name="az">App Insights during bake</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (publish exclusion)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md (size delta + bake)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero .map files in publish output</criterion>
+    <criterion testable="true">Source .map files still present (not deleted)</criterion>
+    <criterion testable="true">Tests pass; warnings unchanged; smoke test matches baseline</criterion>
+    <criterion testable="true">24h dev bake passes</criterion>
+  </acceptance-criteria>
+</task>

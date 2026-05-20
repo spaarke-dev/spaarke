@@ -1,0 +1,83 @@
+<task id="043" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Vuln patch: `Microsoft.Kiota.Abstractions` NU1903 HIGH</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours active + 24-48h bake</estimated-effort>
+    <assigned>AI agent (developer) + dual approver</assigned>
+    <tags>bff-api, security, outcome-b, phase-4, deploy</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Vuln patches sequential per design; Kiota chain coordination required</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Patch the NU1903 HIGH-severity vulnerability on `Microsoft.Kiota.Abstractions 1.21.2` (GHSA-7j59-v9qr-6fq9), confirmed at pipeline pre-flight. CRITICAL: per `src/server/api/Sprk.Bff.Api/CLAUDE.md` all Kiota packages MUST stay version-matched. This task may require a chain-coordinated upgrade of multiple Kiota packages — verify before edit.
+
+    Tier: MEDIUM (csproj edit on same major) — requires dual approver per Phase 4 procedure.
+  </prompt>
+
+  <role>Security-aware .NET developer + Kiota chain familiarity.</role>
+
+  <goal>Build no longer warns NU1903 on Kiota packages. Tests pass. 24-48h bake passes. Test pass count within ±5% baseline.</goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="vulnerable">projects/sdap-bff-api-remediation-fix/inventory/vulnerable.txt</file>
+    <file purpose="candidates">projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+    <file purpose="claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="src/server/api/Sprk.Bff.Api/CLAUDE.md">All Kiota packages MUST stay version-matched at one version</constraint>
+    <constraint source="spec.md §Out of Scope">No Kiota individual bumps — chain-coordinated only</constraint>
+    <constraint source="design.md §3">Dual approver required for MEDIUM tier</constraint>
+    <constraint source="NFR-08">Dual approval for MEDIUM/HIGH</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/vulnerable.txt</file>
+      <file>projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>NU1903 reference: GHSA-7j59-v9qr-6fq9. Kiota chain-lock means bumping Microsoft.Kiota.Abstractions in isolation will likely break the Graph SDK / Kiota generators chain — confirm what other Kiota packages need to move in lockstep before any commit.</background>
+    <dependencies><dependency task="037" status="not-started">Phase 3 BASELINE.md</dependency><dependency task="022" status="not-started">CANDIDATES.md MEDIUM tier confirmed</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read CLAUDE.md Kiota chain-lock notes</step>
+    <step order="2">Identify all Kiota packages in csproj (`Microsoft.Kiota.*`)</step>
+    <step order="3">Research compatible target version that resolves GHSA-7j59-v9qr-6fq9 across the chain</step>
+    <step order="4">Cross-reference with Dependabot PRs (any that propose Kiota bumps?)</step>
+    <step order="5">Dual approver acks the chain-coordinated bump plan</step>
+    <step order="6">Single commit bumping ALL Kiota packages in lockstep + Microsoft.Graph if chain requires</step>
+    <step order="7">build + test (within ±5% baseline)</step>
+    <step order="8">Deploy to dev; smoke test; 24-48h bake</step>
+    <step order="9">Re-run vuln scan: NU1903 entry resolved (no HIGH on Kiota Abstractions)</step>
+    <step order="10">Log to EXECUTION-LOG.md; mark ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish, list package --vulnerable</tool>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+    <tool name="gh">Cross-ref Dependabot PRs</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (Kiota chain bump)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NU1903 no longer present in `dotnet list package --vulnerable --include-transitive`</criterion>
+    <criterion testable="true">All Kiota packages at same version (chain-lock preserved)</criterion>
+    <criterion testable="true">Tests pass ±5% baseline</criterion>
+    <criterion testable="true">Dual approver ACK recorded</criterion>
+    <criterion testable="true">24-48h bake passes</criterion>
+  </acceptance-criteria>
+</task>

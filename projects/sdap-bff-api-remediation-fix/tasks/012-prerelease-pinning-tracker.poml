@@ -1,0 +1,67 @@
+<task id="012" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Pre-release tracker + inline pinning rationale extraction</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, inventory, security, phase-1</tags>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only csproj parsing</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Enumerate every `-beta`, `-rc`, `-preview` package reference in `Sprk.Bff.Api.csproj` and
+    extract the inline rationale comments documenting why each is pinned. Feeds FR-B3
+    (re-verify pinning rationale still applies).
+  </prompt>
+
+  <role>.NET package analyst.</role>
+
+  <goal>
+    File `inventory/prereleases.md` listing each pre-release package, its version, and the
+    inline rationale comment from csproj. Verified at pre-flight to include at least:
+    `Azure.AI.Projects 1.0.0-beta.8`, `Microsoft.Agents.AI 1.0.0-rc1`, `Azure.AI.OpenAI 2.8.0-beta.1`.
+  </goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md §Out of Scope">Pre-release package version changes are out of scope</constraint>
+    <constraint source="spec.md FR-B3">Re-verify pinning rationale; update inline csproj comments only if rationale changed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Pre-release pins exist for chain-compat reasons. The risk is that the rationale becomes stale (e.g., upstream package ships a stable version compatible with the chain). Phase 1 records baseline; Phase 4 re-verifies if any rationale changed.</background>
+    <dependencies><dependency task="008" status="not-started">Phase 0 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Grep csproj for `-beta`, `-rc`, `-preview` PackageReference entries</step>
+    <step order="2">For each, extract the inline comment block above the entry (rationale)</step>
+    <step order="3">Write `inventory/prereleases.md` with table: package | version | rationale | reflection-load impact</step>
+    <step order="4">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools><tool name="dotnet">Confirm parsing</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/prereleases.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 3 known pre-release packages appear with rationale</criterion>
+    <criterion testable="true">Any additional pre-releases discovered are also listed</criterion>
+  </acceptance-criteria>
+</task>

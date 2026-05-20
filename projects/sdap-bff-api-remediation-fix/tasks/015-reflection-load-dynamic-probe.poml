@@ -1,0 +1,88 @@
+<task id="015" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Reflection-load dynamic probe (instrument Program.cs localhost flag)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, inventory, reflection, instrumentation, phase-1</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Requires code instrumentation in Program.cs; sequential</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Add a localhost-only diagnostic flag to `Program.cs` that logs `AppDomain.CurrentDomain.GetAssemblies()`
+    after `app.Build()` completes. Capture the dynamic assembly load list and commit to inventory/.
+    This is the COMPLEMENT to task 014's static analysis — catches packages used via reflection
+    (Graph SDK, Identity.Web, EF, MEL processors, config binding, DI string types).
+
+    Critical: the instrumentation must be REVERSIBLE (single-purpose commit; revert after baseline
+    captured) and must NOT activate outside localhost.
+  </prompt>
+
+  <role>.NET developer experienced with assembly resolution and DI internals.</role>
+
+  <goal>
+    File `inventory/reflection-probe.txt` containing the assembly list captured at localhost startup.
+    The instrumenting commit MUST be revertible (no other behavioral changes).
+  </goal>
+
+  <inputs>
+    <file purpose="program">src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file purpose="claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 1 step 8">Instrumentation localhost-only; revert after capture</constraint>
+    <constraint source="ADR-001">Minimal API only; no Functions</constraint>
+    <constraint source="ADR-010">DI minimalism — do NOT add new registrations</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">No new endpoints/services/DI without justification</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 4 removal decisions for MEDIUM/HIGH tier depend on knowing what reflection-loaded
+      code uses a package. Static grep misses these. The dynamic probe captures the actual
+      runtime load list. Baseline (this task) and post-Phase-4 (per-candidate verification) must
+      match — or differences must be accounted for. Revertibility matters because the diagnostic
+      adds a code path even if it's localhost-only.
+    </background>
+    <dependencies><dependency task="008" status="not-started">Phase 0 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read current Program.cs to understand startup flow</step>
+    <step order="2">Add diagnostic block: `if (app.Environment.IsDevelopment() &amp;&amp; Environment.GetEnvironmentVariable("BFF_REFLECTION_PROBE") == "1") { ... }` that writes assembly list to stdout</step>
+    <step order="3">Build + run locally with `BFF_REFLECTION_PROBE=1`</step>
+    <step order="4">Capture stdout to `inventory/reflection-probe.txt`</step>
+    <step order="5">Revert the Program.cs instrumentation in a separate commit; verify diff is clean</step>
+    <step order="6">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build + run</tool>
+    <tool name="git">two commits: add, then revert</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/reflection-probe.txt</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (changed then reverted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">reflection-probe.txt contains assembly list (≥ 100 entries expected)</criterion>
+    <criterion testable="true">Program.cs has no instrumentation residue after revert (diff vs Phase 0 baseline is empty)</criterion>
+    <criterion testable="true">Diagnostic flag is localhost+env-var-gated (cannot fire in prod)</criterion>
+  </acceptance-criteria>
+</task>

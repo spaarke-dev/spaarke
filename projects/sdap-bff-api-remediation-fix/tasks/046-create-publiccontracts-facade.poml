@@ -1,0 +1,117 @@
+<task id="046" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Create `Services/Ai/PublicContracts/` facade interfaces (FR-E1)</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ai-boundary, facade, outcome-e, phase-4</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must complete before consumer migration tasks 047-050; defines interface signatures</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Create `Services/Ai/PublicContracts/` namespace inside `Sprk.Bff.Api`. Define small focused
+    facade interfaces (per UQ-07 default): `IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`,
+    `IWorkspacePrefillAi`, plus any additional interfaces identified by Phase 1's inventory of
+    actual consumer usage. Implementations wire to existing `IOpenAiClient` / `IPlaybookService`
+    internally. Mirror ADR-007's SpeFileStore pattern (canonical facade-over-Graph-SDK).
+
+    CRITICAL: This task introduces ZERO behavior change — new types only. Compile + test must
+    succeed without ANY consumer migration. Tasks 047–050 do the actual migration.
+
+    NOTE: `Services/Ai/Handlers/` already exists (with GenericAnalysisHandler) — `PublicContracts/`
+    is a NEW sibling subdirectory.
+  </prompt>
+
+  <role>Senior .NET developer with ADR-007 facade-pattern familiarity.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/` directory exists with:
+    - Interfaces: `IBriefingAi.cs`, `IInvoiceAi.cs`, `IRecordMatchingAi.cs`, `IWorkspacePrefillAi.cs` (+ others as discovered)
+    - Implementation classes wired to existing AI internals
+    - DI registration in appropriate `Add*Module()` extension in Program.cs (without removing existing registrations)
+
+    Build passes. Tests pass within ±5% baseline. ZERO consumer migration in this task.
+  </prompt>
+
+  <inputs>
+    <file purpose="adr">.claude/adr/ADR-007-spefilestore.md</file>
+    <file purpose="adr">.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="canonical-facade">src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs</file>
+    <file purpose="existing-ai">src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    <file purpose="program">src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file purpose="claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="constraint">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013 refined">External CRUD consumers MUST go through `Services/Ai/PublicContracts/` facade</constraint>
+    <constraint source="ADR-007">Mirror SpeFileStore facade pattern</constraint>
+    <constraint source="ADR-010">DI minimalism — additional registrations need justification per `.claude/constraints/bff-extensions.md`</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement Justification required</constraint>
+    <constraint source="design.md UQ-07">Small focused interfaces (default), not one large interface</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Refined ADR-013 (2026-05-20) requires this facade for external CRUD→AI consumers. The
+      assessment identified Finance / Workspace / Jobs / Dataverse / Filters / Endpoints as
+      external consumers (CLAUDE.md PF-3 records ~59 files reality vs spec's 20). Phase 1 task
+      014 + 011 + 015 produce the precise inventory. Interface granularity per consumer concern:
+      `IBriefingAi` (Workspace briefing), `IInvoiceAi` (Finance invoice extraction),
+      `IRecordMatchingAi`, `IWorkspacePrefillAi`. Other interfaces may emerge from Phase 1.
+    </background>
+    <dependencies><dependency task="037" status="not-started">Phase 3 BASELINE complete</dependency><dependency task="007" status="not-started">UQ-07 facade granularity confirmed</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read ADR-007 SpeFileStore + actual SpeFileStore.cs source to understand canonical facade shape</step>
+    <step order="2">Identify required methods per consumer category from Phase 1 inventory (task 011 usage map) — what does each consumer actually call?</step>
+    <step order="3">Define 4+ small interfaces (one per concern) — methods MUST match observed usage</step>
+    <step order="4">Create implementation classes wrapping existing IOpenAiClient / IPlaybookService</step>
+    <step order="5">Add DI registration in `Services/Ai/AnalysisServicesModule.cs` or `AiModule.cs` (DON'T remove existing)</step>
+    <step order="6">Update CLAUDE.md Decisions Made with the chosen interface list</step>
+    <step order="7">build + test (±5% baseline)</step>
+    <step order="8">Commit (single, scoped to facade introduction; no consumer migration)</step>
+    <step order="9">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="git">single commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IBriefingAi.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IRecordMatchingAi.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IWorkspacePrefillAi.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/*Ai.cs (implementations)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs (registrations)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made — interface list)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Services/Ai/PublicContracts/` directory exists distinct from existing `Services/Ai/Handlers/`</criterion>
+    <criterion testable="true">≥4 interfaces present (per UQ-07 small-focused default)</criterion>
+    <criterion testable="true">Implementations wire to existing IOpenAiClient/IPlaybookService internally</criterion>
+    <criterion testable="true">build passes; tests pass ±5% baseline</criterion>
+    <criterion testable="true">ZERO consumer migration in this commit (grep for `IOpenAiClient`/`IPlaybookService` consumer count unchanged)</criterion>
+    <criterion testable="true">Placement Justification section in PR description per `.claude/constraints/bff-extensions.md`</criterion>
+  </acceptance-criteria>
+</task>

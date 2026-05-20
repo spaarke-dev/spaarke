@@ -1,0 +1,58 @@
+<task id="061" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Demo smoke test + 48h bake</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours active + 48h calendar</estimated-effort>
+    <assigned>AI agent + waiting period</assigned>
+    <tags>bff-api, deploy, observation, phase-5, calendar-gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>48h calendar gate before prod authorization</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Conduct 48h observation window on `spaarke-demo`. Monitor App Insights for: zero new exception types, error rate within 10% of dev baseline, P95 latency within 10%, dependency success rates unchanged. If stable, authorize prod promotion (if UQ-02 = yes); else revert and investigate.
+  </prompt>
+
+  <role>App Insights / observation analyst.</role>
+  <goal>48h demo bake passes; observations logged; if stable → Phase 5 task 062 authorized.</goal>
+
+  <inputs>
+    <file purpose="baseline">projects/sdap-bff-api-remediation-fix/baseline/app-insights-48h.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 5">48h minimum demo bake</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/baseline/app-insights-48h.json</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Demo bake has wider test audience than dev; signal is stronger.</background>
+    <dependencies><dependency task="060" status="not-started">Demo deploy</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Trigger 48h observation window</step>
+    <step order="2">Periodically check App Insights for new exception types / latency / error rate</step>
+    <step order="3">After 48h: capture metrics comparison to dev baseline</step>
+    <step order="4">If within 10% deltas: log to EXECUTION-LOG.md; mark ✅</step>
+    <step order="5">If outside: revert demo (git revert + redeploy); abort Phase 5 prod</step>
+  </steps>
+
+  <tools><tool name="az">App Insights queries</tool></tools>
+
+  <outputs><output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md (demo bake report)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">48h continuous observation completed</criterion>
+    <criterion testable="true">Zero new exception types</criterion>
+    <criterion testable="true">Error rate + P95 latency within 10% of baseline</criterion>
+  </acceptance-criteria>
+</task>

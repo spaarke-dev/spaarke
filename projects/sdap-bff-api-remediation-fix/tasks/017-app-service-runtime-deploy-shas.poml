@@ -1,0 +1,76 @@
+<task id="017" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>App Service runtime confirmation + current deploy SHAs + zip metrics</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, inventory, azure, phase-1</tags>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only Azure queries; different domain from Group B</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Confirm Azure App Service runtime via `az webapp show`. Capture SHA-256 of all DLLs in
+    current `deploy/api-publish/` (rollback target). Record current zip size + uncompressed
+    size + entry count vs the ~60 MB / ~240 entries baseline.
+  </prompt>
+
+  <role>Azure DevOps engineer with App Service familiarity.</role>
+
+  <goal>
+    Three files committed to `inventory/`:
+    - `app-service-runtime.json` — output of `az webapp show ... --query`
+    - `deployed-sha256.txt` — SHA-256 of every DLL in current deploy
+    - `publish-metrics.txt` — zip size + uncompressed size + file count
+  </goal>
+
+  <inputs>
+    <file purpose="constraint">.claude/constraints/azure-deployment.md</file>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source=".claude/constraints/azure-deployment.md">Baseline ~60 MB / ~240 entries</constraint>
+    <constraint source="design.md §6 Phase 1">App Service: `spe-api-dev-67e2xz` in `spe-infrastructure-westus2`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Runtime confirmation proves the RID we actually need (Linux). Deploy SHAs are the rollback target if Phase 4/5 needs revert.</background>
+    <dependencies><dependency task="008" status="not-started">Phase 0 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`az webapp show --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2 --query "{kind:kind, os:reserved, linuxFxVersion:siteConfig.linuxFxVersion, sku:sku.name}" > inventory/app-service-runtime.json`</step>
+    <step order="2">Compute SHA-256 of all DLLs in `deploy/api-publish/` → `inventory/deployed-sha256.txt`</step>
+    <step order="3">Capture zip size + uncompressed size + file count → `inventory/publish-metrics.txt`</step>
+    <step order="4">Compare metrics vs baseline (60 MB / 240 entries) and 2026-05-19 drift point (75.19 MB)</step>
+    <step order="5">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="az">App Service query</tool>
+    <tool name="dotnet">If publish needs refresh</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/app-service-runtime.json</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/deployed-sha256.txt</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/publish-metrics.txt</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">app-service-runtime.json confirms Linux (`os: true` and Linux FX version)</criterion>
+    <criterion testable="true">deployed-sha256.txt covers every .dll in publish</criterion>
+    <criterion testable="true">publish-metrics.txt shows current vs baseline drift</criterion>
+  </acceptance-criteria>
+</task>

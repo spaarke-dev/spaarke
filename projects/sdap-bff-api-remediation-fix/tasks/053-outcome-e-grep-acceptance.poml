@@ -1,0 +1,60 @@
+<task id="053" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Outcome E grep acceptance (FR-E2)</title>
+    <status>not-started</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, outcome-e, acceptance, phase-4</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential acceptance check after migration verification</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Run the FR-E2 acceptance greps. Confirm zero direct `IOpenAiClient` / `IPlaybookService` references outside `Services/Ai/`.
+  </prompt>
+
+  <role>.NET acceptance verifier.</role>
+  <goal>Greps return zero outside Services/Ai/; results captured in EXECUTION-LOG.md.</goal>
+
+  <inputs>
+    <file purpose="src">src/server/api/Sprk.Bff.Api/</file>
+    <file purpose="spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-E2">grep returns 0 outside Services/Ai/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Per FR-E2 acceptance: `grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/Services/{Finance,Workspace,Jobs,Dataverse}/` returns 0; `grep -r "Sprk.Bff.Api.Services.Ai\." src/server/api/Sprk.Bff.Api/Services/{Finance,Workspace,Dataverse}/` returns only `PublicContracts` references.</background>
+    <dependencies><dependency task="052" status="not-started">Test verification stable</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/Services/{Finance,Workspace,Jobs,Dataverse}/` — must return 0 (Jobs excluding the relocated handlers which are now at Services/Ai/Jobs/)</step>
+    <step order="2">`grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/Api/Filters/` — must return 0</step>
+    <step order="3">`grep -r "Sprk.Bff.Api.Services.Ai\." src/server/api/Sprk.Bff.Api/Services/{Finance,Workspace,Dataverse}/` — must return only `PublicContracts` references</step>
+    <step order="4">Capture all grep outputs in EXECUTION-LOG.md</step>
+    <step order="5">If any fail: identify the consumer; either migrate or document justification (e.g., "internal AI helper that legitimately needs raw client")</step>
+    <step order="6">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">grep</tool></tools>
+
+  <outputs><output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md (acceptance grep results)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep #1 returns 0 (or documented exceptions)</criterion>
+    <criterion testable="true">grep #2 returns 0</criterion>
+    <criterion testable="true">grep #3 returns only PublicContracts references</criterion>
+  </acceptance-criteria>
+</task>

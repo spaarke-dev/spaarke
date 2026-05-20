@@ -1,0 +1,69 @@
+<task id="044" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Vuln patch 2 (count + identity refined post-Phase 1)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours active + 24-48h bake</estimated-effort>
+    <assigned>AI agent (developer) + dual approver</assigned>
+    <tags>bff-api, security, outcome-b, phase-4, deploy</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Vuln patches sequential per design</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Placeholder task for the second vuln patch identified by Phase 1 task 011. The specific package, CVE, and bump target depend on the vulnerable.txt scan output. Treated as MEDIUM tier — dual approver required. 24-48h bake.
+  </prompt>
+
+  <role>Security-aware .NET developer.</role>
+
+  <goal>Second HIGH-severity CVE resolved. Tests pass. 24-48h bake passes.</goal>
+
+  <inputs>
+    <file purpose="vulnerable">projects/sdap-bff-api-remediation-fix/inventory/vulnerable.txt</file>
+    <file purpose="candidates">projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §3">Dual approver required for MEDIUM tier</constraint>
+    <constraint source="spec.md §Out of Scope">No Graph SDK / Kiota individual bumps</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/vulnerable.txt</file>
+      <file>projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Specific package + target version determined by Phase 1 scan + Phase 2 categorization. May be a no-op if Phase 1 finds only the Kiota vuln.</background>
+    <dependencies><dependency task="043" status="not-started">First vuln patch stable</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read CANDIDATES.md for the specific package + target version</step>
+    <step order="2">If no second vuln remains: mark task as ⏸ (deferred — not needed); update TASK-INDEX</step>
+    <step order="3">Else: dual approver acks; single commit bump; build + test (±5% baseline)</step>
+    <step order="4">Deploy to dev; smoke test; 24-48h bake</step>
+    <step order="5">Re-run vuln scan: target CVE resolved</step>
+    <step order="6">Log to EXECUTION-LOG.md; mark ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, vuln scan</tool>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (if vuln exists)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Target CVE resolved OR task marked deferred with rationale</criterion>
+    <criterion testable="true">Tests pass ±5% baseline</criterion>
+    <criterion testable="true">24-48h bake passes (if applied)</criterion>
+  </acceptance-criteria>
+</task>

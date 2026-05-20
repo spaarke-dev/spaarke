@@ -1,0 +1,82 @@
+<task id="005" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Coordinate baseline window with `ai-spaarke-insights-engine-r1` (UQ-04)</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>Project owner</assigned>
+    <started></started>
+    <completed></completed>
+    <tags>coordination, phase-0</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent owner coordination ask</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Confirm with the `ai-spaarke-insights-engine-r1` project owner WHEN Phase 1 integration is
+    expected to land in `Sprk.Bff.Api`. This project's Phase 3 baseline must be captured EITHER
+    fully BEFORE the Insights Engine integration starts OR fully AFTER it is stable — never
+    mid-integration (would invalidate App Insights baseline metrics).
+  </prompt>
+
+  <role>Project coordinator.</role>
+
+  <goal>
+    Documented agreement: either (a) baseline captured before integration window starts, or
+    (b) baseline deferred until after integration is stable. Calendar window for Phase 3 task 033
+    (48h App Insights baseline) reserved.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="sibling-project">projects/ai-spaarke-insights-engine-r1/</file>
+    <file purpose="insights-arch">docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §2.3">Capture Phase 3 baseline BEFORE Engine integration starts, OR fully AFTER stable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-r1/README.md</file>
+      <file>docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Insights Engine Phase 1 integrates ~5 services + new index code INTO `Sprk.Bff.Api`. That
+      adds size and changes App Insights signal characteristics. If our 48h baseline is captured
+      mid-integration, Phase 4 will compare against a noisy reference, undermining the regression
+      detection. Engine project is currently pre-implementation (design phase), so there is
+      flexibility.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off required first</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Contact `ai-spaarke-insights-engine-r1` owner</step>
+    <step order="2">Confirm Phase 1 integration target dates</step>
+    <step order="3">Choose baseline window: pre-integration OR post-stable</step>
+    <step order="4">Record decision and scheduled baseline window in CLAUDE.md</step>
+    <step order="5">Update Phase 0 checklist item 4 to checked</step>
+    <step order="6">Update TASK-INDEX.md status of task 005 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">Update CLAUDE.md + task index</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made entry)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UQ-04 answer recorded with scheduled baseline window</criterion>
+    <criterion testable="true">Phase 0 checklist item 4 marked complete</criterion>
+  </acceptance-criteria>
+</task>

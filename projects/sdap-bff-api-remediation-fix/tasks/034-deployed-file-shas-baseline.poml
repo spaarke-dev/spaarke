@@ -1,0 +1,58 @@
+<task id="034" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Deployed file SHA-256s via Kudu VFS</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, baseline, deploy, phase-3</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only Kudu queries</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Capture SHA-256 of the 6 critical files (or full DLL set) currently deployed to
+    `spe-api-dev-67e2xz` via Kudu VFS. Same mechanism `Deploy-BffApi.ps1` uses for hash-verify.
+    This is the rollback target.
+  </prompt>
+
+  <role>Azure App Service deploy engineer.</role>
+
+  <goal>File `baseline/deployed-sha256.txt` with file path → SHA-256 mapping.</goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md NFR-06">Rollback path must be revertible</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>SHA-256 baseline lets us detect drift if redeploy doesn't match expectations.</background>
+    <dependencies><dependency task="022" status="not-started">Phase 2 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Identify 6 critical files (per Deploy-BffApi.ps1 hash-verify logic)</step>
+    <step order="2">Query Kudu VFS for each; compute SHA-256</step>
+    <step order="3">Write baseline/deployed-sha256.txt</step>
+    <step order="4">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="powershell">Kudu API calls</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/baseline/deployed-sha256.txt</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SHA-256 for each critical file captured</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,91 @@
+<task id="008" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Phase 0 gate review — all checkboxes resolved</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>Project owner + dual approver</assigned>
+    <started></started>
+    <completed></completed>
+    <tags>coordination, governance, phase-0, gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate task; sequential after 002–007 complete</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Conduct the Phase 0 gate review. Verify every Phase 0 checklist item in design.md §6 is
+    closed, every open question (UQ-01…UQ-07) has a documented answer, and the project is
+    cleared to enter Phase 1. Without this gate Phase 1 cannot start.
+  </prompt>
+
+  <role>Project owner + dual approver — joint review.</role>
+
+  <goal>
+    All 9 Phase 0 checklist items in design.md §6 are confirmed complete (item 7 was pre-resolved
+    by extraction assessment); UQ-01…UQ-07 each has a documented answer in CLAUDE.md → Decisions
+    Made section; Phase 1 is authorized to begin.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+    <file purpose="project-claude">projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    <file purpose="task-index">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 0">All 9 boxes must be checked before Phase 1 starts</constraint>
+    <constraint source="project">No Phase 1 work proceeds without this gate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the formal authorization point. Without this gate, Phase 1 inventory work cannot
+      begin. The gate verifies that the project has its dual approver, sibling-coordination,
+      baseline-window scheduling, and prod-process decision in place.
+    </background>
+    <dependencies>
+      <dependency task="002" status="not-started">Dual approver designated</dependency>
+      <dependency task="003" status="not-started">Prod deploy process determined</dependency>
+      <dependency task="004" status="not-started">Perf project coordinated</dependency>
+      <dependency task="005" status="not-started">Insights Engine baseline window coordinated</dependency>
+      <dependency task="006" status="not-started">CI ceiling confirmed</dependency>
+      <dependency task="007" status="not-started">Outcome E scope + facade confirmed</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Verify tasks 001–007 all show ✅ in TASK-INDEX.md</step>
+    <step order="2">Verify each UQ-01…UQ-07 has a corresponding Decisions Made entry in CLAUDE.md</step>
+    <step order="3">Verify Phase 0 checklist items 1–9 in design.md §6 are all checked (item 7 pre-resolved)</step>
+    <step order="4">Verify Phase 5 scope decision (tasks 062, 063 status: 🔲 in-scope OR ⏸ deferred)</step>
+    <step order="5">Owner + dual approver record joint gate approval (PR comment or commit)</step>
+    <step order="6">Update CLAUDE.md → Project Status from "Phase 0 pending" to "Phase 1 ready"</step>
+    <step order="7">Update TASK-INDEX.md status of task 008 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">Phase 0 gate approval commit</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Project Status update)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Gate approval comment or commit with owner + dual approver record</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tasks 001–007 all ✅ in TASK-INDEX.md</criterion>
+    <criterion testable="true">CLAUDE.md → Decisions Made has 7 UQ entries</criterion>
+    <criterion testable="true">design.md §6 Phase 0 — all 9 boxes checked</criterion>
+    <criterion testable="true">CLAUDE.md → Project Status updated to "Phase 1 ready"</criterion>
+    <criterion testable="true">Joint owner + dual approver gate ACK recorded</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,82 @@
+<task id="016" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Native binary + wwwroot asset inventory + size-by-category</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, inventory, publish, phase-1</tags>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only file enumeration; different domain from Group B</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    After a clean `dotnet publish`, enumerate `publish/runtimes/*/native/` and `publish/wwwroot/`.
+    Tabulate native binaries by RID, flag `.map`/README/LICENSE files in wwwroot. Group `publish/`
+    into (managed dll, native lib, wwwroot, config, runtime metadata) with sum per category.
+    These outputs identify Outcome A SAFE candidates (RID trim + sourcemap exclusion + duplicate
+    dedup).
+  </prompt>
+
+  <role>Publish-artifact analyst.</role>
+
+  <goal>
+    Three files committed to `inventory/`:
+    - `native-binaries.md` — per-RID native binary list with sizes
+    - `wwwroot-assets.md` — wwwroot file enumeration with .map/README/LICENSE flags
+    - `size-by-category.md` — summary table grouping publish output by category
+  </goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="constraint">.claude/constraints/azure-deployment.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source=".claude/constraints/azure-deployment.md">Publish to `deploy/api-publish/` NOT `/tmp` (anti-pattern #16)</constraint>
+    <constraint source="design.md">No `--runtime` flag yet (that's task 040) — this captures the CURRENT publish shape</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Verified at pipeline pre-flight: 4 `.map` files exist in `wwwroot/playbook-builder/assets/`.
+      Native binary list will likely include `runtimes/win-x64/`, `runtimes/osx-x64/`, etc. — those
+      are FR-A1 trim targets. Cosmos `ServiceInterop.dll` may appear duplicated — FR-A3 target.
+    </background>
+    <dependencies><dependency task="008" status="not-started">Phase 0 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Clean publish: `dotnet publish src/server/api/Sprk.Bff.Api/ -c Release -o deploy/api-publish/`</step>
+    <step order="2">Enumerate `deploy/api-publish/runtimes/*/native/` — per RID, file list + sizes</step>
+    <step order="3">Enumerate `deploy/api-publish/wwwroot/` recursively — file list with `.map` / `README` / `LICENSE` highlights</step>
+    <step order="4">Group all files in publish/ into 5 categories; sum sizes</step>
+    <step order="5">Detect duplicates (same filename, different paths) — flag Cosmos ServiceInterop specifically</step>
+    <step order="6">Write the 3 output files</step>
+    <step order="7">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools><tool name="dotnet">publish</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/native-binaries.md</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/wwwroot-assets.md</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/size-by-category.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">native-binaries.md lists every RID found</criterion>
+    <criterion testable="true">wwwroot-assets.md flags all 4 known .map files (verified at pipeline pre-flight)</criterion>
+    <criterion testable="true">size-by-category.md totals match `du -sm deploy/api-publish/`</criterion>
+    <criterion testable="true">Duplicate `ServiceInterop.dll` detection result reported (present or absent)</criterion>
+  </acceptance-criteria>
+</task>

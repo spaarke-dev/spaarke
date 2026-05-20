@@ -1,0 +1,102 @@
+<task id="007" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Confirm Outcome E scope + facade granularity (UQ-06, UQ-07)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>Project owner</assigned>
+    <started></started>
+    <completed></completed>
+    <tags>coordination, phase-0, ai-boundary, facade</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent owner decision</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Resolve two related UQ items:
+    - UQ-06: Should `Spaarke.Core` and `Spaarke.Dataverse` package lists be inventoried only,
+      or also pruned in this project? Default: inventory only (spec.md §Assumptions).
+    - UQ-07: Should the Outcome E facade be one large interface (`IBffAiPublicContracts` with
+      ~15 methods) or several small focused interfaces (`IBriefingAi`, `IInvoiceAi`,
+      `IRecordMatchingAi`, `IWorkspacePrefillAi`)? Default per design §3: small focused.
+
+    Also confirm the scope-drift finding from pipeline pre-flight (PF-3): actual CRUD→AI
+    consumer count is ~59 files, not the spec's "20". Outcome E task scope will defer to Phase 1
+    inventory output as source of truth.
+  </prompt>
+
+  <role>Project coordinator + architecture-aware reviewer.</role>
+
+  <goal>
+    Documented decisions:
+    - UQ-06 answer (inventory-only OR also prune)
+    - UQ-07 answer (large interface OR small focused)
+    - PF-3 acknowledgment: facade migration scope deferred to Phase 1 output
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+    <file purpose="project-claude">projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    <file purpose="adr">.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="adr">.claude/adr/ADR-007-spefilestore.md</file>
+    <file purpose="canonical-facade">src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013 refined">Facade required for external CRUD→AI consumers</constraint>
+    <constraint source="ADR-007">SpeFileStore is canonical facade pattern; mirror it</constraint>
+    <constraint source="design.md §3">UQ-06 default: inventory only. UQ-07 default: small focused interfaces</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The refined ADR-013 (2026-05-20) requires `Services/Ai/PublicContracts/` facades for
+      external CRUD→AI consumers. UQ-07 is about granularity. Small focused interfaces (default)
+      mirror ADR-007's SpeFileStore approach — easier to test, lower coupling, simpler deprecation.
+      A single large interface is acceptable if owner prefers but has worse evolution properties.
+
+      PF-3: Pipeline pre-flight found ~59 files / 148 occurrences of `IOpenAiClient` /
+      `IPlaybookService` across Finance/Workspace/Jobs/Dataverse/Filters/Endpoints — much higher
+      than spec FR-E2's "20". Task scope must defer to Phase 1 inventory for the precise list.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off required first</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Owner reviews UQ-06 and UQ-07 options</step>
+    <step order="2">Decide UQ-06 (inventory-only vs prune)</step>
+    <step order="3">Decide UQ-07 (large interface vs small focused — small focused is design default)</step>
+    <step order="4">Acknowledge PF-3 scope deferral (Outcome E task list uses inventory-derived consumer list)</step>
+    <step order="5">Record decisions in CLAUDE.md Decisions Made section</step>
+    <step order="6">Update Phase 0 checklist item 9 (Outcome E scope) to checked</step>
+    <step order="7">Update TASK-INDEX.md status of task 007 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">Update CLAUDE.md + task index</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made for UQ-06, UQ-07, PF-3)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UQ-06 answer documented (inventory-only / prune)</criterion>
+    <criterion testable="true">UQ-07 answer documented (large / small focused)</criterion>
+    <criterion testable="true">PF-3 scope deferral explicitly acknowledged</criterion>
+    <criterion testable="true">Phase 0 checklist item 9 marked complete</criterion>
+  </acceptance-criteria>
+</task>

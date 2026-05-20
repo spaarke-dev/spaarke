@@ -1,0 +1,53 @@
+<task id="036" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Reflection-load probe baseline (snapshot for Phase 4 comparison)</title>
+    <status>not-started</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, baseline, reflection, phase-3</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only file copy</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Copy `inventory/reflection-probe.txt` (Phase 1 output from task 015) to `baseline/reflection-probe-baseline.txt`. This locks the assembly load list at the Phase 3 baseline so Phase 4 per-candidate verification can diff against it.
+  </prompt>
+
+  <role>Baseline manager.</role>
+  <goal>File `baseline/reflection-probe-baseline.txt` identical to inventory version.</goal>
+
+  <inputs><file purpose="probe">projects/sdap-bff-api-remediation-fix/inventory/reflection-probe.txt</file></inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 3">Snapshot baseline; do not re-run probe (would risk drift)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/reflection-probe.txt</file>
+      <file>projects/sdap-bff-api-remediation-fix/tasks/015-reflection-load-dynamic-probe.poml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Phase 4 candidate verification step says: "verify reflection-load probe matches baseline (or differences are accounted for)". This is that baseline.</background>
+    <dependencies><dependency task="015" status="not-started">Phase 1 probe</dependency><dependency task="022" status="not-started">Phase 2 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`cp projects/sdap-bff-api-remediation-fix/inventory/reflection-probe.txt projects/sdap-bff-api-remediation-fix/baseline/reflection-probe-baseline.txt`</step>
+    <step order="2">Verify byte-for-byte identical to inventory version</step>
+    <step order="3">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">Commit baseline copy</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/baseline/reflection-probe-baseline.txt</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">baseline/reflection-probe-baseline.txt exists</criterion>
+    <criterion testable="true">Identical to inventory/reflection-probe.txt</criterion>
+  </acceptance-criteria>
+</task>

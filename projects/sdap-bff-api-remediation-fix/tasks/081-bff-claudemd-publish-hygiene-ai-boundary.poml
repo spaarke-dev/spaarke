@@ -1,0 +1,73 @@
+<task id="081" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>`src/server/api/Sprk.Bff.Api/CLAUDE.md` Publish Hygiene + AI Boundary + bff-extensions ref (FR-D7)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, documentation, codification, outcome-d, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential codification after ADR-029 + skill update exist</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Update `src/server/api/Sprk.Bff.Api/CLAUDE.md` with three new sections:
+    (a) Publish Hygiene — pointing to ADR-029 + Deploy-BffApi.ps1 size guard
+    (b) AI Boundary — pointing to refined ADR-013 + `Services/Ai/PublicContracts/` facade pattern + Services/Ai/Handlers/ vs new Services/Ai/Jobs/ distinction
+    (c) Reference to `.claude/constraints/bff-extensions.md` (binding constraint)
+  </prompt>
+
+  <role>Module documentation author.</role>
+  <goal>BFF CLAUDE.md contains all 3 new sections with proper cross-references.</goal>
+
+  <inputs>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="adr-029">.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    <file purpose="adr-013">.claude/adr/ADR-013-ai-architecture.md</file>
+    <file purpose="bff-extensions">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-D7">3 sections required + cross-references</constraint>
+    <constraint source="spec.md SC-26, SC-27">Documents facade pattern + ADR-013 boundary</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>This is the module-specific CLAUDE.md (not root or project). It's loaded by every Claude session touching BFF code. The 3 sections close out Outcome D by making the policies discoverable from the code level.</background>
+    <dependencies>
+      <dependency task="076" status="not-started">ADR-029 concise exists</dependency>
+      <dependency task="079" status="not-started">bff-deploy skill updated</dependency>
+      <dependency task="051" status="not-started">Services/Ai/Jobs/ exists (distinction documented)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read current BFF CLAUDE.md to find appropriate insertion points</step>
+    <step order="2">Add "Publish Hygiene" section: link to ADR-029 + size guard policy summary</step>
+    <step order="3">Add "AI Boundary" section: link to refined ADR-013 + `Services/Ai/PublicContracts/` facade pattern + show wrong-vs-correct injection code example + clarify `Services/Ai/Handlers/` (existing) vs `Services/Ai/Jobs/` (new) distinction</step>
+    <step order="4">Add reference block to `.claude/constraints/bff-extensions.md` near top (most-read section)</step>
+    <step order="5">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool></tools>
+
+  <outputs><output type="docs">src/server/api/Sprk.Bff.Api/CLAUDE.md</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Publish Hygiene" section present with ADR-029 link</criterion>
+    <criterion testable="true">"AI Boundary" section present with ADR-013 link + facade pattern example + handlers/Jobs distinction</criterion>
+    <criterion testable="true">`.claude/constraints/bff-extensions.md` referenced</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,68 @@
+<task id="074" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>CI PR-label escape hatches `[allow-size-growth]`, `[allow-vuln]` + PR template (FR-C4)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ci-cd, codification, outcome-c, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 071/072/073 workflow steps existing</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add PR-label escape-hatch logic to CI guards from tasks 071/072/073. Labels `[allow-size-growth]` and `[allow-vuln]` cause respective checks to pass WHEN PR body contains a justification section. Update or create `.github/PULL_REQUEST_TEMPLATE.md` with a justification field.
+  </prompt>
+
+  <role>CI/CD engineer + GitHub Actions familiarity.</role>
+  <goal>Synthetic PR with `[allow-size-growth]` label + justification text passes CI; without justification fails. Same for `[allow-vuln]`.</goal>
+
+  <inputs>
+    <file purpose="workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="pr-template">.github/PULL_REQUEST_TEMPLATE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-C4">Labels + justification field; CI honors labels only with body justification</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Explicit-acknowledgment escape is critical to avoid CI-friction-blocks-legitimate-work. The body justification ensures the override is intentional and audited.</background>
+    <dependencies>
+      <dependency task="071" status="not-started">FR-C1 check</dependency>
+      <dependency task="072" status="not-started">FR-C2 check</dependency>
+      <dependency task="073" status="not-started">FR-C3 check</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Add `if: contains(github.event.pull_request.labels.*.name, 'allow-size-growth')` conditional skips to FR-C1/C2/C5 steps</step>
+    <step order="2">Add `if: contains(github.event.pull_request.labels.*.name, 'allow-vuln')` skip to FR-C3</step>
+    <step order="3">For each labeled escape: require PR body contains "## Justification" section with non-empty content (use a separate validator step that fails if label present without justification)</step>
+    <step order="4">Update `.github/PULL_REQUEST_TEMPLATE.md` (create if absent) with `## Justification (required if using [allow-size-growth] or [allow-vuln])` placeholder</step>
+    <step order="5">Synthetic PR tests: with label + justification → pass; with label + no justification → fail</step>
+    <step order="6">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool><tool name="gh">test on synthetic PRs</tool></tools>
+
+  <outputs>
+    <output type="code">.github/workflows/sdap-ci.yml (label-conditional + justification validator)</output>
+    <output type="code">.github/PULL_REQUEST_TEMPLATE.md (justification placeholder)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PR with `[allow-size-growth]` + justification: CI passes the size check</criterion>
+    <criterion testable="true">PR with `[allow-size-growth]` + no justification: CI fails (justification validator)</criterion>
+    <criterion testable="true">Same behavior for `[allow-vuln]` and FR-C3</criterion>
+    <criterion testable="true">PR template includes Justification section</criterion>
+  </acceptance-criteria>
+</task>

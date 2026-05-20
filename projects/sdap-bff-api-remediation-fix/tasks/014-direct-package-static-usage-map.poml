@@ -1,0 +1,77 @@
+<task id="014" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Direct-package static usage map (grep `using`)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, inventory, phase-1</tags>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only grep across codebase</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    For each direct PackageReference in `Sprk.Bff.Api.csproj` and referenced projects, grep the
+    codebase for `using {PackageNamespace}` and `[assembly: ...]` attributes. Identifies packages
+    that may be removable (no static usage). NOTE: grep MISSES reflection-loaded use — task 015's
+    dynamic probe is the complement to this static analysis.
+  </prompt>
+
+  <role>.NET dependency-usage analyst.</role>
+
+  <goal>
+    File `inventory/usage-map-static.md` with rows: package | direct usages count | sample files |
+    "likely removable" flag (if 0 static usages).
+  </goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="packages">projects/sdap-bff-api-remediation-fix/inventory/packages-direct.txt</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 1">Static analysis only; dynamic probe is task 015</constraint>
+    <constraint source="project">Any "likely removable" flag is preliminary — MUST be confirmed by reflection probe before MEDIUM-tier candidacy</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/packages-direct.txt</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/project-references.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Static usage tells us "definitely used" (high confidence) and "no static usage" (preliminary
+      removable, must be confirmed by dynamic probe). Reflection-heavy code (Graph SDK, Identity.Web,
+      EF, MEL telemetry processors, config binding) won't show in static usage but is critically
+      used at runtime.
+    </background>
+    <dependencies>
+      <dependency task="010" status="not-started">packages-direct.txt needed</dependency>
+      <dependency task="013" status="not-started">project-references.md needed</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Parse packages-direct.txt to extract package names</step>
+    <step order="2">For each package, map to its top-level namespace(s) (e.g., `Microsoft.Graph` → `Microsoft.Graph`)</step>
+    <step order="3">Grep `src/server/api/Sprk.Bff.Api/` and referenced projects for `using {Namespace}`</step>
+    <step order="4">Tabulate counts; flag zero-usage as "likely removable (verify with task 015)"</step>
+    <step order="5">Write usage-map-static.md</step>
+    <step order="6">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools><tool name="dotnet">Verify package metadata</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/usage-map-static.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every direct package in packages-direct.txt has a row</criterion>
+    <criterion testable="true">Zero-static-usage packages explicitly flagged as "preliminary removable; confirm via task 015"</criterion>
+  </acceptance-criteria>
+</task>

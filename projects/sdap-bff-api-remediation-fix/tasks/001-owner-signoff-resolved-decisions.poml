@@ -1,0 +1,86 @@
+<task id="001" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Owner sign-off on design.md §3 Resolved Decisions</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>Project owner</assigned>
+    <started></started>
+    <completed></completed>
+    <tags>coordination, governance, phase-0</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>First task; sequential gate for all other Phase 0 work</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Obtain explicit owner sign-off on each of the 9 Resolved Decisions in design.md §3.
+    This is the project's authorization gate — no other Phase 0 work proceeds until each
+    decision is confirmed (or explicitly overridden) by the project owner. Sign-off is recorded
+    as a PR comment on the project branch or as an entry in this task's completion notes.
+  </prompt>
+
+  <role>
+    Project coordinator. Not a code change — this is a stakeholder approval task.
+  </role>
+
+  <goal>
+    Each of the 9 Resolved Decisions in design.md §3 has an explicit owner ACK or override,
+    recorded in this task's completion notes. The Phase 0 checklist in design.md §6 Phase 0
+    has items 1–2 checked.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+    <file purpose="project-plan">projects/sdap-bff-api-remediation-fix/plan.md</file>
+    <file purpose="project-claude">projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md">No Phase 1+ work proceeds without this sign-off</constraint>
+    <constraint source="project">Override of a Resolved Decision must include a written rationale in the task notes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      design.md §3 captures 9 Resolved Decisions arising from approach.md §9 open questions plus
+      late-2026-05-20 additions (test path, vulnerability remediation scope, sole-approver risk,
+      extraction-assessment resolution). The owner authored design.md but the project convention is
+      that an explicit sign-off step makes the assumptions binding.
+    </background>
+    <dependencies>None — this is the first project task</dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read design.md §3 Resolved Decisions table (9 rows)</step>
+    <step order="2">For each decision, the owner ACKs as-is OR provides an override with written rationale</step>
+    <step order="3">Record outcomes in this task's completion notes (or as a PR comment on the project branch)</step>
+    <step order="4">Update design.md §6 Phase 0 checklist items 1–2 to checked</step>
+    <step order="5">Update TASK-INDEX.md status of task 001 from 🔲 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="git">For PR comment / status update if used as the signed-off record</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/001-*.poml (status: complete)</output>
+    <output type="docs">design.md §6 Phase 0 checklist items 1–2 checked (if owner edits design.md) OR PR comment</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update for 001)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 §3 Resolved Decisions have owner ACK or override</criterion>
+    <criterion testable="true">design.md §6 Phase 0 checklist items 1–2 marked complete OR equivalent PR comment exists</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 001 as ✅</criterion>
+  </acceptance-criteria>
+</task>

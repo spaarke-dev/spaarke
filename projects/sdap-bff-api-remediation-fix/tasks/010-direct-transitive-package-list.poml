@@ -1,0 +1,69 @@
+<task id="010" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Direct + transitive package list</title>
+    <status>not-started</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, inventory, read-only, phase-1</tags>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only `dotnet list` command; no file conflicts</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Generate the authoritative direct + transitive package list for `Sprk.Bff.Api.csproj`.
+    Outputs feed all Phase 2 categorization and Phase 4 candidate decisions.
+  </prompt>
+
+  <role>.NET package-inventory analyst.</role>
+
+  <goal>
+    Two files committed to `projects/sdap-bff-api-remediation-fix/inventory/`:
+    `packages-direct.txt` and `packages-transitive.txt` containing the full `dotnet list package`
+    output (direct and `--include-transitive` respectively).
+  </goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 1">Read-only; no edits to csproj</constraint>
+    <constraint source="project">Output to `projects/sdap-bff-api-remediation-fix/inventory/`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Phase 1 baseline inventory — feeds CANDIDATES.md and Phase 4 patches.</background>
+    <dependencies><dependency task="008" status="not-started">Phase 0 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`mkdir -p projects/sdap-bff-api-remediation-fix/inventory/`</step>
+    <step order="2">`dotnet list src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj package > projects/sdap-bff-api-remediation-fix/inventory/packages-direct.txt`</step>
+    <step order="3">`dotnet list src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj package --include-transitive > projects/sdap-bff-api-remediation-fix/inventory/packages-transitive.txt`</step>
+    <step order="4">Verify outputs are non-empty and well-formed</step>
+    <step order="5">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools><tool name="dotnet">Package list</tool><tool name="git">Commit inventory</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/packages-direct.txt</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/packages-transitive.txt</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`packages-direct.txt` contains all direct PackageReference entries from csproj</criterion>
+    <criterion testable="true">`packages-transitive.txt` contains direct + transitive entries</criterion>
+    <criterion testable="true">Files committed to inventory/ directory</criterion>
+  </acceptance-criteria>
+</task>

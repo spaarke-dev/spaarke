@@ -1,0 +1,114 @@
+<task id="051" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Relocate 6 AI-coupled job handlers to `Services/Ai/Jobs/` (FR-E3)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ai-boundary, jobs, outcome-e, phase-4</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 047-050 consumer migrations are stable</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Move 6 AI-coupled job handlers from `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/` to
+    NEW directory `src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/`:
+    - AppOnlyDocumentAnalysisJobHandler
+    - EmailAnalysisJobHandler
+    - AttachmentClassificationJobHandler
+    - RagIndexingJobHandler
+    - InvoiceExtractionJobHandler
+    - ProfileSummaryJobHandler
+
+    All 6 confirmed at pipeline pre-flight. JobType string registration MUST be unchanged
+    (dispatch is by string in ServiceBusJobProcessor). `IJobHandler<T>` contract preserved
+    (ADR-004). After relocation these handlers are AI-internal and may keep direct `IOpenAiClient` /
+    `IPlaybookService` references.
+
+    CRITICAL: NEW `Services/Ai/Jobs/` is DISTINCT from existing `Services/Ai/Handlers/` (which
+    contains `GenericAnalysisHandler` and is unrelated to this work).
+  </prompt>
+
+  <role>Senior .NET developer with job-handler + DI familiarity.</role>
+
+  <goal>
+    All 6 handlers at new paths `Services/Ai/Jobs/*.cs`; old paths absent; JobProcessingModule
+    DI registration succeeds; integration tests pass; JobType dispatch tests pass (jobs route
+    to handlers by string, unchanged).
+  </goal>
+
+  <inputs>
+    <file purpose="old-handlers">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/</file>
+    <file purpose="ai-jobs-target">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/ (NEW)</file>
+    <file purpose="existing-ai-handlers">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (EXISTING — do NOT touch)</file>
+    <file purpose="job-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</file>
+    <file purpose="processor">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-004">IJobHandler&lt;T&gt; contract preserved</constraint>
+    <constraint source="spec.md FR-E3">JobType string registration unchanged (dispatch by string)</constraint>
+    <constraint source="ADR-010">DI minimalism — total registration count must NOT increase</constraint>
+    <constraint source="spec.md FR-E4">Test pass count ±5% Phase 3 baseline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Handlers are AI-internal after relocation per refined ADR-013. JobType strings stay the
+      same so Service Bus messages route correctly. `Services/Ai/Handlers/` is a DIFFERENT
+      pre-existing directory (contains GenericAnalysisHandler) — do not touch.
+    </background>
+    <dependencies>
+      <dependency task="047" status="not-started">Finance migration stable</dependency>
+      <dependency task="048" status="not-started">Workspace migration stable</dependency>
+      <dependency task="049" status="not-started">Jobs (CRUD-side) migration stable</dependency>
+      <dependency task="050" status="not-started">Dataverse + Filters + Endpoints migration stable</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`mkdir -p src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/` (distinct from existing Services/Ai/Handlers/)</step>
+    <step order="2">For each of 6 handlers: `git mv Services/Jobs/Handlers/{Name}.cs Services/Ai/Jobs/{Name}.cs`</step>
+    <step order="3">Update namespace in each file: `Sprk.Bff.Api.Services.Jobs.Handlers` → `Sprk.Bff.Api.Services.Ai.Jobs`</step>
+    <step order="4">Update DI registration in JobProcessingModule.cs to point to new namespace; JobType strings UNCHANGED</step>
+    <step order="5">Update any `using` statements in test files</step>
+    <step order="6">build + test ±5% baseline</step>
+    <step order="7">JobType dispatch integration test: run all 6 job types via test harness, verify each handler executes</step>
+    <step order="8">Verify DI registration count unchanged (no new registrations from this task — pure relocation)</step>
+    <step order="9">Single commit (file moves + namespace + DI module update)</step>
+    <step order="10">Update CLAUDE.md Implementation Notes: clarify Services/Ai/Handlers/ vs Services/Ai/Jobs/ distinction permanently</step>
+    <step order="11">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="git">git mv + commit (preserves history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/*.cs (6 files moved)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/ (6 files removed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs (namespace updates)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Implementation Notes update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 .cs files at `Services/Ai/Jobs/` with correct namespace</criterion>
+    <criterion testable="true">Original `Services/Jobs/Handlers/` paths absent (or only non-AI handlers remain: BulkRagIndexingJobHandler, DocumentProcessingJobHandler, etc.)</criterion>
+    <criterion testable="true">`Services/Ai/Handlers/` unchanged (existing GenericAnalysisHandler not affected)</criterion>
+    <criterion testable="true">JobType string dispatch works — test harness exercises all 6 types</criterion>
+    <criterion testable="true">Test pass count ±5% baseline</criterion>
+    <criterion testable="true">DI registration count unchanged</criterion>
+  </acceptance-criteria>
+</task>

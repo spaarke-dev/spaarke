@@ -1,0 +1,65 @@
+<task id="062" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Production deploy (CONDITIONAL on UQ-02)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>Project owner + dual approver + ops team</assigned>
+    <tags>bff-api, deploy, promote, prod, phase-5</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Prod deploy strictly sequential</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    CONDITIONAL on UQ-02 (task 003) confirming a canonical prod deploy process exists. If yes, deploy cumulative Phase 4 changeset to prod via the canonical process. Dual approver + ops team authorization required. If no canonical process: this task is ⏸ deferred to a follow-up project.
+  </prompt>
+
+  <role>Production deploy engineer + dual approver + ops team.</role>
+  <goal>Prod deploy succeeds; healthz green; immediate smoke test passes; rollback procedure rehearsed and on standby.</goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="canonical-process">(linked from CLAUDE.md UQ-02 entry if YES)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Managed solutions for prod</constraint>
+    <constraint source="NFR-06">Rollback executable within 10 minutes</constraint>
+    <constraint source="NFR-08">Owner + dual approver + ops authorization required</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-managed-solutions.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Highest blast radius. Cumulative pre-tested changeset; rollback rehearsed. If UQ-02 = no, this task is deferred and the project ends at demo+task 063 is also deferred.</background>
+    <dependencies><dependency task="061" status="not-started">Demo bake passed</dependency><dependency task="003" status="not-started">UQ-02 resolution</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Verify UQ-02 resolution = YES (task 003 outcome); if NO, mark this task ⏸ and stop</step>
+    <step order="2">Schedule prod deploy with ops team</step>
+    <step order="3">Dual approver + ops team final ACK</step>
+    <step order="4">Execute canonical prod deploy procedure</step>
+    <step order="5">healthz verify + hash-verify</step>
+    <step order="6">Immediate smoke test pass</step>
+    <step order="7">Log to EXECUTION-LOG.md; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="powershell">canonical prod deploy</tool></tools>
+
+  <outputs><output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md (prod deploy entry)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Prod deploy completes; healthz returns 200</criterion>
+    <criterion testable="true">Immediate smoke test pass</criterion>
+    <criterion testable="true">Dual approver + ops team ACK recorded</criterion>
+    <criterion testable="true">Rollback procedure documented + ops on standby</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,64 @@
+<task id="030" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Test suite baseline (`dotnet test`)</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, baseline, testing, phase-3</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only test run; independent of other Phase 3 baselines</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Run the full `Sprk.Bff.Api.Tests` suite and capture pass/fail counts + duration. This is the
+    Phase 3 baseline — Phase 4 must reproduce this (±5% per FR-E4) for every Outcome E migration
+    and every package removal. Test path confirmed during pre-flight: `tests/unit/Sprk.Bff.Api.Tests/`.
+  </prompt>
+
+  <role>.NET test engineer.</role>
+
+  <goal>
+    File `baseline/tests.txt` with pass/fail/skipped counts, duration, and any failure detail
+    if present.
+  </goal>
+
+  <inputs>
+    <file purpose="test-project">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §3">Test project at `tests/unit/Sprk.Bff.Api.Tests/` (not `src/server/api/Sprk.Bff.Api.Tests/`)</constraint>
+    <constraint source="spec.md FR-E4">±5% baseline tolerance</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Test baseline is the Phase 4 regression check.</background>
+    <dependencies><dependency task="022" status="not-started">Phase 2 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`mkdir -p projects/sdap-bff-api-remediation-fix/baseline/`</step>
+    <step order="2">`dotnet test tests/unit/Sprk.Bff.Api.Tests/ --logger "console;verbosity=normal" > baseline/tests.txt`</step>
+    <step order="3">Capture summary header (totals + duration) at top of file</step>
+    <step order="4">If any failures: document each with file:line + failure reason</step>
+    <step order="5">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="dotnet">test</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/baseline/tests.txt</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">tests.txt has summary header (passed/failed/skipped + duration)</criterion>
+    <criterion testable="true">Any test failure documented with detail</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,66 @@
+<task id="020" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Tier SAFE candidates (publish-time config; no source change)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, risk-categorization, phase-2</tags>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent tier classification; merged in task 022</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Categorize all SAFE-tier candidates from Phase 1 inventory. SAFE = affects deploy artifact
+    only; no source change; no runtime behavior change. Pre-identified candidates: `--runtime
+    linux-x64` publish (FR-A1), `*.js.map` exclusion (FR-A2), duplicate Cosmos ServiceInterop
+    dedup (FR-A3). For each, capture: cost (KB/MB), evidence of waste, removal action, test plan,
+    rollback.
+  </prompt>
+
+  <role>Risk-tier categorizer with publish-artifact awareness.</role>
+
+  <goal>
+    File `inventory/candidates-safe.md` with one row per SAFE candidate including all
+    fields from design §6 Phase 2 ("For each candidate, capture").
+  </goal>
+
+  <inputs>
+    <file purpose="inventory">projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md</file>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 2">SAFE = no source change, no runtime behavior change</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>SAFE candidates run first in Phase 4 (lowest risk, highest savings ratio).</background>
+    <dependencies><dependency task="018" status="not-started">INVENTORY.md needed</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read INVENTORY.md and identify all publish-time-config candidates</step>
+    <step order="2">For each candidate: name, cost (KB/MB), evidence, action, test plan, rollback</step>
+    <step order="3">Write `inventory/candidates-safe.md`</step>
+    <step order="4">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools><tool name="dotnet">Publish inspection</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/inventory/candidates-safe.md</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-A1, FR-A2, FR-A3 candidates documented at minimum</criterion>
+    <criterion testable="true">Each candidate has all 7 design §6 Phase 2 fields populated</criterion>
+  </acceptance-criteria>
+</task>

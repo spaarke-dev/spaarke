@@ -1,0 +1,70 @@
+<task id="033" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>App Insights 48h baseline metrics export</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours active + 48 hours calendar</estimated-effort>
+    <assigned>AI agent + waiting period</assigned>
+    <tags>bff-api, baseline, app-insights, phase-3, calendar-gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>48h calendar gate before Phase 4 can start</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Export 48 hours of App Insights baseline metrics from `spe-api-dev-67e2xz`:
+    - Request count per endpoint
+    - Error rate per endpoint
+    - P50/P95/P99 latency per endpoint
+    - Exception counts by type
+    - Dependency call latency (Graph, Dataverse, Service Bus, Cosmos, Redis) + success rates
+
+    Coordinate window per task 005 (UQ-04) — capture BEFORE Insights Engine integration or AFTER stable. NEVER mid-integration.
+  </prompt>
+
+  <role>App Insights / Azure monitoring analyst.</role>
+
+  <goal>File `baseline/app-insights-48h.json` with the 5 metric categories above, covering a confirmed 48h window outside the Insights Engine integration window.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="coordination">projects/sdap-bff-api-remediation-fix/CLAUDE.md (UQ-04 entry)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §3">48h window (longer beats faster)</constraint>
+    <constraint source="design.md §2.3">Capture outside Insights Engine integration window</constraint>
+    <constraint source="design.md NFR-07">Dev only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>48h calendar gate. Phase 4 cannot start without this. Window choice depends on UQ-04 resolution from task 005.</background>
+    <dependencies><dependency task="022" status="not-started">Phase 2 gate</dependency><dependency task="005" status="not-started">UQ-04 window decided</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Verify window choice per CLAUDE.md UQ-04 entry</step>
+    <step order="2">Trigger 48h observation</step>
+    <step order="3">After 48h: run AI queries against App Insights via portal or `az monitor`</step>
+    <step order="4">Export to baseline/app-insights-48h.json</step>
+    <step order="5">Document any anomalies during the window</step>
+    <step order="6">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="az">App Insights export</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/baseline/app-insights-48h.json</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 metric categories captured</criterion>
+    <criterion testable="true">Window confirmed 48h continuous outside integration disruption</criterion>
+    <criterion testable="true">Per-endpoint P95 latency recorded for every route in baseline/endpoints-smoke.json</criterion>
+  </acceptance-criteria>
+</task>

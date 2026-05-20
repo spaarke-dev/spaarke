@@ -1,0 +1,62 @@
+<task id="049" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Migrate Jobs consumers to facade (FR-E2 part 3)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ai-boundary, facade, migration, outcome-e, jobs, phase-4</tags>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent consumer module (Jobs) — no shared files with sibling Group F tasks</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Migrate ~2 Jobs consumers (`InvoiceIndexingJobHandler`, `EmbeddingMigrationService` — confirmed at pre-flight; spec said 6 but those are the AI-coupled HANDLERS being relocated by task 051, not "CRUD→AI consumers") to facade. NOTE PF-3 scope clarification: the 6 handlers from task 051 may need facade refactoring as part of their relocation — verify against inventory before splitting work.
+  </prompt>
+
+  <role>Senior .NET developer.</role>
+  <goal>`grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/Services/Jobs/` returns 0 (outside the 6 handlers that get relocated to Services/Ai/Jobs/ where direct refs are acceptable — that's internal). Tests pass ±5%.</goal>
+
+  <inputs>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    <file purpose="jobs">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+    <file purpose="inventory">projects/sdap-bff-api-remediation-fix/inventory/usage-map-static.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013 refined">External CRUD consumers MUST use facade</constraint>
+    <constraint source="spec.md FR-E2">Zero direct refs in Services/Jobs/ EXCEPT relocated handlers (task 051)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Distinguish CRUD-side Jobs consumers (this task) from AI-coupled job handlers (task 051). Task 051 RELOCATES 6 handlers to Services/Ai/Jobs/ where they are AI-internal and can keep direct refs.</background>
+    <dependencies><dependency task="046" status="not-started">Facade interfaces</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">List actual Jobs CRUD-side consumers (excluding the 6 handlers slated for relocation in 051)</step>
+    <step order="2">For each: replace direct injection with facade interface</step>
+    <step order="3">build + test ±5% baseline</step>
+    <step order="4">Acceptance grep returns 0 in Services/Jobs/ (excluding handlers/* paths that move in 051)</step>
+    <step order="5">Single commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="dotnet">build, test</tool></tools>
+
+  <outputs><output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/*.cs (migrated, excluding 6 relocated handlers)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep returns 0 in non-handler Jobs files</criterion>
+    <criterion testable="true">Test pass count ±5% baseline</criterion>
+  </acceptance-criteria>
+</task>

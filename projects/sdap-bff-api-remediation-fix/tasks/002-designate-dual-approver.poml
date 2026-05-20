@@ -1,0 +1,79 @@
+<task id="002" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Designate dual approver for MEDIUM/HIGH-tier changes (UQ-01)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>Project owner</assigned>
+    <started></started>
+    <completed></completed>
+    <tags>coordination, governance, phase-0</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent owner coordination ask; no file conflicts with sibling Group A tasks</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Identify and confirm the dual approver who, alongside the project owner, must sign off on
+    every MEDIUM/HIGH-tier candidate in Phase 4 and on the demo→prod promotion in Phase 5.
+    spec.md §Assumptions defaults this to "Auth team lead" given the BFF's auth surface; the owner
+    confirms or overrides. Without this, Phase 4 MEDIUM/HIGH cannot start.
+  </prompt>
+
+  <role>Project coordinator.</role>
+
+  <goal>
+    Dual approver named in writing (PR comment or task notes), with the approver's acknowledgment
+    that they accept the role. Phase 0 checklist item 6 (design.md §6) marked complete.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §3">Dual approver required for MEDIUM/HIGH-tier candidates AND prod promotion</constraint>
+    <constraint source="spec.md NFR-08">Dual approval required for MEDIUM/HIGH tier and all prod promotions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The BFF is the heart of the system with high blast radius. Sole-approver risk on MEDIUM/HIGH
+      changes is unacceptable. spec.md defaults to Auth team lead based on BFF's auth surface
+      (8 distinct auth flows per AUDIT-FINDINGS-AUTH-SYSTEM.md), but any senior engineer with
+      adequate context is acceptable.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off must complete first</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Owner identifies dual approver candidate</step>
+    <step order="2">Approver confirms acceptance of the role (written ACK)</step>
+    <step order="3">Update Phase 0 checklist item 6 to checked</step>
+    <step order="4">Record approver name in CLAUDE.md → Decisions Made section</step>
+    <step order="5">Update TASK-INDEX.md status of task 002 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">PR comment / commit for record</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made entry)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dual approver named in CLAUDE.md Decisions Made section</criterion>
+    <criterion testable="true">Approver's written ACK exists (PR comment or task notes)</criterion>
+    <criterion testable="true">Phase 0 checklist item 6 marked complete</criterion>
+  </acceptance-criteria>
+</task>

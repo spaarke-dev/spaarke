@@ -1,0 +1,79 @@
+<task id="021" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Tier MEDIUM candidates (csproj edit, vuln patches same-major)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, risk-categorization, security, phase-2</tags>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent tier classification</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Categorize all MEDIUM-tier candidates. MEDIUM = csproj edit OR transitive-vulnerability patch
+    on same major; compile-time verifiable; reflection use ruled out via task 015 dynamic probe.
+    Includes vuln patches from task 011 + any direct-package removals where static (task 014)
+    and dynamic (task 015) probes AGREE the package is unused.
+  </prompt>
+
+  <role>Risk-tier categorizer with reflection-load awareness.</role>
+
+  <goal>
+    File `inventory/candidates-medium.md` with one row per MEDIUM candidate including all
+    fields from design §6 Phase 2. CRITICAL: any "package removable" claim must show BOTH
+    static-grep agreement AND dynamic-probe agreement.
+  </goal>
+
+  <inputs>
+    <file purpose="inventory">projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md</file>
+    <file purpose="vulnerable">projects/sdap-bff-api-remediation-fix/inventory/vulnerable.txt</file>
+    <file purpose="usage-map">projects/sdap-bff-api-remediation-fix/inventory/usage-map-static.md</file>
+    <file purpose="probe">projects/sdap-bff-api-remediation-fix/inventory/reflection-probe.txt</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 2">MEDIUM requires static AND dynamic probe agreement</constraint>
+    <constraint source="src/server/api/Sprk.Bff.Api/CLAUDE.md">Kiota packages MUST stay version-matched at 1.21.2 — Kiota patches require chain-coordinated bump</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Vuln patches from task 011 (especially the NU1903 HIGH on Kiota Abstractions) will be in
+      this tier. Kiota chain-lock means the patch may require a coordinated Microsoft.Graph SDK
+      upgrade — flag if so.
+    </background>
+    <dependencies>
+      <dependency task="018" status="not-started">INVENTORY.md</dependency>
+      <dependency task="014" status="not-started">static usage map</dependency>
+      <dependency task="015" status="not-started">reflection probe</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Cross-reference vulnerable.txt + usage-map-static + reflection-probe.txt</step>
+    <step order="2">For each MEDIUM candidate: document static + dynamic agreement</step>
+    <step order="3">For each vuln patch: document chain coupling (e.g., Kiota chain)</step>
+    <step order="4">Write candidates-medium.md</step>
+    <step order="5">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="dotnet">Confirm versions</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/inventory/candidates-medium.md</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every MEDIUM candidate has both probe results referenced</criterion>
+    <criterion testable="true">Kiota / Graph SDK chain coupling flagged where relevant</criterion>
+    <criterion testable="true">Vuln patches enumerated with CVE IDs</criterion>
+  </acceptance-criteria>
+</task>

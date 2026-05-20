@@ -1,0 +1,56 @@
+<task id="073" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>CI: fail on HIGH-severity vulnerable transitive (FR-C3)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ci-cd, security, codification, outcome-c, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential codification</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add CI step that runs `dotnet list package --vulnerable --include-transitive` and fails if HIGH-severity entries exist. PR-label escape hatch `[allow-vuln]` (implemented in task 074).
+  </prompt>
+
+  <role>CI/CD engineer + security-aware.</role>
+  <goal>Workflow step exists; failures on HIGH; passes on MEDIUM/LOW; reports counts to PR check output.</goal>
+
+  <inputs><file purpose="workflow">.github/workflows/sdap-ci.yml</file></inputs>
+  <constraints>
+    <constraint source="spec.md FR-C3">Fails on HIGH; passes on MEDIUM/LOW with counts</constraint>
+    <constraint source="spec.md FR-C4">`[allow-vuln]` PR label provides escape</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Codifies Outcome B. Without this guard, NU1903-style HIGH CVEs would slip back in.</background>
+    <dependencies><dependency task="054" status="not-started">Phase 4 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Add workflow step: `dotnet list package --vulnerable --include-transitive`</step>
+    <step order="2">Parse output: count HIGH / MEDIUM / LOW</step>
+    <step order="3">Fail if HIGH > 0; report counts to GitHub check output</step>
+    <step order="4">Test on a synthetic PR that introduces a known HIGH vuln; verify CI fails</step>
+    <step order="5">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="dotnet">vuln scan</tool><tool name="git">commit</tool></tools>
+
+  <outputs><output type="code">.github/workflows/sdap-ci.yml (new step)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workflow fails on HIGH-severity CVEs</criterion>
+    <criterion testable="true">Workflow passes on MEDIUM/LOW</criterion>
+    <criterion testable="true">Counts reported in GitHub check output</criterion>
+  </acceptance-criteria>
+</task>
