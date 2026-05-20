@@ -3,7 +3,7 @@
   <metadata>
     <title>Spike: Verify FR-07 chat-message attachments[] payload support</title>
     <phase>Phase 0 — Spike</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies></dependencies>
     <blocks>026, 050, 051</blocks>

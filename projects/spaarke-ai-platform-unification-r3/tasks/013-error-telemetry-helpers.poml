@@ -3,7 +3,7 @@
   <metadata>
     <title>Add error-only telemetry helper module for SpaarkeAi</title>
     <phase>Phase A — Foundations</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>027, 035, 023</blocks>
@@ -143,4 +143,36 @@
     STANDARD rigor applies — quality gate (code-review + adr-check at Step 9.5) is skipped, but
     knowledge-file loading, current-task tracking, and proactive checkpointing remain mandatory.
   </execution>
+
+  <notes>
+    Completed 2026-05-20. Files created:
+      - src/solutions/SpaarkeAi/src/telemetry/errorTelemetry.ts (production helper, 3 event constants, setter, no-op fallback)
+      - src/solutions/SpaarkeAi/src/telemetry/__tests__/errorTelemetry.test.ts (12 tests, all green)
+
+    Exported event-name constants:
+      - TELEMETRY_DAILY_BRIEFING_429 = "spaarke-ai-error.daily-briefing.rate-limited"
+      - TELEMETRY_FILE_EXTRACTION_FAILURE = "spaarke-ai-error.chat.file-extraction-failure"
+      - TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE = "spaarke-ai-error.history-overlay.load-failure"
+
+    Public API surface:
+      - logTelemetryError(eventName: string, properties: Record&lt;string, unknown&gt;): void
+      - setAppInsightsInstance(instance: ApplicationInsights | null | undefined): void
+      - __resetForTests() — internal test helper
+
+    Design decisions:
+      - The helper is a thin wrapper; it does NOT initialize App Insights. A future bootstrap
+        (or task 035 etc.) is expected to call setAppInsightsInstance() during app startup.
+        Until then, all logTelemetryError() calls silently no-op — by design, per the
+        "safe no-op fallback" constraint.
+      - Sibling pattern: src/solutions/LegalWorkspace/src/services/telemetry.ts uses the same
+        SDK (@microsoft/applicationinsights-web) and follows the same singleton + null-safe
+        approach. SpaarkeAi telemetry can adopt the same init flow when needed.
+      - Properties are passed through by reference (not cloned) per error-path performance
+        considerations. trackEvent throwing is swallowed defensively.
+
+    Build status: PASS (npm run build clean).
+    Test status: 12/12 PASS (jest + ts-jest, run via ephemeral install since SpaarkeAi does
+    not yet have jest devDeps in package.json — same situation as the existing
+    WorkspaceTabManager.test.ts and ContextPaneController.test.tsx files).
+  </notes>
 </task>

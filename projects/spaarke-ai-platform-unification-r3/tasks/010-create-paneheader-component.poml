@@ -3,7 +3,7 @@
   <metadata>
     <title>Create shared &lt;PaneHeader&gt; component in @spaarke/ui-components</title>
     <phase>Phase A — Foundations</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>022, 030, 040</blocks>

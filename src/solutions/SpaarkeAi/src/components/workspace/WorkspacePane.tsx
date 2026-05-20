@@ -156,7 +156,7 @@ export function WorkspacePane(): React.JSX.Element {
       const meta = getWorkspaceWidgetMetadata(widgetType);
       const displayName = meta?.displayName ?? widgetType;
 
-      // Add the tab — this enforces MAX_TABS eviction internally.
+      // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
       const tabId = manager.addTab(widgetType, widgetData, displayName);
       syncState();
 

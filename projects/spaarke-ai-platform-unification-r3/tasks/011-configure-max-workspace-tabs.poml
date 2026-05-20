@@ -3,7 +3,7 @@
   <metadata>
     <title>Configure MAX_WORKSPACE_TABS = 8 + FIFO eviction in WorkspaceTabManager</title>
     <phase>Phase A — Foundations</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>032</blocks>
@@ -127,4 +127,26 @@
     FULL rigor applies — code-review + adr-check at Step 9.5 because this modifies tab
     lifecycle logic that gates Phase C's WorkspacePane refactor.
   </execution>
+
+  <notes date="2026-05-20">
+    Completed via `task-execute` (FULL rigor). Refactored
+    `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts`:
+    - Renamed `MAX_TABS = 3` to `export const MAX_WORKSPACE_TABS = 8` (ADR-012 single source of truth).
+    - Introduced `WorkspaceTabKind = 'home' | 'widget'` discriminant + `kind` field on `WorkspaceTab`.
+    - Added `ensureHomeTab(displayName?, widgetData?, Component?)` factory that installs the
+      always-present non-closable Home tab at index 0 (idempotent — second call updates in place).
+    - FIFO eviction in `addTab()` now operates only on non-Home indices: Home is excluded
+      from candidates and untouched.
+    - `closeTab()` short-circuits with no state change when the target kind is 'home'.
+    - `clearAllTabs()` preserves Home when present; activeTabId falls back to Home id.
+    Updated `WorkspacePane.tsx` comment reference (cosmetic — no behavior change in non-Home flows).
+    Tests: replaced existing test file with 36 unit tests covering FR-13 boundary at 9 (literal
+    threshold), Home exemption at 20 and 50 adds, idempotent `ensureHomeTab`, closeTab no-op for
+    Home, and clearAllTabs Home preservation. All 36 tests pass via `npx jest`.
+    Build: `npm run build` clean. `npx tsc --noEmit` shows zero new errors in modified files
+    (pre-existing errors in `@spaarke/ai-widgets` are unrelated to this task).
+    Note: SpaarkeAi `package.json` doesn't yet list jest as a devDependency or have a `test`
+    script — tests were verified via locally-installed jest. Follow-up infrastructure task
+    (out of FR-13 scope) should wire jest into package.json + CI.
+  </notes>
 </task>

@@ -11,12 +11,12 @@
 
 | Phase | Tasks | Status |
 |---|---|---|
-| Phase 0 (Spike) | 1 (001) | 🔲 |
-| Phase A (Foundations) | 4 (010-013) | 🔲 |
+| Phase 0 (Spike) | 1 (001) | ✅ |
+| Phase A (Foundations) | 4 (010-013) | ✅ |
 | Phase B (Assistant) | 7 (020-026) | 🔲 |
 | Phase C (Workspace) | 6 (030-035) | 🔲 |
 | Phase D (Context) | 6 (040-045) | 🔲 |
-| Phase E (Backend, conditional) | 2 (050, 051) | 🔲 (status depends on 001 outcome) |
+| Phase E (Backend, conditional) | 2 (050, 051) | 🔲 ACTIVE — Phase E REQUIRED per spike 001 decision (memo: notes/spikes/001-fr07-attachments-payload.md) |
 | Phase F (Verification) | 4 (060-063) | 🔲 |
 | Phase G (Deploy + Smoke) | 5 (070-074) | 🔲 |
 | Phase H (Wrap-up) | 1 (090) | 🔲 |
@@ -27,11 +27,11 @@
 
 | ID | Title | Phase | Status | Dependencies | Blocks | Parallel | Rigor | Est. h |
 |----|-------|-------|--------|--------------|--------|----------|-------|--------|
-| 001 | Spike: FR-07 attachments payload verification | 0 (Spike) | 🔲 | none | 010-013, 026, 050, 051 | — (serial) | STANDARD | 1 |
-| 010 | Create `<PaneHeader>` shared component | A (Foundations) | 🔲 | 001 | 021, 022, 030, 032, 040 | A | FULL | 2 |
-| 011 | Configure `MAX_WORKSPACE_TABS = 8` + FIFO | A (Foundations) | 🔲 | 001 | 032 | A | FULL | 2 |
-| 012 | Lift `ActionCard` to `@spaarke/ui-components` (or verify shared) | A (Foundations) | 🔲 | 001 | 041 | A | FULL | 3 |
-| 013 | Error-only telemetry helpers | A (Foundations) | 🔲 | 001 | 022, 035 | A | STANDARD | 2 |
+| 001 | Spike: FR-07 attachments payload verification | 0 (Spike) | ✅ | none | 010-013, 026, 050, 051 | — (serial) | STANDARD | 1 |
+| 010 | Create `<PaneHeader>` shared component | A (Foundations) | ✅ | 001 | 021, 022, 030, 032, 040 | A | FULL | 2 |
+| 011 | Configure `MAX_WORKSPACE_TABS = 8` + FIFO | A (Foundations) | ✅ | 001 | 032 | A | FULL | 2 |
+| 012 | Lift `ActionCard` to `@spaarke/ui-components` (or verify shared) | A (Foundations) | ✅ | 001 | 041 | A | FULL | 3 |
+| 013 | Error-only telemetry helpers | A (Foundations) | ✅ | 001 | 022, 035 | A | STANDARD | 2 |
 | 020 | WelcomePanel chrome trim | B (Assistant) | 🔲 | 001, 010-013 | — | B | FULL | 2 |
 | 021 | ConversationPane → PaneHeader | B (Assistant) | 🔲 | 010 | 022 | B (serial w/ 022 on ConversationPane.tsx) | FULL | 2 |
 | 022 | HistoryOverlay component + wiring | B (Assistant) | 🔲 | 010, 021 | — | B (serial w/ 021) | FULL | 3 |
