@@ -3,7 +3,7 @@
   <metadata>
     <title>Build GetStartedCardsWidget — 7-card 2-col grid (FR-18)</title>
     <phase>Phase D — Context pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>012</dependencies>
     <blocks>042</blocks>

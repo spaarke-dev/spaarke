@@ -67,6 +67,17 @@ interface AppProps {
   sourceName: string | null;
   /** Authenticated fetch function from @spaarke/auth for BFF API calls. */
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional subset of layout template IDs to surface in Step 1. When `undefined`
+   * (default), the wizard renders all 9 canonical templates — preserves backwards
+   * compatibility for the standalone LegalWorkspace per FR-25 / NFR-10. When provided,
+   * the Step 1 template selector is restricted to the listed IDs (FR-14, used by
+   * SpaarkeAi's `WorkspacePaneMenu` to surface a curated 6-template subset).
+   *
+   * Typed against the exact `LayoutTemplateId` union — NOT widened to `string[]` —
+   * so callers get compile-time safety.
+   */
+  templateFilter?: readonly LayoutTemplateId[];
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +201,7 @@ function buildSectionsJson(
 // App Component
 // ---------------------------------------------------------------------------
 
-export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch }) => {
+export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter }) => {
   // ---------------------------------------------------------------------------
   // SaveAs pre-population: parse source layout data once at mount time
   // ---------------------------------------------------------------------------
@@ -376,6 +387,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
           <TemplateStep
             selectedTemplateId={selectedTemplateId}
             onSelect={setSelectedTemplateId}
+            templateFilter={templateFilter}
           />
         ),
       },
@@ -423,6 +435,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       workspaceName,
       isDefault,
       scope,
+      templateFilter,
     ],
   );
 

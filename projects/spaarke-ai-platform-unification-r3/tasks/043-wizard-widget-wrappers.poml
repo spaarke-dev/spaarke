@@ -3,7 +3,7 @@
   <metadata>
     <title>Thin wizard widget wrappers — CreateProjectWizardWidget + FindSimilarWizardWidget (FR-19)</title>
     <phase>Phase D — Context pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks></blocks>

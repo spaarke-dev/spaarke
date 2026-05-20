@@ -1,12 +1,19 @@
 /**
  * Wizard Step 1 — Template Selection
  *
- * Renders the 6 layout templates as visual thumbnail cards in a responsive grid.
+ * Renders the canonical 9 layout templates as visual thumbnail cards in a responsive grid.
  * Each card displays a CSS-based mini grid preview, the template name, and slot count.
  * The selected card is highlighted with a brand-colored border.
  *
+ * Optionally accepts a `templateFilter` prop to restrict the rendered template list to a
+ * subset of `LayoutTemplateId` values. When the filter is absent (`undefined`) the full
+ * 9-template list is rendered — preserving backwards compatibility for standalone
+ * LegalWorkspace per FR-25 / NFR-10. When present (e.g. passed from SpaarkeAi's
+ * `WorkspacePaneMenu`) only the listed templates are shown — per FR-14.
+ *
  * @see ADR-021 - Fluent UI v9 Design System
  * @see ADR-012 - Shared component library
+ * @see ADR-022 - React 19 typing conventions
  */
 
 import * as React from "react";
@@ -33,6 +40,19 @@ export interface TemplateStepProps {
   selectedTemplateId: LayoutTemplateId | null;
   /** Callback when the user selects a template card. */
   onSelect: (templateId: LayoutTemplateId) => void;
+  /**
+   * Optional subset of template IDs to render. When `undefined` (default), all 9
+   * canonical templates from `LAYOUT_TEMPLATES` are rendered — this preserves the
+   * standalone LegalWorkspace behavior per FR-25 / NFR-10 backwards-compat invariant.
+   * When provided, only templates whose `id` appears in the array are shown — per FR-14
+   * (used by SpaarkeAi's `WorkspacePaneMenu` to surface a curated subset, e.g. the
+   * 6-template set: `2-col-equal`, `3-row-mixed`, `hero-2x2`, `sidebar-main`,
+   * `single-column`, `single-column-5`).
+   *
+   * Note: typed against the exact `LayoutTemplateId` union — NOT widened to `string[]` —
+   * so callers get compile-time safety against typos / stale IDs.
+   */
+  templateFilter?: readonly LayoutTemplateId[];
 }
 
 // ---------------------------------------------------------------------------
@@ -158,8 +178,21 @@ const TemplateThumbnail: React.FC<{
 export const TemplateStep: React.FC<TemplateStepProps> = ({
   selectedTemplateId,
   onSelect,
+  templateFilter,
 }) => {
   const classes = useStyles();
+
+  /**
+   * Apply optional `templateFilter`. When absent (`undefined`) we render the canonical
+   * `LAYOUT_TEMPLATES` list unchanged — preserving FR-25 backwards-compat for the
+   * standalone LegalWorkspace. When present, we filter to the listed IDs while keeping
+   * the canonical order from `LAYOUT_TEMPLATES` (NOT the order of `templateFilter`).
+   */
+  const visibleTemplates = React.useMemo(() => {
+    if (!templateFilter) return LAYOUT_TEMPLATES;
+    const allowed = new Set<LayoutTemplateId>(templateFilter);
+    return LAYOUT_TEMPLATES.filter((t) => allowed.has(t.id));
+  }, [templateFilter]);
 
   return (
     <div className={classes.root}>
@@ -173,7 +206,7 @@ export const TemplateStep: React.FC<TemplateStepProps> = ({
       </Text>
 
       <div className={classes.grid} role="radiogroup" aria-label="Layout templates">
-        {LAYOUT_TEMPLATES.map((template) => {
+        {visibleTemplates.map((template) => {
           const selected = template.id === selectedTemplateId;
           return (
             <div

@@ -449,6 +449,83 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// 14. create-project-wizard — Existing Create Project Code Page dispatcher (task 043, FR-19)
+//     Category: wizard — opens the existing `sprk_createprojectwizard` Code Page
+//     via Xrm.Navigation.navigateTo (REUSE per OC-04 / ADR-012, NOT re-authored).
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may launch multiple Create Project dialogs
+//     in distinct workspace tabs.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Create New Project" card). Renaming this string would break the
+   * GetStartedCards → Create Project routing path.
+   */
+  'create-project-wizard',
+  {
+    displayName: 'Create New Project',
+    category: 'wizard',
+    icon: 'FolderAdd24Regular',
+    /**
+     * allowMultiple=true: users may have several Create Project dispatcher tabs
+     * if they re-launched the card multiple times. The underlying Code Page
+     * itself is a singleton modal — only one dialog is visible at a time —
+     * but the widget tab persists for relaunch.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=120: positioned just after meeting-schedule (110).
+     */
+    defaultOrder: 120,
+  },
+  () =>
+    import('./CreateProjectWizardWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 15. find-similar-wizard — Existing Find Similar Code Page dispatcher (task 043, FR-19)
+//     Category: wizard — opens the existing `sprk_findsimilar` Code Page
+//     via Xrm.Navigation.navigateTo (REUSE per OC-04 / ADR-012, NOT re-authored).
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may launch multiple Find Similar searches
+//     in distinct workspace tabs.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Find Similar" card). Renaming this string would break the
+   * GetStartedCards → Find Similar routing path.
+   */
+  'find-similar-wizard',
+  {
+    displayName: 'Find Similar Documents',
+    category: 'wizard',
+    icon: 'DocumentSearch24Regular',
+    /**
+     * allowMultiple=true: users may have several Find Similar dispatcher tabs
+     * if they re-launched the card multiple times (e.g. comparing different
+     * source documents in parallel).
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=130: positioned just after create-project-wizard (120).
+     */
+    defaultOrder: 130,
+  },
+  () =>
+    import('./FindSimilarWizardWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from index.ts side-effect import)
 // ---------------------------------------------------------------------------
 

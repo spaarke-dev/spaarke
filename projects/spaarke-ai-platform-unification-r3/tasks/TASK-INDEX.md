@@ -39,16 +39,16 @@
 | 024 | `useChatFileAttachment` hook + lazy extraction | B (Assistant) | ✅ | 010 | 025, 026 | B | FULL | 4 |
 | 025 | SprkChat toolbar restructure (+, remove Word) | B (Assistant) | 🔲 | 023, 024 | 026 | B (serial w/ 023) | FULL | 3 |
 | 026 | Wire attachments into chat send payload | B (Assistant) | 🔲 | 001, 024, 025 | — | — (serial — gated by spike) | FULL | 3 |
-| 030 | WorkspacePane → PaneHeader + embed LegalWorkspace | C (Workspace) | 🔲 | 010 | 031, 032, 034 | C (serial on WorkspacePane.tsx) | FULL | 4 |
+| 030 | WorkspacePane → PaneHeader + embed LegalWorkspace | C (Workspace) | ✅ | 010 | 031, 032, 034 | C (serial on WorkspacePane.tsx) | FULL | 4 |
 | 031 | Delete `WorkspaceLandingWidget.tsx` | C (Workspace) | 🔲 | 030 | — | C (serial w/ 030) | STANDARD | 1 |
 | 032 | `WorkspacePaneMenu` Dropdown component | C (Workspace) | 🔲 | 010, 011, 030 | — | C (serial on WorkspacePane.tsx) | FULL | 4 |
-| 033 | `WorkspaceLayoutWizard.templateFilter` prop | C (Workspace) | 🔲 | 001 | — | C | STANDARD | 2 |
-| 034 | Daily Briefing section + `useDailyBriefing` hook | C (Workspace) | 🔲 | 030 | 035 | C | FULL | 4 |
+| 033 | `WorkspaceLayoutWizard.templateFilter` prop | C (Workspace) | ✅ | 001 | — | C | STANDARD | 2 |
+| 034 | Daily Briefing section + `useDailyBriefing` hook | C (Workspace) | ✅ | 030 | 035 | C | FULL | 4 |
 | 035 | Daily Briefing 429 + empty state | C (Workspace) | 🔲 | 013, 034 | — | C (depends on 034) | FULL | 3 |
-| 040 | ContextPaneController → PaneHeader + "Get Started" label | D (Context) | 🔲 | 010 | 042 | D (serial on ContextPaneController.tsx) | FULL | 3 |
-| 041 | `GetStartedCardsWidget` (7 cards, 2-col grid) | D (Context) | 🔲 | 012 | 042 | D | FULL | 3 |
+| 040 | ContextPaneController → PaneHeader + "Get Started" label | D (Context) | ✅ | 010 | 042 | D (serial on ContextPaneController.tsx) | FULL | 3 |
+| 041 | `GetStartedCardsWidget` (7 cards, 2-col grid) | D (Context) | ✅ | 012 | 042 | D | FULL | 3 |
 | 042 | Register widget + welcome-stage swap | D (Context) | 🔲 | 040, 041 | — | D (serial on ContextPaneController.tsx) | FULL | 3 |
-| 043 | Wizard widget wrappers (CreateProject, FindSimilar) | D (Context) | 🔲 | 001 | — | D | FULL | 2 |
+| 043 | Wizard widget wrappers (CreateProject, FindSimilar) | D (Context) | ✅ | 001 | — | D | FULL | 2 |
 | 044 | Analysis Builder intents (email-compose, meeting-schedule) | D (Context) | ✅ | 001 | — | D | STANDARD | 2 |
 | 045 | `AssignWorkWizardLauncher` (Xrm.Navigation) | D (Context) | ✅ | 001 | — | D | FULL | 2 |
 | 050 | Extend ChatEndpoints with attachments[] (CONDITIONAL) | E (Backend) | 🔲 | 001 | 051, 026 | E | FULL | 3 |

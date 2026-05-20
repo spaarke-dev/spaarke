@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate ContextPaneController to shared PaneHeader + stage label rename (FR-17, FR-22)</title>
     <phase>Phase D — Context pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>042</blocks>

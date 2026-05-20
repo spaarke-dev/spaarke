@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate WorkspacePane to shared PaneHeader and embed LegalWorkspace as Home tab</title>
     <phase>Phase C — Workspace Pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>031, 032, 034, 035</blocks>

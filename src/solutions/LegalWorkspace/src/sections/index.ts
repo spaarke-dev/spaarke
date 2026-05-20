@@ -12,3 +12,4 @@ export { quickSummaryRegistration } from "./quickSummary.registration";
 export { latestUpdatesRegistration } from "./latestUpdates.registration";
 export { todoRegistration } from "./todo.registration";
 export { documentsRegistration } from "./documents.registration";
+export { dailyBriefingRegistration } from "./dailyBriefing/dailyBriefing.registration";

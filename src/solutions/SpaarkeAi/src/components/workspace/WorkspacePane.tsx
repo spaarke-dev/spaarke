@@ -34,6 +34,7 @@ import {
   DocumentSearchRegular,
   AppsListRegular,
 } from "@fluentui/react-icons";
+import { PaneHeader } from "@spaarke/ui-components";
 import {
   usePaneEvent,
   useDispatchPaneEvent,
@@ -46,6 +47,7 @@ import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type { WorkspaceTabManagerState } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
 import { WorkspaceLandingWidget } from "./WorkspaceLandingWidget";
+import { WorkspaceHomeTab } from "./WorkspaceHomeTab";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -137,6 +139,38 @@ export function WorkspacePane(): React.JSX.Element {
   /** Sync React state with the current manager snapshot. */
   const syncState = React.useCallback((): void => {
     setTabState(managerRef.current.getSnapshot());
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Home tab — FR-11: embed the LegalWorkspace experience as a non-closable
+  // Home tab containing the user's default workspace layout. The Home tab is
+  // installed eagerly on mount via WorkspaceTabManager.ensureHomeTab() (task
+  // 011 shipped this factory). WorkspaceHomeTab handles its own per-request
+  // BFF fetch via authenticatedFetch (ADR-028).
+  // ---------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    const manager = managerRef.current;
+    const homeTabId = manager.ensureHomeTab(
+      "Home",
+      /* widgetData */ null,
+      /* Component */ WorkspaceHomeTab,
+    );
+    // If no tab is currently active, activate the Home tab so the user sees
+    // workspace content on first paint instead of an empty-state placeholder.
+    if (manager.getActiveTab() === null) {
+      manager.setActiveTab(homeTabId);
+    }
+    syncState();
+    // Dispatch tab_count_change so ShellStageManager can adapt. The Home tab
+    // counts as one tab; subsequent widget tabs add to this count.
+    dispatch("workspace", {
+      type: "tab_count_change",
+      tabCount: manager.getSnapshot().tabs.length,
+    });
+    // Intentionally empty dep array: install Home tab once per mount. dispatch
+    // is stable per useDispatchPaneEvent contract and syncState is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -313,17 +347,40 @@ export function WorkspacePane(): React.JSX.Element {
 
   // ---------------------------------------------------------------------------
   // Render
+  //
+  // FR-10: Render the shared <PaneHeader> at the top of every paint, with the
+  // brand-colored AppsListRegular icon. PaneHeader's `rightSlot` is reserved
+  // for `WorkspacePaneMenu` (task 032 wires this in a later wave); leaving it
+  // undefined keeps the trailing edge available without rendering an empty
+  // node.
+  //
+  // FR-11: With the Home tab installed eagerly in the mount effect above,
+  // `tabs.length === 0` is only reachable as a defensive fallback (e.g. if
+  // ensureHomeTab were ever to be removed). The original Stage-1 / Stage-2 /
+  // generic placeholder branches are preserved as a safety net and to keep
+  // the diff against task 030 minimal; task 031 deletes the now-unreachable
+  // `WorkspaceLandingWidget` path.
   // ---------------------------------------------------------------------------
 
   const { tabs, activeTabId } = tabState;
 
+  const header = (
+    <PaneHeader
+      title="Workspace"
+      icon={<AppsListRegular />}
+      // rightSlot intentionally undefined — task 032 wires WorkspacePaneMenu here.
+    />
+  );
+
   if (tabs.length === 0) {
-    // Stage 1 (welcome): show "What would you like to work on?" + recent work prompt.
-    // Stage 2 (loading): show document/entity selection UI.
-    // Any other empty state: generic workspace placeholder.
+    // Defensive fallback. With the Home tab installed in the mount effect,
+    // this branch is only reachable during the very first render before the
+    // effect runs. Preserves the previous empty-state UX so no flash of
+    // missing content occurs.
     if (currentStage === "welcome") {
       return (
         <div className={styles.root} data-testid="workspace-stage-welcome">
+          {header}
           <WorkspaceLandingWidget />
         </div>
       );
@@ -332,6 +389,7 @@ export function WorkspacePane(): React.JSX.Element {
     if (currentStage === "loading") {
       return (
         <div className={styles.root}>
+          {header}
           <div className={styles.emptyState} data-testid="workspace-stage-loading">
             <DocumentSearchRegular className={styles.emptyIcon} />
             <Text className={styles.emptyTitle} size={400}>
@@ -349,10 +407,9 @@ export function WorkspacePane(): React.JSX.Element {
       );
     }
 
-    // active-chat or review with no tabs: generic placeholder (should not happen
-    // normally, but provides a safe fallback).
     return (
       <div className={styles.root}>
+        {header}
         <div className={styles.emptyState} data-testid="workspace-stage-default">
           <BrainCircuitRegular className={styles.emptyIcon} />
           <Text className={styles.emptyTitle} size={400}>
@@ -369,6 +426,7 @@ export function WorkspacePane(): React.JSX.Element {
 
   return (
     <div className={styles.root}>
+      {header}
       <WorkspaceTabManagerComponent
         tabs={tabs}
         activeTabId={activeTabId}

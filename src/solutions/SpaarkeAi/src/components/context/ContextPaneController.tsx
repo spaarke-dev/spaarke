@@ -37,6 +37,7 @@ import {
   mergeClasses,
 } from "@fluentui/react-components";
 import { DocumentRegular } from "@fluentui/react-icons";
+import { PaneHeader } from "@spaarke/ui-components";
 import {
   usePaneEvent,
   resolveContextWidget,
@@ -138,32 +139,10 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
-  // Header bar
-  header: {
-    flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke1,
-    backgroundColor: tokens.colorNeutralBackground1,
-    minHeight: "40px",
-  },
-  headerIcon: {
-    color: tokens.colorBrandForeground1,
-    fontSize: "16px",
-    flexShrink: 0,
-  },
-  headerTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-    flexGrow: 1,
-  },
+  // Header style classes removed — header is now rendered by the shared
+  // <PaneHeader> primitive from @spaarke/ui-components (ADR-012 / FR-17).
+  // The right-side stage label retains its original neutral-foreground-4 +
+  // fontSizeBase100 treatment via `headerStageLabel`, passed in rightSlot.
   headerStageLabel: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
@@ -504,8 +483,11 @@ export function ContextPaneController(): React.JSX.Element {
   // Derive header stage label for debugging / accessibility
   // ---------------------------------------------------------------------------
 
+  // FR-22 — Welcome-stage label renamed: "Gallery" → "Get Started".
+  // The welcome ShellStage maps to ContextStage 'playbook-gallery' via
+  // shellStageToContextStage(), so we change that entry's label.
   const stageLabelMap: Record<ContextStage, string> = {
-    "playbook-gallery": "Gallery",
+    "playbook-gallery": "Get Started",
     "entity-info": "Entity",
     "sources-citations": "Sources",
     "progress": "Progress",
@@ -688,16 +670,27 @@ export function ContextPaneController(): React.JSX.Element {
 
   return (
     <div className={styles.root} data-testid="context-pane-controller">
-      {/* Header */}
-      <div className={styles.header}>
-        <DocumentRegular className={styles.headerIcon} />
-        <Text className={styles.headerTitle} size={300}>
-          Context
-        </Text>
-        <Text className={styles.headerStageLabel} size={100}>
-          {stageLabelMap[contextStage]}
-        </Text>
-      </div>
+      {/*
+        Header — migrated to shared <PaneHeader> primitive from
+        @spaarke/ui-components (FR-17, task 010). The inline header JSX
+        previously living here was the canonical visual model for PaneHeader,
+        so visual parity is preserved by construction (matching styles in
+        PaneHeader.tsx). Stage label remains in rightSlot.
+
+        NOTE for task 042: rightSlot composition may need adjustment when the
+        welcome-stage widget swap (PlaybookGalleryWidget → GetStartedCardsWidget)
+        lands — leave this single-label composition unless 042 explicitly
+        requires more right-aligned controls.
+      */}
+      <PaneHeader
+        title="Context"
+        icon={<DocumentRegular />}
+        rightSlot={
+          <Text className={styles.headerStageLabel} size={100}>
+            {stageLabelMap[contextStage]}
+          </Text>
+        }
+      />
 
       {/* Content — adaptive based on stage and event state */}
       {renderContent()}

@@ -168,6 +168,34 @@ export type { MeetingScheduleData } from './widgets/workspace/MeetingScheduleWid
 export { serializeMeetingScheduleState } from './widgets/workspace/MeetingScheduleWidget';
 
 // ---------------------------------------------------------------------------
+// Widgets: CreateProjectWizardWidget — Existing Code Page dispatcher (task 043)
+//
+// Thin dispatcher that opens the existing `sprk_createprojectwizard` Code
+// Page via `Xrm.Navigation.navigateTo` (FR-19: Create Project card). The
+// widget is a launcher only — the wizard UI lives in the existing Code Page
+// (REUSE per OC-04 / ADR-012, NOT re-authored).
+// Registered under 'create-project-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as CreateProjectWizardWidget } from './widgets/workspace/CreateProjectWizardWidget';
+export type { CreateProjectWizardData } from './widgets/workspace/CreateProjectWizardWidget';
+export { serializeCreateProjectWizardState } from './widgets/workspace/CreateProjectWizardWidget';
+
+// ---------------------------------------------------------------------------
+// Widgets: FindSimilarWizardWidget — Existing Code Page dispatcher (task 043)
+//
+// Thin dispatcher that opens the existing `sprk_findsimilar` Code Page via
+// `Xrm.Navigation.navigateTo` (FR-19: Find Similar card). The widget is a
+// launcher only — the Find Similar UI lives in the existing Code Page
+// (REUSE per OC-04 / ADR-012, NOT re-authored).
+// Registered under 'find-similar-wizard' via register-workspace-widgets.ts.
+// ---------------------------------------------------------------------------
+
+export { default as FindSimilarWizardWidget } from './widgets/workspace/FindSimilarWizardWidget';
+export type { FindSimilarWizardData } from './widgets/workspace/FindSimilarWizardWidget';
+export { serializeFindSimilarWizardState } from './widgets/workspace/FindSimilarWizardWidget';
+
+// ---------------------------------------------------------------------------
 // Launchers: AssignWorkWizardLauncher (FR-20, task 045)
 //
 // Thin function-based dispatcher (NOT a widget) that opens the existing
