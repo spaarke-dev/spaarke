@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy BFF API + SpaarkeAi Code Page to dev environment (end-to-end deploy)</title>
     <phase>Phase G — Deploy + Smoke</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>060, 061, 062, 063, 065</dependencies>
     <blocks>071, 072, 073, 074</blocks>

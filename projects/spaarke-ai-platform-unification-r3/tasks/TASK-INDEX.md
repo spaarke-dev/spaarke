@@ -58,7 +58,7 @@
 | 062 | Dark-mode token audit (no hex/rgba in new code) | F (Verification) | ✅ | All B/C/D | 070 | F | STANDARD | 2 |
 | 063 | Backwards-compat verification (standalone LW + persistence) | F (Verification) | ✅ | C tasks | 070 | F | STANDARD | 2 |
 | 065 | Extend SessionPersistence with workspace tabs[] (NFR-09 fix) | F (Verification — remediation) | ✅ | 011, 030, 050, 063 | 070 | — (serial) | FULL | 5 |
-| 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | 🔲 | 060-063, **065** | 071-074 | — | FULL | 1 |
+| 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | ✅ | 060-063, **065** | 071-074 | — | FULL | 1 |
 | 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
 | 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
 | 073 | UI smoke — Context pane (FR-17..FR-22) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
