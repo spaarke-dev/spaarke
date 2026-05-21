@@ -192,6 +192,31 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
     [handleSlashButtonClick],
   );
 
+  // ── Cursor focus restoration after streaming (task 082, UX fix #1) ────────
+  // When the response stream completes the parent flips `disabled` from true
+  // back to false. At that moment, return focus to the textarea so the user
+  // can immediately type the next message without clicking back into the box.
+  // Tracking the prior disabled value via a ref ensures we only refocus on the
+  // true→false transition (not on mount or on every render while disabled is
+  // already false).
+  const prevDisabledRef = React.useRef<boolean>(disabled);
+  React.useEffect(() => {
+    const wasDisabled = prevDisabledRef.current;
+    prevDisabledRef.current = disabled;
+
+    if (wasDisabled && !disabled) {
+      // Streaming just completed — restore focus to the input.
+      // Wait one frame so any layout/aria changes from the disabled flip
+      // settle before focusing (avoids losing focus to an intermediate
+      // re-render in Fluent Textarea).
+      const handle = requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(handle);
+    }
+    return undefined;
+  }, [disabled]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
