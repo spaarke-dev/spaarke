@@ -3,7 +3,7 @@
   <metadata>
     <title>Hoist workspace section registry + builder to @spaarke/ui-components (ADR-012 compliance; Bug 2 fix)</title>
     <phase>F (Verification — remediation)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>12</estimated-hours>
     <dependencies>030, 034, 070</dependencies>
     <blocks>072</blocks>
@@ -225,6 +225,39 @@
   </acceptance-criteria>
 
   <notes>
+    **Completion notes (2026-05-20):**
+
+    Outcome: Task delivered the foundation (hoisted builder + types to shared lib) but the
+    full Bug 2 fix is PARTIAL. Re-investigation showed all 6 section factories import
+    solution-local legal-domain components (QuickSummaryRow, ActivityFeed, SmartToDo,
+    DocumentsTab, DailyBriefingSection, ACTION_CARD_CONFIGS). Hoisting them would violate
+    ADR-012 ("MUST NOT hard-code Dataverse entity names ... in shared lib"). The diagnostic
+    agent's pre-investigation claim that "4-5 factories are PORTABLE" was incomplete.
+
+    Decision: hoist the PURE infrastructure (`buildDynamicWorkspaceConfig`,
+    `SYSTEM_DEFAULT_LAYOUT_JSON`, `LayoutJson` types) to `@spaarke/ui-components`. Leave
+    factories solution-local. Rewire SpaarkeAi's WorkspaceHomeTab to use the canonical
+    builder with a local placeholder registry (eliminates parallel `buildFoundationalConfig`
+    logic; aligns SpaarkeAi structurally with LegalWorkspace).
+
+    Result:
+    - Shared lib now owns the canonical builder + types — ADR-012 cross-cutting limitation
+      ARCHITECTURALLY ADDRESSED (the builder is portable; future Code Pages consume it).
+    - SpaarkeAi still renders placeholder bodies for section content — Bug 2 NOT fully
+      fixed at the content level. Resolving that requires either (a) hoisting legal-domain
+      components (large blast radius; violates ADR-012), or (b) building a context-agnostic
+      section catalog parallel to the legal-domain one (new design work).
+    - Both web resources deployed; FR-25/NFR-10 preserved (standalone LegalWorkspace
+      identical: 569.84 KB gzip, 9 templates, all 6 sections render).
+    - Bundle deltas: SpaarkeAi +22.58 KB gzip (+2.9%); LegalWorkspace within noise.
+
+    Artifacts:
+    - `notes/drafts/067-factory-inventory.md` — per-factory portability decision
+    - `notes/067-shared-lib-hoist-summary.md` — architectural summary memo
+    - `notes/deploys/2026-05-20-deploy.md` — supplemental deploy section appended
+
+    Original task notes follow:
+
     This task is the structural response to the operator's "ADR limitation of cross cutting
     components — that needs to be addressed" feedback. After this task, the workspace
     section infrastructure is properly shared per ADR-012; future Code Pages that need to

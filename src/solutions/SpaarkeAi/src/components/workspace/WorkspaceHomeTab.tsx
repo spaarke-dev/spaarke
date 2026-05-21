@@ -4,32 +4,23 @@
  * Fetches the user's default workspace layout from
  * `GET /api/workspace/layouts/default` (per-request auth via `authenticatedFetch`
  * from `@spaarke/auth` — ADR-028) and renders it via the shared `WorkspaceShell`
- * component (ADR-012). This component is wired in as the Home tab's resolved
- * React Component by `WorkspacePane.tsx` via `WorkspaceTabManager.ensureHomeTab()`.
+ * component (ADR-012) using the canonical `buildDynamicWorkspaceConfig` hoisted in
+ * task 067.
  *
- * Foundational scope (task 030):
- *   - PaneHeader rendered at top is the responsibility of WorkspacePane.tsx
- *   - This component only renders the WorkspaceShell content for the Home tab.
- *   - Section bodies are rendered as placeholder content sections that describe
- *     the section id. Wave 2b / 2c tasks (034, 040, 041, 043) wire the actual
- *     section factories (Daily Briefing, Get Started, etc.) once the
- *     `SectionRegistration` factories from LegalWorkspace are accessible via
- *     a shared section registry. Until then, the Home tab faithfully reflects
- *     the user's layout STRUCTURE while leaving content body wiring for later.
- *
- * Why a thin foundational embed:
- *   - The full LegalWorkspace `WorkspaceGrid` consumes `SECTION_REGISTRY` and
- *     `buildDynamicWorkspaceConfig` from `src/solutions/LegalWorkspace/...`.
- *     SpaarkeAi does not depend on LegalWorkspace and lifting the section
- *     registry to the shared library is out of scope for this task (it would
- *     require touching many factories that the standalone LegalWorkspace owns —
- *     violating NFR-10 if not done carefully).
- *   - The foundational pattern landed here (fetch → parse → render via
- *     WorkspaceShell) is the correct shape; subsequent tasks replace the
- *     placeholder section body with real factories.
+ * Section content rendering strategy (task 067):
+ *   - SpaarkeAi consumes the canonical builder from `@spaarke/ui-components`.
+ *   - A LOCAL placeholder registry supplies one registration per known section ID
+ *     (get-started, quick-summary, latest-updates, todo, documents, daily-briefing,
+ *     matters, projects). Each placeholder renders a labelled message describing
+ *     the section. This preserves the structural integrity of the user's layout
+ *     while keeping legal-domain components (QuickSummaryRow, ActivityFeed,
+ *     SmartToDo, DocumentsTab, DailyBriefingSection) inside LegalWorkspace per
+ *     ADR-012 ("MUST NOT hard-code Dataverse entity names ... in shared lib").
+ *   - See `projects/spaarke-ai-platform-unification-r3/notes/drafts/067-factory-inventory.md`
+ *     for the architectural decision.
  *
  * Standards:
- *   - ADR-012: WorkspaceShell consumed from `@spaarke/ui-components` (no deep imports)
+ *   - ADR-012: WorkspaceShell + builder consumed from `@spaarke/ui-components` barrel
  *   - ADR-021: Fluent v9 tokens only (no hex / rgba)
  *   - ADR-022: React 19 functional component
  *   - ADR-028: All BFF calls via `authenticatedFetch`; no `accessToken` snapshots
@@ -45,17 +36,33 @@ import {
   MessageBarBody,
   MessageBarTitle,
 } from "@fluentui/react-components";
+import {
+  RocketRegular,
+  DataBarVerticalRegular,
+  ClockRegular,
+  CheckmarkCircleRegular,
+  DocumentRegular,
+  SparkleRegular,
+  BriefcaseRegular,
+  FolderRegular,
+} from "@fluentui/react-icons";
 import { authenticatedFetch, buildBffApiUrl } from "@spaarke/auth";
-import { WorkspaceShell } from "@spaarke/ui-components";
+import {
+  WorkspaceShell,
+  buildDynamicWorkspaceConfig,
+  SYSTEM_DEFAULT_LAYOUT_JSON,
+} from "@spaarke/ui-components";
 import type {
   WorkspaceConfig,
-  WorkspaceRowConfig,
-  SectionConfig,
+  SectionRegistration,
+  SectionFactoryContext,
+  ContentSectionConfig,
+  LayoutJson,
 } from "@spaarke/ui-components";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
 
 // ---------------------------------------------------------------------------
-// BFF DTO + layout JSON shape (mirror LegalWorkspace conventions)
+// BFF DTO shape (mirror LegalWorkspace conventions)
 // ---------------------------------------------------------------------------
 
 /** Client-side mirror of the BFF `WorkspaceLayoutDto` shape. */
@@ -70,56 +77,95 @@ interface WorkspaceLayoutDto {
   isSystem: boolean;
 }
 
-/** A single row in the persisted layout JSON. */
-interface LayoutJsonRow {
-  id: string;
-  columns: string;
-  columnsSmall?: string;
-  sections: string[];
-}
-
-/** Top-level layout JSON persisted in Dataverse `sprk_sectionsjson`. */
-interface LayoutJson {
-  schemaVersion: number;
-  rows: LayoutJsonRow[];
-}
-
-/**
- * Minimal system-default layout used when the BFF is unreachable or returns no
- * default layout. Matches the shape used by the standalone LegalWorkspace shell
- * so visual parity is preserved at narrower widths.
- */
-const FALLBACK_LAYOUT_JSON: LayoutJson = {
-  schemaVersion: 1,
-  rows: [
-    { id: "row-1", columns: "1fr 1fr", sections: ["get-started", "quick-summary"] },
-    { id: "row-2", columns: "1fr", sections: ["latest-updates"] },
-    { id: "row-3", columns: "1fr 1fr", sections: ["todo", "documents"] },
-  ],
-};
-
 // ---------------------------------------------------------------------------
-// Section id → friendly label map (foundational placeholders)
+// Section id → friendly label + icon map (foundational placeholders).
+//
+// These match the standalone LegalWorkspace section identities so the
+// rendered structure is consistent across both surfaces. Section content
+// bodies are placeholders — the legal-domain section components remain
+// in LegalWorkspace (see notes/drafts/067-factory-inventory.md).
 // ---------------------------------------------------------------------------
 
-const SECTION_LABELS: Record<string, string> = {
-  "get-started": "Get Started",
-  "quick-summary": "Quick Summary",
-  "latest-updates": "Latest Updates",
-  todo: "My To Do List",
-  documents: "My Documents",
-  matters: "My Matters",
-  projects: "My Projects",
-  "daily-briefing": "Daily Briefing",
+interface IPlaceholderSectionMeta {
+  label: string;
+  description: string;
+  icon: SectionRegistration["icon"];
+  defaultHeight: string;
+  category: SectionRegistration["category"];
+}
+
+const PLACEHOLDER_SECTION_META: Record<string, IPlaceholderSectionMeta> = {
+  "get-started": {
+    label: "Get Started",
+    description: "Quick-action cards for common workflows",
+    icon: RocketRegular,
+    defaultHeight: "200px",
+    category: "overview",
+  },
+  "quick-summary": {
+    label: "Quick Summary",
+    description: "Key metrics at a glance",
+    icon: DataBarVerticalRegular,
+    defaultHeight: "180px",
+    category: "overview",
+  },
+  "latest-updates": {
+    label: "Latest Updates",
+    description: "Recent activity feed with flagging",
+    icon: ClockRegular,
+    defaultHeight: "325px",
+    category: "data",
+  },
+  todo: {
+    label: "My To Do List",
+    description: "Embedded smart to-do list",
+    icon: CheckmarkCircleRegular,
+    defaultHeight: "560px",
+    category: "productivity",
+  },
+  documents: {
+    label: "My Documents",
+    description: "Recent documents with quick actions",
+    icon: DocumentRegular,
+    defaultHeight: "560px",
+    category: "data",
+  },
+  "daily-briefing": {
+    label: "Daily Briefing",
+    description: "AI-curated highlights from your day",
+    icon: SparkleRegular,
+    defaultHeight: "325px",
+    category: "ai",
+  },
+  matters: {
+    label: "My Matters",
+    description: "Active legal matters",
+    icon: BriefcaseRegular,
+    defaultHeight: "325px",
+    category: "data",
+  },
+  projects: {
+    label: "My Projects",
+    description: "Active projects",
+    icon: FolderRegular,
+    defaultHeight: "325px",
+    category: "data",
+  },
 };
 
-/** Friendly label for a section id (capitalized fallback). */
-function labelForSection(id: string): string {
-  if (id in SECTION_LABELS) return SECTION_LABELS[id];
-  return id
+/** Build a placeholder SectionRegistration for an unrecognised section ID. */
+function buildFallbackMeta(id: string): IPlaceholderSectionMeta {
+  const label = id
     .split("-")
     .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
     .join(" ");
+  return {
+    label,
+    description: `Section "${label}"`,
+    icon: DocumentRegular,
+    defaultHeight: "200px",
+    category: "data",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,55 +215,90 @@ function parseLayoutJson(sectionsJson: string): LayoutJson {
   } catch (err) {
     console.warn("[WorkspaceHomeTab] Failed to parse sectionsJson:", err);
   }
-  return FALLBACK_LAYOUT_JSON;
+  return SYSTEM_DEFAULT_LAYOUT_JSON;
 }
 
 // ---------------------------------------------------------------------------
-// Build a foundational WorkspaceConfig from a LayoutJson
-//
-// Foundational behaviour: each section in the layout JSON becomes a
-// placeholder `content` section that names the section id. Later tasks
-// replace this with the real section factory output (Daily Briefing,
-// Get Started cards, Latest Updates feed, To Do kanban, Documents grid).
+// Build a placeholder registry covering every section ID referenced in the
+// layout JSON. Each registration produces a ContentSectionConfig whose body
+// is a labelled placeholder paragraph (matching the pre-067 visual contract).
 // ---------------------------------------------------------------------------
 
-function buildFoundationalConfig(
-  layout: LayoutJson,
+function buildPlaceholderRegistry(
+  layoutJson: LayoutJson,
   paddedClassName: string,
-): WorkspaceConfig {
-  const sections: SectionConfig[] = [];
-  const seenSectionIds = new Set<string>();
+): SectionRegistration[] {
+  const seenIds = new Set<string>();
+  const registry: SectionRegistration[] = [];
 
-  for (const row of layout.rows) {
+  for (const row of layoutJson.rows) {
     for (const sectionId of row.sections) {
-      if (seenSectionIds.has(sectionId)) continue;
-      seenSectionIds.add(sectionId);
-      sections.push({
+      if (seenIds.has(sectionId)) continue;
+      seenIds.add(sectionId);
+
+      const meta = PLACEHOLDER_SECTION_META[sectionId] ?? buildFallbackMeta(sectionId);
+
+      const registration: SectionRegistration = {
         id: sectionId,
-        type: "content",
-        title: labelForSection(sectionId),
-        renderContent: () => (
-          <div className={paddedClassName} data-testid={`home-section-${sectionId}`}>
-            <Text size={200}>
-              Section content for &ldquo;{labelForSection(sectionId)}&rdquo; will render here.
-            </Text>
-          </div>
-        ),
-      });
+        label: meta.label,
+        description: meta.description,
+        icon: meta.icon,
+        category: meta.category,
+        defaultHeight: meta.defaultHeight,
+        factory: (_ctx: SectionFactoryContext): ContentSectionConfig => ({
+          id: sectionId,
+          type: "content",
+          title: meta.label,
+          style: {},
+          renderContent: () => (
+            <div className={paddedClassName} data-testid={`home-section-${sectionId}`}>
+              <Text size={200}>
+                Section content for &ldquo;{meta.label}&rdquo; will render here.
+              </Text>
+            </div>
+          ),
+        }),
+      };
+
+      registry.push(registration);
     }
   }
 
-  const rows: WorkspaceRowConfig[] = layout.rows.map((r) => ({
-    id: r.id,
-    sectionIds: r.sections,
-    gridTemplateColumns: r.columns,
-    gridTemplateColumnsSmall: r.columnsSmall,
-  }));
+  return registry;
+}
 
+// ---------------------------------------------------------------------------
+// Build a SectionFactoryContext for SpaarkeAi.
+//
+// SpaarkeAi does not currently expose Xrm.WebApi / DataverseService to the
+// workspace embed; the placeholder factories never call into context.webApi
+// or context.service, so we supply safe no-op stubs. If a future task hoists
+// legal-domain section components into shared lib, this context will need to
+// be enriched with real platform handles.
+// ---------------------------------------------------------------------------
+
+function buildSpaarkeAiContext(bffBaseUrl: string): SectionFactoryContext {
   return {
-    layout: "rows",
-    rows,
-    sections,
+    webApi: undefined as unknown,
+    userId: "",
+    service: undefined as unknown,
+    bffBaseUrl,
+    onNavigate: () => {
+      /* SpaarkeAi navigation handled by host shell; placeholders never navigate */
+    },
+    onOpenWizard: () => {
+      /* Placeholders never open wizards */
+    },
+    onBadgeCountChange: () => {
+      /* Placeholders never report counts */
+    },
+    onRefetchReady: () => {
+      /* Placeholders are static */
+    },
+    onExpandSection: undefined,
+    onOpenDocumentsDialog: undefined,
+    scope: "my",
+    businessUnitId: undefined,
   };
 }
 
@@ -229,8 +310,9 @@ function buildFoundationalConfig(
  * WorkspaceHomeTab — content for the WorkspacePane Home tab.
  *
  * Fetches the user's default workspace layout from the BFF and renders it
- * via the shared `WorkspaceShell`. Falls back to the system-default layout
- * (matching the standalone LegalWorkspace) when the BFF is unreachable.
+ * via the shared `WorkspaceShell` using the canonical `buildDynamicWorkspaceConfig`.
+ * Falls back to the system-default layout (matching the standalone LegalWorkspace)
+ * when the BFF is unreachable.
  *
  * Per ADR-028 the layout fetch is performed via `authenticatedFetch` from
  * `@spaarke/auth`; no `accessToken` is propagated as a prop or held in state.
@@ -239,6 +321,7 @@ export const WorkspaceHomeTab: React.FC = () => {
   const styles = useStyles();
 
   const [layoutJson, setLayoutJson] = React.useState<LayoutJson | null>(null);
+  const [bffBaseUrl, setBffBaseUrl] = React.useState<string>("");
   const [isLoading, setIsLoading] = React.useState(true);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
@@ -253,20 +336,21 @@ export const WorkspaceHomeTab: React.FC = () => {
       setIsLoading(true);
       setErrorMessage(null);
 
-      let bffBaseUrl: string;
+      let resolvedBffBaseUrl: string;
       try {
-        bffBaseUrl = getBffBaseUrl();
+        resolvedBffBaseUrl = getBffBaseUrl();
       } catch {
         // Runtime config not initialized — render fallback layout silently.
         if (!cancelled) {
-          setLayoutJson(FALLBACK_LAYOUT_JSON);
+          setLayoutJson(SYSTEM_DEFAULT_LAYOUT_JSON);
+          setBffBaseUrl("");
           setIsLoading(false);
         }
         return;
       }
 
       try {
-        const url = buildBffApiUrl(bffBaseUrl, "/workspace/layouts/default");
+        const url = buildBffApiUrl(resolvedBffBaseUrl, "/workspace/layouts/default");
         const response = await authenticatedFetch(url);
 
         if (cancelled) return;
@@ -278,7 +362,8 @@ export const WorkspaceHomeTab: React.FC = () => {
           console.warn(
             `[WorkspaceHomeTab] Default layout fetch returned ${response.status}; using fallback layout`,
           );
-          setLayoutJson(FALLBACK_LAYOUT_JSON);
+          setLayoutJson(SYSTEM_DEFAULT_LAYOUT_JSON);
+          setBffBaseUrl(resolvedBffBaseUrl);
           setIsLoading(false);
           return;
         }
@@ -287,13 +372,15 @@ export const WorkspaceHomeTab: React.FC = () => {
         if (cancelled) return;
 
         setLayoutJson(parseLayoutJson(dto.sectionsJson));
+        setBffBaseUrl(resolvedBffBaseUrl);
         setIsLoading(false);
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Unknown error";
         console.warn("[WorkspaceHomeTab] Layout fetch failed, using fallback:", message);
         setErrorMessage(message);
-        setLayoutJson(FALLBACK_LAYOUT_JSON);
+        setLayoutJson(SYSTEM_DEFAULT_LAYOUT_JSON);
+        setBffBaseUrl(resolvedBffBaseUrl);
         setIsLoading(false);
       }
     })();
@@ -316,10 +403,17 @@ export const WorkspaceHomeTab: React.FC = () => {
   }
 
   // -------------------------------------------------------------------------
-  // Render WorkspaceShell with foundational config
+  // Build placeholder registry, factory context, and the WorkspaceConfig via
+  // the canonical builder (hoisted in task 067).
   // -------------------------------------------------------------------------
 
-  const config = buildFoundationalConfig(layoutJson, styles.placeholderBody);
+  const placeholderRegistry = buildPlaceholderRegistry(layoutJson, styles.placeholderBody);
+  const factoryContext = buildSpaarkeAiContext(bffBaseUrl);
+  const config: WorkspaceConfig = buildDynamicWorkspaceConfig(
+    layoutJson,
+    placeholderRegistry,
+    factoryContext,
+  );
 
   return (
     <div className={styles.root} data-testid="home-tab-root">

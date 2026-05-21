@@ -67,6 +67,17 @@ export type {
   LayoutTemplateRow,
 } from "./layoutTemplates";
 
+// Dynamic workspace config builder (hoisted in task 067 from LegalWorkspace)
+export {
+  buildDynamicWorkspaceConfig,
+  SYSTEM_DEFAULT_LAYOUT_JSON,
+} from "./buildDynamicWorkspaceConfig";
+export type {
+  LayoutJson,
+  LayoutJsonRow,
+  WorkspaceScope,
+} from "./buildDynamicWorkspaceConfig";
+
 // Style hooks (optional, for advanced consumers)
 export {
   useWorkspaceShellStyles,

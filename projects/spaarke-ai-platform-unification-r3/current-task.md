@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-20 (Wave 1 complete — commit `9b8a72f7`; Wave 2 ready)
+> **Last Updated**: 2026-05-20 (Task 067 ✅ complete)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,26 +10,35 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — Wave 1 complete (010, 011, 012, 013 all ✅); Wave 2 ready |
-| **Step** | Wave 1 verified (shared lib `tsc` clean; SpaarkeAi vite build clean — 2721 modules, 508 KB gzip); commit `9b8a72f7` pushed |
-| **Status** | between waves |
-| **Next Action** | Dispatch Wave 2a (Phase B Assistant independent tasks: 020, 021, 023, 024 — 4 parallel agents). See TASK-INDEX Wave 2 table. Wave 2 splits into 2a/2b/2c due to 6-agent cap (12 total tasks across waves 2). |
-
-### Files Modified This Session
-
-- `projects/spaarke-ai-platform-unification-r3/README.md` — Created
-- `projects/spaarke-ai-platform-unification-r3/plan.md` — Created
-- `projects/spaarke-ai-platform-unification-r3/CLAUDE.md` — Created
-- `projects/spaarke-ai-platform-unification-r3/current-task.md` — Created + updated
-- `projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md` — Created + task 001 marked ✅
-- `projects/spaarke-ai-platform-unification-r3/tasks/{001..090}-*.poml` (36 files) — Created
-- `projects/spaarke-ai-platform-unification-r3/tasks/001-spike-fr07-attachments-payload.poml` — Status → completed
-- `projects/spaarke-ai-platform-unification-r3/notes/spikes/001-fr07-attachments-payload.md` — Created (spike decision memo)
-- Git: commit `8feda91e`, pushed; draft PR [#296](https://github.com/spaarke-dev/spaarke/pull/296)
+| **Task** | none (between tasks) |
+| **Step** | Task 067 ✅ complete — Workspace section infrastructure hoist landed |
+| **Status** | between tasks |
+| **Next Action** | Operator-driven: continue Phase G smoke (072 — workspace pane), OR address Bug 1 (Assistant pane, deferred), OR proceed to wrap-up (090). |
 
 ### Critical Context
 
-`/project-pipeline` Steps 1-5 complete. Task 001 (FR-07 backend payload spike) decided: **Phase E REQUIRED** — the current `POST /api/ai/chat/sessions/{sessionId}/messages` endpoint does NOT accept `attachments[]` today. The DTO is `ChatSendMessageRequest(string Message, string? DocumentId = null)` at [`ChatEndpoints.cs:2096`](../../src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs#L2096). Tasks 050 + 051 stay active. Phase A foundations (010-013) are now unblocked and parallel-safe.
+Task 067 architecturally addressed the ADR-012 cross-cutting limitation by hoisting the
+PURE workspace section infrastructure (`buildDynamicWorkspaceConfig`,
+`SYSTEM_DEFAULT_LAYOUT_JSON`, `LayoutJson` types) to `@spaarke/ui-components`. The
+6 legal-domain section factories remain in LegalWorkspace by design — hoisting them
+would violate ADR-012 ("MUST NOT hard-code Dataverse entity names ... in shared lib").
+SpaarkeAi's WorkspaceHomeTab now uses the canonical builder with a local placeholder
+registry; section bodies remain placeholders until follow-on work (context-agnostic
+section catalog design). Both web resources deployed and verified. See
+[`notes/067-shared-lib-hoist-summary.md`](notes/067-shared-lib-hoist-summary.md).
+
+### Files Modified This Session (Task 067)
+
+- `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts` — NEW (247 lines hoisted from LegalWorkspace)
+- `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/index.ts` — MODIFIED (+11 lines: barrel exports)
+- `src/solutions/LegalWorkspace/src/workspace/buildDynamicWorkspaceConfig.ts` — REPLACED (248 → 19 lines: re-export shim)
+- `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceHomeTab.tsx` — REWRITTEN (canonical builder + local placeholder registry)
+- `projects/spaarke-ai-platform-unification-r3/notes/drafts/067-factory-inventory.md` — NEW
+- `projects/spaarke-ai-platform-unification-r3/notes/067-shared-lib-hoist-summary.md` — NEW (architectural summary memo)
+- `projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md` — APPENDED (supplemental deploy section)
+- `projects/spaarke-ai-platform-unification-r3/plan.md` — APPENDED R-8 risk row (RESOLVED)
+- `projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md` — row 067 → ✅
+- `projects/spaarke-ai-platform-unification-r3/tasks/067-hoist-workspace-section-registry-to-shared-lib.poml` — status → completed; notes appended
 
 ---
 
@@ -37,125 +46,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none (between waves) |
+| **Task ID** | none (between tasks) |
 | **Task File** | — |
 | **Title** | — |
-| **Phase** | Wave 1 (Phase A — Foundations) pending |
+| **Phase** | F (Verification — remediation, complete) |
 | **Status** | not-started |
 | **Started** | — |
 
----
+### Rigor Level (last completed)
 
-## Progress
-
-### Completed Steps
-
-- [x] /project-pipeline Step 1: spec.md validated (2026-05-20)
-- [x] /project-pipeline Step 1.5: PR overlap check — no conflicts
-- [x] /project-pipeline Step 2: Resource discovery + artifact generation
-- [x] /project-pipeline Step 3: Task decomposition (36 POML + TASK-INDEX)
-- [x] /project-pipeline Step 4: Commit `8feda91e` + push + draft PR #296
-- [x] /project-pipeline Step 5: Auto-start task 001
-- [x] **Task 001**: FR-07 spike — decision: **Phase E REQUIRED**
-  - Read ChatEndpoints.cs (lines 71-77 route handler, 278-291 handler signature, 2093-2096 DTO)
-  - Verified no `attachment` references anywhere in `src/server/api/Sprk.Bff.Api/Api/Ai/`
-  - Wrote decision memo: [`notes/spikes/001-fr07-attachments-payload.md`](notes/spikes/001-fr07-attachments-payload.md)
-  - Updated task 001 status → completed; TASK-INDEX Phase 0 → ✅; Phase E status → ACTIVE
-
-### Current Step
-
-**Step**: Between waves — pipeline orchestration paused, awaiting next user action.
-
-### Files Modified (All Task)
-
-See "Files Modified This Session" above.
-
-### Decisions Made
-
-- **2026-05-20** (Pipeline init): Stay on `work/spaarke-ai-platform-unification-r3` worktree branch (project-pipeline default of `feature/...` overridden) — Reason: repo worktree convention.
-- **2026-05-20** (Task 001): **Phase E REQUIRED** — current DTO `ChatSendMessageRequest(string Message, string? DocumentId = null)` has no `Attachments` property; task 050 must extend; task 051 must add validation tests. — Reason: source-code investigation at `ChatEndpoints.cs:2096` confirms.
-
----
-
-## Next Action
-
-**Next Step**: Dispatch **Wave 1** — Phase A Foundations (4 tasks in parallel)
-
-**Pre-conditions**:
-- [x] Task 001 ✅ complete
-- [x] TASK-INDEX shows Phase 0 ✅
-- [x] Phase E status updated to ACTIVE in TASK-INDEX
-
-**Key Context**:
-- Tasks 010, 011, 012, 013 are all parallel-safe (separate files, no overlap)
-- ADR-012 + ADR-021 + ADR-028 are load-bearing — every code-touching task references all three
-- Hard cap: 6 concurrent agents (4 is well within)
-
-**To Dispatch Wave 1**:
-
-```
-User: "continue" / "dispatch wave 1" / "work on Phase A"
-```
-
-Claude Code response: ONE message with 4 Skill tool calls, each invoking `task-execute` for tasks 010, 011, 012, 013 respectively.
-
-**Expected Output**:
-- 4 parallel `task-execute` invocations
-- Each produces code changes + updated TASK-INDEX statuses
-- After all 4 complete: build verification (`npm run build` for shared components) before Wave 2
-
----
-
-## Blockers
-
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-
-- Started: 2026-05-20 (project-pipeline initial run)
-- Focus: Pipeline initialization + Phase 0 spike
-
-### Key Learnings
-
-- **Spike outcome (FR-07)**: BFF needs schema extension. Phase E is non-optional. Frontend payload wiring in task 026 must wait for task 050 to land (or accept that the field will be silently dropped until then).
-- **Wave dispatch pattern**: Per root CLAUDE.md "Parallel Task Execution" — ONE message with MULTIPLE Skill invocations is the canonical pattern for parallel waves. Sequential invocations waste parallelism.
-- **Existing endpoint conventions**: `MapPost(...).AddAiAuthorizationFilter().RequireRateLimiting("ai-stream")` — task 050 should preserve these filter additions when extending the endpoint.
-
-### Handoff Notes
-
-If a fresh session resumes after this point:
-- Task 001 is complete; spike memo at `notes/spikes/001-fr07-attachments-payload.md` documents the decision
-- Next is Wave 1 dispatch (tasks 010, 011, 012, 013 in parallel)
-- Trigger phrase: "continue" or "dispatch wave 1" or "work on Phase A"
-
----
-
-## Quick Reference
-
-### Project Context
-
-- **Project**: spaarke-ai-platform-unification-r3
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-- **PR**: [#296](https://github.com/spaarke-dev/spaarke/pull/296) (draft)
-
-### Applicable ADRs
-
-**Load-bearing**: ADR-012 (shared components), ADR-021 (Fluent v9 tokens), ADR-028 (auth v2 function-based)
-
-**Task 001 specific**: ADR-013 (AI architecture — extend BFF in-process), ADR-008 (endpoint filters)
-
-### Knowledge Files Loaded (this session)
-
-- [`spec.md`](spec.md)
-- [`plan.md`](plan.md)
-- [`CLAUDE.md`](CLAUDE.md)
-- [`tasks/001-spike-fr07-attachments-payload.poml`](tasks/001-spike-fr07-attachments-payload.poml)
-- [`src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs`](../../src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs) — selectively (lines around endpoint + DTO)
+**FULL** — Task 067 executed at FULL rigor (cross-solution refactor, FR-25/NFR-10 risk).
 
 ---
 
@@ -165,10 +65,27 @@ If a fresh session resumes after this point:
 
 1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
 2. **If more context needed**: Read Active Task and Progress sections
-3. **Load TASK-INDEX**: Check `tasks/TASK-INDEX.md` for current wave state
-4. **Resume**: Dispatch Wave 1 via 4 parallel `task-execute` Skill invocations
+3. **Load TASK-INDEX**: Check `tasks/TASK-INDEX.md` for current state
+4. **Operator decision**: Choose next task — Phase G smoke continuation (072), Bug 1 fix (deferred Assistant pane), or wrap-up (090)
 
 **For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
+
+---
+
+## Session Notes
+
+### Task 067 Key Findings
+
+- **Diagnostic agent's claim wrong**: "4-5 factories are PORTABLE" was incomplete. All 6
+  factories depend on solution-local components.
+- **ADR-012 explicit constraint**: "MUST NOT hard-code Dataverse entity names or schemas as
+  string literals (use configurable entity maps)" — directly forbids hoisting current
+  factories without entity-map refactor.
+- **Correct scope**: Hoist the PURE infrastructure (builder + types); leave domain-coupled
+  factories solution-local. This is the architecturally correct boundary.
+- **Bundle impact**: SpaarkeAi +22.58 KB gzip (+2.9%) — acceptable; NFR-12 already deviated.
+- **Standalone LegalWorkspace**: Untouched behaviorally; re-export shim preserves all
+  imports; 569.84 KB gzip unchanged within noise.
 
 ---
 
