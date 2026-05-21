@@ -3,7 +3,7 @@
   <metadata>
     <title>Backwards compatibility + NFR-09 persistence verification (FR-25, NFR-10, NFR-09)</title>
     <phase>Phase F — Integration &amp; Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>030, 031, 032, 033, 034, 035</dependencies>
     <blocks>070</blocks>
@@ -146,4 +146,36 @@
   <execution>
     This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
   </execution>
+
+  <notes>
+    Completed 2026-05-20 (static verification — no deployed-env access).
+
+    Verification memo: `projects/spaarke-ai-platform-unification-r3/notes/backwards-compat-verification.md`.
+
+    Results:
+      (a) Standalone LegalWorkspace 9 templates (FR-25, FR-14 default)            — ✅ PASS
+      (b) Existing user layouts render identically (FR-25, NFR-10)                — ✅ PASS
+      (c) Non-Home tabs persist across page refresh (NFR-09)                      — ❌ GAP-FOUND (UQ-03 confirmed)
+      (d) PlaybookGalleryWidget registered for non-welcome stages (FR-21)         — ✅ PASS
+      (e) Existing wizard widgets unchanged (FR-25)                               — ✅ PASS
+
+    Key evidence:
+      - TemplateStep.tsx:191-195 — when templateFilter is falsy, returns unfiltered LAYOUT_TEMPLATES.
+      - main.tsx:116-126 — when URL `templateFilter` query param absent, prop is undefined → unfiltered branch.
+      - TemplateStep.test.tsx:55-88 — 3 unit tests cover the unfiltered (9-template) case.
+      - git diff master -- src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ → empty.
+      - git diff master -- src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts → empty.
+      - LegalWorkspace LOC delta: +782 / −0 (Daily Briefing additive only).
+      - git diff master -- {CreateMatterWizardWidget, DocumentUploadWizardWidget}.tsx → empty.
+      - PlaybookGalleryWidget registered in @spaarke/ai-widgets/src/index.ts:246-255 (and redundantly in registry/register-context-widgets.ts:51-54).
+      - ContextPaneController.tsx:575-589 — welcome-stage swap only; non-welcome resolution unchanged.
+
+    NFR-09 (c) gap details:
+      - WorkspaceTabManager.ts has NO persistence: no localStorage, no sessionStorage of tabs, no write-through call.
+      - SessionPersistenceService is server-side BFF/Cosmos for AI session state only — does not serialize tabs array.
+      - This was foreseen (spec.md UQ-03, A-4; design.md R-9; plan.md R-5; README.md R-5).
+      - Recommended follow-up task: `065-extend-sessionpersistence-tab-state` — extend StoredSession schema + write-through wiring + restore on mount. (See memo §c for full scope.)
+
+    Phase G gate verdict: ⚠️ PROCEED with documented gap. Per spec UQ-03 / design.md §H, the NFR-09 gap is already explicitly tracked as a Phase H follow-up. Project owner to decide whether to open task 065 now (block Phase G) or defer to Phase H (proceed to Phase G).
+  </notes>
 </task>

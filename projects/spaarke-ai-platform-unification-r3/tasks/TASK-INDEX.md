@@ -53,10 +53,10 @@
 | 045 | `AssignWorkWizardLauncher` (Xrm.Navigation) | D (Context) | ✅ | 001 | — | D | FULL | 2 |
 | 050 | Extend ChatEndpoints with attachments[] (CONDITIONAL) | E (Backend) | ✅ | 001 | 051, 026 | E | FULL | 3 |
 | 051 | BFF unit tests for attachments[] payload (CONDITIONAL) | E (Backend) | ✅ | 050 | — | E (serial w/ 050) | STANDARD | 2 |
-| 060 | Auth audit (no token snapshots, all via `authenticatedFetch`) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
-| 061 | Bundle-size verification (<250 KB gzip delta vs R2) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
-| 062 | Dark-mode token audit (no hex/rgba in new code) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
-| 063 | Backwards-compat verification (standalone LW + persistence) | F (Verification) | 🔲 | C tasks | 070 | F | STANDARD | 2 |
+| 060 | Auth audit (no token snapshots, all via `authenticatedFetch`) | F (Verification) | ✅ | All B/C/D | 070 | F | STANDARD | 2 |
+| 061 | Bundle-size verification (<250 KB gzip delta vs R2) | F (Verification) | ✅ | All B/C/D | 070 | F | STANDARD | 2 |
+| 062 | Dark-mode token audit (no hex/rgba in new code) | F (Verification) | ✅ | All B/C/D | 070 | F | STANDARD | 2 |
+| 063 | Backwards-compat verification (standalone LW + persistence) | F (Verification) | ✅ | C tasks | 070 | F | STANDARD | 2 |
 | 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | 🔲 | 060-063 | 071-074 | — | FULL | 1 |
 | 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
 | 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |

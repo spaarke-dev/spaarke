@@ -3,7 +3,20 @@
   <metadata>
     <title>Bundle-size verification — NFR-12 (&lt;250 KB gzip delta vs R2 baseline; PDF.js + mammoth lazy-loaded)</title>
     <phase>Phase F — Integration &amp; Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-date>2026-05-20</completion-date>
+    <completion-notes>
+      Conditional PASS — Option 1 accepted by user. Current SpaarkeAi bundle: 797.72 KB gzip
+      (2,963,475 bytes raw). Source-level lazy-loading verified correct in
+      useChatFileAttachment.ts (lines 311 + 327): `await import('pdfjs-dist')` and
+      `await import('mammoth')` — no static top-level imports. NFR-12 overrun (~290 KB above
+      ~508 KB target) is structural — `vite-plugin-singlefile` (per ADR-026) inlines async
+      chunks into the singlefile HTML, nullifying the lazy-import bundle benefit. Phase G
+      task 074 will empirically validate NFR-01 / NFR-03 timings; if those pass, overrun is
+      operationally acceptable. Long-term path: Option 2 (separate Dataverse web resources)
+      deferred to follow-on project. Phase G unblocked from bundle-size standpoint. See
+      notes/bundle-size-verification.md + docs/assessments/code-page-bundle-size-vs-singlefile-2026-05-20.md.
+    </completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>020, 021, 022, 023, 024, 025, 026, 030, 031, 032, 033, 034, 035, 040, 041, 042, 043, 044, 045</dependencies>
     <blocks>070</blocks>

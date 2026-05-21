@@ -3,7 +3,7 @@
   <metadata>
     <title>Auth audit — verify FR-23 / NFR-08 / ADR-028 compliance across all new code</title>
     <phase>Phase F — Integration &amp; Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>020, 021, 022, 023, 024, 025, 026, 030, 031, 032, 033, 034, 035, 040, 041, 042, 043, 044, 045</dependencies>
     <blocks>070</blocks>
@@ -143,4 +143,24 @@
   <execution>
     This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
   </execution>
+
+  <notes>
+    Completed 2026-05-20 by claude-code via task-execute (STANDARD rigor).
+
+    Audit memo: `projects/spaarke-ai-platform-unification-r3/notes/audit-auth-2026-05-20.md`
+
+    Roll-up: CLEAN — 46 source files audited across Phases A/B/C/D/E (waves 0–4); zero violations.
+
+    Checks performed:
+    - (a) `accessToken` props/state: 11 hits, all in JSDoc/comments documenting ADR-028 compliance. PASS.
+    - (a-2) `Authorization: Bearer` literals: 2 hits, both in `__tests__/*` mocking expected header. PASS.
+    - (b) Retired patterns (tokenBridge, BridgeStrategy, XrmStrategy, __SPAARKE_BFF_TOKEN__, etc.): 0 hits. PASS.
+    - (c) Raw `fetch(`: 4 hits (2 comments, 2 source). The 2 source hits in SprkChat.tsx lines 1098 + 1682 are legitimate D-AUTH-7 exceptions (SSE streaming with required `// Auth v2 (D-AUTH-7):` justification comment). `git blame` confirms both lines were authored by the predecessor auth-v2 project (commit 918b08307, 2026-05-19); no R3 commit modified them. PASS.
+    - (d) `authenticatedFetch` adoption: confirmed at WelcomePanel, HistoryOverlay, WorkspaceHomeTab, ConversationPane, useDailyBriefing, SprkChat one-shot persist path. PASS.
+    - (e) BFF endpoint filter chain (task 050): `.AddAiAuthorizationFilter().RequireRateLimiting("ai-stream")` preserved on `/sessions/{sessionId}/messages` and `/sessions/{sessionId}/refine` routes in ChatEndpoints.cs. PASS.
+
+    Gate decision: Phase G UNBLOCKED. Task 070 (deploy SpaarkeAi production) and successors authorized to proceed.
+
+    No remediation tasks opened.
+  </notes>
 </task>
