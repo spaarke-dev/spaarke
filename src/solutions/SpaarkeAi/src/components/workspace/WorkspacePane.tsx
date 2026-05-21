@@ -48,6 +48,7 @@ import type { WorkspaceTabManagerState } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
 import { WorkspaceLandingWidget } from "./WorkspaceLandingWidget";
 import { WorkspaceHomeTab } from "./WorkspaceHomeTab";
+import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -349,10 +350,15 @@ export function WorkspacePane(): React.JSX.Element {
   // Render
   //
   // FR-10: Render the shared <PaneHeader> at the top of every paint, with the
-  // brand-colored AppsListRegular icon. PaneHeader's `rightSlot` is reserved
-  // for `WorkspacePaneMenu` (task 032 wires this in a later wave); leaving it
-  // undefined keeps the trailing edge available without rendering an empty
-  // node.
+  // brand-colored AppsListRegular icon.
+  //
+  // FR-12 (task 032): `PaneHeader.rightSlot` hosts `WorkspacePaneMenu` — a
+  // Fluent v9 Dropdown that replaces the legacy tab bar. It surfaces (1) open
+  // tabs with close affordances, (2) the pinned Home tab, (3) workspace
+  // switching + "+ New Workspace" wizard launch, and (4) edit current
+  // workspace. The menu is fed tab state from `WorkspaceTabManager` snapshots
+  // via the `tabs` / `activeTabId` props and dispatches selection / close back
+  // through the existing `handleTabChange` / `handleTabClose` callbacks.
   //
   // FR-11: With the Home tab installed eagerly in the mount effect above,
   // `tabs.length === 0` is only reachable as a defensive fallback (e.g. if
@@ -368,7 +374,14 @@ export function WorkspacePane(): React.JSX.Element {
     <PaneHeader
       title="Workspace"
       icon={<AppsListRegular />}
-      // rightSlot intentionally undefined — task 032 wires WorkspacePaneMenu here.
+      rightSlot={
+        <WorkspacePaneMenu
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onTabSelect={handleTabChange}
+          onTabClose={handleTabClose}
+        />
+      }
     />
   );
 

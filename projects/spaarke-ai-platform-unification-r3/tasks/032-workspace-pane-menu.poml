@@ -3,7 +3,7 @@
   <metadata>
     <title>Build WorkspacePaneMenu (workspace switcher + tabs-in-dropdown) for WorkspacePane rightSlot</title>
     <phase>Phase C — Workspace Pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>010, 011, 030</dependencies>
     <blocks>none</blocks>
@@ -209,4 +209,56 @@
     FULL rigor applies — net-new component with multi-section interactive UX, dispatches into
     `WorkspaceTabManager` and `WorkspaceLayoutWizard`. Code-review + adr-check at Step 9.5.
   </execution>
+
+  <notes>
+    <completion-date>2026-05-20</completion-date>
+    <completion-summary>
+      Created `WorkspacePaneMenu.tsx` (~470 LOC) as a Fluent v9 Menu rendered in the WorkspacePane
+      PaneHeader rightSlot. Implements all four FR-12 sections with `MenuDivider` separators:
+      (1) Open tabs newest-first with trailing `DismissRegular` close button on each non-Home tab;
+      (2) Home pinned non-closable entry with `HomeRegular` icon, no `×`;
+      (3) Switch Workspace — fetches layouts via `authenticatedFetch` (ADR-028), lists them with
+          active checkmark, + "+ New Workspace" action launching the wizard;
+      (4) Edit current workspace — launches the wizard in edit / saveAs mode.
+
+      WorkspaceLayoutWizard launch uses `Xrm.Navigation.navigateTo` (pageType=webresource,
+      sprk_workspacelayoutwizard) matching `LegalWorkspace/Shell/WorkspaceGrid.tsx#handleCreateLayout`.
+      `templateFilter` is passed as a comma-separated query parameter; the wizard's `main.tsx` is
+      plumbed (new in this task) to parse it back into `readonly LayoutTemplateId[]` and forward
+      to App.tsx. SpaarkeAi consistently surfaces the 6-template subset
+      (`2-col-equal,3-row-mixed,hero-2x2,sidebar-main,single-column,single-column-5`) per FR-14.
+
+      WorkspaceTabManager wiring is via the existing `handleTabChange` / `handleTabClose`
+      callbacks lifted from `WorkspacePane.tsx` — the menu is a pure consumer of the
+      `{ tabs, activeTabId, onTabSelect, onTabClose }` prop contract, with no direct dependency
+      on the manager class (ADR-012 separation of concerns).
+
+      Switch Workspace selection persists the chosen layoutId in `sessionStorage`
+      (`spaarke.workspace.activeLayoutId`) and dispatches a `spaarke:workspace-layout-changed`
+      `CustomEvent` on `window`. The Home tab refetch wiring that consumes this signal is out of
+      scope for task 032 — the contract is laid here so a follow-up task can wire it.
+
+      Files modified:
+        - NEW src/solutions/SpaarkeAi/src/components/workspace/WorkspacePaneMenu.tsx
+        - MOD src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (rightSlot wiring)
+        - MOD src/solutions/WorkspaceLayoutWizard/src/main.tsx (templateFilter query parameter plumbing)
+
+      Build status:
+        - SpaarkeAi: PASS (`npm run build` — 798 KB gzip, 0 TS errors)
+        - WorkspaceLayoutWizard: PASS (`npm run build` — 426 KB gzip, 0 TS errors)
+
+      Acceptance criteria verification:
+        - [x] Menu trigger opens four sections with dividers (Open / Home / Switch Workspace / Edit)
+        - [x] `×` close affordance ONLY on non-Home tabs (Home entry uses HomeRegular icon, no Button)
+        - [x] Selecting an Open tab calls `onTabSelect` → `WorkspaceTabManager.setActiveTab`
+        - [x] Switch Workspace lists all layouts from `/api/workspace/layouts`
+        - [x] "+ New Workspace" launches wizard with `templateFilter` comma-string passed via data query
+        - [x] Zero hex / rgba literals (verified by Grep)
+        - [x] `aria-label="Open workspace menu"` on trigger; MenuItem keyboard navigation native to Fluent v9 Menu
+        - [x] `npm run build` PASS for both SpaarkeAi and WorkspaceLayoutWizard
+
+      Defensive fallbacks in WorkspacePane.tsx (referenced by task 030, removed by task 031) were
+      left in place per coordination instructions.
+    </completion-summary>
+  </notes>
 </task>
