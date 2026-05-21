@@ -8,11 +8,11 @@
  *   2. Home    — pinned, non-closable LegalWorkspace home tab; selecting it
  *                activates the Home tab. NO close affordance (FR-13).
  *   3. Switch Workspace — list of workspace layouts fetched from the BFF via
- *                `useAiSession().authenticatedFetch` (ADR-028); selecting one
- *                persists the choice and dispatches a layout-change signal. A
- *                trailing "+ New Workspace" action launches the
- *                WorkspaceLayoutWizard with the SpaarkeAi 6-template filter
- *                (FR-14).
+ *                `useWorkspaceLayouts` (the SpaarkeAi adaptation of the WORKING
+ *                LegalWorkspace hook). Selecting one persists the choice and
+ *                dispatches a layout-change signal. A trailing "+ New Workspace"
+ *                action launches the WorkspaceLayoutWizard with the SpaarkeAi
+ *                6-template filter (FR-14).
  *   4. Edit current workspace — final action that launches the wizard in
  *                edit / saveAs mode for the active layout.
  *
@@ -23,14 +23,23 @@
  *   - Tab-state callbacks are passed in by `WorkspacePane.tsx` so the menu has
  *     no direct dependency on `WorkspaceTabManager`. The parent owns tab
  *     lifecycle (single source of truth).
- *   - Layout fetching is done locally via `useAiSession().authenticatedFetch` +
- *     `useAiSession().bffBaseUrl` — `useWorkspaceLayouts` lives in
- *     `LegalWorkspace` and is not lifted to `@spaarke/ui-components` in this
- *     project. The fetch shape (`/api/workspace/layouts` returns a
- *     `WorkspaceLayoutDto[]`) is the same. Sourcing auth from the hook (not
- *     module-level `@spaarke/auth` getters) makes the effect auto-defer until
- *     runtime config + auth are ready — task 081 root-cause fix for the
- *     deployed "No workspaces available" silent-failure.
+ *
+ *   - Layout fetching uses `useWorkspaceLayouts` from
+ *     `../../hooks/useWorkspaceLayouts.ts` — a faithful SpaarkeAi adaptation
+ *     of LegalWorkspace's working `useWorkspaceLayouts` hook (cache-first
+ *     hydration, parallel list+default fetch, pinned-id resolution,
+ *     setActiveLayoutById + refetch). This file used to inline its own
+ *     `useWorkspaceLayoutsList` (task 081); that was a parallel
+ *     reimplementation. Round 4 Fix 1 (2026-05-21) replaced it with the
+ *     reused working pattern per operator's reuse principle: "when we have
+ *     working components reuse them."
+ *
+ *     Auth still flows through `useAiSession()` (ADR-028, task 081
+ *     root-cause fix) — the hook takes `authenticatedFetch` + `bffBaseUrl` +
+ *     `isAuthenticated` as args so the effect auto-defers until runtime
+ *     config + auth are ready. The hook file's JSDoc cross-references the
+ *     LegalWorkspace source so both stay in sync.
+ *
  *   - Wizard launch uses `Xrm.Navigation.navigateTo` with `pageType:"webresource"`
  *     and webresourceName `sprk_workspacelayoutwizard`, matching the canonical
  *     pattern in `LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx`.
@@ -70,9 +79,11 @@ import {
   HomeRegular,
   CheckmarkRegular,
 } from "@fluentui/react-icons";
-import { buildBffApiUrl } from "@spaarke/auth";
 import { useAiSession } from "@spaarke/ai-widgets";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
+// useWorkspaceLayouts — SpaarkeAi adaptation of LegalWorkspace's working hook.
+// See ../../hooks/useWorkspaceLayouts.ts header for the reuse rationale.
+import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
 
 // ---------------------------------------------------------------------------
 // Constants — FR-14 SpaarkeAi 6-template filter
@@ -113,18 +124,12 @@ const ACTIVE_LAYOUT_STORAGE_KEY = "spaarke.workspace.activeLayoutId";
 const LAYOUT_CHANGED_EVENT = "spaarke:workspace-layout-changed";
 
 // ---------------------------------------------------------------------------
-// BFF DTO — mirrors WorkspaceLayoutDto
+// BFF DTO — imported from ../../hooks/useWorkspaceLayouts (Round 4 Fix 1)
+// The local interface declaration was removed when the parallel-implementation
+// `useWorkspaceLayoutsList` was replaced with the reused `useWorkspaceLayouts`
+// hook. The DTO shape is identical to LegalWorkspace's WorkspaceLayoutDto —
+// both consume `GET /api/workspace/layouts` returning the same BFF response.
 // ---------------------------------------------------------------------------
-
-interface WorkspaceLayoutDto {
-  id: string;
-  name: string;
-  layoutTemplateId: string;
-  sectionsJson: string;
-  isDefault: boolean;
-  sortOrder: number | null;
-  isSystem: boolean;
-}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -349,138 +354,14 @@ function applyActiveLayout(layoutId: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// useWorkspaceLayoutsList — local hook for the menu's Switch Workspace section
-// ---------------------------------------------------------------------------
-
-/**
- * Fetch workspace layouts from the BFF via the consumer-supplied
- * `authenticatedFetch` (taken from `useAiSession()` per ADR-028). Mirrors the
- * shape used by `LegalWorkspace/src/hooks/useWorkspaceLayouts.ts` but stays
- * SpaarkeAi-local to avoid a cross-solution dependency.
- *
- * Why this hook takes auth as parameters (instead of grabbing module-level
- * `authenticatedFetch` + `getBffBaseUrl`): task 081 root-caused the deployed
- * "No workspaces available" silent-failure to a config-not-ready race where
- * the module-level `getBffBaseUrl()` call threw during the first effect run
- * (before `setRuntimeConfig(...)` had been called by `main.tsx` bootstrap).
- * The catch block then permanently rendered an empty state because the
- * effect's dep array didn't include any auth/config readiness signal to
- * re-run on. Funnelling auth + base URL through the hook deps means the
- * effect auto-defers until `isAuthenticated && bffBaseUrl` are truthy, then
- * runs exactly once with valid inputs.
- *
- * Returns `[]` while loading or if the fetch fails (degrade gracefully — the
- * menu still renders Open / Home / Edit even when Switch Workspace is empty).
- * Fetch failures log to `console.error` (not silently swallowed) so future
- * regressions are visible in browser devtools.
- */
-function useWorkspaceLayoutsList(args: {
-  bffBaseUrl: string;
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
-  isAuthenticated: boolean;
-}): {
-  layouts: WorkspaceLayoutDto[];
-  activeLayout: WorkspaceLayoutDto | null;
-  isLoading: boolean;
-  refetch: () => void;
-} {
-  const { bffBaseUrl, authenticatedFetch, isAuthenticated } = args;
-  const [layouts, setLayouts] = React.useState<WorkspaceLayoutDto[]>([]);
-  const [activeLayout, setActiveLayout] =
-    React.useState<WorkspaceLayoutDto | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [fetchKey, setFetchKey] = React.useState(0);
-
-  React.useEffect(() => {
-    // Defer until auth + runtime config are ready. Without this guard the
-    // first effect run would `buildBffApiUrl(bffBaseUrl, ...)` against an
-    // empty string and throw, leaving the menu permanently empty.
-    if (!isAuthenticated || !bffBaseUrl) {
-      // Still show a loading spinner while waiting — the next render that
-      // flips isAuthenticated → true (or bffBaseUrl → non-empty) re-runs this
-      // effect and the data arrives.
-      setIsLoading(true);
-      return;
-    }
-
-    let cancelled = false;
-
-    (async () => {
-      setIsLoading(true);
-      try {
-        const listUrl = buildBffApiUrl(bffBaseUrl, "/workspace/layouts");
-        const defaultUrl = buildBffApiUrl(
-          bffBaseUrl,
-          "/workspace/layouts/default",
-        );
-        const [listRes, defaultRes] = await Promise.all([
-          authenticatedFetch(listUrl),
-          authenticatedFetch(defaultUrl),
-        ]);
-        if (cancelled) return;
-
-        const allLayouts: WorkspaceLayoutDto[] = listRes.ok
-          ? await listRes.json()
-          : [];
-
-        let chosenActive: WorkspaceLayoutDto | null = null;
-
-        // Prefer a sessionStorage-pinned layout if it exists in the list
-        let pinnedId: string | null = null;
-        try {
-          pinnedId =
-            window.sessionStorage?.getItem(ACTIVE_LAYOUT_STORAGE_KEY) ?? null;
-        } catch {
-          /* ignore */
-        }
-        if (pinnedId) {
-          chosenActive = allLayouts.find((l) => l.id === pinnedId) ?? null;
-        }
-
-        // Otherwise use the BFF default
-        if (!chosenActive && defaultRes.ok) {
-          chosenActive = (await defaultRes.json()) as WorkspaceLayoutDto;
-        }
-
-        // Otherwise pick the first default / system / first layout
-        if (!chosenActive && allLayouts.length > 0) {
-          chosenActive =
-            allLayouts.find((l) => l.isDefault) ??
-            allLayouts.find((l) => l.isSystem) ??
-            allLayouts[0];
-        }
-
-        if (!cancelled) {
-          setLayouts(allLayouts);
-          setActiveLayout(chosenActive);
-          setIsLoading(false);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        // Log to console.error so failures are visible in devtools.
-        // Render empty state (degrade gracefully) but do NOT swallow silently.
-        console.error(
-          "[WorkspacePaneMenu] Layouts fetch failed; rendering empty Switch Workspace section:",
-          err,
-        );
-        setLayouts([]);
-        setActiveLayout(null);
-        setIsLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchKey, bffBaseUrl, isAuthenticated, authenticatedFetch]);
-
-  const refetch = React.useCallback(() => setFetchKey((k) => k + 1), []);
-
-  return { layouts, activeLayout, isLoading, refetch };
-}
-
-// ---------------------------------------------------------------------------
 // WorkspacePaneMenu component
+//
+// Round 4 Fix 1 (2026-05-21): the inline `useWorkspaceLayoutsList` hook
+// (task 081 reimplementation) was removed and replaced with the reused
+// `useWorkspaceLayouts` hook in `../../hooks/useWorkspaceLayouts.ts` —
+// the SpaarkeAi adaptation of LegalWorkspace's WORKING reference
+// implementation. See file header for the reuse rationale + the hook
+// file's JSDoc for the surgical adaptations.
 // ---------------------------------------------------------------------------
 
 /**
@@ -495,17 +376,19 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
 }) => {
   const styles = useStyles();
   const [menuOpen, setMenuOpen] = React.useState(false);
-  // Task 081 fix: source auth + bffBaseUrl from the hook (defers until ready)
-  // rather than module-level `authenticatedFetch` / `getBffBaseUrl()` which
-  // race the runtime-config bootstrap and silently produce an empty menu.
+  // Task 081 fix carried forward in Round 4 Fix 1: auth + bffBaseUrl come
+  // from `useAiSession()` (defers until ready) rather than module-level
+  // `authenticatedFetch` / `getBffBaseUrl()` which race the runtime-config
+  // bootstrap and silently produce an empty menu. The reused
+  // `useWorkspaceLayouts` hook accepts these as args and runs the WORKING
+  // LegalWorkspace fetch pattern (cache-first hydration, parallel
+  // list+default fetch, pinned-id resolution).
   const { authenticatedFetch, bffBaseUrl, isAuthenticated } = useAiSession();
-  const { layouts, activeLayout, isLoading, refetch } = useWorkspaceLayoutsList(
-    {
-      bffBaseUrl,
-      authenticatedFetch,
-      isAuthenticated,
-    },
-  );
+  const { layouts, activeLayout, isLoading, refetch } = useWorkspaceLayouts({
+    bffBaseUrl,
+    authenticatedFetch,
+    isAuthenticated,
+  });
 
   // -------------------------------------------------------------------------
   // Derived: split tabs into Home (singular) + Open (newest first, non-Home)
