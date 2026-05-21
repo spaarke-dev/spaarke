@@ -68,13 +68,17 @@ public static class ChatEndpoints
             .ProducesProblem(401)
             .ProducesProblem(403);
 
-        // POST /api/ai/chat/sessions/{sessionId}/messages — send message, receive SSE stream
+        // POST /api/ai/chat/sessions/{sessionId}/messages — send message, receive SSE stream.
+        // Endpoint filters per ADR-008: AddAiAuthorizationFilter() + RequireRateLimiting("ai-stream").
+        // These fire BEFORE the handler runs, so the FR-07 attachment-payload validation added
+        // in task 050 (handler-level) executes only on requests that already passed auth + rate
+        // limiting. No filter bypass is introduced.
         group.MapPost("/sessions/{sessionId}/messages", SendMessageAsync)
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("SendChatMessage")
             .WithSummary("Send a message and receive SSE-streamed response")
-            .WithDescription("Sends a user message to the agent and streams the response as Server-Sent Events. Events: {type:'token',content:'...'} then {type:'done'}.")
+            .WithDescription("Sends a user message to the agent and streams the response as Server-Sent Events. Events: {type:'token',content:'...'} then {type:'done'}. Optional attachments[] (max 5, FR-07) provide in-memory file context for the SAME single LLM call.")
             .Produces(200, contentType: "text/event-stream")
             .ProducesProblem(400)
             .ProducesProblem(401)
@@ -310,6 +314,27 @@ public static class ChatEndpoints
             return;
         }
 
+        // === FR-07 attachment validation (task 050) ===
+        // Validate BEFORE setting SSE headers so we can return a normal JSON 400 ProblemDetails
+        // response (RFC 7807, ADR-019). Endpoint filters (AddAiAuthorizationFilter +
+        // RequireRateLimiting per ADR-008) have already fired by the time this handler runs;
+        // attachment validation is in-handler payload validation, complementary to those filters.
+        var attachmentValidationError = ValidateAttachments(request.Attachments);
+        if (attachmentValidationError is { } err)
+        {
+            response.StatusCode = err.statusCode;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(err.payload, cancellationToken);
+            return;
+        }
+
+        // Compose the effective user-message text passed to the SINGLE LLM call (D-01).
+        // When no attachments are present, this is request.Message verbatim. When present,
+        // attachment text is appended as structured blocks. Used wherever the agent receives
+        // the user message; the ORIGINAL request.Message is still persisted to history (FR-07
+        // in-memory-only semantics — attachments are not stored in Dataverse).
+        var effectiveMessage = ComposeMessageWithAttachments(request.Message, request.Attachments);
+
         // Set SSE headers — required for production-quality token-by-token streaming.
         // X-Accel-Buffering: no prevents nginx/YARP reverse proxy from buffering the SSE stream,
         // ensuring each token frame reaches the client immediately (NFR-01: first token < 500ms).
@@ -319,8 +344,11 @@ public static class ChatEndpoints
         response.Headers["X-Accel-Buffering"] = "no";
 
         logger.LogInformation(
-            "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, document={DocumentId}",
-            sessionId, tenantId, request.Message.Length, request.DocumentId ?? session.DocumentId);
+            "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, attachments={AttachmentCount}, attachmentChars={AttachmentChars}, document={DocumentId}",
+            sessionId, tenantId, request.Message.Length,
+            request.Attachments?.Count ?? 0,
+            request.Attachments?.Sum(a => a.TextContent?.Length ?? 0) ?? 0,
+            request.DocumentId ?? session.DocumentId);
 
         // === AIPU2-028: Cross-Matter Conversation Safety (FR-408) ===
         // Before building the agent or AI history, detect whether the session has pivoted
@@ -430,7 +458,7 @@ public static class ChatEndpoints
                 session.AdditionalDocumentIds,
                 httpContext,
                 sseWriter,
-                latestUserMessage: request.Message,
+                latestUserMessage: effectiveMessage,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -447,7 +475,10 @@ public static class ChatEndpoints
             //   - Any external action tool (SendEmail, CreateTask, etc.)
             //
             // This satisfies spec constraint FR-11: "No write-back executes without user Proceed."
-            var toolCalls = await agent.DetectToolCallsAsync(request.Message, history, cancellationToken);
+            // FR-07 (task 050): pass the effectiveMessage so compound-intent detection sees
+            // the attachment context. The agent SDK reuses this same text downstream — there is
+            // still exactly ONE LLM call per user turn (D-01 single-LLM-call invariant).
+            var toolCalls = await agent.DetectToolCallsAsync(effectiveMessage, history, cancellationToken);
             var intentDetector = new CompoundIntentDetector(logger);
 
             if (intentDetector.IsCompoundIntent(toolCalls))
@@ -545,8 +576,12 @@ public static class ChatEndpoints
             // to show a typing indicator animation (NFR-01: first token < 500ms).
             await WriteChatSSEAsync(response, new ChatSseEvent("typing_start", null), cancellationToken);
 
-            // Stream the agent response via IAsyncEnumerable<ChatResponseUpdate>
-            await foreach (var update in agent.SendMessageAsync(request.Message, history, cancellationToken))
+            // Stream the agent response via IAsyncEnumerable<ChatResponseUpdate>.
+            // FR-07 (task 050): effectiveMessage contains the user's typed text PLUS any
+            // attachment context — this is the SINGLE LLM call that produces the response
+            // (D-01 invariant). The agent receives one composed message; no second extraction
+            // or summarization LLM call is introduced.
+            await foreach (var update in agent.SendMessageAsync(effectiveMessage, history, cancellationToken))
             {
                 var content = update.Text;
                 if (!string.IsNullOrEmpty(content))
@@ -605,6 +640,11 @@ public static class ChatEndpoints
                 // Runs after the main response completes so it doesn't delay perceived response time.
                 // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
                 // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
+                //
+                // FR-07 (task 050): intentionally pass request.Message (NOT effectiveMessage)
+                // here — suggestions are follow-up prompts generated against the user's
+                // conceptual question, not the augmented attachment blob. Including 5 MB of
+                // attachment text would balloon this ~100-token suggestion call.
                 await GenerateAndEmitSuggestionsAsync(
                     chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
             }
@@ -1730,6 +1770,177 @@ public static class ChatEndpoints
         return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 
+    // =========================================================================
+    // FR-07 Multi-file attachment validation + composition (task 050)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (per CLAUDE.md §10 BFF Hygiene + ADR-013):
+    // - In-process extension on an existing endpoint (POST /sessions/{id}/messages).
+    // - NO new DI feature module, NO new service, NO new NuGet packages.
+    // - Latency-coupled to the existing single LLM call (D-01 invariant preserved).
+    // - Transactional coupling with session/history persistence in same request lifecycle.
+    // - All four BFF decision criteria (ADR-013 §"Decision Criteria") answer "BFF" → stays here.
+    // - All four CRUD→AI facade boundary rules satisfied: this is AI-internal code in
+    //   Api/Ai/, not CRUD code consuming AI — no IBffAiPublicContracts facade needed.
+
+    /// <summary>Maximum attachments per chat message (NFR-04, FR-07).</summary>
+    internal const int MaxAttachmentsPerMessage = 5;
+
+    /// <summary>
+    /// Maximum extracted text length per attachment, in characters.
+    /// ~2.5M chars ≈ 10 MB UTF-16 in memory; bounds LLM prompt growth per attachment.
+    /// Aligned with NFR-04 (10 MB per file at the binary/extraction layer).
+    /// </summary>
+    internal const int MaxAttachmentTextCharsPerFile = 2_500_000;
+
+    /// <summary>
+    /// Maximum sum of all attachment <c>TextContent</c> lengths in a single message.
+    /// Bounds the LLM prompt size so 5 × 2.5M = 12.5M does not balloon context.
+    /// </summary>
+    internal const int MaxAttachmentTextCharsTotal = 5_000_000;
+
+    /// <summary>
+    /// Allowed MIME types for attachments (NFR-04, FR-07). Matches the client-side extractor surface.
+    /// </summary>
+    private static readonly HashSet<string> AllowedAttachmentContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "text/plain",
+        "text/markdown",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
+
+    /// <summary>
+    /// Validates the <c>Attachments</c> list per NFR-04 and FR-07. Returns null on success;
+    /// returns an RFC 7807 ProblemDetails-shaped error payload (with HTTP 400) on failure.
+    /// Caller is responsible for writing the payload + status code to the response when not null.
+    /// </summary>
+    /// <returns>(statusCode, payload) on rejection; null on accept.</returns>
+    private static (int statusCode, object payload)? ValidateAttachments(
+        IReadOnlyList<ChatMessageAttachment>? attachments)
+    {
+        if (attachments is null || attachments.Count == 0)
+        {
+            return null;
+        }
+
+        // Rule 1: max 5 attachments per message (NFR-04, FR-07)
+        if (attachments.Count > MaxAttachmentsPerMessage)
+        {
+            return (400, BuildProblemDetails(
+                title: "Too many attachments",
+                detail: $"Attachments cannot exceed {MaxAttachmentsPerMessage} entries. Received {attachments.Count}.",
+                status: 400));
+        }
+
+        long totalChars = 0;
+
+        for (var i = 0; i < attachments.Count; i++)
+        {
+            var att = attachments[i];
+
+            // Defensive: null entry from a deserializer edge case
+            if (att is null || att.ContentType is null || att.TextContent is null || att.Filename is null)
+            {
+                return (400, BuildProblemDetails(
+                    title: "Invalid attachment",
+                    detail: $"Attachment at index {i} has missing required fields (filename, contentType, textContent).",
+                    status: 400));
+            }
+
+            // Rule 2: MIME type in allow-list (NFR-04, FR-07)
+            if (!AllowedAttachmentContentTypes.Contains(att.ContentType))
+            {
+                return (400, BuildProblemDetails(
+                    title: "Unsupported attachment content type",
+                    detail: $"Attachment '{att.Filename}' has unsupported contentType '{att.ContentType}'. " +
+                            $"Allowed types: {string.Join(", ", AllowedAttachmentContentTypes)}.",
+                    status: 400));
+            }
+
+            // Rule 3: per-file size cap (NFR-04: ≤ 10 MB extracted text)
+            if (att.TextContent.Length > MaxAttachmentTextCharsPerFile)
+            {
+                return (400, BuildProblemDetails(
+                    title: "Attachment too large",
+                    detail: $"Attachment '{att.Filename}' textContent length ({att.TextContent.Length}) " +
+                            $"exceeds the per-file cap of {MaxAttachmentTextCharsPerFile} characters.",
+                    status: 400));
+            }
+
+            totalChars += att.TextContent.Length;
+
+            // Rule 4: sum-of-all-attachments size cap (bounds LLM prompt)
+            if (totalChars > MaxAttachmentTextCharsTotal)
+            {
+                return (400, BuildProblemDetails(
+                    title: "Attachments exceed total size limit",
+                    detail: $"Sum of attachment textContent lengths exceeds the total cap of " +
+                            $"{MaxAttachmentTextCharsTotal} characters.",
+                    status: 400));
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Builds an RFC 7807 ProblemDetails-shaped object suitable for direct JSON serialization
+    /// in the SSE response (the handler returns <see cref="Task"/>, not <see cref="IResult"/>,
+    /// so <c>Results.Problem(...)</c> cannot be used directly — we emit the same shape inline).
+    /// </summary>
+    private static object BuildProblemDetails(string title, string detail, int status)
+    {
+        return new
+        {
+            type = "https://tools.ietf.org/html/rfc7807",
+            title,
+            status,
+            detail,
+        };
+    }
+
+    /// <summary>
+    /// Composes the effective user-message text passed to the SINGLE LLM call (D-01 invariant).
+    /// When attachments are present, their filenames + extracted text are appended as structured
+    /// blocks so the model has clear file boundaries; the user's typed message is preserved at
+    /// the top so the question remains the dominant signal. When no attachments are present,
+    /// the original message is returned verbatim (zero overhead, backwards compatible).
+    /// </summary>
+    /// <remarks>
+    /// CRITICAL: this is the ONLY place where attachment text reaches the agent. There is no
+    /// separate extraction or summarization LLM call — the single existing <c>agent.SendMessageAsync</c>
+    /// receives one message that contains everything. This preserves D-01.
+    /// </remarks>
+    private static string ComposeMessageWithAttachments(
+        string message,
+        IReadOnlyList<ChatMessageAttachment>? attachments)
+    {
+        if (attachments is null || attachments.Count == 0)
+        {
+            return message;
+        }
+
+        var sb = new System.Text.StringBuilder(message.Length + 256);
+
+        sb.Append("User message: ").AppendLine(message);
+        sb.AppendLine();
+        sb.Append("[Attached files: ")
+          .Append(string.Join(", ", attachments.Select(a => a.Filename)))
+          .AppendLine("]");
+        sb.AppendLine();
+
+        for (var i = 0; i < attachments.Count; i++)
+        {
+            var att = attachments[i];
+            sb.Append("--- Attachment: ").Append(att.Filename).Append(" (").Append(att.ContentType).AppendLine(") ---");
+            sb.AppendLine(att.TextContent);
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>
     /// Converts the session's domain <see cref="DvChatMessage"/> history to the AI framework
     /// <see cref="AiChatMessage"/> format required by <see cref="SprkChatAgent.SendMessageAsync"/>.
@@ -2093,7 +2304,35 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// <summary>Request body for POST /sessions/{id}/messages.</summary>
 /// <param name="Message">The user's message text.</param>
 /// <param name="DocumentId">Optional document ID override (uses session's document if omitted).</param>
-public record ChatSendMessageRequest(string Message, string? DocumentId = null);
+/// <param name="Attachments">
+/// Optional in-memory file attachments with client-side-extracted text (FR-07). Max 5 entries.
+/// Each entry's <see cref="ChatMessageAttachment.TextContent"/> is appended to the same
+/// single LLM call's user-message context — there is exactly ONE LLM call per user turn
+/// (D-01 single-LLM-call invariant). NOT persisted as Dataverse Document entities (FR-07
+/// in-memory only). Default null preserves backwards compatibility for clients that omit
+/// the field. See <see cref="ValidateAttachments"/> for validation rules (NFR-04).
+/// </param>
+public record ChatSendMessageRequest(
+    string Message,
+    string? DocumentId = null,
+    IReadOnlyList<ChatMessageAttachment>? Attachments = null);
+
+/// <summary>
+/// In-memory chat-message attachment with client-extracted text content (FR-07).
+///
+/// Text extraction happens client-side (PDF.js, mammoth.js, raw read) before the message
+/// is sent. The BFF receives only the extracted text — never the original binary file.
+/// Attachments are NOT persisted as Dataverse Document entities; they live for exactly
+/// one user turn and are passed into the same single LLM call as the user message
+/// (D-01 invariant, ADR-013 in-process AI extension).
+/// </summary>
+/// <param name="Filename">Original filename for display in the prompt context (e.g., "contract-a.pdf").</param>
+/// <param name="ContentType">Original MIME type. MUST be in the allow-list (see <see cref="ValidateAttachments"/>).</param>
+/// <param name="TextContent">Client-extracted text content. Length capped per <see cref="MaxAttachmentTextCharsPerFile"/>.</param>
+public record ChatMessageAttachment(
+    string Filename,
+    string ContentType,
+    string TextContent);
 
 /// <summary>Request body for POST /sessions/{id}/refine.</summary>
 /// <param name="SelectedText">The text passage to refine.</param>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Extend ChatEndpoints to accept attachments[] payload (FR-07 backend half) — CONDITIONAL</title>
     <phase>Phase E — Backend (conditional on spike 001 outcome)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>051</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Wire attachments[] into outbound chat-message payload (FR-07 payload wiring)</title>
     <phase>Phase B — Assistant pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001, 024, 025</dependencies>
     <blocks></blocks>
@@ -184,4 +184,61 @@
     Step 9.5 code-review + adr-check gates run at FULL rigor. Spike 001 memo MUST be read
     at Step 1 before any payload edits.
   </execution>
+
+  <notes>
+    **Completed**: 2026-05-20
+
+    **Spike branch**: Per spike 001 memo, the current BFF `ChatSendMessageRequest`
+    DTO does NOT accept `attachments[]` today (only `Message` + `DocumentId`).
+    Phase E (task 050) extends the DTO; task 051 adds BFF unit tests.
+
+    **Strategy**: Per user instruction, send `attachments` UNCONDITIONALLY (no
+    feature flag) when chips are present. System.Text.Json default behavior silently
+    drops unknown properties, so the request remains valid against the current DTO
+    and lands cleanly once task 050 ships. End-to-end flow works after 026 + 050
+    are both merged; 051 adds BFF coverage.
+
+    **Files modified**:
+    - `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`
+      - Renamed `_chatAttachments` → `chatAttachments` (removed `_` prefix + TODO marker)
+      - Added `clearAll: clearAttachments` to the hook destructure
+      - Updated `handleSend` to conditionally include `attachments: [{filename, contentType, textContent}]`
+        in the POST body when `chatAttachments.length > 0`. Omitted entirely otherwise.
+      - Added `clearAttachments()` call inside the `streamDone` effect so chips clear on
+        successful completion. On error (`streamError`, no `streamDone`), chips remain
+        for retry — error telemetry path (existing `displayError` banner at line 1948) is unchanged.
+      - Added `chatAttachments` to the handleSend `useCallback` dependency list.
+    - `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChat.attachments.test.tsx` (new)
+      - Verifies: payload omits `attachments` when no chips; includes camelCase
+        `attachments[]` when chips ready; calls `clearAll` on stream completion;
+        no `/documents` POST triggered (OC-02 compliance).
+
+    **Build status**:
+    - `npm run build` in `src/client/shared/Spaarke.UI.Components` → ✅ tsc clean
+    - `npm run build` in `src/solutions/SpaarkeAi` → ✅ Vite build 13.03s, 3157 modules transformed
+
+    **Test status**: New attachment payload test suite added. Cannot execute against
+    the current Jest environment due to a pre-existing infrastructure issue
+    (`@testing-library/react@14` requires `react-dom/client` which is React 18+ only,
+    but this lib pins React 16). The EXISTING `SprkChat.test.tsx` and
+    `useChatFileAttachment.test.ts` files have the same failure mode. This is NOT a
+    regression introduced by task 026 — it's a pre-existing testing-environment debt
+    item (out of scope for FR-07 wiring). Type-check (`tsc`) for both modified and
+    new files is green via `npm run build`.
+
+    **Acceptance criteria verification**:
+    - ✅ `attachments` field included with chips present, camelCase, exact schema from spike 001
+    - ✅ `clearAll()` called on stream success (via `streamDone` effect)
+    - ✅ Chips preserved on error (no `clearAll` on `streamError` path)
+    - ✅ Single-LLM-call invariant: one POST per send, attachments inline in same body
+    - ✅ No `accessToken` props introduced — auth still via `getAccessToken` to startStream
+    - ✅ Builds succeed on shared lib + SpaarkeAi
+    - ⏭️ End-to-end test with mixed-MIME files: DEFERRED until task 050 lands (per FR-07
+      acceptance — BFF must accept attachments[] for AI to reference content). Wiring lands
+      now; end-to-end completes post-050.
+
+    **Coordination with parallel task 050**: NO file overlap. 050 modifies `ChatEndpoints.cs`
+    (DTO + handler); 026 modifies `SprkChat.tsx` (client payload). Both can land independently;
+    end-to-end attachment flow works once both are merged.
+  </notes>
 </task>

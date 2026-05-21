@@ -450,19 +450,26 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [actionUploadFile, setActionUploadFile] = React.useState<File | null>(null);
 
-  // ── FR-07 + FR-09 (task 025): Multi-file chat attachment state ───────────
+  // ── FR-07 + FR-09 (tasks 024, 025, 026): Multi-file chat attachment state ─
   // The `+` button in the controls strip opens a native file picker; selected
-  // files flow through `useChatFileAttachment.addFiles`. Task 026 will consume
-  // `attachments` when assembling the chat-send payload (see TODO marker on the
-  // handleSend wiring below).
+  // files flow through `useChatFileAttachment.addFiles`. Task 026 wires the
+  // hook's `attachments` (status === 'ready' chips only, NFR-04 caps already
+  // enforced) into the outbound POST body in handleSend. `clearAll` empties the
+  // chip state after a successful stream completion (see streamDone effect).
+  //
+  // Backend contract (per spike 001 + Phase E task 050): the
+  // POST /api/ai/chat/sessions/{sessionId}/messages DTO will accept an optional
+  // `attachments: ChatMessageAttachment[]` property where each entry has
+  // `{ filename, contentType, textContent }` (camelCase via System.Text.Json
+  // default policy). Until task 050 ships, the field is silently dropped by
+  // the BFF — sending it unconditionally is safe and lands cleanly post-050.
   const attachmentInputRef = React.useRef<HTMLInputElement>(null);
   const {
     files: attachmentFiles,
-    // TODO(task 026): wire `attachments` into the chat-send payload alongside
-    // the user message. The hook already filters to `status === 'ready'` chips.
-    attachments: _chatAttachments,
+    attachments: chatAttachments,
     addFiles: addAttachmentFiles,
     removeFile: removeAttachmentFile,
+    clearAll: clearAttachments,
   } = useChatFileAttachment();
 
   // Imperative handle for SprkChatInput so the [Prompt] button in our controls
@@ -676,8 +683,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     if (streamDone && isStreamingRef.current) {
       isStreamingRef.current = false;
       // Final content is already set by the token updates
+      // FR-07 (task 026): clear in-memory attachment chips on successful send
+      // completion. On error (streamError set, streamDone NOT set), chips remain
+      // visible so the user can retry without re-attaching. clearAll is a no-op
+      // when there are no attachments, so it's safe to call unconditionally.
+      clearAttachments();
     }
-  }, [streamDone]);
+  }, [streamDone, clearAttachments]);
 
   // Phase 2F: When a plan_preview SSE event arrives, update the last assistant message's metadata
   // so PlanPreviewCard renders correctly instead of the plain text bubble.
@@ -883,14 +895,40 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       // Start SSE stream — useSseStream re-acquires a fresh token via getAccessToken()
       // at stream-open time (Auth v2 D-AUTH-7), so no token snapshot lives in this closure.
+      //
+      // FR-07 (task 026): include in-memory attachments (chips with status 'ready')
+      // in the outbound payload when present. Field name + casing match the agreed
+      // BFF DTO from spike 001 / task 050 (camelCase: attachments[], filename,
+      // contentType, textContent). The field is omitted entirely when no ready
+      // chips exist so the request body shape stays minimal for the common path.
+      // NFR-04 caps (≤5 files, ≤10 MB each, allowed MIME) are enforced by the
+      // hook (task 024) — this site does not re-validate.
       const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+      const body: Record<string, unknown> = { message: messageText, documentId };
+      if (chatAttachments.length > 0) {
+        body.attachments = chatAttachments.map(a => ({
+          filename: a.filename,
+          contentType: a.contentType,
+          textContent: a.textContent,
+        }));
+      }
       startStream(
         `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`,
-        { message: messageText, documentId },
+        body,
         getAccessToken
       );
     },
-    [session, isStreaming, addMessage, startStream, clearSuggestions, apiBaseUrl, documentId, getAccessToken]
+    [
+      session,
+      isStreaming,
+      addMessage,
+      startStream,
+      clearSuggestions,
+      apiBaseUrl,
+      documentId,
+      getAccessToken,
+      chatAttachments,
+    ]
   );
 
   // Handle predefined prompt selection

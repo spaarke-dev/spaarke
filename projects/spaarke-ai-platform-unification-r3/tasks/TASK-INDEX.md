@@ -38,7 +38,7 @@
 | 023 | SprkChatInput editable on cold load | B (Assistant) | ✅ | 010 | 025, 026 | B (serial w/ 025 on SprkChat.tsx) | FULL | 2 |
 | 024 | `useChatFileAttachment` hook + lazy extraction | B (Assistant) | ✅ | 010 | 025, 026 | B | FULL | 4 |
 | 025 | SprkChat toolbar restructure (+, remove Word) | B (Assistant) | ✅ | 023, 024 | 026 | B (serial w/ 023) | FULL | 3 |
-| 026 | Wire attachments into chat send payload | B (Assistant) | 🔲 | 001, 024, 025 | — | — (serial — gated by spike) | FULL | 3 |
+| 026 | Wire attachments into chat send payload | B (Assistant) | ✅ | 001, 024, 025 | — | — (serial — gated by spike) | FULL | 3 |
 | 030 | WorkspacePane → PaneHeader + embed LegalWorkspace | C (Workspace) | ✅ | 010 | 031, 032, 034 | C (serial on WorkspacePane.tsx) | FULL | 4 |
 | 031 | Delete `WorkspaceLandingWidget.tsx` | C (Workspace) | ✅ | 030 | — | C (serial w/ 030) | STANDARD | 1 |
 | 032 | `WorkspacePaneMenu` Dropdown component | C (Workspace) | ✅ | 010, 011, 030 | — | C (serial on WorkspacePane.tsx) | FULL | 4 |
@@ -51,7 +51,7 @@
 | 043 | Wizard widget wrappers (CreateProject, FindSimilar) | D (Context) | ✅ | 001 | — | D | FULL | 2 |
 | 044 | Analysis Builder intents (email-compose, meeting-schedule) | D (Context) | ✅ | 001 | — | D | STANDARD | 2 |
 | 045 | `AssignWorkWizardLauncher` (Xrm.Navigation) | D (Context) | ✅ | 001 | — | D | FULL | 2 |
-| 050 | Extend ChatEndpoints with attachments[] (CONDITIONAL) | E (Backend) | 🔲 | 001 | 051, 026 | E | FULL | 3 |
+| 050 | Extend ChatEndpoints with attachments[] (CONDITIONAL) | E (Backend) | ✅ | 001 | 051, 026 | E | FULL | 3 |
 | 051 | BFF unit tests for attachments[] payload (CONDITIONAL) | E (Backend) | 🔲 | 050 | — | E (serial w/ 050) | STANDARD | 2 |
 | 060 | Auth audit (no token snapshots, all via `authenticatedFetch`) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
 | 061 | Bundle-size verification (<250 KB gzip delta vs R2) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
