@@ -28,12 +28,8 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens, Text, Spinner } from "@fluentui/react-components";
-import {
-  BrainCircuitRegular,
-  DocumentSearchRegular,
-  AppsListRegular,
-} from "@fluentui/react-icons";
+import { makeStyles, tokens, Spinner } from "@fluentui/react-components";
+import { AppsListRegular } from "@fluentui/react-icons";
 import { PaneHeader } from "@spaarke/ui-components";
 import {
   usePaneEvent,
@@ -42,11 +38,9 @@ import {
   getWorkspaceWidgetMetadata,
 } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
-import { useShellStage } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type { WorkspaceTabManagerState } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
-import { WorkspaceLandingWidget } from "./WorkspaceLandingWidget";
 import { WorkspaceHomeTab } from "./WorkspaceHomeTab";
 import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
 
@@ -64,46 +58,13 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
-  // ── Stage 1 / Stage 2 empty states ───────────────────────────────────────
-  emptyState: {
+  // ── First-paint placeholder (rendered for the one tick before the Home tab
+  //    effect installs the Home tab) ────────────────────────────────────────
+  firstPaintPlaceholder: {
     flex: 1,
     display: "flex",
-    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    gap: tokens.spacingVerticalM,
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalXXL,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    textAlign: "center",
-    color: tokens.colorNeutralForeground3,
-  },
-
-  emptyIcon: {
-    fontSize: "40px",
-    color: tokens.colorNeutralForeground4,
-    marginBottom: tokens.spacingVerticalS,
-  },
-
-  emptyTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground2,
-  },
-
-  emptySubtitle: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    maxWidth: "280px",
-  },
-
-  // ── Stage 2 action row ────────────────────────────────────────────────────
-  actionRow: {
-    display: "flex",
-    flexDirection: "row",
-    gap: tokens.spacingHorizontalM,
-    justifyContent: "center",
-    marginTop: tokens.spacingVerticalS,
   },
 });
 
@@ -121,9 +82,6 @@ const useStyles = makeStyles({
 export function WorkspacePane(): React.JSX.Element {
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
-
-  // Current shell stage drives the empty-state content (Stage 1 vs Stage 2).
-  const { currentStage } = useShellStage();
 
   // ---------------------------------------------------------------------------
   // Tab manager — single instance per WorkspacePane mount
@@ -360,12 +318,12 @@ export function WorkspacePane(): React.JSX.Element {
   // via the `tabs` / `activeTabId` props and dispatches selection / close back
   // through the existing `handleTabChange` / `handleTabClose` callbacks.
   //
-  // FR-11: With the Home tab installed eagerly in the mount effect above,
-  // `tabs.length === 0` is only reachable as a defensive fallback (e.g. if
-  // ensureHomeTab were ever to be removed). The original Stage-1 / Stage-2 /
-  // generic placeholder branches are preserved as a safety net and to keep
-  // the diff against task 030 minimal; task 031 deletes the now-unreachable
-  // `WorkspaceLandingWidget` path.
+  // FR-11: The Home tab is installed eagerly in the mount effect above, so
+  // `tabs.length === 0` is only reachable during the single render that
+  // happens before that effect runs. We render a minimal Spinner placeholder
+  // under the standard <PaneHeader> in that window so there's no flash of
+  // missing content. Task 031 removed the legacy Stage-1 landing widget that
+  // previously occupied this branch.
   // ---------------------------------------------------------------------------
 
   const { tabs, activeTabId } = tabState;
@@ -386,52 +344,14 @@ export function WorkspacePane(): React.JSX.Element {
   );
 
   if (tabs.length === 0) {
-    // Defensive fallback. With the Home tab installed in the mount effect,
-    // this branch is only reachable during the very first render before the
-    // effect runs. Preserves the previous empty-state UX so no flash of
-    // missing content occurs.
-    if (currentStage === "welcome") {
-      return (
-        <div className={styles.root} data-testid="workspace-stage-welcome">
-          {header}
-          <WorkspaceLandingWidget />
-        </div>
-      );
-    }
-
-    if (currentStage === "loading") {
-      return (
-        <div className={styles.root}>
-          {header}
-          <div className={styles.emptyState} data-testid="workspace-stage-loading">
-            <DocumentSearchRegular className={styles.emptyIcon} />
-            <Text className={styles.emptyTitle} size={400}>
-              Select a document or entity
-            </Text>
-            <Text className={styles.emptySubtitle} size={200}>
-              Upload or browse for a document to analyze, or navigate to a
-              record in Dataverse to begin working with it.
-            </Text>
-            <div className={styles.actionRow}>
-              <Spinner size="tiny" label="Waiting for selection..." />
-            </div>
-          </div>
-        </div>
-      );
-    }
-
+    // First-paint placeholder. With the Home tab installed in the mount
+    // effect, this branch is reachable only for the single render before the
+    // effect commits.
     return (
-      <div className={styles.root}>
+      <div className={styles.root} data-testid="workspace-first-paint">
         {header}
-        <div className={styles.emptyState} data-testid="workspace-stage-default">
-          <BrainCircuitRegular className={styles.emptyIcon} />
-          <Text className={styles.emptyTitle} size={400}>
-            Workspace
-          </Text>
-          <Text className={styles.emptySubtitle} size={200}>
-            AI analysis results, document views, and structured outputs will
-            appear here as tabs when you run an action.
-          </Text>
+        <div className={styles.firstPaintPlaceholder}>
+          <Spinner size="tiny" />
         </div>
       </div>
     );

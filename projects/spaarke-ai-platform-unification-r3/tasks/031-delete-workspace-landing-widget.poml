@@ -3,7 +3,7 @@
   <metadata>
     <title>Delete WorkspaceLandingWidget and clean up orphan imports</title>
     <phase>Phase C — Workspace Pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>none</blocks>
@@ -144,4 +144,31 @@
     STANDARD rigor applies — deletion + import cleanup, no new code. Code-review + adr-check are
     optional but a build verification is mandatory.
   </execution>
+
+  <notes>
+    **Completed 2026-05-20** — STANDARD rigor.
+
+    **Files deleted**:
+    - `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceLandingWidget.tsx` (394 lines)
+
+    **Files modified**:
+    - `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`:
+      - Removed import of `WorkspaceLandingWidget`, `useShellStage`, and now-unused icons (`BrainCircuitRegular`, `DocumentSearchRegular`) + `Text` from Fluent components.
+      - Removed `useShellStage()` call (no longer needed — fallback branches collapsed).
+      - Replaced ~50 lines of three-way Stage-1/Stage-2/default empty-state branches with a single minimal first-paint placeholder (Spinner under `<PaneHeader>`). The Home tab effect installs the Home tab on first commit so users effectively never see this branch.
+      - Trimmed `useStyles` from 5 unused empty-state slots to a single `firstPaintPlaceholder` slot.
+    - `src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx`:
+      - Removed dangling `@see WorkspaceLandingWidget` doc comment (line 25).
+
+    **Build verification**: `npm run build` in SpaarkeAi → **PASS** (3157 modules transformed, ~6.6s, no errors, no warnings).
+
+    **Grep verification**: Zero `WorkspaceLandingWidget` references in `src/` (only historical references remain in `.claude/`, `notes/`, `projects/` docs — expected and intentional).
+
+    **Acceptance criteria** (all met):
+    - ✅ `WorkspaceLandingWidget.tsx` deleted.
+    - ✅ Zero project-wide live references / orphan imports in `src/`.
+    - ✅ `npm run build` clean (zero TS errors, zero new lint warnings).
+    - ✅ No tests reference deleted widget (verified — `ContextPaneController.test.tsx` and `WorkspaceTabManager.test.ts` are unrelated).
+    - ✅ Standalone LegalWorkspace unaffected (FR-25) — `WorkspaceLandingWidget` was solution-local to SpaarkeAi; LegalWorkspace had no dependency on it (confirmed via grep).
+  </notes>
 </task>

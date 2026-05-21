@@ -22,7 +22,6 @@
  * - ADR-021: Dark mode must work without additional CSS (tokens adapt automatically).
  * - ADR-028: Auth surface comes via useAiSession() — no token snapshots in props/state.
  *
- * @see WorkspaceLandingWidget — workspace pane Stage 1 content
  * @see ADR-021 — Fluent v9 design system, dark mode, semantic tokens
  * @see ConversationPane.tsx — renders this component when no session and no entity context
  */
