@@ -490,7 +490,7 @@ The 12 patterns touch far more than the two engines. Comprehensive impact map:
 - `Services/Ai/Gates/IGateResolver` + implementations — new
 - `Services/Ai/SeedDataIngestion/` — new (could also be a separate Azure Function)
 
-Note CLAUDE.md §10 — every new BFF service requires loading [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md) and explicit placement justification in the project's `design.md`. This document is the precursor; placement justification must be written per-component when projects formalize.
+Note CLAUDE.md §10 — every new BFF service requires loading [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) and explicit placement justification in the project's `design.md`. This document is the precursor; placement justification must be written per-component when projects formalize.
 
 **JPS Playbook System** — 4 of 12 patterns extend it directly:
 - New Action category: `EvaluatorGate`
@@ -839,7 +839,7 @@ Recommendation: prefer Application Insights custom events for sanitization audit
 
 ## 10. Proposed ADRs (Skeletons)
 
-These are the new architectural decisions that need to be ratified before code work begins on the affected patterns. Each is a skeleton — full ADRs would be expanded under [`.claude/adr/`](.claude/adr/) and [`docs/adr/`](docs/adr/).
+These are the new architectural decisions that need to be ratified before code work begins on the affected patterns. Each is a skeleton — full ADRs would be expanded under [`.claude/adr/`](../../.claude/adr/) and [`docs/adr/`](../../docs/adr/).
 
 ### 10.1 ADR-NEW-Precedent-Board
 
@@ -1200,7 +1200,11 @@ Pass 2 (streaming, agent inventory, cross-checking) findings are inline in this 
 ## 18. Footer
 
 **Maintained by**: ralph.schroeder@hotmail.com
-**Status as of 2026-05-20**: Working analysis. To be decomposed into formal ADRs (10.1–10.6), Insight Engine `design.md` updates (Precedent Board layer), Action Engine `design.md` updates (GateResolver, EvaluatorGate), and dedicated schema specs in [docs/data-model/](data-model/) as workstreams formalize.
+**Status as of 2026-05-20**: Working analysis. To be decomposed into formal ADRs (10.1–10.6), Insight Engine `design.md` updates (Precedent Board layer), Action Engine `design.md` updates (GateResolver, EvaluatorGate), and dedicated schema specs in [docs/data-model/](../../docs/data-model/) as workstreams formalize.
+
+**Companion documents in this project directory**:
+- [`ADVANCED-AI-USE-CASE-PATTERNS.md`](ADVANCED-AI-USE-CASE-PATTERNS.md) — the six user interaction modes (synchronous review, async triage, conversational inquiry, precedent curation, in-document drafting, scheduled distillation)
+- [`TEST-DATA-REQUIREMENTS.md`](TEST-DATA-REQUIREMENTS.md) — strategy for priming demo, validation, and edge-case test data
 
 **Next actions**:
 1. Approve fork-to-org + Wayback submission for lavern artifact preservation
@@ -1209,9 +1213,9 @@ Pass 2 (streaming, agent inventory, cross-checking) findings are inline in this 
 4. Update coordination assessment in `projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md` to incorporate the new coordination decisions from §11
 
 **Cross-references**:
-- Insight Engine project: [`projects/ai-spaarke-insight-engine-r1/`](../projects/ai-spaarke-insight-engine-r1/)
-- Action Engine project: [`projects/ai-spaarke-action-engine-r1/`](../projects/ai-spaarke-action-engine-r1/)
-- Coordination assessment: [`projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md`](../projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md)
-- BFF additions governance: [`.claude/constraints/bff-extensions.md`](../.claude/constraints/bff-extensions.md)
-- AI architecture: [`docs/architecture/AI-ARCHITECTURE.md`](architecture/AI-ARCHITECTURE.md)
-- JPS scope catalog: [`.claude/catalogs/scope-model-index.json`](../.claude/catalogs/scope-model-index.json)
+- Insight Engine project: [`projects/ai-spaarke-insight-engine-r1/`](../ai-spaarke-insight-engine-r1/)
+- Action Engine project: [`projects/ai-spaarke-action-engine-r1/`](../ai-spaarke-action-engine-r1/)
+- Coordination assessment: [`projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md`](../ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md)
+- BFF additions governance: [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md)
+- AI architecture: [`docs/architecture/AI-ARCHITECTURE.md`](../../docs/architecture/AI-ARCHITECTURE.md)
+- JPS scope catalog: [`.claude/catalogs/scope-model-index.json`](../../.claude/catalogs/scope-model-index.json)
