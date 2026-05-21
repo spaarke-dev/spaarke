@@ -465,10 +465,34 @@ public class PlaybookService : IPlaybookService
         int skip,
         CancellationToken cancellationToken)
     {
-        // Get total count first
+        // Get total count first.
+        // Missing-entity tolerance (e.g., fresh dev env without `sprk_analysisplaybook` table):
+        // Dataverse returns 404 or 400 with "Resource not found" / "Could not find a property
+        // named" — treat as empty list rather than throwing, so chat tool detection +
+        // capability resolution can proceed gracefully.
         var countUrl = $"{EntitySetName}/$count?$filter={Uri.EscapeDataString(filter)}";
         var countResponse = await _httpClient.GetAsync(countUrl, cancellationToken);
-        countResponse.EnsureSuccessStatusCode();
+
+        if (!countResponse.IsSuccessStatusCode)
+        {
+            var countBody = await countResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (IsMissingEntityResponse(countResponse.StatusCode, countBody))
+            {
+                _logger.LogWarning(
+                    "[PLAYBOOK] Dataverse table '{EntitySet}' is not provisioned in this environment " +
+                    "({StatusCode}). Returning empty playbook list.",
+                    EntitySetName, countResponse.StatusCode);
+                return new PlaybookListResponse
+                {
+                    Items = [],
+                    TotalCount = 0,
+                    Page = query.Page,
+                    PageSize = pageSize
+                };
+            }
+            countResponse.EnsureSuccessStatusCode();
+        }
+
         var totalCount = int.Parse(await countResponse.Content.ReadAsStringAsync(cancellationToken));
 
         // Build order by
@@ -481,7 +505,26 @@ public class PlaybookService : IPlaybookService
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (IsMissingEntityResponse(response.StatusCode, body))
+            {
+                _logger.LogWarning(
+                    "[PLAYBOOK] Dataverse query for '{EntitySet}' returned missing-entity " +
+                    "response ({StatusCode}). Returning empty playbook list.",
+                    EntitySetName, response.StatusCode);
+                return new PlaybookListResponse
+                {
+                    Items = [],
+                    TotalCount = 0,
+                    Page = query.Page,
+                    PageSize = pageSize
+                };
+            }
+            response.EnsureSuccessStatusCode();
+        }
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
         var items = result?.Value?.Select(MapToPlaybookSummary).ToArray() ?? [];
@@ -493,6 +536,29 @@ public class PlaybookService : IPlaybookService
             Page = query.Page,
             PageSize = pageSize
         };
+    }
+
+    /// <summary>
+    /// Detects whether a non-success Dataverse response indicates the queried entity
+    /// (table) does not exist in this environment. Mirrors the helper in
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Capabilities.DataverseCapabilityManifestLoader"/>.
+    /// Treated as a graceful "no results" condition rather than an error so the chat
+    /// pipeline and Daily Briefing can degrade gracefully when fresh environments lack
+    /// schema.
+    /// </summary>
+    internal static bool IsMissingEntityResponse(System.Net.HttpStatusCode statusCode, string body)
+    {
+        if (statusCode == System.Net.HttpStatusCode.NotFound)
+            return true;
+
+        if (statusCode == System.Net.HttpStatusCode.BadRequest && !string.IsNullOrEmpty(body))
+        {
+            return body.Contains("Resource not found for the segment", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("does not exist", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 
     private static PlaybookSummary MapToPlaybookSummary(JsonElement element)

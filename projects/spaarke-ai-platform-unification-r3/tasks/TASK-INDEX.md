@@ -64,6 +64,7 @@
 | 069 | Daily Briefing as SpaarkeAi Home tab default content (Option Z minimum scope; Bug 2 visual fix) | F (Verification — remediation) | ✅ | 034, 067, 068, 070 | 072 | — (serial) | FULL | 5 |
 | 081 | WorkspacePaneMenu config-ready fetch fix (smoke remediation round 2) | F (Verification — remediation) | ✅ | 032, 070 | 072 | — (serial) | STANDARD | 1 |
 | 082 | SprkChat UX fixes — input focus restore + slash menu outside-click (smoke remediation round 2) | F (Verification — remediation) | ✅ | 023, 025, 070 | 071 | — (serial) | STANDARD | 1 |
+| 083 | BFF resilience: missing Dataverse manifest + empty Daily Briefing payload (smoke remediation round 2 — unblocks chat + Daily Briefing in dev) | F (Verification — remediation) | ✅ | 050, 070 | 071, 072 | — (serial) | STANDARD | 1.5 |
 | 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | ✅ | 060-063, **065** | 071-074 | — | FULL | 1 |
 | 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
 | 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
