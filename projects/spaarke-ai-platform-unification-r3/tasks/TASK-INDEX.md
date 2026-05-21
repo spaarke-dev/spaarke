@@ -16,7 +16,7 @@
 | Phase B (Assistant) | 7 (020-026) | 🔲 |
 | Phase C (Workspace) | 6 (030-035) | 🔲 |
 | Phase D (Context) | 6 (040-045) | 🔲 |
-| Phase E (Backend, conditional) | 2 (050, 051) | 🔲 ACTIVE — Phase E REQUIRED per spike 001 decision (memo: notes/spikes/001-fr07-attachments-payload.md) |
+| Phase E (Backend, conditional) | 2 (050, 051) | ✅ — Phase E COMPLETE (per spike 001 decision; memo: notes/spikes/001-fr07-attachments-payload.md) |
 | Phase F (Verification) | 4 (060-063) | 🔲 |
 | Phase G (Deploy + Smoke) | 5 (070-074) | 🔲 |
 | Phase H (Wrap-up) | 1 (090) | 🔲 |
@@ -52,7 +52,7 @@
 | 044 | Analysis Builder intents (email-compose, meeting-schedule) | D (Context) | ✅ | 001 | — | D | STANDARD | 2 |
 | 045 | `AssignWorkWizardLauncher` (Xrm.Navigation) | D (Context) | ✅ | 001 | — | D | FULL | 2 |
 | 050 | Extend ChatEndpoints with attachments[] (CONDITIONAL) | E (Backend) | ✅ | 001 | 051, 026 | E | FULL | 3 |
-| 051 | BFF unit tests for attachments[] payload (CONDITIONAL) | E (Backend) | 🔲 | 050 | — | E (serial w/ 050) | STANDARD | 2 |
+| 051 | BFF unit tests for attachments[] payload (CONDITIONAL) | E (Backend) | ✅ | 050 | — | E (serial w/ 050) | STANDARD | 2 |
 | 060 | Auth audit (no token snapshots, all via `authenticatedFetch`) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
 | 061 | Bundle-size verification (<250 KB gzip delta vs R2) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
 | 062 | Dark-mode token audit (no hex/rgba in new code) | F (Verification) | 🔲 | All B/C/D | 070 | F | STANDARD | 2 |
