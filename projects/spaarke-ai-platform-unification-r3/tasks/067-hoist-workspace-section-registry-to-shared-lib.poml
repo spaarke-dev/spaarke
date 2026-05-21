@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Hoist workspace section registry + builder to @spaarke/ui-components (ADR-012 compliance; Bug 2 fix)</title>
+    <phase>F (Verification — remediation)</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <dependencies>030, 034, 070</dependencies>
+    <blocks>072</blocks>
+    <tags>refactoring, shared-components, react, frontend, architecture</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-solution refactor: moves code from LegalWorkspace solution into @spaarke/ui-components shared lib. Touches THREE solutions (LegalWorkspace, SpaarkeAi, the shared lib). FR-25/NFR-10 risk — standalone LegalWorkspace MUST continue to function identically. Multi-file dependency graph. Code-review + adr-check + dark-mode-audit required.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-solution refactor — single agent or careful sequence required to preserve FR-25 (standalone LegalWorkspace untouched in behavior).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Fix Bug 2 from operator smoke feedback AND address the ADR-012 cross-cutting-components
+    limitation flagged by the project owner. Currently SpaarkeAi's WorkspaceHomeTab renders
+    only structural placeholders (no section content) because the section registry and
+    workspace-config builder live solution-local in LegalWorkspace. Hoist the portable parts
+    of LegalWorkspace's workspace section infrastructure to @spaarke/ui-components so both
+    LegalWorkspace (standalone) AND SpaarkeAi (embedded) render section content from a single
+    source of truth.
+  </prompt>
+
+  <role>
+    Senior React + TypeScript engineer comfortable with monorepo refactors, shared-library
+    design, and Vite tsconfig path aliases. Familiar with React 19 hooks, Fluent v9, and
+    the ADR-012 shared-component contract.
+  </role>
+
+  <goal>
+    `@spaarke/ui-components` exports a workspace section infrastructure (buildDynamicWorkspaceConfig,
+    SECTION_REGISTRY for portable factories, types). LegalWorkspace's sectionRegistry.ts is
+    refactored to compose shared + local registrations. SpaarkeAi's WorkspaceHomeTab.tsx
+    renders ACTUAL section content (not placeholders) by consuming the shared infrastructure.
+    Standalone LegalWorkspace continues to render identically (FR-25 / NFR-10 preserved).
+    The ADR-012 cross-cutting limitation flagged by the project owner is resolved for
+    workspace section composition.
+  </goal>
+
+  <context>
+    <background>
+      Task 030 (WorkspacePane LegalWorkspace embed) shipped structure-only Home tab content
+      with a documented rationale: "Strict reuse of LegalWorkspace's SECTION_REGISTRY +
+      buildDynamicWorkspaceConfig would require cross-solution coupling that SpaarkeAi does
+      not currently have (package.json has no LegalWorkspace dependency). Per the parent
+      agent message ('Your job is to land the foundational structure cleanly'), the Home
+      tab renders a faithful structural representation of the user's layout — correct rows,
+      correct column widths, correct section identities — with each section rendering a
+      placeholder content body."
+
+      Operator smoke at 2026-05-20 confirmed: "no data showing for the workspace widgets."
+      Plus: "there was mention in earlier question about ADR limitation of cross cutting
+      components — that needs to be addressed."
+
+      Diagnostic agent analysis (read-only):
+      - `WorkspaceHomeTab.tsx:184-222` (`buildFoundationalConfig`): each section is hardcoded
+        type:"content" with a placeholder `renderContent`. This is the deliberate placeholder
+        from task 030.
+      - LegalWorkspace owns: `sectionRegistry.ts` (the registry array), 6 per-section
+        `*.registration.ts` files in `sections/`, and `workspace/buildDynamicWorkspaceConfig.ts`
+        (the pure builder, no LegalWorkspace-specific imports).
+      - @spaarke/ui-components ALREADY owns: `WorkspaceShell`, `SectionPanel`, `ActionCard{Row}`,
+        `MetricCard{Row}`, and ALL types (`SectionRegistration`, `SectionFactoryContext`,
+        `SectionConfig`) per ADR-012.
+      - `buildDynamicWorkspaceConfig` is PURE and TYPE-ONLY against the shared lib — hoisting
+        is a pure relocation.
+      - 4-5 section factories are PORTABLE (no LegalWorkspace-only imports). The `dailyBriefing`
+        factory (task 034) uses local `useDailyBriefing` + `DailyBriefingSection` — stays in
+        LegalWorkspace OR is also hoisted as part of this task (decision required during work).
+
+      Effort estimate from diagnostic: medium (1-2 days). The risk is cross-solution build
+      verification (LegalWorkspace MUST continue to build + render identically).
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file>src/solutions/LegalWorkspace/src/workspace/buildDynamicWorkspaceConfig.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/getStarted.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/quickSummary.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/latestUpdates.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/documents.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceHomeTab.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components and shared logic live in @spaarke/ui-components. The workspace section registry + builder are cross-cutting infrastructure consumed by 2+ solutions — they BELONG in the shared lib. This task closes the gap.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only. No hex / rgba literals introduced.</constraint>
+    <constraint source="ADR-022">React 19 patterns. No legacy React 16 fallbacks.</constraint>
+    <constraint source="ADR-028">No `accessToken` props in any new shared-lib code. All BFF calls (if any factories call BFF) use `authenticatedFetch` via passed-in `SectionFactoryContext` callbacks — NOT by importing `@spaarke/auth` into the shared lib (preserves ADR-012 boundary).</constraint>
+    <constraint source="spec">FR-25 / NFR-10: Standalone LegalWorkspace MUST continue to function identically. After this task, opening standalone LegalWorkspace in a separate browser tab MUST show all 9 templates in its wizard AND render existing user layouts with the same section content as before.</constraint>
+    <constraint source="project">If a section factory has LegalWorkspace-specific dependencies (e.g., `dailyBriefing` uses local `useDailyBriefing` hook), EITHER (a) hoist the dependency too if it makes sense for shared-lib use, OR (b) keep that factory LegalWorkspace-local and compose into the LegalWorkspace registry alongside shared factories. Document the decision per-factory.</constraint>
+    <constraint source="project">Do NOT modify the `WorkspaceShell` component itself — it's already in the shared lib and consumed by both solutions.</constraint>
+    <constraint source="project">SpaarkeAi MUST consume the hoisted infrastructure via the shared-lib public barrel (`@spaarke/ui-components`), not via deep imports.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/drafts/012-actioncard-decision.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inventory portable vs solution-local factories">
+      For each of the 6 LegalWorkspace section factories, classify:
+      - **Portable**: only imports from @spaarke/ui-components types + general utilities. Examples likely: getStarted (uses ActionCard which is already shared), quickSummary, latestUpdates, todo, documents.
+      - **Solution-local**: imports from LegalWorkspace-specific components or hooks. Example: dailyBriefing (uses local DailyBriefingSection + useDailyBriefing).
+      Document in `projects/spaarke-ai-platform-unification-r3/notes/drafts/067-factory-inventory.md`.
+    </step>
+    <step order="2" name="Hoist buildDynamicWorkspaceConfig to shared lib">
+      Move `src/solutions/LegalWorkspace/src/workspace/buildDynamicWorkspaceConfig.ts` to
+      `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts`.
+      Update internal imports if needed (likely zero changes — diagnostic confirmed it's already type-only against shared lib).
+      Export from `WorkspaceShell/index.ts` barrel AND root `index.ts`. Replace LegalWorkspace's local copy with a re-export from `@spaarke/ui-components` so existing imports don't break.
+    </step>
+    <step order="3" name="Hoist SYSTEM_DEFAULT_LAYOUT_JSON if applicable">
+      Diagnostic mentioned `SYSTEM_DEFAULT_LAYOUT_JSON`. If it lives in LegalWorkspace and is referenced by buildDynamicWorkspaceConfig, hoist it too. Otherwise skip.
+    </step>
+    <step order="4" name="Hoist portable section factories">
+      For each portable factory (inventory step 1):
+      - Create `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/{name}.registration.ts`
+      - Move the factory file contents (or carefully copy + delete the original)
+      - Verify any component/utility imports resolve from `@spaarke/ui-components` (no LegalWorkspace paths)
+      - Update LegalWorkspace's `sectionRegistry.ts` to import the hoisted registrations from `@spaarke/ui-components` (instead of local paths)
+      - Verify LegalWorkspace builds clean after the move.
+    </step>
+    <step order="5" name="Decide on dailyBriefing factory placement">
+      Two options for `dailyBriefing.registration.ts`:
+      - **Option H (hoist)**: also hoist `useDailyBriefing.ts` + `DailyBriefingSection.tsx` to shared lib. SpaarkeAi gets Daily Briefing automatically. Trade-off: shared lib gains AI-feature dependency on `@spaarke/auth` (already there) + telemetry callback pattern.
+      - **Option L (stay)**: factory stays in LegalWorkspace. SpaarkeAi's registry composition omits it OR LegalWorkspace exposes a discrete "AI Briefing" registration that SpaarkeAi opts into.
+      Decide; document; implement. If unclear, default to Option L (smaller blast radius for this task; can hoist later).
+    </step>
+    <step order="6" name="Create shared SECTION_REGISTRY composition">
+      Decide the shared lib's exported registry shape:
+      - **Sub-step 6a**: Export `PORTABLE_SECTION_REGISTRY: SectionRegistration[]` from `@spaarke/ui-components/src/components/WorkspaceShell/sectionRegistry.ts`. This is the canonical list of portable sections.
+      - **Sub-step 6b**: LegalWorkspace's `sectionRegistry.ts` becomes a composition: `[...PORTABLE_SECTION_REGISTRY, dailyBriefingRegistration]` (or whichever local factories it adds).
+      - **Sub-step 6c**: SpaarkeAi's WorkspaceHomeTab.tsx imports `PORTABLE_SECTION_REGISTRY` + `buildDynamicWorkspaceConfig` from `@spaarke/ui-components`.
+    </step>
+    <step order="7" name="Wire WorkspaceHomeTab to use shared infrastructure">
+      Rewrite `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceHomeTab.tsx`:
+      - Import `buildDynamicWorkspaceConfig` + `PORTABLE_SECTION_REGISTRY` from `@spaarke/ui-components`.
+      - Build a `SectionFactoryContext` from SpaarkeAi's environment (webApi via Xrm bootstrap, userId from authenticated session, callbacks for `onOpenWizard`/`onNavigate` using `Xrm.Navigation.navigateTo`).
+      - Remove the placeholder `buildFoundationalConfig` and `renderContent: <Text>placeholder</Text>` pattern.
+      - Pass the fully-built config to `<WorkspaceShell config={config} />`.
+    </step>
+    <step order="8" name="Verify standalone LegalWorkspace identical">
+      Run `cd src/solutions/LegalWorkspace && npm run build`. Verify build succeeds.
+      Manually compare bundle size + section count vs pre-task baseline. Document any drift.
+      The standalone LegalWorkspace Code Page MUST be visually identical after this task.
+    </step>
+    <step order="9" name="Verify SpaarkeAi renders section content">
+      Run `cd src/solutions/SpaarkeAi && npm run build`. Verify build succeeds.
+      Document the bundle-size delta vs Phase F task 061 baseline (777.6 KB gzip post-deploy).
+      Hoisting portable factories may INCREASE SpaarkeAi bundle (now pulls in section component bodies it didn't before). Acknowledge if NFR-12 deviation grows; reference bundle-size assessment.
+    </step>
+    <step order="10" name="Tests + quality gates">
+      - Update or add tests for the hoisted infrastructure if existing patterns exist in shared-lib tests.
+      - Run `code-review` skill on modified files.
+      - Run `adr-check` skill (ADR-012, ADR-021, ADR-028 compliance).
+      - Run dark-mode token grep on any new/modified component files.
+    </step>
+    <step order="11" name="Redeploy both web resources">
+      After build verification:
+      - Run `scripts/Deploy-SpaarkeAi.ps1` (redeploys sprk_spaarkeai with the new WorkspaceHomeTab content).
+      - Run `scripts/Deploy-LegalWorkspaceCustomPage.ps1` (or equivalent) to redeploy standalone LegalWorkspace.
+      - Update deploy memo at `notes/deploys/2026-05-20-deploy.md` with supplemental deploy section.
+    </step>
+    <step order="12" name="Update task status + TASK-INDEX + project docs">
+      - Task 067 POML → completed.
+      - TASK-INDEX row 067 → ✅.
+      - Update plan.md Risk Register: mark "Bug 2 / ADR-012 cross-cutting limitation" as RESOLVED.
+      - Add a `notes/067-shared-lib-hoist-summary.md` documenting the architectural change for the wrap-up lessons-learned.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Source files across 3 solutions</tool>
+    <tool name="Edit">Modify shared lib + LegalWorkspace + SpaarkeAi files</tool>
+    <tool name="Write">New shared lib files; inventory memo; deploy memo append</tool>
+    <tool name="Bash">npm install/build commands; deploy script invocations</tool>
+    <tool name="Grep">Find import sites, dependency tracing</tool>
+    <tool name="Glob">Locate section factory files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts (NEW — hoisted)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sectionRegistry.ts (NEW — PORTABLE_SECTION_REGISTRY export)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/*.registration.ts (NEW — hoisted factories)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sectionRegistry.ts (MODIFIED — composes shared + local)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/workspace/buildDynamicWorkspaceConfig.ts (REPLACED with re-export OR deleted if no remaining imports)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspaceHomeTab.tsx (MODIFIED — uses shared infrastructure)</output>
+    <output type="notes">projects/spaarke-ai-platform-unification-r3/notes/drafts/067-factory-inventory.md (NEW — per-factory portability classification)</output>
+    <output type="notes">projects/spaarke-ai-platform-unification-r3/notes/067-shared-lib-hoist-summary.md (NEW — architectural change summary)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">@spaarke/ui-components public barrel exports `buildDynamicWorkspaceConfig` and `PORTABLE_SECTION_REGISTRY`.</criterion>
+    <criterion testable="true">@spaarke/ui-components builds clean (tsc) with no new errors.</criterion>
+    <criterion testable="true">LegalWorkspace builds clean (vite) with no new errors; bundle size delta within reasonable bounds.</criterion>
+    <criterion testable="true">LegalWorkspace's sectionRegistry.ts composes [...PORTABLE_SECTION_REGISTRY, ...local].</criterion>
+    <criterion testable="true">Standalone LegalWorkspace, opened in a separate browser tab, renders existing user layouts with the SAME section content as before this task.</criterion>
+    <criterion testable="true">Standalone LegalWorkspace shows all 9 layout templates in the wizard (FR-25 backwards compat).</criterion>
+    <criterion testable="true">SpaarkeAi WorkspaceHomeTab.tsx no longer uses placeholder renderContent; renders actual section components from the shared registry.</criterion>
+    <criterion testable="true">SpaarkeAi builds clean (vite); bundle size delta documented vs Phase F task 061 baseline (NFR-12 deviation context preserved).</criterion>
+    <criterion testable="true">Both web resources redeployed; deploy memo appended.</criterion>
+    <criterion testable="true">No new accessToken props or state introduced (ADR-028).</criterion>
+    <criterion testable="true">No new hex/rgba literals in modified code (ADR-021).</criterion>
+    <criterion testable="true">Architectural summary memo at notes/067-shared-lib-hoist-summary.md documents the cross-cutting refactor for project wrap-up.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the structural response to the operator's "ADR limitation of cross cutting
+    components — that needs to be addressed" feedback. After this task, the workspace
+    section infrastructure is properly shared per ADR-012; future Code Pages that need to
+    embed workspace surfaces can do so via the same shared barrel.
+
+    The dailyBriefing factory decision (Option H vs L in step 5) is documented in the
+    factory-inventory memo. If staying solution-local, SpaarkeAi loses Daily Briefing
+    until a future task hoists it. If hoisting, SpaarkeAi gets it for free now but the
+    shared lib gains a feature dependency.
+
+    Risk highest in steps 4 (hoist factories) and 8 (verify LegalWorkspace identical).
+    Any visual regression in standalone LegalWorkspace is a FR-25 violation and must be
+    fixed before this task is considered complete.
+
+    Architectural follow-on (NOT in this task, captured for next review):
+    The operator also flagged a pane-coordination requirement — "we need to have some
+    rule or logic in the code that matches what is in the Workspace pane with what is
+    in the Context pane because these work in conjunction (and likewise of course the
+    Assistant needs to be aware of what is in the Workspace pane and the Context pane
+    b/c the Assistant is directly interacting)". This is a separate architectural
+    concern (Assistant ↔ Workspace ↔ Context state coordination) — likely a follow-on
+    project or new ADR. Out of scope for task 067.
+  </notes>
+
+  <execution>
+    Execute via `task-execute` skill. Multi-file refactor — Step 8.0 multi-file work decomposition
+    applies. Consider splitting into sub-agents: (a) shared-lib agent (hoist builder + factories);
+    (b) LegalWorkspace agent (compose + verify identical); (c) SpaarkeAi agent (wire WorkspaceHomeTab).
+    These ARE sequential (each depends on the prior landing), so a single coordinated agent may
+    be cleaner than parallel.
+  </execution>
+</task>
