@@ -230,6 +230,7 @@ export type {
 } from './widgets/context/ProgressTrackerWidget';
 
 import { registerContextWidget } from './registry/ContextWidgetRegistry';
+import type { ContextWidgetComponent } from './types/widget-types';
 registerContextWidget('progress-tracker', {
   factory: () =>
     import('./widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
@@ -251,6 +252,44 @@ export type {
 registerContextWidget('playbook-gallery', {
   factory: () =>
     import('./widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+});
+
+// ---------------------------------------------------------------------------
+// Widgets: GetStartedCardsWidget (context pane — Welcome stage, FR-18)
+//
+// Exported so consumers (ContextPaneController in SpaarkeAi) can render it
+// directly with an `onCardClick` callback prop. Also registered under
+// 'get-started-cards' for symmetry with the other context widgets and so
+// the registry stays the single source of truth for "what can render in
+// the Context pane".
+//
+// Note: GetStartedCardsWidget's props (`onCardClick`, `className`) are NOT
+// the standard `ContextWidgetProps` shape — it is a client-driven welcome
+// widget, not a server-driven `context_update` target. The registry factory
+// uses a type cast at the boundary so the widget can still be discovered by
+// `resolveContextWidget('get-started-cards')` if needed; callers that need
+// to wire `onCardClick` should import the named export directly and render
+// it themselves (this is what ContextPaneController does for the welcome
+// stage). PlaybookGalleryWidget registration is RETAINED above for FR-21
+// (non-welcome stage resolution).
+// ---------------------------------------------------------------------------
+
+export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
+export type {
+  GetStartedCardId,
+  GetStartedCardsWidgetProps,
+} from './widgets/context/GetStartedCardsWidget';
+
+registerContextWidget('get-started-cards', {
+  factory: () =>
+    import('./widgets/context/GetStartedCardsWidget').then((m) => ({
+      // Intentional cast: GetStartedCardsWidget's prop shape differs from
+      // ContextWidgetComponent's (it takes `onCardClick` + `className` instead
+      // of `data` + `widgetType` + `isLoading`). The registry entry exists
+      // for discoverability + symmetry; the actual render uses the named
+      // export directly so the callback is wirable.
+      default: m.GetStartedCardsWidget as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------

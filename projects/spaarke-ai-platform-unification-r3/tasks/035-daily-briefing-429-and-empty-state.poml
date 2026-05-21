@@ -3,7 +3,7 @@
   <metadata>
     <title>Daily Briefing 429 graceful degradation + empty state + error telemetry</title>
     <phase>Phase C — Workspace Pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>013, 034</dependencies>
     <blocks>none</blocks>

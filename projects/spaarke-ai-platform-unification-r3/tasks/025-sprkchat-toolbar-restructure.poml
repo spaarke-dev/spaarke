@@ -3,7 +3,7 @@
   <metadata>
     <title>Restructure SprkChat toolbar: remove Export Word, add + attach, move strip above input (FR-08, FR-09)</title>
     <phase>Phase B — Assistant pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>023, 024</dependencies>
     <blocks></blocks>

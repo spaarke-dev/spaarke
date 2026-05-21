@@ -40,12 +40,21 @@ import { DocumentRegular } from "@fluentui/react-icons";
 import { PaneHeader } from "@spaarke/ui-components";
 import {
   usePaneEvent,
+  useDispatchPaneEvent,
   resolveContextWidget,
   getContextWidgetForTab,
+  GetStartedCardsWidget,
+  launchAssignWorkWizard,
 } from "@spaarke/ai-widgets";
-import type { ContextWidgetComponent, ContextPaneEvent, WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type {
+  ContextWidgetComponent,
+  ContextPaneEvent,
+  WorkspacePaneEvent,
+  GetStartedCardId,
+} from "@spaarke/ai-widgets";
 import { useShellStage } from "../shell/ThreePaneShell";
 import type { ShellStage } from "../shell/ThreePaneShell";
+import { getBffBaseUrl } from "../../config/runtimeConfig";
 
 // ---------------------------------------------------------------------------
 // ContextStage — maps to each of the five named context rendering modes.
@@ -328,28 +337,24 @@ export function ContextPaneController(): React.JSX.Element {
 
   // Keep contextStage in sync with shell stage changes (fallback when no
   // context_update has set a specific stage for the new shell stage).
-  // Also auto-load the PlaybookGalleryWidget when entering Stage 1 (AIPU2-107).
+  //
+  // Welcome stage (FR-18 + FR-21, task 042): the welcome stage now renders
+  // the static <GetStartedCardsWidget /> directly in renderContent() rather
+  // than auto-resolving a widget from the registry. We clear `activeWidget`
+  // on entry to welcome so any prior widget (e.g. a PlaybookGalleryWidget
+  // loaded by a context_update on a previous stage) does not bleed through.
+  // PlaybookGalleryWidget remains REGISTERED in ContextWidgetRegistry — see
+  // index.ts of @spaarke/ai-widgets — so non-welcome stages or future
+  // context_update events that request it will still resolve correctly.
   React.useEffect(() => {
     setContextStage(shellStageToContextStage(currentStage));
 
-    // Auto-load PlaybookGalleryWidget in Stage 1 so the gallery is interactive
-    // from the start (not just a static placeholder). The widget is resolved
-    // lazily from the ContextWidgetRegistry — same path as context_update events.
     if (currentStage === "welcome") {
-      setIsResolving(true);
-      resolveContextWidget("playbook-gallery").then((Component) => {
-        setIsResolving(false);
-        if (Component !== null) {
-          setActiveWidget({
-            Component,
-            widgetType: "playbook-gallery",
-            data: null,
-            isLoading: false,
-          });
-        }
-      }).catch(() => {
-        setIsResolving(false);
-      });
+      // Clear any previously-resolved widget so the welcome state shows the
+      // GetStartedCards (rendered directly in renderContent below) instead of
+      // a stale widget left over from a previous shell stage.
+      setActiveWidget(null);
+      setIsResolving(false);
     }
   }, [currentStage]);
 
@@ -480,6 +485,57 @@ export function ContextPaneController(): React.JSX.Element {
   }, []));
 
   // ---------------------------------------------------------------------------
+  // PaneEventBus dispatcher — for welcome-stage GetStartedCards card clicks (FR-19).
+  //
+  // Six of the seven cards dispatch a `widget_load` event on the `workspace`
+  // channel; the WorkspacePane subscribes and opens the corresponding widget
+  // as a new top-tab. The seventh card ('assign-work') is special-cased to
+  // call launchAssignWorkWizard() — it crosses the host boundary into Dataverse
+  // via Xrm.Navigation.navigateTo and does NOT open an in-app workspace tab.
+  // No new channels are invented; only the existing `workspace` channel is used.
+  // ---------------------------------------------------------------------------
+
+  const dispatch = useDispatchPaneEvent();
+
+  /**
+   * onCardClick handler for {@link GetStartedCardsWidget} (FR-19 mapping).
+   *
+   * - 'assign-work' → invoke {@link launchAssignWorkWizard} (task 045) with
+   *   `bffBaseUrl` from runtimeConfig; the launcher feature-detects
+   *   Xrm.Navigation and returns a status object so Vite dev / non-host
+   *   environments do not crash. The status is intentionally not surfaced
+   *   here — the calling site decides whether to show a placeholder; for
+   *   the Context pane we keep behaviour silent (consistent with how the
+   *   ribbon command path handles non-host gracefully).
+   * - any other card → dispatch a `widget_load` event on the `workspace`
+   *   channel with `widgetType` set to the card id. The card id strings are
+   *   the exact widget_type values registered in WorkspaceWidgetRegistry
+   *   (see register-workspace-widgets.ts) — task 041 deliberately aligned
+   *   the GetStartedCardId union with those strings.
+   */
+  const handleGetStartedCardClick = React.useCallback(
+    (cardId: GetStartedCardId): void => {
+      if (cardId === "assign-work") {
+        // ADR-028: bffBaseUrl is a base URL only, NOT a token. The launcher
+        // is forbidden by contract from passing tokens via Xrm.navigateTo's
+        // `data` query string; the wizard authenticates inside its iframe.
+        launchAssignWorkWizard({ bffBaseUrl: getBffBaseUrl() });
+        return;
+      }
+
+      // Dispatch widget_load on the existing `workspace` channel — the
+      // WorkspacePane top-tab opener subscribes here. We pass only the
+      // widgetType (no token, no widgetData); the workspace widget itself
+      // fetches whatever data it needs via authenticatedFetch.
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: cardId,
+      });
+    },
+    [dispatch]
+  );
+
+  // ---------------------------------------------------------------------------
   // Derive header stage label for debugging / accessibility
   // ---------------------------------------------------------------------------
 
@@ -509,30 +565,24 @@ export function ContextPaneController(): React.JSX.Element {
    *   Stage 4 'review':      Context adapts to active workspace tab via tab_change.
    */
   function renderContent(): React.ReactNode {
-    // Stage 1 — welcome: no playbook selected, show gallery placeholder.
-    // The PlaybookGalleryWidget (AIPU2-086) should ideally be loaded here via
-    // a context_update event, but if no event has arrived yet we show the
-    // static placeholder so the pane is never empty.
+    // Stage 1 — welcome: render the GetStartedCardsWidget (FR-18, FR-19, FR-21).
+    //
+    // The widget shows 7 action cards in a 2-column grid. Each card click
+    // routes through `handleGetStartedCardClick` (defined above):
+    //   - 'assign-work'    → launchAssignWorkWizard({ bffBaseUrl }) (task 045)
+    //   - any other cardId → dispatch widget_load on the `workspace` channel,
+    //                        which opens the corresponding widget in the
+    //                        Workspace pane as a new top-tab.
+    //
+    // PlaybookGalleryWidget remains REGISTERED in ContextWidgetRegistry (see
+    // @spaarke/ai-widgets/src/index.ts) so any future server-driven
+    // context_update that requests 'playbook-gallery' on a non-welcome stage
+    // resolves correctly. We do NOT auto-load it here anymore — the welcome
+    // stage is now the GetStarted entry point per FR-18 / the R3 design.
     if (currentStage === "welcome") {
-      // If a widget has been loaded (e.g. PlaybookGalleryWidget via context_update),
-      // prefer it over the static placeholder so the gallery renders interactively.
-      if (activeWidget !== null) {
-        return (
-          <div className={styles.content} data-testid="context-pane-widget">
-            <ResolvedContextWidget slot={activeWidget} highlightRef={highlightRef} />
-          </div>
-        );
-      }
       return (
-        <div className={styles.emptyState} data-testid="context-pane-welcome">
-          <DocumentRegular className={styles.emptyIcon} />
-          <Text className={styles.emptyTitle} size={400}>
-            Select a Playbook
-          </Text>
-          <Text className={styles.emptySubtitle} size={200}>
-            Choose a playbook from the right panel to configure the AI agent
-            and get started. Context, sources, and citations will appear here.
-          </Text>
+        <div className={styles.content} data-testid="context-pane-welcome">
+          <GetStartedCardsWidget onCardClick={handleGetStartedCardClick} />
         </div>
       );
     }

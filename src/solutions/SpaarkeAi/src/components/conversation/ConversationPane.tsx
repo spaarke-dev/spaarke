@@ -77,6 +77,7 @@ import {
   DismissRegular,
   ArrowResetRegular,
   CheckmarkCircleRegular,
+  HistoryRegular,
 } from "@fluentui/react-icons";
 // PaneHeader is the canonical pane-header primitive lifted into the shared
 // library in Phase A task 010 (ADR-012). It owns the icon brand-color treatment
@@ -87,6 +88,7 @@ import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 import { useShellStage, useRestoreContext } from "../shell/ThreePaneShell";
+import { HistoryOverlay } from "./HistoryOverlay";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -394,8 +396,18 @@ export function ConversationPane(): React.JSX.Element {
 
   // NOTE (task 021, FR-02): The legacy `activeView` tab state ("chat" | "history")
   // was removed when the Chat/History tab buttons were replaced by <PaneHeader>.
-  // The History UI becomes a side-overlay (OC-01) wired by task 022 via the
-  // <PaneHeader> rightSlot — see render block below for the placeholder.
+  // The History UI becomes a side-overlay (OC-01) wired below via the
+  // <PaneHeader> rightSlot — see HistoryOverlay and historyOpen state.
+
+  // ── History side-overlay state (task 022, FR-03 / OC-01) ────────────────
+  //
+  // Toggled by the HistoryRegular button in the PaneHeader rightSlot. When
+  // true, <HistoryOverlay> slides in from the trailing edge of the viewport
+  // (Claude-Code-style). Selecting a session calls setChatSessionId which
+  // resumes the conversation via the existing AiSessionProvider flow.
+  const [historyOpen, setHistoryOpen] = React.useState<boolean>(false);
+  const handleOpenHistory = React.useCallback(() => setHistoryOpen(true), []);
+  const handleCloseHistory = React.useCallback(() => setHistoryOpen(false), []);
 
   // ── Playbook selection state (AIPU2-102) ────────────────────────────────
   //
@@ -724,18 +736,42 @@ export function ConversationPane(): React.JSX.Element {
        * color is applied internally by PaneHeader via tokens.colorBrandForeground1
        * (ADR-021 — no hex / no rgba literals).
        *
-       * TODO(task 022, FR-03 / OC-01): Wire the History side-overlay trigger
-       * into the rightSlot prop below. Task 022 will:
-       *   - Add a <Button icon={<HistoryRegular />} appearance="subtle" /> as
-       *     rightSlot, plus an overlay component (Claude-Code style).
-       *   - Pass an `onClick` that opens the ChatHistoryPanel as a side overlay
-       *     (no more tab toggle — the History pane slides in over the chat).
-       * Leaving rightSlot undefined here so task 022 lands as a single-prop add.
+       * task 022 (FR-03 / OC-01): rightSlot now hosts a HistoryRegular icon
+       * button that toggles the <HistoryOverlay> side overlay (Claude-Code
+       * style). Selecting a session in the overlay calls setChatSessionId,
+       * which resumes the conversation via the existing AiSessionProvider
+       * flow.
        */}
       <PaneHeader
         title="Assistant"
         icon={<ChatRegular />}
-        // rightSlot intentionally omitted — see TODO(task 022) above.
+        rightSlot={
+          <Tooltip content="Show chat history" relationship="label" positioning="below">
+            <Button
+              appearance="subtle"
+              icon={<HistoryRegular />}
+              onClick={handleOpenHistory}
+              aria-label="Show chat history"
+              aria-haspopup="dialog"
+              aria-expanded={historyOpen}
+            />
+          </Tooltip>
+        }
+      />
+
+      {/* ── History side-overlay (task 022, FR-03 / OC-01) ─────────────────── */}
+      {/*
+       * Claude-Code-style overlay that slides in from the trailing edge.
+       * Hidden when historyOpen===false (OverlayDrawer manages its own
+       * visibility). On session select, setChatSessionId resumes the
+       * conversation in SprkChat and the overlay closes itself.
+       */}
+      <HistoryOverlay
+        open={historyOpen}
+        onClose={handleCloseHistory}
+        onSelectSession={setChatSessionId}
+        bffBaseUrl={bffBaseUrl}
+        authenticatedFetch={authenticatedFetch}
       />
 
       {/* ── Playbook header strip (AIPU2-102) ──────────────────────────────── */}

@@ -46,9 +46,9 @@ export type { ISprkChatUploadZoneProps, UploadedDocument } from './SprkChatUploa
 // Document upload status (Phase 3E: upload processing feedback)
 export { SprkChatDocumentStatus } from './SprkChatDocumentStatus';
 
-// Word export button (Phase 3E: Open in Word action)
-export { SprkChatExportWord } from './SprkChatExportWord';
-export type { ISprkChatExportWordProps } from './SprkChatExportWord';
+// Word export button removed (FR-08, task 025 — replaced by toolbar restructure).
+// `SprkChatExportWord` is no longer exported from `@spaarke/ui-components`.
+// The file remains in the tree as historical reference but is unreferenced.
 
 // Hooks
 // Note: useSseStream is exported from src/hooks/useSseStream (canonical) via src/hooks/index.ts.
@@ -89,6 +89,7 @@ export type {
   IChatSseEvent,
   ISprkChatMessageProps,
   ISprkChatInputProps,
+  ISprkChatInputHandle,
   ISprkChatContextSelectorProps,
   ISprkChatPredefinedPromptsProps,
   ISprkChatHighlightRefineProps,

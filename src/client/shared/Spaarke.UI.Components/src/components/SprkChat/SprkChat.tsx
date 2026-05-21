@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react';
-import { makeStyles, shorthands, tokens, Spinner, Text, Button } from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens, Spinner, Text, Button, Tooltip } from '@fluentui/react-components';
 import {
   SparkleRegular,
   SearchRegular,
@@ -25,6 +25,10 @@ import {
   LightbulbRegular,
   ArrowSyncRegular,
   StopRegular,
+  AttachRegular,
+  DismissRegular,
+  PromptRegular,
+  WarningRegular,
 } from '@fluentui/react-icons';
 import {
   ISprkChatProps,
@@ -52,7 +56,8 @@ import { useSelectionListener } from './hooks/useSelectionListener';
 import { useChatContextMapping } from './hooks/useChatContextMapping';
 import type { IInlineActionInfo } from './hooks/useChatContextMapping';
 import { useDynamicSlashCommands } from './hooks/useDynamicSlashCommands';
-import { SprkChatExportWord } from './SprkChatExportWord';
+import { useChatFileAttachment } from './hooks/useChatFileAttachment';
+import type { ISprkChatInputHandle } from './types';
 import { Toaster, useToastController, useId, Toast, ToastTitle, ToastBody } from '@fluentui/react-components';
 import { ActionConfirmationDialog } from './ActionConfirmationDialog';
 import { openCodePageDialog, navigateToTarget, dispatchConfirmedAction } from './hooks/useActionHandlers';
@@ -169,12 +174,63 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
   },
-  inputToolbar: {
+  // FR-08 + FR-09 (task 025): toolbar restructure — vertical stack containing
+  // the optional chip strip, the controls strip ([Prompt] [+ Attach]), and the
+  // input itself. The wrapper itself is a thin layout container; SprkChatInput
+  // owns its own top border.
+  inputZone: {
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap(tokens.spacingVerticalXS),
+  },
+  // Chip strip — visible only when files.length > 0. Horizontal wrap to handle
+  // up to MAX_ATTACHMENTS (5) chips across narrow panes.
+  chipStrip: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM, '0', tokens.spacingHorizontalM),
+  },
+  // FR-09: single horizontal row containing [ Prompt ▾ ] [ + Attach ] above the
+  // input box. `spacingHorizontalS` gap between items per FR-09 acceptance.
+  controlsStrip: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalM),
     ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
+  },
+  // Individual chip — pill-shaped with filename, status icon, and × dismiss.
+  // Uses Fluent v9 token-based colors only (ADR-021, NFR-06 dark-mode safe).
+  attachmentChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
+    ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalS),
+    ...shorthands.borderRadius(tokens.borderRadiusCircular),
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase200,
+    maxWidth: '240px',
+  },
+  attachmentChipError: {
+    ...shorthands.border('1px', 'solid', tokens.colorPaletteRedBorder1),
+    backgroundColor: tokens.colorPaletteRedBackground1,
+    color: tokens.colorPaletteRedForeground1,
+  },
+  attachmentChipFilename: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '160px',
+  },
+  attachmentChipStatus: {
+    display: 'inline-flex',
+    alignItems: 'center',
+  },
+  attachmentChipDismiss: {
+    minWidth: 'auto',
   },
 });
 
@@ -393,6 +449,25 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // The input's onChange handler reuses the same SprkChatUploadZone flow.
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [actionUploadFile, setActionUploadFile] = React.useState<File | null>(null);
+
+  // ── FR-07 + FR-09 (task 025): Multi-file chat attachment state ───────────
+  // The `+` button in the controls strip opens a native file picker; selected
+  // files flow through `useChatFileAttachment.addFiles`. Task 026 will consume
+  // `attachments` when assembling the chat-send payload (see TODO marker on the
+  // handleSend wiring below).
+  const attachmentInputRef = React.useRef<HTMLInputElement>(null);
+  const {
+    files: attachmentFiles,
+    // TODO(task 026): wire `attachments` into the chat-send payload alongside
+    // the user message. The hook already filters to `status === 'ready'` chips.
+    attachments: _chatAttachments,
+    addFiles: addAttachmentFiles,
+    removeFile: removeAttachmentFile,
+  } = useChatFileAttachment();
+
+  // Imperative handle for SprkChatInput so the [Prompt] button in our controls
+  // strip can open the slash menu without re-implementing the wiring (FR-09).
+  const inputHandleRef = React.useRef<ISprkChatInputHandle>(null);
 
   // Additional documents state for multi-document context
   const [additionalDocumentIds, setAdditionalDocumentIds] = React.useState<string[]>([]);
@@ -870,6 +945,38 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // initialFile prop and begin uploading immediately on mount.
     setActionUploadFile(file);
     setIsDragging(true);
+  }, []);
+
+  // ── FR-07 + FR-09 (task 025): + Attach button handlers ───────────────────
+  // Opens a native file picker (multi-select, MIME-filtered) and forwards the
+  // resulting FileList to the useChatFileAttachment hook. Validation (count,
+  // size, MIME, PDF page-cap) and client-side extraction (PDF / DOCX / text)
+  // all happen inside the hook.
+  const handleAttachButtonClick = React.useCallback(() => {
+    attachmentInputRef.current?.click();
+  }, []);
+
+  const handleAttachInputChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const list = e.target.files;
+      if (!list || list.length === 0) {
+        return;
+      }
+      // Reset input so re-picking the same file works.
+      e.target.value = '';
+      // Fire-and-forget; the hook updates `files` optimistically and patches
+      // status as extraction resolves. We intentionally do not await here so
+      // the UI thread stays responsive.
+      void addAttachmentFiles(list);
+    },
+    [addAttachmentFiles],
+  );
+
+  // FR-09: opens the slash command menu from the strip-mounted [Prompt] button.
+  // Delegates to SprkChatInput's imperative handle so the wiring stays in one
+  // place.
+  const handlePromptMenuButtonClick = React.useCallback(() => {
+    inputHandleRef.current?.triggerSlashMode();
   }, []);
 
   // ── Plan Preview callbacks (Phase 2F) ──────────────────────────────────────
@@ -1834,32 +1941,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     [switchContext, documentId, hostContext, onPlaybookChange]
   );
 
-  // ── Task R2-057: Word export error/success handlers ──────────────────────
-  // Uses the existing Fluent v9 Toaster for user feedback (ADR-021).
-  const handleExportWordError = React.useCallback(
-    (errorMessage: string) => {
-      dispatchToast(
-        React.createElement(
-          Toast,
-          null,
-          React.createElement(ToastTitle, null, 'Export to Word failed'),
-          React.createElement(ToastBody, null, errorMessage)
-        ),
-        { intent: 'error' }
-      );
-    },
-    [dispatchToast]
-  );
-
-  const handleExportWordSuccess = React.useCallback(
-    (_wordOnlineUrl: string) => {
-      dispatchToast(
-        React.createElement(Toast, null, React.createElement(ToastTitle, null, 'Document opened in Word Online')),
-        { intent: 'success' }
-      );
-    },
-    [dispatchToast]
-  );
+  // ── FR-08 (task 025): SprkChatExportWord handlers removed ────────────────
+  // The "Open in Word" affordance was removed from the input toolbar per FR-08.
+  // No other code paths consumed handleExportWordError / handleExportWordSuccess.
 
   const displayError = sessionError || streamError || editorRefineError;
   const showPredefinedPrompts = messages.length === 0 && predefinedPrompts.length > 0 && !isSessionLoading;
@@ -2073,32 +2157,131 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         </div>
       )}
 
-      {/* Input toolbar — export actions above the input area (task R2-057) */}
-      <div className={styles.inputToolbar} data-testid="chat-input-toolbar">
-        <SprkChatExportWord
-          sessionId={session?.sessionId ?? null}
-          messages={messages}
-          apiBaseUrl={apiBaseUrl}
-          authenticatedFetch={authenticatedFetch}
-          onError={handleExportWordError}
-          onSuccess={handleExportWordSuccess}
+      {/*
+        FR-08 + FR-09 (task 025): Input zone restructure.
+
+        Three vertical regions inside a single wrapper:
+          1. (conditional) Chip strip — rendered when attachmentFiles.length > 0
+             with one chip per attachment (status visual + dismiss).
+          2. Controls strip — single horizontal row containing
+             [ Prompt menu ▾ ] [ + Attach ], `spacingHorizontalS` between items.
+          3. Input box — existing SprkChatInput (with its own internal slash
+             button hidden via `hideSlashButton`; the strip-mounted button
+             above triggers the slash menu via the imperative handle).
+
+        The previous "Open in Word" SprkChatExportWord button has been removed
+        entirely (FR-08). Consumer survey 2026-05-20: no external consumer of
+        SprkChatExportWord found; barrel export removed from index.ts.
+
+        FR-06: Input remains editable on cold load (handleSend guards `!session`).
+      */}
+      <div className={styles.inputZone} data-testid="chat-input-zone">
+        {/* Region 1: chip strip — visible only when files have been attached */}
+        {attachmentFiles.length > 0 && (
+          <div className={styles.chipStrip} role="list" aria-label="Attached files" data-testid="attachment-chip-strip">
+            {attachmentFiles.map((file, index) => {
+              const isError = file.status === 'error';
+              const chipClassName = isError
+                ? `${styles.attachmentChip} ${styles.attachmentChipError}`
+                : styles.attachmentChip;
+              const statusNode =
+                file.status === 'extracting'
+                  ? <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                  : file.status === 'ready'
+                    ? <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
+                    : <WarningRegular aria-label="Extraction failed" data-testid={`attachment-chip-status-error-${index}`} />;
+
+              const chipBody = (
+                <div
+                  key={file.id}
+                  className={chipClassName}
+                  role="listitem"
+                  data-testid={`attachment-chip-${index}`}
+                >
+                  <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
+                    {statusNode}
+                  </span>
+                  <span className={styles.attachmentChipFilename} title={file.filename}>
+                    {file.filename}
+                  </span>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<DismissRegular />}
+                    onClick={() => removeAttachmentFile(index)}
+                    aria-label={`Remove ${file.filename}`}
+                    title={`Remove ${file.filename}`}
+                    className={styles.attachmentChipDismiss}
+                    data-testid={`attachment-chip-dismiss-${index}`}
+                  />
+                </div>
+              );
+
+              // For error chips, wrap in a Tooltip exposing the parse error.
+              return isError && file.error
+                ? (
+                    <Tooltip
+                      key={file.id}
+                      content={file.error}
+                      relationship="description"
+                      withArrow
+                    >
+                      {chipBody}
+                    </Tooltip>
+                  )
+                : chipBody;
+            })}
+          </div>
+        )}
+
+        {/* Region 2: controls strip — [ Prompt ▾ ] [ + Attach ] (FR-09) */}
+        <div className={styles.controlsStrip} role="toolbar" aria-label="Chat input actions" data-testid="chat-input-controls-strip">
+          <Button
+            appearance="subtle"
+            icon={<PromptRegular />}
+            onClick={handlePromptMenuButtonClick}
+            disabled={isStreaming}
+            aria-label="Open slash commands"
+            title="Open slash commands (/)"
+            data-testid="strip-prompt-menu-button"
+          />
+          <Button
+            appearance="subtle"
+            icon={<AttachRegular />}
+            onClick={handleAttachButtonClick}
+            disabled={isStreaming || attachmentFiles.length >= 5}
+            aria-label="Attach files"
+            title="Attach files (text, markdown, PDF, DOCX)"
+            data-testid="strip-attach-button"
+          />
+        </div>
+
+        {/* Region 3: input box. `hideSlashButton` removes the in-input [/]
+            button to avoid duplicating the strip-mounted Prompt button. */}
+        <SprkChatInput
+          ref={inputHandleRef}
+          onSend={handleSend}
+          disabled={isStreaming}
+          maxCharCount={maxCharCount}
+          dynamicSlashCommands={dynamicSlashCommands}
+          hideSlashButton
         />
       </div>
 
-      {/* Input area */}
-      {/*
-        FR-06: Input is editable on cold load (before session exists). The
-        session is created on mount via useChatSession.createSession() and
-        handleSend internally guards `!session` — typing is allowed during the
-        mount-time creation window, and the send action waits for the session
-        to be ready. Only `isStreaming` disables the input to preserve the
-        active-streaming UX invariant.
-      */}
-      <SprkChatInput
-        onSend={handleSend}
-        disabled={isStreaming}
-        maxCharCount={maxCharCount}
-        dynamicSlashCommands={dynamicSlashCommands}
+      {/* FR-07 + FR-09 (task 025): hidden multi-select file picker.
+          Triggered programmatically by the strip-mounted + Attach button. MIME
+          accept list mirrors the hook's ALLOWED_MIME_TYPES so the OS picker
+          itself filters out unsupported types. */}
+      <input
+        ref={attachmentInputRef}
+        type="file"
+        multiple
+        accept="text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        style={{ display: 'none' }}
+        onChange={handleAttachInputChange}
+        aria-hidden="true"
+        tabIndex={-1}
+        data-testid="attachment-file-input"
       />
 
       {/* Task R2-039: HITL Action Confirmation Dialog — shown when an action requires user confirmation */}

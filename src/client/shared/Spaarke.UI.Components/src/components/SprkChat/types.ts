@@ -545,6 +545,28 @@ export interface ISprkChatInputProps {
    * When omitted, only DEFAULT_SLASH_COMMANDS are shown in the menu.
    */
   dynamicSlashCommands?: import('../SlashCommandMenu/slashCommandMenu.types').SlashCommand[];
+  /**
+   * FR-09 (task 025): When true, hide the in-input `[/]` slash-command button.
+   * Consumers (SprkChat) that render their own prompt-menu button in a toolbar
+   * strip above the input use this to avoid duplicating the affordance.
+   * The slash menu is still reachable by typing `/`, or by invoking
+   * `triggerSlashMode()` via the imperative handle.
+   */
+  hideSlashButton?: boolean;
+}
+
+/**
+ * Imperative handle exposed by SprkChatInput (FR-09, task 025).
+ *
+ * Allows a parent that owns the toolbar strip (SprkChat) to open the slash
+ * command menu from an external button without re-implementing the wiring.
+ */
+export interface ISprkChatInputHandle {
+  /**
+   * Open the slash command menu by writing `/` into the textarea, notifying
+   * the slash hook, and focusing the input.
+   */
+  triggerSlashMode: () => void;
 }
 
 /** Props for SprkChatContextSelector sub-component. */

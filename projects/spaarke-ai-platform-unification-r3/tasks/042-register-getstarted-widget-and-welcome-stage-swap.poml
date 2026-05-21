@@ -3,7 +3,7 @@
   <metadata>
     <title>Register GetStartedCardsWidget + welcome-stage swap + wire widget_load events (FR-18, FR-19, FR-21)</title>
     <phase>Phase D — Context pane</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>040, 041</dependencies>
     <blocks></blocks>
