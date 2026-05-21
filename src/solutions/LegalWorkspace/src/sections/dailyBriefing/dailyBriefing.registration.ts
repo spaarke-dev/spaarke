@@ -1,26 +1,20 @@
 /**
- * dailyBriefing.registration.ts — SectionRegistration for the Daily Briefing section.
+ * dailyBriefing.registration.ts — LegalWorkspace re-export shim.
  *
- * Adds the AI-curated Daily Briefing as a selectable section in the Workspace
- * Layout Wizard's Step 2 (Section Selection) and renders inside the WorkspaceShell
- * via WorkspaceGrid's dynamic config builder.
+ * Hoisted to `@spaarke/ui-components` in task 069 as a FACTORY
+ * (`createDailyBriefingRegistration`). This shim preserves the pre-069
+ * STATIC export shape `dailyBriefingRegistration: SectionRegistration` so
+ * `sectionRegistry.ts` and `sections/index.ts` continue working unchanged.
  *
- * Implements FR-15. Available in both standalone LegalWorkspace AND the SpaarkeAi
- * WorkspacePane embed (FR-25) — because this is a LegalWorkspace section, both
- * consumers pick it up via the shared `SECTION_REGISTRY`.
+ * The shim uses the LegalWorkspace-LOCAL `DailyBriefingSection` shim
+ * (which already closes over local `authenticatedFetch` + `trackEvent`),
+ * so no auth deps are passed to the factory pattern — the local component
+ * wrapper handles all wiring identically to the pre-069 implementation.
+ * This preserves FR-25 / NFR-10 (standalone byte-identical render).
  *
- * Constraints:
- *   - ADR-012: Section lives with LegalWorkspace sections (coupled to the
- *     LegalWorkspace section-registration contract).
- *   - ADR-013: Data is consumed via the existing BFF `/api/ai/daily-briefing/narrate`
- *     endpoint inside `useDailyBriefing` — no new BFF service.
- *   - ADR-014 / ADR-016 / ADR-028: TTL cache + rate-limit-aware error shape + auth
- *     are all encapsulated inside `useDailyBriefing`.
- *   - ADR-021: All styling via Fluent v9 tokens inside DailyBriefingSection.
- *   - ADR-025: Icon (`SparkleRegular`) sourced from `@fluentui/react-icons` v9.
- *
- * Default height: "medium" per FR-15 → mapped to "325px" to match sibling AI
- * "Latest Updates" content sections (visually consistent medium pane).
+ * See task 067/069 hoist precedent and:
+ *   - `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/dailyBriefing.registration.ts`
+ *   - ADR-012 (shared components).
  */
 
 import * as React from "react";
@@ -32,15 +26,13 @@ import type {
 } from "@spaarke/ui-components";
 import { DailyBriefingSection } from "./DailyBriefingSection";
 
-// ---------------------------------------------------------------------------
-// Registration
-// ---------------------------------------------------------------------------
-
 /**
- * Daily Briefing section registration.
+ * Daily Briefing section registration (LegalWorkspace shim).
  *
- * The factory is intentionally minimal — the section component owns its data
- * fetching (via `useDailyBriefing`) and renders without parent-scoped wiring.
+ * Mirrors the pre-069 static const shape exactly. The factory delegates
+ * rendering to the local `DailyBriefingSection` shim, which closes over
+ * LegalWorkspace-local `authenticatedFetch` + tenant ID resolver + local
+ * `trackEvent` telemetry — preserving the standalone behavior byte-for-byte.
  */
 export const dailyBriefingRegistration: SectionRegistration = {
   id: "daily-briefing",

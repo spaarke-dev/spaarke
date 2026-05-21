@@ -84,3 +84,25 @@ export {
   useSectionContentPaddingStyles,
   useToolbarDividerStyles,
 } from "./WorkspaceShell.styles";
+
+// Daily Briefing section (hoisted in task 069 from LegalWorkspace).
+// The hook + section component are context-agnostic — consumers supply
+// `authenticatedFetch` and optionally `tenantId` / `onRateLimitError`.
+// The registration is a FACTORY (not a static const) because consumer-supplied
+// auth deps must close over the factory call; see comments in
+// `dailyBriefing.registration.ts` for rationale.
+export { useDailyBriefing } from "./sections/dailyBriefing/useDailyBriefing";
+export type {
+  DailyBriefingState,
+  DailyBriefingError,
+  UseDailyBriefingOptions,
+} from "./sections/dailyBriefing/useDailyBriefing";
+
+export {
+  DailyBriefingSection,
+  TELEMETRY_EVENT_DAILY_BRIEFING_429,
+} from "./sections/dailyBriefing/DailyBriefingSection";
+export type { DailyBriefingSectionProps } from "./sections/dailyBriefing/DailyBriefingSection";
+
+export { createDailyBriefingRegistration } from "./sections/dailyBriefing/dailyBriefing.registration";
+export type { CreateDailyBriefingRegistrationOptions } from "./sections/dailyBriefing/dailyBriefing.registration";

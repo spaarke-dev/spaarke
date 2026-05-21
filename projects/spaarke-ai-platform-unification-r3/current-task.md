@@ -11,9 +11,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | none (between tasks) |
-| **Step** | Task 067 ✅ complete — Workspace section infrastructure hoist landed |
+| **Step** | Task 069 ✅ complete — Daily Briefing hoisted to shared lib; SpaarkeAi Home tab renders Daily Briefing as default content |
 | **Status** | between tasks |
-| **Next Action** | Operator-driven: continue Phase G smoke (072 — workspace pane), OR address Bug 1 (Assistant pane, deferred), OR proceed to wrap-up (090). |
+| **Next Action** | Operator-driven: continue Phase G smoke (071-074) validation, OR proceed to wrap-up (090). Bug 2 visual fix landed for default case; standalone LegalWorkspace preserved (FR-25/NFR-10). |
 
 ### Critical Context
 

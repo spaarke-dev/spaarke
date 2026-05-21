@@ -61,6 +61,7 @@
 | 066 | Redeploy WorkspaceLayoutWizard + update Deploy-WizardCodePages.ps1 (Bug 3 fix from smoke) | F (Verification — remediation) | ✅ | 032, 033, 070 | 072 | — (serial) | STANDARD | 0.5 |
 | 067 | Hoist workspace section registry to @spaarke/ui-components (Bug 2 fix + ADR-012 compliance) | F (Verification — remediation) | ✅ | 030, 034, 070 | 072 | — (serial) | FULL | 12 |
 | 068 | Smoke remediation: Bug 1 (chat box) + UX-A (Recent Conversations) + UX-B (all wizards as popups) | F (Verification — remediation) | ✅ | 020, 021, 023, 025, 042, 067, 070 | 071, 072, 073 | — (serial) | FULL | 2.5 |
+| 069 | Daily Briefing as SpaarkeAi Home tab default content (Option Z minimum scope; Bug 2 visual fix) | F (Verification — remediation) | ✅ | 034, 067, 068, 070 | 072 | — (serial) | FULL | 5 |
 | 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | ✅ | 060-063, **065** | 071-074 | — | FULL | 1 |
 | 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
 | 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |

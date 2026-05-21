@@ -1,26 +1,37 @@
 /**
  * WorkspaceHomeTab.tsx — Home tab content for the SpaarkeAi WorkspacePane.
  *
- * Fetches the user's default workspace layout from
- * `GET /api/workspace/layouts/default` (per-request auth via `authenticatedFetch`
- * from `@spaarke/auth` — ADR-028) and renders it via the shared `WorkspaceShell`
- * component (ADR-012) using the canonical `buildDynamicWorkspaceConfig` hoisted in
- * task 067.
+ * Task 069 (Option Z minimum scope, Bug 2 visual fix): SpaarkeAi's Workspace
+ * Home tab now defaults to the **Daily Briefing** section. The shared
+ * `createDailyBriefingRegistration` factory + `WorkspaceShell` + canonical
+ * `buildDynamicWorkspaceConfig` are consumed from `@spaarke/ui-components`.
  *
- * Section content rendering strategy (task 067):
- *   - SpaarkeAi consumes the canonical builder from `@spaarke/ui-components`.
- *   - A LOCAL placeholder registry supplies one registration per known section ID
- *     (get-started, quick-summary, latest-updates, todo, documents, daily-briefing,
- *     matters, projects). Each placeholder renders a labelled message describing
- *     the section. This preserves the structural integrity of the user's layout
- *     while keeping legal-domain components (QuickSummaryRow, ActivityFeed,
- *     SmartToDo, DocumentsTab, DailyBriefingSection) inside LegalWorkspace per
- *     ADR-012 ("MUST NOT hard-code Dataverse entity names ... in shared lib").
- *   - See `projects/spaarke-ai-platform-unification-r3/notes/drafts/067-factory-inventory.md`
- *     for the architectural decision.
+ * Why Daily Briefing as the default Home content?
+ *   - Operator 2026-05-20 direction (Option Z): SpaarkeAi has a DIFFERENT
+ *     workspace surface than LegalWorkspace. After clarification, the minimum
+ *     scope is: SpaarkeAi's Home tab defaults to Daily Briefing. Future Home
+ *     content expansion (additional sections, AI session list, etc.) is
+ *     deferred to follow-on review.
+ *   - Daily Briefing is the LEAST domain-coupled of the LegalWorkspace
+ *     section catalogue — it calls a shared BFF AI endpoint
+ *     (`/api/ai/daily-briefing/narrate`) and is safe to consume from
+ *     `@spaarke/ui-components` per ADR-012 (no Dataverse strings).
+ *   - The other 5 legal-domain factories (getStarted, quickSummary,
+ *     latestUpdates, todo, documents) remain solution-local per ADR-012.
+ *
+ * Auth (ADR-028):
+ *   - `authenticatedFetch` + `bffBaseUrl` are obtained from `useAiSession()`
+ *     (never snapshotted as props or token strings).
+ *   - `tenantId` is read from the runtime config (used to scope the daily
+ *     briefing TTL cache per ADR-014).
+ *
+ * Telemetry:
+ *   - 429 failures route through `logTelemetryError(TELEMETRY_DAILY_BRIEFING_429, ...)`
+ *     (SpaarkeAi-side helper from task 013).
  *
  * Standards:
- *   - ADR-012: WorkspaceShell + builder consumed from `@spaarke/ui-components` barrel
+ *   - ADR-012: WorkspaceShell + builder + Daily Briefing consumed from
+ *     `@spaarke/ui-components` barrel
  *   - ADR-021: Fluent v9 tokens only (no hex / rgba)
  *   - ADR-022: React 19 functional component
  *   - ADR-028: All BFF calls via `authenticatedFetch`; no `accessToken` snapshots
@@ -30,143 +41,24 @@ import * as React from "react";
 import {
   makeStyles,
   tokens,
-  Spinner,
-  Text,
-  MessageBar,
-  MessageBarBody,
-  MessageBarTitle,
 } from "@fluentui/react-components";
-import {
-  RocketRegular,
-  DataBarVerticalRegular,
-  ClockRegular,
-  CheckmarkCircleRegular,
-  DocumentRegular,
-  SparkleRegular,
-  BriefcaseRegular,
-  FolderRegular,
-} from "@fluentui/react-icons";
-import { authenticatedFetch, buildBffApiUrl } from "@spaarke/auth";
 import {
   WorkspaceShell,
   buildDynamicWorkspaceConfig,
-  SYSTEM_DEFAULT_LAYOUT_JSON,
+  createDailyBriefingRegistration,
 } from "@spaarke/ui-components";
 import type {
   WorkspaceConfig,
   SectionRegistration,
   SectionFactoryContext,
-  ContentSectionConfig,
   LayoutJson,
 } from "@spaarke/ui-components";
-import { getBffBaseUrl } from "../../config/runtimeConfig";
-
-// ---------------------------------------------------------------------------
-// BFF DTO shape (mirror LegalWorkspace conventions)
-// ---------------------------------------------------------------------------
-
-/** Client-side mirror of the BFF `WorkspaceLayoutDto` shape. */
-interface WorkspaceLayoutDto {
-  id: string;
-  name: string;
-  layoutTemplateId: string;
-  /** Stringified `LayoutJson`. */
-  sectionsJson: string;
-  isDefault: boolean;
-  sortOrder: number | null;
-  isSystem: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Section id → friendly label + icon map (foundational placeholders).
-//
-// These match the standalone LegalWorkspace section identities so the
-// rendered structure is consistent across both surfaces. Section content
-// bodies are placeholders — the legal-domain section components remain
-// in LegalWorkspace (see notes/drafts/067-factory-inventory.md).
-// ---------------------------------------------------------------------------
-
-interface IPlaceholderSectionMeta {
-  label: string;
-  description: string;
-  icon: SectionRegistration["icon"];
-  defaultHeight: string;
-  category: SectionRegistration["category"];
-}
-
-const PLACEHOLDER_SECTION_META: Record<string, IPlaceholderSectionMeta> = {
-  "get-started": {
-    label: "Get Started",
-    description: "Quick-action cards for common workflows",
-    icon: RocketRegular,
-    defaultHeight: "200px",
-    category: "overview",
-  },
-  "quick-summary": {
-    label: "Quick Summary",
-    description: "Key metrics at a glance",
-    icon: DataBarVerticalRegular,
-    defaultHeight: "180px",
-    category: "overview",
-  },
-  "latest-updates": {
-    label: "Latest Updates",
-    description: "Recent activity feed with flagging",
-    icon: ClockRegular,
-    defaultHeight: "325px",
-    category: "data",
-  },
-  todo: {
-    label: "My To Do List",
-    description: "Embedded smart to-do list",
-    icon: CheckmarkCircleRegular,
-    defaultHeight: "560px",
-    category: "productivity",
-  },
-  documents: {
-    label: "My Documents",
-    description: "Recent documents with quick actions",
-    icon: DocumentRegular,
-    defaultHeight: "560px",
-    category: "data",
-  },
-  "daily-briefing": {
-    label: "Daily Briefing",
-    description: "AI-curated highlights from your day",
-    icon: SparkleRegular,
-    defaultHeight: "325px",
-    category: "ai",
-  },
-  matters: {
-    label: "My Matters",
-    description: "Active legal matters",
-    icon: BriefcaseRegular,
-    defaultHeight: "325px",
-    category: "data",
-  },
-  projects: {
-    label: "My Projects",
-    description: "Active projects",
-    icon: FolderRegular,
-    defaultHeight: "325px",
-    category: "data",
-  },
-};
-
-/** Build a placeholder SectionRegistration for an unrecognised section ID. */
-function buildFallbackMeta(id: string): IPlaceholderSectionMeta {
-  const label = id
-    .split("-")
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join(" ");
-  return {
-    label,
-    description: `Section "${label}"`,
-    icon: DocumentRegular,
-    defaultHeight: "200px",
-    category: "data",
-  };
-}
+import { useAiSession } from "@spaarke/ai-widgets";
+import { getTenantId } from "../../config/runtimeConfig";
+import {
+  logTelemetryError,
+  TELEMETRY_DAILY_BRIEFING_429,
+} from "../../telemetry/errorTelemetry";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -182,99 +74,33 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
   },
-  loading: {
-    flex: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    padding: tokens.spacingVerticalXXL,
-  },
-  errorBar: {
-    marginBottom: tokens.spacingVerticalM,
-  },
-  placeholderBody: {
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    color: tokens.colorNeutralForeground3,
-  },
 });
 
 // ---------------------------------------------------------------------------
-// Layout JSON parsing
+// Default layout — single row, single Daily Briefing section
+//
+// Minimum-scope Home tab (task 069): one row with the Daily Briefing section.
+// Future expansions (multi-section Home, recent AI sessions, etc.) will
+// extend this layout.
 // ---------------------------------------------------------------------------
 
-function parseLayoutJson(sectionsJson: string): LayoutJson {
-  try {
-    const parsed = JSON.parse(sectionsJson) as LayoutJson;
-    if (parsed && typeof parsed.schemaVersion === "number" && Array.isArray(parsed.rows)) {
-      return parsed;
-    }
-  } catch (err) {
-    console.warn("[WorkspaceHomeTab] Failed to parse sectionsJson:", err);
-  }
-  return SYSTEM_DEFAULT_LAYOUT_JSON;
-}
-
-// ---------------------------------------------------------------------------
-// Build a placeholder registry covering every section ID referenced in the
-// layout JSON. Each registration produces a ContentSectionConfig whose body
-// is a labelled placeholder paragraph (matching the pre-067 visual contract).
-// ---------------------------------------------------------------------------
-
-function buildPlaceholderRegistry(
-  layoutJson: LayoutJson,
-  paddedClassName: string,
-): SectionRegistration[] {
-  const seenIds = new Set<string>();
-  const registry: SectionRegistration[] = [];
-
-  for (const row of layoutJson.rows) {
-    for (const sectionId of row.sections) {
-      if (seenIds.has(sectionId)) continue;
-      seenIds.add(sectionId);
-
-      const meta = PLACEHOLDER_SECTION_META[sectionId] ?? buildFallbackMeta(sectionId);
-
-      const registration: SectionRegistration = {
-        id: sectionId,
-        label: meta.label,
-        description: meta.description,
-        icon: meta.icon,
-        category: meta.category,
-        defaultHeight: meta.defaultHeight,
-        factory: (_ctx: SectionFactoryContext): ContentSectionConfig => ({
-          id: sectionId,
-          type: "content",
-          title: meta.label,
-          style: {},
-          renderContent: () => (
-            <div className={paddedClassName} data-testid={`home-section-${sectionId}`}>
-              <Text size={200}>
-                Section content for &ldquo;{meta.label}&rdquo; will render here.
-              </Text>
-            </div>
-          ),
-        }),
-      };
-
-      registry.push(registration);
-    }
-  }
-
-  return registry;
-}
+const HOME_LAYOUT_JSON: LayoutJson = {
+  schemaVersion: 1,
+  rows: [
+    {
+      sections: ["daily-briefing"],
+    },
+  ],
+};
 
 // ---------------------------------------------------------------------------
 // Build a SectionFactoryContext for SpaarkeAi.
 //
-// SpaarkeAi does not currently expose Xrm.WebApi / DataverseService to the
-// workspace embed; the placeholder factories never call into context.webApi
-// or context.service, so we supply safe no-op stubs. If a future task hoists
-// legal-domain section components into shared lib, this context will need to
-// be enriched with real platform handles.
+// Daily Briefing doesn't use webApi / service / onNavigate / onOpenWizard /
+// onBadgeCountChange / onRefetchReady — it self-contains its data layer via
+// the supplied `authenticatedFetch`. We supply no-op stubs for the unused
+// fields so the SectionFactoryContext contract is satisfied without forcing
+// SpaarkeAi to provide Dataverse handles it doesn't have.
 // ---------------------------------------------------------------------------
 
 function buildSpaarkeAiContext(bffBaseUrl: string): SectionFactoryContext {
@@ -284,16 +110,16 @@ function buildSpaarkeAiContext(bffBaseUrl: string): SectionFactoryContext {
     service: undefined as unknown,
     bffBaseUrl,
     onNavigate: () => {
-      /* SpaarkeAi navigation handled by host shell; placeholders never navigate */
+      /* SpaarkeAi Home tab does not navigate from Daily Briefing */
     },
     onOpenWizard: () => {
-      /* Placeholders never open wizards */
+      /* Daily Briefing never opens wizards */
     },
     onBadgeCountChange: () => {
-      /* Placeholders never report counts */
+      /* Daily Briefing does not report badge counts */
     },
     onRefetchReady: () => {
-      /* Placeholders are static */
+      /* Daily Briefing's refetch is owned internally by the section */
     },
     onExpandSection: undefined,
     onOpenDocumentsDialog: undefined,
@@ -309,122 +135,70 @@ function buildSpaarkeAiContext(bffBaseUrl: string): SectionFactoryContext {
 /**
  * WorkspaceHomeTab — content for the WorkspacePane Home tab.
  *
- * Fetches the user's default workspace layout from the BFF and renders it
- * via the shared `WorkspaceShell` using the canonical `buildDynamicWorkspaceConfig`.
- * Falls back to the system-default layout (matching the standalone LegalWorkspace)
- * when the BFF is unreachable.
+ * Renders the Daily Briefing section as the default Home content per Option Z
+ * (task 069). Uses the canonical `buildDynamicWorkspaceConfig` + `WorkspaceShell`
+ * from `@spaarke/ui-components` so future Home-content expansion is purely a
+ * matter of extending `HOME_LAYOUT_JSON` and registering more sections.
  *
- * Per ADR-028 the layout fetch is performed via `authenticatedFetch` from
- * `@spaarke/auth`; no `accessToken` is propagated as a prop or held in state.
+ * Auth is per-request via `useAiSession().authenticatedFetch` (ADR-028).
+ * 429 failures route through `logTelemetryError` (FR-24 error-only telemetry).
  */
 export const WorkspaceHomeTab: React.FC = () => {
   const styles = useStyles();
 
-  const [layoutJson, setLayoutJson] = React.useState<LayoutJson | null>(null);
-  const [bffBaseUrl, setBffBaseUrl] = React.useState<string>("");
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const { bffBaseUrl, authenticatedFetch, isAuthenticated } = useAiSession();
 
-  // -------------------------------------------------------------------------
-  // Fetch default layout via authenticatedFetch (ADR-028)
-  // -------------------------------------------------------------------------
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      setIsLoading(true);
-      setErrorMessage(null);
-
-      let resolvedBffBaseUrl: string;
-      try {
-        resolvedBffBaseUrl = getBffBaseUrl();
-      } catch {
-        // Runtime config not initialized — render fallback layout silently.
-        if (!cancelled) {
-          setLayoutJson(SYSTEM_DEFAULT_LAYOUT_JSON);
-          setBffBaseUrl("");
-          setIsLoading(false);
-        }
-        return;
-      }
-
-      try {
-        const url = buildBffApiUrl(resolvedBffBaseUrl, "/workspace/layouts/default");
-        const response = await authenticatedFetch(url);
-
-        if (cancelled) return;
-
-        if (!response.ok) {
-          // Non-OK response: fall back to system default. We do not surface
-          // an error UI here because the fallback is visually equivalent and
-          // task 035 / FR-24 owns the error-telemetry path.
-          console.warn(
-            `[WorkspaceHomeTab] Default layout fetch returned ${response.status}; using fallback layout`,
-          );
-          setLayoutJson(SYSTEM_DEFAULT_LAYOUT_JSON);
-          setBffBaseUrl(resolvedBffBaseUrl);
-          setIsLoading(false);
-          return;
-        }
-
-        const dto = (await response.json()) as WorkspaceLayoutDto;
-        if (cancelled) return;
-
-        setLayoutJson(parseLayoutJson(dto.sectionsJson));
-        setBffBaseUrl(resolvedBffBaseUrl);
-        setIsLoading(false);
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : "Unknown error";
-        console.warn("[WorkspaceHomeTab] Layout fetch failed, using fallback:", message);
-        setErrorMessage(message);
-        setLayoutJson(SYSTEM_DEFAULT_LAYOUT_JSON);
-        setBffBaseUrl(resolvedBffBaseUrl);
-        setIsLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+  // Resolve tenant ID for cache scoping (ADR-014). Read from runtime config —
+  // it's a synchronous getter that's already wired during app startup.
+  const tenantId = React.useMemo<string | undefined>(() => {
+    try {
+      return getTenantId();
+    } catch {
+      // Runtime config not initialized — fall back to anonymous cache key.
+      return undefined;
+    }
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Loading state
-  // -------------------------------------------------------------------------
-
-  if (isLoading || layoutJson === null) {
-    return (
-      <div className={styles.loading} data-testid="home-tab-loading">
-        <Spinner size="medium" label="Loading workspace..." />
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Build placeholder registry, factory context, and the WorkspaceConfig via
-  // the canonical builder (hoisted in task 067).
-  // -------------------------------------------------------------------------
-
-  const placeholderRegistry = buildPlaceholderRegistry(layoutJson, styles.placeholderBody);
-  const factoryContext = buildSpaarkeAiContext(bffBaseUrl);
-  const config: WorkspaceConfig = buildDynamicWorkspaceConfig(
-    layoutJson,
-    placeholderRegistry,
-    factoryContext,
+  // 429 telemetry callback — routes through SpaarkeAi's error-only helper.
+  const handleRateLimitError = React.useCallback(
+    (properties: Record<string, unknown>) => {
+      logTelemetryError(TELEMETRY_DAILY_BRIEFING_429, properties);
+    },
+    [],
   );
+
+  // Build the Daily Briefing registration via the shared factory, closing
+  // over auth deps + telemetry routing. Stable across renders (deps
+  // shouldn't change after initial auth).
+  const dailyBriefingRegistration = React.useMemo<SectionRegistration>(
+    () =>
+      createDailyBriefingRegistration({
+        authenticatedFetch,
+        tenantId,
+        onRateLimitError: handleRateLimitError,
+      }),
+    [authenticatedFetch, tenantId, handleRateLimitError],
+  );
+
+  // Build the WorkspaceConfig via the canonical builder.
+  const config = React.useMemo<WorkspaceConfig>(() => {
+    const factoryContext = buildSpaarkeAiContext(bffBaseUrl);
+    return buildDynamicWorkspaceConfig(
+      HOME_LAYOUT_JSON,
+      [dailyBriefingRegistration],
+      factoryContext,
+    );
+  }, [bffBaseUrl, dailyBriefingRegistration]);
+
+  // Don't render the section until auth is ready — the Daily Briefing fetch
+  // would fail with no token, surfacing a confusing error state instead of
+  // a smooth first-paint experience.
+  if (!isAuthenticated) {
+    return <div className={styles.root} data-testid="home-tab-root" />;
+  }
 
   return (
     <div className={styles.root} data-testid="home-tab-root">
-      {errorMessage ? (
-        <MessageBar intent="warning" className={styles.errorBar}>
-          <MessageBarBody>
-            <MessageBarTitle>Couldn&rsquo;t load your workspace</MessageBarTitle>
-            Showing the default layout. {errorMessage}
-          </MessageBarBody>
-        </MessageBar>
-      ) : null}
       <WorkspaceShell config={config} />
     </div>
   );

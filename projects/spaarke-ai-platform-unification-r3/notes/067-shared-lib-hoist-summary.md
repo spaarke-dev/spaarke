@@ -172,4 +172,22 @@ SpaarkeAi's section *bodies* are still placeholders.
 
 ---
 
+## 2026-05-21 amendment — Task 069 revisits Option L for Daily Briefing
+
+Task 067 placed Daily Briefing under "solution-local — STAYS in LegalWorkspace" (per the factory inventory) citing ADR-013 placement governance. On review (operator 2026-05-20 / Option Z minimum scope direction), that rationale was reconsidered:
+
+- **ADR-013 governs SERVER-side BFF placement** (where AI services live in the backend), NOT frontend consumers sharing an existing AI BFF endpoint. Multiple Code Pages calling `/api/ai/daily-briefing/narrate` via a shared frontend component is not an ADR-013 concern.
+- **ADR-012's binding rule** is "MUST NOT hard-code Dataverse entity names or schemas as string literals". Daily Briefing's hook + section call only the shared BFF AI endpoint — no `sprk_event` / `sprk_document` / `sprk_todo` references. It is safe to hoist under ADR-012.
+- **Architectural design for the hoist**: shared `useDailyBriefing` + `DailyBriefingSection` accept `authenticatedFetch` (function-based contract per ADR-028) as parameters; `dailyBriefing.registration.ts` becomes a FACTORY (`createDailyBriefingRegistration({ authenticatedFetch, tenantId, onRateLimitError? })`) so consumers close over their own auth deps. LegalWorkspace shim path preserves FR-25 / NFR-10 byte-identically.
+
+The other 5 legal-domain factories (getStarted, quickSummary, latestUpdates, todo, documents) CORRECTLY stay solution-local — they each have Dataverse entity string dependencies that ADR-012 explicitly forbids in shared lib.
+
+After task 069 deploys, SpaarkeAi's Home tab shows the Daily Briefing section as its default content (single-row layout). LegalWorkspace continues to consume Daily Briefing via the local shim, alongside its 5 legal-domain sections. Bundle delta: -0.81 KB gzip LegalWorkspace, -0.52 KB gzip SpaarkeAi.
+
+See:
+- [`tasks/069-daily-briefing-in-spaarkeai-home-tab.poml`](../tasks/069-daily-briefing-in-spaarkeai-home-tab.poml)
+- [`notes/deploys/2026-05-20-deploy.md`](deploys/2026-05-20-deploy.md) — Task 069 supplemental deploy section
+
+---
+
 *End of architectural summary.*
