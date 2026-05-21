@@ -1,135 +1,239 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="070" project="spaarke-ai-platform-unification-r3">
   <metadata>
-    <title>Deploy SpaarkeAi production bundle + smoke-verify deployment</title>
+    <title>Deploy BFF API + SpaarkeAi Code Page to dev environment (end-to-end deploy)</title>
     <phase>Phase G — Deploy + Smoke</phase>
     <status>not-started</status>
-    <estimated-hours>1</estimated-hours>
-    <dependencies>060, 061, 062, 063</dependencies>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>060, 061, 062, 063, 065</dependencies>
     <blocks>071, 072, 073, 074</blocks>
-    <tags>deploy, dataverse, frontend</tags>
+    <tags>deploy, dataverse, azure, bff-api, frontend</tags>
     <rigor-hint>FULL</rigor-hint>
-    <rigor-reason>Production deployment — modifies the deployed environment. Per task-execute decision tree, deployment-related tasks run at FULL rigor with the deployment skill orchestrating safety checks. Touches `dataverse-deploy` / `code-page-deploy` skill boundaries.</rigor-reason>
+    <rigor-reason>Production-style deployment touching shared infrastructure (Azure App Service + Dataverse). Requires real cloud credentials. Per task-execute decision tree, deployment-related tasks run at FULL rigor with deployment-skill safety checks.</rigor-reason>
     <parallel-group>G-deploy</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Single deployment event — must complete before smoke tests can run.</parallel-reason>
+    <parallel-reason>Single deployment sequence — BFF must land first (frontend's PATCH /tabs + attachments[] endpoints depend on it); SpaarkeAi follows; verification gates the smoke wave.</parallel-reason>
   </metadata>
 
   <prompt>
-    Deploy the SpaarkeAi production bundle to the target Dataverse environment using
-    `scripts/Build-ViteSolutionsDirect.ps1` (for build) + `scripts/Deploy-SpaarkeAi.ps1`
-    (for solution import). Verify the deployment with `scripts/Test-Deployment.ps1`. Record
-    deployment result, environment, commit SHA, and timestamp in
-    `projects/spaarke-ai-platform-unification-r3/notes/deploys/{date}-deploy.md`. This task
-    is the gate for Phase G smoke testing — no smoke test runs until this task PASSES.
+    Deploy the R3 changes end-to-end to the dev environment in two stages:
+    (1) BFF API to Azure App Service via `scripts/Deploy-BffApi.ps1` so the new
+    attachments[] endpoint (task 050) + tabs[] endpoint (task 065) are reachable;
+    (2) SpaarkeAi Code Page web resource to Dataverse via `scripts/Deploy-SpaarkeAi.ps1`
+    so the frontend changes can exercise the new BFF endpoints end-to-end.
+    Verify each deployment with its respective health check. Record the deployment
+    in `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md`.
+    This task is the gate for Phase G smoke testing — no smoke test runs until BOTH
+    deploys PASS.
   </prompt>
 
   <role>
-    Spaarke deployment operator comfortable with the canonical Code Page deploy scripts
-    (`scripts/Build-ViteSolutionsDirect.ps1`, `scripts/Deploy-SpaarkeAi.ps1`,
-    `scripts/Test-Deployment.ps1`) and the `code-page-deploy` skill. Familiar with Power
-    Apps environment selection and PAC CLI authentication.
+    Spaarke deployment operator comfortable with the canonical deploy scripts
+    (`scripts/Deploy-BffApi.ps1` for Azure App Service, `scripts/Build-ViteSolutionsDirect.ps1`
+    + `scripts/Deploy-SpaarkeAi.ps1` for the Code Page) and the `code-page-deploy` skill.
+    Familiar with `az` CLI / PAC CLI authentication. Comfortable reading health-check output
+    and rolling back via swap-back if BFF deploy fails post-swap.
   </role>
 
   <goal>
-    SpaarkeAi is built (production mode) and deployed to the target Dataverse environment.
-    `scripts/Test-Deployment.ps1` reports the deployment as healthy. A deploy memo records
-    environment name, target URL, commit SHA, build artifact hash (if available), and
-    timestamp. Smoke tasks 071-074 can now run against the deployed surface.
+    Both R3 surfaces are deployed to the dev environment and verified healthy:
+    (1) BFF API at `https://spe-api-dev-67e2xz.azurewebsites.net` (default — confirm via script)
+    responds OK to `/healthz` and the new `/api/ai/chat/sessions/{id}/tabs` + extended
+    `/api/ai/chat/sessions/{id}/messages` (with attachments[]) endpoints respond per ADR-008
+    filters. (2) SpaarkeAi web resource `sprk_spaarkeai` is loaded into Dataverse at
+    `https://spaarkedev1.crm.dynamics.com` (default — confirm via script) and renders.
+    A deploy memo records environment names, target URLs, commit SHA, build/deploy output,
+    and health-check evidence. Phase G smoke tasks 071-074 can now run.
   </goal>
 
   <context>
     <background>
-      All Phase F verification gates have passed (auth audit CLEAN, bundle size PASS,
-      dark-mode audit CLEAN, backwards-compat PASS). This task ships the validated build to
-      the target environment so the Phase G smoke battery (071-074) can verify it. The
-      project uses Code Page deployment (NOT PCF) — `code-page-deploy` skill, not
-      `pcf-deploy`.
+      R3 made coordinated frontend + backend changes:
+      - Frontend (SpaarkeAi Code Page): PaneHeader, HistoryOverlay, SprkChat toolbar +
+        useChatFileAttachment, WorkspacePane LegalWorkspace embed, WorkspacePaneMenu,
+        Daily Briefing section consumer, GetStartedCardsWidget, wizard dispatchers,
+        AssignWork launcher, write-through to /tabs.
+      - Backend (Sprk.Bff.Api): ChatEndpoints extended with `attachments[]` on POST
+        messages (task 050) and new PATCH/GET `/sessions/{id}/tabs` (task 065).
+
+      Wave 5 verification gates all PASSED (auth audit CLEAN, dark-mode CLEAN, backwards-compat
+      PASS, bundle-size Option 1 accepted with NFR-12 deviation documented). Task 065 closed
+      the NFR-09 tab-persistence gap. All blocking work is on git (PR #296, latest commits
+      pushed to origin). The codebase compiles cleanly for both targets.
+
+      The two halves MUST be deployed together because the frontend will fail to use
+      attachments + tab persistence if it hits the OLD BFF (the new endpoints return 404).
+      Deploy order: BFF first (existing clients work unchanged), then SpaarkeAi (new clients
+      can use the new endpoints).
     </background>
     <relevant-files>
-      <file>scripts/Build-ViteSolutionsDirect.ps1</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
       <file>scripts/Deploy-SpaarkeAi.ps1</file>
+      <file>scripts/Build-ViteSolutionsDirect.ps1</file>
       <file>scripts/Test-Deployment.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>src/solutions/SpaarkeAi/package.json</file>
     </relevant-files>
   </context>
 
   <constraints>
-    <constraint source="project">All Phase F audits (060, 061, 062, 063) MUST be COMPLETE with PASS/CLEAN verdicts before this task runs. Verify by reading each verification memo before invoking deployment.</constraint>
-    <constraint source="project">Use the canonical scripts (`Build-ViteSolutionsDirect.ps1`, `Deploy-SpaarkeAi.ps1`, `Test-Deployment.ps1`). Do not invent ad-hoc deploy invocations.</constraint>
+    <constraint source="project">All Phase F audits (060, 061, 062, 063) MUST be COMPLETE with PASS/CLEAN verdicts. Task 065 (NFR-09 fix) MUST be COMPLETE. Verify by reading each verification memo + checking TASK-INDEX before invoking deployment.</constraint>
+    <constraint source="project">Use the canonical scripts (`Deploy-BffApi.ps1`, `Build-ViteSolutionsDirect.ps1`, `Deploy-SpaarkeAi.ps1`, `Test-Deployment.ps1`). Do not invent ad-hoc deploy invocations.</constraint>
     <constraint source="ADR-026">SpaarkeAi is a full-page Code Page (NOT PCF). Use `code-page-deploy` skill semantics, not `pcf-deploy`.</constraint>
-    <constraint source="ADR-028">No auth code or token paths are exercised by deployment scripts themselves; deployment auth uses PAC CLI / service-principal flow per environment standard.</constraint>
-    <constraint source="project">Capture deployment evidence in `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md` — date in filename, environment + commit SHA + timestamp + verification output in body.</constraint>
+    <constraint source="ADR-028">No auth code or token paths are exercised by deployment scripts themselves; deployment auth uses `az login` / PAC CLI / service principal per environment standard. Verify `az account show` succeeds before running Deploy-BffApi.ps1.</constraint>
+    <constraint source="project">Default environment is DEV. If the user has not explicitly requested a different environment, do NOT deploy to staging or production. Confirm DEV target via script defaults before running.</constraint>
+    <constraint source="project">Deploy order is REQUIRED: BFF first, then SpaarkeAi. Reason: frontend write-through to /tabs will silently fail until the BFF endpoint exists. Reverse order leaves the frontend broken between deploys.</constraint>
+    <constraint source="project">Capture deployment evidence in `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md` — date in filename, both environments + commit SHA + timestamps + health-check output in body.</constraint>
   </constraints>
 
   <knowledge>
     <files>
       <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
       <file>.claude/adr/ADR-021-fluent-design-system.md</file>
       <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
       <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
       <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
       <file>.claude/patterns/webresource/full-page-custom-page.md</file>
       <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
       <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
       <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/audit-auth-2026-05-20.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/bundle-size-verification.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/dark-mode-audit.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/backwards-compat-verification.md</file>
       <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
     </files>
   </knowledge>
 
   <steps>
-    <step order="1" name="Verify Phase F gates">
-      Read each Phase F verification memo
-      (`notes/audit-auth-{date}.md`, `notes/bundle-size-verification.md`,
-      `notes/dark-mode-audit.md`, `notes/backwards-compat-verification.md`). Confirm each
-      issues a CLEAN / PASS verdict and explicitly unblocks Phase G. If any is missing or
-      FAIL, STOP and report — do not deploy.
+    <step order="1" name="Verify Phase F + task 065 gates">
+      Read each Phase F verification memo + confirm task 065 status in TASK-INDEX:
+      - `notes/audit-auth-2026-05-20.md` — verdict: CLEAN
+      - `notes/bundle-size-verification.md` — Option 1 accepted
+      - `notes/dark-mode-audit.md` — verdict: CLEAN
+      - `notes/backwards-compat-verification.md` — verdict: PASS (with NFR-09 closed by 065)
+      - `tasks/TASK-INDEX.md` row 065 — ✅
+      If any is missing or FAIL/regressed, STOP and report — do not deploy.
     </step>
-    <step order="2" name="Confirm target environment + capture commit SHA">
-      Read the project README + recent decisions to identify the target environment. Run
-      `git rev-parse HEAD` and record the deployment commit SHA.
+    <step order="2" name="Confirm Azure + Dataverse auth + capture commit SHA">
+      - Run `az account show` — verify subscription is selected (should be the DEV
+        subscription per `Deploy-BffApi.ps1` defaults).
+      - Optionally `pac auth list` to verify Dataverse auth profile (Deploy-SpaarkeAi.ps1
+        uses `az` for Dataverse token — verify access scope works).
+      - Run `git rev-parse HEAD` and record the deployment commit SHA.
+      - Read script defaults to confirm target URLs:
+        • BFF: `spe-api-dev-67e2xz.azurewebsites.net` (in `spe-infrastructure-westus2`)
+        • Dataverse: `https://spaarkedev1.crm.dynamics.com`
     </step>
-    <step order="3" name="Build production bundle">
-      Run `scripts/Build-ViteSolutionsDirect.ps1` for SpaarkeAi. Verify build succeeds with
-      zero errors. Capture build output summary.
+    <step order="3" name="Build BFF in Release mode">
+      Confirm `dotnet build src/server/api/Sprk.Bff.Api/ --configuration Release` succeeds
+      (Deploy-BffApi.ps1 does this internally — verify or run separately to surface errors
+      early). 0 errors required.
     </step>
-    <step order="4" name="Deploy to target environment">
-      Run `scripts/Deploy-SpaarkeAi.ps1` against the target environment. Confirm the
-      deployment-confirmation prompt; capture all output (success/failure, solution name,
-      version).
+    <step order="4" name="Deploy BFF API to dev App Service">
+      Run `scripts/Deploy-BffApi.ps1` (no parameters — defaults to dev env, direct deploy,
+      no slot). Capture all output including:
+      - Build summary
+      - Zip package size
+      - Deploy result
+      - `/healthz` verification result (should be 200 OK)
+      If `/healthz` fails, STOP and report. Do NOT proceed to SpaarkeAi deploy until BFF
+      is healthy.
     </step>
-    <step order="5" name="Run Test-Deployment.ps1">
-      Run `scripts/Test-Deployment.ps1` against the target environment. Verify it reports
-      healthy. Capture output.
+    <step order="5" name="Verify new BFF endpoints respond" optional="true">
+      Optional sanity check against the deployed BFF:
+      - `GET /healthz` → 200 OK (already verified in step 4)
+      - `GET /api/ai/chat/sessions/00000000-0000-0000-0000-000000000000/tabs` → 401 (no auth)
+        or 404 (auth handled, session-not-found) — either confirms the endpoint exists.
+      - The full happy-path validation happens in Phase G smoke tasks 071-074.
+      Document the response codes captured.
     </step>
-    <step order="6" name="Record deploy memo">
+    <step order="6" name="Build SpaarkeAi production bundle">
+      Run `scripts/Build-ViteSolutionsDirect.ps1` for SpaarkeAi
+      (or `cd src/solutions/SpaarkeAi && npm run build`). Verify build succeeds with
+      zero TypeScript errors. Capture bundle gzip size (expected ~798 KB per Phase F
+      task 061; document any drift).
+    </step>
+    <step order="7" name="Deploy SpaarkeAi to Dataverse">
+      Run `scripts/Deploy-SpaarkeAi.ps1` (no parameters — defaults to spaarkedev1).
+      Capture all output:
+      - Web resource update result (sprk_spaarkeai)
+      - Solution version (if applicable)
+      - Publish customizations result
+    </step>
+    <step order="8" name="Verify SpaarkeAi deployment">
+      Run `scripts/Test-Deployment.ps1` against the target Dataverse environment.
+      Capture verification output. Verify deployment is reported as healthy.
+    </step>
+    <step order="9" name="Record deploy memo">
       Create `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md`
-      with: environment, target URL, commit SHA, build output summary, deploy output, test
-      output, timestamp. Mark this task COMPLETE only after the memo exists.
+      with sections:
+      - Header: date, commit SHA, environments (BFF + Dataverse)
+      - BFF deploy: target URL, build summary, deploy output tail, /healthz status,
+        new-endpoint sanity-check codes
+      - SpaarkeAi deploy: target URL, build bundle size (gzip), deploy output tail,
+        Test-Deployment.ps1 verdict
+      - Smoke readiness: confirm both deploys healthy + Phase G smoke 071-074 unblocked
+      Mark this task COMPLETE only after the memo exists.
+    </step>
+    <step order="10" name="Update task status + TASK-INDEX">
+      Update task 070 POML status → completed. Update TASK-INDEX row 070 → ✅.
     </step>
   </steps>
 
   <tools>
-    <tool name="Read">Phase F verification memos</tool>
-    <tool name="Bash">PowerShell to run `scripts/Build-ViteSolutionsDirect.ps1`, `scripts/Deploy-SpaarkeAi.ps1`, `scripts/Test-Deployment.ps1`, `git rev-parse HEAD`</tool>
+    <tool name="Read">Phase F + 065 verification memos; script headers</tool>
+    <tool name="Bash">PowerShell to run `az`, `pac`, `dotnet`, `scripts/Deploy-BffApi.ps1`, `scripts/Build-ViteSolutionsDirect.ps1`, `scripts/Deploy-SpaarkeAi.ps1`, `scripts/Test-Deployment.ps1`, `git rev-parse HEAD`</tool>
     <tool name="Write">Deploy memo</tool>
+    <tool name="Edit">Task POML status + TASK-INDEX row</tool>
   </tools>
 
   <outputs>
     <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md</output>
-    <output type="report">Task completion report confirming deployment success + Test-Deployment.ps1 healthy result</output>
+    <output type="report">Task completion report confirming both BFF + SpaarkeAi deployments succeeded and verified</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">All four Phase F verification memos (060, 061, 062, 063) were read and confirmed PASS/CLEAN before this task began.</criterion>
-    <criterion testable="true">`scripts/Build-ViteSolutionsDirect.ps1` succeeded for SpaarkeAi with zero errors.</criterion>
-    <criterion testable="true">`scripts/Deploy-SpaarkeAi.ps1` ran against the target environment and reported success.</criterion>
+    <criterion testable="true">All four Phase F verification memos (060, 061, 062, 063) PLUS task 065 status confirmed before deploy.</criterion>
+    <criterion testable="true">`az account show` confirmed correct subscription before BFF deploy.</criterion>
+    <criterion testable="true">BFF Release build succeeded (0 errors).</criterion>
+    <criterion testable="true">`scripts/Deploy-BffApi.ps1` ran against dev App Service and `/healthz` returned 200 OK after deploy.</criterion>
+    <criterion testable="true">New BFF endpoints respond with auth/404 codes (proving they exist), not 405/MethodNotAllowed (proving they don't).</criterion>
+    <criterion testable="true">SpaarkeAi vite build succeeded with zero errors.</criterion>
+    <criterion testable="true">`scripts/Deploy-SpaarkeAi.ps1` ran against dev Dataverse and reported success.</criterion>
     <criterion testable="true">`scripts/Test-Deployment.ps1` reports the deployment as healthy.</criterion>
-    <criterion testable="true">Deploy memo at `projects/spaarke-ai-platform-unification-r3/notes/deploys/{YYYY-MM-DD}-deploy.md` records environment, commit SHA, timestamp, and tool output.</criterion>
+    <criterion testable="true">Deploy memo records both deploys, commit SHA, timestamps, and verifies Phase G smoke is unblocked.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Why deploy ORDER is BFF-first then SpaarkeAi-second: frontend write-through to
+    PATCH /tabs (task 065) and POST messages with attachments[] (task 026 wiring) will
+    silently fail until the BFF endpoints exist. Pre-task-026 clients sending the
+    `attachments` field were silently dropped by the old BFF DTO; post-task-026 clients
+    will SEND attachments but the agent won't use them unless task 050's DTO has landed.
+    Deploying BFF first ensures both old + new client builds work correctly.
+
+    Why DEV environment: this is the project's first integration deployment. Phase G smoke
+    tasks (071-074) need a real Power Apps host to verify FR-02..FR-22 acceptance criteria
+    + NFR timings. Staging/production deploys are typically a separate decision after smoke
+    passes (and would use `Deploy-BffApi.ps1 -UseSlotDeploy` for zero-downtime).
+
+    BFF deploy can take 5-10 minutes (build + zip + upload + slot warm-up + health check).
+    SpaarkeAi deploy is faster (1-2 minutes — single web resource).
+
+    Rollback plan: if BFF deploy fails post-swap, the script auto-rolls back via swap-back
+    (RollbackOnFailure default $true). If SpaarkeAi deploy fails, the previous web resource
+    version remains in Dataverse — re-import the previous solution if needed.
+
+    Phase H wrap-up (task 090) will document this deploy in the final release notes.
+  </notes>
 
   <execution>
     This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
-    The deployment itself is orchestrated via the `code-page-deploy` skill — task-execute
-    invokes it at the appropriate step. Do not bypass either skill.
+    The deployment itself is orchestrated via the `code-page-deploy` skill (for SpaarkeAi)
+    and the standard `Deploy-BffApi.ps1` script (for BFF — no dedicated skill, the script
+    is canonical). Do not bypass either path.
   </execution>
 </task>
