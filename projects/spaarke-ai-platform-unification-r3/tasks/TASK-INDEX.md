@@ -18,7 +18,7 @@
 | Phase D (Context) | 6 (040-045) | 🔲 |
 | Phase E (Backend, conditional) | 2 (050, 051) | ✅ — Phase E COMPLETE (per spike 001 decision; memo: notes/spikes/001-fr07-attachments-payload.md) |
 | Phase F (Verification) | 5 (060-063, 065) | ✅ all 5 complete — NFR-09 fix landed in task 065 |
-| Phase G (Deploy + Smoke) | 5 (070-074) | 🔲 |
+| Phase G (Deploy + Smoke) | 5 (070-074) | 🔄 (070 ✅ deployed; 071-074 in-progress — operator-driven smoke) |
 | Phase H (Wrap-up) | 1 (090) | 🔲 |
 
 ---
@@ -59,10 +59,10 @@
 | 063 | Backwards-compat verification (standalone LW + persistence) | F (Verification) | ✅ | C tasks | 070 | F | STANDARD | 2 |
 | 065 | Extend SessionPersistence with workspace tabs[] (NFR-09 fix) | F (Verification — remediation) | ✅ | 011, 030, 050, 063 | 070 | — (serial) | FULL | 5 |
 | 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | ✅ | 060-063, **065** | 071-074 | — | FULL | 1 |
-| 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
-| 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
-| 073 | UI smoke — Context pane (FR-17..FR-22) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
-| 074 | NFR verification (Lighthouse + History overlay timings) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
+| 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
+| 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
+| 073 | UI smoke — Context pane (FR-17..FR-22) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
+| 074 | NFR verification (Lighthouse + History overlay timings) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
 | 090 | Project wrap-up (code-review + adr-check + repo-cleanup + lessons-learned) | H (Wrap-up) | 🔲 | 070-074 (+050, 051 if Phase E) | — | — | STANDARD | 3 |
 
 **Total estimated effort**: ~75 hours (excludes Phase E if skipped). With Phase E: ~80 hours.
