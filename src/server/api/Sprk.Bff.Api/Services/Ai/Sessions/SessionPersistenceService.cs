@@ -199,6 +199,56 @@ public class SessionPersistenceService : ISessionPersistenceService
     }
 
     // =========================================================================
+    // SaveTabsAsync (NFR-09 — task 065)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (CLAUDE.md §10 BFF Hygiene + ADR-013):
+    //   - In-process extension of the existing AI session persistence pipeline.
+    //   - NO new DI feature module (registration handled by existing AiPersistenceModule
+    //     via the ISessionPersistenceService interface — ADR-010).
+    //   - NO new service, NO new NuGet packages.
+    //   - Reuses the same Redis-hot + Cosmos-warm write-through pattern as PersistMessageAsync
+    //     and PersistSummaryAsync (D-06). Latency profile is identical to existing methods.
+    //   - Additive Cosmos schema change (StoredSession.Tabs + ActiveTabId) — backwards
+    //     compatible with older documents (ADR-015 partition key /tenantId unchanged).
+    //   - All four BFF decision criteria from ADR-013 answer "BFF" → stays here.
+
+    /// <inheritdoc/>
+    public async Task<bool> SaveTabsAsync(
+        string sessionId,
+        string tenantId,
+        IReadOnlyList<StoredWorkspaceTab> tabs,
+        string? activeTabId,
+        CancellationToken cancellationToken = default)
+    {
+        // Load existing session: try Redis first, fall back to Cosmos. Mirrors LoadSessionAsync
+        // but without re-warming Redis (we'll write the full session back below anyway).
+        var session = await LoadFromRedisAsync(tenantId, sessionId, cancellationToken)
+            ?? await LoadFromCosmosAsync(tenantId, sessionId, cancellationToken);
+
+        if (session is null)
+        {
+            _logger.LogDebug(
+                "SessionPersistenceService.SaveTabsAsync: session {SessionId} not found (tenant={TenantId}) — returning false",
+                sessionId, tenantId);
+            return false;
+        }
+
+        // Mutate only tab-related fields + LastActivity. All other state (Messages, WidgetStates,
+        // Summary, EntityRefs) is preserved verbatim.
+        session.Tabs = tabs.ToList();
+        session.ActiveTabId = activeTabId;
+        session.LastActivity = DateTimeOffset.UtcNow;
+
+        // Write-through (D-06): Redis hot tier first, then Cosmos warm tier (fire-and-forget).
+        // Neither failure surfaces to the caller — matches the existing PersistMessageAsync contract.
+        await WriteToRedisAsync(tenantId, sessionId, session, cancellationToken);
+        _ = UpsertToCosmosAsync(session, CancellationToken.None);
+
+        return true;
+    }
+
+    // =========================================================================
     // Private helpers — Redis
     // =========================================================================
 

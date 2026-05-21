@@ -14,7 +14,12 @@
  *   - getSnapshot returns a shallow copy (mutations to result don't affect manager).
  */
 
-import { WorkspaceTabManager, MAX_WORKSPACE_TABS } from "../WorkspaceTabManager";
+import * as React from "react";
+import {
+  WorkspaceTabManager,
+  MAX_WORKSPACE_TABS,
+} from "../WorkspaceTabManager";
+import type { WorkspaceTabPersistenceSnapshot } from "../WorkspaceTabManager";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -518,5 +523,355 @@ describe("WorkspaceTabManager — getSnapshot immutability", () => {
 
     // The manager's internal state must be unchanged.
     expect(mgr.getSnapshot().tabs).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serializeForPersistence — NFR-09 (task 065)
+// ---------------------------------------------------------------------------
+
+describe("WorkspaceTabManager — serializeForPersistence (NFR-09)", () => {
+  it("serializeForPersistence_emptyManager_returnsEmptyTabsArray", () => {
+    const mgr = makeManager();
+    const snap = mgr.serializeForPersistence();
+
+    expect(snap.tabs).toEqual([]);
+    expect(snap.activeTabId).toBeNull();
+  });
+
+  it("serializeForPersistence_homeOnly_excludesHomeTab", () => {
+    const mgr = makeManager();
+    const homeId = mgr.ensureHomeTab("Home", { layout: "default" });
+    // Activate Home — activeTabId passes through unchanged but tabs excludes home.
+    mgr.setActiveTab(homeId);
+
+    const snap = mgr.serializeForPersistence();
+
+    expect(snap.tabs).toEqual([]); // Home is not in the persisted tabs list
+    expect(snap.activeTabId).toBe(homeId); // activeTabId passes through
+  });
+
+  it("serializeForPersistence_threeWidgetTabs_returnsAllInOrder_withActiveTabId", () => {
+    const mgr = makeManager();
+    mgr.ensureHomeTab(); // Home should still be excluded from the serialized tabs.
+
+    const id1 = mgr.addTab("widget-1", { v: 1 }, "Widget One");
+    const id2 = mgr.addTab("widget-2", { v: 2 }, "Widget Two");
+    const id3 = mgr.addTab("widget-3", { v: 3 }, "Widget Three");
+
+    // Make the middle tab active to verify activeTabId carries through.
+    mgr.setActiveTab(id2);
+
+    const snap = mgr.serializeForPersistence();
+
+    expect(snap.tabs).toHaveLength(3);
+    expect(snap.tabs[0]).toEqual({
+      id: id1,
+      widgetType: "widget-1",
+      widgetData: { v: 1 },
+      displayName: "Widget One",
+    });
+    expect(snap.tabs[1]).toEqual({
+      id: id2,
+      widgetType: "widget-2",
+      widgetData: { v: 2 },
+      displayName: "Widget Two",
+    });
+    expect(snap.tabs[2]).toEqual({
+      id: id3,
+      widgetType: "widget-3",
+      widgetData: { v: 3 },
+      displayName: "Widget Three",
+    });
+    expect(snap.activeTabId).toBe(id2);
+
+    // The serialized objects MUST NOT include the Component field.
+    for (const t of snap.tabs) {
+      expect(t).not.toHaveProperty("Component");
+      expect(t).not.toHaveProperty("kind");
+      expect(t).not.toHaveProperty("isLoading");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// restoreFromPersistence — NFR-09 (task 065)
+// ---------------------------------------------------------------------------
+
+describe("WorkspaceTabManager — restoreFromPersistence (NFR-09)", () => {
+  // A no-op React component used as the resolved widget Component.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const FakeComponent: React.ComponentType<any> = (): null => null;
+
+  /** Resolver that returns FakeComponent for any widgetType. */
+  function makeResolveAll(): jest.Mock {
+    return jest.fn(async (_widgetType: string) => FakeComponent);
+  }
+
+  /** Resolver that returns null for a specific widgetType (simulating unregistered widget). */
+  function makeResolveExcept(missingType: string): jest.Mock {
+    return jest.fn(async (widgetType: string) =>
+      widgetType === missingType ? null : FakeComponent,
+    );
+  }
+
+  it("restoreFromPersistence_emptyManager_addsAllTabs_inOrder", async () => {
+    const mgr = makeManager();
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        { id: "t1", widgetType: "widget-a", widgetData: { a: 1 }, displayName: "A" },
+        { id: "t2", widgetType: "widget-b", widgetData: { b: 2 }, displayName: "B" },
+        { id: "t3", widgetType: "widget-c", widgetData: { c: 3 }, displayName: "C" },
+      ],
+      activeTabId: null,
+    };
+
+    await mgr.restoreFromPersistence(snap, makeResolveAll());
+
+    const { tabs } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(3);
+    expect(tabs.map((t) => t.id)).toEqual(["t1", "t2", "t3"]);
+    expect(tabs.map((t) => t.widgetType)).toEqual([
+      "widget-a",
+      "widget-b",
+      "widget-c",
+    ]);
+    expect(tabs.map((t) => t.displayName)).toEqual(["A", "B", "C"]);
+    expect(tabs.map((t) => t.widgetData)).toEqual([
+      { a: 1 },
+      { b: 2 },
+      { c: 3 },
+    ]);
+    // All tabs should be hydrated with the resolved Component (not loading).
+    for (const t of tabs) {
+      expect(t.isLoading).toBe(false);
+      expect(t.Component).toBe(FakeComponent);
+      expect(t.kind).toBe("widget");
+    }
+  });
+
+  it("restoreFromPersistence_managerWithExistingNonHomeTabs_noOps", async () => {
+    const mgr = makeManager();
+    const existingId = mgr.addTab("existing-widget", { v: 1 }, "Existing");
+
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        { id: "t1", widgetType: "widget-a", widgetData: null, displayName: "A" },
+        { id: "t2", widgetType: "widget-b", widgetData: null, displayName: "B" },
+      ],
+      activeTabId: "t1",
+    };
+
+    const resolve = makeResolveAll();
+    await mgr.restoreFromPersistence(snap, resolve);
+
+    // Manager state should be unchanged — restore is a no-op when a non-Home
+    // tab already exists.
+    const { tabs, activeTabId } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].id).toBe(existingId);
+    expect(activeTabId).toBe(existingId); // unchanged
+    // resolveWidget must NOT have been called when we no-op.
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("restoreFromPersistence_managerWithOnlyHomeTab_proceedsWithRestore", async () => {
+    // Home is exempt from the no-op guard (it's not a 'widget' kind tab).
+    const mgr = makeManager();
+    const homeId = mgr.ensureHomeTab("Home");
+
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        { id: "t1", widgetType: "widget-a", widgetData: null, displayName: "A" },
+      ],
+      activeTabId: "t1",
+    };
+
+    await mgr.restoreFromPersistence(snap, makeResolveAll());
+
+    const { tabs, activeTabId } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(2); // Home + restored widget
+    expect(tabs[0].id).toBe(homeId); // Home stays at index 0
+    expect(tabs[1].id).toBe("t1");
+    expect(activeTabId).toBe("t1");
+  });
+
+  it("restoreFromPersistence_setsActiveTabId_ifInRestoredSet", async () => {
+    const mgr = makeManager();
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        { id: "t1", widgetType: "widget-a", widgetData: null, displayName: "A" },
+        { id: "t2", widgetType: "widget-b", widgetData: null, displayName: "B" },
+      ],
+      activeTabId: "t2",
+    };
+
+    await mgr.restoreFromPersistence(snap, makeResolveAll());
+
+    expect(mgr.getSnapshot().activeTabId).toBe("t2");
+  });
+
+  it("restoreFromPersistence_ignoresActiveTabId_ifNotInRestoredSet", async () => {
+    const mgr = makeManager();
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        { id: "t1", widgetType: "widget-a", widgetData: null, displayName: "A" },
+      ],
+      activeTabId: "non-existent-id",
+    };
+
+    await mgr.restoreFromPersistence(snap, makeResolveAll());
+
+    // activeTabId in snapshot does not match a restored tab → no change.
+    expect(mgr.getSnapshot().activeTabId).toBeNull();
+  });
+
+  it("restoreFromPersistence_invalidWidgetType_gracefullySkips", async () => {
+    const mgr = makeManager();
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        { id: "t1", widgetType: "widget-a", widgetData: null, displayName: "A" },
+        { id: "t2", widgetType: "widget-bad", widgetData: null, displayName: "Bad" },
+        { id: "t3", widgetType: "widget-c", widgetData: null, displayName: "C" },
+      ],
+      activeTabId: null,
+    };
+
+    // The resolver returns null for "widget-bad" (e.g. widget was unregistered).
+    await mgr.restoreFromPersistence(snap, makeResolveExcept("widget-bad"));
+
+    const { tabs } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(2); // bad tab is skipped, good tabs survive
+    expect(tabs.map((t) => t.id)).toEqual(["t1", "t3"]);
+  });
+
+  it("restoreFromPersistence_handlesEmptySnapshot", async () => {
+    const mgr = makeManager();
+    const snap: WorkspaceTabPersistenceSnapshot = { tabs: [], activeTabId: null };
+
+    await mgr.restoreFromPersistence(snap, makeResolveAll());
+
+    expect(mgr.getSnapshot().tabs).toHaveLength(0);
+    expect(mgr.getSnapshot().activeTabId).toBeNull();
+  });
+
+  it("restoreFromPersistence_doesNotCallOnPersistChange", async () => {
+    // Restore is a read of an already-persisted snapshot — it must NOT
+    // re-emit a write-through (would cause a spurious save on mount).
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        { id: "t1", widgetType: "widget-a", widgetData: null, displayName: "A" },
+      ],
+      activeTabId: "t1",
+    };
+
+    await mgr.restoreFromPersistence(snap, makeResolveAll());
+
+    expect(onPersistChange).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onPersistChange callback — NFR-09 write-through (task 065)
+// ---------------------------------------------------------------------------
+
+describe("WorkspaceTabManager — onPersistChange callback (NFR-09)", () => {
+  it("onPersistChange_calledAfterAddTab", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+
+    mgr.addTab("widget-a", { v: 1 }, "A");
+
+    expect(onPersistChange).toHaveBeenCalledTimes(1);
+    const snap = onPersistChange.mock.calls[0][0];
+    expect(snap.tabs).toHaveLength(1);
+    expect(snap.tabs[0].widgetType).toBe("widget-a");
+  });
+
+  it("onPersistChange_calledAfterCloseTab", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+
+    const id1 = mgr.addTab("widget-a", null, "A");
+    onPersistChange.mockClear(); // clear the addTab call
+
+    mgr.closeTab(id1);
+
+    expect(onPersistChange).toHaveBeenCalledTimes(1);
+    const snap = onPersistChange.mock.calls[0][0];
+    expect(snap.tabs).toHaveLength(0);
+  });
+
+  it("onPersistChange_calledAfterCloseTab_evenForInactiveTab", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+
+    const id1 = mgr.addTab("widget-a", null, "A");
+    mgr.addTab("widget-b", null, "B"); // id2 becomes active
+    onPersistChange.mockClear();
+
+    mgr.closeTab(id1); // close the inactive tab
+
+    expect(onPersistChange).toHaveBeenCalledTimes(1);
+    const snap = onPersistChange.mock.calls[0][0];
+    expect(snap.tabs).toHaveLength(1);
+    expect(snap.tabs[0].widgetType).toBe("widget-b");
+  });
+
+  it("onPersistChange_calledAfterSetActiveTab", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+
+    const id1 = mgr.addTab("widget-a", null, "A");
+    mgr.addTab("widget-b", null, "B"); // id2 becomes active
+    onPersistChange.mockClear();
+
+    mgr.setActiveTab(id1);
+
+    expect(onPersistChange).toHaveBeenCalledTimes(1);
+    const snap = onPersistChange.mock.calls[0][0];
+    expect(snap.activeTabId).toBe(id1);
+  });
+
+  it("onPersistChange_notCalledOnSetActiveTab_unknownId", () => {
+    // No state change → no persist event.
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+
+    mgr.addTab("widget-a", null, "A");
+    onPersistChange.mockClear();
+
+    mgr.setActiveTab("non-existent-id");
+
+    expect(onPersistChange).not.toHaveBeenCalled();
+  });
+
+  it("onPersistChange_calledAfterClearAllTabs", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+
+    mgr.addTab("widget-a", null, "A");
+    mgr.addTab("widget-b", null, "B");
+    onPersistChange.mockClear();
+
+    mgr.clearAllTabs();
+
+    expect(onPersistChange).toHaveBeenCalledTimes(1);
+    const snap = onPersistChange.mock.calls[0][0];
+    expect(snap.tabs).toHaveLength(0);
+  });
+
+  it("onPersistChange_omitted_doesNotThrow", () => {
+    // The callback is optional — manager must not throw when it's absent.
+    const mgr = new WorkspaceTabManager(); // no options
+    expect(() => {
+      const id = mgr.addTab("widget-a", null, "A");
+      mgr.setActiveTab(id);
+      mgr.closeTab(id);
+      mgr.clearAllTabs();
+    }).not.toThrow();
   });
 });

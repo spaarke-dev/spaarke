@@ -60,6 +60,24 @@ export const TELEMETRY_FILE_EXTRACTION_FAILURE =
 export const TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE =
   "spaarke-ai-error.history-overlay.load-failure";
 
+/**
+ * Emitted when GET /api/ai/chat/sessions/{sessionId}/tabs fails on
+ * WorkspacePane mount (e.g. network error or 5xx). 404 is treated as
+ * "no tabs to restore" and does NOT emit this event. Consumed by task 065
+ * (NFR-09 tab persistence write-through + restore).
+ */
+export const TELEMETRY_TAB_RESTORE_LOAD_FAILURE =
+  "spaarke-ai-error.tab-restore.load-failure";
+
+/**
+ * Emitted when PATCH /api/ai/chat/sessions/{sessionId}/tabs fails on
+ * debounced write-through (e.g. network error or 5xx). Write-through is
+ * best-effort; in-memory tab state remains correct on failure. Consumed by
+ * task 065 (NFR-09 tab persistence write-through + restore).
+ */
+export const TELEMETRY_TAB_RESTORE_SAVE_FAILURE =
+  "spaarke-ai-error.tab-restore.save-failure";
+
 // ---------------------------------------------------------------------------
 // Internal state — App Insights singleton resolved via setter
 // ---------------------------------------------------------------------------

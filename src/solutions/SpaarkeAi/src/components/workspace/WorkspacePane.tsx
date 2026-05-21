@@ -36,13 +36,23 @@ import {
   useDispatchPaneEvent,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
+  useAiSession,
 } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
+import { buildBffApiUrl } from "@spaarke/auth";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
-import type { WorkspaceTabManagerState } from "./WorkspaceTabManager";
+import type {
+  WorkspaceTabManagerState,
+  WorkspaceTabPersistenceSnapshot,
+} from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
 import { WorkspaceHomeTab } from "./WorkspaceHomeTab";
 import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
+import {
+  logTelemetryError,
+  TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
+  TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
+} from "../../telemetry/errorTelemetry";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -84,11 +94,39 @@ export function WorkspacePane(): React.JSX.Element {
   const dispatch = useDispatchPaneEvent();
 
   // ---------------------------------------------------------------------------
+  // Auth surface — NFR-09 tab persistence (task 065)
+  //
+  // Per ADR-028: `authenticatedFetch` is obtained from useAiSession() (never
+  // snapshotted as a prop or token string). `bffBaseUrl` + `chatSessionId`
+  // also come from the session provider so write-through targets the correct
+  // session and we can no-op cleanly when no session id is set yet.
+  // ---------------------------------------------------------------------------
+
+  const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated } =
+    useAiSession();
+
+  // ---------------------------------------------------------------------------
   // Tab manager — single instance per WorkspacePane mount
   // ---------------------------------------------------------------------------
 
+  // Forwarding ref: the manager's onPersistChange callback dereferences this
+  // on every mutation. The actual `persistTabs` function below is rebuilt with
+  // useCallback (it captures sessionId/bffBaseUrl) and assigned into the ref
+  // on each render — so the manager always calls the latest persistTabs.
+  const persistTabsRef = React.useRef<
+    ((snapshot: WorkspaceTabPersistenceSnapshot) => void) | null
+  >(null);
+
   // Stable manager reference — never recreated across re-renders.
-  const managerRef = React.useRef<WorkspaceTabManager>(new WorkspaceTabManager());
+  // The onPersistChange callback is itself stable; it just dispatches through
+  // the current persistTabsRef value (so updates to deps refresh cleanly).
+  const managerRef = React.useRef<WorkspaceTabManager>(
+    new WorkspaceTabManager({
+      onPersistChange: (snapshot) => {
+        persistTabsRef.current?.(snapshot);
+      },
+    }),
+  );
 
   // React state mirrors the manager's snapshot; triggers re-renders.
   const [tabState, setTabState] = React.useState<WorkspaceTabManagerState>(() =>
@@ -99,6 +137,147 @@ export function WorkspacePane(): React.JSX.Element {
   const syncState = React.useCallback((): void => {
     setTabState(managerRef.current.getSnapshot());
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Debounced write-through — NFR-09 (task 065)
+  //
+  // The manager fires onPersistChange synchronously on every mutation. We
+  // coalesce rapid bursts (e.g. FIFO eviction adding + removing) by buffering
+  // the latest snapshot in a ref and flushing once per ~200ms tick. The
+  // write-through is best-effort: on failure we log telemetry and continue
+  // (in-memory state remains correct, restore on next mount may be stale).
+  // ---------------------------------------------------------------------------
+
+  const pendingSnapshotRef =
+    React.useRef<WorkspaceTabPersistenceSnapshot | null>(null);
+  const persistTimerRef = React.useRef<number | null>(null);
+
+  const persistTabs = React.useCallback(
+    (snapshot: WorkspaceTabPersistenceSnapshot): void => {
+      pendingSnapshotRef.current = snapshot;
+      if (persistTimerRef.current !== null) {
+        window.clearTimeout(persistTimerRef.current);
+      }
+      persistTimerRef.current = window.setTimeout(async () => {
+        persistTimerRef.current = null;
+        const snap = pendingSnapshotRef.current;
+        pendingSnapshotRef.current = null;
+        if (!snap) return;
+        if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
+
+        try {
+          const url = buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
+          );
+          const response = await authenticatedFetch(url, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify(snap),
+          });
+          // 404 = session not yet known to BFF — treat as benign (best-effort).
+          if (!response.ok && response.status !== 404) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+        } catch (err) {
+          logTelemetryError(TELEMETRY_TAB_RESTORE_SAVE_FAILURE, {
+            sessionId: chatSessionId,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          // Continue — write-through is best-effort. In-memory state is the
+          // source of truth until the next successful save.
+        }
+      }, 200);
+    },
+    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch],
+  );
+
+  // Update the forwarding ref every render so the manager calls the latest
+  // persistTabs (which captures the latest sessionId/bffBaseUrl deps).
+  React.useEffect(() => {
+    persistTabsRef.current = persistTabs;
+  }, [persistTabs]);
+
+  // On unmount: cancel any pending timer to avoid late writes against a stale
+  // session id. The in-memory snapshot is discarded; the most recent
+  // successful write to BFF remains authoritative.
+  React.useEffect(() => {
+    return () => {
+      if (persistTimerRef.current !== null) {
+        window.clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Restore on mount — NFR-09 (task 065)
+  //
+  // Fetches the persisted tab snapshot for the current chat session and
+  // hydrates the manager. 404 is benign (no tabs to restore). Other failures
+  // emit telemetry and leave the workspace in its default Home-only state.
+  // Guard: restoreFromPersistence() itself no-ops if a non-Home tab is
+  // already open, so an in-flight session won't be clobbered if the user
+  // opens a tab during the restore window.
+  // ---------------------------------------------------------------------------
+
+  React.useEffect(() => {
+    if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = buildBffApiUrl(
+          bffBaseUrl,
+          `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
+        );
+        const response = await authenticatedFetch(url, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
+        if (cancelled) return;
+        if (response.status === 404) return; // no tabs to restore — benign
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const snapshot =
+          (await response.json()) as WorkspaceTabPersistenceSnapshot;
+        if (cancelled) return;
+
+        await managerRef.current.restoreFromPersistence(
+          snapshot,
+          resolveWorkspaceWidget,
+        );
+        if (cancelled) return;
+        syncState();
+
+        // Notify ShellStageManager about the restored tab count so it can
+        // advance to the appropriate stage (Stage 3 / Stage 4).
+        const snap = managerRef.current.getSnapshot();
+        dispatch("workspace", {
+          type: "tab_count_change",
+          tabCount: snap.tabs.length,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
+          sessionId: chatSessionId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        // Degrade gracefully — workspace continues with Home-only state.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // authenticatedFetch is a stable module-level function from @spaarke/auth
+    // (returned by useAiSession() but identical reference across renders).
+    // Including it in deps would re-fire the effect needlessly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatSessionId, bffBaseUrl, isAuthenticated]);
 
   // ---------------------------------------------------------------------------
   // Home tab — FR-11: embed the LegalWorkspace experience as a non-closable

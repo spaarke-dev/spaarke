@@ -60,6 +60,51 @@ export const MAX_WORKSPACE_TABS = 8;
  */
 export type WorkspaceTabKind = "home" | "widget";
 
+// ---------------------------------------------------------------------------
+// Persistence — NFR-09 tab write-through (task 065)
+//
+// Workspace tabs are persisted via the BFF `PATCH /api/ai/chat/sessions/
+// {sessionId}/tabs` endpoint so non-Home tabs survive a page refresh. The
+// Home tab is NOT persisted — it is recreated by ensureHomeTab() on every
+// WorkspacePane mount. React component references are NOT persisted either
+// — they are re-resolved from `resolveWorkspaceWidget(widgetType)` on
+// restore.
+// ---------------------------------------------------------------------------
+
+/** Serializable view of a non-Home tab (Component excluded; widgetType drives re-resolution on restore). */
+export interface SerializableWorkspaceTab {
+  /** Stable tab id; preserved across restore so deep-linking and event tabId carry over. */
+  id: string;
+  /** Widget type string — re-resolved through resolveWorkspaceWidget() on restore. */
+  widgetType: string;
+  /** Opaque widget payload — server stores it round-trip; client may shape as needed. */
+  widgetData: unknown;
+  /** Human-readable display label persisted alongside the tab. */
+  displayName: string;
+}
+
+/** Persistence snapshot returned by serializeForPersistence(). */
+export interface WorkspaceTabPersistenceSnapshot {
+  tabs: SerializableWorkspaceTab[];
+  /** Active tab id at save time; may be `"home"` or a widget id, or null if no tabs. */
+  activeTabId: string | null;
+}
+
+/**
+ * Optional constructor options for WorkspaceTabManager.
+ *
+ * `onPersistChange` is invoked AFTER any state-mutating method (addTab,
+ * closeTab, setActiveTab, clearAllTabs, and ensureHomeTab calls that create
+ * the Home tab for the first time, only when there are non-Home tabs to
+ * persist). The callback receives the current persistence snapshot — the
+ * caller (WorkspacePane) is responsible for debouncing and dispatching the
+ * BFF write-through. The manager itself never performs network I/O.
+ */
+export interface WorkspaceTabManagerOptions {
+  /** Called after every state-mutating operation with the current snapshot. Optional. */
+  onPersistChange?: (snapshot: WorkspaceTabPersistenceSnapshot) => void;
+}
+
 /**
  * State record for a single workspace tab.
  *
@@ -125,6 +170,29 @@ export class WorkspaceTabManager {
   private _tabs: WorkspaceTab[] = [];
   private _activeTabId: string | null = null;
   private _nextSeq = 0;
+  private _options: WorkspaceTabManagerOptions;
+
+  /**
+   * Construct a WorkspaceTabManager.
+   *
+   * @param options - Optional configuration. Use `onPersistChange` to receive a
+   *                  persistence snapshot after every state-mutating operation
+   *                  (NFR-09 write-through). The manager performs NO network
+   *                  I/O — the caller debounces and dispatches.
+   */
+  constructor(options: WorkspaceTabManagerOptions = {}) {
+    this._options = options;
+  }
+
+  /**
+   * Emit a persistence snapshot to the onPersistChange callback if one is
+   * registered. Centralised here so every mutation site has a single line of
+   * write-through wiring.
+   */
+  private _notifyPersistChange(): void {
+    if (!this._options.onPersistChange) return;
+    this._options.onPersistChange(this.serializeForPersistence());
+  }
 
   // -------------------------------------------------------------------------
   // ensureHomeTab — install / update the always-present Home tab
@@ -233,6 +301,7 @@ export class WorkspaceTabManager {
     this._tabs = [...this._tabs, newTab];
     this._activeTabId = id;
 
+    this._notifyPersistChange();
     return id;
   }
 
@@ -306,6 +375,7 @@ export class WorkspaceTabManager {
     this._tabs = this._tabs.filter((t) => t.id !== tabId);
 
     if (!wasActive) {
+      this._notifyPersistChange();
       return this._activeTabId;
     }
 
@@ -318,6 +388,7 @@ export class WorkspaceTabManager {
       this._activeTabId = this._tabs[this._tabs.length - 1].id;
     }
 
+    this._notifyPersistChange();
     return this._activeTabId;
   }
 
@@ -335,6 +406,7 @@ export class WorkspaceTabManager {
   setActiveTab(tabId: string): void {
     if (this._tabs.some((t) => t.id === tabId)) {
       this._activeTabId = tabId;
+      this._notifyPersistChange();
     }
   }
 
@@ -374,7 +446,126 @@ export class WorkspaceTabManager {
     this._tabs = homeTab ? [homeTab] : [];
     this._activeTabId = homeTab ? homeTab.id : null;
 
+    this._notifyPersistChange();
     return removedCount;
+  }
+
+  // -------------------------------------------------------------------------
+  // serializeForPersistence — NFR-09 write-through (task 065)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Returns a serializable snapshot of NON-HOME tabs only.
+   *
+   * - The Home tab is excluded — it is recreated by ensureHomeTab() on every
+   *   WorkspacePane mount and never round-trips through the persistence layer.
+   * - React Component references are excluded — they are re-resolved through
+   *   `resolveWorkspaceWidget(widgetType)` on restore.
+   * - `activeTabId` passes through unchanged — it may be the Home tab id, a
+   *   widget id, or null. On restore, WorkspacePane decides whether to honor
+   *   it (it does only if the id matches one of the restored widget tabs).
+   *
+   * No side effects; safe to call from inside React render or effects.
+   */
+  serializeForPersistence(): WorkspaceTabPersistenceSnapshot {
+    const tabs: SerializableWorkspaceTab[] = this._tabs
+      .filter((t) => t.kind === "widget")
+      .map((t) => ({
+        id: t.id,
+        widgetType: t.widgetType,
+        widgetData: t.widgetData,
+        displayName: t.displayName,
+      }));
+
+    return {
+      tabs,
+      activeTabId: this._activeTabId,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // restoreFromPersistence — NFR-09 restore on mount (task 065)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Replace non-Home tabs from a persisted snapshot.
+   *
+   * Semantics:
+   *   - No-op if the manager already has at least one non-Home tab (don't
+   *     clobber an in-flight active session).
+   *   - Each snapshot tab's `widgetType` is resolved via the provided
+   *     `resolveWidget` factory. Tabs whose widget cannot be resolved
+   *     (e.g. widget unregistered, lazy-import error) are skipped — restore
+   *     degrades gracefully rather than throwing.
+   *   - Restored tabs are added in insertion order via direct splice into
+   *     `_tabs` (bypassing addTab so the FIFO eviction logic does NOT fire
+   *     and so the onPersistChange callback does NOT re-emit during restore).
+   *   - `activeTabId` is set only if it matches one of the restored tab ids
+   *     (or the existing Home tab) — otherwise the current active tab is
+   *     preserved (or null if no Home tab exists either).
+   *   - This method does NOT call onPersistChange — restore is a read of an
+   *     already-persisted snapshot; calling write-through would create a
+   *     spurious save on mount.
+   *
+   * @param snapshot     The persisted snapshot, typically returned by GET
+   *                     `/api/ai/chat/sessions/{sessionId}/tabs`.
+   * @param resolveWidget Async factory that returns the React component for
+   *                      a widgetType, or null if not registered. Typically
+   *                      `resolveWorkspaceWidget` from `@spaarke/ai-widgets`.
+   */
+  async restoreFromPersistence(
+    snapshot: WorkspaceTabPersistenceSnapshot,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolveWidget: (widgetType: string) => Promise<React.ComponentType<any> | null>,
+  ): Promise<void> {
+    // Guard: don't clobber an active session.
+    const hasNonHomeTab = this._tabs.some((t) => t.kind === "widget");
+    if (hasNonHomeTab) return;
+
+    if (!snapshot || !Array.isArray(snapshot.tabs)) return;
+
+    // Resolve all widget components in parallel; preserve original order in result.
+    const resolutions = await Promise.all(
+      snapshot.tabs.map(async (t) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const Component = await resolveWidget(t.widgetType);
+          return { t, Component };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (_err) {
+          // Unresolvable widget — skip gracefully (see method JSDoc).
+          return { t, Component: null };
+        }
+      }),
+    );
+
+    const restoredTabs: WorkspaceTab[] = [];
+    for (const { t, Component } of resolutions) {
+      if (Component == null) continue; // skip unresolvable widgets
+      // Bump _nextSeq so any subsequent addTab() generates a non-colliding id.
+      this._nextSeq++;
+      restoredTabs.push({
+        id: t.id,
+        kind: "widget",
+        widgetType: t.widgetType,
+        widgetData: t.widgetData,
+        Component,
+        isLoading: false,
+        displayName: t.displayName,
+      });
+    }
+
+    // Splice restored tabs in AFTER any existing Home tab so Home stays at idx 0.
+    this._tabs = [...this._tabs, ...restoredTabs];
+
+    // Honor snapshot.activeTabId only if it matches a tab now in the manager.
+    if (
+      snapshot.activeTabId != null &&
+      this._tabs.some((t) => t.id === snapshot.activeTabId)
+    ) {
+      this._activeTabId = snapshot.activeTabId;
+    }
+    // NOTE: intentionally NO _notifyPersistChange() — restore is a read.
   }
 
   // -------------------------------------------------------------------------

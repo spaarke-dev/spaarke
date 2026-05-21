@@ -145,6 +145,33 @@ public static class ChatEndpoints
             .ProducesProblem(401)
             .ProducesProblem(404);
 
+        // PATCH /api/ai/chat/sessions/{sessionId}/tabs — write-through workspace tab persistence (NFR-09, task 065)
+        // Endpoint filters match the sibling /messages route (ADR-008): auth + ai-stream rate limit.
+        group.MapMethods("/sessions/{sessionId}/tabs", ["PATCH"], SaveTabsAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("SaveSessionTabs")
+            .WithSummary("Persist workspace tabs and active tab id for a session (NFR-09)")
+            .WithDescription("Write-through persistence of non-Home workspace tabs and active selection. Used by SpaarkeAi WorkspacePane on every tab mutation (debounced ~200ms client-side). Home tab is recreated by ensureHomeTab() and is not persisted.")
+            .Produces(204)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404)
+            .ProducesProblem(429);
+
+        // GET /api/ai/chat/sessions/{sessionId}/tabs — read persisted workspace tabs (NFR-09, task 065)
+        group.MapGet("/sessions/{sessionId}/tabs", GetTabsAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("GetSessionTabs")
+            .WithSummary("Retrieve persisted workspace tabs and active tab id for a session")
+            .WithDescription("Returns the most recently persisted non-Home tabs and active tab id. Empty list for sessions that have never persisted tabs.")
+            .Produces<SessionTabsResponse>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404)
+            .ProducesProblem(429);
+
         // GET /api/ai/chat/playbooks — discover available playbooks (no session required)
         group.MapGet("/playbooks", ListPlaybooksAsync)
             .AddAiAuthorizationFilter()
@@ -1736,6 +1763,153 @@ public static class ChatEndpoints
     }
 
     // =========================================================================
+    // Workspace tab persistence (NFR-09 — task 065)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (CLAUDE.md §10 BFF Hygiene + ADR-013):
+    //   - Extends the existing /api/ai/chat session endpoint group in-process.
+    //   - Uses the same ISessionPersistenceService that handles messages, widget states,
+    //     and summaries — no new DI feature module (ADR-010).
+    //   - Filter chain (.AddAiAuthorizationFilter().RequireRateLimiting("ai-stream"))
+    //     matches the sibling /messages route (ADR-008).
+    //   - Cosmos schema change is purely additive (StoredSession.Tabs, ActiveTabId)
+    //     with /tenantId partition key unchanged (ADR-015).
+    //   - All four BFF decision criteria from ADR-013 answer "BFF" → stays here.
+
+    /// <summary>
+    /// Defensive upper bound on incoming tab count. UI cap is MAX_WORKSPACE_TABS = 8 (FR-13),
+    /// but we tolerate up to 50 in the payload to absorb FIFO eviction races and future cap
+    /// adjustments without forcing a BFF redeploy.
+    /// </summary>
+    internal const int MaxTabsInRequest = 50;
+
+    /// <summary>
+    /// PATCH /api/ai/chat/sessions/{sessionId}/tabs
+    /// Write-through workspace tab persistence (NFR-09).
+    /// </summary>
+    private static async Task<IResult> SaveTabsAsync(
+        string sessionId,
+        SessionTabsRequest request,
+        ISessionPersistenceService persistence,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatEndpoints.SaveTabs");
+
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        if (request is null || request.Tabs is null)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Validation Error",
+                detail: "Request body must include a 'tabs' array (use [] for no tabs).");
+        }
+
+        if (request.Tabs.Count > MaxTabsInRequest)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Validation Error",
+                detail: $"Tabs payload cannot exceed {MaxTabsInRequest} entries. Received {request.Tabs.Count}.");
+        }
+
+        // Map wire DTOs to persistence DTOs. The wire shape (camelCase JsonElement) and the
+        // persistence shape are identical fields-wise — this mapping is the explicit contract
+        // boundary between the HTTP layer and the persistence layer.
+        var storedTabs = new List<StoredWorkspaceTab>(request.Tabs.Count);
+        foreach (var t in request.Tabs)
+        {
+            if (string.IsNullOrEmpty(t.Id) || string.IsNullOrEmpty(t.WidgetType))
+            {
+                return Results.Problem(
+                    statusCode: 400,
+                    title: "Validation Error",
+                    detail: "Each tab must have a non-empty 'id' and 'widgetType'.");
+            }
+            storedTabs.Add(new StoredWorkspaceTab(
+                Id: t.Id,
+                WidgetType: t.WidgetType,
+                WidgetData: t.WidgetData,
+                DisplayName: t.DisplayName ?? string.Empty));
+        }
+
+        logger.LogDebug(
+            "SaveTabs: session={SessionId}, tenant={TenantId}, tabCount={TabCount}, activeTabId={ActiveTabId}",
+            sessionId, tenantId, storedTabs.Count, request.ActiveTabId ?? "(null)");
+
+        var updated = await persistence.SaveTabsAsync(
+            sessionId,
+            tenantId,
+            storedTabs,
+            request.ActiveTabId,
+            cancellationToken);
+
+        if (!updated)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
+
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions/{sessionId}/tabs
+    /// Read persisted workspace tabs and active selection.
+    /// </summary>
+    private static async Task<IResult> GetTabsAsync(
+        string sessionId,
+        ISessionPersistenceService persistence,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatEndpoints.GetTabs");
+
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var session = await persistence.LoadSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
+
+        logger.LogDebug(
+            "GetTabs: session={SessionId}, tenant={TenantId}, tabCount={TabCount}",
+            sessionId, tenantId, session.Tabs.Count);
+
+        // Project persistence DTOs back to the wire shape. Identical field names, so this is
+        // effectively a pass-through; we keep the explicit projection to make the wire contract
+        // visible at the endpoint boundary (System.Text.Json camelCase via [JsonPropertyName]).
+        var wireTabs = session.Tabs
+            .Select(t => new SessionTabDto(t.Id, t.WidgetType, t.WidgetData, t.DisplayName))
+            .ToList();
+
+        return Results.Ok(new SessionTabsResponse(wireTabs, session.ActiveTabId));
+    }
+
+    // =========================================================================
     // Private Helpers
     // =========================================================================
 
@@ -2413,6 +2587,45 @@ public record ChatHistoryResponse(string SessionId, ChatSessionMessageInfo[] Mes
 /// <param name="Content">Message text content.</param>
 /// <param name="Timestamp">UTC timestamp when the message was created.</param>
 public record ChatSessionMessageInfo(string Role, string Content, DateTimeOffset Timestamp);
+
+/// <summary>
+/// Request body for PATCH /api/ai/chat/sessions/{sessionId}/tabs (NFR-09, task 065).
+///
+/// Field names use System.Text.Json camelCase by default ([JsonPropertyName] on the per-tab
+/// record for explicitness). The frontend agent and BFF agent share this exact contract —
+/// do not rename without coordinated update.
+/// </summary>
+/// <param name="Tabs">Non-Home workspace tabs in display order. Empty list clears the persisted tabs.</param>
+/// <param name="ActiveTabId">Active tab id at save time. May be "home" or one of the Tabs entries' Id. Null = no active selection persisted.</param>
+public record SessionTabsRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("tabs")] IReadOnlyList<SessionTabDto> Tabs,
+    [property: System.Text.Json.Serialization.JsonPropertyName("activeTabId")] string? ActiveTabId);
+
+/// <summary>
+/// Response body for GET /api/ai/chat/sessions/{sessionId}/tabs (NFR-09, task 065).
+/// </summary>
+/// <param name="Tabs">Persisted non-Home tabs in display order. Empty for sessions that never persisted tabs.</param>
+/// <param name="ActiveTabId">Persisted active tab id. May be "home", one of the Tabs entries' Id, or null.</param>
+public record SessionTabsResponse(
+    [property: System.Text.Json.Serialization.JsonPropertyName("tabs")] IReadOnlyList<SessionTabDto> Tabs,
+    [property: System.Text.Json.Serialization.JsonPropertyName("activeTabId")] string? ActiveTabId);
+
+/// <summary>
+/// Wire DTO for a single persisted workspace tab — shared by PATCH request and GET response.
+///
+/// Identical field shape to <see cref="Sprk.Bff.Api.Services.Ai.Sessions.StoredWorkspaceTab"/>;
+/// the endpoint handler maps between the two explicitly to make the wire contract visible at
+/// the HTTP boundary.
+/// </summary>
+/// <param name="Id">Tab identifier (client-generated, stable across persist/restore).</param>
+/// <param name="WidgetType">Widget kind to re-resolve via the client widget registry on restore.</param>
+/// <param name="WidgetData">Opaque widget payload pass-through. Null if the widget has no state.</param>
+/// <param name="DisplayName">Tab title displayed in the workspace tab strip.</param>
+public record SessionTabDto(
+    [property: System.Text.Json.Serialization.JsonPropertyName("id")] string Id,
+    [property: System.Text.Json.Serialization.JsonPropertyName("widgetType")] string WidgetType,
+    [property: System.Text.Json.Serialization.JsonPropertyName("widgetData")] System.Text.Json.JsonElement? WidgetData,
+    [property: System.Text.Json.Serialization.JsonPropertyName("displayName")] string DisplayName);
 
 /// <summary>
 /// SSE event payload for chat streaming.

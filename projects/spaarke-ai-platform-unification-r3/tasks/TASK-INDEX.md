@@ -17,7 +17,7 @@
 | Phase C (Workspace) | 6 (030-035) | 🔲 |
 | Phase D (Context) | 6 (040-045) | 🔲 |
 | Phase E (Backend, conditional) | 2 (050, 051) | ✅ — Phase E COMPLETE (per spike 001 decision; memo: notes/spikes/001-fr07-attachments-payload.md) |
-| Phase F (Verification) | 4 (060-063) | 🔲 |
+| Phase F (Verification) | 5 (060-063, 065) | ✅ all 5 complete — NFR-09 fix landed in task 065 |
 | Phase G (Deploy + Smoke) | 5 (070-074) | 🔲 |
 | Phase H (Wrap-up) | 1 (090) | 🔲 |
 
@@ -57,7 +57,8 @@
 | 061 | Bundle-size verification (<250 KB gzip delta vs R2) | F (Verification) | ✅ | All B/C/D | 070 | F | STANDARD | 2 |
 | 062 | Dark-mode token audit (no hex/rgba in new code) | F (Verification) | ✅ | All B/C/D | 070 | F | STANDARD | 2 |
 | 063 | Backwards-compat verification (standalone LW + persistence) | F (Verification) | ✅ | C tasks | 070 | F | STANDARD | 2 |
-| 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | 🔲 | 060-063 | 071-074 | — | FULL | 1 |
+| 065 | Extend SessionPersistence with workspace tabs[] (NFR-09 fix) | F (Verification — remediation) | ✅ | 011, 030, 050, 063 | 070 | — (serial) | FULL | 5 |
+| 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | 🔲 | 060-063, **065** | 071-074 | — | FULL | 1 |
 | 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
 | 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
 | 073 | UI smoke — Context pane (FR-17..FR-22) | G (Smoke) | 🔲 | 070 | 090 | G | STANDARD | 2 |
