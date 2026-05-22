@@ -1,12 +1,20 @@
 /**
  * ContextPaneMenu.tsx — Dropdown menu rendered in the ContextPaneController's
- * PaneHeader rightSlot (Task 095; pin column added Task 099).
+ * PaneHeader rightSlot (Task 095; pin column added Task 099; type icons
+ * dropped Task 103; active-marker checkmark dropped Task 106).
  *
  * Mirrors the WorkspacePaneMenu pattern: Fluent v9 `<Menu>` with a subtle
  * Button trigger using `ChevronDownRegular`, MenuPopover + MenuList +
- * MenuGroupHeader + MenuItems for each available Context tool. The active
- * tool gets a `CheckmarkRegular` icon (same `activeMarker` treatment as
- * WorkspacePaneMenu line 530-540) on the RIGHT side of the row.
+ * MenuGroupHeader + MenuItems for each available Context tool.
+ *
+ * Task 106 — active-tool checkmark removed (Round 8 operator feedback,
+ * 2026-05-22): "'Active tool marker' I don't think this is really necessary
+ * — we know what's active because it's what's loaded and there can only be
+ * one. Can remove that icon." Each MenuItem no longer receives an `icon`
+ * prop at all (the `CheckmarkRegular` previously rendered on the active
+ * row), so the row now reads `[pin button] [tool name]` only. The pin icon
+ * (functional toggle for the default-on-load tool) stays per R7 directive
+ * "only leave the pin".
  *
  * Task 099 adds a clickable PIN COLUMN on the LEFT of each tool's name,
  * mirroring the workspace-dropdown pin pattern (task 098). The operator
@@ -40,8 +48,8 @@
  *     when `onCollapse` is wired (task 094) — so the menu trigger button
  *     never accidentally collapses the pane. No defensive belt needed here.
  *
- *   - Styling reuses the same `trigger` / `activeMarker` / `tabLabel` shapes
- *     as WorkspacePaneMenu for visual parity across panes; pin styling
+ *   - Styling reuses the same `trigger` / `tabLabel` shapes as
+ *     WorkspacePaneMenu for visual parity across panes; pin styling
  *     (`layoutRow` / `pinButton` / `pinButtonActive`) mirrors task 098 on the
  *     Workspace pane verbatim so the operator sees a single coherent UX.
  *
@@ -68,7 +76,6 @@ import {
 } from '@fluentui/react-components';
 import {
   ChevronDownRegular,
-  CheckmarkRegular,
   PinRegular,
   PinFilled,
 } from '@fluentui/react-icons';
@@ -84,7 +91,11 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface ContextPaneMenuProps {
-  /** The currently-selected Context tool (drives the active checkmark). */
+  /**
+   * The currently-selected Context tool. Retained as a prop because the parent
+   * controller owns selection state; this menu no longer renders an active
+   * marker for it (task 106 removed the checkmark per operator feedback).
+   */
   selectedTool: ContextToolId;
   /** Called when the user selects a tool from the dropdown. */
   onSelectTool: (id: ContextToolId) => void;
@@ -104,10 +115,6 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     flex: '1 1 auto',
     minWidth: 0,
-  },
-  activeMarker: {
-    color: tokens.colorBrandForeground1,
-    flexShrink: 0,
   },
 
   // Task 099 — pin column (mirrors task 098's WorkspacePaneMenu styles).
@@ -147,12 +154,13 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 // Task 103 — type icons removed from each MenuItem per operator request
-// (Round 7, 2026-05-22): "remove the icons (only leave the pin)". The pin
-// affordance and the active-marker checkmark remain — those are functional
-// (toggle default tool, indicate active selection). The previous left-side
-// type icons (AppsListRegular for Quick Start, SearchRegular for Semantic
-// Search) were purely decorative and added visual clutter. After this change
-// each MenuItem renders: `[pin button] [tool name] [active checkmark]`.
+// (Round 7, 2026-05-22): "remove the icons (only leave the pin)".
+// Task 106 — active-marker checkmark also removed per Round 8 operator
+// feedback (2026-05-22): "'Active tool marker' I don't think this is really
+// necessary — we know what's active because it's what's loaded and there can
+// only be one. Can remove that icon." The pin remains as the only icon
+// affordance (functional toggle for the default-on-load tool). After this
+// change each MenuItem renders: `[pin button] [tool name]`.
 interface ToolDescriptor {
   id: ContextToolId;
   label: string;
@@ -259,7 +267,6 @@ export const ContextPaneMenu: React.FC<ContextPaneMenuProps> = ({
         <MenuList>
           <MenuGroupHeader>Context Tools</MenuGroupHeader>
           {CONTEXT_TOOLS.map((tool) => {
-            const isActive = tool.id === selectedTool;
             const isPinned = pinnedToolId === tool.id;
             const pinLabel = isPinned
               ? `Unpin ${tool.label}`
@@ -269,17 +276,14 @@ export const ContextPaneMenu: React.FC<ContextPaneMenuProps> = ({
                 key={tool.id}
                 onClick={() => handleSelect(tool.id)}
                 data-testid={`context-tool-${tool.id}`}
-                // Task 103 — type icons removed (operator: "remove the icons,
-                // only leave the pin"). The MenuItem `icon` slot now renders
-                // ONLY the active-marker checkmark when this tool is selected;
-                // when not active we render `undefined` so Fluent v9 collapses
-                // the icon slot entirely and the row reads
-                // `[pin] [tool name]` instead of `[type icon] [tool name]`.
-                icon={
-                  isActive ? (
-                    <CheckmarkRegular className={styles.activeMarker} />
-                  ) : undefined
-                }
+                // Task 106 — active-marker checkmark removed (operator:
+                // "'Active tool marker' I don't think this is really necessary
+                // — we know what's active because it's what's loaded and there
+                // can only be one. Can remove that icon."). With no icon prop
+                // supplied at all, Fluent v9 collapses the icon slot entirely
+                // and each row reads `[pin button] [tool name]`. The pin
+                // remains per R7 directive "only leave the pin".
+                icon={undefined}
               >
                 <span className={styles.toolRow}>
                   <Tooltip content={pinLabel} relationship="label">

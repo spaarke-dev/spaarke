@@ -400,21 +400,27 @@ function launchSemanticSearch(criteria: PersistedCriteria): void {
 // Styles — Fluent v9 tokens only (ADR-021)
 // ---------------------------------------------------------------------------
 
-// Task 103 — width cap rationale (Round 7 operator feedback 2026-05-22):
+// Task 106 — width cap + LEFT-aligned anchoring (Round 8 operator feedback
+// 2026-05-22, revising task 103's centering decision):
 //
 // When the Context pane is full-width (Assistant + Workspace both collapsed
 // via task 100), the Semantic Search criteria stretches across the entire
 // screen, which makes a form-style surface (single-column labels + dropdowns
-// + textarea) look stretched and unbalanced. The operator wanted the
-// criteria capped at a typical form-panel width so it stays compact and
-// centered even when the pane is wide.
+// + textarea) look stretched and unbalanced. Task 103 capped the criteria at
+// 480px AND centered it (`marginLeft: 'auto'` + `marginRight: 'auto'`).
+// Round 8 operator feedback: "the semantic search component should be left
+// aligned (see screenshot)." So we KEEP the 480px cap (still prevents the
+// form from stretching across the full pane on wide layouts) but FLIP the
+// horizontal anchoring from CENTERED to LEFT-ALIGNED.
 //
 // Cap: `CRITERIA_MAX_WIDTH_PX = 480`. Picked to mirror a typical Fluent v9
 // form-panel width — wide enough for two filter dropdowns to feel uncramped,
 // narrow enough that the criteria doesn't span more than ~30% of a 1600px
-// monitor. Centering is achieved via `marginLeft: 'auto'` + `marginRight: 'auto'`
+// monitor. Left-alignment is achieved via `marginLeft: 0` + `marginRight: 'auto'`
 // on the criteria CONTAINER (not the `root` which fills the pane's full
-// width for background coverage).
+// width for background coverage). The form anchors to the pane's left edge
+// (against the outer wrapper's left padding) and any empty space sits on the
+// right when the pane is wider than 480px.
 //
 // At narrow pane widths (~400-480px) the cap doesn't activate — the criteria
 // fill the pane naturally because `max-width` only constrains; it doesn't
@@ -448,17 +454,21 @@ const useStyles = makeStyles({
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
   },
-  // Task 103 — width cap container. `max-width: 480px` only constrains; it
-  // doesn't shrink below natural width, so narrow panes are unaffected.
-  // `margin: 0 auto` centers the criteria horizontally within `root` when
-  // the pane is wider than 480px + padding. `width: 100%` is required for
-  // `max-width` to take effect when there's no explicit width.
+  // Task 106 — width cap container, LEFT-ALIGNED (revises task 103's centered
+  // layout). `max-width: 480px` only constrains; it doesn't shrink below
+  // natural width, so narrow panes are unaffected. `marginLeft: 0` +
+  // `marginRight: auto` anchors the criteria to the pane's left edge (against
+  // the outer `root` wrapper's left padding) instead of centering — operator
+  // (Round 8, 2026-05-22): "the semantic search component should be left
+  // aligned." Empty space sits on the RIGHT when the pane is wider than 480px.
+  // `width: 100%` is required for `max-width` to take effect when there's no
+  // explicit width.
   criteria: {
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
     maxWidth: `${CRITERIA_MAX_WIDTH_PX}px`,
-    marginLeft: 'auto',
+    marginLeft: 0,
     marginRight: 'auto',
     gap: tokens.spacingVerticalM,
   },
@@ -624,10 +634,11 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
   return (
     <div className={styles.root} data-testid="semantic-search-criteria-tool">
       {/*
-        Task 103 — `criteria` wrapper applies max-width: 480px + margin: 0 auto
-        so the form stays centered at a comfortable form-panel width even when
-        the Context pane is full-width (Assistant + Workspace both collapsed
-        via task 100). Narrow panes unaffected — max-width only constrains.
+        Task 106 — `criteria` wrapper applies max-width: 480px + marginLeft: 0
+        + marginRight: auto so the form is left-aligned, max-width 480px so the
+        form anchors to the pane's left edge instead of stretching or centering
+        on wider screens (revises task 103's centering decision per Round 8
+        operator feedback). Narrow panes unaffected — max-width only constrains.
       */}
       <div className={styles.criteria}>
       <div className={styles.header}>
