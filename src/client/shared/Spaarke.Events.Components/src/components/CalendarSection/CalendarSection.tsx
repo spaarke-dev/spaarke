@@ -77,6 +77,48 @@ export interface CalendarSectionProps {
   initialDate?: string;
   /** Height of the calendar section */
   height?: number;
+
+  /**
+   * Controlled-mode anchor month for the rendered range.
+   *
+   * When provided, CalendarSection is CONTROLLED by the parent — the parent
+   * owns the month-anchor state and internal `viewDate` is ignored. The
+   * rendered range starts at this month and spans `monthsToShow` months
+   * forward.
+   *
+   * When OMITTED, CalendarSection retains the existing internal-state
+   * behavior (defaults to today's month, "+ 2 ahead" rendering — i.e. 3
+   * months total). The standalone EventsPage's `CalendarDrawer` consumes
+   * CalendarSection without this prop and is therefore unaffected.
+   *
+   * Task 116 — required for the Calendar widget's external ◀ ▶ navigation.
+   */
+  viewDate?: Date;
+
+  /**
+   * Number of months to render. Defaults to 3 (the prior internal behavior).
+   *
+   * Calendar widget (task 116) passes a responsive value derived from
+   * container width via ResizeObserver. EventsPage standalone omits this
+   * prop and gets the original 3-month behavior.
+   */
+  monthsToShow?: number;
+
+  /**
+   * Layout direction for the rendered months.
+   *
+   * - `'vertical'` (DEFAULT) — months stack top-to-bottom inside a single
+   *   vertically-scrolling container. Preserves the prior behavior used by
+   *   EventsPage's CalendarDrawer.
+   * - `'horizontal'` — months sit side-by-side via flex row with a fixed
+   *   gap. Used by the Calendar workspace widget (task 116) where strip
+   *   width is bounded by the parent and arrows handle navigation rather
+   *   than scrolling.
+   *
+   * Defaults to `'vertical'` so existing CalendarSection consumers render
+   * identically without changes.
+   */
+  layout?: "vertical" | "horizontal";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,8 +155,29 @@ const useStyles = makeStyles({
     ...shorthands.padding("8px"),
     overflowY: "auto",
   },
+  // Task 116: horizontal layout variant. Row of months, no internal scroll
+  // (the consuming widget bounds the width and uses external arrows to
+  // navigate; we hide overflow so partial months don't appear cut off).
+  calendarContentHorizontal: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    ...shorthands.padding("8px"),
+    ...shorthands.gap("16px"),
+    overflow: "hidden",
+  },
   monthContainer: {
     marginBottom: "16px",
+  },
+  // Task 116: in horizontal layout each month is a fixed-min-width column;
+  // the bottom margin from `monthContainer` is irrelevant because flex
+  // gap supplies the spacing. We share `monthContainer` for the grid + day
+  // structure and override marginBottom for horizontal here.
+  monthContainerHorizontal: {
+    marginBottom: 0,
+    flex: "1 1 0",
+    minWidth: "240px",
   },
   monthHeader: {
     display: "flex",
@@ -299,14 +362,28 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   onFilterChange,
   initialDate,
   height,
+  viewDate: viewDateProp,
+  monthsToShow: monthsToShowProp,
+  layout = "vertical",
 }) => {
   const styles = useStyles();
   const today = new Date();
 
-  // State for current view (which months to display)
-  const [viewDate, setViewDate] = React.useState<Date>(
+  // State for current view (which months to display) — used only when the
+  // parent does NOT pass `viewDate`. When `viewDateProp` is provided the
+  // component is CONTROLLED and this internal state is bypassed entirely
+  // (per task 116, to support the Calendar widget's external ◀ ▶ arrows).
+  const [internalViewDate, setInternalViewDate] = React.useState<Date>(
     initialDate ? parseIsoDate(initialDate) : today
   );
+  // setInternalViewDate is exposed for backwards compatibility with the
+  // original component (no external API change). It's referenced only when
+  // the component is in uncontrolled mode — currently no internal callers,
+  // but kept so future month-nav buttons inside CalendarSection itself
+  // remain possible without an API break.
+  void setInternalViewDate;
+  const viewDate = viewDateProp ?? internalViewDate;
+  const monthsToShowCount = monthsToShowProp ?? 3;
 
   // Selection state
   const [selectedDate, setSelectedDate] = React.useState<string | null>(
@@ -412,7 +489,12 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
     }
 
     return (
-      <div key={`${year}-${month}`} className={styles.monthContainer}>
+      <div
+        key={`${year}-${month}`}
+        className={`${styles.monthContainer} ${
+          layout === "horizontal" ? styles.monthContainerHorizontal : ""
+        }`}
+      >
         <div className={styles.monthHeader}>
           {MONTHS[month]} {year}
         </div>
@@ -473,15 +555,19 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
     );
   };
 
-  // Generate months to display (current month + next 2 months)
+  // Generate months to display. Default count is 3 (the prior internal
+  // behavior — current + 2 ahead); parents may override via `monthsToShow`
+  // prop (task 116 Calendar widget computes a responsive count from
+  // container width).
   const monthsToShow = React.useMemo(() => {
     const months: { year: number; month: number }[] = [];
-    for (let i = 0; i < 3; i++) {
+    const count = Math.max(1, monthsToShowCount);
+    for (let i = 0; i < count; i++) {
       const d = new Date(viewDate.getFullYear(), viewDate.getMonth() + i, 1);
       months.push({ year: d.getFullYear(), month: d.getMonth() });
     }
     return months;
-  }, [viewDate]);
+  }, [viewDate, monthsToShowCount]);
 
   const hasSelection = selectedDate !== null || rangeStart !== null;
 
@@ -511,8 +597,15 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
         <div className={styles.selectionInfo}>{selectionInfo}</div>
       )}
 
-      {/* Calendar content */}
-      <div className={styles.calendarContent}>
+      {/* Calendar content — vertical stack (default, EventsPage drawer) or
+          horizontal row (Calendar widget, task 116). */}
+      <div
+        className={
+          layout === "horizontal"
+            ? styles.calendarContentHorizontal
+            : styles.calendarContent
+        }
+      >
         {monthsToShow.map(({ year, month }) => renderMonth(year, month))}
       </div>
 

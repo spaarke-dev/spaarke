@@ -1,23 +1,36 @@
 /**
  * CalendarWorkspaceWidget — the 5th SpaarkeAi system workspace widget.
  *
- * Task 115 (Round 9, 2026-05-22). Operator vision: a "Calendar" workspace
- * surfaces all events + tasks the user has access to (same data scope as
- * the standalone `sprk_eventspage` code page) and re-uses the SAME Events
- * + Tasks shared components hoisted in task 114.
+ * Task 115 (Round 9, 2026-05-22) shipped the initial vertical-stacked
+ * 3-month strip. Task 116 (Round 10, 2026-05-22) polished it per operator
+ * smoke feedback:
+ *
+ *  1. **Horizontal calendar strip** (was vertical stacking). The shared
+ *     `CalendarSection` now accepts `layout?: 'vertical' | 'horizontal'`
+ *     (default 'vertical' so EventsPage's `CalendarDrawer` is unchanged).
+ *  2. **Responsive month count.** A `ResizeObserver` measures the strip
+ *     container and maps the width to a month count via
+ *     `computeMonthsForWidth`. CalendarSection accepts `monthsToShow?:
+ *     number` (default 3 = prior behavior).
+ *  3. **External ◀ ▶ arrow navigation.** CalendarSection accepts
+ *     `viewDate?: Date` — controlled-component mode. The widget owns the
+ *     anchor month state; arrows shift it by ±1 month. No upper bound on
+ *     month/year navigation.
+ *  4. **No internal scroll on the strip.** `overflow: hidden` on the
+ *     strip container; arrows ARE the navigation, no scrollbar.
+ *  5. **Collapsible strip.** Chevron toggle right of the strip. When
+ *     collapsed, the strip unmounts; date-filter / toolbar / view selector
+ *     / grid all remain visible. The grid container has `flex: 1 1 auto`
+ *     so it absorbs the freed vertical space. Collapsed preference
+ *     persists in `localStorage["spaarke:calendar:collapsed"]` (try/catch
+ *     wrapped per task 092 `pinnedWorkspaces.ts` pattern).
+ *  6. **Reduced default height.** Strip container is `min-height: 280px`,
+ *     `flex-shrink: 0`. Single-month grid baseline is ~240–280px, so this
+ *     fits one full row of months without dominating the workspace.
  *
  * Layout (operator mockup, top → bottom):
  *  1. Date-range filter row    — "Filter by Date Field" dropdown + From/To pickers
- *  2. 3-month calendar strip   — composed via `<CalendarSection>` (which already
- *                                renders current + 2 ahead — see CalendarSection
- *                                v1.0.0 monthsToShow). The original brief asked
- *                                for ◀ ▶ navigation; CalendarSection's internal
- *                                viewDate state advances on user interaction but
- *                                does NOT expose external prev/next handles.
- *                                Adding nav arrows would require modifying the
- *                                shared component — out of scope (composition
- *                                over modification per the brief). Flagged for
- *                                a future round.
+ *  2. Calendar strip row       — ◀ button · responsive horizontal CalendarSection · ▶ button · collapse chevron
  *  3. EventsPage toolbar       — full parity with standalone EventsPage:
  *                                New / Delete / Complete / Close / Cancel /
  *                                On Hold / Archive / Refresh / Calendar
@@ -58,6 +71,8 @@ import {
   Toolbar,
   ToolbarButton,
   ToolbarDivider,
+  Button,
+  Tooltip,
 } from "@fluentui/react-components";
 import {
   Add24Regular,
@@ -69,6 +84,10 @@ import {
   DismissCircle24Regular,
   Pause24Regular,
   Archive24Regular,
+  ChevronLeft20Regular,
+  ChevronRight20Regular,
+  ChevronUp20Regular,
+  ChevronDown20Regular,
 } from "@fluentui/react-icons";
 
 import {
@@ -82,6 +101,7 @@ import {
   ViewSelectorDropdown,
   useViewSelection,
 } from "../../components/ViewSelectorDropdown";
+import { addMonths, startOfMonth } from "../../utils/dateMath";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Xrm typing — host-provided global
@@ -123,6 +143,58 @@ const DATE_FIELDS = [
   { value: "createdon", label: "Created On" },
   { value: "modifiedon", label: "Modified On" },
 ] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collapse persistence (task 116) — mirrors `pinnedWorkspaces.ts` pattern
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CALENDAR_COLLAPSED_KEY = "spaarke:calendar:collapsed";
+
+function readCollapsedPref(): boolean {
+  try {
+    return window.localStorage?.getItem(CALENDAR_COLLAPSED_KEY) === "1";
+  } catch {
+    // Private browsing / quota / corrupt storage — degrade silently.
+    return false;
+  }
+}
+
+function writeCollapsedPref(collapsed: boolean): void {
+  try {
+    if (collapsed) {
+      window.localStorage?.setItem(CALENDAR_COLLAPSED_KEY, "1");
+    } else {
+      window.localStorage?.removeItem(CALENDAR_COLLAPSED_KEY);
+    }
+  } catch {
+    /* see readCollapsedPref */
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Responsive month-count breakpoints (task 116)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Map calendar-strip container width (px) to a month count.
+ *
+ * Single-month grid is roughly 240–280px wide once padding + day cells are
+ * counted. Breakpoints are calibrated for SpaarkeAi's typical workspace
+ * pane widths:
+ *   - ~450–600px at the default 25/50/25 split (task 117 baseline) → 2 mo.
+ *   - ~900–1100px when Context pane is collapsed → 3-4 mo.
+ *   - >1400px on ultra-wide / Assistant + Context both collapsed → 5 mo.
+ *
+ * Cap at 5 to avoid over-rendering on ultra-wide monitors (each month
+ * paints 42 day cells, so 5 months = 210 cells + headers).
+ */
+function computeMonthsForWidth(widthPx: number): number {
+  if (widthPx < 380) return 1;
+  if (widthPx < 720) return 2;
+  if (widthPx < 1060) return 3;
+  if (widthPx < 1400) return 4;
+  return 5;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -185,21 +257,63 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
   },
-  calendarStripContainer: {
+  // Task 116: calendar row = ◀ + strip (flex: 1) + ▶ + collapse toggle.
+  // The row itself is `flex-shrink: 0` so the grid below can claim
+  // remaining vertical space via `flex: 1 1 auto` on `gridContainer`.
+  calendarRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "stretch",
+    flexShrink: 0,
+    ...shorthands.gap("4px"),
+    ...shorthands.padding("0", "4px"),
+    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+    minHeight: "280px",
+  },
+  calendarRowCollapsed: {
+    minHeight: "auto",
+  },
+  // The middle strip: hosts CalendarSection in horizontal layout. No
+  // scrollbar — arrows are the navigation.
+  calendarStrip: {
+    flex: "1 1 auto",
     display: "flex",
     flexDirection: "column",
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
-    // CalendarSection already renders 3 months stacked vertically; constrain
-    // height so the strip does not dominate the widget on tall hosts.
-    maxHeight: "560px",
-    minHeight: "320px",
     overflow: "hidden",
+    minWidth: 0, // allow flex shrink past content's intrinsic width
+  },
+  navButton: {
+    alignSelf: "center",
+    flexShrink: 0,
+  },
+  collapseButtonContainer: {
+    display: "flex",
+    alignItems: "center",
+    flexShrink: 0,
+    ...shorthands.padding("0", "0", "0", "4px"),
+    ...shorthands.borderLeft("1px", "solid", tokens.colorNeutralStroke2),
+  },
+  // When collapsed, the row shrinks to just hosting the expand button.
+  collapsedBar: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexShrink: 0,
+    ...shorthands.padding("4px", "8px"),
+    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+  },
+  collapsedLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
   },
   toolbarRow: {
+    flexShrink: 0,
     ...shorthands.padding("0", "4px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
   viewSelectorRow: {
+    flexShrink: 0,
     display: "flex",
     alignItems: "center",
     ...shorthands.padding("8px"),
@@ -324,6 +438,49 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
     refreshGrid,
   } = useEventsPageContext();
 
+  // ── Calendar strip state (task 116) ──────────────────────────────────────
+  // Anchor month for the rendered range. CalendarSection is in CONTROLLED
+  // mode via this state — arrows shift ±1 month with no upper bound.
+  const [viewDate, setViewDate] = React.useState<Date>(() =>
+    startOfMonth(new Date()),
+  );
+
+  // Responsive month count derived from strip width via ResizeObserver.
+  // Initial guess of 2 mirrors the default 25/50/25 SpaarkeAi pane split
+  // (~600px Workspace pane → 2 months); the observer overrides on first
+  // measurement so cold-load reflow is invisible.
+  const stripRef = React.useRef<HTMLDivElement | null>(null);
+  const [monthsToShow, setMonthsToShow] = React.useState<number>(2);
+
+  React.useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return; // SSR / very old browsers
+    const node = stripRef.current;
+    if (!node) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width;
+        if (w > 0) {
+          const next = computeMonthsForWidth(w);
+          setMonthsToShow((prev) => (prev === next ? prev : next));
+        }
+      }
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+
+  // Collapse state (task 116) — persisted in localStorage.
+  const [calendarCollapsed, setCalendarCollapsed] = React.useState<boolean>(
+    () => readCollapsedPref(),
+  );
+  const toggleCollapsed = React.useCallback(() => {
+    setCalendarCollapsed((prev) => {
+      const next = !prev;
+      writeCollapsedPref(next);
+      return next;
+    });
+  }, []);
+
   // ── Date-range filter (top row) ──────────────────────────────────────────
   const [dateField, setDateField] = React.useState<string>(initialDateField);
   const [fromDate, setFromDate] = React.useState<string>("");
@@ -350,9 +507,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
   }, [fromDate, toDate, dateField, setCalendarFilter]);
 
   // ── View selector ────────────────────────────────────────────────────────
-  // `useViewSelection()` reads from / writes to sessionStorage; if a caller
-  // wants a non-default initial view, we one-shot prime the hook on first
-  // mount (avoids forking the hook signature for a narrow widget need).
   const [selectedViewId, setSelectedViewId] = useViewSelection();
   const primedRef = React.useRef(false);
   React.useEffect(() => {
@@ -464,14 +618,32 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
 
   // The "Calendar" toolbar button in standalone EventsPage opens the side-pane
   // Date Filter. In the embedded widget, there is no separate side pane — the
-  // calendar strip is always visible above the grid. We map this button to a
-  // calendar-filter clear (deselects any active date filter) so the button is
-  // not a dead affordance.
+  // calendar strip is (when not collapsed) always visible above the grid. We
+  // map this button to a calendar-filter clear (deselects any active date
+  // filter) so the button is not a dead affordance.
   const onCalendarToolbarClick = React.useCallback(() => {
     setCalendarFilter({ type: "clear" });
     setFromDate("");
     setToDate("");
   }, [setCalendarFilter]);
+
+  // ── Month navigation handlers (task 116) ─────────────────────────────────
+  // Step = 1 month per click by default; Shift+click advances by the visible
+  // window so power users can jump faster on wide screens.
+  const onPrevMonth = React.useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      const step = e.shiftKey ? Math.max(1, monthsToShow) : 1;
+      setViewDate((prev) => addMonths(prev, -step));
+    },
+    [monthsToShow],
+  );
+  const onNextMonth = React.useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      const step = e.shiftKey ? Math.max(1, monthsToShow) : 1;
+      setViewDate((prev) => addMonths(prev, step));
+    },
+    [monthsToShow],
+  );
 
   return (
     <div className={styles.root}>
@@ -511,14 +683,65 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
         </div>
       </div>
 
-      {/* (2) 3-month calendar strip — CalendarSection already renders
-              current month + next 2 (see CalendarSection v1.0.0 monthsToShow). */}
-      <div className={styles.calendarStripContainer}>
-        <CalendarSection
-          eventDates={eventDates as IEventDateInfo[]}
-          onFilterChange={(filter) => setCalendarFilter(filter)}
-        />
-      </div>
+      {/* (2) Calendar strip — collapsible. When collapsed, the strip
+              unmounts (state lives in this layout, not in CalendarSection
+              now that viewDate is controlled, so unmount/remount is free).
+              A slim bar with just the expand chevron remains. */}
+      {calendarCollapsed ? (
+        <div className={styles.collapsedBar}>
+          <span className={styles.collapsedLabel}>Calendar (collapsed)</span>
+          <Tooltip content="Expand calendar" relationship="label">
+            <Button
+              appearance="subtle"
+              icon={<ChevronDown20Regular />}
+              onClick={toggleCollapsed}
+              aria-expanded={false}
+              aria-label="Expand calendar"
+            />
+          </Tooltip>
+        </div>
+      ) : (
+        <div className={styles.calendarRow}>
+          <Tooltip content="Previous month (Shift+click: jump by window)" relationship="label">
+            <Button
+              className={styles.navButton}
+              appearance="subtle"
+              icon={<ChevronLeft20Regular />}
+              onClick={onPrevMonth}
+              aria-label="Previous month"
+            />
+          </Tooltip>
+          <div ref={stripRef} className={styles.calendarStrip}>
+            <CalendarSection
+              eventDates={eventDates as IEventDateInfo[]}
+              onFilterChange={(filter) => setCalendarFilter(filter)}
+              viewDate={viewDate}
+              monthsToShow={monthsToShow}
+              layout="horizontal"
+            />
+          </div>
+          <Tooltip content="Next month (Shift+click: jump by window)" relationship="label">
+            <Button
+              className={styles.navButton}
+              appearance="subtle"
+              icon={<ChevronRight20Regular />}
+              onClick={onNextMonth}
+              aria-label="Next month"
+            />
+          </Tooltip>
+          <div className={styles.collapseButtonContainer}>
+            <Tooltip content="Collapse calendar" relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<ChevronUp20Regular />}
+                onClick={toggleCollapsed}
+                aria-expanded={true}
+                aria-label="Collapse calendar"
+              />
+            </Tooltip>
+          </div>
+        </div>
+      )}
 
       {/* (3) Full EventsPage toolbar */}
       <div className={styles.toolbarRow}>
