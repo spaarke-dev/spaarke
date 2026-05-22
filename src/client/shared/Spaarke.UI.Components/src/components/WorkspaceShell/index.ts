@@ -106,3 +106,22 @@ export type { DailyBriefingSectionProps } from "./sections/dailyBriefing/DailyBr
 
 export { createDailyBriefingRegistration } from "./sections/dailyBriefing/dailyBriefing.registration";
 export type { CreateDailyBriefingRegistrationOptions } from "./sections/dailyBriefing/dailyBriefing.registration";
+
+// Wizard launchers (hoisted in Round 4 Fix 2 / task 085 — see file header).
+// Shared Xrm.Navigation.navigateTo wrappers for the seven Get Started wizards.
+// Reused by SpaarkeAi's ContextPaneController; LegalWorkspace's WorkspaceGrid
+// continues to use its own local handlers for FR-25 byte-stability.
+export {
+  launchCreateMatterWizard,
+  launchCreateProjectWizard,
+  launchSummarizeFilesWizard,
+  launchFindSimilarWizard,
+  launchAssignWorkWizard,
+  launchPlaybookIntent,
+} from "./wizardLaunchers";
+export type {
+  BaseLauncherOptions,
+  SummarizeFilesLauncherOptions,
+  FindSimilarLauncherOptions,
+  PlaybookIntentLauncherOptions,
+} from "./wizardLaunchers";

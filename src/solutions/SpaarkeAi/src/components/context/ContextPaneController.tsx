@@ -37,14 +37,20 @@ import {
   mergeClasses,
 } from "@fluentui/react-components";
 import { DocumentRegular } from "@fluentui/react-icons";
-import { PaneHeader } from "@spaarke/ui-components";
+import {
+  PaneHeader,
+  launchCreateMatterWizard,
+  launchCreateProjectWizard,
+  launchSummarizeFilesWizard,
+  launchFindSimilarWizard,
+  launchAssignWorkWizard,
+  launchPlaybookIntent,
+} from "@spaarke/ui-components";
 import {
   usePaneEvent,
-  useDispatchPaneEvent,
   resolveContextWidget,
   getContextWidgetForTab,
   GetStartedCardsWidget,
-  launchAssignWorkWizard,
 } from "@spaarke/ai-widgets";
 import type {
   ContextWidgetComponent,
@@ -300,50 +306,20 @@ function ResolvedContextWidget({
 }
 
 // ---------------------------------------------------------------------------
-// launchCodePagePopup — inline Xrm.Navigation dispatcher (task 068, UX-B)
+// Wizard launchers
 //
-// Mirrors the pattern from launchAssignWorkWizard (task 045) but inlined here
-// because Create Matter + Summarize Files don't justify a shared launcher each
-// — the Code Page web-resource name + bffBaseUrl query string is the only
-// configuration that varies. ADR-028: bffBaseUrl is a base URL only, NOT a
-// token — the wizard authenticates inside its iframe via @spaarke/auth.
+// Round 4 Fix 2 (task 085): all seven Get Started card click handlers now use
+// the shared `launch*Wizard` helpers from `@spaarke/ui-components`. The shared
+// helpers REUSE LegalWorkspace's exact Xrm.Navigation.navigateTo call shape
+// (verbatim from `src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx`
+// and `ActionCardHandlers.ts`). The previous local `launchCodePagePopup` and
+// `launchAssignWorkWizard` package-local helpers were divergent (and the
+// widget_load dispatch paths added a tab-mount round-trip), which broke the
+// six non-Create-Project wizard launches from this pane.
 //
-// Non-host environments (Vite dev, jsdom tests) silently no-op when
-// window.Xrm.Navigation is unavailable. This matches AssignWorkWizardLauncher's
-// silent-fail behaviour — the calling site (this component) does not surface a
-// placeholder UI because the ContextPane should not flash a non-host warning
-// when, e.g., a developer is iterating in Vite dev.
+// See `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts`
+// for the launcher implementations + provenance comments.
 // ---------------------------------------------------------------------------
-
-function launchCodePagePopup(
-  webresourceName: string,
-  title: string,
-  bffBaseUrl: string,
-): void {
-  if (typeof window === "undefined") return;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
-    if (!xrm || !xrm.Navigation || typeof xrm.Navigation.navigateTo !== "function") {
-      return; // Vite dev / unit tests / Storybook — silent no-op.
-    }
-    const data = `bffBaseUrl=${encodeURIComponent(bffBaseUrl)}`;
-    xrm.Navigation.navigateTo(
-      { pageType: "webresource", webresourceName, data },
-      {
-        target: 2,
-        width: { value: 60, unit: "%" },
-        height: { value: 70, unit: "%" },
-        title,
-      },
-    ).catch(() => {
-      // Intentional: user cancel / dialog error — ignore (matches
-      // LegalWorkspace WorkspaceGrid.tsx precedent and AssignWorkWizardLauncher).
-    });
-  } catch {
-    // Xrm getter threw (rare; observed in some PCF harnesses) — silent.
-  }
-}
 
 // ---------------------------------------------------------------------------
 // ContextPaneController — primary export
@@ -531,72 +507,76 @@ export function ContextPaneController(): React.JSX.Element {
   }, []));
 
   // ---------------------------------------------------------------------------
-  // PaneEventBus dispatcher — for welcome-stage GetStartedCards card clicks (FR-19).
+  // PaneEventBus dispatcher — kept for non-card workspace events.
   //
-  // task 068 (UX-B — smoke remediation): the seven Get Started cards now split
-  // into three behaviour groups:
+  // Round 4 Fix 2 (task 085): all 7 Get Started cards now route through the
+  // shared `launch*Wizard` helpers from `@spaarke/ui-components`. The previous
+  // split into "Group A" (direct Xrm.Navigation via local `launchCodePagePopup`)
+  // and "Group B" (`widget_load` → tab-mount → widget calls navigateTo on mount)
+  // is REMOVED — that split was the parallel-implementation bug. Now every card
+  // calls the SAME launcher pattern that LegalWorkspace's WorkspaceGrid uses.
   //
-  //   Group A — Code Page popups via Xrm.Navigation.navigateTo (3 cards):
-  //     - 'assign-work'            → sprk_createworkassignmentwizard
-  //     - 'create-matter-wizard'   → sprk_creatematterwizard           (task 068)
-  //     - 'document-upload-wizard' → sprk_summarizefileswizard         (task 068)
-  //   These cross the host boundary into Dataverse and open as dialogs. Pre-068,
-  //   Create Matter + Summarize Files dispatched widget_load and embedded the
-  //   R2 wizard widgets as Workspace tabs; operator feedback (2026-05-20 smoke)
-  //   asked for popup consistency with the other 5 cards. The embedded
-  //   CreateMatterWizardWidget / DocumentUploadWizardWidget remain registered in
-  //   WorkspaceWidgetRegistry for non-ContextPane widget_load consumers — we
-  //   only changed the click-handler routing here.
-  //
-  //   Group B — Code Page popups via Xrm.Navigation (4 cards routed by
-  //   WorkspacePane via widget_load → workspace-widget components that call
-  //   navigateTo themselves; pattern preserved):
-  //     - 'create-project-wizard', 'find-similar-wizard',
-  //       'email-compose', 'meeting-schedule'
-  //
-  // No new channels are invented; the existing `workspace` channel is used
-  // for Group B only.
+  // The corresponding workspace-widgets (CreateProjectWizardWidget,
+  // FindSimilarWizardWidget, EmailComposeWidget, MeetingScheduleWidget,
+  // CreateMatterWizardWidget, DocumentUploadWizardWidget) REMAIN REGISTERED in
+  // WorkspaceWidgetRegistry per operator's "keep embedded structure for future
+  // use cases" directive — server-initiated `widget_load` events from a future
+  // playbook orchestrator can still mount them as workspace tabs. Only the
+  // welcome-state CARD CLICK routing changes here.
   // ---------------------------------------------------------------------------
-
-  const dispatch = useDispatchPaneEvent();
 
   /**
    * onCardClick handler for {@link GetStartedCardsWidget} (FR-19 mapping).
    *
-   * - 'assign-work'            → {@link launchAssignWorkWizard} (task 045)
-   * - 'create-matter-wizard'   → Xrm.Navigation popup → sprk_creatematterwizard   (task 068)
-   * - 'document-upload-wizard' → Xrm.Navigation popup → sprk_summarizefileswizard (task 068)
-   * - any other card           → dispatch `widget_load` on the `workspace`
-   *                              channel; WorkspacePane opens the widget as
-   *                              a new top-tab.
+   * All seven cards route directly to the shared wizard launchers — the exact
+   * Xrm.Navigation.navigateTo shape used by LegalWorkspace's WorkspaceGrid. No
+   * tab-mount intermediate, no widget_load dispatch, no parallel implementation.
    */
   const handleGetStartedCardClick = React.useCallback(
     (cardId: GetStartedCardId): void => {
-      if (cardId === "assign-work") {
-        launchAssignWorkWizard({ bffBaseUrl: getBffBaseUrl() });
-        return;
-      }
+      const bffBaseUrl = getBffBaseUrl();
 
-      if (cardId === "create-matter-wizard") {
-        launchCodePagePopup("sprk_creatematterwizard", "Create Matter", getBffBaseUrl());
-        return;
-      }
+      switch (cardId) {
+        case "create-matter-wizard":
+          launchCreateMatterWizard({ bffBaseUrl });
+          return;
 
-      if (cardId === "document-upload-wizard") {
-        launchCodePagePopup("sprk_summarizefileswizard", "Summarize Files", getBffBaseUrl());
-        return;
-      }
+        case "create-project-wizard":
+          launchCreateProjectWizard({ bffBaseUrl });
+          return;
 
-      // Group B — dispatch widget_load on the existing `workspace` channel.
-      // The WorkspacePane top-tab opener subscribes here. We pass only the
-      // widgetType (no token, no widgetData); the workspace widget itself
-      // fetches whatever data it needs via authenticatedFetch.
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: cardId,
-      });
+        case "assign-work":
+          launchAssignWorkWizard({ bffBaseUrl });
+          return;
+
+        case "document-upload-wizard":
+          // GetStartedCardsWidget labels this "Summarize Files" — route to the
+          // same Summarize Files wizard LegalWorkspace uses.
+          launchSummarizeFilesWizard({ bffBaseUrl });
+          return;
+
+        case "find-similar-wizard":
+          launchFindSimilarWizard({ bffBaseUrl });
+          return;
+
+        case "email-compose":
+          launchPlaybookIntent({ bffBaseUrl, intent: "email-compose" });
+          return;
+
+        case "meeting-schedule":
+          launchPlaybookIntent({ bffBaseUrl, intent: "meeting-schedule" });
+          return;
+
+        default: {
+          // Exhaustiveness check — TypeScript will flag this if a new
+          // GetStartedCardId is added without a matching case.
+          const _exhaustive: never = cardId;
+          void _exhaustive;
+          return;
+        }
+      }
     },
-    [dispatch]
+    []
   );
 
   // ---------------------------------------------------------------------------

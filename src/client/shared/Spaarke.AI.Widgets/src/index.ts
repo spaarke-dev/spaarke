@@ -196,24 +196,23 @@ export type { FindSimilarWizardData } from './widgets/workspace/FindSimilarWizar
 export { serializeFindSimilarWizardState } from './widgets/workspace/FindSimilarWizardWidget';
 
 // ---------------------------------------------------------------------------
-// Launchers: AssignWorkWizardLauncher (FR-20, task 045)
+// Launchers: REMOVED in Round 4 Fix 2 (task 085)
 //
-// Thin function-based dispatcher (NOT a widget) that opens the existing
-// Dataverse Code Page wizard `sprk_createworkassignmentwizard` via
-// `Xrm.Navigation.navigateTo`. Feature-detects `window.Xrm` and returns a
-// status object so calling sites can render a Vite-dev placeholder without
-// the launcher having to mutate the DOM. See file header for UQ-05 precedent
-// citations.
+// The package-local `launchAssignWorkWizard` (task 045) has been superseded by
+// the shared `launchAssignWorkWizard` exported from `@spaarke/ui-components`
+// (see `WorkspaceShell/wizardLaunchers.ts`). The shared launcher uses the same
+// verbatim Xrm.Navigation shape as LegalWorkspace's WorkspaceGrid.tsx and
+// applies frame-walking Xrm resolution (the package-local helper only checked
+// `window.Xrm`, which missed nested-iframe cases).
+//
+// Migration:
+//   - Old: `import { launchAssignWorkWizard } from '@spaarke/ai-widgets'`
+//   - New: `import { launchAssignWorkWizard } from '@spaarke/ui-components'`
+//
+// The shared module also exports launchers for the other six Get Started
+// wizards (Create Matter, Create Project, Summarize Files, Find Similar,
+// Email Compose, Schedule Meeting) — see `@spaarke/ui-components` exports.
 // ---------------------------------------------------------------------------
-
-export {
-  launchAssignWorkWizard,
-  ASSIGN_WORK_WEBRESOURCE_NAME,
-} from './widgets/workspace/AssignWorkWizardLauncher';
-export type {
-  AssignWorkLaunchOptions,
-  AssignWorkLaunchResult,
-} from './widgets/workspace/AssignWorkWizardLauncher';
 
 // ---------------------------------------------------------------------------
 // Widgets: ProgressTrackerWidget (context pane — workflow step progress)

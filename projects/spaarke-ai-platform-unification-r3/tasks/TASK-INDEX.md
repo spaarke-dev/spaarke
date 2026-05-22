@@ -66,6 +66,7 @@
 | 082 | SprkChat UX fixes — input focus restore + slash menu outside-click (smoke remediation round 2) | F (Verification — remediation) | ✅ | 023, 025, 070 | 071 | — (serial) | STANDARD | 1 |
 | 083 | BFF resilience: missing Dataverse manifest + empty Daily Briefing payload (smoke remediation round 2 — unblocks chat + Daily Briefing in dev) | F (Verification — remediation) | ✅ | 050, 070 | 071, 072 | — (serial) | STANDARD | 1.5 |
 | 084 | WorkspacePaneMenu: replace task-081 parallel implementation with reused LegalWorkspace `useWorkspaceLayouts` hook (Round 4 Fix 1 — workspaces dropdown still empty after 081) | F (Verification — remediation) | ✅ | 032, 081 | 072 | — (serial) | STANDARD | 2 |
+| 085 | Get Started wizard launchers: hoist LegalWorkspace's exact navigateTo handlers to `@spaarke/ui-components` and reuse from SpaarkeAi ContextPaneController (Round 4 Fix 2 — wizards opened from Context-pane cards now route through the proven LegalWorkspace call shape; removes parallel `launchCodePagePopup` + `launchAssignWorkWizard` helpers) | F (Verification — remediation) | ✅ | 042, 044, 045, 068 | 073 | — (serial) | STANDARD | 3 |
 | 070 | Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` | G (Deploy) | ✅ | 060-063, **065** | 071-074 | — | FULL | 1 |
 | 071 | UI smoke — Assistant pane (FR-02..FR-09) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
 | 072 | UI smoke — Workspace pane (FR-10..FR-16) | G (Smoke) | 🔄 | 070 | 090 | G | STANDARD | 2 |
