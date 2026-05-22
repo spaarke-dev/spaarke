@@ -115,6 +115,34 @@ const useStyles = makeStyles({
     },
   },
 
+  // (Task 094) Collapsed center strip — narrow click-to-expand indicator.
+  // Visual treatment matches left/right strips; bordered on both sides to
+  // distinguish it from neighbouring (possibly also collapsed) strips.
+  centerPaneCollapsed: {
+    flex: '0 0 36px',
+    minWidth: '36px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingTop: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalXS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: 'pointer',
+    overflow: 'hidden',
+    height: '100%',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2Hover,
+    },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorStrokeFocus2,
+      outlineOffset: '-2px',
+    },
+  },
+
   // Rotated label text for collapsed strips
   collapsedLabel: {
     writingMode: 'vertical-rl',
@@ -174,6 +202,14 @@ export function ThreePaneLayout({
   defaultRightVisible = true,
   leftPaneCollapseLabel = 'Show left panel',
   rightPaneCollapseLabel = 'Show right panel',
+  centerPaneCollapseLabel = 'Show center panel',
+  // (Task 094) External collapse-state override props.
+  leftCollapsed,
+  centerCollapsed,
+  rightCollapsed,
+  onToggleLeft,
+  onToggleCenter,
+  onToggleRight,
   className,
 }: ThreePaneLayoutProps): JSX.Element {
   const styles = useStyles();
@@ -181,10 +217,10 @@ export function ThreePaneLayout({
   const {
     leftWidthPx,
     rightWidthPx,
-    isLeftVisible,
-    isRightVisible,
-    toggleLeft,
-    toggleRight,
+    isLeftVisible: internalLeftVisible,
+    isRightVisible: internalRightVisible,
+    toggleLeft: internalToggleLeft,
+    toggleRight: internalToggleRight,
     leftSplitterHandlers,
     rightSplitterHandlers,
     isDragging,
@@ -199,6 +235,20 @@ export function ThreePaneLayout({
     defaultLeftVisible,
     defaultRightVisible,
   });
+
+  // (Task 094) Resolve visibility + toggles, preferring external control
+  // when provided. When the consumer wires `leftCollapsed` + `onToggleLeft`
+  // they fully own the state — useful for the SpaarkeAi shell where
+  // collapse persists to localStorage via the `usePaneCollapse` hook.
+  const isLeftVisible = leftCollapsed !== undefined ? !leftCollapsed : internalLeftVisible;
+  const isRightVisible = rightCollapsed !== undefined ? !rightCollapsed : internalRightVisible;
+  // Center pane has no internal collapse — it's opt-in via the props.
+  const isCenterVisible = centerCollapsed !== undefined ? !centerCollapsed : true;
+
+  const toggleLeft = onToggleLeft ?? internalToggleLeft;
+  const toggleRight = onToggleRight ?? internalToggleRight;
+  // toggleCenter is only meaningful when the consumer wired centerCollapsed.
+  const toggleCenter = onToggleCenter;
 
   // Calculate ARIA ratios for PanelSplitter accessibility
   // Left splitter: proportion of (left pane) relative to total visible width
@@ -240,7 +290,9 @@ export function ThreePaneLayout({
       )}
 
       {/* ---- Left Splitter (between left and center) ---- */}
-      {isLeftVisible && (
+      {/* Hide the splitter when EITHER side is collapsed — there's nothing
+          meaningful to resize when one side is a fixed-width strip. */}
+      {isLeftVisible && isCenterVisible && (
         <PanelSplitter
           onMouseDown={leftSplitterHandlers.onMouseDown}
           onKeyDown={leftSplitterHandlers.onKeyDown}
@@ -250,11 +302,34 @@ export function ThreePaneLayout({
         />
       )}
 
-      {/* ---- Center Pane (flex:1) ---- */}
-      <div className={styles.centerPane}>{centerPane}</div>
+      {/* ---- Center Pane (flex:1, or collapsed strip when centerCollapsed) ---- */}
+      {/* (Task 094) When `centerCollapsed===true` the center pane renders as
+          a narrow vertical strip with a rotated label, mirroring the left
+          and right collapsed strips. Click / Enter / Space re-expands. */}
+      {isCenterVisible ? (
+        <div className={styles.centerPane}>{centerPane}</div>
+      ) : (
+        <div
+          className={styles.centerPaneCollapsed}
+          onClick={toggleCenter}
+          role="button"
+          tabIndex={0}
+          aria-label={centerPaneCollapseLabel}
+          title={centerPaneCollapseLabel}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              toggleCenter?.();
+            }
+          }}
+        >
+          <ChevronRight16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
+          <span className={styles.collapsedLabel}>{centerPaneCollapseLabel}</span>
+        </div>
+      )}
 
       {/* ---- Right Splitter (between center and right) ---- */}
-      {isRightVisible && (
+      {isRightVisible && isCenterVisible && (
         <PanelSplitter
           onMouseDown={rightSplitterHandlers.onMouseDown}
           onKeyDown={rightSplitterHandlers.onKeyDown}

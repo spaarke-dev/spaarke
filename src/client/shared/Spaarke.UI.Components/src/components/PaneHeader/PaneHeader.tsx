@@ -25,7 +25,7 @@
  */
 
 import * as React from 'react';
-import { Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -51,6 +51,25 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorNeutralStroke1,
     backgroundColor: tokens.colorNeutralBackground1,
     minHeight: '40px',
+  },
+
+  /**
+   * Clickable variant — applied when `onCollapse` is wired so the header acts
+   * as a collapse trigger. Cursor is `pointer` everywhere except over icon
+   * buttons in `rightSlot` (those buttons stop propagation themselves).
+   * Mirrors SmartToDo KanbanBoard.tsx column-header pattern (Task 094).
+   */
+  rootClickable: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorStrokeFocus2,
+      outlineOffset: '-2px',
+    },
   },
 
   /**
@@ -103,8 +122,37 @@ export interface PaneHeaderProps {
   /**
    * Optional right-aligned content (stage label, action button, etc.).
    * Rendered after the title in a non-shrinking flex container.
+   *
+   * When `onCollapse` is wired, interactive elements inside `rightSlot`
+   * (Buttons, Menus, etc.) MUST call `e.stopPropagation()` in their own
+   * `onClick` handlers so clicking them does not trigger the collapse.
+   * The shared PaneHeader applies `stopPropagation` on the rightSlot
+   * container's `onClick` automatically, so consumers do NOT have to wire
+   * it on every internal button — the container guard catches bubbling
+   * clicks from any descendant. This mirrors the SmartToDo KanbanBoard
+   * column-header pattern (Task 094).
    */
   rightSlot?: React.ReactNode;
+  /**
+   * Optional collapse-toggle callback (Task 094 — SpaarkeAi three-pane
+   * collapse/expand). When provided, the header becomes a clickable surface
+   * — clicking anywhere on the header (except inside `rightSlot` icon
+   * buttons, which stop propagation) invokes this callback. Used by the
+   * three-pane shell to toggle a pane's collapsed state.
+   *
+   * Pattern matches SmartToDo KanbanBoard.tsx column-header click-to-collapse
+   * (`onToggleCollapse` prop). Keyboard accessibility: when wired, the
+   * header is `tabIndex=0`, `role="button"`, `aria-expanded={expanded}`,
+   * and responds to Enter / Space.
+   */
+  onCollapse?: () => void;
+  /**
+   * When `onCollapse` is wired, indicates whether the pane is currently
+   * expanded. Drives `aria-expanded` on the clickable header for screen
+   * readers. Defaults to `true` so cold-load state is reported correctly
+   * before consumer state initialises.
+   */
+  expanded?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,11 +165,71 @@ export interface PaneHeaderProps {
  * `<header>` element for accessibility — screen readers announce it as
  * a landmark region without needing an explicit `role`.
  */
-export const PaneHeader: React.FC<PaneHeaderProps> = ({ title, icon, rightSlot }) => {
+export const PaneHeader: React.FC<PaneHeaderProps> = ({
+  title,
+  icon,
+  rightSlot,
+  onCollapse,
+  expanded = true,
+}) => {
   const styles = useStyles();
 
+  // ── Collapse-toggle wiring (Task 094) ──────────────────────────────────
+  //
+  // When `onCollapse` is provided, the header becomes a clickable / focusable
+  // surface that toggles the pane's collapsed state. Keyboard accessibility
+  // is wired via tabIndex / role / onKeyDown so the same affordance is
+  // reachable without a mouse.
+  //
+  // The rightSlot container stops propagation so any interactive content
+  // inside (Buttons, Menus, Tooltips) does not bubble its click up to the
+  // header. This is the same guard SmartToDo KanbanBoard.tsx uses for its
+  // column headers (KanbanBoard.tsx:212 `onClick={onToggleCollapse}` on the
+  // outer header, with the count badge / icon buttons inside the header
+  // never propagating).
+  const collapsible = typeof onCollapse === 'function';
+
+  const handleHeaderClick = collapsible ? () => onCollapse?.() : undefined;
+
+  const handleHeaderKeyDown = collapsible
+    ? (e: React.KeyboardEvent<HTMLElement>): void => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onCollapse?.();
+        }
+      }
+    : undefined;
+
+  const handleRightSlotClick = collapsible
+    ? (e: React.MouseEvent<HTMLSpanElement>): void => {
+        // Prevent rightSlot children (icon buttons, menus) from bubbling
+        // their click up to the header and accidentally triggering collapse.
+        e.stopPropagation();
+      }
+    : undefined;
+
+  const handleRightSlotKeyDown = collapsible
+    ? (e: React.KeyboardEvent<HTMLSpanElement>): void => {
+        // Block Enter / Space inside rightSlot from reaching the header's
+        // keyboard handler. Buttons inside Fluent components handle their
+        // own Enter / Space natively; we just stop the bubble here.
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.stopPropagation();
+        }
+      }
+    : undefined;
+
   return (
-    <header className={styles.root} data-testid="pane-header">
+    <header
+      className={mergeClasses(styles.root, collapsible && styles.rootClickable)}
+      data-testid="pane-header"
+      onClick={handleHeaderClick}
+      onKeyDown={handleHeaderKeyDown}
+      role={collapsible ? 'button' : undefined}
+      tabIndex={collapsible ? 0 : undefined}
+      aria-expanded={collapsible ? expanded : undefined}
+      aria-label={collapsible ? `${title} pane — click to ${expanded ? 'collapse' : 'expand'}` : undefined}
+    >
       {icon ? (
         <span className={styles.icon} aria-hidden="true" data-testid="pane-header-icon">
           {icon}
@@ -131,7 +239,12 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({ title, icon, rightSlot }
         {title}
       </Text>
       {rightSlot ? (
-        <span className={styles.rightSlot} data-testid="pane-header-right-slot">
+        <span
+          className={styles.rightSlot}
+          data-testid="pane-header-right-slot"
+          onClick={handleRightSlotClick}
+          onKeyDown={handleRightSlotKeyDown}
+        >
           {rightSlot}
         </span>
       ) : null}

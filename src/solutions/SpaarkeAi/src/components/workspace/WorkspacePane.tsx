@@ -40,6 +40,7 @@ import {
 } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
 import { buildBffApiUrl } from "@spaarke/auth";
+import { usePaneCollapseContext } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type {
   ActiveTabSnapshot,
@@ -629,10 +630,25 @@ export function WorkspacePane(): React.JSX.Element {
 
   const { tabs, activeTabId } = tabState;
 
+  // ── Pane collapse (Task 094) ────────────────────────────────────────────
+  //
+  // The Workspace pane is the CENTER pane in the three-pane shell. Clicking
+  // the PaneHeader (anywhere except the WorkspacePaneMenu dropdown trigger)
+  // toggles collapse via `paneCollapse.toggle('workspace')`. The shared
+  // PaneHeader applies stopPropagation on its rightSlot wrapper so the
+  // dropdown menu doesn't bubble its click up to the header.
+  const paneCollapse = usePaneCollapseContext();
+  const handleHeaderCollapse = React.useCallback(() => {
+    paneCollapse?.toggle("workspace");
+  }, [paneCollapse]);
+  const isWorkspaceExpanded = !(paneCollapse?.isCollapsed("workspace") ?? false);
+
   const header = (
     <PaneHeader
       title="Workspace"
       icon={<AppsListRegular />}
+      onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
+      expanded={isWorkspaceExpanded}
       rightSlot={
         <WorkspacePaneMenu
           tabs={tabs}

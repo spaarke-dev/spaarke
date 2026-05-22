@@ -58,7 +58,7 @@ import type {
   WorkspacePaneEvent,
   GetStartedCardId,
 } from "@spaarke/ai-widgets";
-import { useShellStage } from "../shell/ThreePaneShell";
+import { useShellStage, usePaneCollapseContext } from "../shell/ThreePaneShell";
 import type { ShellStage } from "../shell/ThreePaneShell";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
 
@@ -339,6 +339,19 @@ function ResolvedContextWidget({
 export function ContextPaneController(): React.JSX.Element {
   const styles = useStyles();
   const { currentStage } = useShellStage();
+
+  // ── Pane collapse (Task 094) ────────────────────────────────────────────
+  //
+  // The Context pane participates in the three-pane collapse/expand feature
+  // owned by the shell. Clicking the PaneHeader (anywhere except the stage
+  // label, which is non-interactive Text) toggles collapse via
+  // `paneCollapse.toggle('context')`. The shared PaneHeader applies
+  // stopPropagation on its rightSlot wrapper as a defensive guard.
+  const paneCollapse = usePaneCollapseContext();
+  const handleHeaderCollapse = React.useCallback(() => {
+    paneCollapse?.toggle("context");
+  }, [paneCollapse]);
+  const isContextExpanded = !(paneCollapse?.isCollapsed("context") ?? false);
 
   // Active widget slot — null until a context_update event arrives with a
   // successfully resolved widget component.
@@ -779,6 +792,8 @@ export function ContextPaneController(): React.JSX.Element {
       <PaneHeader
         title="Context"
         icon={<DocumentRegular />}
+        onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
+        expanded={isContextExpanded}
         rightSlot={
           <Text className={styles.headerStageLabel} size={100}>
             {stageLabelMap[contextStage]}

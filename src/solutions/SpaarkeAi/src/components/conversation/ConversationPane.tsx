@@ -87,7 +87,11 @@ import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-wi
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
-import { useShellStage, useRestoreContext } from "../shell/ThreePaneShell";
+import {
+  useShellStage,
+  useRestoreContext,
+  usePaneCollapseContext,
+} from "../shell/ThreePaneShell";
 import { HistoryOverlay } from "./HistoryOverlay";
 
 // ---------------------------------------------------------------------------
@@ -392,6 +396,19 @@ export function ConversationPane(): React.JSX.Element {
 
   // ── Shell stage transitions ─────────────────────────────────────────────
   const { toLoading, reset } = useShellStage();
+
+  // ── Pane collapse (Task 094) ────────────────────────────────────────────
+  //
+  // The Assistant pane participates in the three-pane collapse/expand
+  // feature owned by the shell. Clicking the PaneHeader (anywhere except
+  // the History icon) toggles collapse via `paneCollapse.toggle('assistant')`.
+  // When the context is null (e.g. ConversationPane rendered in isolation
+  // by tests) collapse is simply disabled.
+  const paneCollapse = usePaneCollapseContext();
+  const handleHeaderCollapse = React.useCallback(() => {
+    paneCollapse?.toggle("assistant");
+  }, [paneCollapse]);
+  const isAssistantExpanded = !(paneCollapse?.isCollapsed("assistant") ?? false);
 
   // ── Session restore context (AIPU2-106) ─────────────────────────────────
   const restoreCtx = useRestoreContext();
@@ -728,12 +745,19 @@ export function ConversationPane(): React.JSX.Element {
       <PaneHeader
         title="Assistant"
         icon={<ChatRegular />}
+        onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
+        expanded={isAssistantExpanded}
         rightSlot={
           <Tooltip content="Show chat history" relationship="label" positioning="below">
             <Button
               appearance="subtle"
               icon={<HistoryRegular />}
-              onClick={handleOpenHistory}
+              onClick={(e) => {
+                // Task 094: prevent the header's collapse handler from
+                // firing when clicking the History icon button.
+                e.stopPropagation();
+                handleOpenHistory();
+              }}
               aria-label="Show chat history"
               aria-haspopup="dialog"
               aria-expanded={historyOpen}

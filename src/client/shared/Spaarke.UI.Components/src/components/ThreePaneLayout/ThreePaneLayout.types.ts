@@ -132,6 +132,55 @@ export interface ThreePaneLayoutProps {
   rightPaneCollapseLabel?: string;
 
   /**
+   * (Task 094) Optional externally-controlled collapse state for the LEFT pane.
+   * When defined, this overrides the internal `isLeftVisible` derived from
+   * sessionStorage; the consumer fully owns the collapse state and persists
+   * it however they choose. Used by SpaarkeAi's `usePaneCollapse` hook to
+   * collapse panes via clicks on each pane's header.
+   */
+  leftCollapsed?: boolean;
+
+  /**
+   * (Task 094) Optional externally-controlled collapse state for the CENTER
+   * pane. The base layout has no internal toggle for center collapse — this
+   * is opt-in behaviour exposed for SpaarkeAi's three-pane shell. When the
+   * center pane is collapsed it renders as a narrow vertical strip with a
+   * rotated label, identical to the existing left/right collapsed strips.
+   */
+  centerCollapsed?: boolean;
+
+  /**
+   * (Task 094) Optional externally-controlled collapse state for the RIGHT pane.
+   * See `leftCollapsed` for semantics.
+   */
+  rightCollapsed?: boolean;
+
+  /**
+   * (Task 094) Toggle callback for the LEFT pane. Invoked when the user
+   * clicks the collapsed strip's expand button. If provided alongside
+   * `leftCollapsed`, takes precedence over the internal `toggleLeft`.
+   */
+  onToggleLeft?: () => void;
+
+  /**
+   * (Task 094) Toggle callback for the CENTER pane. Invoked when the user
+   * clicks the collapsed strip's expand button. Required when
+   * `centerCollapsed` is wired.
+   */
+  onToggleCenter?: () => void;
+
+  /**
+   * (Task 094) Toggle callback for the RIGHT pane. See `onToggleLeft`.
+   */
+  onToggleRight?: () => void;
+
+  /**
+   * (Task 094) Accessible label for the collapsed CENTER pane strip.
+   * @default 'Show center panel'
+   */
+  centerPaneCollapseLabel?: string;
+
+  /**
    * Optional additional CSS class name for the root container.
    */
   className?: string;
