@@ -385,6 +385,56 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
   ]);
 
   // ------------------------------------------------------------------
+  // (Task 119) Reset to FRAC defaults — forces left/right widths back to
+  // `defaultLeftWidthFrac` / `defaultRightWidthFrac` × `window.innerWidth`,
+  // discarding any user-dragged pixel widths in sessionStorage. Used by the
+  // ThreePaneLayout all-panes-collapsed empty-state Open button so the layout
+  // returns to a clean 25/50/25 (or whatever the consumer's frac defaults are)
+  // even if the user had dragged the splitters earlier in the session.
+  //
+  // Falls back to the legacy pixel defaults when `frac` is not provided.
+  // Does NOT touch visibility (callers handle uncollapse separately via the
+  // existing onToggle* callbacks they already wire).
+  // ------------------------------------------------------------------
+
+  const resetToFracDefaults = useCallback(() => {
+    const computeFromFrac = (
+      frac: number | undefined,
+      defaultPx: number,
+      min: number
+    ): number => {
+      if (
+        frac !== undefined &&
+        Number.isFinite(frac) &&
+        frac > 0 &&
+        typeof window !== 'undefined' &&
+        Number.isFinite(window.innerWidth) &&
+        window.innerWidth > 0
+      ) {
+        return Math.max(min, Math.round(window.innerWidth * frac));
+      }
+      return Math.max(min, defaultPx);
+    };
+
+    const newLeft = computeFromFrac(defaultLeftWidthFrac, defaultLeftWidthPx, minLeftWidthPx);
+    const newRight = computeFromFrac(defaultRightWidthFrac, defaultRightWidthPx, minRightWidthPx);
+
+    setLeftWidthPx(newLeft);
+    setRightWidthPx(newRight);
+    persistWidth(leftWidthKey, newLeft);
+    persistWidth(rightWidthKey, newRight);
+  }, [
+    defaultLeftWidthFrac,
+    defaultRightWidthFrac,
+    defaultLeftWidthPx,
+    defaultRightWidthPx,
+    minLeftWidthPx,
+    minRightWidthPx,
+    leftWidthKey,
+    rightWidthKey,
+  ]);
+
+  // ------------------------------------------------------------------
   // Splitter handler objects
   // ------------------------------------------------------------------
 
@@ -411,6 +461,7 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
     rightSplitterHandlers,
     isDragging,
     resetToDefaults,
+    resetToFracDefaults,
     containerRef,
   };
 }

@@ -22,8 +22,12 @@
  */
 
 import * as React from 'react';
-import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { ChevronLeft16Regular, ChevronRight16Regular } from '@fluentui/react-icons';
+import { Button, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  ChevronLeft16Regular,
+  ChevronRight16Regular,
+  EmojiSmileSlight24Regular,
+} from '@fluentui/react-icons';
 import { PanelSplitter } from '../PanelSplitter/PanelSplitter';
 import { ThreePaneLayoutProps } from './ThreePaneLayout.types';
 import { useThreePaneLayout } from './useThreePaneLayout';
@@ -216,6 +220,38 @@ const useStyles = makeStyles({
       transitionDuration: '0ms',
     },
   },
+
+  /**
+   * (Task 119) All-panes-collapsed empty-state overlay. Rendered to the RIGHT
+   * of the three 48px collapsed strips when `leftCollapsed && centerCollapsed
+   * && rightCollapsed`. `flex: 1 1 auto` lets it absorb the remaining viewport
+   * width after the 3 × 48px = 144px of collapsed strips. Vertically centers a
+   * smiley icon + welcome text + primary Open button so the surface feels
+   * friendly rather than barren.
+   */
+  allCollapsedOverlay: {
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: tokens.spacingVerticalL,
+    paddingTop: tokens.spacingVerticalXXL,
+    paddingBottom: tokens.spacingVerticalXXL,
+    paddingLeft: tokens.spacingHorizontalXL,
+    paddingRight: tokens.spacingHorizontalXL,
+    backgroundColor: tokens.colorNeutralBackground2,
+    height: '100%',
+    overflow: 'hidden',
+  },
+  allCollapsedSmiley: {
+    fontSize: '64px',
+    color: tokens.colorNeutralForeground3,
+  },
+  allCollapsedText: {
+    fontSize: tokens.fontSizeBase400,
+    color: tokens.colorNeutralForeground3,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -289,6 +325,7 @@ export function ThreePaneLayout({
     leftSplitterHandlers,
     rightSplitterHandlers,
     isDragging,
+    resetToFracDefaults,
     containerRef,
   } = useThreePaneLayout({
     defaultLeftWidthPx,
@@ -352,6 +389,41 @@ export function ThreePaneLayout({
   // pane (the canonical "primary content" surface in SpaarkeAi's three-pane).
   const rightFillsForCollapsedCenter =
     isLeftVisible && !isCenterVisible && isRightVisible;
+
+  // (Task 119) Degenerate "all 3 panes collapsed" state — operator request
+  // 2026-05-22: instead of leaving a barren empty area to the right of the
+  // 3 × 48px strips, show a friendly empty-state with a smiley icon + an
+  // "Open" button that forces the layout back to its frac defaults
+  // (typically 25/50/25 for SpaarkeAi).
+  const allCollapsed = !isLeftVisible && !isCenterVisible && !isRightVisible;
+
+  // (Task 119) Open handler — three steps, fully self-contained inside the
+  // shared layout (no SpaarkeAi-side changes needed):
+  //   1. resetToFracDefaults() — re-computes left/right widths as
+  //      `defaultLeftWidthFrac` / `defaultRightWidthFrac` × `window.innerWidth`
+  //      AND clears the user-dragged pixel widths in sessionStorage so the
+  //      new percentages persist for subsequent mounts (operator: "force
+  //      25/50/25 always" — saved widths intentionally discarded).
+  //   2. Calls each externally-wired `onToggle{Left,Center,Right}` while
+  //      collapsed so the consumer's pane-collapse hook (e.g. SpaarkeAi's
+  //      `usePaneCollapse` from task 094) uncollapses all three.
+  //   3. The `if (collapsed)` guards ensure we only toggle FROM collapsed
+  //      TO expanded — the toggle callbacks are stateful and would otherwise
+  //      flip an already-expanded pane back to collapsed.
+  const handleOpenFromAllCollapsed = React.useCallback(() => {
+    resetToFracDefaults();
+    if (leftCollapsed) onToggleLeft?.();
+    if (centerCollapsed) onToggleCenter?.();
+    if (rightCollapsed) onToggleRight?.();
+  }, [
+    resetToFracDefaults,
+    leftCollapsed,
+    centerCollapsed,
+    rightCollapsed,
+    onToggleLeft,
+    onToggleCenter,
+    onToggleRight,
+  ]);
 
   return (
     <div className={mergeClasses(styles.root, className)} ref={containerRef as React.RefObject<HTMLDivElement>}>
@@ -506,6 +578,32 @@ export function ThreePaneLayout({
               <span className={styles.collapsedLabel}>{rightPaneCollapseLabel}</span>
             </>
           )}
+        </div>
+      )}
+
+      {/* ---- (Task 119) All-panes-collapsed empty-state overlay ----
+          Rendered ONLY when all three panes are collapsed. Slots in after the
+          3 × 48px strips and `flex: 1` absorbs the remaining viewport width.
+          The primary Button is `autoFocus` so keyboard users can press Enter
+          to expand immediately when the empty state appears. */}
+      {allCollapsed && (
+        <div
+          className={styles.allCollapsedOverlay}
+          role="region"
+          aria-label="All panes are collapsed"
+        >
+          <EmojiSmileSlight24Regular
+            className={styles.allCollapsedSmiley}
+            aria-hidden="true"
+          />
+          <Text className={styles.allCollapsedText}>Welcome back</Text>
+          <Button
+            appearance="primary"
+            autoFocus
+            onClick={handleOpenFromAllCollapsed}
+          >
+            Open
+          </Button>
         </div>
       )}
     </div>

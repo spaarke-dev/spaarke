@@ -39,6 +39,14 @@ export interface UseThreePaneLayoutResult {
   isDragging: boolean;
   /** Reset all panes to default widths and full visibility */
   resetToDefaults: () => void;
+  /**
+   * (Task 119) Reset left/right widths to the frac-based defaults
+   * (`defaultLeftWidthFrac` / `defaultRightWidthFrac` × `window.innerWidth`),
+   * discarding any user-dragged pixel widths in sessionStorage. Falls back to
+   * the legacy pixel defaults when frac is not provided. Does NOT touch
+   * visibility — callers handle uncollapse separately.
+   */
+  resetToFracDefaults: () => void;
   /** Ref to attach to the outer container element for measuring available width */
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
