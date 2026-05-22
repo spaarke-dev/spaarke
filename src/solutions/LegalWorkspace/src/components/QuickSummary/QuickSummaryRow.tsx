@@ -18,16 +18,25 @@ export interface IQuickSummaryRowProps {
 }
 
 const useStyles = makeStyles({
+  // Round 8 Wave 3 (task 110, 2026-05-22): switched from a flex-wrap row
+  // to a 2-column CSS grid so the 6 cards (My Matters, My Projects,
+  // Assign Work, Open Tasks, Communications, Invoices) naturally arrange
+  // as a 2x3 layout per the operator's "My Work" system workspace spec.
+  // On narrow viewports the grid collapses to 1 column via auto-fit; on
+  // wider viewports it stays at 2 columns so the cards remain readable
+  // (the Quick Summary section sits in the Workspace pane, which is
+  // typically a fixed-width column rather than full-page).
   row: {
-    display: "flex",
-    flexDirection: "row",
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: tokens.spacingHorizontalL,
-    flexWrap: "wrap",
+    rowGap: tokens.spacingVerticalL,
+    width: "100%",
   },
 });
 
 /**
- * QuickSummaryRow — renders 4 metric cards in a horizontal row.
+ * QuickSummaryRow — renders 6 metric cards in a 2x3 grid.
  *
  * Each card shows a live count, an icon, and a notification badge
  * (green "New" or red "Overdue"). Clicking navigates to the
@@ -35,6 +44,14 @@ const useStyles = makeStyles({
  *
  * The section title, toolbar, and card wrapper are now provided by
  * WorkspaceGrid (same sectionCard pattern as other sections).
+ *
+ * Card list (in order):
+ *   1. My Matters
+ *   2. My Projects
+ *   3. Assign Work
+ *   4. Open Tasks
+ *   5. Communications (added 2026-05-22 — task 110)
+ *   6. Invoices       (added 2026-05-22 — task 110)
  */
 export const QuickSummaryRow: React.FC<IQuickSummaryRowProps> = ({
   webApi,
