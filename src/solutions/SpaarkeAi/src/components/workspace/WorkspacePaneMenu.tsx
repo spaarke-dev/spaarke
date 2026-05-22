@@ -1,20 +1,26 @@
 /**
  * WorkspacePaneMenu.tsx — Dropdown menu rendered in the WorkspacePane PaneHeader
- * rightSlot. Replaces the in-pane tab bar with a Fluent v9 Menu surface that
- * unifies four interaction surfaces in one trigger (FR-12):
+ * rightSlot. A Fluent v9 Menu surface that unifies workspace-level actions in
+ * one trigger (FR-12).
  *
- *   1. Open    — currently-open non-Home tabs, newest first, each with a
- *                trailing `DismissRegular` close affordance.
- *   2. Home    — pinned, non-closable LegalWorkspace home tab; selecting it
- *                activates the Home tab. NO close affordance (FR-13).
- *   3. Switch Workspace — list of workspace layouts fetched from the BFF via
+ * Sections (post task 089 cleanup):
+ *
+ *   1. Select Workspace — list of workspace layouts fetched from the BFF via
  *                `useWorkspaceLayouts` (the SpaarkeAi adaptation of the WORKING
- *                LegalWorkspace hook). Selecting one persists the choice and
- *                dispatches a layout-change signal. A trailing "+ New Workspace"
- *                action launches the WorkspaceLayoutWizard with the SpaarkeAi
- *                6-template filter (FR-14).
- *   4. Edit current workspace — final action that launches the wizard in
- *                edit / saveAs mode for the active layout.
+ *                LegalWorkspace hook). Selecting one dispatches `widget_load`
+ *                so the chosen workspace opens as a new tab via the existing
+ *                WorkspacePane → WorkspaceTabManager → resolveWorkspaceWidget
+ *                pipeline.
+ *   2. Actions  — `+ New Workspace` launches the WorkspaceLayoutWizard with
+ *                the SpaarkeAi 6-template filter (FR-14); `Manage workspaces`
+ *                is a stub for task 093 (side pane); `Edit current workspace`
+ *                launches the wizard in edit / saveAs mode for the active
+ *                layout.
+ *
+ * Removed in task 089 (operator UX feedback 2026-05-21):
+ *   - "Open" section (redundant with the visible tab bar above the dropdown).
+ *   - "Home" section (Home is no longer a distinct concept; Daily Briefing is
+ *     just one widget rather than a special "home" tab anymore).
  *
  * The menu is keyboard-navigable and ARIA-labeled (NFR-05). Styling uses
  * Fluent v9 tokens only — no hex or rgba literals (ADR-021).
@@ -73,10 +79,9 @@ import {
 } from "@fluentui/react-components";
 import {
   ChevronDownRegular,
-  DismissRegular,
   AddRegular,
   EditRegular,
-  HomeRegular,
+  SettingsRegular,
   CheckmarkRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
@@ -138,15 +143,23 @@ const LAYOUT_CHANGED_EVENT = "spaarke:workspace-layout-changed";
 export interface WorkspacePaneMenuProps {
   /**
    * Currently-open tabs from `WorkspaceTabManager.getSnapshot().tabs`.
-   * Includes the Home tab (kind === "home") at index 0 by convention.
+   * Retained for API back-compat after task 089 removed the Open/Home menu
+   * sections; the menu no longer renders per-tab rows (the tab bar above the
+   * dropdown is the canonical surface).
    */
   tabs: readonly WorkspaceTab[];
-  /** The currently-active tab id, or `null` if no tab is active. */
+  /** The currently-active tab id, or `null` if no tab is active. Retained for back-compat (see `tabs`). */
   activeTabId: string | null;
-  /** Called when a tab is selected from the menu. */
-  onTabSelect: (tabId: string) => void;
-  /** Called when the user clicks the `×` close affordance on a non-Home tab. */
-  onTabClose: (tabId: string) => void;
+  /**
+   * Retained for API back-compat with `WorkspacePane.tsx` (task 089 removed
+   * the per-tab menu entries that used this callback).
+   */
+  onTabSelect?: (tabId: string) => void;
+  /**
+   * Retained for API back-compat with `WorkspacePane.tsx` (task 089 removed
+   * the per-tab `×` affordance from the menu).
+   */
+  onTabClose?: (tabId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,32 +170,12 @@ const useStyles = makeStyles({
   trigger: {
     minWidth: "auto",
   },
-  tabRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    gap: tokens.spacingHorizontalS,
-  },
   tabLabel: {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     flex: "1 1 auto",
     minWidth: 0,
-  },
-  closeButton: {
-    flexShrink: 0,
-    minWidth: "auto",
-    paddingTop: tokens.spacingVerticalXXS,
-    paddingBottom: tokens.spacingVerticalXXS,
-    paddingLeft: tokens.spacingHorizontalXS,
-    paddingRight: tokens.spacingHorizontalXS,
-    color: tokens.colorNeutralForeground3,
-    ":hover": {
-      color: tokens.colorNeutralForeground1,
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
   },
   activeMarker: {
     color: tokens.colorBrandForeground1,
@@ -369,10 +362,9 @@ function applyActiveLayout(layoutId: string): void {
  * of the WorkspacePane. See file header for full FR / NFR mapping.
  */
 export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
-  tabs,
-  activeTabId,
-  onTabSelect,
-  onTabClose,
+  // tabs / activeTabId / onTabSelect / onTabClose retained for API back-compat
+  // (see WorkspacePaneMenuProps JSDoc). Task 089 removed the Open + Home menu
+  // sections that used these props.
 }) => {
   const styles = useStyles();
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -397,40 +389,8 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
   const dispatch = useDispatchPaneEvent();
 
   // -------------------------------------------------------------------------
-  // Derived: split tabs into Home (singular) + Open (newest first, non-Home)
-  // -------------------------------------------------------------------------
-
-  const homeTab = React.useMemo(
-    () => tabs.find((t) => t.kind === "home") ?? null,
-    [tabs],
-  );
-  /** Non-Home tabs sorted newest first (reverse insertion order). */
-  const openTabs = React.useMemo(
-    () => tabs.filter((t) => t.kind === "widget").slice().reverse(),
-    [tabs],
-  );
-
-  // -------------------------------------------------------------------------
   // Handlers
   // -------------------------------------------------------------------------
-
-  const handleTabActivate = React.useCallback(
-    (tabId: string) => {
-      onTabSelect(tabId);
-      setMenuOpen(false);
-    },
-    [onTabSelect],
-  );
-
-  const handleTabCloseClick = React.useCallback(
-    (e: React.MouseEvent | React.KeyboardEvent, tabId: string) => {
-      e.stopPropagation();
-      e.preventDefault();
-      onTabClose(tabId);
-      // Keep the menu open so the user can close multiple tabs in a row.
-    },
-    [onTabClose],
-  );
 
   const handleLayoutSelect = React.useCallback(
     (layoutId: string) => {
@@ -480,6 +440,19 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
     });
     refetch();
   }, [bffBaseUrl, refetch]);
+
+  /**
+   * Task 089 stub — placeholder handler for the "Manage workspaces" menu entry.
+   * Task 093 will implement the side pane that this entry opens. The console
+   * log is intentional so the operator can verify the menu entry routes
+   * through this handler in dev tools.
+   */
+  const handleManageWorkspaces = React.useCallback(() => {
+    setMenuOpen(false);
+    console.log(
+      "Manage workspaces — task 093 will implement side pane",
+    );
+  }, []);
 
   const handleEditWorkspace = React.useCallback(async () => {
     setMenuOpen(false);
@@ -535,78 +508,15 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
       <MenuPopover data-testid="workspace-pane-menu-popover">
         <MenuList>
           {/* ───────────────────────────────────────────────────────────────
-           * Section 1 — Open tabs (newest first), each with `×` close.
-           * Renders an italic empty hint when no non-Home tabs are open.
+           * Section 1 — Select Workspace (all layouts).
+           *
+           * Task 089 (2026-05-21) renamed the section from "Switch Workspace"
+           * (operator wording change) and removed the upstream "Open" / "Home"
+           * sections — the open tab bar above the dropdown is the canonical
+           * surface for tab interaction, and "Home" is no longer a distinct
+           * concept (Daily Briefing is just one widget).
            * ─────────────────────────────────────────────────────────────── */}
-          <MenuGroupHeader>Open</MenuGroupHeader>
-          {openTabs.length === 0 ? (
-            <Text className={styles.emptyHint} data-testid="open-tabs-empty">
-              No open tabs.
-            </Text>
-          ) : (
-            openTabs.map((tab) => {
-              const isActive = tab.id === activeTabId;
-              return (
-                <MenuItem
-                  key={tab.id}
-                  onClick={() => handleTabActivate(tab.id)}
-                  data-testid={`open-tab-${tab.id}`}
-                  icon={
-                    isActive ? (
-                      <CheckmarkRegular className={styles.activeMarker} />
-                    ) : undefined
-                  }
-                >
-                  <span className={styles.tabRow}>
-                    <span className={styles.tabLabel}>{tab.displayName}</span>
-                    <Button
-                      appearance="subtle"
-                      size="small"
-                      icon={<DismissRegular />}
-                      className={styles.closeButton}
-                      aria-label={`Close ${tab.displayName}`}
-                      onClick={(e) => handleTabCloseClick(e, tab.id)}
-                      data-testid={`open-tab-close-${tab.id}`}
-                    />
-                  </span>
-                </MenuItem>
-              );
-            })
-          )}
-
-          <MenuDivider />
-
-          {/* ───────────────────────────────────────────────────────────────
-           * Section 2 — Home (pinned, non-closable). FR-13: no `×` affordance.
-           * Only rendered when a Home tab is present (always true post task 030).
-           * ─────────────────────────────────────────────────────────────── */}
-          <MenuGroupHeader>Home</MenuGroupHeader>
-          {homeTab ? (
-            <MenuItem
-              onClick={() => handleTabActivate(homeTab.id)}
-              data-testid={`home-tab-${homeTab.id}`}
-              icon={
-                homeTab.id === activeTabId ? (
-                  <CheckmarkRegular className={styles.activeMarker} />
-                ) : (
-                  <HomeRegular />
-                )
-              }
-            >
-              <span className={styles.tabLabel}>{homeTab.displayName}</span>
-            </MenuItem>
-          ) : (
-            <Text className={styles.emptyHint} data-testid="home-tab-missing">
-              Home is not installed.
-            </Text>
-          )}
-
-          <MenuDivider />
-
-          {/* ───────────────────────────────────────────────────────────────
-           * Section 3 — Switch Workspace (all layouts) + "+ New Workspace".
-           * ─────────────────────────────────────────────────────────────── */}
-          <MenuGroupHeader>Switch Workspace</MenuGroupHeader>
+          <MenuGroupHeader>Select Workspace</MenuGroupHeader>
           {isLoading ? (
             <div className={styles.spinnerRow} data-testid="layouts-loading">
               <Spinner size="tiny" label="Loading workspaces..." />
@@ -622,7 +532,7 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
                 <MenuItem
                   key={layout.id}
                   onClick={() => handleLayoutSelect(layout.id)}
-                  data-testid={`switch-workspace-${layout.id}`}
+                  data-testid={`select-workspace-${layout.id}`}
                   icon={
                     isActive ? (
                       <CheckmarkRegular className={styles.activeMarker} />
@@ -634,6 +544,18 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
               );
             })
           )}
+
+          <MenuDivider />
+
+          {/* ───────────────────────────────────────────────────────────────
+           * Section 2 — Workspace actions.
+           *
+           *   • + New Workspace      — launches WorkspaceLayoutWizard (create).
+           *   • Manage workspaces    — stub for task 093 (side pane).
+           *   • Edit current workspace — launches the wizard in edit / saveAs
+           *     mode for the active layout. Kept (operator did not request
+           *     removal; remains a meaningful action on the active layout).
+           * ─────────────────────────────────────────────────────────────── */}
           <MenuItem
             onClick={handleCreateWorkspace}
             data-testid="new-workspace-action"
@@ -642,11 +564,14 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
             <span className={styles.newWorkspace}>+ New Workspace</span>
           </MenuItem>
 
-          <MenuDivider />
+          <MenuItem
+            onClick={handleManageWorkspaces}
+            data-testid="manage-workspaces-action"
+            icon={<SettingsRegular />}
+          >
+            Manage workspaces
+          </MenuItem>
 
-          {/* ───────────────────────────────────────────────────────────────
-           * Section 4 — Edit current workspace.
-           * ─────────────────────────────────────────────────────────────── */}
           <MenuItem
             onClick={handleEditWorkspace}
             disabled={!activeLayout}
