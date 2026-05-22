@@ -526,6 +526,46 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// 16. workspace — Embedded LegalWorkspaceApp (Round 4 Fix 4, 2026-05-21)
+//     Category: workspace — opens the chosen workspace layout as a single
+//     workspace tab via the embedded LegalWorkspaceApp surface
+//     (`embedded={true}`). Triggered by WorkspacePaneMenu's "Switch Workspace"
+//     handler in SpaarkeAi. The widget data carries `{ layoutId, layoutName }`
+//     — `layoutId` is passed as `initialWorkspaceId` so the embedded
+//     useWorkspaceLayouts hook activates the chosen layout on mount.
+//
+//     allowMultiple=true — a session may have multiple workspace tabs open
+//     (e.g. Corporate Workspace + Litigation Workspace side-by-side via the
+//     tab manager). The FIFO cap on MAX_WORKSPACE_TABS still applies.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Widget type string MUST match the value dispatched by
+   * `WorkspacePaneMenu.tsx` when the user selects a layout from "Switch
+   * Workspace". The string is intentionally plain "workspace" — there is one
+   * workspace widget type and it always renders LegalWorkspaceApp.
+   */
+  'workspace',
+  {
+    displayName: 'Workspace',
+    category: 'workspace',
+    icon: 'AppsListRegular',
+    allowMultiple: true,
+    /**
+     * defaultOrder=140: positioned after the existing intent dispatchers
+     * (email-compose 100, meeting-schedule 110, create-project 120,
+     * find-similar 130).
+     */
+    defaultOrder: 140,
+  },
+  () =>
+    import('./WorkspaceLayoutWidget').then((m) => ({
+      default: m.WorkspaceLayoutWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
+    })),
+);
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from index.ts side-effect import)
 // ---------------------------------------------------------------------------
 

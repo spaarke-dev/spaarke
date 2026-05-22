@@ -42,6 +42,7 @@ import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widg
 import { buildBffApiUrl } from "@spaarke/auth";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type {
+  ActiveTabSnapshot,
   WorkspaceTabManagerState,
   WorkspaceTabPersistenceSnapshot,
 } from "./WorkspaceTabManager";
@@ -117,13 +118,24 @@ export function WorkspacePane(): React.JSX.Element {
     ((snapshot: WorkspaceTabPersistenceSnapshot) => void) | null
   >(null);
 
+  // Round 4 Fix 4: Forwarding ref for the active-tab-change signal. Same
+  // pattern as persistTabsRef — keeps the manager construction stable while
+  // letting the dispatch closure capture the latest `dispatch` reference.
+  const activeTabChangeRef = React.useRef<
+    ((snapshot: ActiveTabSnapshot) => void) | null
+  >(null);
+
   // Stable manager reference — never recreated across re-renders.
-  // The onPersistChange callback is itself stable; it just dispatches through
-  // the current persistTabsRef value (so updates to deps refresh cleanly).
+  // The onPersistChange / onActiveTabChange callbacks are themselves stable;
+  // they just dispatch through the current ref values (so updates to deps
+  // refresh cleanly without re-instantiating the manager).
   const managerRef = React.useRef<WorkspaceTabManager>(
     new WorkspaceTabManager({
       onPersistChange: (snapshot) => {
         persistTabsRef.current?.(snapshot);
+      },
+      onActiveTabChange: (snapshot) => {
+        activeTabChangeRef.current?.(snapshot);
       },
     }),
   );
@@ -200,6 +212,41 @@ export function WorkspacePane(): React.JSX.Element {
   React.useEffect(() => {
     persistTabsRef.current = persistTabs;
   }, [persistTabs]);
+
+  // ---------------------------------------------------------------------------
+  // Active-tab signal — Round 4 Fix 4 (2026-05-21)
+  //
+  // Foundation signal for cross-pane coordination: when the active workspace
+  // tab changes, broadcast `active_widget_changed` on the `workspace` channel
+  // so future subscribers (Assistant + Context panes) can scope themselves to
+  // the active workspace context. NO consumers are wired in this task — this
+  // is the signal infrastructure only.
+  //
+  // The dispatch is mediated by activeTabChangeRef so the WorkspaceTabManager
+  // ref stays stable across renders even as `dispatch` evolves.
+  // ---------------------------------------------------------------------------
+
+  const broadcastActiveTabChange = React.useCallback(
+    (snapshot: ActiveTabSnapshot): void => {
+      // Skip events that have no active tab — they're a "no active context"
+      // state that subscribers can derive from a separate `session_reset` or
+      // `tabs_clear` event when needed.
+      if (!snapshot.tabId || !snapshot.widgetType) return;
+
+      dispatch("workspace", {
+        type: "active_widget_changed",
+        widgetType: snapshot.widgetType,
+        widgetData: snapshot.widgetData,
+        tabId: snapshot.tabId,
+        displayName: snapshot.displayName ?? snapshot.widgetType,
+      });
+    },
+    [dispatch],
+  );
+
+  React.useEffect(() => {
+    activeTabChangeRef.current = broadcastActiveTabChange;
+  }, [broadcastActiveTabChange]);
 
   // On unmount: cancel any pending timer to avoid late writes against a stale
   // session id. The in-memory snapshot is discarded; the most recent
@@ -324,9 +371,15 @@ export function WorkspacePane(): React.JSX.Element {
       const widgetType = event.widgetType ?? "unknown";
       const widgetData = event.widgetData ?? null;
 
-      // Retrieve optional metadata for the display name.
+      // Resolve the tab display name with this precedence:
+      //   1. Event payload `displayName` (Round 4 Fix 4: lets the menu set the
+      //      tab title to a per-instance label such as "Corporate Workspace"
+      //      rather than the generic registry label "Workspace").
+      //   2. Registry metadata `displayName`.
+      //   3. The raw widgetType string as last resort.
       const meta = getWorkspaceWidgetMetadata(widgetType);
-      const displayName = meta?.displayName ?? widgetType;
+      const displayName =
+        event.displayName ?? meta?.displayName ?? widgetType;
 
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
       const tabId = manager.addTab(widgetType, widgetData, displayName);
@@ -335,7 +388,15 @@ export function WorkspacePane(): React.JSX.Element {
       // Lazy-resolve the widget component; update the tab once resolved.
       resolveWorkspaceWidget(widgetType).then((Component) => {
         const resolvedMeta = getWorkspaceWidgetMetadata(widgetType);
-        manager.resolveTabComponent(tabId, Component, resolvedMeta?.displayName);
+        // Round 4 Fix 4: preserve a per-instance displayName from the event
+        // payload (e.g. "Corporate Workspace") over the registry's generic
+        // label (e.g. "Workspace"). Pass `undefined` for displayName when the
+        // event carried one so resolveTabComponent does not overwrite it.
+        manager.resolveTabComponent(
+          tabId,
+          Component,
+          event.displayName ? undefined : resolvedMeta?.displayName,
+        );
         syncState();
 
         // Snapshot the current tab count after resolution so ShellStageManager

@@ -79,7 +79,7 @@ import {
   HomeRegular,
   CheckmarkRegular,
 } from "@fluentui/react-icons";
-import { useAiSession } from "@spaarke/ai-widgets";
+import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 // useWorkspaceLayouts — SpaarkeAi adaptation of LegalWorkspace's working hook.
 // See ../../hooks/useWorkspaceLayouts.ts header for the reuse rationale.
@@ -389,6 +389,12 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
     authenticatedFetch,
     isAuthenticated,
   });
+  // Round 4 Fix 4 (2026-05-21): used by handleLayoutSelect to dispatch a
+  // `widget_load` event so the chosen workspace opens as a new tab via the
+  // existing WorkspacePane → WorkspaceTabManager → resolveWorkspaceWidget
+  // pipeline. The widget type is `'workspace'` and resolves to
+  // WorkspaceLayoutWidget (which embeds LegalWorkspaceApp).
+  const dispatch = useDispatchPaneEvent();
 
   // -------------------------------------------------------------------------
   // Derived: split tabs into Home (singular) + Open (newest first, non-Home)
@@ -428,10 +434,33 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
 
   const handleLayoutSelect = React.useCallback(
     (layoutId: string) => {
+      // Persist the active layout id + dispatch the legacy
+      // window-CustomEvent signal (kept for backwards compatibility with any
+      // downstream subscribers still listening to it).
       applyActiveLayout(layoutId);
+
+      // Round 4 Fix 4 (2026-05-21): dispatch `widget_load` so the chosen
+      // workspace opens as a new tab via the existing tab pipeline. The
+      // pane subscriber in `WorkspacePane.tsx` calls
+      // `manager.addTab('workspace', { layoutId, layoutName }, displayName)`,
+      // then `resolveWorkspaceWidget('workspace')` resolves to
+      // `WorkspaceLayoutWidget`, which renders LegalWorkspaceApp with
+      // `initialWorkspaceId={layoutId}` and `embedded`.
+      //
+      // We resolve the friendly layout name from the loaded `layouts` array
+      // so the tab title matches what the user clicked. Fall back to
+      // "Workspace" if (somehow) the id is unknown.
+      const chosen = layouts.find((l) => l.id === layoutId);
+      const layoutName = chosen?.name ?? "Workspace";
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "workspace",
+        widgetData: { layoutId, layoutName },
+      });
+
       setMenuOpen(false);
     },
-    [],
+    [dispatch, layouts],
   );
 
   const handleCreateWorkspace = React.useCallback(async () => {

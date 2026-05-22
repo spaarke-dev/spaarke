@@ -25,6 +25,7 @@
     "@fluentui/react-spinner": "^9.7.15",
     "@fluentui/react-theme": "^9.2.1",
     "@fluentui/react-tooltip": "^9.9.3",
+    "@hello-pangea/dnd": "^18.0.1",
     "@lexical/html": "^0.41.0",
     "@lexical/list": "^0.41.0",
     "@lexical/react": "^0.41.0",

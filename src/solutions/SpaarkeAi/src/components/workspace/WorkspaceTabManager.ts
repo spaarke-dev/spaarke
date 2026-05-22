@@ -100,9 +100,39 @@ export interface WorkspaceTabPersistenceSnapshot {
  * caller (WorkspacePane) is responsible for debouncing and dispatching the
  * BFF write-through. The manager itself never performs network I/O.
  */
+/**
+ * Snapshot of the currently active tab, surfaced via the optional
+ * `onActiveTabChange` callback. Foundation for cross-pane coordination
+ * (Round 4 Fix 4, 2026-05-21) — the Assistant and Context panes can
+ * subscribe to this in a follow-up task to scope themselves to the active
+ * workspace context.
+ */
+export interface ActiveTabSnapshot {
+  /** The stable id of the now-active tab (or null if the active tab cleared). */
+  tabId: string | null;
+  /** Widget type string of the active tab (or null when tabId is null). */
+  widgetType: string | null;
+  /** Widget payload of the active tab (or null when tabId is null). */
+  widgetData: unknown;
+  /** Human-readable label of the active tab (or null when tabId is null). */
+  displayName: string | null;
+  /** Discriminant — distinguishes the Home tab from widget tabs. */
+  kind: WorkspaceTabKind | null;
+}
+
 export interface WorkspaceTabManagerOptions {
   /** Called after every state-mutating operation with the current snapshot. Optional. */
   onPersistChange?: (snapshot: WorkspaceTabPersistenceSnapshot) => void;
+  /**
+   * Called after every operation that changes which tab is active
+   * (setActiveTab, addTab when the new tab auto-activates, closeTab when the
+   * close advances the active id, clearAllTabs when it resets active). Round 4
+   * Fix 4 (2026-05-21) — foundation signal for the future Assistant/Context
+   * pane coordination contract. Not called during `restoreFromPersistence`
+   * (restore is a read of an already-stored state, not a user-initiated
+   * activation event).
+   */
+  onActiveTabChange?: (snapshot: ActiveTabSnapshot) => void;
 }
 
 /**
@@ -192,6 +222,52 @@ export class WorkspaceTabManager {
   private _notifyPersistChange(): void {
     if (!this._options.onPersistChange) return;
     this._options.onPersistChange(this.serializeForPersistence());
+  }
+
+  /**
+   * Build an ActiveTabSnapshot for the current `_activeTabId`. Returns a
+   * snapshot with all-null fields (except tabId) if there is no active tab.
+   * Round 4 Fix 4 (2026-05-21) — kept private to centralise the snapshot shape
+   * so consumers only ever see one canonical builder.
+   */
+  private _buildActiveTabSnapshot(): ActiveTabSnapshot {
+    const id = this._activeTabId;
+    if (!id) {
+      return {
+        tabId: null,
+        widgetType: null,
+        widgetData: null,
+        displayName: null,
+        kind: null,
+      };
+    }
+    const tab = this._tabs.find((t) => t.id === id);
+    if (!tab) {
+      return {
+        tabId: id,
+        widgetType: null,
+        widgetData: null,
+        displayName: null,
+        kind: null,
+      };
+    }
+    return {
+      tabId: tab.id,
+      widgetType: tab.widgetType,
+      widgetData: tab.widgetData,
+      displayName: tab.displayName,
+      kind: tab.kind,
+    };
+  }
+
+  /**
+   * Emit the active-tab snapshot to `onActiveTabChange` if a callback is
+   * registered. Called by every mutation site that changes which tab is active.
+   * Round 4 Fix 4 (2026-05-21).
+   */
+  private _notifyActiveTabChange(): void {
+    if (!this._options.onActiveTabChange) return;
+    this._options.onActiveTabChange(this._buildActiveTabSnapshot());
   }
 
   // -------------------------------------------------------------------------
@@ -302,6 +378,9 @@ export class WorkspaceTabManager {
     this._activeTabId = id;
 
     this._notifyPersistChange();
+    // Round 4 Fix 4: addTab always auto-activates the new tab, so emit the
+    // active-tab change signal too. Order matters — emit AFTER state is set.
+    this._notifyActiveTabChange();
     return id;
   }
 
@@ -389,6 +468,9 @@ export class WorkspaceTabManager {
     }
 
     this._notifyPersistChange();
+    // Round 4 Fix 4: closing the active tab always changes which tab is
+    // active (to a successor or null), so emit the active-tab change signal.
+    this._notifyActiveTabChange();
     return this._activeTabId;
   }
 
@@ -405,8 +487,12 @@ export class WorkspaceTabManager {
    */
   setActiveTab(tabId: string): void {
     if (this._tabs.some((t) => t.id === tabId)) {
+      const changed = this._activeTabId !== tabId;
       this._activeTabId = tabId;
       this._notifyPersistChange();
+      // Round 4 Fix 4: only emit when the active id actually changed —
+      // setActiveTab(currentActiveId) is a no-op for cross-pane subscribers.
+      if (changed) this._notifyActiveTabChange();
     }
   }
 
@@ -442,11 +528,17 @@ export class WorkspaceTabManager {
   clearAllTabs(): number {
     const homeTab = this._tabs.find((t) => t.kind === "home") ?? null;
     const removedCount = this._tabs.filter((t) => t.kind === "widget").length;
+    const previousActiveId = this._activeTabId;
 
     this._tabs = homeTab ? [homeTab] : [];
     this._activeTabId = homeTab ? homeTab.id : null;
 
     this._notifyPersistChange();
+    // Round 4 Fix 4: emit only when the active id actually changed (e.g.
+    // clearing while a widget tab was active drops back to Home / null).
+    if (previousActiveId !== this._activeTabId) {
+      this._notifyActiveTabChange();
+    }
     return removedCount;
   }
 
