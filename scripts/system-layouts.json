@@ -1,0 +1,38 @@
+{
+  "$comment": "System workspace layout seed definitions for sprk_workspacelayout (isSystem=true). Consumed by Deploy-SystemWorkspaceLayouts.ps1. Section factory IDs MUST match src/solutions/LegalWorkspace/src/sectionRegistry.ts. Layout template IDs MUST match src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/layoutTemplates.ts.",
+  "schemaVersion": 1,
+  "layouts": [
+    {
+      "name": "Daily Briefing",
+      "sectionId": "daily-briefing",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 0,
+      "isDefault": true,
+      "description": "Wave 2b will auto-install this as the default landing workspace. Replaces hard-coded WorkspaceHomeTab."
+    },
+    {
+      "name": "Smart To Do List",
+      "sectionId": "todo",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 1,
+      "isDefault": false,
+      "description": "LegalWorkspace todo section (Smart To Do List)."
+    },
+    {
+      "name": "My Work",
+      "sectionId": "quick-summary",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 2,
+      "isDefault": false,
+      "description": "LegalWorkspace quick-summary section. Wave 3 task 109 extends with sprk_communication + sprk_invoices cards (no layout JSON change)."
+    },
+    {
+      "name": "Documents",
+      "sectionId": "documents",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 3,
+      "isDefault": false,
+      "description": "LegalWorkspace documents section (Active Documents). Wave 3 task 110 verifies + add / expand affordances embed-safe in SpaarkeAi."
+    }
+  ]
+}
