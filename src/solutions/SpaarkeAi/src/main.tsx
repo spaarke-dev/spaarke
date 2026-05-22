@@ -47,6 +47,17 @@ import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
 import { App } from "./App";
 import type { IRuntimeConfig } from "@spaarke/auth";
+// Round 4 Fix 4.1 (2026-05-21): SpaarkeAi embeds `LegalWorkspaceApp` as a
+// workspace tab widget. LegalWorkspace has its OWN runtime-config singleton
+// (separate from SpaarkeAi's) — when embedded, code paths in the LegalWorkspace
+// tree call `getBffBaseUrl()` which reads from LegalWorkspace's singleton.
+// Without this dual-init call, document preview and other actions inside the
+// embedded tree throw "[LegalWorkspace] Runtime config not initialized."
+//
+// Both singletons receive the SAME `IRuntimeConfig` so they agree on bffBaseUrl
+// / scope / clientId / tenantId. The two are distinct in-process instances by
+// design — embedding does not collapse them; it just keeps both warm.
+import { setLegalWorkspaceRuntimeConfig } from "@spaarke/legal-workspace";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -142,6 +153,24 @@ async function bootstrap(): Promise<void> {
   }
 
   setRuntimeConfig(config);
+
+  // Round 4 Fix 4.1 (2026-05-21): also initialize LegalWorkspace's runtime
+  // config singleton with the SAME resolved config so the embedded
+  // LegalWorkspaceApp's code paths (e.g. `getBffBaseUrl()` from navigateTo
+  // handlers + `useWorkspaceLayouts` BFF fetch + document preview) find an
+  // initialized singleton instead of throwing. Both singletons hold equivalent
+  // values; they remain distinct in-process instances.
+  try {
+    setLegalWorkspaceRuntimeConfig(config);
+  } catch (err) {
+    // Non-fatal — if the embedded LegalWorkspace init fails, embedded paths
+    // will surface their own "runtime config not initialized" error and the
+    // standalone code paths in SpaarkeAi continue to work.
+    console.warn(
+      "[SpaarkeAi] setLegalWorkspaceRuntimeConfig failed; embedded LegalWorkspace paths may error:",
+      err,
+    );
+  }
 
   // Cache config to localStorage so subsequent visits resolve instantly
   // without needing Xrm or a BFF fetch.

@@ -452,10 +452,17 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
       // "Workspace" if (somehow) the id is unknown.
       const chosen = layouts.find((l) => l.id === layoutId);
       const layoutName = chosen?.name ?? "Workspace";
+      // Round 4 Fix 4.1 (2026-05-21): include `displayName` at the top level
+      // of the event so `WorkspacePane.tsx`'s `widget_load` handler picks it
+      // up as the per-instance tab title (e.g. "Ralph Workspace 4") instead
+      // of the generic registry metadata label ("Workspace"). The pane's
+      // displayName-precedence ladder is: event.displayName → registry
+      // metadata.displayName → widgetType. We supply the highest priority.
       dispatch("workspace", {
         type: "widget_load",
         widgetType: "workspace",
         widgetData: { layoutId, layoutName },
+        displayName: layoutName,
       });
 
       setMenuOpen(false);

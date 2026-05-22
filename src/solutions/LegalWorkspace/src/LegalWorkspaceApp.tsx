@@ -161,6 +161,7 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
             webApi={webApi}
             userId={userId}
             initialWorkspaceId={initialWorkspaceId}
+            embedded={embedded}
             onHeaderReady={!embedded ? setHeaderState : undefined}
           />
         </main>
