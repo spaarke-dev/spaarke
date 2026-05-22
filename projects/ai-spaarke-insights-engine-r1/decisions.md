@@ -1,10 +1,10 @@
 # Decisions Log — Spaarke Insights Engine (r1)
 
 > **Status**: Living document — decisions added as made, marked superseded when changed.
-> **Last Updated**: 2026-05-19
-> **Anchor doc**: read this first; for full rationale see [design.md](design.md) section references.
+> **Last Updated**: 2026-05-22 (added D-46–D-51 LAVERN-derived decisions; updated D-01, D-02, D-03 wording; added LAVERN coordination items; added DEF-12, DEF-13, DEF-14, DEF-15; noted D-39–D-45 + DEF-08–DEF-11 numbering gap from architecture-doc r2 expansion)
+> **Anchor doc**: read this first; for full rationale see [design.md](design.md) section references and [lavern-pattern-assessment.md](lavern-pattern-assessment.md) for LAVERN-pattern decision basis.
 
-Each entry: `D-XX | Decision | Rationale (one line) | design.md ref`. Decisions are durable until superseded; supersessions are explicit and reference the superseding entry.
+Each entry: `D-XX | Decision | Rationale (one line) | design.md ref or lavern-pattern-assessment.md §`. Decisions are durable until superseded; supersessions are explicit and reference the superseding entry.
 
 ---
 
@@ -12,14 +12,14 @@ Each entry: `D-XX | Decision | Rationale (one line) | design.md ref`. Decisions 
 
 | ID | Decision | Rationale | Ref |
 |---|---|---|---|
-| D-01 | Name: **Spaarke Insights Engine** (internal: `Insights Engine`, code: `Insights*`) | Distinct from IQ Stack (marketing umbrella). "Engine" honestly scopes — signals in, context out; sources and surfaces are out of scope. | §1.1 |
-| D-02 | Engine boundary: ONLY the resolver + synthesis layer + sync/extraction Functions + Insight Index + Insight Graph. **Sources (Dataverse, SPE) and surfaces (pane, ribbon, Outlook) are out of scope.** | Single responsibility; replaceable; independently deployable. | §1.1, §3.1 |
+| D-01 | Name: **Spaarke Insights Engine** (plural, canonical; internal: `Insights Engine`; code: `Insights*`; project folder: `projects/ai-spaarke-insights-engine-r1/`) | "Engine" honestly scopes — signals in, context out. The Engine **owns** the resolver + synthesis + sync/extraction Functions + Insight Index + Insight Graph + Precedent Board. Source systems (Dataverse, SPE, AI sessions) are **consumed but not owned**; presentation surfaces are **emitted to but not owned**. Distinct from IQ Stack (marketing umbrella). | §1.1 |
+| D-02 | Engine boundary by **ownership**: **owns** the resolver + synthesis layer + sync/extraction Functions + Insight Index + Insight Graph + Precedent Board. **Consumes but does not own**: source systems (Dataverse, SPE, AI session storage) as signal inputs — they feed the Engine but are upstream concerns with their own teams, schemas, lifecycles. **Emits to but does not own**: presentation surfaces (pane, ribbon, Outlook, Teams, public API) — they render `InsightResponse` payloads but evolve independently. | Single responsibility; replaceable; independently deployable. Ownership boundary determines what ships when "Insights Engine v2" deploys (Engine components) vs what doesn't (sources and surfaces). | §1.1, §3.1 |
 
 ## Conceptual model
 
 | ID | Decision | Rationale | Ref |
 |---|---|---|---|
-| D-03 | **Three-artifact taxonomy**: Fact / Observation / Inference. Every artifact carries this `type`. | Different trust profiles, stores, APIs, presentation rules. Mixing them is what makes "intelligence" silently dishonest. | §2.1 |
+| D-03 | **Four-artifact taxonomy**: Fact / Observation / **Precedent** / Inference. Every artifact carries this `type`. Phase 1 ships architecture + scaffold for all four tiers (D-A26, D-A27); Precedent lifecycle automation ships in Phase 1.5. | Different trust profiles, stores, APIs, presentation rules. Mixing them is what makes "intelligence" silently dishonest. The 3-tier model lacked a layer above Observations for cross-matter patterns that accumulate evidence and get SME-confirmed as institutional rules — Precedent fills that gap. See D-46 and `lavern-pattern-assessment.md` §3.1 for rationale; LAVERN ADR 10.1. | §2.1 |
 | D-04 | **Provenance is the API contract.** Every Observation and Inference carries `evidence[]`. Surfaces that can't render provenance can't display Inferences. | The architectural mechanism that prevents dishonesty by construction. | §2.4 |
 | D-05 | Every Observation stores **`producedBy.version`** (e.g., `closure-extraction@v3`). Mandatory field. | Without this, you can't selectively re-extract when extraction playbooks improve. Confirmed by knowledge research. | §2.2 |
 | D-06 | **Evidence sufficiency is a per-question rule** in the question catalog (e.g., `comparableMatters.min: 12`). Insufficient → structured `insufficient_evidence` response, never silent fallback to generic AI. | The architectural enforcement of the IQ Stack honesty contract. | §5.4 |
@@ -96,6 +96,23 @@ Each entry: `D-XX | Decision | Rationale (one line) | design.md ref`. Decisions 
 |---|---|---|---|
 | D-38 | **ADR-001 narrowed**: BFF endpoints MUST be Minimal API (no Functions hosting BFF endpoints); Azure Functions permitted for narrow out-of-band integration; Durable Functions still rejected. Commit `84cec9f9`. | Original concern (don't fragment BFF runtime) preserved. New scope unblocks Insights Engine sync work. Propagated to 16 files. | ADR-001, design.md §13 |
 
+## Numbering note — D-39 through D-45 + DEF-08 through DEF-11 gap
+
+The `INSIGHTS-ENGINE-ARCHITECTURE.md` "r2" expansion introduced **D-39 through D-45** for architecture-internal decisions (historical backfill / golden dataset / MCP server / streaming verifier / sync backpressure / graph adjacency-list write amplification / embedding model lifecycle) AND **DEF-08 through DEF-11** for deferred items (Foundry IQ evaluation / Engine extraction / MCP write operations / Spaarke-specific fine-tuned models). Those decisions and DEF entries are described in detail in the architecture doc §19.9 and §19.11 but **have not yet been propagated to this anchor document**. Bringing them into this canonical decisions log is tracked as a follow-up (see DEF-15). LAVERN-derived decisions below start at **D-46**, and the LAVERN-derived deferred items below start at **DEF-12**, both to avoid colliding with the existing ranges; the architecture doc's r2 numbering is preserved.
+
+## LAVERN-derived decisions (Pattern adoption from `ai-advanced-capabilities-development` project)
+
+These decisions are responses to the LAVERN analysis (`projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md`) — 12 patterns derived from the AnttiHero/lavern Apache 2.0 repo. Phase 1 adopts 5 patterns; full rationale + verdicts on all 12 in `lavern-pattern-assessment.md`.
+
+| ID | Decision | Rationale | Ref |
+|---|---|---|---|
+| D-46 | **Precedent Board layer in 4-tier taxonomy.** Architecture + scaffold in Phase 1 (D-A26, D-A27); lifecycle automation in Phase 1.5. Includes: `sprk_precedent` Dataverse entity + Cosmos `Precedent` vertex + `OBSERVATION_SUPPORTS_PRECEDENT` / `PRECEDENT_RELATED_TO_PRECEDENT` edges + `IPrecedentBoard` interface + `insight-precedents` AI Search embedding index. References LAVERN ADR 10.1 (proposed, not yet ratified). | Pre-production is the right moment to get the conceptual model right. Building "3-tier with room for 4th" is harder than "4-tier from day one." Without Precedent: (a) every Inference re-derives patterns from raw Observations (cost + quality issue), (b) no path for SME confirmation of institutional rules (`Mode 4` from use-case doc doesn't exist), (c) the system architecturally mirrors generic AI hedging the marketing disavows. Phase 1 scaffold + Phase 1.5 lifecycle is the disciplined middle ground. | lavern-pattern-assessment.md §3.1; LAVERN ADR 10.1 |
+| D-47 | **`GroundingVerifier` post-Agent citation check** — mechanical zero-LLM substring + sliding-window verifier, **MANDATORY** in `InsightsResolverService` after Insights Agent before returning. Failed citations stripped or annotated `[citation could not be verified]`. Platform primitive shared with Action Engine. References LAVERN ADR 10.6 (proposed). Complementary to but distinct from architecture-doc D-42 (rule-based + embedding-similarity streaming safety verifier): D-47 is mechanical citation check on individual evidence refs; D-42 is response-level claim/evidence binding check. Both run in the response pipeline. | D-04 declares provenance is the API contract but the existing design never verifies cited evidence actually contains the claim's quoted text. Without verification D-04 is principle, not enforcement. Mechanical primitive: ~milliseconds, zero LLM cost. Closes the gap between the honesty contract's promise and what the code mechanically guarantees. | lavern-pattern-assessment.md §3.2; LAVERN ADR 10.6 |
+| D-48 | **`EvidenceGuard.Validate` runtime non-empty guard** on every evidence-bearing tool handler. Throws `EvidenceRequiredException` on empty `Evidence`. Applied to `IFindComparableMattersTool`, `IGetMatterFactsTool`, `IAssessEvidenceSufficiencyTool`, `ISearchPrecedentsTool`. References LAVERN Pattern #6. | C# type system enforces shape, not non-empty contents. Tests, direct callers, or future code constructing payloads programmatically could pass `Evidence: []` and silently bypass D-04. Belt-and-suspenders: ~1 day cost; meaningful defense. | lavern-pattern-assessment.md §3.3 |
+| D-49 | **`IDeclineToFindTool` as first-class tool verb** — replaces "Agent reasons about whether to decline" prose with a deterministic tool the Agent invokes when `IAssessEvidenceSufficiencyTool` returns insufficient. Returns structured `DeclineResponse { Reason, Explanation, MinimumEvidenceNeeded, SuggestedActions, ConfidenceInDecline }`. References LAVERN Pattern #7. | D-06 declares no silent fallback to generic AI, but enforcement is currently an LLM call that can be coerced ("only 4 comparable matters but let me give a rough estimate"). A dedicated tool makes uncertainty a deterministic affordance the Agent must invoke. | lavern-pattern-assessment.md §3.4 |
+| D-50 | **`ISanitizer` + `Smacl1Sanitizer` ingest primitive** — strips prompt-injection vectors (zero-width Unicode U+200B–U+200F + U+202A–U+202E + U+2060–U+206F + U+FEFF, HTML comments, ANSI escapes, control chars) before any LLM sees text. Audit log to App Insights custom events. **MANDATORY** at all AI-facing ingest paths in the Engine; Phase 1 wires it into closure-extraction stub ingest paths so Phase 2 real-document path inherits sanitization by default. Platform primitive shared with Action Engine. References LAVERN ADR 10.6 (proposed). | Every AI-facing ingest path without canonical sanitization is its own prompt-injection attack surface. "Build for real data from the onset" (user-stated principle, 2026-05-22) means closure-extraction's real-document path in Phase 2 must inherit sanitization, not retrofit it. Build the primitive in Phase 1 even though Phase 1 itself uses mock data. | lavern-pattern-assessment.md §3.5; LAVERN ADR 10.6 |
+| D-51 | **Shared GateResolver consumption for Phase 2+ write-back paths.** Action Engine MVP is the implementer of `IGateResolver` interface + 4 implementations per LAVERN ADR 10.3 (proposed); Insights Engine consumes the same primitive when write-back paths land (Phase 2+). The §8.4 "extends existing PendingPlanManager" plan in design.md is superseded by GateResolver consumption. | One canonical approval primitive across Spaarke beats per-subsystem reimplementation. Coordination assessment §4.6 (new) tracks this. Phase 1 Insights is read-only so no implementation work; design discipline is to reference the planned primitive rather than building our own. | lavern-pattern-assessment.md §6; coordination-assessment-with-insights-engine.md §4.6; LAVERN ADR 10.3 |
+
 ---
 
 ## Explicit "do not do" — the negative space
@@ -114,6 +131,15 @@ These are decided NOT to do. Recording them prevents drift:
 - **Do not** require human curation of identity resolution (D-29)
 - **Do not** return generic AI hedging when Inference evidence is insufficient — return structured `insufficient_evidence` (D-06)
 - **Do not** put document content into cross-matter aggregates (privilege leakage — §7.4)
+- **Do not** skip `GroundingVerifier` post-Agent step on any evidence-bearing Insight response (D-47)
+- **Do not** allow empty `Evidence` arrays through evidence-bearing tool handlers — `EvidenceGuard.Validate` MUST fire (D-48)
+- **Do not** write decline prose from the Agent; invoke `IDeclineToFindTool` for structured `DeclineResponse` (D-49)
+- **Do not** route external text to any LLM step without first passing through `ISanitizer` (D-50)
+- **Do not** create Precedents without supporting Observations referenced via `OBSERVATION_SUPPORTS_PRECEDENT` edges (D-46)
+- **Do not** hardcode Precedent lifecycle thresholds (`CONFIRM_THRESHOLD`, decay rate, drift threshold) — Phase 1.5 makes them configurable (DEF-12)
+- **Do not** reimplement an approval primitive in Phase 2+ — consume Action Engine's `IGateResolver` (D-51)
+- **Do not** spell the project name singular ("Insight Engine") — D-01 is plural canonical
+- **Do not** confuse architecture+scaffold (Phase 1 D-A26) with full Precedent Board (Phase 1.5) — scaffold means: entity, interface, vertex+edges, index, tool stubs, admin endpoint. Full means: decay job, promotion job, drift detection, curator, SME review queue, hybrid retrieval dedup
 
 ---
 
@@ -128,6 +154,21 @@ The Spaarke auth Phase C work (currently in flight) interlocks with Phase 1 of t
 | **#044** — HMAC-SHA256 webhook signature validation | Ship Phase 1 initially with `clientState`; drop in HMAC when #044 lands | Copy the same validator code; do not fork |
 | **#047** — Non-`common` `TenantId` in `appsettings.template.json` | Insights Engine Function appsettings adopt the fix from day one | Per-tenant explicit TenantId in every Bicep deployment |
 | **`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`** | Active auth design canon until ADR-027 lands | Insights Engine auth design must be consistent with this canon |
+
+---
+
+## LAVERN coordination items
+
+The `ai-advanced-capabilities-development` project authored the LAVERN analysis + ADR proposals 10.1–10.6 (`projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md` §10). Coordinate:
+
+| LAVERN ADR | Coordination requirement | Impact on Phase 1 |
+|---|---|---|
+| **10.1** — Precedent Board | Ratification before D-A26 design freeze. Insights Engine is the implementer (scaffold in Phase 1, lifecycle in Phase 1.5). Action Engine is downstream consumer (AI Tools cite Precedents in R2+). | Phase 1 D-A26 + D-A27 (scaffold); Phase 1.5 (lifecycle automation) |
+| **10.3** — GateResolver interface | Joint ratification with Action Engine. Action Engine MVP is the implementer; Insights consumes for Phase 2+ write-back paths. See D-51. | No Phase 1 implementation; reference only |
+| **10.4** — Provider tier abstraction | Required *before* EvaluatorGate (LAVERN Pattern #2) ships (Phase 2+ Action Engine concern). Insights stays on hardcoded D-08 embedding model; tier abstraction is platform/JPS concern. | No Phase 1 change; awareness only |
+| **10.6** — Sanitization + Citation Verification Standard | Insights builds the primitives in Phase 1 (D-A22 GroundingVerifier, D-A25 Sanitizer). Action Engine consumes when webhook/signal triggers land (R2). See D-47, D-50. | Phase 1 D-A22 + D-A25 |
+| **`ai-advanced-capabilities-development` project status** | Currently working document; ADRs 10.1–10.6 are proposed, not yet ratified. Phase 1 design proceeds in parallel with explicit cross-references to LAVERN ADR proposals; final ADR docs land in `docs/adr/` post-ratification. | Coordination is documented, not blocking |
+| **Cross-project artifacts** | `coordination-assessment-with-insights-engine.md` in Action Engine project tracks joint decisions (now §4.1–§4.8 with LAVERN-derived §4.6/§4.7/§4.8 additions) | Anchor doc for cross-project alignment; both projects reference |
 
 ---
 
@@ -153,6 +194,10 @@ The Spaarke auth Phase C work (currently in flight) interlocks with Phase 1 of t
 | DEF-05 | Tenant control plane (config-driven → data-driven) | When tenant count approaches 10 |
 | DEF-06 | Foundry-hosted agent for separate multi-day diligence surfaces | When those surfaces are designed (separate project) |
 | DEF-07 | Cross-tenant insights (industry benchmarks) — opt-in only | Possibly Phase 3+; major privacy/legal work first |
+| DEF-12 | Precedent Board lifecycle automation tuning (`CONFIRM_THRESHOLD`, decay rate, drift threshold) | Calibrate with real Observations flowing in Phase 1.5; do NOT pre-tune in Phase 1 |
+| DEF-13 | SME review queue UI surface for Precedent confirmation/drift (workspace context pane vs dedicated Code Page vs Teams app) | Product input from real SME during Phase 1.5; the surface choice affects Mode 4 from `ADVANCED-AI-USE-CASE-PATTERNS.md` |
+| DEF-14 | Cross-tenant Precedent publishing (Spaarke-curated shared pool of confirmed Precedents) | Major privacy/legal work first; Phase 2+ if at all |
+| DEF-15 | **Back-propagate architecture-doc r2 decisions (D-39 through D-45) AND DEF entries (DEF-08 through DEF-11) into this anchor doc.** Architecture doc r2 expanded the decision log without propagating to decisions.md, creating doc drift. D-39–D-45 cover historical backfill, golden dataset + eval harness, MCP server, streaming verifier, sync backpressure, graph write amplification, embedding model lifecycle. DEF-08–DEF-11 cover Foundry IQ evaluation, Engine extraction trigger, MCP server write operations, Spaarke-specific fine-tuned models. They are documented in detail in `INSIGHTS-ENGINE-ARCHITECTURE.md` §19 (and r2 sections elsewhere) but not yet in this canonical decisions log. Bring them in to close the doc-drift gap. | Before Phase 1 design freeze (low priority — the architecture doc is the de-facto canon for these decisions today; this is a hygiene cleanup) |
 
 ---
 

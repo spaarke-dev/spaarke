@@ -150,21 +150,23 @@ The Engine is intentionally additive. It does not replace any existing AI subsys
 
 ## 3. Conceptual model
 
-### 3.1 The three-artifact taxonomy
+### 3.1 The four-artifact taxonomy
 
-Every piece of context the Engine produces is one of three things, each with a different trust profile, store, and presentation rule. This taxonomy is the most important architectural invariant — mixing the three is what makes "intelligence" silently dishonest.
+Every piece of context the Engine produces is one of four things, each with a different trust profile, store, and presentation rule. This taxonomy is the most important architectural invariant — mixing tiers is what makes "intelligence" silently dishonest. Phase 1 ships the architecture + scaffold for all four tiers; Precedent lifecycle automation lands in Phase 1.5 (see §17). Rationale for the 4-tier model: [`projects/ai-spaarke-insights-engine-r1/lavern-pattern-assessment.md`](../../projects/ai-spaarke-insights-engine-r1/lavern-pattern-assessment.md) §3.1; decisions.md D-03, D-46.
 
 | Type | Source | Confidence | Lives in | Presented as |
 |---|---|---|---|---|
 | **Fact** | Deterministic computation over systems of record | 1.0 always | Live Dataverse query OR materialized feature view in Insight Index | Stated directly. No hedging. |
 | **Observation** | Probabilistic extraction by playbook/LLM at a milestone | 0.0–1.0 | Insight Index (AI Search) + Insight Graph references | Stated with confidence + evidence link |
-| **Inference** | Synthesized on demand by the Insights Agent over Facts + Observations | 0.0–1.0 | Never authoritatively stored (cached only) | Stated with confidence, comparable set, reasoning |
+| **Precedent** | Cross-matter pattern that has accumulated supporting Observations and (in Phase 1.5+) been SME-confirmed as a firm-level rule | 0.0–1.0, refined over time | `sprk_precedent` Dataverse entity + `insight-precedents` AI Search index + `Precedent` vertices in Cosmos graph; lifecycle: Tentative → Confirmed → UnderDriftReview → Deprecated → Retired | Stated as institutional rule with evidence count, confirmation status, supporting matters, last-reviewed date |
+| **Inference** | Synthesized on demand by the Insights Agent over Facts + Observations + Precedents | 0.0–1.0 | Never authoritatively stored (cached only) | Stated with confidence, comparable set, citable Precedents, reasoning |
 
 #### 3.1.1 Examples to anchor the taxonomy
 
 - **Fact**: `Matter M-1234 was pending 287 days` — computed from `closedDate - openedDate`. Always true given the source. State directly.
 - **Observation**: `Matter M-1234 outcome quality: favorable (0.92)` — produced by a closure-extraction playbook reading documents and decisions. Carries confidence and evidence. Cite the playbook + source docs.
-- **Inference**: `Predicted cost for this new matter: ~$280K (confidence 0.74), based on 12 comparable matters` — synthesized at query time. Cite the 12 matters and their actual numbers. If only 3 are comparable, return *"insufficient evidence"* with the gap.
+- **Precedent**: `Counterparty 'BigCorp' typically negotiates 30-day cure periods up from 15 in IP indemnity clauses` (Confirmed, 7 supporting matters, last reviewed by S. Lee 2026-04-12). Cross-matter pattern that has been SME-confirmed; cite as institutional rule with supporting Observation evidence trail.
+- **Inference**: `Predicted cost for this new matter: ~$280K (confidence 0.74), based on 12 comparable matters; supported by Confirmed Precedent PR-007 on M&A earnout settlement timing` — synthesized at query time. Cite the 12 matters, their actual numbers, and any applicable Precedents. If only 3 comparable matters exist, return *"insufficient evidence"* via `IDeclineToFindTool` with the gap.
 
 ### 3.2 The unified artifact envelope
 
@@ -173,7 +175,7 @@ Every artifact uses the same envelope so surfaces can render uniformly. Fields l
 ```json
 {
   "id": "stable-identifier",
-  "type": "fact | observation | inference",
+  "type": "fact | observation | precedent | inference",
   "subject": { "entityType": "matter", "entityId": "M-1234" },
   "predicate": "totalSpend | outcomeQuality | predictedCost | ...",
   "value": {
@@ -217,6 +219,45 @@ Notes:
 ### 3.3 Provenance is the API contract
 
 Every artifact carries its evidence. The surface receives `{value, evidence[]}` as a minimum; rendering provenance is non-optional. **A surface that cannot display provenance cannot display Inferences** — only Facts, which need none beyond their source query (D-04). This single rule prevents most ways the system could become dishonest.
+
+### 3.4 The Precedent layer
+
+The Precedent tier (introduced by D-46 / LAVERN ADR 10.1) sits between Observations and Inferences. It captures **cross-matter patterns that have accumulated supporting evidence** and become **institutional rules**. Without this tier, the Engine re-derives the same patterns from raw Observations on every Inference query (cost + quality issue) and has no mechanism for SMEs to ratify or reject patterns the system surfaces.
+
+#### 3.4.1 Lifecycle states
+
+| State | Meaning | How to enter | How to exit |
+|---|---|---|---|
+| `Tentative` | Pattern has been observed across N matters but not yet promoted | Created automatically on Nth recurrence (Phase 1.5) OR manually via admin endpoint (Phase 1) | Promoted to `Confirmed` when `timesUsed ≥ CONFIRM_THRESHOLD` AND all outcomes positive (Phase 1.5); rejected to `Deprecated` by SME or curator |
+| `Confirmed` | SME-ratified institutional rule | `Tentative` + threshold met + SME confirmation (Phase 1.5 via review queue; Phase 1 via admin endpoint) | `UnderDriftReview` if `negativeOutcomes ≥ 2`; explicit deprecation by SME |
+| `UnderDriftReview` | Confirmed pattern with contradicting evidence — needs SME re-evaluation | Drift detection (Phase 1.5) on `negativeOutcomes ≥ 2`; surfaces in SME queue | Returns to `Confirmed` (false alarm), drops to `Deprecated` (genuine drift), or modified to a refined pattern |
+| `Deprecated` | No longer applies — explicit retraction | SME action or stale decay (Phase 1.5: `daysInactive > decayDays × 6`) | Rarely; intentional re-instatement only |
+| `Retired` | Soft-deleted, kept for audit history | Administrative cleanup | Never (immutable audit) |
+
+#### 3.4.2 Reinforcement, decay, drift
+
+Per LAVERN Pattern #1 (Phase 1.5 behaviors):
+
+- **Reinforcement**: each recurrence increments `timesUsed`, appends to `outcomes[]`, bumps `effectivenessScore += scoreDelta × 0.2`. Dedup by hybrid retrieval (vector + BM25 match on `sprk_patternsignature`), NOT by lavern's SHA-256 string match.
+- **Decay**: daily heartbeat job decays `effectivenessScore *= 0.95` on Precedents inactive past `decayDays`. After `decayDays × 6` inactivity → `Deprecated`.
+- **Drift**: `negativeOutcomes ≥ 2` flips `Confirmed` → `UnderDriftReview`, surfaces in SME queue. Does NOT auto-deprecate.
+- **Scope by relevance** (D-30 extended to Precedents): only invest curation effort on patterns meeting N+ matters or N+ outbound edges. Long-tail mentions stay as standalone Observations without promotion to Tentative.
+
+#### 3.4.3 What's in Phase 1 vs Phase 1.5
+
+| In Phase 1 (D-A26, D-A27) | Deferred to Phase 1.5 |
+|---|---|
+| Envelope supports `type: "precedent"` natively | `PrecedentDecayJob` (daily decay) |
+| `sprk_precedent` Dataverse entity + relationship tables | `PrecedentPromotionJob` (consolidation pass) |
+| `IPrecedentBoard` interface + stub `DataversePrecedentBoard` | Drift detection automation |
+| Cosmos: `Precedent` vertex + `OBSERVATION_SUPPORTS_PRECEDENT` + `PRECEDENT_RELATED_TO_PRECEDENT` edges | Hybrid retrieval dedup algorithm |
+| AI Search `insight-precedents` embedding index | SME review queue UI (Mode 4 from use-case doc) |
+| Agent tools: `ISearchPrecedentsTool`, `ICitePrecedentTool` (stubs) | Inference layer cites Precedents in synthesis (vs re-deriving) |
+| Admin endpoint `POST /api/insights/admin/precedents` (manual create/confirm/deprecate for testing) | Curator consolidation logic |
+
+#### 3.4.4 What Phase 1 acceptance demonstrates
+
+A manually-created Confirmed Precedent (`POST /api/insights/admin/precedents`) is retrieved by `ISearchPrecedentsTool` and cited by the Insights Agent in an Inference response with provenance link `precedent://...`. This proves the 4-tier architecture works end-to-end before Phase 1.5 lifecycle automation begins.
 
 ---
 
@@ -366,9 +407,13 @@ The Engine spans the BFF API, a new Function App, and three substrate stores. Th
 | `LiveFactResolverService` | `Sprk.Bff.Api/Services/Insights/Facts/LiveFactResolverService.cs` | Typed Dataverse queries for deterministic Facts; 5-min Redis cache | Wraps existing `IDataverseService` |
 | `IInsightGraph` + `CosmosNoSqlInsightGraph` | `Sprk.Bff.Api/Services/Insights/Graph/` | Adjacency-list graph over Cosmos NoSQL with named traversals | NEW — no existing graph |
 | `IInsightArtifactStore` | `Sprk.Bff.Api/Services/Insights/Index/` | Wraps `SearchClient` for Insight-specific operations (envelope serialization, idempotent upsert, evidence preservation) | Wraps existing AI Search SDK; pattern from `ReferenceIndexingService` |
-| Insight tool handlers | `Sprk.Bff.Api/Services/Insights/Tools/` | `IFindComparableMattersTool`, `IGetMatterFactsTool`, `IRetrieveByGraphTool`, `IGetObservationsTool`, `IAssessEvidenceSufficiencyTool`, `IComposeInferenceTool` | Implements existing `IAiToolHandler` pattern |
+| Insight tool handlers | `Sprk.Bff.Api/Services/Insights/Tools/` | `IFindComparableMattersTool`, `IGetMatterFactsTool`, `IRetrieveByGraphTool`, `IGetObservationsTool`, `IAssessEvidenceSufficiencyTool`, `IComposeInferenceTool`, **`ISearchPrecedentsTool`** (D-A26), **`ICitePrecedentTool`** (D-A26), **`IDeclineToFindTool`** (D-A24, D-49) | Implements existing `IAiToolHandler` pattern |
+| **`IPrecedentBoard`** + stub `DataversePrecedentBoard` | `Sprk.Bff.Api/Services/Insights/Precedents/` | Phase 1 scaffold for 4th tier (D-A26, D-46). CRUD over `sprk_precedent` entity + Cosmos `Precedent` vertex + `insight-precedents` AI Search index. Lifecycle methods (decay, promotion, drift) declared but `NotImplementedException` until Phase 1.5. | NEW |
+| **`GroundingVerifier`** | `Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs` | Mechanical post-Agent citation check (D-A22, D-47). Runs in `InsightsResolverService` before returning. Platform primitive shared with Action Engine (coordination assessment §4.7). | NEW (platform primitive) |
+| **`EvidenceGuard`** | `Sprk.Bff.Api/Services/Insights/EvidenceGuard.cs` | Static `Validate(result)` method; throws `EvidenceRequiredException` (D-A23, D-48). | NEW |
+| **`ISanitizer` + `Smacl1Sanitizer`** | `Sprk.Bff.Api/Services/Ai/IngestSanitization/` | Strips prompt-injection vectors before any LLM step (D-A25, D-50). Audit log to App Insights. Platform primitive shared with Action Engine (coordination assessment §4.7). | NEW (platform primitive) |
 | Question catalog | `Sprk.Bff.Api/Services/Insights/Questions/` | Per-question evidence-sufficiency rules, insufficient-evidence response shapes | NEW — first entry: `predict-matter-cost` |
-| `InsightEndpoints` | `Sprk.Bff.Api/Api/Insights/InsightEndpoints.cs` | `POST /api/insights/ask`, endpoint-filter auth (ADR-008), rate limiting (ADR-016), ProblemDetails errors (ADR-019) | Mirrors existing endpoint patterns |
+| `InsightEndpoints` | `Sprk.Bff.Api/Api/Insights/InsightEndpoints.cs` | `POST /api/insights/ask`, endpoint-filter auth (ADR-008), rate limiting (ADR-016), ProblemDetails errors (ADR-019). Phase 1 also exposes `POST /api/insights/admin/precedents` (D-A27) for manual Precedent CRUD for end-to-end testing. | Mirrors existing endpoint patterns |
 | `AnalysisServicesModule`-style DI module | `Sprk.Bff.Api/Infrastructure/DI/InsightsModule.cs` | Feature module wiring all of the above | Mirrors `AnalysisServicesModule.cs` |
 
 ### 5.2 Function App components (new)
@@ -408,11 +453,23 @@ From [`ai-inventory.md`](../../projects/ai-spaarke-insights-engine-r1/ai-invento
 
 | Store | Where | Contains |
 |---|---|---|
-| **Insight Index** | AI Search (existing service, new indexes) | Observations + materialized Facts; vector + structured fields per artifact envelope; 4 indexes: `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions` |
-| **Insight Graph** | Cosmos NoSQL (new account) | Vertices (Matter, Party, Person, Firm, Document, Issue, Jurisdiction, Outcome, Playbook) + typed edges (INVOLVED_PARTY, WORKED_ON, REPRESENTED, ADJUDICATED, BELONGS_TO, INVOLVED_ISSUE, VENUE, RESULTED_IN, RELATED_TO, REFERENCES, SAME_AS) + artifact refs |
+| **Insight Index** | AI Search (existing service, new indexes) | Observations + materialized Facts; vector + structured fields per artifact envelope; **5 indexes**: `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, **`insight-precedents`** (D-A26) |
+| **Insight Graph** | Cosmos NoSQL (new account) | Vertices (Matter, Party, Person, Firm, Document, Issue, Jurisdiction, Outcome, Playbook, **Precedent**) + typed edges (INVOLVED_PARTY, WORKED_ON, REPRESENTED, ADJUDICATED, BELONGS_TO, INVOLVED_ISSUE, VENUE, RESULTED_IN, RELATED_TO, REFERENCES, SAME_AS, **OBSERVATION_SUPPORTS_PRECEDENT**, **PRECEDENT_RELATED_TO_PRECEDENT**) + artifact refs |
+| **Precedent Board** | `sprk_precedent` Dataverse entity + `sprk_precedent_observation` (N:N) + `sprk_precedent_related` (N:N self) | Cross-matter pattern records with lifecycle state, effectiveness score, outcomes log, last-reviewed-by/date. Phase 1 ships entity + CRUD via `IPrecedentBoard` stub (D-A26); Phase 1.5 ships lifecycle automation. |
 | **Live Facts** | Direct Dataverse queries | No storage — deterministic computation over `sprk_matter`, `sprk_invoice`, etc. with 5-minute Redis cache |
 | **Two-tier memory** | Redis | `user_profile` (30-day sliding) + `chat_summary` (session-scoped sliding); per-question TTL cache for resolver responses |
 | **Audit log** | Existing audit Cosmos (append-only, immutable) | Every Insight request and response logged for compliance |
+
+### 5.5 Platform primitives consumed across Spaarke
+
+Two of the components above are **platform primitives** — they live in `Sprk.Bff.Api/Services/Ai/` (not `Services/Insights/`) and are designed to be shared across subsystems. Coordination assessment §4.7 (in Action Engine project) tracks these.
+
+| Primitive | Built by | Consumed by | Status |
+|---|---|---|---|
+| `ISanitizer` + `Smacl1Sanitizer` | Insights Engine Phase 1 (D-A25) | Insights closure-extraction (Phase 2 real-doc path); Action Engine R2 (webhook/signal triggers); future subsystems | LAVERN ADR 10.6 (proposed) |
+| `GroundingVerifier` | Insights Engine Phase 1 (D-A22) | Insights `InsightsResolverService` (mandatory); Action Engine R2 AI Tools that return findings; future subsystems | LAVERN ADR 10.6 (proposed) |
+| `IGateResolver` + 4 implementations | **Action Engine MVP** (LAVERN ADR 10.3) | Insights Engine Phase 2+ write-back paths (D-51); Self-Service Registration; Email Wizard; future approval surfaces | LAVERN ADR 10.3 (proposed) |
+| Extended `ToolHandlerMetadata` schema | Joint workstream (coordination assessment §4.5, §4.8) | Both Engines' tool registrations | Pending |
 
 ---
 
@@ -693,12 +750,15 @@ Memory shapes the question and the synthesis style; evidence still comes from in
 |---|---|---|
 | `FindComparableMatters` | Vector + filter retrieval over `insight-matters` | List of `MatterArtifact` with similarity scores |
 | `GetMatterFacts` | Live-fact lookup for one or more matters | Map of `matterId → {factPredicate → value}` |
-| `RetrieveByGraph` | Named graph traversals | List of vertex refs + edge context |
+| `RetrieveByGraph` | Named graph traversals (Phase 1 includes `Precedent` vertex + `OBSERVATION_SUPPORTS_PRECEDENT` / `PRECEDENT_RELATED_TO_PRECEDENT` edges) | List of vertex refs + edge context |
 | `GetObservations` | Retrieve Observations matching a predicate + scope filter | List of Observation artifacts |
+| **`SearchPrecedents`** | Vector + filter retrieval over `insight-precedents` index (D-A26, D-46). Stub in Phase 1; returns Confirmed Precedents matching scope filter. | List of `PrecedentArtifact` with confirmation status, supporting matter count, last-reviewed date |
+| **`CitePrecedent`** | Build provenance reference to a Precedent for inclusion in Inference `evidence[]` (D-A26, D-46) | `EvidenceRef { refType: 'precedent', ref: 'precedent://...' }` |
 | `AssessEvidenceSufficiency` | Check if comparable set is large/diverse enough for an Inference | `{sufficient: bool, count: N, threshold: M, gap: '…'}` |
-| `ComposeInference` | Final synthesis — wraps conclusion in envelope with evidence | Inference artifact |
+| **`DeclineToFind`** | Deterministic decline path when evidence insufficient (D-A24, D-49). Replaces "Agent writes decline prose" with structured tool invocation. | `DeclineResponse { Reason, Explanation, MinimumEvidenceNeeded, SuggestedActions, ConfidenceInDecline }` |
+| `ComposeInference` | Final synthesis — wraps conclusion in envelope with evidence (including Precedent citations where applicable) | Inference artifact |
 
-Each tool follows the existing `IAiToolHandler` pattern; no new tool registry.
+Each tool follows the existing `IAiToolHandler` pattern; no new tool registry. Tools producing evidence-bearing artifacts (`FindComparableMatters`, `GetMatterFacts`, `SearchPrecedents`, `AssessEvidenceSufficiency`) MUST invoke `EvidenceGuard.Validate(result)` on return per D-48.
 
 ### 9.3 Evidence-sufficiency rules — non-negotiable
 
@@ -1491,7 +1551,20 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 | Graph adjacency-list write amplification — D-44 | Adjacency-list pattern for Phase 1; migrate high-degree vertices (≥500 edges OR ≥200KB document size) to edges-as-documents in Phase 2 via nightly reconciliation; `IInsightGraph` abstraction unchanged | Cosmos document-size and RU cost limits at scale. Phase 1 trigger unlikely to fire on freshly-bootstrapped corpus; migration tooling designed in Phase 2. | — |
 | Embedding model lifecycle — D-45 | Dual-write versioned index pattern: provision `insight-matters-v{N+1}-emb{NewModel}`, re-embed via ScheduledReIndexer, dual-read grace period, cutover via config flag, decommission old | When `text-embedding-3-large` is succeeded, the entire Insight Index needs re-embedding. Same pattern as playbook-version migration; only the trigger differs. | — |
 
-### 19.10 Explicit "do not do"
+### 19.10 LAVERN-derived decisions (D-46 to D-51)
+
+These six decisions are responses to the LAVERN analysis (`projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md`); rationale + pattern-by-pattern verdicts in [`projects/ai-spaarke-insights-engine-r1/lavern-pattern-assessment.md`](../../projects/ai-spaarke-insights-engine-r1/lavern-pattern-assessment.md). Numbering note: D-39 through D-45 were claimed by §19.9 (r2 additions); LAVERN decisions therefore start at D-46.
+
+| Decision | Choice | Rationale | ADR |
+|---|---|---|---|
+| Precedent Board as 4th tier — D-46 | Architecture + scaffold in Phase 1 (D-A26, D-A27); lifecycle automation in Phase 1.5. `sprk_precedent` entity + Cosmos `Precedent` vertex + `OBSERVATION_SUPPORTS_PRECEDENT` / `PRECEDENT_RELATED_TO_PRECEDENT` edges + `IPrecedentBoard` interface + `insight-precedents` index | Pre-production is the right moment to get conceptual model right. Without Precedent the system re-derives patterns every query and lacks SME confirmation path | LAVERN ADR 10.1 |
+| `GroundingVerifier` post-Agent citation check — D-47 | Mechanical zero-LLM substring + sliding-window verifier, MANDATORY before returning. Failed citations stripped or annotated. Platform primitive shared with Action Engine. Complementary to D-42 (response-level claim/evidence binding); D-47 is per-citation mechanical check | D-04 declares provenance is the API contract but never verified the cited evidence contains the claim. Closes the gap between principle and enforcement | LAVERN ADR 10.6 |
+| `EvidenceGuard.Validate` runtime guard — D-48 | Static `Validate(result)` throws `EvidenceRequiredException` on empty `Evidence`. Applied to all evidence-bearing tool handlers | Type system enforces shape, not non-empty contents. Belt-and-suspenders for D-04 | LAVERN Pattern #6 |
+| `IDeclineToFindTool` as first-class tool — D-49 | Returns structured `DeclineResponse`; deterministic exit path | D-06 enforcement was LLM-coercible. A dedicated tool makes uncertainty a deterministic affordance | LAVERN Pattern #7 |
+| `ISanitizer` + `Smacl1Sanitizer` ingest primitive — D-50 | Strips prompt-injection vectors before any LLM step. Audit log to App Insights. Mandatory at AI-facing ingest paths. Wired into closure-extraction stub paths in Phase 1 so real-doc path (Phase 2) inherits sanitization | "Build for real data from the onset" — Phase 2 inherits, doesn't retrofit | LAVERN ADR 10.6 |
+| Shared GateResolver consumption — D-51 | Action Engine MVP implements `IGateResolver` per LAVERN ADR 10.3; Insights consumes when Phase 2+ write-back paths land. Supersedes design.md §8.4 "extends existing PendingPlanManager" | One canonical approval primitive across Spaarke; tracked in coordination assessment §4.6 | LAVERN ADR 10.3 |
+
+### 19.11 Explicit "do not do"
 
 - Do not host the Insights Agent in Foundry (D-13).
 - Do not use Durable Functions (D-20).
@@ -1506,7 +1579,7 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 - Do not return generic AI hedging when Inference evidence is insufficient — return structured `insufficient_evidence` (D-06).
 - Do not put document content into cross-matter aggregates (privilege leakage — §13.4).
 
-### 19.11 Deferred (will revisit)
+### 19.12 Deferred (will revisit)
 
 - Purpose-built graph DB (Cosmos Gremlin or Neo4j) — if/when Phase 2+ needs deep multi-hop algorithmic queries (`DEF-01`).
 - AI Search S2 tier bump — when indexed artifacts approach ~5M per tenant (`DEF-02`).
@@ -1549,6 +1622,13 @@ This section lists the MUST / MUST NOT rules that govern modifications to the En
 - **MUST** include `displayHint` on every artifact value field per the rendering rules in §10.7.
 - **MUST** validate user OBO token on every MCP server request; **MUST** apply `accessibleMatterSet` trimming on every MCP tool call exactly as on direct API calls (§15.1, §15.3).
 - **MUST** render `evidence[]` for every Inference visibly by default on every surface; never collapse it behind multiple clicks (§10.1, §10.7).
+- **MUST** run `GroundingVerifier` (D-47, §3.4 indirect) as a post-Agent step in `InsightsResolverService` on every evidence-bearing response — verifies each cited `evidence[]` reference actually contains the claim's quoted text. Failed citations stripped or annotated; never silently passed.
+- **MUST** invoke `EvidenceGuard.Validate(result)` on every evidence-bearing tool handler return (D-48). Throws `EvidenceRequiredException` on empty `Evidence` array.
+- **MUST** use `IDeclineToFindTool` (D-49) — never free-prose decline — when the Agent determines insufficient evidence after `IAssessEvidenceSufficiencyTool` returns insufficient.
+- **MUST** route all external text through `ISanitizer` / `Smacl1Sanitizer` (D-50) before any LLM step. Includes closure-extraction document ingestion, webhook payloads, and any other AI-facing ingest path.
+- **MUST** carry `producedBy.version` on every Precedent (D-46) — same rule as Observations (D-05). Enables targeted re-extraction when Phase 1.5 ships.
+- **MUST** create `OBSERVATION_SUPPORTS_PRECEDENT` edges from every supporting Observation to its Precedent (D-46) — Precedents without supporting Observation edges are invalid.
+- **MUST** treat Phase 1.5 Precedent lifecycle thresholds (CONFIRM_THRESHOLD, decay rate, drift threshold) as configurable, not hardcoded (DEF-12 — calibrate with real Observations, not Phase 1 mock data).
 
 ### 20.2 MUST NOT
 
@@ -1566,6 +1646,13 @@ This section lists the MUST / MUST NOT rules that govern modifications to the En
 - **MUST NOT** mix artifact types in a single response without explicit `type` tagging — Facts state directly; Observations/Inferences require provenance + confidence.
 - **MUST NOT** expose Gremlin syntax (or any raw query language) to `IInsightGraph` consumers — they depend on named traversals only (D-10).
 - **MUST NOT** ship an Inference question template without a golden-dataset entry (D-40).
+- **MUST NOT** skip `GroundingVerifier` on any evidence-bearing Insight response — even for "trusted" question paths (D-47).
+- **MUST NOT** allow any evidence-bearing tool handler to return artifacts with empty `Evidence` arrays — `EvidenceGuard.Validate` MUST fire (D-48).
+- **MUST NOT** write free-prose decline messages from the Agent — invoke `IDeclineToFindTool` for structured `DeclineResponse` (D-49).
+- **MUST NOT** route any external text to LLM without first passing through `ISanitizer` (D-50).
+- **MUST NOT** create Precedents without supporting Observations referenced via `OBSERVATION_SUPPORTS_PRECEDENT` edges (D-46).
+- **MUST NOT** reimplement an approval primitive when Phase 2+ write-back paths land — consume Action Engine's `IGateResolver` per coordination assessment §4.6 and D-51.
+- **MUST NOT** spell the project name singular ("Insight Engine") — D-01 declares plural canonical.
 - **MUST NOT** ship a build that fails the eval harness's groundedness regression gate or insufficient-evidence-correctness gate (D-40, §14.4).
 - **MUST NOT** use a second LLM call as the streaming safety verifier — verifier must be rule-based + embedding-similarity (D-42).
 - **MUST NOT** expose write operations through the MCP server in V1 — read-only inference and reference only (§15.3, `DEF-10`).
@@ -1594,7 +1681,7 @@ Net: skip directly to Phase 1.
 
 Phase 1 is split into **Track A (auth-independent, in scope NOW)** and **Track B (auth-coupled, blocked on Phase C)**. Track A is the immediate path; Track B unblocks once Phase C resolves.
 
-**Track A deliverables** (per [SPEC.md](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) D-A1 through D-A14, plus r2 additions D-A15 through D-A20):
+**Track A deliverables** (per [SPEC.md](../../projects/ai-spaarke-insights-engine-r1/SPEC.md) D-A1 through D-A14, plus r2 additions D-A15 through D-A21 (evaluation / surfacing / MCP / customer-onboarding), plus LAVERN-derived D-A22 through D-A27 (citation verifier / evidence guard / decline-to-find / sanitization / Precedent scaffold / Precedent admin endpoint)):
 
 *Substrate and code*
 
@@ -1625,10 +1712,21 @@ Phase 1 is split into **Track A (auth-independent, in scope NOW)** and **Track B
 19. **MCP server contract document** (D-A20, §15.4) — tool signatures, resource URIs, prompt fragments, OBO auth flow. Drafted alongside the question catalog so they evolve together. Implementation deferred to Phase 2.
 20. **Customer-onboarding workflow design** (D-A21, §11.4) — historical backfill priority algorithm, "Insights-ready" milestone definitions, customer-facing progress dashboard mockup. Implementation begins in Phase 1 if Track B unblocks; otherwise early Phase 2.
 
+*LAVERN-derived additions (D-A22 through D-A27 — see [lavern-pattern-assessment.md](../../projects/ai-spaarke-insights-engine-r1/lavern-pattern-assessment.md))*
+
+21. **`GroundingVerifier`** (D-A22, D-47) — mechanical post-Agent citation check; platform primitive shared with Action Engine. Runs in `InsightsResolverService`.
+22. **`EvidenceGuard.Validate`** (D-A23, D-48) — runtime non-empty guard on evidence-bearing tool handlers.
+23. **`IDeclineToFindTool`** (D-A24, D-49) — deterministic decline path replacing free-prose Agent decline.
+24. **`ISanitizer` + `Smacl1Sanitizer`** (D-A25, D-50) — ingest sanitization primitive shared with Action Engine.
+25. **Precedent layer architecture + scaffold** (D-A26, D-46) — `sprk_precedent` entity + `IPrecedentBoard` interface + Cosmos `Precedent` vertex + `insight-precedents` AI Search index + tool stubs (`ISearchPrecedentsTool`, `ICitePrecedentTool`). Lifecycle automation deferred to Phase 1.5.
+26. **Precedent admin endpoint** (D-A27) — `POST /api/insights/admin/precedents` for manual create/confirm/deprecate (end-to-end Phase 1 testing without lifecycle automation).
+
 *Tests*
 
-21. Smoke tests — unit + integration + AI Search index provisioning verification.
-22. Eval harness smoke run — golden dataset executes end-to-end against synthetic corpus with stub-implemented agent; baseline metrics captured.
+27. Smoke tests — unit + integration + AI Search index provisioning verification.
+28. Eval harness smoke run — golden dataset executes end-to-end against synthetic corpus with stub-implemented agent; baseline metrics captured.
+29. Precedent end-to-end smoke test — manually-created Confirmed Precedent retrieved by `ISearchPrecedentsTool`, cited by Insights Agent in Inference response with `precedent://...` provenance link.
+30. LAVERN primitive smoke tests — `GroundingVerifier` strips known-bad citation; `EvidenceGuard.Validate` rejects empty-evidence; `IDeclineToFindTool` returns structured `DeclineResponse`; `ISanitizer` audit log fires.
 
 **Track B deliverables** (blocked on Phase C auth work):
 
@@ -1670,7 +1768,28 @@ Phase 1 is split into **Track A (auth-independent, in scope NOW)** and **Track B
 - MCP server contract document approved; tool signatures aligned with question catalog.
 - Customer-onboarding workflow design approved; backfill priority algorithm documented.
 
-### 21.3 Phase 2 — Expansion (8–12 weeks after Phase 1)
+### 21.3 Phase 1.5 — Precedent Board lifecycle automation (NEW)
+
+Phase 1 ships the Precedent layer architecture + scaffold (D-A26, D-A27). Phase 1.5 ships the lifecycle automation:
+
+- **`PrecedentDecayJob`** — daily background job in `ServiceBusJobProcessor`; `effectivenessScore *= 0.95` on Precedents past `decayDays` inactive; `Deprecated` after `decayDays × 6` (D-46, DEF-12).
+- **`PrecedentPromotionJob`** — daily consolidation pass; `Tentative` → `Confirmed` when `timesUsed ≥ CONFIRM_THRESHOLD` AND all outcomes positive (D-46, DEF-12).
+- **Drift detection automation** — `negativeOutcomes ≥ 2` flips `Confirmed` → `UnderDriftReview` (D-46, DEF-12); does NOT auto-deprecate.
+- **Hybrid retrieval dedup** — Azure AI Search vector + BM25 match on `sprk_patternsignature` for semantic dedup; NOT lavern's SHA-256 string match (D-46, decisions.md §3.6).
+- **Curator consolidation logic** — re-scores Tentative Precedents as more signal accumulates; calibrated against real Observations (DEF-12).
+- **SME review queue UI** — surface choice from {workspace context pane, dedicated Code Page, Teams app} per DEF-13; Mode 4 from `ADVANCED-AI-USE-CASE-PATTERNS.md` becomes user-facing.
+- **Inference layer updated** to cite Precedents by reference instead of re-deriving from raw Observations every query — the cost + quality benefit fully realized.
+- **Mode 6 weekly briefing** capability — "Newly Confirmed Precedents (3)", "Drift detection (1)" digest format per use-case doc §5.6.
+
+**Phase 1.5 acceptance**:
+
+- All Phase 1.5 lifecycle jobs run on a per-tenant schedule via Bicep-deployed timer triggers
+- A Precedent created in Phase 1 via admin endpoint transitions through Tentative → Confirmed → UnderDriftReview lifecycle under simulated outcome inputs
+- SME review queue UI loads pending confirmations and drift reviews
+- Threshold configurability verified (changing `CONFIRM_THRESHOLD` in config doesn't require redeploy)
+- LAVERN ADR 10.1 ratified
+
+### 21.4 Phase 2 — Expansion (8–12 weeks after Phase 1)
 
 *Originally planned*
 
@@ -1694,7 +1813,7 @@ Phase 1 is split into **Track A (auth-independent, in scope NOW)** and **Track B
 - **Notification surface** — SSE events (`insight_highlight`, `insight_invalidate`) wired to Context pane.
 - **Graph migration tooling** (per D-44) — design and prototype edges-as-documents migration for high-degree vertices; trigger threshold instrumentation in place; actual migration only if a vertex crosses the threshold (unlikely in Phase 2 corpus sizes).
 
-### 21.4 Phase 3 — Production polish
+### 21.5 Phase 3 — Production polish
 
 *Originally planned*
 
@@ -1717,7 +1836,7 @@ Phase 1 is split into **Track A (auth-independent, in scope NOW)** and **Track B
 - **Embedding model migration playbook** validated end-to-end on a non-production tenant per D-45 / §8.1, in preparation for the inevitable `text-embedding-3-large` successor.
 - **Production observability prescriptive feedback loops** (§22.7) — automated question-catalog tuning based on insufficient-evidence rate and confidence-band distribution.
 
-### 21.5 Phase C coordination items (from [`decisions.md`](../../projects/ai-spaarke-insights-engine-r1/decisions.md))
+### 21.6 Phase C coordination items (from [`decisions.md`](../../projects/ai-spaarke-insights-engine-r1/decisions.md))
 
 | Phase C task | Coordination requirement | Phase 1 impact |
 |---|---|---|
@@ -1726,6 +1845,18 @@ Phase 1 is split into **Track A (auth-independent, in scope NOW)** and **Track B
 | #044 — HMAC-SHA256 webhook validation | Ship Phase 1 with `clientState`; HMAC drops in when #044 lands | Copy the same validator code; do not fork |
 | #047 — Non-`common` `TenantId` in template | Insights Engine Function appsettings adopt the fix from day one | Per-tenant explicit TenantId in every Bicep deployment |
 | `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Active auth design canon until ADR-027 lands | Engine auth design must remain consistent |
+
+### 21.7 LAVERN coordination items (from [`decisions.md`](../../projects/ai-spaarke-insights-engine-r1/decisions.md))
+
+The `ai-advanced-capabilities-development` project authored the LAVERN analysis + ADR proposals 10.1–10.6 (`projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md` §10). Coordinate:
+
+| LAVERN ADR | Coordination requirement | Phase 1 / 1.5 impact |
+|---|---|---|
+| **10.1** — Precedent Board | Ratification before D-A26 design freeze. Insights Engine implements scaffold in Phase 1; lifecycle in Phase 1.5. Action Engine downstream consumer (R2+). | Phase 1: D-A26, D-A27 (scaffold). Phase 1.5: lifecycle automation. |
+| **10.3** — GateResolver interface | Joint ratification with Action Engine. Action Engine MVP implements; Insights consumes for Phase 2+ write-back. See D-51. | No Phase 1 implementation; reference only. |
+| **10.4** — Provider tier abstraction | Required *before* EvaluatorGate (LAVERN Pattern #2) ships (Phase 2+ Action Engine concern). Insights stays on hardcoded D-08 embedding model. | No Phase 1 change; awareness only. |
+| **10.6** — Sanitization + Citation Verification Standard | Insights builds the primitives in Phase 1 (D-A22 GroundingVerifier, D-A25 Sanitizer). Action Engine consumes when webhook/signal triggers land (R2). See D-47, D-50. | Phase 1: D-A22 + D-A25. |
+| `ai-advanced-capabilities-development` project status | Currently working document; ADRs 10.1–10.6 are proposed, not yet ratified. Phase 1 design proceeds in parallel with explicit cross-references; final ADR docs land in `docs/adr/` post-ratification. | Coordination is documented, not blocking. |
 
 ---
 

@@ -35,7 +35,7 @@ Track A delivers (1)–(8) without dependency on the Phase C auth work. Track B 
 | D-A1 | Project scaffolding: folder structure for `Services/Insights/`, `infra/insights/`, `schemas/`, `tests/Insights/` | Repo structure |
 | D-A2 | Bicep modules for resource provisioning: AI Search indexes, Cosmos account + database + containers, Service Bus topic + subscriptions, Function App shell (compute only, no functions deployed yet), Key Vault references, App Insights connection, per-tenant UAMI | Infra |
 | D-A3 | AI Search index schemas (JSON, declarative): `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions` per [design.md §4.1.3](design.md) — fields, vector profile, semantic config, tenantId as first-class | Infra |
-| D-A4 | `InsightArtifact` envelope C# types in `Sprk.Bff.Api/Models/Insights/` — POCOs for Fact / Observation / Inference per [design.md §2.2](design.md) | Domain types |
+| D-A4 | `InsightArtifact` envelope C# types in `Sprk.Bff.Api/Models/Insights/` — POCOs for the four-tier taxonomy (Fact / Observation / Precedent / Inference) per [design.md §2.2](design.md) and decisions.md D-03 | Domain types |
 | D-A5 | `IInsightGraph` interface in `Sprk.Bff.Api/Services/Insights/Graph/` — typed named traversal patterns per [design.md §4.2.2](design.md) | Domain types |
 | D-A6 | `CosmosNoSqlInsightGraph` implementation — adjacency-list document model; vertex + edge upsert/get/delete; `FindMattersInvolvingPartyAsync`, `FindConnectedEntitiesAsync` named traversals; per-tenant partition key | Substrate |
 | D-A7 | `LiveFactResolverService` in `Sprk.Bff.Api/Services/Insights/Facts/` — direct Dataverse queries via existing `IDataverseService`. Initial Facts: `matterDuration`, `totalSpend`, `status`, `daysSinceLastActivity`, `documentCount`. 5-minute Redis cache | Domain logic |
@@ -46,6 +46,14 @@ Track A delivers (1)–(8) without dependency on the Phase C auth work. Track B 
 | D-A12 | Closure-extraction JPS playbook DESIGN document (not implementation) in `projects/ai-spaarke-insights-engine-r1/closure-extraction-playbook-design.md` — what it emits, version handling, target indexes | Design |
 | D-A13 | Initial Bicep deployment to dev environment — provisions resources only (no functions deployed); verifies all Bicep modules work; documents the per-tenant parameter file pattern | DevOps |
 | D-A14 | Smoke tests: unit tests for envelope serialization, `IInsightGraph` interface contracts, `LiveFactResolverService` against mocked Dataverse; integration tests for `InsightsResolverService` end-to-end with mock data; AI Search index provisioning verification (round-trip schema deploy + read) | Tests |
+| D-A22 | `GroundingVerifier` post-Agent step in `Sprk.Bff.Api/Services/Ai/CitationVerification/` — mechanical (regex + substring + sliding window, 10K-char DoS cap) zero-LLM verifier. Runs in `InsightsResolverService` after the Insights Agent before returning. Failed citations stripped or annotated `[citation could not be verified]`. Platform primitive — also exposed for Action Engine consumption (LAVERN ADR 10.6). Closes the D-04 gap between provenance promise and code enforcement. | Platform primitive |
+| D-A23 | `EvidenceGuard.Validate(result)` utility — runtime non-empty check on every tool handler returning evidence-bearing artifacts. Applied to `IFindComparableMattersTool`, `IGetMatterFactsTool`, `IAssessEvidenceSufficiencyTool`, `ISearchPrecedentsTool`. Throws `EvidenceRequiredException`. Belt-and-suspenders with C# type system per LAVERN Pattern #6. | Domain logic |
+| D-A24 | `IDeclineToFindTool` in Insights Agent tool set — returns structured `DeclineResponse { Reason, Explanation, MinimumEvidenceNeeded, SuggestedActions, ConfidenceInDecline }`. Deterministic exit path; replaces "Agent decides to decline" prose with a tool the Agent must invoke when `IAssessEvidenceSufficiencyTool` returns insufficient. Makes D-06 enforcement mechanical, not LLM-coercible. | Domain logic |
+| D-A25 | `ISanitizer` + `Smacl1Sanitizer` in `Sprk.Bff.Api/Services/Ai/IngestSanitization/` — strips zero-width Unicode (U+200B–U+200F, U+202A–U+202E, U+2060–U+206F, U+FEFF), HTML comments, ANSI escapes, control chars before any LLM sees text. Audit log to App Insights custom events. Platform primitive — also exposed for Action Engine consumption (LAVERN ADR 10.6). Wired into stub closure-extraction ingest entry points so the Phase 2 real-document path inherits sanitization by default, not as a retrofit. | Platform primitive |
+| D-A26 | **Precedent layer — architecture + scaffold (NOT lifecycle automation).** Implements the 4th tier per decisions.md D-03 and D-46. Includes: (a) `InsightArtifact` envelope supports `type: "precedent"` natively (envelope schema + C# types in D-A4). (b) `sprk_precedent` Dataverse entity + relationship tables (`sprk_precedent_observation` N:N, `sprk_precedent_related` N:N self) provisioned via PAC CLI per `dataverse-create-schema` skill. (c) `IPrecedentBoard` C# interface in `Sprk.Bff.Api/Services/Insights/Precedents/` with stub `DataversePrecedentBoard` implementation registered in DI. (d) Graph schema extension: `Precedent` vertex type + `OBSERVATION_SUPPORTS_PRECEDENT`, `PRECEDENT_RELATED_TO_PRECEDENT` Cosmos edge types (extends D-A6). (e) AI Search `insight-precedents` embedding index (schema designed, deployed via Bicep — extends D-A3). (f) `ISearchPrecedentsTool`, `ICitePrecedentTool` stub interfaces in Insights Agent tool set (extends D-A9). Cross-references LAVERN ADR 10.1. **Lifecycle automation deferred to Phase 1.5 — see §3.3.** | Domain types + Substrate |
+| D-A27 | Admin endpoint `POST /api/insights/admin/precedents` (JWT-authorized; admin role per ADR-008 endpoint filter) — manual create/confirm/deprecate of Precedents for end-to-end testing in Phase 1. Enables Phase 1 acceptance: a manually-created Confirmed Precedent can be retrieved by `ISearchPrecedentsTool`, cited by Insights Agent in an Inference response with provenance link `precedent://M-1234#cure-period-ip`. Becomes optional/admin-only when Phase 1.5 lifecycle automation lands. | API |
+
+> **Note on numbering**: The `INSIGHTS-ENGINE-ARCHITECTURE.md` r2 expansion (2026-05-21 or so) added Track A deliverables D-A15 through D-A21 for evaluation / surfacing / MCP / customer-onboarding scope (synthetic corpus generator, golden dataset, eval harness, observability, surfacing design doc, MCP server contract, customer-onboarding workflow design). Those deliverables are described in `INSIGHTS-ENGINE-ARCHITECTURE.md` §21.2 but have not yet been propagated to this SPEC. LAVERN-derived deliverables start at **D-A22** to preserve the architecture doc's numbering; back-propagation of D-A15 through D-A21 to this SPEC is tracked as **DEF-15** in decisions.md.
 
 ### 3.2 Out of scope (Track B — blocked on Phase C auth work)
 
@@ -59,43 +67,75 @@ Track A delivers (1)–(8) without dependency on the Phase C auth work. Track B 
 | D-B6 | HMAC-SHA256 validation upgrade when Phase C task 044 lands | Phase C #044 |
 | D-B7 | End-to-end real-data Inference response (replaces Track A mock data) | D-B1 through D-B5 |
 
-### 3.3 Explicitly NOT in scope (deferred to Phase 2+)
+### 3.3 Deferred to Phase 1.5 (the immediate next phase, after Track A lands)
+
+Phase 1 ships the Precedent layer **architecture + scaffold** (D-A26, D-A27). Phase 1.5 ships the lifecycle automation, with thresholds and SME workflow design informed by real Observations flowing through Track B and real customer SME input:
+
+- `PrecedentDecayJob` — daily background job decaying `effectivenessScore` on stale Precedents
+- `PrecedentPromotionJob` — daily consolidation pass; promotes Tentative → Confirmed when `timesUsed ≥ CONFIRM_THRESHOLD` AND all outcomes positive
+- Drift detection — `negativeOutcomes ≥ 2` flips Confirmed → UnderDriftReview
+- Hybrid retrieval dedup — Azure AI Search vector + BM25 match for semantic dedup on `sprk_patternsignature`
+- Curator consolidation logic — re-scoring Tentative Precedents as more signal accumulates
+- SME review queue UI — workspace context pane / dedicated Code Page / Teams app (surface choice DEF-09)
+- Inference layer updated to cite Precedents by reference instead of re-deriving from Observations
+- Mode 4 (Precedent curation) and Mode 6 (weekly briefing of newly Confirmed Precedents) per `ADVANCED-AI-USE-CASE-PATTERNS.md`
+
+Phase 1.5 calibration of thresholds (CONFIRM_THRESHOLD, decay rate, drift threshold) is intentionally deferred — see DEF-08 in `decisions.md`.
+
+### 3.4 Explicitly NOT in scope — Phase 2+
 
 - Additional Insight indexes (`insight-sessions` enrichment, etc.)
-- Additional graph entities (Person, Firm, Judge, Issue) — Phase 1 only models Matter + Party + INVOLVED_PARTY edge
+- Additional graph entities (Person, Firm, Judge, Issue) — Phase 1 only models Matter + Party + INVOLVED_PARTY edge + Precedent vertex
 - Outlook/Teams surfaces
 - Per-tenant deployment to customer environments (Phase 1 deploys to Spaarke Dev only)
-- Closure-extraction playbook IMPLEMENTATION (Phase 1 designs it; Phase 2 builds it)
+- Closure-extraction playbook IMPLEMENTATION (Phase 1 designs it; Phase 2 builds it; sanitization primitive from D-A25 is wired in from day one)
 - Identity resolution SAME_AS edges (Phase 2)
 - AI Search S2 tier bump (Phase 2+)
 - Migrate `PlaybookIndexingBackgroundService` to Function (Phase 3 cleanup)
+- **EvaluatorGate** (LAVERN Pattern #2) — Phase 2+ quality upgrade; depends on provider tier abstraction (LAVERN Pattern #11) shipping first
+- **Full GateResolver consumption** — Phase 2+ when write-back paths land; the primitive is built by Action Engine MVP per `coordination-assessment-with-insights-engine.md` §4.6 (LAVERN ADR 10.3)
+- Cross-tenant Precedent publishing — Phase 2+ with major privacy/legal work first (DEF-10)
 
 ## 4. Architecture summary
 
 Per [decisions.md](decisions.md), Phase 1 commits to:
 
-- **Substrate**: Azure AI Search (existing service) + Cosmos NoSQL adjacency-list (new account) + Live Dataverse Facts
+- **Taxonomy**: **four-tier** Fact / Observation / Precedent / Inference per D-03 and D-46. Precedent layer architecture + scaffold lands in Phase 1 (D-A26, D-A27); lifecycle automation lands in Phase 1.5.
+- **Substrate**: Azure AI Search (existing service; new indexes `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, **`insight-precedents`**) + Cosmos NoSQL adjacency-list (new account; vertices include `Precedent`) + Live Dataverse Facts + `sprk_precedent` Dataverse entity
 - **Embedding**: `text-embedding-3-large` (3072 dim)
 - **Synthesis**: custom Insights Agent in `Sprk.Bff.Api`, reusing existing `IChatClient` + UseFunctionInvocation + tool framework
+- **LAVERN-derived enforcement primitives** (turn the honesty contract from principle to mechanism):
+  - `ISanitizer` (D-A25) — strips prompt-injection vectors before any LLM step
+  - `GroundingVerifier` (D-A22) — mechanical post-Agent citation check
+  - `EvidenceGuard.Validate` (D-A23) — runtime non-empty guard on evidence-bearing tool outputs
+  - `IDeclineToFindTool` (D-A24) — deterministic decline path for insufficient evidence
 - **Sync (Track B)**: Azure Functions on Flex Consumption + Service Bus topic + intake Function as auth trust boundary
 - **Auth**: `Microsoft.Identity.Web` for inbound JWT (mirror `Sprk.Bff.Api/Program.cs`); `DefaultAzureCredential` for outbound; clientState → HMAC on Dataverse → Intake Function hop
 - **Tenant isolation**: physical per-tenant; r1 uses tenant-list-as-configuration in Bicep params
 
-Full diagrams and rationale: [design.md](design.md).
+Full diagrams and rationale: [design.md](design.md). LAVERN pattern adoption rationale: [lavern-pattern-assessment.md](lavern-pattern-assessment.md).
 
 ## 5. Acceptance criteria (Phase 1)
 
 ### Track A acceptance
 
 - [ ] All Bicep modules deploy cleanly to Spaarke Dev environment (`spe-infrastructure-westus2`)
-- [ ] All 4 AI Search indexes provisioned with correct schema (tenantId, 3072-dim vectors, vectorFilterMode-preFilter friendly)
-- [ ] Cosmos NoSQL account + database + containers provisioned; partition key strategy verified
+- [ ] All **5** AI Search indexes provisioned with correct schema (`insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, `insight-precedents`) — tenantId, 3072-dim vectors, vectorFilterMode-preFilter friendly
+- [ ] Cosmos NoSQL account + database + containers provisioned; partition key strategy verified; Precedent vertex type + `OBSERVATION_SUPPORTS_PRECEDENT` / `PRECEDENT_RELATED_TO_PRECEDENT` edges representable
+- [ ] `sprk_precedent` Dataverse entity + `sprk_precedent_observation` + `sprk_precedent_related` relationship tables provisioned and queryable
 - [ ] `Sprk.Bff.Api` builds and existing tests pass after additions (no regressions)
 - [ ] Unit + integration tests for new services pass
+- [ ] **4-tier envelope** round-trips through `InsightArtifact` C# types (Fact / Observation / Precedent / Inference all serialize/deserialize correctly)
+- [ ] `IPrecedentBoard` stub registered in DI and discoverable
+- [ ] **End-to-end Precedent smoke test**: Precedent created via `POST /api/insights/admin/precedents`; `ISearchPrecedentsTool` retrieves it; Insights Agent cites it in an Inference response with provenance link `precedent://...`
 - [ ] `POST /api/insights/ask` with `{question: "predict-matter-cost", subject: "matter:X"}` returns a structured `InsightResponse` (with mock data) demonstrating:
-  - The artifact envelope shape
-  - Provenance pointers (`evidence[]`)
-  - Either an Inference with citations OR a structured `insufficient_evidence` response
+  - The 4-tier artifact envelope shape
+  - Provenance pointers (`evidence[]`) including Precedent refs where applicable
+  - Either an Inference with citations OR a structured `insufficient_evidence` response (via `IDeclineToFindTool`)
+- [ ] **`GroundingVerifier` post-step** strips one known-bad citation from a synthetic Inference response in unit tests
+- [ ] **`EvidenceGuard.Validate`** rejects programmatically-constructed empty-evidence artifact in unit tests
+- [ ] **`IDeclineToFindTool`** produces structured `DeclineResponse` (not freely-composed prose) when invoked from low-evidence path
+- [ ] **`ISanitizer` audit log** fires for one synthetic adversarial input (zero-width Unicode + ANSI escape) in unit tests
 - [ ] All ADR compliance verified via `/adr-check` skill (no new violations)
 - [ ] Zero new SAS keys, zero new `ClientSecretCredential` usages (per D-24, D-27)
 
@@ -118,6 +158,8 @@ Full diagrams and rationale: [design.md](design.md).
 | DEP-2 | Auth team responses to A4-A6 (informational: #047 template, #041-042 outbound, decisions.md feedback) | Auth team | **In flight** | Track B polish |
 | DEP-3 | Resolution of O-02 (decisions.md): does `accessibleMatterSet` come from unified access control project or do we maintain our own source? | Architecture | Open | D-A8 (InsightsResolverService trimming logic) |
 | DEP-4 | Resolution of O-01 (decisions.md): JPS or specialized format for closure-extraction playbook | Architecture | Open | D-A12 (playbook design doc), D-B5 (Phase 2 impl) |
+| DEP-5 | LAVERN ADRs **10.1** (Precedent Board), **10.6** (Sanitization + Citation Verification Standard) ratified jointly with `ai-advanced-capabilities-development` project. ADRs proposed in `projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md` §10. | Both projects (joint) | Proposed; not yet ratified | D-A22, D-A25, D-A26 design freeze |
+| DEP-6 | Coordinate `IGateResolver` interface design (LAVERN ADR **10.3**) — built by Action Engine MVP; Insights consumes for Phase 2+ write-back paths. Tracked in `coordination-assessment-with-insights-engine.md` §4.6 (new). | Action Engine team | Pending Action Engine pipeline | No Phase 1 implementation; Phase 2+ consumer only |
 
 ### 6.2 External (Azure / Microsoft)
 
@@ -128,9 +170,10 @@ Full diagrams and rationale: [design.md](design.md).
 
 ## 7. Rigor and quality
 
-- Per [CLAUDE.md §8](../../CLAUDE.md), this is a **FULL rigor** project (tags include `bff-api`, modifies `.cs` files, 14+ deliverables, dependencies on multiple tasks).
+- Per [CLAUDE.md §8](../../CLAUDE.md), this is a **FULL rigor** project (tags include `bff-api`, modifies `.cs` files, 20+ deliverables, dependencies on multiple tasks).
 - All tasks run via `task-execute` skill with code-review + adr-check quality gates at Step 9.5.
 - Phase C coordination is a continuous concern — every auth-touching task must reference decisions.md §D-22 to D-28.
+- LAVERN coordination is a continuous concern — every LAVERN-derived task (D-A22 to D-A27) must reference decisions.md §D-46 to D-51 and the LAVERN ADR proposals in `projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md`.
 
 ## 8. Phasing within Phase 1
 
@@ -138,24 +181,35 @@ A natural ordering for Track A:
 
 | Wave | Tasks | Rationale |
 |---|---|---|
-| W1 | D-A1, D-A4, D-A5 | Foundation: scaffolding + types + interfaces (no runtime dependencies) |
-| W2 | D-A2, D-A3, D-A13 | Bicep + index schemas + initial deployment (validate infra deploys cleanly) |
-| W3 | D-A6, D-A7 | Substrate implementations: Cosmos graph + Live Facts. Independent, can run in parallel. |
-| W4 | D-A8 | Resolver orchestration (depends on W3) |
-| W5 | D-A9, D-A10 | Insights Agent + first question (depends on W4 for resolver dispatch) |
+| W1 | D-A1, D-A4, D-A5 | Foundation: scaffolding + types (now 4-tier per D-03 / D-A4) + interfaces (no runtime dependencies) |
+| W2 | D-A2, D-A3, D-A13 | Bicep + index schemas (5 indexes including `insight-precedents`) + initial deployment |
+| W2.5 | **D-A25** | `ISanitizer` + `Smacl1Sanitizer` platform primitive — parallel with W3; needed by closure-extraction stub ingest paths |
+| W3 | D-A6, D-A7 | Substrate implementations: Cosmos graph (with Precedent vertex type) + Live Facts. Independent, can run in parallel. |
+| W3.5 | **D-A26** | **Precedent layer architecture + scaffold** — depends on W1 envelope + W3 Cosmos graph; foundation for Precedent-aware code paths in W4/W5/W6 |
+| W4 | D-A8 | Resolver orchestration (depends on W3 + W3.5 — must be Precedent-aware) |
+| W4.5 | **D-A22, D-A23, D-A24** | Enforcement primitives: `GroundingVerifier` (post-Agent), `EvidenceGuard.Validate` (runtime guard), `IDeclineToFindTool` (decline path) — parallel with W5 |
+| W5 | D-A9, D-A10 | Insights Agent + first question + Precedent tool stubs (`ISearchPrecedentsTool`, `ICitePrecedentTool`) (depends on W4 for resolver dispatch + W4.5 for honesty primitives) |
 | W6 | D-A11 | API endpoint (depends on W5 for agent) |
-| W7 | D-A12, D-A14 | Closure-extraction design + smoke tests (final integration) |
+| W6.5 | **D-A27** | Precedent admin endpoint — parallel with W6 |
+| W7 | D-A12, D-A14 | Closure-extraction design + smoke tests (final integration, includes Precedent end-to-end smoke test) |
 
 Tasks within a wave can be parallel; waves are sequential.
 
 ## 9. References
 
 ### 9.1 Project documents
-- [decisions.md](decisions.md) — anchor doc; 38 numbered decisions
+- [decisions.md](decisions.md) — anchor doc; 44 numbered decisions (D-01 to D-38 baseline + architecture-doc r2 D-39–D-45 (pending back-propagation, see DEF-11) + LAVERN-derived D-46 to D-51)
 - [design.md](design.md) — comprehensive design (13 sections)
 - [ai-inventory.md](ai-inventory.md) — DI-anchored existing AI service inventory
 - [azure-inventory.md](azure-inventory.md) — Dev + Demo Azure inventories
 - [README.md](README.md) — project overview
+- [lavern-pattern-assessment.md](lavern-pattern-assessment.md) — LAVERN pattern-by-pattern analysis + decision basis for D-A22 through D-A27
+
+### 9.1a Related Spaarke projects
+- [`projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md`](../ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md) — source of the 12 patterns + 6 proposed ADRs
+- [`projects/ai-advanced-capabilities-development/ADVANCED-AI-USE-CASE-PATTERNS.md`](../ai-advanced-capabilities-development/ADVANCED-AI-USE-CASE-PATTERNS.md) — the six user-interaction modes that consume the Engine
+- [`projects/ai-spaarke-action-engine-r1/action-engine-overview.md`](../ai-spaarke-action-engine-r1/action-engine-overview.md) — sister project; consumer of Insights' signals + Precedents
+- [`projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md`](../ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md) — joint decisions including §4.6 (GateResolver), §4.7 (shared platform primitives), §4.8 (Tool Registry metadata)
 
 ### 9.2 Knowledge base (researcher-authored)
 - [knowledge/azure-ai-search/](../../knowledge/azure-ai-search/) — vector search, integrated vectorization, security trimming
