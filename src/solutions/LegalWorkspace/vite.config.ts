@@ -86,6 +86,9 @@ export default defineConfig({
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
     },
+    // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
+    // .gitignore) never silently shadow source. See Task 112 (2026-05-22).
+    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx", ".json"],
     // Force deduplication for shared packages
     dedupe: [
       "react",

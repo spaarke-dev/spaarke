@@ -117,3 +117,20 @@ LogFiles/
 # Temporary download directories
 tmp-site-download/
 deploy/
+
+# Stale tsc-emit cruft in source folders (Task 112, 2026-05-22)
+# Project tsconfigs use noEmit:true OR outDir=./dist; .js/.d.ts under src/ is
+# always stale compilation output. Without these rules, Vite's default
+# resolve.extensions (.js before .ts) silently imports stale code.
+src/solutions/*/src/**/*.js
+src/solutions/*/src/**/*.d.ts
+src/solutions/*/src/**/*.js.map
+src/solutions/*/src/**/*.d.ts.map
+src/client/shared/*/src/**/*.js
+src/client/shared/*/src/**/*.d.ts
+src/client/shared/*/src/**/*.js.map
+src/client/shared/*/src/**/*.d.ts.map
+
+# Negation rules for legitimately hand-written files
+!src/solutions/SpaarkeAi/src/ribbon/xrm-globals.d.ts
+!src/client/shared/Spaarke.UI.Components/src/__mocks__/diff.js

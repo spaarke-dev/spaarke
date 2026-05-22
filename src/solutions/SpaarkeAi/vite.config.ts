@@ -127,6 +127,9 @@ export default defineConfig({
       "@spaarke/legal-workspace/src": path.resolve(__dirname, "../LegalWorkspace/src"),
       "@spaarke/legal-workspace": path.resolve(__dirname, "../LegalWorkspace/src"),
     },
+    // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
+    // .gitignore) never silently shadow source. See Task 112 (2026-05-22).
+    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx", ".json"],
     // Force single copy of shared packages across the bundle (ADR-022: no duplicate React)
     dedupe: [
       "react",
