@@ -57,7 +57,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
-import { ChatRegular } from "@fluentui/react-icons";
+import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
 import { ThreePaneLayout } from "@spaarke/ui-components";
 import {
   PaneEventBusProvider,
@@ -641,16 +641,19 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                   centerPaneCollapseLabel="Workspace"
                   rightPaneCollapseLabel="Context"
                   /*
-                   * Task 097 (Wave 2): the Assistant pane's collapsed strip
-                   * now renders the ChatRegular icon (centered) instead of
-                   * the rotated "Assistant" text fallback. Mirrors the icon
-                   * the PaneHeader itself shows when the pane is expanded.
-                   * Task 096 introduced the `leftCollapsedIcon` prop on
-                   * ThreePaneLayout. Workspace + Context will pass their own
-                   * `centerCollapsedIcon` / `rightCollapsedIcon` in their
-                   * sibling Wave-2 tasks (098 / 099).
+                   * Task 096 introduced the `*CollapsedIcon` props on
+                   * ThreePaneLayout. Each collapsed strip now renders the
+                   * same icon the pane's PaneHeader shows when expanded:
+                   *   Assistant  → ChatRegular        (task 097)
+                   *   Workspace  → AppsListRegular    (task 098 follow-up)
+                   *   Context    → DocumentRegular    (task 099 follow-up)
+                   * The rotated-text fallback is no longer used in SpaarkeAi.
+                   * Operator feedback (2026-05-22): "in collapse mode use the
+                   * icon only as the pane identifier, not the words."
                    */
                   leftCollapsedIcon={<ChatRegular />}
+                  centerCollapsedIcon={<AppsListRegular />}
+                  rightCollapsedIcon={<DocumentRegular />}
                   leftCollapsed={leftCollapsed}
                   centerCollapsed={centerCollapsed}
                   rightCollapsed={rightCollapsed}
