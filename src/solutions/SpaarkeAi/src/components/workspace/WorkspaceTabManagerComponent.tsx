@@ -31,18 +31,17 @@ import {
   Tooltip,
 } from "@fluentui/react-components";
 import {
-  DismissRegular,
+  Dismiss12Regular,
   WarningRegular,
-  PinRegular,
-  PinFilled,
 } from "@fluentui/react-icons";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
-import {
-  isPinned,
-  pinWorkspace,
-  unpinWorkspace,
-} from "../../services/pinnedWorkspaces";
+
+// NOTE (task 098 — 2026-05-22): the per-tab pin button was removed from
+// every tab row. Pin state is still owned by `services/pinnedWorkspaces.ts`
+// (localStorage `spaarke:workspace:pinned-list`), but the only UI surface for
+// toggling it is now the WorkspacePaneMenu dropdown. Auto-open of pinned
+// workspaces on cold load is unchanged (see WorkspacePane mount effect).
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -86,15 +85,21 @@ const useStyles = makeStyles({
     maxWidth: "160px",
   },
 
+  // Tab title — task 098 (2026-05-22): bumped one Fluent v9 step
+  // (fontSizeBase200 → fontSizeBase300) per operator feedback. The tab is
+  // still visually a tab (TabList size="small") but the label is now slightly
+  // more prominent, matching the pane title proportions polished in Wave 1.
   tabLabel: {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    fontSize: tokens.fontSizeBase200,
-    lineHeight: tokens.lineHeightBase200,
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
   },
 
   // Loading badge inside the tab (replaces label while resolving).
+  // Kept at fontSizeBase200 — the spinner + ellipsis row is intentionally
+  // less prominent than the resolved title; bumping it would crowd the row.
   tabLoadingBadge: {
     display: "inline-flex",
     alignItems: "center",
@@ -103,7 +108,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
-  // Close button — small, borderless, appears inside the tab.
+  // Close button — task 098 (2026-05-22): downsized via Dismiss12Regular
+  // (the 12px icon variant) so the × is visually subordinate to the bumped
+  // tab title. Button hit area kept at 16×16 for accessibility (WCAG min
+  // target ~24px is relaxed for icon-inside-tab affordances per Fluent v9
+  // tab pattern; the surrounding tab itself is the primary 40px target).
   closeButton: {
     minWidth: "unset",
     height: "16px",
@@ -114,29 +123,6 @@ const useStyles = makeStyles({
     ":hover": {
       color: tokens.colorNeutralForeground1,
       backgroundColor: tokens.colorNeutralBackground3Hover,
-    },
-  },
-
-  // Pin button — task 092. Same small, borderless treatment as the close
-  // button so the two affordances visually balance. Filled state uses the
-  // brand foreground token so a pinned tab is unambiguously pinned at a
-  // glance; unpinned state matches the close button's subtle foreground.
-  pinButton: {
-    minWidth: "unset",
-    height: "16px",
-    width: "16px",
-    padding: "0",
-    flexShrink: 0,
-    color: tokens.colorNeutralForeground3,
-    ":hover": {
-      color: tokens.colorNeutralForeground1,
-      backgroundColor: tokens.colorNeutralBackground3Hover,
-    },
-  },
-  pinButtonActive: {
-    color: tokens.colorBrandForeground1,
-    ":hover": {
-      color: tokens.colorBrandForeground1,
     },
   },
 
@@ -254,40 +240,6 @@ export function WorkspaceTabManagerComponent({
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
   // ---------------------------------------------------------------------------
-  // Pin state — task 092
-  //
-  // The localStorage-backed pin list is the source of truth (see
-  // `services/pinnedWorkspaces.ts`). We hold a derived `Set<layoutId>` in
-  // React state so the pin icon re-renders synchronously when the user
-  // toggles it (otherwise the icon would only flip after the next external
-  // re-render of WorkspacePane).
-  //
-  // Re-syncs on tab list changes so a freshly-opened pinned tab (from the
-  // auto-open effect) reflects its true pinned state without needing the
-  // user to click anything.
-  // ---------------------------------------------------------------------------
-
-  const [pinnedIds, setPinnedIds] = React.useState<Set<string>>(() => {
-    const set = new Set<string>();
-    for (const tab of tabs) {
-      if (tab.widgetType !== "workspace") continue;
-      const data = tab.widgetData as { layoutId?: string } | null;
-      if (data?.layoutId && isPinned(data.layoutId)) set.add(data.layoutId);
-    }
-    return set;
-  });
-
-  React.useEffect(() => {
-    const next = new Set<string>();
-    for (const tab of tabs) {
-      if (tab.widgetType !== "workspace") continue;
-      const data = tab.widgetData as { layoutId?: string } | null;
-      if (data?.layoutId && isPinned(data.layoutId)) next.add(data.layoutId);
-    }
-    setPinnedIds(next);
-  }, [tabs]);
-
-  // ---------------------------------------------------------------------------
   // Tab close — stop propagation so clicking the X does not also activate the tab.
   // ---------------------------------------------------------------------------
 
@@ -300,44 +252,10 @@ export function WorkspaceTabManagerComponent({
   );
 
   // ---------------------------------------------------------------------------
-  // Pin toggle — task 092
-  //
-  // Restricted to workspace tabs (widgetType === 'workspace') with a layoutId
-  // in `widgetData`. Non-workspace tabs (e.g. Create Matter wizard widget
-  // that opens as a tab) are filtered upstream at render time so this
-  // handler never receives a non-pinnable tab id, but we guard defensively.
-  //
-  // Stops event propagation so the underlying Tab click handler does not
-  // also fire and switch the active tab as a side effect.
-  // ---------------------------------------------------------------------------
-
-  const handlePinToggle = React.useCallback(
-    (e: React.MouseEvent, tab: WorkspaceTab): void => {
-      e.stopPropagation();
-      const data = tab.widgetData as { layoutId?: string; layoutName?: string } | null;
-      const layoutId = data?.layoutId;
-      if (!layoutId) return;
-      const layoutName = data?.layoutName ?? tab.displayName ?? "Workspace";
-
-      if (pinnedIds.has(layoutId)) {
-        unpinWorkspace(layoutId);
-        setPinnedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(layoutId);
-          return next;
-        });
-      } else {
-        pinWorkspace(layoutId, layoutName);
-        setPinnedIds((prev) => {
-          const next = new Set(prev);
-          next.add(layoutId);
-          return next;
-        });
-      }
-    },
-    [pinnedIds]
-  );
-
+  // Pin toggle previously lived here (task 092). Removed in task 098 — pin UX
+  // now lives only in WorkspacePaneMenu's "Select Workspace" section. The
+  // localStorage contract (`spaarke:workspace:pinned-list`) and the cold-load
+  // auto-open behavior in WorkspacePane are unchanged.
   // ---------------------------------------------------------------------------
   // Fluent TabList value — must be a string matching the selected Tab's value.
   // ---------------------------------------------------------------------------
@@ -365,22 +283,10 @@ export function WorkspaceTabManagerComponent({
           appearance="subtle"
         >
           {tabs.map((tab) => {
-            // Pin affordance — task 092.
-            //
-            // Only workspace-kind tabs (widgetType === 'workspace') with a
-            // `widgetData.layoutId` are pinnable. The Home tab is excluded
-            // (it's the default; auto-installed every cold load) and tabs
-            // that opened as transient widgets (e.g. wizard widgets — Create
-            // Matter, Find Similar) are excluded too — those aren't long-
-            // lived workspaces the user would want to re-open on startup.
-            const widgetData = tab.widgetData as { layoutId?: string } | null;
-            const layoutId = widgetData?.layoutId;
-            const isPinnable =
-              tab.kind === "widget" &&
-              tab.widgetType === "workspace" &&
-              !!layoutId;
-            const tabIsPinned = isPinnable && pinnedIds.has(layoutId!);
-
+            // Task 098 (2026-05-22): the inline per-tab pin button was
+            // removed (operator: "pin belongs in the workspace selection
+            // surface, not on every open tab"). Tab rows now contain only
+            // the label + close affordance.
             return (
               <Tab
                 key={tab.id}
@@ -399,36 +305,6 @@ export function WorkspaceTabManagerComponent({
                     </span>
                   )}
 
-                  {isPinnable && (
-                    <Tooltip
-                      content={
-                        tabIsPinned
-                          ? `Unpin ${tab.displayName} from start`
-                          : `Pin ${tab.displayName} to start`
-                      }
-                      relationship="label"
-                      positioning="below"
-                    >
-                      <Button
-                        className={mergeClasses(
-                          styles.pinButton,
-                          tabIsPinned && styles.pinButtonActive,
-                        )}
-                        appearance="subtle"
-                        icon={tabIsPinned ? <PinFilled /> : <PinRegular />}
-                        size="small"
-                        aria-label={
-                          tabIsPinned
-                            ? `Unpin ${tab.displayName} from start`
-                            : `Pin ${tab.displayName} to start`
-                        }
-                        aria-pressed={tabIsPinned}
-                        data-testid={`workspace-tab-pin-${tab.id}`}
-                        onClick={(e) => handlePinToggle(e, tab)}
-                      />
-                    </Tooltip>
-                  )}
-
                   <Tooltip
                     content={`Close ${tab.displayName}`}
                     relationship="label"
@@ -437,7 +313,7 @@ export function WorkspaceTabManagerComponent({
                     <Button
                       className={mergeClasses(styles.closeButton)}
                       appearance="subtle"
-                      icon={<DismissRegular />}
+                      icon={<Dismiss12Regular />}
                       size="small"
                       aria-label={`Close ${tab.displayName}`}
                       data-testid={`workspace-tab-close-${tab.id}`}

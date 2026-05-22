@@ -3,24 +3,34 @@
  * rightSlot. A Fluent v9 Menu surface that unifies workspace-level actions in
  * one trigger (FR-12).
  *
- * Sections (post task 089 cleanup):
+ * Sections (post task 098 cleanup):
  *
  *   1. Select Workspace — list of workspace layouts fetched from the BFF via
  *                `useWorkspaceLayouts` (the SpaarkeAi adaptation of the WORKING
- *                LegalWorkspace hook). Selecting one dispatches `widget_load`
- *                so the chosen workspace opens as a new tab via the existing
- *                WorkspacePane → WorkspaceTabManager → resolveWorkspaceWidget
- *                pipeline.
+ *                LegalWorkspace hook). Each row shows a clickable pin
+ *                indicator on the LEFT (task 098 — operator feedback
+ *                2026-05-22) that toggles localStorage
+ *                `spaarke:workspace:pinned-list` via `pinnedWorkspaces.ts`;
+ *                pinned workspaces auto-open as tabs on cold load via the
+ *                existing WorkspacePane mount effect (unchanged since task
+ *                092). Clicking the row body (anywhere but the pin) dispatches
+ *                `widget_load` so the chosen workspace opens as a new tab via
+ *                the existing WorkspacePane → WorkspaceTabManager →
+ *                resolveWorkspaceWidget pipeline.
  *   2. Actions  — `+ New Workspace` launches the WorkspaceLayoutWizard with
  *                the SpaarkeAi 6-template filter (FR-14); `Manage workspaces`
- *                is a stub for task 093 (side pane); `Edit current workspace`
- *                launches the wizard in edit / saveAs mode for the active
- *                layout.
+ *                is a stub for task 093 (side pane). Edit / Delete actions on
+ *                the active workspace will live in that Manage workspaces
+ *                side pane (operator: dropdown is for SELECTION, not editing).
  *
  * Removed in task 089 (operator UX feedback 2026-05-21):
  *   - "Open" section (redundant with the visible tab bar above the dropdown).
  *   - "Home" section (Home is no longer a distinct concept; Daily Briefing is
  *     just one widget rather than a special "home" tab anymore).
+ *
+ * Removed in task 098 (operator UX feedback 2026-05-22):
+ *   - "Edit current workspace" menu entry — moved to the Manage workspaces
+ *     side pane (task 093). Dropdown trigger label "Workspace" → "Workspaces".
  *
  * The menu is keyboard-navigable and ARIA-labeled (NFR-05). Styling uses
  * Fluent v9 tokens only — no hex or rgba literals (ADR-021).
@@ -64,6 +74,7 @@
 import * as React from "react";
 import {
   makeStyles,
+  mergeClasses,
   tokens,
   Menu,
   MenuTrigger,
@@ -80,15 +91,24 @@ import {
 import {
   ChevronDownRegular,
   AddRegular,
-  EditRegular,
   SettingsRegular,
   CheckmarkRegular,
+  PinRegular,
+  PinFilled,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 // useWorkspaceLayouts — SpaarkeAi adaptation of LegalWorkspace's working hook.
 // See ../../hooks/useWorkspaceLayouts.ts header for the reuse rationale.
 import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
+// pinnedWorkspaces — task 092 localStorage contract. Task 098 surfaces the
+// toggle UI here (in the dropdown) since the per-tab pin button was removed.
+import {
+  getPinnedWorkspaces,
+  isPinned,
+  pinWorkspace,
+  unpinWorkspace,
+} from "../../services/pinnedWorkspaces";
 
 // ---------------------------------------------------------------------------
 // Constants — FR-14 SpaarkeAi 6-template filter
@@ -200,6 +220,38 @@ const useStyles = makeStyles({
     justifyContent: "center",
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
+  },
+
+  // Task 098 — pin column in the Select Workspace section. The pin icon
+  // appears on the LEFT of the layout name (BEFORE the active-checkmark
+  // marker) and is a clickable affordance independent of the row's main
+  // click handler. The button is intentionally small (16×16 with a tiny
+  // icon) so it sits comfortably inside a MenuItem row without inflating
+  // the row height.
+  layoutRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    width: "100%",
+    minWidth: 0,
+  },
+  pinButton: {
+    minWidth: "unset",
+    height: "20px",
+    width: "20px",
+    padding: "0",
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
+    ":hover": {
+      color: tokens.colorNeutralForeground1,
+      backgroundColor: tokens.colorNeutralBackground3Hover,
+    },
+  },
+  pinButtonActive: {
+    color: tokens.colorBrandForeground1,
+    ":hover": {
+      color: tokens.colorBrandForeground1,
+    },
   },
 });
 
@@ -389,6 +441,67 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
   const dispatch = useDispatchPaneEvent();
 
   // -------------------------------------------------------------------------
+  // Pin state — task 098 (2026-05-22)
+  //
+  // The localStorage-backed pin list is the source of truth (see
+  // `services/pinnedWorkspaces.ts`). We hold a derived `Set<layoutId>` in
+  // React state so the pin icon re-renders synchronously when the user
+  // toggles it (otherwise the icon would only flip after the next external
+  // re-render of WorkspacePaneMenu).
+  //
+  // Re-syncs when the menu opens so a freshly-pinned workspace from another
+  // surface (none today, but defensive) is reflected without remounting.
+  // -------------------------------------------------------------------------
+
+  const [pinnedIds, setPinnedIds] = React.useState<Set<string>>(() => {
+    const set = new Set<string>();
+    for (const p of getPinnedWorkspaces()) set.add(p.layoutId);
+    return set;
+  });
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const next = new Set<string>();
+    for (const p of getPinnedWorkspaces()) next.add(p.layoutId);
+    setPinnedIds(next);
+  }, [menuOpen]);
+
+  /**
+   * Toggle the pin state for a workspace layout. Stops event propagation so
+   * the surrounding MenuItem's onClick (which calls handleLayoutSelect) does
+   * NOT also fire — clicking the pin icon must only flip pin state, not
+   * open the workspace. Persists to localStorage via the shared
+   * `pinnedWorkspaces.ts` contract; cold-load auto-open in WorkspacePane
+   * consumes the same list (unchanged since task 092).
+   */
+  const handlePinToggle = React.useCallback(
+    (
+      e: React.MouseEvent | React.KeyboardEvent,
+      layoutId: string,
+      layoutName: string,
+    ): void => {
+      e.stopPropagation();
+      if (!layoutId) return;
+      if (pinnedIds.has(layoutId)) {
+        unpinWorkspace(layoutId);
+        setPinnedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(layoutId);
+          return next;
+        });
+      } else {
+        pinWorkspace(layoutId, layoutName);
+        setPinnedIds((prev) => {
+          const next = new Set(prev);
+          next.add(layoutId);
+          return next;
+        });
+      }
+    },
+    [pinnedIds],
+  );
+
+  // -------------------------------------------------------------------------
   // Handlers
   // -------------------------------------------------------------------------
 
@@ -454,30 +567,12 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
     );
   }, []);
 
-  const handleEditWorkspace = React.useCallback(async () => {
-    setMenuOpen(false);
-    if (!activeLayout) {
-      console.warn(
-        "[WorkspacePaneMenu] No active layout — Edit current workspace is a no-op.",
-      );
-      return;
-    }
-    // System layouts use saveAs mode (clone-then-edit); user layouts use edit.
-    const mode = activeLayout.isSystem ? "saveAs" : "edit";
-    await launchWizard({
-      mode,
-      title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
-      bffBaseUrl,
-      layoutId: activeLayout.id,
-      layoutTemplateId:
-        mode === "saveAs" ? activeLayout.layoutTemplateId : null,
-      sectionsJson: mode === "saveAs" ? activeLayout.sectionsJson : null,
-      name: mode === "saveAs" ? activeLayout.name : null,
-      // SpaarkeAi consistently surfaces the 6-template subset.
-      templateFilter: SPAARKEAI_TEMPLATE_FILTER,
-    });
-    refetch();
-  }, [activeLayout, bffBaseUrl, refetch]);
+  // Task 098 (2026-05-22): `handleEditWorkspace` (and its MenuItem) was
+  // removed from this dropdown. Edit + Delete on the active workspace will
+  // live in the Manage workspaces side pane (task 093, Wave 3). Operator
+  // feedback: the dropdown is for SELECTION, not editing. The wizard launch
+  // helper `launchWizard` (above) remains for "+ New Workspace"; the
+  // task-093 surface will re-import + re-use it for edit/saveAs flows.
 
   // -------------------------------------------------------------------------
   // Render
@@ -500,7 +595,7 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
             className={styles.trigger}
             data-testid="workspace-pane-menu-trigger"
           >
-            Workspace
+            Workspaces
           </Button>
         </Tooltip>
       </MenuTrigger>
@@ -528,18 +623,70 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
           ) : (
             layouts.map((layout) => {
               const isActive = activeLayout?.id === layout.id;
+              const layoutIsPinned = pinnedIds.has(layout.id);
+              const pinTooltip = layoutIsPinned
+                ? `Unpin ${layout.name} from start`
+                : `Pin ${layout.name} to start`;
+
+              // Pin affordance — task 098. The icon sits to the LEFT of the
+              // layout name (BEFORE the active checkmark). Clicking it ONLY
+              // toggles pin state (stopPropagation in the handler) so the
+              // surrounding MenuItem.onClick (handleLayoutSelect) does not
+              // also fire. aria-pressed reflects the current pin state for
+              // assistive tech; keyboard activation (Enter/Space) routes
+              // through Button's native handling.
+              const pinSlot = (
+                <Tooltip
+                  content={pinTooltip}
+                  relationship="label"
+                  positioning="before"
+                >
+                  <Button
+                    className={mergeClasses(
+                      styles.pinButton,
+                      layoutIsPinned && styles.pinButtonActive,
+                    )}
+                    appearance="subtle"
+                    size="small"
+                    icon={
+                      layoutIsPinned ? (
+                        <PinFilled />
+                      ) : (
+                        <PinRegular />
+                      )
+                    }
+                    aria-label={pinTooltip}
+                    aria-pressed={layoutIsPinned}
+                    data-testid={`pin-workspace-${layout.id}`}
+                    onClick={(e) =>
+                      handlePinToggle(e, layout.id, layout.name)
+                    }
+                    onKeyDown={(e) => {
+                      // Prevent the MenuItem from consuming Enter/Space and
+                      // firing handleLayoutSelect. Button still handles the
+                      // activation natively via its own click on keyup, but
+                      // we stop the event from bubbling to the MenuItem.
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                      }
+                    }}
+                  />
+                </Tooltip>
+              );
+
               return (
                 <MenuItem
                   key={layout.id}
                   onClick={() => handleLayoutSelect(layout.id)}
                   data-testid={`select-workspace-${layout.id}`}
-                  icon={
-                    isActive ? (
-                      <CheckmarkRegular className={styles.activeMarker} />
-                    ) : undefined
-                  }
                 >
-                  <span className={styles.tabLabel}>{layout.name}</span>
+                  <div className={styles.layoutRow}>
+                    {pinSlot}
+                    <span className={styles.tabLabel}>{layout.name}</span>
+                    {isActive && (
+                      <CheckmarkRegular className={styles.activeMarker} />
+                    )}
+                  </div>
                 </MenuItem>
               );
             })
@@ -552,9 +699,10 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
            *
            *   • + New Workspace      — launches WorkspaceLayoutWizard (create).
            *   • Manage workspaces    — stub for task 093 (side pane).
-           *   • Edit current workspace — launches the wizard in edit / saveAs
-           *     mode for the active layout. Kept (operator did not request
-           *     removal; remains a meaningful action on the active layout).
+           *
+           * Edit + Delete moved to Manage workspaces side pane (task 093).
+           * Operator feedback 2026-05-22: dropdown should be for SELECTION,
+           * not editing — editing lives in the manage surface.
            * ─────────────────────────────────────────────────────────────── */}
           <MenuItem
             onClick={handleCreateWorkspace}
@@ -570,15 +718,6 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
             icon={<SettingsRegular />}
           >
             Manage workspaces
-          </MenuItem>
-
-          <MenuItem
-            onClick={handleEditWorkspace}
-            disabled={!activeLayout}
-            data-testid="edit-current-workspace-action"
-            icon={<EditRegular />}
-          >
-            Edit current workspace
           </MenuItem>
         </MenuList>
       </MenuPopover>
