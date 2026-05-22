@@ -30,9 +30,19 @@ import {
   Button,
   Tooltip,
 } from "@fluentui/react-components";
-import { DismissRegular, WarningRegular } from "@fluentui/react-icons";
+import {
+  DismissRegular,
+  WarningRegular,
+  PinRegular,
+  PinFilled,
+} from "@fluentui/react-icons";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
+import {
+  isPinned,
+  pinWorkspace,
+  unpinWorkspace,
+} from "../../services/pinnedWorkspaces";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -104,6 +114,29 @@ const useStyles = makeStyles({
     ":hover": {
       color: tokens.colorNeutralForeground1,
       backgroundColor: tokens.colorNeutralBackground3Hover,
+    },
+  },
+
+  // Pin button — task 092. Same small, borderless treatment as the close
+  // button so the two affordances visually balance. Filled state uses the
+  // brand foreground token so a pinned tab is unambiguously pinned at a
+  // glance; unpinned state matches the close button's subtle foreground.
+  pinButton: {
+    minWidth: "unset",
+    height: "16px",
+    width: "16px",
+    padding: "0",
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
+    ":hover": {
+      color: tokens.colorNeutralForeground1,
+      backgroundColor: tokens.colorNeutralBackground3Hover,
+    },
+  },
+  pinButtonActive: {
+    color: tokens.colorBrandForeground1,
+    ":hover": {
+      color: tokens.colorBrandForeground1,
     },
   },
 
@@ -221,6 +254,40 @@ export function WorkspaceTabManagerComponent({
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
   // ---------------------------------------------------------------------------
+  // Pin state — task 092
+  //
+  // The localStorage-backed pin list is the source of truth (see
+  // `services/pinnedWorkspaces.ts`). We hold a derived `Set<layoutId>` in
+  // React state so the pin icon re-renders synchronously when the user
+  // toggles it (otherwise the icon would only flip after the next external
+  // re-render of WorkspacePane).
+  //
+  // Re-syncs on tab list changes so a freshly-opened pinned tab (from the
+  // auto-open effect) reflects its true pinned state without needing the
+  // user to click anything.
+  // ---------------------------------------------------------------------------
+
+  const [pinnedIds, setPinnedIds] = React.useState<Set<string>>(() => {
+    const set = new Set<string>();
+    for (const tab of tabs) {
+      if (tab.widgetType !== "workspace") continue;
+      const data = tab.widgetData as { layoutId?: string } | null;
+      if (data?.layoutId && isPinned(data.layoutId)) set.add(data.layoutId);
+    }
+    return set;
+  });
+
+  React.useEffect(() => {
+    const next = new Set<string>();
+    for (const tab of tabs) {
+      if (tab.widgetType !== "workspace") continue;
+      const data = tab.widgetData as { layoutId?: string } | null;
+      if (data?.layoutId && isPinned(data.layoutId)) next.add(data.layoutId);
+    }
+    setPinnedIds(next);
+  }, [tabs]);
+
+  // ---------------------------------------------------------------------------
   // Tab close — stop propagation so clicking the X does not also activate the tab.
   // ---------------------------------------------------------------------------
 
@@ -230,6 +297,45 @@ export function WorkspaceTabManagerComponent({
       onTabClose(tabId);
     },
     [onTabClose]
+  );
+
+  // ---------------------------------------------------------------------------
+  // Pin toggle — task 092
+  //
+  // Restricted to workspace tabs (widgetType === 'workspace') with a layoutId
+  // in `widgetData`. Non-workspace tabs (e.g. Create Matter wizard widget
+  // that opens as a tab) are filtered upstream at render time so this
+  // handler never receives a non-pinnable tab id, but we guard defensively.
+  //
+  // Stops event propagation so the underlying Tab click handler does not
+  // also fire and switch the active tab as a side effect.
+  // ---------------------------------------------------------------------------
+
+  const handlePinToggle = React.useCallback(
+    (e: React.MouseEvent, tab: WorkspaceTab): void => {
+      e.stopPropagation();
+      const data = tab.widgetData as { layoutId?: string; layoutName?: string } | null;
+      const layoutId = data?.layoutId;
+      if (!layoutId) return;
+      const layoutName = data?.layoutName ?? tab.displayName ?? "Workspace";
+
+      if (pinnedIds.has(layoutId)) {
+        unpinWorkspace(layoutId);
+        setPinnedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(layoutId);
+          return next;
+        });
+      } else {
+        pinWorkspace(layoutId, layoutName);
+        setPinnedIds((prev) => {
+          const next = new Set(prev);
+          next.add(layoutId);
+          return next;
+        });
+      }
+    },
+    [pinnedIds]
   );
 
   // ---------------------------------------------------------------------------
@@ -258,42 +364,90 @@ export function WorkspaceTabManagerComponent({
           size="small"
           appearance="subtle"
         >
-          {tabs.map((tab) => (
-            <Tab
-              key={tab.id}
-              value={tab.id}
-              data-testid={`workspace-tab-${tab.id}`}
-            >
-              <div className={styles.tabContent}>
-                {tab.isLoading ? (
-                  <span className={styles.tabLoadingBadge}>
-                    <Spinner size="extra-tiny" />
-                    <span className={styles.tabLabel}>{tab.displayName}</span>
-                  </span>
-                ) : (
-                  <span className={styles.tabLabel} title={tab.displayName}>
-                    {tab.displayName}
-                  </span>
-                )}
+          {tabs.map((tab) => {
+            // Pin affordance — task 092.
+            //
+            // Only workspace-kind tabs (widgetType === 'workspace') with a
+            // `widgetData.layoutId` are pinnable. The Home tab is excluded
+            // (it's the default; auto-installed every cold load) and tabs
+            // that opened as transient widgets (e.g. wizard widgets — Create
+            // Matter, Find Similar) are excluded too — those aren't long-
+            // lived workspaces the user would want to re-open on startup.
+            const widgetData = tab.widgetData as { layoutId?: string } | null;
+            const layoutId = widgetData?.layoutId;
+            const isPinnable =
+              tab.kind === "widget" &&
+              tab.widgetType === "workspace" &&
+              !!layoutId;
+            const tabIsPinned = isPinnable && pinnedIds.has(layoutId!);
 
-                <Tooltip
-                  content={`Close ${tab.displayName}`}
-                  relationship="label"
-                  positioning="below"
-                >
-                  <Button
-                    className={mergeClasses(styles.closeButton)}
-                    appearance="subtle"
-                    icon={<DismissRegular />}
-                    size="small"
-                    aria-label={`Close ${tab.displayName}`}
-                    data-testid={`workspace-tab-close-${tab.id}`}
-                    onClick={(e) => handleCloseClick(e, tab.id)}
-                  />
-                </Tooltip>
-              </div>
-            </Tab>
-          ))}
+            return (
+              <Tab
+                key={tab.id}
+                value={tab.id}
+                data-testid={`workspace-tab-${tab.id}`}
+              >
+                <div className={styles.tabContent}>
+                  {tab.isLoading ? (
+                    <span className={styles.tabLoadingBadge}>
+                      <Spinner size="extra-tiny" />
+                      <span className={styles.tabLabel}>{tab.displayName}</span>
+                    </span>
+                  ) : (
+                    <span className={styles.tabLabel} title={tab.displayName}>
+                      {tab.displayName}
+                    </span>
+                  )}
+
+                  {isPinnable && (
+                    <Tooltip
+                      content={
+                        tabIsPinned
+                          ? `Unpin ${tab.displayName} from start`
+                          : `Pin ${tab.displayName} to start`
+                      }
+                      relationship="label"
+                      positioning="below"
+                    >
+                      <Button
+                        className={mergeClasses(
+                          styles.pinButton,
+                          tabIsPinned && styles.pinButtonActive,
+                        )}
+                        appearance="subtle"
+                        icon={tabIsPinned ? <PinFilled /> : <PinRegular />}
+                        size="small"
+                        aria-label={
+                          tabIsPinned
+                            ? `Unpin ${tab.displayName} from start`
+                            : `Pin ${tab.displayName} to start`
+                        }
+                        aria-pressed={tabIsPinned}
+                        data-testid={`workspace-tab-pin-${tab.id}`}
+                        onClick={(e) => handlePinToggle(e, tab)}
+                      />
+                    </Tooltip>
+                  )}
+
+                  <Tooltip
+                    content={`Close ${tab.displayName}`}
+                    relationship="label"
+                    positioning="below"
+                  >
+                    <Button
+                      className={mergeClasses(styles.closeButton)}
+                      appearance="subtle"
+                      icon={<DismissRegular />}
+                      size="small"
+                      aria-label={`Close ${tab.displayName}`}
+                      data-testid={`workspace-tab-close-${tab.id}`}
+                      onClick={(e) => handleCloseClick(e, tab.id)}
+                    />
+                  </Tooltip>
+                </div>
+              </Tab>
+            );
+          })}
         </TabList>
       </div>
 

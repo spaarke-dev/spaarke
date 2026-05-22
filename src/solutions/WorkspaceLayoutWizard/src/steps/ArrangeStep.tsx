@@ -56,8 +56,10 @@ export interface ArrangeStepProps {
   isDefault: boolean;
   /**
    * Whether this workspace should be pinned to auto-open on next SpaarkeAi load.
-   * Task 091 / round 5 — operator-driven UX. Persistence wiring lives in App.tsx
-   * (sessionStorage stub; task 092 will wire to BFF + `sprk_workspacelayout.sprk_ispinned`).
+   * Task 092 / round 5 — operator-driven UX. Persistence wiring lives in App.tsx
+   * (multi-pin `localStorage` list `spaarke:workspace:pinned-list`, shared with
+   * SpaarkeAi's `services/pinnedWorkspaces.ts`; BFF user-preferences endpoint
+   * remains a follow-on once such an endpoint exists).
    */
   pinToStart: boolean;
   /** Callback when slot assignments change. */
@@ -611,10 +613,12 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
           style={{ paddingBottom: "2px" }}
         />
         {/*
-          Pin to Start — task 091 / round 5 operator UX. When checked, this
-          workspace's ID is persisted (currently via sessionStorage stub in
-          App.tsx; task 092 wires BFF + `sprk_workspacelayout.sprk_ispinned`)
-          and SpaarkeAi auto-opens it on the next cold load.
+          Pin to Start — task 092 / round 5 operator UX. When checked, this
+          workspace's ID + name is added to the multi-pin localStorage list
+          `spaarke:workspace:pinned-list` (see App.tsx). SpaarkeAi's
+          WorkspacePane reads the list on cold load and auto-opens each
+          pinned workspace as a tab. Multiple pins coexist; persists across
+          browser sessions on the same device.
         */}
         <Checkbox
           checked={pinToStart}

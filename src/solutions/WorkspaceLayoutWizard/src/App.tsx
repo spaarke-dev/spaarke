@@ -168,52 +168,105 @@ function parseSectionsJson(
 }
 
 // ---------------------------------------------------------------------------
-// Pin-to-Start persistence (task 091 / round 5)
+// Pin-to-Start persistence (task 092 / round 5 — multi-pin localStorage)
 //
-// The BFF DTO does NOT yet carry a pin flag (CreateWorkspaceLayoutRequest /
-// UpdateWorkspaceLayoutRequest in src/server/api/Sprk.Bff.Api/Api/Workspace/
-// WorkspaceLayoutDtos.cs has no `IsPinned` field, and `sprk_workspacelayout`
-// has no `sprk_ispinned` column). To unblock operator-driven UX without
-// expanding scope into a Dataverse schema change, we stub persistence in
-// sessionStorage keyed by layout ID. Task 092 will:
-//   1. Add `sprk_workspacelayout.sprk_ispinned` (boolean column)
-//   2. Extend Create/UpdateWorkspaceLayoutRequest with `IsPinned`
-//   3. Extend WorkspaceLayoutDto with `IsPinned`
-//   4. Wire SpaarkeAi auto-open behavior to read the flag from BFF (not session)
+// Task 091 stubbed pin persistence in `sessionStorage` with a single-pin
+// layout ID. Task 092 (this revision) upgrades to a multi-pin model in
+// `localStorage` keyed `spaarke:workspace:pinned-list` — same shape consumed
+// by SpaarkeAi's `services/pinnedWorkspaces.ts` (the source of truth for
+// auto-open behavior on SpaarkeAi cold load). The wizard cannot import from
+// SpaarkeAi's solution at build time (separate Vite app), so the storage
+// shape is replicated verbatim here. Both files MUST stay in sync — if the
+// key or record shape changes, update both.
 //
-// Until then, the wizard's pinToStart state is local to the browser session.
-// Standalone LegalWorkspace (which doesn't auto-open by pinning) is unaffected.
+// Why localStorage (not sessionStorage):
+//   sessionStorage is cleared when the browser tab/window closes; the
+//   operator requested that pinned workspaces survive a full browser restart.
+//
+// TODO(BFF migration, next review):
+//   Replace this localStorage layer with a BFF `user-preferences` endpoint
+//   (no such endpoint exists today — the `UserPreferences` records in
+//   `AiIntentClassificationSchema.cs` / `PlaybookRunContext.cs` are
+//   AI-pipeline payloads, not a generic preferences surface). Cross-device
+//   sync is the motivating use case. Until then, pins are device-local.
+//
+// Standalone LegalWorkspace is unaffected: its `WorkspaceGrid.handleOpenWizard`
+// passes neither `templateFilter` nor any pin-related prop; `pinToStart`
+// defaults to `false` for create mode and to whatever's in localStorage for
+// edit mode.
 // ---------------------------------------------------------------------------
 
-const PIN_STORAGE_KEY = "spaarke:workspace:pinned-layout-id";
+const PIN_STORAGE_KEY = "spaarke:workspace:pinned-list";
 
-/** Read the pinned layout ID — returns true if the given layoutId matches. */
-function readPinToStartForLayout(layoutId: string | null): boolean {
-  if (!layoutId) return false;
+interface PinnedWorkspaceRecord {
+  layoutId: string;
+  layoutName: string;
+}
+
+/** Read the pinned-workspace list from localStorage. Returns `[]` on error. */
+function readPinnedList(): PinnedWorkspaceRecord[] {
   try {
-    return sessionStorage.getItem(PIN_STORAGE_KEY) === layoutId;
+    const raw = window.localStorage?.getItem(PIN_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry): PinnedWorkspaceRecord[] => {
+      if (
+        entry &&
+        typeof entry === "object" &&
+        typeof (entry as PinnedWorkspaceRecord).layoutId === "string" &&
+        typeof (entry as PinnedWorkspaceRecord).layoutName === "string"
+      ) {
+        return [
+          {
+            layoutId: (entry as PinnedWorkspaceRecord).layoutId,
+            layoutName: (entry as PinnedWorkspaceRecord).layoutName,
+          },
+        ];
+      }
+      return [];
+    });
   } catch {
-    return false;
+    return [];
   }
 }
 
+/** Read pin state for a given layoutId — returns true if pinned. */
+function readPinToStartForLayout(layoutId: string | null): boolean {
+  if (!layoutId) return false;
+  return readPinnedList().some((p) => p.layoutId === layoutId);
+}
+
 /**
- * Persist the pin-to-Start choice. Only one workspace may be pinned at a time
- * (matches the eventual BFF semantics where pinning a workspace clears any
- * previously pinned one).
+ * Persist the pin-to-Start choice. Multiple workspaces may be pinned
+ * simultaneously; pinning ADDS (or refreshes) and unpinning REMOVES the
+ * matching entry. Failures (private browsing, quota exceeded) degrade
+ * silently — the in-memory wizard state is the user's source of truth for
+ * the current dialog session.
  */
-function writePinToStartForLayout(layoutId: string, pinned: boolean): void {
+function writePinToStartForLayout(
+  layoutId: string,
+  layoutName: string,
+  pinned: boolean,
+): void {
+  if (!layoutId) return;
   try {
+    const current = readPinnedList();
+    let next: PinnedWorkspaceRecord[];
     if (pinned) {
-      sessionStorage.setItem(PIN_STORAGE_KEY, layoutId);
+      const exists = current.some((p) => p.layoutId === layoutId);
+      next = exists
+        ? current.map((p) =>
+            p.layoutId === layoutId ? { layoutId, layoutName } : p,
+          )
+        : [...current, { layoutId, layoutName }];
     } else {
-      const current = sessionStorage.getItem(PIN_STORAGE_KEY);
-      if (current === layoutId) {
-        sessionStorage.removeItem(PIN_STORAGE_KEY);
-      }
+      next = current.filter((p) => p.layoutId !== layoutId);
+      if (next.length === current.length) return; // not pinned — no-op
     }
+    window.localStorage?.setItem(PIN_STORAGE_KEY, JSON.stringify(next));
   } catch {
-    /* sessionStorage unavailable — no-op */
+    /* localStorage unavailable — no-op */
   }
 }
 
@@ -274,10 +327,12 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   >(() => saveAsData?.sectionIds ?? new Set(DEFAULT_SECTION_IDS));
   const [workspaceName, setWorkspaceName] = React.useState(saveAsData?.name ?? "");
   const [isDefault, setIsDefault] = React.useState(false);
-  // Pin-to-Start — task 091 / round 5. Persistence is a sessionStorage stub
-  // here; task 092 will wire to a BFF `isPinned` flag once the DTO + Dataverse
-  // column (`sprk_workspacelayout.sprk_ispinned`) are added. The wizard treats
-  // the saved value as opaque: read on saveAs/edit prefill, write on save.
+  // Pin-to-Start — task 092 / round 5. Persistence is now a multi-pin
+  // localStorage list (`spaarke:workspace:pinned-list`) shared with
+  // SpaarkeAi's `services/pinnedWorkspaces.ts`; the wizard treats the saved
+  // value as opaque: read on saveAs/edit prefill, write on save. BFF-backed
+  // cross-device sync is still a follow-on once a user-preferences endpoint
+  // exists (no such endpoint today).
   const [pinToStart, setPinToStart] = React.useState<boolean>(() =>
     readPinToStartForLayout(mode === "edit" ? layoutId : null),
   );
@@ -373,17 +428,23 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       const savedId = savedLayout?.id ?? savedLayout?.Id ?? layoutId;
 
       // ---------------------------------------------------------------------
-      // Persist pinToStart (task 091 / round 5)
+      // Persist pinToStart (task 092 / round 5 — multi-pin localStorage)
       //
-      // TODO(task 092): replace sessionStorage stub with BFF persistence once
-      // CreateWorkspaceLayoutRequest / UpdateWorkspaceLayoutRequest carry an
-      // `IsPinned` field and `sprk_workspacelayout.sprk_ispinned` exists.
-      // The sessionStorage write here is a load-bearing stub for the UX flow
-      // until task 092 lands; once the BFF accepts the field, the wizard
-      // should include `isPinned: pinToStart` in the request body.
+      // Writes to `localStorage` key `spaarke:workspace:pinned-list` — the
+      // same shape SpaarkeAi's `services/pinnedWorkspaces.ts` reads on cold
+      // load to auto-open pinned workspaces as tabs. Multiple workspaces may
+      // be pinned simultaneously (additive ADD; explicit REMOVE on unpin).
+      //
+      // TODO(BFF migration): replace with a BFF `user-preferences` endpoint
+      // (does NOT exist today) so pins sync across devices. Until then, pins
+      // are device-local but persist across browser restarts.
       // ---------------------------------------------------------------------
       if (savedId) {
-        writePinToStartForLayout(String(savedId), pinToStart);
+        writePinToStartForLayout(
+          String(savedId),
+          workspaceName.trim() || "Workspace",
+          pinToStart,
+        );
       }
 
       // Set dialog result for parent to read

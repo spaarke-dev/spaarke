@@ -54,6 +54,7 @@ import {
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
   TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
 } from "../../telemetry/errorTelemetry";
+import { getPinnedWorkspaces } from "../../services/pinnedWorkspaces";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -357,6 +358,66 @@ export function WorkspacePane(): React.JSX.Element {
     // is stable per useDispatchPaneEvent contract and syncState is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Auto-open pinned workspaces — task 092 / round 5
+  //
+  // Reads the multi-pin list from `services/pinnedWorkspaces.ts` (backed by
+  // `localStorage` key `spaarke:workspace:pinned-list`) and dispatches a
+  // `widget_load` event for each pinned workspace. The existing event handler
+  // below converts each into a tab via the WorkspaceTabManager pipeline —
+  // identical machinery used by `WorkspacePaneMenu.handleLayoutSelect`. Home
+  // tab remains the default and is NOT replaced (pinned tabs open IN ADDITION
+  // to Home so the user can close Home if they don't want it).
+  //
+  // Deferral on auth: pinned workspaces resolve via LegalWorkspace's embedded
+  // `useWorkspaceLayouts` which calls the BFF — we wait for `isAuthenticated`
+  // before dispatching so the auto-opened tabs hydrate cleanly instead of
+  // rendering a 401 or empty state.
+  //
+  // Duplicate guard: if a pinned workspace is already open (e.g. user
+  // refreshes the page mid-session and tab restore via NFR-09 restored that
+  // workspace), we skip the auto-open dispatch to avoid stacking duplicate
+  // tabs. The match is by `widgetData.layoutId` since `widgetType` is the
+  // generic `'workspace'` string for every workspace tab.
+  // ---------------------------------------------------------------------------
+
+  const autoOpenedPinsRef = React.useRef<boolean>(false);
+  React.useEffect(() => {
+    if (!isAuthenticated) return;
+    if (autoOpenedPinsRef.current) return; // run once per mount
+    autoOpenedPinsRef.current = true;
+
+    const pinned = getPinnedWorkspaces();
+    if (pinned.length === 0) return;
+
+    const manager = managerRef.current;
+    const openLayoutIds = new Set<string>(
+      manager
+        .getSnapshot()
+        .tabs.filter((t) => t.widgetType === "workspace")
+        .map((t) => {
+          const data = t.widgetData as { layoutId?: string } | null;
+          return data?.layoutId ?? "";
+        })
+        .filter((id): id is string => id.length > 0),
+    );
+
+    for (const pin of pinned) {
+      if (openLayoutIds.has(pin.layoutId)) continue; // already open — skip
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "workspace",
+        widgetData: { layoutId: pin.layoutId, layoutName: pin.layoutName },
+        displayName: pin.layoutName,
+      });
+    }
+    // Auto-open is a one-shot per mount. `isAuthenticated` flipping false→true
+    // is the trigger; subsequent state changes (re-auth on token refresh)
+    // MUST NOT re-trigger or we'd re-stack tabs. The ref guard above enforces
+    // this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   // ---------------------------------------------------------------------------
   // PaneEventBus subscription — 'workspace' channel
