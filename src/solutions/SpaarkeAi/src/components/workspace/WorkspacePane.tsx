@@ -48,7 +48,6 @@ import type {
   WorkspaceTabPersistenceSnapshot,
 } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
-import { WorkspaceHomeTab } from "./WorkspaceHomeTab";
 import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
 import {
   logTelemetryError,
@@ -56,6 +55,11 @@ import {
   TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
 } from "../../telemetry/errorTelemetry";
 import { getPinnedWorkspaces } from "../../services/pinnedWorkspaces";
+// Wave 2b (task 109): the cold-load default tab is now driven by
+// useWorkspaceLayouts().activeLayout (the BFF's discovered default — Daily
+// Briefing in dev) instead of a hard-coded Home tab. See the auto-install
+// effect below for the dispatch path.
+import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -71,8 +75,11 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
-  // ── First-paint placeholder (rendered for the one tick before the Home tab
-  //    effect installs the Home tab) ────────────────────────────────────────
+  // ── First-paint / empty-state placeholder. Wave 2b (task 109) — used in
+  //    two cases now: (a) the brief window between mount and the
+  //    auto-install-default effect dispatching the default workspace tab,
+  //    and (b) when the BFF returns NO default (cascade step 4) — the user
+  //    sees an empty pane and can pick from the Workspaces dropdown.
   firstPaintPlaceholder: {
     flex: 1,
     display: "flex",
@@ -329,36 +336,108 @@ export function WorkspacePane(): React.JSX.Element {
   }, [chatSessionId, bffBaseUrl, isAuthenticated]);
 
   // ---------------------------------------------------------------------------
-  // Home tab — FR-11: embed the LegalWorkspace experience as a non-closable
-  // Home tab containing the user's default workspace layout. The Home tab is
-  // installed eagerly on mount via WorkspaceTabManager.ensureHomeTab() (task
-  // 011 shipped this factory). WorkspaceHomeTab handles its own per-request
-  // BFF fetch via authenticatedFetch (ADR-028).
+  // Auto-install default workspace tab — Wave 2b (task 109)
+  //
+  // The hard-coded "Home" tab (formerly installed via
+  // WorkspaceTabManager.ensureHomeTab + WorkspaceHomeTab) is GONE. Round 8
+  // operator decision Option B: architectural unity — every workspace
+  // (Corporate Workspace, the 4 Wave 2a Dataverse-seeded system layouts,
+  // and user-created layouts) flows through the same `widget_load →
+  // WorkspaceLayoutWidget → LegalWorkspaceApp(embedded) → section factories`
+  // pipeline. The cold-load tab is therefore the BFF's discovered default
+  // (typically "Daily Briefing" in dev, per Wave 2a's seed) — NOT a code-
+  // local Home tab.
+  //
+  // The BFF's GetDefaultLayoutAsync cascade (task 109 BFF changes):
+  //   1. Per-user default (user's customized choice)
+  //   2. Dataverse system default (sprk_issystem=true + sprk_isdefault=true)
+  //   3. Hard-coded system flagged as global default (forward-compat path)
+  //   4. null — no default; we render an empty pane.
+  //
+  // Coordination with task 101's pin auto-open (effect declared below):
+  //   - If the resolved default is in the pinned list, this effect SKIPS the
+  //     dispatch and lets the pin auto-open handle it (the pin loop opens
+  //     pinned workspaces in their persisted order; the default IS opened
+  //     because it's pinned).
+  //   - If the default is NOT pinned, this effect dispatches it independently
+  //     as the first tab.
+  //
+  // Subscription-race fix carried forward from task 101: defer the dispatch
+  // to a macrotask via setTimeout(..., 0). The usePaneEvent('workspace', ...)
+  // subscription below is registered in its own useEffect that runs AFTER
+  // this one in React's commit order; without the macrotask deferral the
+  // dispatch lands on a zero-subscriber channel and is silently dropped.
+  //
+  // Step 4 fallback: if activeLayout is null (BFF returned null OR no
+  // layouts at all), do NOT install any tab. The user sees an empty workspace
+  // pane and can pick from the Workspaces dropdown. This is acceptable — no
+  // default tab is the correct UX when the system has no default to offer.
   // ---------------------------------------------------------------------------
 
+  const { activeLayout } = useWorkspaceLayouts({
+    bffBaseUrl,
+    authenticatedFetch,
+    isAuthenticated,
+  });
+
+  const autoInstalledDefaultRef = React.useRef<boolean>(false);
   React.useEffect(() => {
+    if (!isAuthenticated) return;
+    if (autoInstalledDefaultRef.current) return; // run once per mount
+    if (!activeLayout) return; // wait for the BFF default to resolve, or stay empty if null
+
+    // Defer the guard arming until after we actually have a default to
+    // process so a transient `activeLayout === null` (cold load before fetch
+    // resolves) doesn't lock the effect out.
+    autoInstalledDefaultRef.current = true;
+
     const manager = managerRef.current;
-    const homeTabId = manager.ensureHomeTab(
-      "Home",
-      /* widgetData */ null,
-      /* Component */ WorkspaceHomeTab,
+
+    // Skip if this layout is already open (e.g. NFR-09 tab restore brought
+    // it back from the last session). Match by widgetData.layoutId.
+    const alreadyOpen = manager
+      .getSnapshot()
+      .tabs.some((t) => {
+        if (t.widgetType !== "workspace") return false;
+        const data = t.widgetData as { layoutId?: string } | null;
+        return data?.layoutId === activeLayout.id;
+      });
+    if (alreadyOpen) return;
+
+    // Skip if the default is in the pinned list — the pin auto-open effect
+    // below will open it; we don't want to double-dispatch.
+    const isPinned = getPinnedWorkspaces().some(
+      (p) => p.layoutId === activeLayout.id,
     );
-    // If no tab is currently active, activate the Home tab so the user sees
-    // workspace content on first paint instead of an empty-state placeholder.
-    if (manager.getActiveTab() === null) {
-      manager.setActiveTab(homeTabId);
-    }
-    syncState();
-    // Dispatch tab_count_change so ShellStageManager can adapt. The Home tab
-    // counts as one tab; subsequent widget tabs add to this count.
-    dispatch("workspace", {
-      type: "tab_count_change",
-      tabCount: manager.getSnapshot().tabs.length,
-    });
-    // Intentionally empty dep array: install Home tab once per mount. dispatch
-    // is stable per useDispatchPaneEvent contract and syncState is stable.
+    if (isPinned) return;
+
+    // Defer to a macrotask so usePaneEvent's subscription effect (declared
+    // later in this component) has registered. Identical pattern to the pin
+    // auto-open effect below — see that effect's block comment for the
+    // subscription-race rationale.
+    const timerId = window.setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[WorkspacePane] Auto-installing default workspace: ${activeLayout.name} (${activeLayout.id})`,
+      );
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "workspace",
+        widgetData: {
+          layoutId: activeLayout.id,
+          layoutName: activeLayout.name,
+        },
+        displayName: activeLayout.name,
+      });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+    // Run once when both auth AND activeLayout are ready; the ref guard
+    // prevents re-runs on subsequent dependency changes (e.g. refetch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAuthenticated, activeLayout]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -649,19 +728,20 @@ export function WorkspacePane(): React.JSX.Element {
   // brand-colored AppsListRegular icon.
   //
   // FR-12 (task 032): `PaneHeader.rightSlot` hosts `WorkspacePaneMenu` — a
-  // Fluent v9 Dropdown that replaces the legacy tab bar. It surfaces (1) open
-  // tabs with close affordances, (2) the pinned Home tab, (3) workspace
-  // switching + "+ New Workspace" wizard launch, and (4) edit current
-  // workspace. The menu is fed tab state from `WorkspaceTabManager` snapshots
-  // via the `tabs` / `activeTabId` props and dispatches selection / close back
-  // through the existing `handleTabChange` / `handleTabClose` callbacks.
+  // Fluent v9 Dropdown that surfaces workspace switching + "+ New Workspace"
+  // wizard launch + Manage workspaces. The menu is fed tab state from
+  // `WorkspaceTabManager` snapshots via the `tabs` / `activeTabId` props and
+  // dispatches selection / close back through the existing `handleTabChange`
+  // / `handleTabClose` callbacks.
   //
-  // FR-11: The Home tab is installed eagerly in the mount effect above, so
-  // `tabs.length === 0` is only reachable during the single render that
-  // happens before that effect runs. We render a minimal Spinner placeholder
-  // under the standard <PaneHeader> in that window so there's no flash of
-  // missing content. Task 031 removed the legacy Stage-1 landing widget that
-  // previously occupied this branch.
+  // Wave 2b (task 109): `tabs.length === 0` is now a reachable steady state
+  // (not just a single render window) — it occurs when the BFF returns no
+  // default layout (cascade step 4) AND the user has no pinned workspaces.
+  // We render a minimal Spinner placeholder while auth + the default-layout
+  // fetch are still resolving; once they settle, the placeholder remains as
+  // an empty-state hint that the user should pick from the Workspaces
+  // dropdown. Operator UX rationale: no fake "Home" tab; an empty pane is
+  // the honest signal that no default is configured.
   // ---------------------------------------------------------------------------
 
   const { tabs, activeTabId } = tabState;

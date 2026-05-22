@@ -24,6 +24,12 @@ public sealed class WorkspaceLayoutService
     private const string EntityName = "sprk_workspacelayout";
     private const int MaxUserLayouts = 10;
 
+    // Wave 2b (task 109): include sprk_issystem so the service can:
+    //  (a) tag DTOs with IsSystem=true when the Dataverse record is a seeded
+    //      system layout (one of the 4 records POSTed by Wave 2a's seed script);
+    //  (b) reject UPDATE / DELETE against any Dataverse record whose
+    //      sprk_issystem column is true (defense-in-depth complement to the
+    //      client-side disable affordance in WorkspacePaneMenu / ManageWorkspacesPane).
     private static readonly string[] SelectColumns =
     [
         "sprk_workspacelayoutid",
@@ -31,7 +37,8 @@ public sealed class WorkspaceLayoutService
         "sprk_layouttemplateid",
         "sprk_sectionsjson",
         "sprk_isdefault",
-        "sprk_sortorder"
+        "sprk_sortorder",
+        "sprk_issystem"
     ];
 
     private readonly IGenericEntityService _entityService;
@@ -46,28 +53,62 @@ public sealed class WorkspaceLayoutService
     }
 
     /// <summary>
-    /// Returns all layouts for the specified user: system layouts first, then user layouts
-    /// sorted by sortOrder.
+    /// Returns the union of (a) hard-coded system layouts from
+    /// <see cref="SystemWorkspaceLayouts.All"/> ("Corporate Workspace"),
+    /// (b) Dataverse layouts flagged <c>sprk_issystem=true</c> (seeded by
+    /// <c>scripts/Deploy-SystemWorkspaceLayouts.ps1</c>), and (c) user-owned
+    /// Dataverse layouts for the calling user. Wave 2b (task 109) — Option B
+    /// architectural unity: all three sources flow through the same list
+    /// endpoint and the same client pipeline so SpaarkeAi's Workspaces
+    /// dropdown surfaces every workspace the user can open.
     /// </summary>
+    /// <remarks>
+    /// Order:
+    ///   1. Hard-coded system layouts (in their static array order — single
+    ///      entry today, "Corporate Workspace").
+    ///   2. Dataverse system layouts (sprk_issystem=true), sorted by
+    ///      <c>sprk_sortorder</c> ascending (Wave 2a seeded them as 0..3:
+    ///      Daily Briefing, Smart To Do List, My Work, Documents).
+    ///   3. User-owned layouts sorted by <c>sprk_sortorder</c> ascending.
+    ///
+    /// Every DTO in the returned list carries <see cref="WorkspaceLayoutDto.IsSystem"/>
+    /// set correctly for its source (true for groups 1+2, false for group 3).
+    /// The client uses this flag to disable Delete + route Edit through
+    /// "save as" in <c>ManageWorkspacesPane.tsx</c>; the server enforces the
+    /// same constraint in <see cref="UpdateLayoutAsync"/> + <see cref="DeleteLayoutAsync"/>.
+    /// </remarks>
     /// <param name="userId">The Entra ID object ID of the authenticated user.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Combined list of system and user layouts.</returns>
+    /// <returns>Combined list of hard-coded + Dataverse-system + user layouts.</returns>
     public async Task<IReadOnlyList<WorkspaceLayoutDto>> GetLayoutsAsync(
         string userId,
         CancellationToken ct = default)
     {
         _logger.LogDebug("Loading layouts for user {UserId}", userId);
 
-        var userLayouts = await QueryUserLayoutsAsync(userId, ct);
+        // Group 2 (Dataverse system) + Group 3 (user) — run in parallel to
+        // halve the wall-clock of the round-trip cascade.
+        var systemTask = QueryDataverseSystemLayoutsAsync(ct);
+        var userTask = QueryUserLayoutsAsync(userId, ct);
+        await Task.WhenAll(systemTask, userTask);
+        var dataverseSystemLayouts = systemTask.Result;
+        var userLayouts = userTask.Result;
 
-        // System layouts first, then user layouts sorted by sortOrder
-        var result = new List<WorkspaceLayoutDto>(SystemWorkspaceLayouts.All.Count + userLayouts.Count);
+        var result = new List<WorkspaceLayoutDto>(
+            SystemWorkspaceLayouts.All.Count + dataverseSystemLayouts.Count + userLayouts.Count);
+
+        // (1) Hard-coded system layouts (Corporate Workspace).
         result.AddRange(SystemWorkspaceLayouts.All);
+
+        // (2) Dataverse system layouts, ordered by sortOrder ascending.
+        result.AddRange(dataverseSystemLayouts.OrderBy(l => l.SortOrder ?? int.MaxValue));
+
+        // (3) User layouts, ordered by sortOrder ascending.
         result.AddRange(userLayouts.OrderBy(l => l.SortOrder ?? int.MaxValue));
 
         _logger.LogDebug(
-            "Returning {Total} layouts ({System} system, {User} user) for user {UserId}",
-            result.Count, SystemWorkspaceLayouts.All.Count, userLayouts.Count, userId);
+            "Returning {Total} layouts ({HardCoded} hard-coded system, {DvSystem} Dataverse system, {User} user) for user {UserId}",
+            result.Count, SystemWorkspaceLayouts.All.Count, dataverseSystemLayouts.Count, userLayouts.Count, userId);
 
         return result;
     }
@@ -84,10 +125,10 @@ public sealed class WorkspaceLayoutService
         string userId,
         CancellationToken ct = default)
     {
-        // Check system layouts first (no Dataverse query needed)
-        var systemLayout = SystemWorkspaceLayouts.GetById(id);
-        if (systemLayout is not null)
-            return systemLayout;
+        // Check hard-coded system layouts first (no Dataverse query needed)
+        var hardCodedSystem = SystemWorkspaceLayouts.GetById(id);
+        if (hardCodedSystem is not null)
+            return hardCodedSystem;
 
         _logger.LogDebug("Loading layout {LayoutId} for user {UserId}", id, userId);
 
@@ -95,14 +136,20 @@ public sealed class WorkspaceLayoutService
         {
             var entity = await _entityService.RetrieveAsync(EntityName, id, SelectColumns, ct);
 
-            // Verify ownership — the user can only see their own layouts
-            var ownerId = entity.GetAttributeValue<EntityReference>("ownerid")?.Id;
-            if (ownerId.HasValue && Guid.TryParse(userId, out var userGuid) && ownerId.Value != userGuid)
+            // Wave 2b (task 109): Dataverse system layouts (sprk_issystem=true)
+            // are visible to ALL users regardless of ownership. User-owned
+            // records remain isolated by ownerid as before.
+            var isSystem = entity.GetAttributeValue<bool?>("sprk_issystem") ?? false;
+            if (!isSystem)
             {
-                _logger.LogWarning(
-                    "User {UserId} attempted to access layout {LayoutId} owned by {OwnerId}",
-                    userId, id, ownerId);
-                return null;
+                var ownerId = entity.GetAttributeValue<EntityReference>("ownerid")?.Id;
+                if (ownerId.HasValue && Guid.TryParse(userId, out var userGuid) && ownerId.Value != userGuid)
+                {
+                    _logger.LogWarning(
+                        "User {UserId} attempted to access layout {LayoutId} owned by {OwnerId}",
+                        userId, id, ownerId);
+                    return null;
+                }
             }
 
             return MapToDto(entity);
@@ -115,53 +162,150 @@ public sealed class WorkspaceLayoutService
     }
 
     /// <summary>
-    /// Returns the user's default layout. Falls back to the first system layout
-    /// if no user default is set.
+    /// Returns the default workspace layout for the calling user using a
+    /// four-step discovery cascade. Wave 2b (task 109) extension: the
+    /// previous implementation only honored a per-user default and otherwise
+    /// fell back to the hard-coded Corporate Workspace. After Wave 2a seeded
+    /// system layouts in Dataverse, cold-load users with no per-user default
+    /// should land on the globally-flagged Dataverse system default ("Daily
+    /// Briefing" in dev, per the Wave 2a seed).
     /// </summary>
+    /// <remarks>
+    /// Cascade:
+    ///   1. Per-user default — a layout owned by <paramref name="userId"/>
+    ///      with <c>sprk_isdefault=true</c>. This honors any user-customized
+    ///      default chosen via Manage Workspaces.
+    ///   2. Dataverse system default — a layout with both
+    ///      <c>sprk_issystem=true</c> AND <c>sprk_isdefault=true</c> (Wave 2a
+    ///      seeded Daily Briefing in this slot). Cross-user; visible to
+    ///      every authenticated user. <c>TopCount=1</c> with sortOrder
+    ///      ascending for deterministic selection if multiple are ever flagged.
+    ///   3. Hard-coded system layout — any entry in
+    ///      <see cref="SystemWorkspaceLayouts.All"/> with
+    ///      <see cref="WorkspaceLayoutDto.IsDefault"/> true (today
+    ///      Corporate Workspace is seeded with IsDefault=false, so this step
+    ///      typically yields nothing; preserved for forward compatibility if
+    ///      a code constant is ever promoted to global default).
+    ///   4. <c>null</c> — no default available; the client must not
+    ///      auto-install a tab. Frontend behavior on null: render an empty
+    ///      Workspace pane and let the user pick from the Workspaces dropdown
+    ///      (see <c>WorkspacePane.tsx</c>'s default-install effect).
+    ///
+    /// Return type changed from <c>Task&lt;WorkspaceLayoutDto&gt;</c> to
+    /// <c>Task&lt;WorkspaceLayoutDto?&gt;</c> to express step 4 — the endpoint
+    /// handler converts null to a 200 with explicit null body so client code
+    /// can distinguish "no default" from a fetch failure.
+    /// </remarks>
     /// <param name="userId">The Entra ID object ID of the authenticated user.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The default layout.</returns>
-    public async Task<WorkspaceLayoutDto> GetDefaultLayoutAsync(
+    /// <returns>The default layout, or null if none is available.</returns>
+    public async Task<WorkspaceLayoutDto?> GetDefaultLayoutAsync(
         string userId,
         CancellationToken ct = default)
     {
         _logger.LogDebug("Loading default layout for user {UserId}", userId);
 
-        var query = new QueryExpression(EntityName)
-        {
-            ColumnSet = new ColumnSet(SelectColumns)
-        };
-
-        query.Criteria.AddCondition("sprk_isdefault", ConditionOperator.Equal, true);
-
+        // ──────────────────────────────────────────────────────────────────
+        // Step 1 — Per-user default.
+        //
+        // We split the per-user query from the Dataverse-system default
+        // query so step 2 can run even if the user has zero owned layouts
+        // (the original query lumped both into one filter).
+        // ──────────────────────────────────────────────────────────────────
         if (Guid.TryParse(userId, out var userGuid))
         {
-            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, userGuid);
+            var userQuery = new QueryExpression(EntityName)
+            {
+                ColumnSet = new ColumnSet(SelectColumns),
+                TopCount = 1
+            };
+            userQuery.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            userQuery.Criteria.AddCondition("sprk_isdefault", ConditionOperator.Equal, true);
+            userQuery.Criteria.AddCondition("ownerid", ConditionOperator.Equal, userGuid);
+            // Per-user defaults never have sprk_issystem=true (the seed script
+            // sets system records to be owned by the script-runner, but they
+            // are surfaced via step 2's cross-user discovery; step 1 is for
+            // user-customized defaults only).
+            userQuery.Criteria.AddCondition("sprk_issystem", ConditionOperator.NotEqual, true);
+
+            try
+            {
+                var userResults = await _entityService.RetrieveMultipleAsync(userQuery, ct);
+                if (userResults.Entities.Count > 0)
+                {
+                    var dto = MapToDto(userResults.Entities[0]);
+                    _logger.LogDebug(
+                        "Found per-user default layout {LayoutId} for user {UserId}",
+                        dto.Id, userId);
+                    return dto;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to query per-user default for user {UserId}", userId);
+                // Continue to step 2 — don't let a query failure prevent
+                // discovery of the cross-user system default.
+            }
         }
 
-        query.TopCount = 1;
+        // ──────────────────────────────────────────────────────────────────
+        // Step 2 — Dataverse system default (cross-user).
+        //
+        // No ownerid filter — system layouts are visible to all users.
+        // ──────────────────────────────────────────────────────────────────
+        var systemQuery = new QueryExpression(EntityName)
+        {
+            ColumnSet = new ColumnSet(SelectColumns),
+            TopCount = 1
+        };
+        systemQuery.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+        systemQuery.Criteria.AddCondition("sprk_issystem", ConditionOperator.Equal, true);
+        systemQuery.Criteria.AddCondition("sprk_isdefault", ConditionOperator.Equal, true);
+        systemQuery.AddOrder("sprk_sortorder", OrderType.Ascending);
 
         try
         {
-            var results = await _entityService.RetrieveMultipleAsync(query, ct);
-
-            if (results.Entities.Count > 0)
+            var systemResults = await _entityService.RetrieveMultipleAsync(systemQuery, ct);
+            if (systemResults.Entities.Count > 0)
             {
-                var dto = MapToDto(results.Entities[0]);
+                var dto = MapToDto(systemResults.Entities[0]);
                 _logger.LogDebug(
-                    "Found user default layout {LayoutId} for user {UserId}",
+                    "Found Dataverse system default layout {LayoutId} for user {UserId}",
                     dto.Id, userId);
                 return dto;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to query default layout for user {UserId}", userId);
+            _logger.LogError(ex, "Failed to query Dataverse system default for user {UserId}", userId);
+            // Continue to step 3 — graceful degradation.
         }
 
-        // Fall back to system default
-        _logger.LogDebug("No user default found, returning system default for user {UserId}", userId);
-        return SystemWorkspaceLayouts.CorporateWorkspace;
+        // ──────────────────────────────────────────────────────────────────
+        // Step 3 — Hard-coded system layout flagged as global default.
+        //
+        // SystemWorkspaceLayouts.All today contains Corporate Workspace with
+        // IsDefault=false, so this typically returns nothing. Preserved as a
+        // forward-compat path so a future code constant can be promoted to
+        // global default without changing the cascade structure.
+        // ──────────────────────────────────────────────────────────────────
+        var hardCodedDefault = SystemWorkspaceLayouts.All.FirstOrDefault(l => l.IsDefault);
+        if (hardCodedDefault is not null)
+        {
+            _logger.LogDebug(
+                "Returning hard-coded system default layout {LayoutId} for user {UserId}",
+                hardCodedDefault.Id, userId);
+            return hardCodedDefault;
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Step 4 — No default available.
+        //
+        // The endpoint returns 200 with explicit null body. Frontend renders
+        // an empty Workspace pane; user picks from Workspaces dropdown.
+        // ──────────────────────────────────────────────────────────────────
+        _logger.LogDebug("No default layout discovered for user {UserId} — returning null", userId);
+        return null;
     }
 
     /// <summary>
@@ -252,11 +396,11 @@ public sealed class WorkspaceLayoutService
         string userId,
         CancellationToken ct = default)
     {
-        // Reject updates to system layouts
+        // Reject updates to hard-coded system layouts (Corporate Workspace)
         if (SystemWorkspaceLayouts.IsSystemLayout(id))
         {
             _logger.LogWarning(
-                "User {UserId} attempted to update system layout {LayoutId}",
+                "User {UserId} attempted to update hard-coded system layout {LayoutId}",
                 userId, id);
             return (null, "System workspaces cannot be modified.");
         }
@@ -265,11 +409,24 @@ public sealed class WorkspaceLayoutService
             "Updating layout {LayoutId} for user {UserId} (isDefault={IsDefault})",
             id, userId, request.IsDefault);
 
-        // Verify the layout exists and belongs to this user
+        // Verify the layout exists and belongs to this user (or is a system record).
         var existing = await GetLayoutByIdAsync(id, userId, ct);
         if (existing is null)
         {
             return (null, "Workspace layout not found.");
+        }
+
+        // Wave 2b (task 109): reject updates to Dataverse system layouts too —
+        // defense-in-depth complement to the client-side disable affordance.
+        // The client's ManageWorkspacesPane already routes Edit through
+        // "save as" for isSystem records; this guards against a crafted PUT
+        // that bypasses the UI.
+        if (existing.IsSystem)
+        {
+            _logger.LogWarning(
+                "User {UserId} attempted to update Dataverse system layout {LayoutId}",
+                userId, id);
+            return (null, "System workspaces cannot be modified.");
         }
 
         // If setting as default, clear existing defaults first
@@ -326,22 +483,35 @@ public sealed class WorkspaceLayoutService
         string userId,
         CancellationToken ct = default)
     {
-        // Reject deletion of system layouts
+        // Reject deletion of hard-coded system layouts (Corporate Workspace)
         if (SystemWorkspaceLayouts.IsSystemLayout(id))
         {
             _logger.LogWarning(
-                "User {UserId} attempted to delete system layout {LayoutId}",
+                "User {UserId} attempted to delete hard-coded system layout {LayoutId}",
                 userId, id);
             return "System workspaces cannot be deleted.";
         }
 
         _logger.LogInformation("Deleting layout {LayoutId} for user {UserId}", id, userId);
 
-        // Verify the layout exists and belongs to this user
+        // Verify the layout exists and belongs to this user (or is a system record).
         var existing = await GetLayoutByIdAsync(id, userId, ct);
         if (existing is null)
         {
             return "Workspace layout not found.";
+        }
+
+        // Wave 2b (task 109): reject deletion of Dataverse system layouts too —
+        // defense-in-depth complement to the client-side disable affordance.
+        // The client's ManageWorkspacesPane disables the Delete button for
+        // isSystem records; this guards against a crafted DELETE that
+        // bypasses the UI.
+        if (existing.IsSystem)
+        {
+            _logger.LogWarning(
+                "User {UserId} attempted to delete Dataverse system layout {LayoutId}",
+                userId, id);
+            return "System workspaces cannot be deleted.";
         }
 
         try
@@ -362,7 +532,11 @@ public sealed class WorkspaceLayoutService
     #region Private Helpers
 
     /// <summary>
-    /// Queries all active user layouts from Dataverse filtered by ownerid.
+    /// Queries all active USER-OWNED Dataverse layouts (not system layouts).
+    /// Wave 2b (task 109): explicitly excludes <c>sprk_issystem=true</c> records
+    /// so the user-layout slice of the merged list endpoint doesn't include
+    /// system records (which are surfaced via <see cref="QueryDataverseSystemLayoutsAsync"/>
+    /// instead). The user-isolation guarantee remains via the ownerid filter.
     /// </summary>
     private async Task<IReadOnlyList<WorkspaceLayoutDto>> QueryUserLayoutsAsync(
         string userId,
@@ -375,6 +549,11 @@ public sealed class WorkspaceLayoutService
 
         // Active records only
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+
+        // Wave 2b: exclude system records — they're returned by the
+        // QueryDataverseSystemLayoutsAsync path instead so we don't double-
+        // count them in the merged list.
+        query.Criteria.AddCondition("sprk_issystem", ConditionOperator.NotEqual, true);
 
         // Owned by the specified user (user isolation)
         if (Guid.TryParse(userId, out var userGuid))
@@ -399,6 +578,50 @@ public sealed class WorkspaceLayoutService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to query layouts from Dataverse for user {UserId}", userId);
+            return Array.Empty<WorkspaceLayoutDto>();
+        }
+    }
+
+    /// <summary>
+    /// Queries Dataverse-stored system workspace layouts (<c>sprk_issystem=true</c>).
+    /// Wave 2b (task 109): these records are seeded by
+    /// <c>scripts/Deploy-SystemWorkspaceLayouts.ps1</c> (the 4 Wave 2a layouts —
+    /// Daily Briefing, Smart To Do List, My Work, Documents) and are visible to
+    /// ALL authenticated users regardless of ownership. The ownerid is set to
+    /// the seed-script runner but does not gate visibility — system records
+    /// are global.
+    /// </summary>
+    private async Task<IReadOnlyList<WorkspaceLayoutDto>> QueryDataverseSystemLayoutsAsync(
+        CancellationToken ct)
+    {
+        var query = new QueryExpression(EntityName)
+        {
+            ColumnSet = new ColumnSet(SelectColumns)
+        };
+
+        // Active records only
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+
+        // System layouts only (sprk_issystem=true)
+        query.Criteria.AddCondition("sprk_issystem", ConditionOperator.Equal, true);
+
+        query.AddOrder("sprk_sortorder", OrderType.Ascending);
+
+        try
+        {
+            var results = await _entityService.RetrieveMultipleAsync(query, ct);
+            var layouts = new List<WorkspaceLayoutDto>(results.Entities.Count);
+
+            foreach (var entity in results.Entities)
+            {
+                layouts.Add(MapToDto(entity));
+            }
+
+            return layouts;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to query Dataverse system layouts");
             return Array.Empty<WorkspaceLayoutDto>();
         }
     }
@@ -440,7 +663,12 @@ public sealed class WorkspaceLayoutService
     }
 
     /// <summary>
-    /// Maps a Dataverse entity to a WorkspaceLayoutDto.
+    /// Maps a Dataverse entity to a WorkspaceLayoutDto. Wave 2b (task 109):
+    /// <see cref="WorkspaceLayoutDto.IsSystem"/> now reflects the Dataverse
+    /// <c>sprk_issystem</c> column instead of being hard-coded false. This
+    /// lets the client distinguish Dataverse system records (seeded by Wave
+    /// 2a's deploy script) from user-owned records so the UI can disable
+    /// Edit/Delete and the server can reject mutating writes against them.
     /// </summary>
     private static WorkspaceLayoutDto MapToDto(Entity entity) => new()
     {
@@ -450,7 +678,7 @@ public sealed class WorkspaceLayoutService
         SectionsJson = entity.GetAttributeValue<string>("sprk_sectionsjson") ?? string.Empty,
         IsDefault = entity.GetAttributeValue<bool?>("sprk_isdefault") ?? false,
         SortOrder = entity.GetAttributeValue<int?>("sprk_sortorder"),
-        IsSystem = false
+        IsSystem = entity.GetAttributeValue<bool?>("sprk_issystem") ?? false
     };
 
     #endregion
