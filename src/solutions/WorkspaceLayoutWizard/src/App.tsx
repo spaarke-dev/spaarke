@@ -167,6 +167,56 @@ function parseSectionsJson(
   return { sectionIds, assignments };
 }
 
+// ---------------------------------------------------------------------------
+// Pin-to-Start persistence (task 091 / round 5)
+//
+// The BFF DTO does NOT yet carry a pin flag (CreateWorkspaceLayoutRequest /
+// UpdateWorkspaceLayoutRequest in src/server/api/Sprk.Bff.Api/Api/Workspace/
+// WorkspaceLayoutDtos.cs has no `IsPinned` field, and `sprk_workspacelayout`
+// has no `sprk_ispinned` column). To unblock operator-driven UX without
+// expanding scope into a Dataverse schema change, we stub persistence in
+// sessionStorage keyed by layout ID. Task 092 will:
+//   1. Add `sprk_workspacelayout.sprk_ispinned` (boolean column)
+//   2. Extend Create/UpdateWorkspaceLayoutRequest with `IsPinned`
+//   3. Extend WorkspaceLayoutDto with `IsPinned`
+//   4. Wire SpaarkeAi auto-open behavior to read the flag from BFF (not session)
+//
+// Until then, the wizard's pinToStart state is local to the browser session.
+// Standalone LegalWorkspace (which doesn't auto-open by pinning) is unaffected.
+// ---------------------------------------------------------------------------
+
+const PIN_STORAGE_KEY = "spaarke:workspace:pinned-layout-id";
+
+/** Read the pinned layout ID — returns true if the given layoutId matches. */
+function readPinToStartForLayout(layoutId: string | null): boolean {
+  if (!layoutId) return false;
+  try {
+    return sessionStorage.getItem(PIN_STORAGE_KEY) === layoutId;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Persist the pin-to-Start choice. Only one workspace may be pinned at a time
+ * (matches the eventual BFF semantics where pinning a workspace clears any
+ * previously pinned one).
+ */
+function writePinToStartForLayout(layoutId: string, pinned: boolean): void {
+  try {
+    if (pinned) {
+      sessionStorage.setItem(PIN_STORAGE_KEY, layoutId);
+    } else {
+      const current = sessionStorage.getItem(PIN_STORAGE_KEY);
+      if (current === layoutId) {
+        sessionStorage.removeItem(PIN_STORAGE_KEY);
+      }
+    }
+  } catch {
+    /* sessionStorage unavailable — no-op */
+  }
+}
+
 /**
  * Build the sectionsJson string from current wizard state.
  * Transforms slot assignments (Map<slotKey, sectionId>) into the LayoutJson
@@ -224,6 +274,13 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   >(() => saveAsData?.sectionIds ?? new Set(DEFAULT_SECTION_IDS));
   const [workspaceName, setWorkspaceName] = React.useState(saveAsData?.name ?? "");
   const [isDefault, setIsDefault] = React.useState(false);
+  // Pin-to-Start — task 091 / round 5. Persistence is a sessionStorage stub
+  // here; task 092 will wire to a BFF `isPinned` flag once the DTO + Dataverse
+  // column (`sprk_workspacelayout.sprk_ispinned`) are added. The wizard treats
+  // the saved value as opaque: read on saveAs/edit prefill, write on save.
+  const [pinToStart, setPinToStart] = React.useState<boolean>(() =>
+    readPinToStartForLayout(mode === "edit" ? layoutId : null),
+  );
   const [scope, setScope] = React.useState<"my" | "all">("my");
   const scopeRef = React.useRef(scope);
   scopeRef.current = scope;
@@ -315,9 +372,23 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       const savedLayout = await response.json();
       const savedId = savedLayout?.id ?? savedLayout?.Id ?? layoutId;
 
+      // ---------------------------------------------------------------------
+      // Persist pinToStart (task 091 / round 5)
+      //
+      // TODO(task 092): replace sessionStorage stub with BFF persistence once
+      // CreateWorkspaceLayoutRequest / UpdateWorkspaceLayoutRequest carry an
+      // `IsPinned` field and `sprk_workspacelayout.sprk_ispinned` exists.
+      // The sessionStorage write here is a load-bearing stub for the UX flow
+      // until task 092 lands; once the BFF accepts the field, the wizard
+      // should include `isPinned: pinToStart` in the request body.
+      // ---------------------------------------------------------------------
+      if (savedId) {
+        writePinToStartForLayout(String(savedId), pinToStart);
+      }
+
       // Set dialog result for parent to read
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__dialogResult = { confirmed: true, layoutId: savedId };
+      (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
 
       // Return success config — WizardShell displays the success screen
       return {
@@ -364,7 +435,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         throw new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
       }
     }
-  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, authenticatedFetch]);
+  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, authenticatedFetch]);
 
   // ---------------------------------------------------------------------------
   // WizardShell step configurations
@@ -418,9 +489,11 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
               sectionAssignments={sectionAssignments}
               workspaceName={workspaceName}
               isDefault={isDefault}
+              pinToStart={pinToStart}
               onAssignmentsChange={setSectionAssignments}
               onNameChange={setWorkspaceName}
               onDefaultChange={setIsDefault}
+              onPinToStartChange={setPinToStart}
             />
           ) : null,
       },
@@ -434,6 +507,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       sectionAssignments,
       workspaceName,
       isDefault,
+      pinToStart,
       scope,
       templateFilter,
     ],

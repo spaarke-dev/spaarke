@@ -153,6 +153,14 @@ export function buildDynamicWorkspaceConfig(
     const resolvedSectionIds: string[] = [];
 
     for (const sectionId of jsonRow.sections) {
+      // Task 091 fix 1 — tolerate empty / falsy slot IDs silently.
+      // The wizard now allows saving layouts with empty slots (operator
+      // removed a section via the X button). Empty slots serialize as ""
+      // in sectionsJson; we skip them without a console warning.
+      if (!sectionId) {
+        continue;
+      }
+
       const registration = findRegistration(sectionId, registry);
 
       if (!registration) {

@@ -25,6 +25,8 @@ import {
 import {
   ReOrderDotsVertical24Regular,
   Info16Regular,
+  DismissRegular,
+  PinRegular,
 } from "@fluentui/react-icons";
 import type { FluentIcon } from "@fluentui/react-icons";
 import {
@@ -52,12 +54,20 @@ export interface ArrangeStepProps {
   workspaceName: string;
   /** Whether this workspace is set as default. */
   isDefault: boolean;
+  /**
+   * Whether this workspace should be pinned to auto-open on next SpaarkeAi load.
+   * Task 091 / round 5 — operator-driven UX. Persistence wiring lives in App.tsx
+   * (sessionStorage stub; task 092 will wire to BFF + `sprk_workspacelayout.sprk_ispinned`).
+   */
+  pinToStart: boolean;
   /** Callback when slot assignments change. */
   onAssignmentsChange: (assignments: SlotAssignments) => void;
   /** Callback when workspace name changes. */
   onNameChange: (name: string) => void;
   /** Callback when default checkbox changes. */
   onDefaultChange: (isDefault: boolean) => void;
+  /** Callback when pin-to-start checkbox changes. */
+  onPinToStartChange: (pinToStart: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +139,7 @@ const useStyles = makeStyles({
     gap: "8px",
   },
   slot: {
+    position: "relative",
     minHeight: "72px",
     ...shorthands.padding("12px"),
     ...shorthands.borderRadius(tokens.borderRadiusMedium),
@@ -140,6 +151,39 @@ const useStyles = makeStyles({
     transitionProperty: "border-color, background-color",
     transitionDuration: tokens.durationNormal,
     transitionTimingFunction: tokens.curveEasyEase,
+  },
+  slotRemoveButton: {
+    position: "absolute",
+    top: "4px",
+    right: "4px",
+    width: "20px",
+    height: "20px",
+    minWidth: "20px",
+    minHeight: "20px",
+    ...shorthands.padding("0"),
+    ...shorthands.borderRadius(tokens.borderRadiusCircular),
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "none",
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+    cursor: "pointer",
+    opacity: 0,
+    transitionProperty: "opacity, background-color",
+    transitionDuration: tokens.durationFast,
+    transitionTimingFunction: tokens.curveEasyEase,
+    ":hover": {
+      backgroundColor: tokens.colorNeutralBackground3Hover,
+      color: tokens.colorNeutralForeground1,
+    },
+    ":focus": {
+      opacity: 1,
+      outline: `2px solid ${tokens.colorStrokeFocus2}`,
+    },
+  },
+  slotRemoveButtonVisible: {
+    opacity: 1,
   },
   slotDragOver: {
     border: `2px solid ${tokens.colorBrandStroke1}`,
@@ -268,7 +312,13 @@ const GridSlot: React.FC<{
   section: SectionCatalogItem | undefined;
   onDrop: (slotId: string, sectionId: string) => void;
   onDragStart: (sectionId: string, sourceSlotId: string) => void;
-}> = ({ slotId, section, onDrop, onDragStart }) => {
+  /**
+   * Remove the section from this slot (Fix 2 / task 091).
+   * Returns the section to the unassigned pool. The slot becomes empty;
+   * the save flow tolerates empty slots — fix 1 / task 091.
+   */
+  onRemove: (slotId: string) => void;
+}> = ({ slotId, section, onDrop, onDragStart, onRemove }) => {
   const classes = useStyles();
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
@@ -310,6 +360,21 @@ const GridSlot: React.FC<{
     [section, slotId, onDragStart],
   );
 
+  const handleRemoveClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      // Stop propagation so the click doesn't initiate a drag or focus the slot.
+      e.stopPropagation();
+      e.preventDefault();
+      onRemove(slotId);
+    },
+    [slotId, onRemove],
+  );
+
+  // Prevent the remove button from initiating an HTML5 drag on the parent slot.
+  const handleRemoveMouseDown = React.useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
   return (
     <div
       className={mergeClasses(
@@ -326,7 +391,24 @@ const GridSlot: React.FC<{
       onMouseLeave={() => setIsHovered(false)}
     >
       {section ? (
-        <DraggableSectionCard section={section} isHovered={isHovered} />
+        <>
+          <DraggableSectionCard section={section} isHovered={isHovered} />
+          <button
+            type="button"
+            className={mergeClasses(
+              classes.slotRemoveButton,
+              isHovered && classes.slotRemoveButtonVisible,
+            )}
+            onClick={handleRemoveClick}
+            onMouseDown={handleRemoveMouseDown}
+            aria-label={`Remove ${section.label} from this slot`}
+            title={`Remove ${section.label}`}
+            data-testid={`slot-remove-${slotId}`}
+            draggable={false}
+          >
+            <DismissRegular fontSize={14} />
+          </button>
+        </>
       ) : (
         <Text className={classes.slotPlaceholder} size={200}>
           Drop section here
@@ -377,9 +459,11 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
   sectionAssignments,
   workspaceName,
   isDefault,
+  pinToStart,
   onAssignmentsChange,
   onNameChange,
   onDefaultChange,
+  onPinToStartChange,
 }) => {
   const classes = useStyles();
   const template = getLayoutTemplate(templateId);
@@ -483,6 +567,20 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
     [sectionAssignments, onAssignmentsChange],
   );
 
+  // Remove a section from a slot via the slot's X button (Fix 2 / task 091).
+  // The section returns to the unassigned pool automatically via the
+  // `unassignedSections` derived state.
+  const handleSlotRemove = React.useCallback(
+    (slotId: string) => {
+      if (!sectionAssignments.has(slotId)) return;
+      const next = new Map(sectionAssignments);
+      next.delete(slotId);
+      dragSourceRef.current = null;
+      onAssignmentsChange(next);
+    },
+    [sectionAssignments, onAssignmentsChange],
+  );
+
   if (!template) return null;
 
   // Identify overflow sections: selected but beyond slot capacity.
@@ -492,8 +590,8 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
 
   return (
     <div className={classes.root}>
-      {/* Workspace name + Set default (inline row) */}
-      <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end", gap: tokens.spacingHorizontalL }}>
+      {/* Workspace name + Set default + Pin to Start (inline row) */}
+      <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end", gap: tokens.spacingHorizontalL, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 0", minWidth: 0, maxWidth: "480px" }}>
           <Label htmlFor="workspace-name" required weight="semibold">
             Workspace name
@@ -510,6 +608,26 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
           checked={isDefault}
           onChange={(_e, data) => onDefaultChange(data.checked === true)}
           label="Set default"
+          style={{ paddingBottom: "2px" }}
+        />
+        {/*
+          Pin to Start — task 091 / round 5 operator UX. When checked, this
+          workspace's ID is persisted (currently via sessionStorage stub in
+          App.tsx; task 092 wires BFF + `sprk_workspacelayout.sprk_ispinned`)
+          and SpaarkeAi auto-opens it on the next cold load.
+        */}
+        <Checkbox
+          checked={pinToStart}
+          onChange={(_e, data) => onPinToStartChange(data.checked === true)}
+          label={
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+              <PinRegular fontSize={14} aria-hidden="true" />
+              <span>Pin to Start</span>
+            </span>
+          }
+          aria-label="Pin to Start — auto-open this workspace on SpaarkeAi load"
+          title="Auto-open this workspace on SpaarkeAi load"
+          data-testid="pin-to-start-checkbox"
           style={{ paddingBottom: "2px" }}
         />
       </div>
@@ -539,6 +657,7 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
                   section={section}
                   onDrop={handleSlotDrop}
                   onDragStart={handleSlotDragStart}
+                  onRemove={handleSlotRemove}
                 />
               );
             })}
