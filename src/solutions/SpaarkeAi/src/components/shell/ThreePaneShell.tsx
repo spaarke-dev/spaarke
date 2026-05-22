@@ -57,6 +57,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
+import { ChatRegular } from "@fluentui/react-icons";
 import { ThreePaneLayout } from "@spaarke/ui-components";
 import {
   PaneEventBusProvider,
@@ -639,6 +640,17 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                   leftPaneCollapseLabel="Assistant"
                   centerPaneCollapseLabel="Workspace"
                   rightPaneCollapseLabel="Context"
+                  /*
+                   * Task 097 (Wave 2): the Assistant pane's collapsed strip
+                   * now renders the ChatRegular icon (centered) instead of
+                   * the rotated "Assistant" text fallback. Mirrors the icon
+                   * the PaneHeader itself shows when the pane is expanded.
+                   * Task 096 introduced the `leftCollapsedIcon` prop on
+                   * ThreePaneLayout. Workspace + Context will pass their own
+                   * `centerCollapsedIcon` / `rightCollapsedIcon` in their
+                   * sibling Wave-2 tasks (098 / 099).
+                   */
+                  leftCollapsedIcon={<ChatRegular />}
                   leftCollapsed={leftCollapsed}
                   centerCollapsed={centerCollapsed}
                   rightCollapsed={rightCollapsed}

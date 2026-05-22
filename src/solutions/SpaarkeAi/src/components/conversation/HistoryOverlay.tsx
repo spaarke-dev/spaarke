@@ -1,69 +1,94 @@
 /**
- * HistoryOverlay.tsx — Claude-Code-style right-side overlay for chat history.
+ * HistoryOverlay.tsx — Assistant pane "History" dropdown menu (R3 task 097).
  *
- * Replaces the legacy "History" tab on ConversationPane (removed in task 021,
- * FR-02). Per OC-01 / FR-03, history is now a side overlay (Drawer surface)
- * triggered by the HistoryRegular icon in the PaneHeader rightSlot. Selecting
- * a session calls `setChatSessionId(sessionId)` and closes the overlay; the
- * conversation then resumes via the existing AiSessionProvider flow (the same
- * data-refreshed restore semantics used in R2 D-08).
+ * Historical context:
+ *   Task 022 introduced this surface as a Fluent v9 `<OverlayDrawer>` (a
+ *   right-side overlay, "Claude-Code-style") triggered by an icon-only
+ *   `HistoryRegular` button in the Assistant PaneHeader's rightSlot. The 2026-
+ *   05-22 operator smoke flagged the inconsistency: Workspace and Context panes
+ *   use a Fluent v9 `<Menu>` dropdown ("Workspace ▾" / "Tools ▾") in their
+ *   PaneHeader rightSlots, whereas Assistant had an icon-only button that
+ *   opened a slide-in overlay. The dropdown pattern is the canonical Spaarke
+ *   pane-trigger UX (per task 097 design).
+ *
+ * Task 097 — what changed:
+ *   - The `OverlayDrawer` surface is GONE. The session list now renders inside
+ *     a `<MenuPopover>` (Path A from task 097 design notes).
+ *   - The trigger is now a subtle `<Button>` with the text label "History" +
+ *     `<ChevronDownRegular>` icon (iconPosition="after") — visually identical
+ *     to `WorkspacePaneMenu` ("Workspace ▾") and `ContextPaneMenu` ("Tools ▾").
+ *   - The MenuPopover has a max-height + overflow-y: auto so the 50-item list
+ *     scrolls inside the popover without forcing a separate overlay surface.
+ *   - The previous `HistoryOverlayProps { open, onClose, onSelectSession, ... }`
+ *     was replaced by `HistoryMenuProps { onSelectSession, bffBaseUrl,
+ *     authenticatedFetch }` because Fluent v9 `<Menu>` manages its own
+ *     open/close state — ConversationPane no longer needs the `historyOpen`
+ *     boolean.
+ *   - The legacy `HistoryOverlay` named export is preserved as a thin alias
+ *     to `HistoryMenu` to keep imports stable for any future renamer. The
+ *     ConversationPane is the only consumer and is updated to import
+ *     `HistoryMenu` directly.
+ *
+ * Why Path A (inline Menu+MenuPopover) was chosen over Path B (kept overlay,
+ * new trigger only): Path A unifies BOTH the trigger AND the surface with
+ * Workspace/Context. The 50-item ceiling fits comfortably inside a scrollable
+ * MenuPopover (max-height 360px, ~10 items visible, scroll for the rest) and
+ * eliminates the separate slide-in surface that no other pane uses. Path B
+ * would leave the surface mismatched with the rest of the shell.
  *
  * Data flow:
- *   open=true  →  fetch GET /api/ai/chat/sessions?limit=50 via authenticatedFetch
- *               →  render a list of up to 50 most-recent sessions
- *               →  click a session ➜ onSelectSession(sessionId) + onClose()
+ *   Menu opens (user clicks "History ▾")
+ *     →  fetch GET /api/ai/chat/sessions?limit=50 via authenticatedFetch
+ *     →  render a list of up to 50 most-recent sessions in MenuItems
+ *     →  click a MenuItem ➜ onSelectSession(sessionId) + Menu auto-closes
  *
  * Performance (NFR-03):
- *   - Open animation MUST land in <200 ms (handled by Fluent v9 OverlayDrawer).
  *   - List populated in <300 ms p95 for 50 items — measured at the request
  *     boundary with `performance.now()` and surfaced through DevTools timing.
  *
  * Auth (ADR-028 §H-4):
  *   - NO accessToken prop. All BFF calls use the per-request authenticatedFetch
- *     returned by useAiSession(). The token never crosses the component
- *     boundary; authenticatedFetch attaches the Bearer header internally.
+ *     returned by useAiSession().
  *
  * Telemetry (FR-24 / OC-09):
  *   - Error-only. On fetch failure (network error OR non-2xx response) emit
- *     `logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, { status, message })`.
- *   - No happy-path events.
+ *     `logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, ...)`.
  *
  * Accessibility (NFR-05):
- *   - Keyboard-navigable (Tab cycles list, Enter selects, Escape closes).
- *   - ARIA labels on the surface ("Chat history") and on each list item
- *     ("Resume conversation: {title}, last activity {relative}").
- *   - Screen-reader announces "Chat history, dialog" on open (OverlayDrawer's
- *     built-in role="dialog" + aria-label propagation).
+ *   - Fluent v9 `<Menu>` is keyboard-navigable out of the box (Tab to enter,
+ *     ArrowDown / ArrowUp between items, Enter to select, Escape to close).
+ *   - ARIA labels on the trigger ("Open chat history menu") and on each
+ *     MenuItem ("Resume conversation: {title}, last activity {relative}").
  *
  * Constraints:
- *   - ADR-012 — solution-local (HistoryOverlay binds to SpaarkeAi's session
- *     context). Promote to @spaarke/ui-components when a second consumer
- *     appears.
+ *   - ADR-012 — solution-local. Mirrors WorkspacePaneMenu / ContextPaneMenu
+ *     pattern (also solution-local).
  *   - ADR-021 — Fluent v9 tokens only. No hex, no rgba.
  *   - ADR-022 — React 19 functional component, hooks-based.
- *   - ADR-025 — HistoryRegular + DismissRegular icons from @fluentui/react-icons.
+ *   - ADR-025 — ChevronDownRegular icon from @fluentui/react-icons.
  *   - ADR-028 — function-based auth contract; no token snapshots.
  *
- * @see ConversationPane.tsx — wires the rightSlot trigger and renders this overlay
- * @see ChatHistoryPanel.tsx — the prior tab-mode panel (kept for collapsed-strip
- *      usage; this overlay is the new primary surface)
+ * @see ConversationPane.tsx — wires this into the PaneHeader rightSlot
+ * @see WorkspacePaneMenu.tsx — sibling pattern this mirrors (task 089)
+ * @see ContextPaneMenu.tsx — sibling pattern this mirrors (task 095)
  * @see errorTelemetry.ts — TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE constant
  */
 
 import * as React from "react";
 import {
-  OverlayDrawer,
-  DrawerHeader,
-  DrawerHeaderTitle,
-  DrawerBody,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
   Button,
   Spinner,
   Text,
+  Tooltip,
   makeStyles,
-  mergeClasses,
   tokens,
 } from "@fluentui/react-components";
-import { DismissRegular, HistoryRegular } from "@fluentui/react-icons";
+import { ChevronDownRegular } from "@fluentui/react-icons";
 import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import {
   logTelemetryError,
@@ -78,7 +103,6 @@ import {
  * One row of the session list. Shape adapts to the BFF response — the BFF
  * `/api/ai/chat/sessions?limit=50` endpoint returns objects with at least
  * `sessionId` (or `id`) + a title-like field and a last-activity timestamp.
- * See ChatHistoryPanel.tsx for the corresponding mapping in the legacy panel.
  */
 interface HistorySessionRow {
   sessionId: string;
@@ -87,19 +111,13 @@ interface HistorySessionRow {
 }
 
 /**
- * Props accepted by HistoryOverlay.
+ * Props accepted by HistoryMenu.
  *
- * NO accessToken prop — auth flows through useAiSession() → authenticatedFetch
- * (ADR-028 §H-4). The parent (ConversationPane) controls the open state and
- * supplies the session-select handler (typically a direct reference to
- * `setChatSessionId` from useAiSession()).
+ * No `open` / `onClose` — Fluent v9 `<Menu>` manages its own open state.
+ * No `accessToken` — auth flows through `authenticatedFetch` (ADR-028 §H-4).
  */
-export interface HistoryOverlayProps {
-  /** Whether the overlay is currently shown. */
-  open: boolean;
-  /** Called when the overlay requests close (Escape, dismiss button, or selection). */
-  onClose: () => void;
-  /** Called when the user picks a session. The component closes itself afterward. */
+export interface HistoryMenuProps {
+  /** Called when the user picks a session. The Menu auto-closes afterward. */
   onSelectSession: (sessionId: string) => void;
   /** BFF host URL (e.g. https://spe-api-dev.example.com). Pass-through from useAiSession(). */
   bffBaseUrl: string;
@@ -107,78 +125,46 @@ export interface HistoryOverlayProps {
   authenticatedFetch: AuthenticatedFetchFn;
 }
 
+/**
+ * @deprecated Renamed to {@link HistoryMenuProps} in task 097.
+ * Kept as an alias to ease grep across older comments / docs.
+ */
+export type HistoryOverlayProps = HistoryMenuProps;
+
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
   /**
-   * Drawer surface width — matches the assistant pane's typical overlay width.
-   * Width is fixed at 360px so the list has comfortable line length for 50
-   * entries and consistent feel across viewports.
+   * Trigger button — matches WorkspacePaneMenu / ContextPaneMenu trigger:
+   * subtle appearance, small size, ChevronDownRegular icon AFTER the label.
+   * `minWidth: auto` keeps the button width tight against the text.
    */
-  drawer: {
-    width: "360px",
-  },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: tokens.spacingHorizontalS,
-  },
-  headerTitleInner: {
-    display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightSemibold,
+  trigger: {
+    minWidth: "auto",
   },
   /**
-   * Body — full vertical scroll, single column. No horizontal padding because
-   * individual items own their own padding for crisp keyboard focus rings.
+   * MenuPopover content — capped at ~10 visible items (360px) with internal
+   * scroll for longer lists. Matches the typical dropdown ergonomics; deeper
+   * lists are reachable via scroll, not a separate surface.
    */
-  body: {
-    paddingLeft: 0,
-    paddingRight: 0,
-    backgroundColor: tokens.colorNeutralBackground1,
+  popover: {
+    maxHeight: "360px",
+    minWidth: "280px",
+    overflowY: "auto",
   },
-  list: {
+  /**
+   * MenuItem inner layout — two lines stacked vertically: title (semibold)
+   * on top, relative timestamp meta below.
+   */
+  itemInner: {
     display: "flex",
     flexDirection: "column",
-    width: "100%",
-  },
-  item: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "stretch",
-    justifyContent: "flex-start",
+    alignItems: "flex-start",
     gap: tokens.spacingVerticalXXS,
     width: "100%",
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    borderTopWidth: "0",
-    borderRightWidth: "0",
-    borderLeftWidth: "0",
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-    cursor: "pointer",
-    textAlign: "left",
-    fontFamily: "inherit",
-    fontSize: tokens.fontSizeBase300,
-    ":hover": {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-    ":focus-visible": {
-      outlineWidth: "2px",
-      outlineStyle: "solid",
-      outlineColor: tokens.colorStrokeFocus2,
-      outlineOffset: "-2px",
-    },
+    minWidth: 0,
   },
   itemTitle: {
     fontWeight: tokens.fontWeightSemibold,
@@ -186,44 +172,35 @@ const useStyles = makeStyles({
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    maxWidth: "240px",
   },
   itemMeta: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
   },
-  empty: {
+  /**
+   * Inline status rows — loading / empty / error sit inside the MenuPopover
+   * but are NOT MenuItems (they're not selectable). Padding mirrors Fluent v9
+   * MenuItem padding so they feel visually consistent.
+   */
+  statusRow: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalXXL,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    gap: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    gap: tokens.spacingVerticalXS,
     color: tokens.colorNeutralForeground3,
     textAlign: "center",
   },
-  errorState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "stretch",
-    paddingTop: tokens.spacingVerticalL,
-    paddingBottom: tokens.spacingVerticalL,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    gap: tokens.spacingVerticalS,
+  errorRow: {
     color: tokens.colorPaletteRedForeground1,
   },
   retryButton: {
-    alignSelf: "flex-start",
-  },
-  loading: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalXXL,
+    marginTop: tokens.spacingVerticalXS,
   },
 });
 
@@ -232,9 +209,9 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * Format a timestamp into a short relative-time string for the list-item meta
+ * Format a timestamp into a short relative-time string for the MenuItem meta
  * line. Returns "Just now", "5m ago", "2h ago", "3d ago", or the localized
- * date for older entries. Pure function — safe to call during render.
+ * date for older entries.
  */
 function formatRelative(timestamp: string): string {
   const ts = Date.parse(timestamp);
@@ -246,14 +223,12 @@ function formatRelative(timestamp: string): string {
   if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`;
   if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`;
   if (diffMs < 7 * 86_400_000) return `${Math.floor(diffMs / 86_400_000)}d ago`;
-  // Older — show the localized short date.
   return new Date(ts).toLocaleDateString();
 }
 
 /**
- * Map an arbitrary BFF session payload to the strongly-typed HistorySessionRow
- * used by the overlay. Mirrors the mapping in ChatHistoryPanel.tsx so the two
- * surfaces remain compatible until ChatHistoryPanel is fully retired.
+ * Map an arbitrary BFF session payload to the strongly-typed HistorySessionRow.
+ * Mirrors the legacy mapping so the BFF response contract is unchanged.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapSession(item: any): HistorySessionRow {
@@ -273,49 +248,51 @@ function mapSession(item: any): HistorySessionRow {
 // ---------------------------------------------------------------------------
 
 /**
- * HistoryOverlay — Claude-Code-style right-side overlay listing recent chat
- * sessions. Renders nothing visible when `open === false`; when `open === true`
- * the OverlayDrawer slides in from the trailing edge and the session list is
- * fetched (once per open transition). See file-header docblock for full design.
+ * HistoryMenu — Fluent v9 dropdown menu listing recent chat sessions.
+ *
+ * Renders a `<Button>` ("History ▾") inside a `<MenuTrigger>`. On open, the
+ * MenuPopover fetches up to 50 sessions from the BFF and renders them as
+ * MenuItems. Selecting an item calls `onSelectSession(sessionId)` and the
+ * Menu auto-closes.
+ *
+ * This component replaces the prior `OverlayDrawer`-based HistoryOverlay
+ * (task 022) — see file header for the design rationale (task 097).
  */
-export const HistoryOverlay: React.FC<HistoryOverlayProps> = ({
-  open,
-  onClose,
+export const HistoryMenu: React.FC<HistoryMenuProps> = ({
   onSelectSession,
   bffBaseUrl,
   authenticatedFetch,
 }) => {
   const styles = useStyles();
 
-  // ── Local state ───────────────────────────────────────────────────────────
+  // ── Menu open state ──────────────────────────────────────────────────────
+  //
+  // We track open state explicitly so we can trigger the fetch only on the
+  // closed → open transition (avoids refetching on every render while the
+  // popover is open). Fluent v9 `<Menu>` also accepts `open` + `onOpenChange`
+  // for fully-controlled behaviour, which we use here.
+  const [open, setOpen] = React.useState<boolean>(false);
+
+  // ── Fetch state ──────────────────────────────────────────────────────────
   const [sessions, setSessions] = React.useState<HistorySessionRow[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [errorState, setErrorState] = React.useState<{ message: string } | null>(
     null
   );
-  // Reload key — bumped by the Retry button to re-fire the fetch effect even
-  // though `open` has not changed.
+  // Reload key — bumped by the Retry MenuItem to re-fire the fetch effect.
   const [reloadKey, setReloadKey] = React.useState<number>(0);
-
-  // Ref to the list container so we can move focus into it once items render.
-  // First focusable child becomes the focus target when the overlay opens —
-  // a11y requirement per NFR-05.
-  const listRef = React.useRef<HTMLDivElement | null>(null);
 
   // ── Fetch effect ─────────────────────────────────────────────────────────
   //
-  // Fires on the open=false → open=true transition (and on retry). Cancels via
-  // a captured boolean when unmounted or when `open` flips back to false.
+  // Fires on the closed → open transition (and on retry). Cancels via a
+  // captured boolean when unmounted or when `open` flips back to false.
   React.useEffect(() => {
     if (!open) {
-      // Reset state when closing so the next open starts fresh — prevents
-      // stale list flashes if a session was just added.
+      // Clear error on close so the next open starts fresh.
       setErrorState(null);
       return;
     }
     if (!bffBaseUrl) {
-      // Defensive: no BFF host configured — surface as load failure so the
-      // user sees the inline error state rather than an empty list.
       setErrorState({ message: "BFF host not configured." });
       return;
     }
@@ -333,16 +310,13 @@ export const HistoryOverlay: React.FC<HistoryOverlayProps> = ({
         });
 
         if (!response.ok) {
-          // Non-2xx — emit error telemetry and surface inline error state.
           logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, {
             status: response.status,
             message: `HTTP ${response.status}`,
           });
           if (!cancelled) {
             setSessions([]);
-            setErrorState({
-              message: "Couldn't load history. Try again.",
-            });
+            setErrorState({ message: "Couldn't load history. Try again." });
           }
           return;
         }
@@ -355,24 +329,18 @@ export const HistoryOverlay: React.FC<HistoryOverlayProps> = ({
 
         if (!cancelled) {
           setSessions(mapped);
-          // Performance mark — surfaces in DevTools Performance tab so NFR-03
-          // measurement (<300 ms p95) can be recorded without instrumentation.
           if (typeof performance !== "undefined" && performance.mark) {
-            performance.mark("HistoryOverlay.populated");
+            performance.mark("HistoryMenu.populated");
           }
-          // Lightweight dev-only timing log — kept silent in production by the
-          // surrounding production-build strip; safe in Vite dev for NFR-03.
           const elapsed = performance.now() - startedAt;
           if (elapsed > 0) {
             // eslint-disable-next-line no-console
             console.debug(
-              `[HistoryOverlay] sessions populated in ${Math.round(elapsed)} ms (${mapped.length} items)`
+              `[HistoryMenu] sessions populated in ${Math.round(elapsed)} ms (${mapped.length} items)`
             );
           }
         }
       } catch (err) {
-        // Network error / parse error / etc. — emit telemetry and surface
-        // inline error state. Never let exceptions reach the React tree.
         const message = err instanceof Error ? err.message : String(err);
         logTelemetryError(TELEMETRY_HISTORY_OVERLAY_LOAD_FAILURE, {
           status: 0,
@@ -405,138 +373,117 @@ export const HistoryOverlay: React.FC<HistoryOverlayProps> = ({
     (sessionId: string): void => {
       if (!sessionId) return;
       onSelectSession(sessionId);
-      onClose();
+      setOpen(false);
     },
-    [onSelectSession, onClose]
-  );
-
-  // ── Keyboard support on individual rows ───────────────────────────────────
-  // Buttons natively handle Enter/Space; we additionally accept ArrowDown /
-  // ArrowUp for between-item navigation since list items are sibling buttons
-  // inside a flat container (no ListBox role to avoid double-announce issues).
-  const handleItemKeyDown = React.useCallback(
-    (e: React.KeyboardEvent<HTMLButtonElement>): void => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        const next = e.currentTarget.nextElementSibling as HTMLElement | null;
-        next?.focus();
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        const prev = e.currentTarget.previousElementSibling as HTMLElement | null;
-        prev?.focus();
-      }
-    },
-    []
+    [onSelectSession]
   );
 
   // ── Retry handler ────────────────────────────────────────────────────────
-  const handleRetry = React.useCallback((): void => {
+  const handleRetry = React.useCallback((event: React.MouseEvent): void => {
+    // Stop click propagation so the MenuItem inside the popover doesn't
+    // close the Menu — we want to stay open and refetch.
+    event.preventDefault();
+    event.stopPropagation();
     setReloadKey((k) => k + 1);
   }, []);
 
-  // ── Auto-focus first item once list renders ───────────────────────────────
-  React.useEffect(() => {
-    if (!open || isLoading || errorState || sessions.length === 0) return;
-    // Microtask-defer so the OverlayDrawer transition completes its initial
-    // paint before we move focus — prevents a focus-then-scroll jank during
-    // the open animation.
-    const id = window.setTimeout(() => {
-      const first = listRef.current?.querySelector<HTMLButtonElement>("button");
-      first?.focus();
-    }, 0);
-    return () => window.clearTimeout(id);
-  }, [open, isLoading, errorState, sessions.length]);
-
   // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <OverlayDrawer
+    <Menu
       open={open}
-      position="end"
-      onOpenChange={(_, data) => {
-        if (!data.open) {
-          onClose();
-        }
-      }}
-      className={styles.drawer}
-      aria-label="Chat history"
+      onOpenChange={(_, data) => setOpen(data.open)}
+      positioning="below-end"
     >
-      <DrawerHeader>
-        <div className={styles.header}>
-          <DrawerHeaderTitle>
-            <span className={styles.headerTitleInner}>
-              <HistoryRegular />
-              Chat history
-            </span>
-          </DrawerHeaderTitle>
+      <MenuTrigger disableButtonEnhancement>
+        <Tooltip content="Show chat history" relationship="label">
           <Button
             appearance="subtle"
-            aria-label="Close chat history"
-            icon={<DismissRegular />}
-            onClick={onClose}
-          />
-        </div>
-      </DrawerHeader>
-
-      <DrawerBody className={styles.body}>
-        {isLoading ? (
-          <div className={styles.loading}>
-            <Spinner size="small" label="Loading history…" labelPosition="below" />
-          </div>
-        ) : errorState ? (
-          <div className={styles.errorState} role="alert">
-            <Text>{errorState.message}</Text>
-            <Button
-              className={styles.retryButton}
-              appearance="secondary"
-              onClick={handleRetry}
-              aria-label="Retry loading chat history"
-            >
-              Retry
-            </Button>
-          </div>
-        ) : sessions.length === 0 ? (
-          <div className={styles.empty}>
-            <Text>No recent conversations.</Text>
-            <Text size={200}>
-              Start a chat from the Assistant and it will appear here.
-            </Text>
-          </div>
-        ) : (
-          <div
-            ref={listRef}
-            className={styles.list}
-            role="list"
-            aria-label="Recent chat sessions"
+            size="small"
+            icon={<ChevronDownRegular />}
+            iconPosition="after"
+            aria-label="Open chat history menu"
+            className={styles.trigger}
+            data-testid="history-menu-trigger"
+            onClick={(e) => {
+              // Prevent the PaneHeader's collapse handler from firing when
+              // clicking the History trigger (parity with the legacy icon-
+              // button click handler in ConversationPane).
+              e.stopPropagation();
+            }}
           >
-            {sessions.map((s) => {
+            History
+          </Button>
+        </Tooltip>
+      </MenuTrigger>
+
+      <MenuPopover
+        className={styles.popover}
+        data-testid="history-menu-popover"
+      >
+        <MenuList aria-label="Recent chat sessions">
+          {isLoading ? (
+            <div className={styles.statusRow} role="status">
+              <Spinner size="tiny" label="Loading history…" labelPosition="below" />
+            </div>
+          ) : errorState ? (
+            <div
+              className={`${styles.statusRow} ${styles.errorRow}`}
+              role="alert"
+            >
+              <Text size={200}>{errorState.message}</Text>
+              <Button
+                className={styles.retryButton}
+                appearance="secondary"
+                size="small"
+                onClick={handleRetry}
+                aria-label="Retry loading chat history"
+              >
+                Retry
+              </Button>
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className={styles.statusRow}>
+              <Text size={200}>No recent conversations.</Text>
+              <Text size={100}>
+                Start a chat from the Assistant and it will appear here.
+              </Text>
+            </div>
+          ) : (
+            sessions.map((s) => {
               const relative = formatRelative(s.lastMessageAt);
               const ariaLabel = relative
                 ? `Resume conversation: ${s.title}, last activity ${relative}`
                 : `Resume conversation: ${s.title}`;
               return (
-                <button
+                <MenuItem
                   key={s.sessionId}
-                  type="button"
-                  role="listitem"
-                  aria-label={ariaLabel}
-                  className={mergeClasses(styles.item)}
                   onClick={() => handleSelect(s.sessionId)}
-                  onKeyDown={handleItemKeyDown}
+                  aria-label={ariaLabel}
+                  data-testid={`history-menu-item-${s.sessionId}`}
                 >
-                  <span className={styles.itemTitle} title={s.title}>
-                    {s.title}
+                  <span className={styles.itemInner}>
+                    <span className={styles.itemTitle} title={s.title}>
+                      {s.title}
+                    </span>
+                    {relative && (
+                      <span className={styles.itemMeta}>{relative}</span>
+                    )}
                   </span>
-                  {relative && (
-                    <span className={styles.itemMeta}>{relative}</span>
-                  )}
-                </button>
+                </MenuItem>
               );
-            })}
-          </div>
-        )}
-      </DrawerBody>
-    </OverlayDrawer>
+            })
+          )}
+        </MenuList>
+      </MenuPopover>
+    </Menu>
   );
 };
 
-export default HistoryOverlay;
+/**
+ * @deprecated Renamed to {@link HistoryMenu} in task 097 (operator UX feedback —
+ * dropdown replaces OverlayDrawer to match Workspace/Context pane menus).
+ * Kept as a named alias so stale imports keep compiling during transition.
+ */
+export const HistoryOverlay = HistoryMenu;
+
+export default HistoryMenu;

@@ -77,7 +77,6 @@ import {
   DismissRegular,
   ArrowResetRegular,
   CheckmarkCircleRegular,
-  HistoryRegular,
 } from "@fluentui/react-icons";
 // PaneHeader is the canonical pane-header primitive lifted into the shared
 // library in Phase A task 010 (ADR-012). It owns the icon brand-color treatment
@@ -92,7 +91,7 @@ import {
   useRestoreContext,
   usePaneCollapseContext,
 } from "../shell/ThreePaneShell";
-import { HistoryOverlay } from "./HistoryOverlay";
+import { HistoryMenu } from "./HistoryOverlay";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -425,15 +424,16 @@ export function ConversationPane(): React.JSX.Element {
   // The History UI becomes a side-overlay (OC-01) wired below via the
   // <PaneHeader> rightSlot — see HistoryOverlay and historyOpen state.
 
-  // ── History side-overlay state (task 022, FR-03 / OC-01) ────────────────
+  // ── History dropdown (task 097 — was OverlayDrawer in task 022) ─────────
   //
-  // Toggled by the HistoryRegular button in the PaneHeader rightSlot. When
-  // true, <HistoryOverlay> slides in from the trailing edge of the viewport
-  // (Claude-Code-style). Selecting a session calls setChatSessionId which
-  // resumes the conversation via the existing AiSessionProvider flow.
-  const [historyOpen, setHistoryOpen] = React.useState<boolean>(false);
-  const handleOpenHistory = React.useCallback(() => setHistoryOpen(true), []);
-  const handleCloseHistory = React.useCallback(() => setHistoryOpen(false), []);
+  // Operator smoke 2026-05-22 flagged the icon-only History button + slide-in
+  // OverlayDrawer as inconsistent with Workspace + Context panes which use a
+  // Fluent v9 `<Menu>` dropdown in the PaneHeader rightSlot. Task 097 replaces
+  // the overlay with `<HistoryMenu>` — a self-contained Menu+MenuPopover that
+  // renders the session list inline. The Menu manages its own open/close
+  // state so there's no `historyOpen` boolean here anymore. Selecting a
+  // session still calls setChatSessionId, which resumes the conversation via
+  // the existing AiSessionProvider flow.
 
   // ── Playbook selection state (AIPU2-102) ────────────────────────────────
   //
@@ -736,11 +736,13 @@ export function ConversationPane(): React.JSX.Element {
        * color is applied internally by PaneHeader via tokens.colorBrandForeground1
        * (ADR-021 — no hex / no rgba literals).
        *
-       * task 022 (FR-03 / OC-01): rightSlot now hosts a HistoryRegular icon
-       * button that toggles the <HistoryOverlay> side overlay (Claude-Code
-       * style). Selecting a session in the overlay calls setChatSessionId,
-       * which resumes the conversation via the existing AiSessionProvider
-       * flow.
+       * task 097 (operator smoke 2026-05-22): rightSlot now hosts <HistoryMenu>
+       * — a Fluent v9 dropdown matching the Workspace ("Workspace ▾") and
+       * Context ("Tools ▾") pane menus. Replaces the prior HistoryRegular
+       * icon-only button + OverlayDrawer (task 022) which read as MDA-style
+       * and broke pane-trigger consistency. The session list renders inline
+       * in the MenuPopover; selecting a session calls setChatSessionId, which
+       * resumes the conversation via the existing AiSessionProvider flow.
        */}
       <PaneHeader
         title="Assistant"
@@ -748,37 +750,12 @@ export function ConversationPane(): React.JSX.Element {
         onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
         expanded={isAssistantExpanded}
         rightSlot={
-          <Tooltip content="Show chat history" relationship="label" positioning="below">
-            <Button
-              appearance="subtle"
-              icon={<HistoryRegular />}
-              onClick={(e) => {
-                // Task 094: prevent the header's collapse handler from
-                // firing when clicking the History icon button.
-                e.stopPropagation();
-                handleOpenHistory();
-              }}
-              aria-label="Show chat history"
-              aria-haspopup="dialog"
-              aria-expanded={historyOpen}
-            />
-          </Tooltip>
+          <HistoryMenu
+            onSelectSession={setChatSessionId}
+            bffBaseUrl={bffBaseUrl}
+            authenticatedFetch={authenticatedFetch}
+          />
         }
-      />
-
-      {/* ── History side-overlay (task 022, FR-03 / OC-01) ─────────────────── */}
-      {/*
-       * Claude-Code-style overlay that slides in from the trailing edge.
-       * Hidden when historyOpen===false (OverlayDrawer manages its own
-       * visibility). On session select, setChatSessionId resumes the
-       * conversation in SprkChat and the overlay closes itself.
-       */}
-      <HistoryOverlay
-        open={historyOpen}
-        onClose={handleCloseHistory}
-        onSelectSession={setChatSessionId}
-        bffBaseUrl={bffBaseUrl}
-        authenticatedFetch={authenticatedFetch}
       />
 
       {/* ── Playbook header strip (AIPU2-102) ──────────────────────────────── */}
