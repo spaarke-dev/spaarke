@@ -400,21 +400,67 @@ function launchSemanticSearch(criteria: PersistedCriteria): void {
 // Styles — Fluent v9 tokens only (ADR-021)
 // ---------------------------------------------------------------------------
 
+// Task 103 — width cap rationale (Round 7 operator feedback 2026-05-22):
+//
+// When the Context pane is full-width (Assistant + Workspace both collapsed
+// via task 100), the Semantic Search criteria stretches across the entire
+// screen, which makes a form-style surface (single-column labels + dropdowns
+// + textarea) look stretched and unbalanced. The operator wanted the
+// criteria capped at a typical form-panel width so it stays compact and
+// centered even when the pane is wide.
+//
+// Cap: `CRITERIA_MAX_WIDTH_PX = 480`. Picked to mirror a typical Fluent v9
+// form-panel width — wide enough for two filter dropdowns to feel uncramped,
+// narrow enough that the criteria doesn't span more than ~30% of a 1600px
+// monitor. Centering is achieved via `marginLeft: 'auto'` + `marginRight: 'auto'`
+// on the criteria CONTAINER (not the `root` which fills the pane's full
+// width for background coverage).
+//
+// At narrow pane widths (~400-480px) the cap doesn't activate — the criteria
+// fill the pane naturally because `max-width` only constrains; it doesn't
+// shrink below natural width. The visible behavior change is only at wide
+// pane widths.
+//
+// TODO (future tools): as other Context tools are added (Search Saved, Filter
+// Library, etc.) they MUST each set their own width caps using the same
+// pattern. Operator explicitly flagged this: "As other tools are added we'll
+// need to address responsiveness." Treat this constant as a pattern, not a
+// shared singleton — each tool decides its own visual cap based on its
+// content (dense table tools may not need a cap; form tools should mirror
+// this 480px).
+const CRITERIA_MAX_WIDTH_PX = 480;
+
 const useStyles = makeStyles({
+  // Outer container fills the pane width so the background + spacing
+  // continue to span edge-to-edge in the wide-pane case. The inner `criteria`
+  // wrapper is the one that's capped + centered.
   root: {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
+    overflowY: 'auto',
+    backgroundColor: tokens.colorNeutralBackground1,
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    gap: tokens.spacingVerticalM,
-    overflowY: 'auto',
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
     margin: tokens.spacingHorizontalS,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
+  },
+  // Task 103 — width cap container. `max-width: 480px` only constrains; it
+  // doesn't shrink below natural width, so narrow panes are unaffected.
+  // `margin: 0 auto` centers the criteria horizontally within `root` when
+  // the pane is wider than 480px + padding. `width: 100%` is required for
+  // `max-width` to take effect when there's no explicit width.
+  criteria: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    maxWidth: `${CRITERIA_MAX_WIDTH_PX}px`,
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    gap: tokens.spacingVerticalM,
   },
   header: {
     display: 'flex',
@@ -577,6 +623,13 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
 
   return (
     <div className={styles.root} data-testid="semantic-search-criteria-tool">
+      {/*
+        Task 103 — `criteria` wrapper applies max-width: 480px + margin: 0 auto
+        so the form stays centered at a comfortable form-panel width even when
+        the Context pane is full-width (Assistant + Workspace both collapsed
+        via task 100). Narrow panes unaffected — max-width only constrains.
+      */}
+      <div className={styles.criteria}>
       <div className={styles.header}>
         <Text className={styles.headerTitle} size={400}>
           Search Criteria
@@ -720,6 +773,7 @@ export const SemanticSearchCriteriaTool: React.FC = () => {
         >
           Search
         </Button>
+      </div>
       </div>
     </div>
   );

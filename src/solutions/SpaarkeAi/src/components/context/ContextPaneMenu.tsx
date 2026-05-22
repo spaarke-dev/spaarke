@@ -68,8 +68,6 @@ import {
 } from '@fluentui/react-components';
 import {
   ChevronDownRegular,
-  AppsListRegular,
-  SearchRegular,
   CheckmarkRegular,
   PinRegular,
   PinFilled,
@@ -148,22 +146,26 @@ const useStyles = makeStyles({
 // Tool catalog — keep in sync with ContextToolId in useContextTool.ts
 // ---------------------------------------------------------------------------
 
+// Task 103 — type icons removed from each MenuItem per operator request
+// (Round 7, 2026-05-22): "remove the icons (only leave the pin)". The pin
+// affordance and the active-marker checkmark remain — those are functional
+// (toggle default tool, indicate active selection). The previous left-side
+// type icons (AppsListRegular for Quick Start, SearchRegular for Semantic
+// Search) were purely decorative and added visual clutter. After this change
+// each MenuItem renders: `[pin button] [tool name] [active checkmark]`.
 interface ToolDescriptor {
   id: ContextToolId;
   label: string;
-  icon: React.ReactElement;
 }
 
 const CONTEXT_TOOLS: readonly ToolDescriptor[] = [
   {
     id: 'quick-start',
     label: 'Quick Start',
-    icon: <AppsListRegular />,
   },
   {
     id: 'semantic-search',
     label: 'Semantic Search',
-    icon: <SearchRegular />,
   },
 ];
 
@@ -267,12 +269,16 @@ export const ContextPaneMenu: React.FC<ContextPaneMenuProps> = ({
                 key={tool.id}
                 onClick={() => handleSelect(tool.id)}
                 data-testid={`context-tool-${tool.id}`}
+                // Task 103 — type icons removed (operator: "remove the icons,
+                // only leave the pin"). The MenuItem `icon` slot now renders
+                // ONLY the active-marker checkmark when this tool is selected;
+                // when not active we render `undefined` so Fluent v9 collapses
+                // the icon slot entirely and the row reads
+                // `[pin] [tool name]` instead of `[type icon] [tool name]`.
                 icon={
                   isActive ? (
                     <CheckmarkRegular className={styles.activeMarker} />
-                  ) : (
-                    tool.icon
-                  )
+                  ) : undefined
                 }
               >
                 <span className={styles.toolRow}>

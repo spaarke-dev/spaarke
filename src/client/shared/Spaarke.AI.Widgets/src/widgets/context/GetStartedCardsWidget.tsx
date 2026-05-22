@@ -7,7 +7,15 @@
  *
  * Layout
  * ======
- * - 2-column CSS grid: `gridTemplateColumns: '1fr 1fr'`, `gap: spacingHorizontalS`.
+ * - Responsive CSS grid: `gridTemplateColumns: repeat(auto-fill, minmax(160px, 1fr))`,
+ *   `gap: spacingHorizontalS` (task 103 — Round 7 operator feedback 2026-05-22).
+ *   At narrow Context-pane widths the grid resolves to 2 columns (preserves the
+ *   prior 2-col behavior at the typical ~400px pane width). At wider pane
+ *   widths (when Assistant + Workspace are both collapsed per task 100) the
+ *   grid auto-fills more columns — 3, 4, 5 cards per row depending on the
+ *   available width. Each card has a minimum width of 160px so cards don't
+ *   shrink below a usable touch target. The 160px minimum was chosen to match
+ *   the visual size of the previous fixed 2-column layout at ~400px pane width.
  * - Vertical scroll on overflow: `overflowY: 'auto'` — height is constrained by
  *   the parent pane, not by this widget (NFR-05 + spec constraint).
  *
@@ -207,9 +215,17 @@ const CARDS: readonly CardDefinition[] = Object.freeze([
 
 const useStyles = makeStyles({
   /**
-   * Grid container — 2-column layout per FR-18.
+   * Grid container — responsive auto-fill layout (task 103, Round 7, 2026-05-22).
    *
-   * - `gridTemplateColumns: '1fr 1fr'`: fixed 2 columns; both equal width.
+   * - `gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))'`: at narrow
+   *   pane widths (~400px) the grid resolves to 2 equal-width columns
+   *   (preserving the pre-task-103 visual rhythm). At wider pane widths (when
+   *   Assistant + Workspace are both collapsed via task 100, freeing the
+   *   Context pane to the full main-area width), the grid auto-fills more
+   *   columns — 3, 4, 5 cards per row depending on available width. The 160px
+   *   minimum prevents cards from shrinking below a usable touch target and
+   *   matches the visual card size of the previous fixed 2-column layout at
+   *   the default Context-pane width.
    * - `gap: tokens.spacingHorizontalS`: per the spec constraint.
    * - `overflowY: 'auto'`: vertical scroll when content exceeds the pane.
    *   Height is bounded by the parent (`100%`) — we do NOT hard-cap a pixel
@@ -226,7 +242,7 @@ const useStyles = makeStyles({
    */
   grid: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingHorizontalM,
     boxSizing: 'border-box',
@@ -245,12 +261,18 @@ const useStyles = makeStyles({
 /**
  * Move keyboard focus across the 7-card grid in response to arrow keys.
  *
- * The grid is row-major in source order; with `gridTemplateColumns: '1fr 1fr'`
- * the visual layout is also row-major (left-to-right, top-to-bottom). So:
+ * The grid is row-major in source order; with the task-103 responsive grid
+ * (`repeat(auto-fill, minmax(160px, 1fr))`) the column count varies with pane
+ * width. We compute the current column count at runtime by measuring the
+ * card row positions from the DOM (`getBoundingClientRect().top` for each
+ * `[data-card-index]` wrapper — cards in the same row share the same top).
+ * That keeps arrow navigation correct at any column count without coupling
+ * to a fixed layout assumption.
+ *
  *   - ArrowLeft  → index - 1
  *   - ArrowRight → index + 1
- *   - ArrowUp    → index - 2 (move up one row)
- *   - ArrowDown  → index + 2 (move down one row)
+ *   - ArrowUp    → index - <columnsPerRow> (move up one row)
+ *   - ArrowDown  → index + <columnsPerRow> (move down one row)
  *
  * Out-of-range indices are clamped to [0, length - 1] (no wrap-around — that
  * surprises screen-reader users).
@@ -258,12 +280,34 @@ const useStyles = makeStyles({
  * The function reads focusable card elements from the container via
  * `[data-card-index]` so it doesn't need to know the React tree shape.
  */
+function getColumnsPerRow(container: HTMLDivElement): number {
+  // Walk the rendered cards and count how many share the smallest `top`
+  // coordinate — that's the column count in the first row. A 2-col layout
+  // produces 2 cards at the same top; a 4-col layout produces 4. We use the
+  // FIRST row because some browsers can return slightly different `top`
+  // values for the last (possibly partial) row.
+  const cards = container.querySelectorAll<HTMLElement>('[data-card-index]');
+  if (cards.length === 0) return 1;
+  const firstTop = cards[0].getBoundingClientRect().top;
+  let count = 0;
+  for (const card of cards) {
+    // Allow a 1px tolerance to absorb sub-pixel rounding differences.
+    if (Math.abs(card.getBoundingClientRect().top - firstTop) <= 1) {
+      count += 1;
+    } else {
+      break; // Different row → stop counting; we're done with row 1.
+    }
+  }
+  return Math.max(count, 1);
+}
+
 function moveFocus(
   container: HTMLDivElement,
   fromIndex: number,
   direction: 'left' | 'right' | 'up' | 'down'
 ): void {
   const total = CARDS.length;
+  const columnsPerRow = getColumnsPerRow(container);
   let next: number;
   switch (direction) {
     case 'left':
@@ -273,10 +317,10 @@ function moveFocus(
       next = fromIndex + 1;
       break;
     case 'up':
-      next = fromIndex - 2;
+      next = fromIndex - columnsPerRow;
       break;
     case 'down':
-      next = fromIndex + 2;
+      next = fromIndex + columnsPerRow;
       break;
   }
   if (next < 0 || next >= total) {
