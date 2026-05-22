@@ -105,10 +105,12 @@ import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
 // toggle UI here (in the dropdown) since the per-tab pin button was removed.
 import {
   getPinnedWorkspaces,
-  isPinned,
   pinWorkspace,
   unpinWorkspace,
 } from "../../services/pinnedWorkspaces";
+// Task 093 — Manage Workspaces side pane. The dropdown's "Manage workspaces"
+// MenuItem opens this OverlayDrawer; Edit + Delete live inside it.
+import { ManageWorkspacesPane } from "./ManageWorkspacesPane";
 
 // ---------------------------------------------------------------------------
 // Constants — FR-14 SpaarkeAi 6-template filter
@@ -420,6 +422,10 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
 }) => {
   const styles = useStyles();
   const [menuOpen, setMenuOpen] = React.useState(false);
+  // Task 093 — Manage Workspaces side pane open state. The "Manage workspaces"
+  // MenuItem (formerly a `console.log` stub) flips this to true; the
+  // OverlayDrawer mounted at the end of the JSX renders the side pane.
+  const [isManageOpen, setIsManageOpen] = React.useState(false);
   // Task 081 fix carried forward in Round 4 Fix 1: auth + bffBaseUrl come
   // from `useAiSession()` (defers until ready) rather than module-level
   // `authenticatedFetch` / `getBffBaseUrl()` which race the runtime-config
@@ -555,16 +561,24 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
   }, [bffBaseUrl, refetch]);
 
   /**
-   * Task 089 stub — placeholder handler for the "Manage workspaces" menu entry.
-   * Task 093 will implement the side pane that this entry opens. The console
-   * log is intentional so the operator can verify the menu entry routes
-   * through this handler in dev tools.
+   * Task 093 (2026-05-22) — "Manage workspaces" opens the
+   * `ManageWorkspacesPane` OverlayDrawer. The drawer is mounted as a sibling
+   * of the `<Menu>` at the end of this component's JSX (see below) and
+   * controlled via `isManageOpen`. Closing the menu first prevents the menu
+   * popover from sitting on top of the drawer scrim.
    */
   const handleManageWorkspaces = React.useCallback(() => {
     setMenuOpen(false);
-    console.log(
-      "Manage workspaces — task 093 will implement side pane",
-    );
+    setIsManageOpen(true);
+  }, []);
+
+  /**
+   * Called by `ManageWorkspacesPane` when its drawer requests close (X, scrim,
+   * Escape). Wired here so the menu can also close it programmatically (e.g.
+   * a future "Close" affordance from the menu when the drawer is already open).
+   */
+  const handleManageOpenChange = React.useCallback((open: boolean): void => {
+    setIsManageOpen(open);
   }, []);
 
   // Task 098 (2026-05-22): `handleEditWorkspace` (and its MenuItem) was
@@ -579,6 +593,7 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
   // -------------------------------------------------------------------------
 
   return (
+    <>
     <Menu
       open={menuOpen}
       onOpenChange={(_, data) => setMenuOpen(data.open)}
@@ -722,6 +737,16 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
         </MenuList>
       </MenuPopover>
     </Menu>
+
+    {/* Task 093 — Manage Workspaces side pane (Fluent v9 OverlayDrawer).
+     * Mounted as a sibling of the Menu so it overlays the entire pane shell,
+     * not just the menu popover. The drawer self-portals via Fluent v9, so
+     * its DOM position here doesn't affect render layering. */}
+    <ManageWorkspacesPane
+      open={isManageOpen}
+      onOpenChange={handleManageOpenChange}
+    />
+    </>
   );
 };
 
