@@ -149,19 +149,25 @@ Session started with `continue` after `/clear`. Major events in compaction order
 
 | Item | Notes |
 |---|---|
-| Task 031 (3 wizard payload bugs) | Pre-existing; CreateMatter N:N, CreateProject + CreateWorkAssignment createRecord; deferred per user. |
-| Task 040 deferred | Dev env, low blast radius. Revisit at prod readiness. |
+| Task 031 (3 wizard payload bugs) | Pre-existing; CreateMatter N:N, CreateProject + CreateWorkAssignment createRecord; deferred per user. Not auth-related. |
+| Task 040 deferred | Dev env, low blast radius. Moved to V3 Phase G (`spaarke-auth-v3-and-hardening` project). |
 | Webhook sender reconfig deferred | Communication + Email webhooks return 401 until Microsoft Graph subscription + Dataverse Service Endpoint are reconfigured to sign with new keys. Dev doesn't actively use webhooks. |
 | `/healthz/dataverse/doc/{id}` endpoint | Still live (debug-ish under `/healthz/`). Outside task 043's strict scope. |
 | spaarke-demo BFF Application User | BFF + MI not added to spaarke-demo. If BFF starts calling demo Dataverse, add MI. |
-| Task 083 (Office Add-ins deploy) | Rebuild + deploy Outlook/Word add-ins — NOT scheduled; user has not given explicit direction. |
-| SemanticSearch Code Page | Blocked by `@lexical/react` `.prod.mjs` webpack issue. |
-| 4 PCFs missing eslint devDep | SDV, SSC, RDC, EPM — agents installed ad-hoc with `--no-save`. |
 | `Deploy-SpaarkeAi.ps1` CREATE branch | Buggy first-time create; `Deploy-WebResourceInline.ps1` is the workaround. |
-| `Spaarke.UI.Components/src/services/document-upload/*` + `useAiSummary.ts` | Still build raw Bearer in implementation (D-AUTH-7 exception sites). |
-| DocumentUploadWizard `bffTokenProvider` prop | Still wired through wizard tree (residual). |
-| PlaybookBuilder/services/authService.ts | Deprecated, zero consumers; can be deleted in cleanup pass. |
+| `Spaarke.UI.Components/src/services/document-upload/*` + `useAiSummary.ts` | Still build raw Bearer in implementation (D-AUTH-7 exception sites). Moved to V3 Phase H. |
+| DocumentUploadWizard `bffTokenProvider` prop | Still wired through wizard tree (residual). Moved to V3 Phase H. |
+| PlaybookBuilder/services/authService.ts | Deprecated, zero consumers; can be deleted in cleanup pass. Moved to V3 Phase H. |
 | Duplicate `infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js` | Duplicate file — verify which is canonical before next ribbon change. |
+| UniversalQuickCreate PCF still uses local `MsalAuthProvider.ts` | Only remaining pre-v2 PCF (audit 2026-05-19 confirmed SSC + DRV both PCF and Code Page are migrated). Moved to V3 Phase H as cleanup target. |
+
+### Resolved carryovers (kept here briefly to note resolution, then remove)
+
+| Item | Resolution |
+|---|---|
+| ~~Task 083 (Office Add-ins deploy)~~ | ✅ Deployed 2026-05-19 to SWA, manifest 1.0.15.0 (commit `e649f244` merge / `6e8ead1c` close-out). |
+| ~~SemanticSearch Code Page blocked by `@lexical/react` `.prod.mjs` webpack issue~~ | ✅ Fixed 2026-05-20 via deep-import in `ThemeProvider.ts` (commit `4495857f` / merge `4866682d`). SemanticSearch rebuilt + dual-env deployed; popup eliminated; user-verified. |
+| ~~4 PCFs missing eslint devDep~~ (RDC, EPM, UniversalQuickCreate, VisualHost) | ✅ Fixed in commit `f67e6cca fix(pcf): add missing eslint to 4 PCFs` (other-project commit, on master). |
 
 ---
 
