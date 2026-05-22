@@ -134,3 +134,85 @@ export function unpinWorkspace(layoutId: string): void {
     /* localStorage unavailable — fail silently. */
   }
 }
+
+/**
+ * Write the pinned-workspace list verbatim, preserving the order of the
+ * supplied array. Used by reordering UI (Manage Workspaces side pane —
+ * task 104) where the user has explicitly arranged pinned workspaces via
+ * "Set as default" / "Move up" / "Move down" actions.
+ *
+ * Defensive normalization: each entry must have non-empty string `layoutId`
+ * and `layoutName` fields; invalid entries are filtered out (mirrors the
+ * read-side normalization in `getPinnedWorkspaces`). Duplicate `layoutId`s
+ * are de-duplicated keeping the FIRST occurrence (preserves user-intended
+ * ordering when callers accidentally double-pin).
+ *
+ * Failures (storage unavailable, quota exceeded) are swallowed — same
+ * try/catch posture as `pinWorkspace` / `unpinWorkspace`.
+ */
+export function setPinnedWorkspacesOrder(list: PinnedWorkspace[]): void {
+  try {
+    const seen = new Set<string>();
+    const normalized: PinnedWorkspace[] = [];
+    for (const entry of list) {
+      if (
+        entry &&
+        typeof entry.layoutId === "string" &&
+        entry.layoutId.length > 0 &&
+        typeof entry.layoutName === "string" &&
+        !seen.has(entry.layoutId)
+      ) {
+        seen.add(entry.layoutId);
+        normalized.push({
+          layoutId: entry.layoutId,
+          layoutName: entry.layoutName,
+        });
+      }
+    }
+    window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    /* localStorage unavailable / quota exceeded — fail silently. */
+  }
+}
+
+/**
+ * Convenience: pin (if not already) the workspace AND move it to index 0 of
+ * the pinned list. The first entry of the list is the "default" by
+ * convention — `WorkspacePane.tsx`'s auto-open effect dispatches
+ * `widget_load` events in array order, so index 0 opens first on cold
+ * load. Used by the Manage Workspaces "Set as default" action (task 104).
+ *
+ * Idempotent: if `layoutId` is already at index 0 the list is rewritten
+ * verbatim (no observable difference). If `layoutId` is unknown (no
+ * existing entry and no `layoutName` supplied — see overload limitation
+ * below) this function reads any existing name from the current list and
+ * falls back to the supplied `layoutName` if provided.
+ *
+ * The `layoutName` parameter is REQUIRED when promoting a workspace that
+ * is not yet pinned (we cannot synthesize a sensible display name). For
+ * already-pinned workspaces the existing name is preserved unless the
+ * caller passes a non-empty override.
+ */
+export function moveWorkspaceToTop(
+  layoutId: string,
+  layoutName?: string,
+): void {
+  if (!layoutId) return;
+  try {
+    const current = getPinnedWorkspaces();
+    const existing = current.find((p) => p.layoutId === layoutId);
+    const name = layoutName ?? existing?.layoutName;
+    if (!name) {
+      // No way to construct a valid entry — bail rather than write garbage.
+      return;
+    }
+    const rest = current.filter((p) => p.layoutId !== layoutId);
+    const next: PinnedWorkspace[] = [
+      { layoutId, layoutName: name },
+      ...rest,
+    ];
+    window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* localStorage unavailable / quota exceeded — fail silently. */
+  }
+}
