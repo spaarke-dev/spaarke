@@ -1,11 +1,10 @@
 /**
- * useContextTool — persisted Context-pane tool selection (Task 095).
+ * useContextTool — persisted Context-pane tool selection (Task 095 / 099 / 101).
  *
- * The SpaarkeAi Context pane now has a dropdown selector in its PaneHeader
+ * The SpaarkeAi Context pane has a dropdown selector in its PaneHeader
  * rightSlot (mirrors the WorkspacePaneMenu pattern). Selecting a tool
- * persists across browser sessions via localStorage so that modal closes
- * (wizard popups, Semantic Search results modal) return the pane to the
- * user-selected tool instead of going blank.
+ * persists across modal closes (wizard popups, Semantic Search results modal)
+ * so the pane returns to the user-selected tool instead of going blank.
  *
  * Tool ids:
  *   - 'quick-start'     — GetStartedCardsWidget (default for first-time users)
@@ -13,26 +12,45 @@
  *                         Search button launches the full sprk_semanticsearch
  *                         Code Page in a popup modal)
  *
- * localStorage key:
- *   `spaarke:context:selected-tool` — JSON string holding one of the ContextToolId
- *   values. Validated against VALID_CONTEXT_TOOL_IDS on every read; corrupt /
- *   unknown values fall back to the pinned default (task 099) or 'quick-start'.
+ * Storage split (task 101 — pin persistence fix):
+ *   Task 095 originally stored the selected tool in `localStorage`. This
+ *   defeated task 099's "pin = default on load" intent: once a user clicked
+ *   ANY tool, `selected-tool` was set in localStorage, and the first-mount
+ *   logic that honors the pin only fires when `selected-tool` is null — so
+ *   subsequent browser refreshes ignored the pin forever.
  *
- * First-mount default (task 099):
- *   When no `selected-tool` value exists in localStorage (first-time users /
- *   cold resets), the hook reads the pinned default tool via
- *   `getPinnedContextTool()` from `services/contextToolPin.ts` BEFORE falling
- *   back to the hardcoded 'quick-start' default. If both a `selected-tool` AND
- *   a pinned tool exist, `selected-tool` wins (user's last-used > pinned
- *   default). This makes pin = "default on load" without disturbing the
- *   existing tool-selection persistence flow.
+ *   Fix: split by lifetime.
+ *     - sessionStorage `spaarke:context:selected-tool`
+ *         Holds the user's within-session active tool. Cleared on browser
+ *         close. This still preserves task 095's modal-close-restoration
+ *         requirement because Semantic Search results modals open and close
+ *         WITHIN the same browser session.
+ *     - localStorage `spaarke:context:pinned-tool` (unchanged — task 099
+ *         utility `contextToolPin.ts`). Persists the user's pin across
+ *         browser sessions.
+ *
+ *   On cold mount (browser restart):
+ *     1. sessionStorage is empty (browser was closed) → fall through.
+ *     2. Read pinned tool. If set → use it. (pin is now AUTHORITATIVE on
+ *        cold start. Bug A from the operator feedback resolved.)
+ *     3. Else default to `'quick-start'`.
+ *
+ *   On within-session refresh (browser stays open):
+ *     1. sessionStorage has the user's last-clicked tool → use it.
+ *
+ * One-time migration:
+ *   Existing users may have a `selected-tool` value in localStorage from
+ *   task 095/099 sessions. On first mount per session, we look for it; if
+ *   found, we seed sessionStorage with the value and DELETE the legacy
+ *   localStorage entry. This avoids stranding existing-user defaults under
+ *   the old key without forcing them to re-pick.
  *
  * Pattern provenance: this hook mirrors usePaneCollapse.ts (task 094) verbatim
  * in posture — try/catch-wrapped accessors, type-safe validation, silent
  * failure on private-browsing / quota-exceeded.
  *
- * @see usePaneCollapse — same localStorage posture
- * @see pinnedWorkspaces — same try/catch + JSDoc cross-reference style
+ * @see usePaneCollapse — same storage posture
+ * @see contextToolPin — pin (localStorage) accessor — UNCHANGED by task 101
  * @see ContextPaneController — consumer
  * @see ContextPaneMenu — dropdown UI that calls setSelectedTool
  */
@@ -63,8 +81,12 @@ export interface UseContextToolResult {
 // ---------------------------------------------------------------------------
 
 /**
- * localStorage key. Namespaced under the `spaarke:` prefix the rest of the
- * SpaarkeAi solution uses for client-side preferences (matches task 092's
+ * Storage key for the user's within-session active tool selection. Lives in
+ * sessionStorage (task 101) so that browser-close clears it and the pinned
+ * default tool is honored on cold start.
+ *
+ * Namespaced under the `spaarke:` prefix the rest of the SpaarkeAi solution
+ * uses for client-side preferences (matches task 092's
  * `spaarke:workspace:pinned-list` and task 094's `spaarke:panes:collapsed`).
  */
 const STORAGE_KEY = 'spaarke:context:selected-tool';
@@ -78,18 +100,60 @@ const VALID_CONTEXT_TOOL_IDS: ReadonlySet<string> = new Set<ContextToolId>([
 ]);
 
 // ---------------------------------------------------------------------------
-// localStorage helpers — try/catch-wrapped for private browsing / quota
+// Storage helpers — try/catch-wrapped for private browsing / quota
+// (task 101: split between sessionStorage for selection and localStorage for
+//  legacy migration. Pin storage lives in `contextToolPin.ts`.)
 // ---------------------------------------------------------------------------
+
+/**
+ * One-time migration: if a legacy `selected-tool` value lives in localStorage
+ * (from task 095/099 sessions), seed sessionStorage with it (so within-session
+ * behaviour is preserved for the upgrading user) and DELETE the legacy entry.
+ * After the migration runs the legacy key is gone forever, so this is a
+ * no-op on subsequent calls.
+ *
+ * Idempotent + safe against private-browsing / quota errors (any throw
+ * short-circuits silently — the user will simply fall through to the pin
+ * default / hardcoded default).
+ */
+function migrateLegacyLocalStorageEntry(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const legacy = window.localStorage.getItem(STORAGE_KEY);
+    if (legacy === null) return;
+    // Validate the legacy payload before seeding sessionStorage — we'd
+    // rather discard a corrupt entry than propagate it.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(legacy);
+    } catch {
+      parsed = legacy;
+    }
+    if (
+      typeof parsed === 'string' &&
+      VALID_CONTEXT_TOOL_IDS.has(parsed) &&
+      window.sessionStorage.getItem(STORAGE_KEY) === null
+    ) {
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    }
+    // Always delete the legacy entry — its presence is the bug we're fixing.
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Storage unavailable — give up silently. Pin resolution still works.
+  }
+}
 
 function readPersistedTool(): ContextToolId {
   if (typeof window === 'undefined') return resolveFirstMountDefault();
+  // Run the one-time migration before reading sessionStorage so an upgrading
+  // user's last selection is preserved within their current session.
+  migrateLegacyLocalStorageEntry();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
     if (raw === null) {
-      // No prior `selected-tool` exists → task 099: honor the user's pinned
-      // default tool, if any. Pin acts as "default on load" for first-time
-      // users / cold resets. When no pin exists either, fall back to the
-      // hardcoded DEFAULT_TOOL (`quick-start`).
+      // No within-session selection exists — could be a cold start (browser
+      // restart) or a brand-new user. Honor the pinned default (task 099) and
+      // fall back to the hardcoded `DEFAULT_TOOL`.
       return resolveFirstMountDefault();
     }
     // Stored as a JSON string (matches the rest of the spaarke: namespace);
@@ -113,12 +177,12 @@ function readPersistedTool(): ContextToolId {
 }
 
 /**
- * First-mount default resolution (task 099): when no `selected-tool` value
- * exists in localStorage, fall back to the pinned default before the
- * hardcoded `DEFAULT_TOOL`. The pin is the user's "default on load"
- * preference set via the ContextPaneMenu pin icons. If no pin exists, use
- * the hardcoded default (quick-start) — preserves task 095 behaviour for
- * users who have never pinned anything.
+ * First-mount default resolution (task 099): when no within-session
+ * `selected-tool` value exists in sessionStorage, fall back to the pinned
+ * default before the hardcoded `DEFAULT_TOOL`. The pin is the user's
+ * "default on load" preference set via the ContextPaneMenu pin icons.
+ * If no pin exists, use the hardcoded default (quick-start) — preserves
+ * task 095 behaviour for users who have never pinned anything.
  */
 function resolveFirstMountDefault(): ContextToolId {
   const pinned = getPinnedContextTool();
@@ -128,7 +192,9 @@ function resolveFirstMountDefault(): ContextToolId {
 function writePersistedTool(id: ContextToolId): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(id));
+    // Task 101: sessionStorage (not localStorage). Cleared on browser close;
+    // pin (localStorage) is then authoritative on the next cold mount.
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(id));
   } catch {
     // Best-effort persistence — same posture as task 092's
     // pinnedWorkspaces.ts: silent no-op on storage failure.
@@ -142,9 +208,12 @@ function writePersistedTool(id: ContextToolId): void {
 /**
  * useContextTool — React hook returning a typed Context-pane tool controller.
  *
- * Initial state is read from localStorage; every setSelectedTool() updates
- * both the in-memory React state (driving rerender) and the persisted snapshot
- * (driving cold-load restoration + modal-close restoration).
+ * Initial state is read from sessionStorage (task 101 — was localStorage in
+ * task 095; see file header for the rationale); every setSelectedTool()
+ * updates both the in-memory React state (driving rerender) and the
+ * sessionStorage snapshot (driving within-session modal-close restoration).
+ * On cold mount with empty sessionStorage the hook falls back to the pinned
+ * default tool (task 099) and finally to the hardcoded DEFAULT_TOOL.
  *
  * @example
  *   const { selectedTool, setSelectedTool } = useContextTool();

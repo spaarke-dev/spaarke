@@ -361,7 +361,7 @@ export function WorkspacePane(): React.JSX.Element {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Auto-open pinned workspaces — task 092 / round 5
+  // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
   //
   // Reads the multi-pin list from `services/pinnedWorkspaces.ts` (backed by
   // `localStorage` key `spaarke:workspace:pinned-list`) and dispatches a
@@ -381,6 +381,21 @@ export function WorkspacePane(): React.JSX.Element {
   // workspace), we skip the auto-open dispatch to avoid stacking duplicate
   // tabs. The match is by `widgetData.layoutId` since `widgetType` is the
   // generic `'workspace'` string for every workspace tab.
+  //
+  // Subscription-race fix (task 101 — operator feedback):
+  //   The `usePaneEvent('workspace', ...)` subscription below is registered
+  //   via its own internal `useEffect`. React runs effects in declaration
+  //   order, so this auto-open effect (declared earlier in this component)
+  //   ran BEFORE the workspace subscription was attached. When `widget_load`
+  //   was dispatched, PaneEventBus had zero subscribers on the workspace
+  //   channel → the event fell on the floor → pinned tabs never opened on
+  //   refresh, even though the pin indicator persisted correctly.
+  //
+  //   Fix: defer the dispatches to a macrotask via `setTimeout(..., 0)`. By
+  //   the time the macrotask runs, every useEffect in this render's commit
+  //   phase has executed (including usePaneEvent's), so the subscription is
+  //   live when the events fire. We cancel the timer on unmount to avoid a
+  //   late dispatch into a torn-down tree.
   // ---------------------------------------------------------------------------
 
   const autoOpenedPinsRef = React.useRef<boolean>(false);
@@ -404,15 +419,36 @@ export function WorkspacePane(): React.JSX.Element {
         .filter((id): id is string => id.length > 0),
     );
 
-    for (const pin of pinned) {
-      if (openLayoutIds.has(pin.layoutId)) continue; // already open — skip
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: "workspace",
-        widgetData: { layoutId: pin.layoutId, layoutName: pin.layoutName },
-        displayName: pin.layoutName,
-      });
-    }
+    // Filter to the pins that actually need opening so we can log + skip
+    // cleanly if there's nothing to do.
+    const pinsToOpen = pinned.filter(
+      (pin) => !openLayoutIds.has(pin.layoutId),
+    );
+    if (pinsToOpen.length === 0) return;
+
+    // Defer dispatch to a macrotask so usePaneEvent's subscription effect
+    // (declared later in this component) has had a chance to register on the
+    // workspace channel. Without this, dispatches land on a zero-subscriber
+    // channel and are silently dropped — see block comment above.
+    const timerId = window.setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[WorkspacePane] Auto-opening ${pinsToOpen.length} pinned workspace(s):`,
+        pinsToOpen,
+      );
+      for (const pin of pinsToOpen) {
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: "workspace",
+          widgetData: { layoutId: pin.layoutId, layoutName: pin.layoutName },
+          displayName: pin.layoutName,
+        });
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
     // Auto-open is a one-shot per mount. `isAuthenticated` flipping false→true
     // is the trigger; subsequent state changes (re-auth on token refresh)
     // MUST NOT re-trigger or we'd re-stack tabs. The ref guard above enforces
