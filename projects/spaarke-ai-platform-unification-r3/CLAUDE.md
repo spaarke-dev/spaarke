@@ -234,6 +234,15 @@ See [`plan.md` §2 Discovered Resources](plan.md) for the canonical list. Key en
 - [`docs/guides/auth-deployment-setup.md`](../../docs/guides/auth-deployment-setup.md) — auth v2 operator runbook
 - [`docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md`](../../docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md) — Code Page smoke verification
 
+### Workspace architecture (post-Round-8 reference set)
+
+Task 113 (2026-05-22) produced the foundational reference docs for the SpaarkeAi workspace pipeline as it stands after Round 8 (Option B / Dataverse-seeded system layouts). Load these before adding or modifying any workspace-pipeline code:
+
+- [`docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../../docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — end-to-end cold-load → widget render pipeline, storage contract, BFF surface, the 5 system layouts shipped today.
+- [`docs/architecture/SPAARKEAI-COMPONENT-MODEL.md`](../../docs/architecture/SPAARKEAI-COMPONENT-MODEL.md) — inventory of `@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`, plus solution-local components. Includes the PaneEventBus contract.
+- [`docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`](../../docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) — honest reuse + extendability audit. Calls out the dual `useWorkspaceLayouts`, LegalWorkspace-internal section factories, `WorkspaceLayoutWidget` hard-wired to `LegalWorkspaceApp`, Xrm.WebApi vs BFF undocumented decision criteria, and the informal embedded-mode contract. Includes a prioritized remediation backlog.
+- [`docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../../docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) — step-by-step tutorial for adding a new system workspace (Pattern A) or new workspace widget type (Patterns B/C). Worked example: the Calendar widget for a future round.
+
 ---
 
 *This file should be kept updated throughout project lifecycle. Decisions Made and Implementation Notes sections grow as tasks execute.*
