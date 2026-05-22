@@ -31,6 +31,8 @@ import {
   Tooltip,
 } from "@fluentui/react-components";
 import {
+  ChevronLeft20Regular,
+  ChevronRight20Regular,
   Dismiss12Regular,
   WarningRegular,
 } from "@fluentui/react-icons";
@@ -57,6 +59,13 @@ const useStyles = makeStyles({
   },
 
   // Tab bar strip — sits at the top, never shrinks.
+  //
+  // Task 107 (2026-05-22): the previous `overflowX: 'auto'` on the bar itself
+  // produced a visible horizontal scrollbar when tabs overflowed. The new
+  // layout is [arrowLeft] [tabScroll (overflow + hidden bar)] [arrowRight];
+  // the bar itself no longer scrolls — it is a flex container with three
+  // children. Arrow visibility is computed in the component from
+  // scrollLeft/scrollWidth/clientWidth of `tabScroll`.
   tabBar: {
     flexShrink: 0,
     display: "flex",
@@ -68,11 +77,48 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalXS,
     paddingRight: tokens.spacingHorizontalXS,
     minHeight: "40px",
-    overflowX: "auto",
-    overflowY: "hidden",
+    overflow: "hidden",
   },
 
-  // The TabList itself — let it grow to fill available width.
+  // Inner scroll container for the TabList — the element whose scrollLeft we
+  // drive with the arrow buttons. Hidden scrollbar (Fix 1 / Fix 2 shared
+  // pattern): scrollbarWidth: none + ::-webkit-scrollbar { display: none }
+  // hides the native bar while keeping the element scrollable (programmatic
+  // and wheel/trackpad scroll still work).
+  tabScroll: {
+    flexGrow: 1,
+    overflowX: "auto",
+    overflowY: "hidden",
+    scrollbarWidth: "none",
+    "::-webkit-scrollbar": {
+      display: "none",
+    },
+  },
+
+  // Arrow buttons at the start/end of the tab bar (task 107).
+  // `flexShrink: 0` so they never collapse when the tab strip is full.
+  // Reserve space when hidden so the tab strip width doesn't jitter as
+  // arrows appear/disappear — we use `visibility: hidden` rather than
+  // unmount (see `arrowHidden`).
+  arrowButton: {
+    minWidth: "28px",
+    width: "28px",
+    height: "28px",
+    padding: "0",
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
+    ":hover": {
+      color: tokens.colorNeutralForeground1,
+      backgroundColor: tokens.colorNeutralBackground3Hover,
+    },
+  },
+  arrowHidden: {
+    visibility: "hidden",
+    pointerEvents: "none",
+  },
+
+  // The TabList itself — let it grow so tabs lay out naturally inside
+  // `tabScroll`; the scroll container handles horizontal overflow.
   tabList: {
     flexGrow: 1,
   },
@@ -127,9 +173,20 @@ const useStyles = makeStyles({
   },
 
   // Content area — grows to fill remaining height.
+  //
+  // Task 107 (2026-05-22) Fix 1: hide the visible vertical scrollbar while
+  // keeping the area scrollable (wheel/trackpad/keyboard still work). The
+  // Assistant pane chat scroll is intentionally NOT touched (visible bar is
+  // part of its UX); the Context pane is owned by sibling task 106 — this
+  // change is surgically scoped to the WorkspacePane content wrapper.
   content: {
     flex: 1,
-    overflow: "auto",
+    overflowY: "auto",
+    overflowX: "hidden",
+    scrollbarWidth: "none",
+    "::-webkit-scrollbar": {
+      display: "none",
+    },
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
@@ -240,6 +297,103 @@ export function WorkspaceTabManagerComponent({
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
   // ---------------------------------------------------------------------------
+  // Tab overflow arrows — task 107 (2026-05-22)
+  //
+  // The tab strip lives inside `tabScroll` (an element with overflow-x: auto +
+  // hidden scrollbar). When tabs overflow the visible width we surface
+  // chevron buttons at the start/end of the bar so the user can move through
+  // the tabs without a visible horizontal scrollbar. Visibility is driven by
+  // scrollLeft / scrollWidth / clientWidth on the scroll container and stays
+  // in sync via three observers:
+  //
+  //   1. `scroll` listener on the container — fires while the user scrolls.
+  //   2. ResizeObserver on the container — covers pane width changes.
+  //   3. `tabs` dependency on the recompute effect — covers add/close/rename.
+  //
+  // Both arrows are always rendered (with `visibility: hidden` when
+  // unreachable) so the tab strip width doesn't jitter as arrows appear and
+  // disappear.
+  // ---------------------------------------------------------------------------
+
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = React.useState(false);
+  const [canScrollRight, setCanScrollRight] = React.useState(false);
+
+  const recomputeScrollState = React.useCallback((): void => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Tolerance of 1px to absorb subpixel rounding.
+    const left = el.scrollLeft > 0;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setCanScrollLeft(left);
+    setCanScrollRight(right);
+  }, []);
+
+  // Recompute when tabs change (add/close/rename can shift overflow state).
+  React.useEffect(() => {
+    recomputeScrollState();
+  }, [tabs, recomputeScrollState]);
+
+  // Wire scroll + ResizeObserver listeners on the scroll container.
+  React.useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const onScroll = (): void => recomputeScrollState();
+    el.addEventListener("scroll", onScroll, { passive: true });
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => recomputeScrollState());
+      resizeObserver.observe(el);
+    }
+
+    // Initial measurement after the layout commits.
+    recomputeScrollState();
+
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [recomputeScrollState]);
+
+  // Arrow click handlers — scroll by ~one "tab width" (200px). The container
+  // smooths the scroll for a less abrupt UX. The recompute effect fires via
+  // the scroll listener as scrollLeft animates.
+  const scrollByDelta = React.useCallback((delta: number): void => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: delta, behavior: "smooth" });
+  }, []);
+
+  const handleScrollLeft = React.useCallback((): void => {
+    scrollByDelta(-200);
+  }, [scrollByDelta]);
+
+  const handleScrollRight = React.useCallback((): void => {
+    scrollByDelta(200);
+  }, [scrollByDelta]);
+
+  // Active-tab into view — when the active tab changes (programmatic add,
+  // close-restore, restore-from-persistence), bring it into view so users
+  // never lose the active tab off the right edge. `inline: 'nearest'` is a
+  // no-op if the tab is already visible; only clipped tabs scroll.
+  React.useEffect(() => {
+    if (!activeTabId) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const activeEl = container.querySelector(
+      `[data-testid="workspace-tab-${activeTabId}"]`,
+    ) as HTMLElement | null;
+    if (!activeEl) return;
+    // Defer to next frame so layout settles before measuring.
+    const raf = window.requestAnimationFrame(() => {
+      activeEl.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [activeTabId, tabs]);
+
+  // ---------------------------------------------------------------------------
   // Tab close — stop propagation so clicking the X does not also activate the tab.
   // ---------------------------------------------------------------------------
 
@@ -273,16 +427,37 @@ export function WorkspaceTabManagerComponent({
     <div className={styles.root}>
       {/* ------------------------------------------------------------------ */}
       {/* Tab bar                                                              */}
+      {/*                                                                      */}
+      {/* Task 107 (2026-05-22) layout:                                        */}
+      {/*   [arrowLeft] [tabScroll containing TabList] [arrowRight]            */}
+      {/* Arrow buttons stay rendered (visibility: hidden when unreachable)    */}
+      {/* so the tab strip width doesn't jitter as overflow state changes.     */}
       {/* ------------------------------------------------------------------ */}
       <div className={styles.tabBar}>
-        <TabList
-          className={styles.tabList}
-          selectedValue={activeTabId ?? undefined}
-          onTabSelect={handleTabListSelect}
-          size="small"
+        <Button
+          className={mergeClasses(
+            styles.arrowButton,
+            !canScrollLeft && styles.arrowHidden,
+          )}
           appearance="subtle"
-        >
-          {tabs.map((tab) => {
+          size="small"
+          icon={<ChevronLeft20Regular />}
+          aria-label="Scroll tabs left"
+          aria-hidden={!canScrollLeft}
+          tabIndex={canScrollLeft ? 0 : -1}
+          onClick={handleScrollLeft}
+          data-testid="workspace-tabs-scroll-left"
+        />
+
+        <div ref={scrollContainerRef} className={styles.tabScroll}>
+          <TabList
+            className={styles.tabList}
+            selectedValue={activeTabId ?? undefined}
+            onTabSelect={handleTabListSelect}
+            size="small"
+            appearance="subtle"
+          >
+            {tabs.map((tab) => {
             // Task 098 (2026-05-22): the inline per-tab pin button was
             // removed (operator: "pin belongs in the workspace selection
             // surface, not on every open tab"). Tab rows now contain only
@@ -324,7 +499,23 @@ export function WorkspaceTabManagerComponent({
               </Tab>
             );
           })}
-        </TabList>
+          </TabList>
+        </div>
+
+        <Button
+          className={mergeClasses(
+            styles.arrowButton,
+            !canScrollRight && styles.arrowHidden,
+          )}
+          appearance="subtle"
+          size="small"
+          icon={<ChevronRight20Regular />}
+          aria-label="Scroll tabs right"
+          aria-hidden={!canScrollRight}
+          tabIndex={canScrollRight ? 0 : -1}
+          onClick={handleScrollRight}
+          data-testid="workspace-tabs-scroll-right"
+        />
       </div>
 
       {/* ------------------------------------------------------------------ */}
