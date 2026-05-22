@@ -123,6 +123,13 @@ import {
   renameWorkspaceLayout,
   deleteWorkspaceLayout,
 } from "../../services/workspaceLayoutMutations";
+// Task 102 (2026-05-22) — shared 6-template filter constant. Round 7
+// operator finding: the Edit Workspace wizard launched from this pane
+// surfaced all 9 templates while the Create wizard (launched from
+// WorkspacePaneMenu) correctly surfaced only the FR-14 6-template subset.
+// Root cause: `launchEditWizard` below was not forwarding the filter. Now
+// imported from the same shared constant so create + edit are aligned.
+import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilter";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -275,6 +282,15 @@ async function launchEditWizard(
     parts.push(`sectionsJson=${encodeURIComponent(layout.sectionsJson)}`);
     parts.push(`name=${encodeURIComponent(layout.name)}`);
   }
+  // Task 102 (2026-05-22) — forward the SpaarkeAi 6-template filter to the
+  // wizard's TemplateStep so Edit + SaveAs surface the SAME 6 layout
+  // templates that Create surfaces. Previously this pane forwarded no
+  // filter, so the wizard fell back to all 9 templates and operators saw
+  // an inconsistent set vs. Create. FR-25 preservation is unchanged:
+  // standalone LegalWorkspace continues to launch with no filter → all 9.
+  parts.push(
+    `templateFilter=${encodeURIComponent(SPAARKEAI_TEMPLATE_FILTER.join(","))}`,
+  );
   const data = parts.join("&");
 
   try {

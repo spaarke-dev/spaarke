@@ -111,29 +111,13 @@ import {
 // Task 093 — Manage Workspaces side pane. The dropdown's "Manage workspaces"
 // MenuItem opens this OverlayDrawer; Edit + Delete live inside it.
 import { ManageWorkspacesPane } from "./ManageWorkspacesPane";
-
-// ---------------------------------------------------------------------------
-// Constants — FR-14 SpaarkeAi 6-template filter
-// ---------------------------------------------------------------------------
-
-/**
- * The 6-template subset surfaced when the SpaarkeAi `WorkspacePaneMenu`
- * launches `WorkspaceLayoutWizard` via "+ New Workspace" (FR-14). Standalone
- * LegalWorkspace still sees all 9 templates because it invokes the wizard
- * without this parameter (FR-25 backwards-compat).
- *
- * Order matches the FR-14 specification. The wizard's `TemplateStep` renders
- * templates in canonical `LAYOUT_TEMPLATES` order regardless of the filter
- * array order, so this list is just a membership set.
- */
-const SPAARKEAI_TEMPLATE_FILTER = [
-  "2-col-equal",
-  "3-row-mixed",
-  "hero-2x2",
-  "sidebar-main",
-  "single-column",
-  "single-column-5",
-] as const;
+// Task 102 (2026-05-22) — shared 6-template filter constant. Factored out
+// of this file so `ManageWorkspacesPane` (edit launch) can import the SAME
+// set used by `handleCreateWorkspace` below. Round 7 operator finding: the
+// edit wizard previously surfaced all 9 templates; the create wizard
+// surfaced the FR-14 6-template subset. See constants file JSDoc for the
+// FR-25 backwards-compat rationale.
+import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilter";
 
 /**
  * SessionStorage key used to persist the user's chosen active workspace
@@ -589,6 +573,56 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
   // task-093 surface will re-import + re-use it for edit/saveAs flows.
 
   // -------------------------------------------------------------------------
+  // Ordered layouts — task 102 (2026-05-22)
+  //
+  // Operator: "in the workspace edit put the pinned at the top in the
+  // current order — do not need numbers — the default will be first, and
+  // then the order as pin/saved/persisted."
+  //
+  // Order:
+  //   1. Default workspace (the BFF `activeLayout` — resolved by the hook
+  //      from `GET /api/workspace/layouts/default`, falls back to first
+  //      system layout, then first layout). This is the "default" the
+  //      operator means; `WorkspaceLayoutDto.isDefault` could also be used
+  //      but `activeLayout` already encodes the same selection cascade plus
+  //      the user's runtime "switch" via setActiveLayoutById.
+  //   2. Pinned workspaces in `getPinnedWorkspaces()` order (the order they
+  //      were pinned / persisted to localStorage). The default is excluded
+  //      from this section if it happens to also be pinned.
+  //   3. Remaining unpinned, non-default layouts in BFF list order.
+  //
+  // Empty-state safety: if `getPinnedWorkspaces()` is empty, section 2
+  // contributes nothing; if `activeLayout` is null (cold load, fetch
+  // pending), section 1 contributes nothing and the list degrades to BFF
+  // order — still safe. Memoized on (layouts, activeLayout, pinnedIds) to
+  // avoid re-sorting on every render.
+  // -------------------------------------------------------------------------
+
+  const orderedLayouts = React.useMemo(() => {
+    if (layouts.length === 0) return layouts;
+    const defaultId = activeLayout?.id ?? null;
+    const pinnedList = getPinnedWorkspaces(); // preserves persisted order
+
+    const defaultEntry = defaultId
+      ? layouts.filter((l) => l.id === defaultId)
+      : [];
+
+    const pinnedEntries = pinnedList
+      .filter((p) => p.layoutId !== defaultId)
+      .map((p) => layouts.find((l) => l.id === p.layoutId))
+      .filter((l): l is (typeof layouts)[number] => Boolean(l));
+
+    const pinnedIdSet = new Set(pinnedList.map((p) => p.layoutId));
+    const remaining = layouts.filter(
+      (l) => l.id !== defaultId && !pinnedIdSet.has(l.id),
+    );
+
+    return [...defaultEntry, ...pinnedEntries, ...remaining];
+    // pinnedIds is intentionally included so the order re-syncs when the
+    // user toggles a pin without closing the menu.
+  }, [layouts, activeLayout, pinnedIds]);
+
+  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
@@ -636,7 +670,10 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
               No workspaces available.
             </Text>
           ) : (
-            layouts.map((layout) => {
+            // Task 102 — `orderedLayouts` re-orders: default first, then
+            // pinned (in persisted order), then unpinned. See the useMemo
+            // above for the cascade.
+            orderedLayouts.map((layout) => {
               const isActive = activeLayout?.id === layout.id;
               const layoutIsPinned = pinnedIds.has(layout.id);
               const pinTooltip = layoutIsPinned
@@ -719,12 +756,19 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
            * Operator feedback 2026-05-22: dropdown should be for SELECTION,
            * not editing — editing lives in the manage surface.
            * ─────────────────────────────────────────────────────────────── */}
+          {/* Task 102 (2026-05-22) — dropped the literal "+" prefix from the
+            * label. The `AddRegular` icon already conveys "add"; rendering
+            * a "+" symbol in BOTH the icon slot AND the leading character
+            * of the label produced a visible "+ +" duplicate (operator
+            * Round 7 finding). Ribbon JS / XML audit found no other source
+            * for the duplication.
+            */}
           <MenuItem
             onClick={handleCreateWorkspace}
             data-testid="new-workspace-action"
             icon={<AddRegular className={styles.newWorkspace} />}
           >
-            <span className={styles.newWorkspace}>+ New Workspace</span>
+            <span className={styles.newWorkspace}>New Workspace</span>
           </MenuItem>
 
           <MenuItem
