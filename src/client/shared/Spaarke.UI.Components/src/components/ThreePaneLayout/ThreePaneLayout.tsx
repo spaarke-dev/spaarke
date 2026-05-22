@@ -66,13 +66,20 @@ const useStyles = makeStyles({
 
   // Collapsed left strip — narrow click-to-expand indicator.
   // (Task 096) Width 48px (was 28px) mirrors MDA left-nav collapsed width.
+  // (Task 100) `justifyContent: 'flex-start'` + `paddingTop: spacingVerticalM`
+  // top-aligns the icon to mirror the PaneHeader's expanded icon offset
+  // (PaneHeader's `paddingTop: spacingVerticalS` inside a 40px min-height row
+  // visually places the icon ~12px from the top edge — `spacingVerticalM` ≈ 12px
+  // matches that rhythm so the icon doesn't shift vertically when toggling
+  // collapse/expand).
   leftPaneCollapsed: {
     flex: `0 0 ${COLLAPSED_STRIP_PX}px`,
     minWidth: `${COLLAPSED_STRIP_PX}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    paddingTop: tokens.spacingVerticalS,
+    justifyContent: 'flex-start',
+    paddingTop: tokens.spacingVerticalM,
     gap: tokens.spacingVerticalXS,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -108,13 +115,15 @@ const useStyles = makeStyles({
 
   // Collapsed right strip — narrow click-to-expand indicator.
   // (Task 096) Width 48px (was 28px) mirrors MDA left-nav collapsed width.
+  // (Task 100) See `leftPaneCollapsed` for the top-alignment rationale.
   rightPaneCollapsed: {
     flex: `0 0 ${COLLAPSED_STRIP_PX}px`,
     minWidth: `${COLLAPSED_STRIP_PX}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    paddingTop: tokens.spacingVerticalS,
+    justifyContent: 'flex-start',
+    paddingTop: tokens.spacingVerticalM,
     gap: tokens.spacingVerticalXS,
     backgroundColor: tokens.colorNeutralBackground2,
     borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -136,13 +145,15 @@ const useStyles = makeStyles({
   // Visual treatment matches left/right strips; bordered on both sides to
   // distinguish it from neighbouring (possibly also collapsed) strips.
   // (Task 096) Width 48px (was 36px) mirrors MDA left-nav collapsed width.
+  // (Task 100) See `leftPaneCollapsed` for the top-alignment rationale.
   centerPaneCollapsed: {
     flex: `0 0 ${COLLAPSED_STRIP_PX}px`,
     minWidth: `${COLLAPSED_STRIP_PX}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    paddingTop: tokens.spacingVerticalS,
+    justifyContent: 'flex-start',
+    paddingTop: tokens.spacingVerticalM,
     gap: tokens.spacingVerticalXS,
     backgroundColor: tokens.colorNeutralBackground2,
     borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -174,18 +185,20 @@ const useStyles = makeStyles({
   },
 
   /**
-   * (Task 096) Centered-icon container used INSIDE a collapsed strip when
-   * the consumer passes a `*CollapsedIcon` prop. Replaces the rotated-text
-   * identifier. The icon is centered vertically + horizontally in the strip
-   * and uses neutral foreground 2 (subdued) → 1 on hover (matches typical
-   * Fluent v9 icon-button affordance for clickable surfaces).
+   * (Task 096) Icon container used INSIDE a collapsed strip when the consumer
+   * passes a `*CollapsedIcon` prop. Replaces the rotated-text identifier.
+   * (Task 100) Removed `flexGrow: 1` so the icon stays at the TOP of the strip
+   * (mirroring MDA left-nav collapsed visual rhythm) instead of stretching to
+   * fill the entire vertical space and centering inside it. Horizontal
+   * centering is preserved via `alignItems: 'center'` on the column-flex parent.
+   * Subdued `colorNeutralForeground2` → `1` on hover matches typical Fluent v9
+   * icon-button affordance for clickable surfaces.
    */
   collapsedIcon: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    flexGrow: 1,
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase400,
     userSelect: 'none',
@@ -309,13 +322,47 @@ export function ThreePaneLayout({
 
   const rightRatio = containerWidth > 0 && isRightVisible ? (containerWidth - rightWidthPx) / containerWidth : 1;
 
+  // (Task 100) Width-redistribution algorithm: the expanded pane(s) should
+  // FILL the available width — never leave an empty `colorNeutralBackground1`
+  // strip when one or more panes are collapsed (operator request — a 280px
+  // Context pane shouldn't sit next to a 96px gap of collapsed strips and a
+  // wide empty background column). Algorithm:
+  //   - collapsed pane                         → flex 0 0 48px (fixed strip)
+  //   - center expanded                        → flex 1 1 auto (always flexes)
+  //   - left/right sole-expanded               → flex 1 1 auto (fills freed width)
+  //   - left/right when center is collapsed
+  //     and the OTHER side pane is expanded    → right flexes (right is the
+  //         canonical "primary content" surface in three-pane shells);
+  //         left stays at fixed width
+  //   - left/right with center expanded        → fixed defaultWidthPx (preserves
+  //         user-resizable behavior via splitter)
+  // Splitters between two collapsed panes are already hidden (task 094); when
+  // an expanded side pane is the sole expanded surface the adjacent splitter
+  // also hides (no resize partner), so its `flex: 1` doesn't fight a splitter.
+  const expandedCount =
+    (isLeftVisible ? 1 : 0) + (isCenterVisible ? 1 : 0) + (isRightVisible ? 1 : 0);
+  const leftIsSoleExpanded = isLeftVisible && expandedCount === 1;
+  const rightIsSoleExpanded = isRightVisible && expandedCount === 1;
+  // Center-collapsed-but-both-sides-expanded edge case: give right the flex
+  // so the otherwise-empty space at the right edge is filled by the Context
+  // pane (the canonical "primary content" surface in SpaarkeAi's three-pane).
+  const rightFillsForCollapsedCenter =
+    isLeftVisible && !isCenterVisible && isRightVisible;
+
   return (
     <div className={mergeClasses(styles.root, className)} ref={containerRef as React.RefObject<HTMLDivElement>}>
       {/* ---- Left Pane ---- */}
+      {/* (Task 100) Sole-expanded left pane gets `flex: 1` so it fills the
+          freed width when center + right are both collapsed; otherwise it
+          stays at its user-resizable fixed `leftWidthPx`. */}
       {isLeftVisible ? (
         <div
           className={mergeClasses(styles.leftPane, !isDragging && styles.panelAnimated)}
-          style={{ width: `${leftWidthPx}px` }}
+          style={
+            leftIsSoleExpanded
+              ? { flex: '1 1 auto', width: 'auto' }
+              : { width: `${leftWidthPx}px` }
+          }
         >
           {leftPane}
         </div>
@@ -412,10 +459,20 @@ export function ThreePaneLayout({
       )}
 
       {/* ---- Right Pane ---- */}
+      {/* (Task 100) Right pane flex-grows in two cases: (i) it's the sole
+          expanded pane (left + center collapsed), (ii) the center is collapsed
+          but BOTH side panes are expanded — in that single-collapse case the
+          right pane absorbs the freed space (right is the canonical "primary
+          content" surface in SpaarkeAi's three-pane). Otherwise it stays at
+          its user-resizable fixed `rightWidthPx`. */}
       {isRightVisible ? (
         <div
           className={mergeClasses(styles.rightPane, !isDragging && styles.panelAnimated)}
-          style={{ width: `${rightWidthPx}px` }}
+          style={
+            rightIsSoleExpanded || rightFillsForCollapsedCenter
+              ? { flex: '1 1 auto', width: 'auto' }
+              : { width: `${rightWidthPx}px` }
+          }
         >
           {rightPane}
         </div>
