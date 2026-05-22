@@ -91,38 +91,67 @@ export interface UseDailyBriefingOptions {
    * supplied `authenticatedFetch` is responsible for base URL resolution.
    */
   endpoint?: string;
+  /**
+   * OPTIONAL programmatic notification-context loader (task 086 / Round 4
+   * Fix 3). When supplied, the hook calls this callback before POST-ing to
+   * the narrate endpoint and forwards the returned `NarrateRequest` payload
+   * verbatim. When omitted, the hook falls back to the legacy
+   * empty-payload behavior so the BFF returns 200/empty bullets (the
+   * pre-086 contract).
+   *
+   * SpaarkeAi's `WorkspaceHomeTab` supplies a callback that mirrors the
+   * standalone Daily Briefing Code Page's data path (Xrm.WebApi query of
+   * `appnotification` → `groupByCategory` → `buildNarrationRequest`) so the
+   * embedded Daily Briefing actually returns real bullets on cold load.
+   *
+   * LegalWorkspace's `dailyBriefing.registration` shim does NOT pass this
+   * callback (preserves the byte-stable standalone bundle per FR-25 /
+   * NFR-10). The standalone Daily Briefing Code Page is its own surface
+   * and is unaffected.
+   *
+   * Implementations should return a fully-built `NarrateRequest`. To opt
+   * the user out of context-loading for any reason (e.g., webApi not yet
+   * resolved), return `null` — the hook will then send the legacy empty
+   * payload so the empty-state UI surfaces normally.
+   */
+  loadNotificationContext?: () => Promise<NarrateRequest | null>;
 }
 
 // ---------------------------------------------------------------------------
 // Narrate request / response DTOs (mirror DailyBriefingEndpoints.cs)
 // ---------------------------------------------------------------------------
 
-interface NarrateRequest {
+/**
+ * Narrate request envelope sent to POST /api/ai/daily-briefing/narrate.
+ * Exported so consumers that wire a `loadNotificationContext` callback can
+ * import the shape they need to return.
+ */
+export interface NarrateRequest {
   categories: NotificationCategoryDto[];
   priorityItems: PriorityItemDto[];
   totalNotificationCount: number;
   channels: ChannelNarrationInput[];
 }
 
-interface NotificationCategoryDto {
+export interface NotificationCategoryDto {
   name: string;
   count: number;
   unreadCount: number;
 }
 
-interface PriorityItemDto {
+export interface PriorityItemDto {
   category: string;
   title: string;
   dueDate?: string | null;
 }
 
-interface ChannelNarrationInput {
+export interface ChannelNarrationInput {
   category: string;
   label: string;
   items: ChannelItemDto[];
 }
 
-interface ChannelItemDto {
+export interface ChannelItemDto {
   id: string;
   title: string;
   body: string;
@@ -274,7 +303,7 @@ function mapError(err: unknown): DailyBriefingError {
  * @returns {DailyBriefingState} bullets, isLoading, error, refetch
  */
 export function useDailyBriefing(options: UseDailyBriefingOptions): DailyBriefingState {
-  const { authenticatedFetch, tenantId, endpoint } = options;
+  const { authenticatedFetch, tenantId, endpoint, loadNotificationContext } = options;
   const targetEndpoint = endpoint ?? DEFAULT_ENDPOINT;
 
   const [bullets, setBullets] = React.useState<string[]>([]);
@@ -318,10 +347,34 @@ export function useDailyBriefing(options: UseDailyBriefingOptions): DailyBriefin
       }
 
       try {
+        // Resolve the narrate payload. When the consumer supplied a
+        // `loadNotificationContext` callback (task 086), use it to populate
+        // a real categories/priorityItems/channels envelope so the BFF can
+        // return actual bullets. When omitted, fall back to the legacy
+        // empty-payload contract (BFF returns 200 with empty bullets → the
+        // section component renders the empty-state UI).
+        let payload: NarrateRequest = buildEmptyNarrateRequest();
+        if (loadNotificationContext) {
+          try {
+            const loaded = await loadNotificationContext();
+            if (loaded) {
+              payload = loaded;
+            }
+          } catch (loadErr) {
+            // Don't crash the section if the context loader itself fails —
+            // fall through to the empty payload so the BFF returns 200/empty
+            // and the empty-state UI surfaces (preserves the pre-086 UX).
+            console.warn(
+              "[useDailyBriefing] loadNotificationContext failed; falling back to empty payload.",
+              loadErr,
+            );
+          }
+        }
+
         const response = await authenticatedFetch(targetEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildEmptyNarrateRequest()),
+          body: JSON.stringify(payload),
         });
 
         // authenticatedFetch throws on non-2xx, so this branch implies success.
@@ -358,7 +411,7 @@ export function useDailyBriefing(options: UseDailyBriefingOptions): DailyBriefin
         }
       }
     },
-    [authenticatedFetch, tenantId, targetEndpoint],
+    [authenticatedFetch, tenantId, targetEndpoint, loadNotificationContext],
   );
 
   // Initial fetch on mount (and when auth deps change).

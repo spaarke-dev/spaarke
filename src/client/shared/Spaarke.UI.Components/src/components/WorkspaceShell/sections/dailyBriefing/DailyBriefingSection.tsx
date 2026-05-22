@@ -51,6 +51,7 @@ import {
   WarningRegular,
 } from "@fluentui/react-icons";
 import { useDailyBriefing } from "./useDailyBriefing";
+import type { NarrateRequest } from "./useDailyBriefing";
 
 // ---------------------------------------------------------------------------
 // Telemetry event-name constant (shared key for App Insights KQL parity)
@@ -180,6 +181,20 @@ export interface DailyBriefingSectionProps {
    * Receives a properties payload suitable for App Insights `trackEvent`.
    */
   onRateLimitError?: (properties: Record<string, unknown>) => void;
+  /**
+   * Optional programmatic notification-context loader (task 086 / Round 4
+   * Fix 3). When supplied, the section forwards it to `useDailyBriefing` so
+   * the narrate endpoint receives a populated payload (categories +
+   * priorityItems + channels) instead of the legacy empty envelope. When
+   * omitted, the section preserves its pre-086 behavior (empty payload →
+   * BFF returns empty bullets → empty-state UI).
+   *
+   * Used by SpaarkeAi's `WorkspaceHomeTab` to wire the standalone Daily
+   * Briefing Code Page's Xrm.WebApi `appnotification` query into the
+   * embedded Daily Briefing section. LegalWorkspace's shim does NOT pass
+   * this prop (preserves FR-25 / NFR-10).
+   */
+  loadNotificationContext?: () => Promise<NarrateRequest | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,11 +212,13 @@ export const DailyBriefingSection: React.FC<DailyBriefingSectionProps> = ({
   authenticatedFetch,
   tenantId,
   onRateLimitError,
+  loadNotificationContext,
 }) => {
   const styles = useStyles();
   const { bullets, isLoading, error, refetch } = useDailyBriefing({
     authenticatedFetch,
     tenantId,
+    loadNotificationContext,
   });
 
   // ---------------------------------------------------------------------

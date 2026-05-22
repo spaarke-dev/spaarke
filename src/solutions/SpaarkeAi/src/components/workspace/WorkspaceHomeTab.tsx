@@ -59,6 +59,7 @@ import {
   logTelemetryError,
   TELEMETRY_DAILY_BRIEFING_429,
 } from "../../telemetry/errorTelemetry";
+import { loadSpaarkeAiNotificationContext } from "../../services/notificationContextLoader";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -170,12 +171,20 @@ export const WorkspaceHomeTab: React.FC = () => {
   // Build the Daily Briefing registration via the shared factory, closing
   // over auth deps + telemetry routing. Stable across renders (deps
   // shouldn't change after initial auth).
+  //
+  // Task 086 / Round 4 Fix 3: also wire `loadNotificationContext` so the
+  // narrate endpoint receives the SAME populated payload the standalone
+  // Daily Briefing Code Page sends (Xrm.WebApi `appnotification` query →
+  // categories + priorityItems + channels). Without this, the embedded
+  // section auto-fires with an empty envelope and the operator sees the
+  // empty-state UI on every cold load.
   const dailyBriefingRegistration = React.useMemo<SectionRegistration>(
     () =>
       createDailyBriefingRegistration({
         authenticatedFetch,
         tenantId,
         onRateLimitError: handleRateLimitError,
+        loadNotificationContext: loadSpaarkeAiNotificationContext,
       }),
     [authenticatedFetch, tenantId, handleRateLimitError],
   );

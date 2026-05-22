@@ -55,6 +55,7 @@ import type {
   ContentSectionConfig,
 } from "../../types";
 import { DailyBriefingSection } from "./DailyBriefingSection";
+import type { NarrateRequest } from "./useDailyBriefing";
 
 // ---------------------------------------------------------------------------
 // Factory options
@@ -83,6 +84,22 @@ export interface CreateDailyBriefingRegistrationOptions {
    * `logTelemetryError`).
    */
   onRateLimitError?: (properties: Record<string, unknown>) => void;
+  /**
+   * Optional programmatic notification-context loader (task 086 / Round 4
+   * Fix 3). When supplied, the factory forwards it to `DailyBriefingSection`
+   * → `useDailyBriefing` so the narrate endpoint receives the same populated
+   * payload the standalone Daily Briefing Code Page sends (categories +
+   * priorityItems + per-channel items via Xrm.WebApi). When omitted, the
+   * legacy empty-payload contract is preserved (BFF returns empty bullets
+   * → empty-state UI).
+   *
+   * SpaarkeAi's `WorkspaceHomeTab` supplies a callback that mirrors the
+   * standalone code page's `useNotificationData` →
+   * `buildNarrationRequest` data path so the embedded Daily Briefing
+   * returns real AI bullets on cold load. LegalWorkspace's shim does NOT
+   * supply this (preserves FR-25 / NFR-10).
+   */
+  loadNotificationContext?: () => Promise<NarrateRequest | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +116,7 @@ export interface CreateDailyBriefingRegistrationOptions {
 export function createDailyBriefingRegistration(
   options: CreateDailyBriefingRegistrationOptions,
 ): SectionRegistration {
-  const { authenticatedFetch, tenantId, onRateLimitError } = options;
+  const { authenticatedFetch, tenantId, onRateLimitError, loadNotificationContext } = options;
 
   return {
     id: "daily-briefing",
@@ -121,6 +138,7 @@ export function createDailyBriefingRegistration(
             authenticatedFetch,
             tenantId,
             onRateLimitError,
+            loadNotificationContext,
           }),
       };
     },

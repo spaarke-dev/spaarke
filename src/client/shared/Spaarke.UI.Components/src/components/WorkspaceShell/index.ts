@@ -96,6 +96,13 @@ export type {
   DailyBriefingState,
   DailyBriefingError,
   UseDailyBriefingOptions,
+  // task 086 / Round 4 Fix 3 — exposed so consumers wiring
+  // `loadNotificationContext` can type their payload builders.
+  NarrateRequest,
+  NotificationCategoryDto,
+  PriorityItemDto,
+  ChannelNarrationInput,
+  ChannelItemDto,
 } from "./sections/dailyBriefing/useDailyBriefing";
 
 export {
