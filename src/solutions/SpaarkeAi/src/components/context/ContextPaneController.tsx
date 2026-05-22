@@ -159,12 +159,27 @@ const useStyles = makeStyles({
 
   // Header style classes removed — header is now rendered by the shared
   // <PaneHeader> primitive from @spaarke/ui-components (ADR-012 / FR-17).
-  // The right-side stage label retains its original neutral-foreground-4 +
-  // fontSizeBase100 treatment via `headerStageLabel`, passed in rightSlot.
-  headerStageLabel: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground4,
-    flexShrink: 0,
+  //
+  // Task 099 — the previous `headerStageLabel` rendering ("Sources" /
+  // "Get Started" / etc.) was removed from the rightSlot per operator
+  // request, leaving the Tools dropdown alone right-justified to mirror
+  // the Workspace pane's PaneHeader. The `stageLabelMap` is kept for
+  // potential ARIA / debug use but is no longer visually rendered, so the
+  // CSS class for it is gone with this task.
+
+  // Task 099 — "Quick Start" section title shown above the
+  // GetStartedCardsWidget body. Uses Text size 400 semibold (one Fluent v9
+  // step below the PaneHeader title from Wave 1's size 400 bump) so the
+  // section title is clearly secondary to the pane title but still bold.
+  quickStartHeader: {
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+  },
+  quickStartTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
   },
 
   // Content area — scrollable
@@ -689,8 +704,22 @@ export function ContextPaneController(): React.JSX.Element {
     // selectedTool, so the pane returns to GetStartedCardsWidget when the
     // modal closes).
     if (currentStage === "welcome" || (selectedTool === "quick-start" && activeWidget === null && !isResolving)) {
+      // Task 099 — wrap the GetStartedCardsWidget in a small section header
+      // showing "Quick Start" so the user can SEE which Context tool is
+      // currently active inside the pane body. We do NOT modify
+      // GetStartedCardsWidget itself (it's in `@spaarke/ai-widgets` shared
+      // lib — out of scope for this SpaarkeAi-local revision).
       return (
         <div className={styles.content} data-testid="context-pane-welcome">
+          <div className={styles.quickStartHeader}>
+            <Text
+              className={styles.quickStartTitle}
+              size={400}
+              data-testid="context-quick-start-title"
+            >
+              Quick Start
+            </Text>
+          </div>
           <GetStartedCardsWidget onCardClick={handleGetStartedCardClick} />
         </div>
       );
@@ -827,8 +856,20 @@ export function ContextPaneController(): React.JSX.Element {
   // Render
   // ---------------------------------------------------------------------------
 
+  // Task 099 — `stageLabelMap` is retained for ARIA / debug only (no longer
+  // rendered visually after the rightSlot stage-label removal). We expose
+  // the current stage label as a `data-context-stage` attribute on the root
+  // so test harnesses (Playwright / smoke) can still assert the pane's
+  // logical stage without reading any rendered text. Keeps the mapping
+  // referenced so `noUnusedLocals` is satisfied.
+  const debugStageLabel = stageLabelMap[contextStage];
+
   return (
-    <div className={styles.root} data-testid="context-pane-controller">
+    <div
+      className={styles.root}
+      data-testid="context-pane-controller"
+      data-context-stage={debugStageLabel}
+    >
       {/*
         Header — migrated to shared <PaneHeader> primitive from
         @spaarke/ui-components (FR-17, task 010). The inline header JSX
@@ -848,27 +889,23 @@ export function ContextPaneController(): React.JSX.Element {
         expanded={isContextExpanded}
         rightSlot={
           /*
-            Task 095 — rightSlot now composes ContextPaneMenu + the existing
-            stage label in a flex row. The PaneHeader's rightSlot wrapper
-            applies stopPropagation on clicks (task 094) so the Menu trigger
-            does NOT accidentally collapse the pane. Belt-and-braces: the
-            stage label is non-interactive `Text` so it never bubbles a click.
+            Task 099 — rightSlot is now the ContextPaneMenu (Tools dropdown)
+            ALONE, right-justified by virtue of PaneHeader's rightSlot CSS.
+            The previous stage label `<Text>` ("Sources" / "Get Started" /
+            etc.) was removed per operator request so the Context pane's
+            PaneHeader visually mirrors the Workspace pane's PaneHeader
+            (Tools dropdown only on the right). The `stageLabelMap` and
+            `contextStage` state are kept for potential ARIA / debug use
+            but are no longer rendered.
+
+            The PaneHeader's rightSlot wrapper applies stopPropagation on
+            clicks (task 094) so the Menu trigger does NOT accidentally
+            collapse the pane.
           */
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: tokens.spacingHorizontalS,
-            }}
-          >
-            <ContextPaneMenu
-              selectedTool={selectedTool}
-              onSelectTool={setSelectedTool}
-            />
-            <Text className={styles.headerStageLabel} size={100}>
-              {stageLabelMap[contextStage]}
-            </Text>
-          </div>
+          <ContextPaneMenu
+            selectedTool={selectedTool}
+            onSelectTool={setSelectedTool}
+          />
         }
       />
 

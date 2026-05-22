@@ -16,7 +16,16 @@
  * localStorage key:
  *   `spaarke:context:selected-tool` — JSON string holding one of the ContextToolId
  *   values. Validated against VALID_CONTEXT_TOOL_IDS on every read; corrupt /
- *   unknown values fall back to 'quick-start'.
+ *   unknown values fall back to the pinned default (task 099) or 'quick-start'.
+ *
+ * First-mount default (task 099):
+ *   When no `selected-tool` value exists in localStorage (first-time users /
+ *   cold resets), the hook reads the pinned default tool via
+ *   `getPinnedContextTool()` from `services/contextToolPin.ts` BEFORE falling
+ *   back to the hardcoded 'quick-start' default. If both a `selected-tool` AND
+ *   a pinned tool exist, `selected-tool` wins (user's last-used > pinned
+ *   default). This makes pin = "default on load" without disturbing the
+ *   existing tool-selection persistence flow.
  *
  * Pattern provenance: this hook mirrors usePaneCollapse.ts (task 094) verbatim
  * in posture — try/catch-wrapped accessors, type-safe validation, silent
@@ -29,6 +38,7 @@
  */
 
 import { useCallback, useState } from 'react';
+import { getPinnedContextTool } from '../services/contextToolPin';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,10 +82,16 @@ const VALID_CONTEXT_TOOL_IDS: ReadonlySet<string> = new Set<ContextToolId>([
 // ---------------------------------------------------------------------------
 
 function readPersistedTool(): ContextToolId {
-  if (typeof window === 'undefined') return DEFAULT_TOOL;
+  if (typeof window === 'undefined') return resolveFirstMountDefault();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return DEFAULT_TOOL;
+    if (raw === null) {
+      // No prior `selected-tool` exists → task 099: honor the user's pinned
+      // default tool, if any. Pin acts as "default on load" for first-time
+      // users / cold resets. When no pin exists either, fall back to the
+      // hardcoded DEFAULT_TOOL (`quick-start`).
+      return resolveFirstMountDefault();
+    }
     // Stored as a JSON string (matches the rest of the spaarke: namespace);
     // tolerate raw strings too in case an older / hand-edited value exists.
     let parsed: unknown;
@@ -87,12 +103,26 @@ function readPersistedTool(): ContextToolId {
     if (typeof parsed === 'string' && VALID_CONTEXT_TOOL_IDS.has(parsed)) {
       return parsed as ContextToolId;
     }
-    return DEFAULT_TOOL;
+    // Corrupt / unknown persisted value — treat as fresh user and honor pin.
+    return resolveFirstMountDefault();
   } catch {
     // Private browsing, quota exceeded, or corrupt JSON → behave like a
     // fresh user. Never crash on storage failure.
-    return DEFAULT_TOOL;
+    return resolveFirstMountDefault();
   }
+}
+
+/**
+ * First-mount default resolution (task 099): when no `selected-tool` value
+ * exists in localStorage, fall back to the pinned default before the
+ * hardcoded `DEFAULT_TOOL`. The pin is the user's "default on load"
+ * preference set via the ContextPaneMenu pin icons. If no pin exists, use
+ * the hardcoded default (quick-start) — preserves task 095 behaviour for
+ * users who have never pinned anything.
+ */
+function resolveFirstMountDefault(): ContextToolId {
+  const pinned = getPinnedContextTool();
+  return pinned ?? DEFAULT_TOOL;
 }
 
 function writePersistedTool(id: ContextToolId): void {
