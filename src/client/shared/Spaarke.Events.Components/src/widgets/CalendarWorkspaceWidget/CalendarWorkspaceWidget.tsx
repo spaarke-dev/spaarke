@@ -86,8 +86,17 @@ import {
   Archive24Regular,
   ChevronLeft20Regular,
   ChevronRight20Regular,
-  ChevronUp20Regular,
-  ChevronDown20Regular,
+  // Task 118: replaces ChevronUp20Regular / ChevronDown20Regular for the
+  // calendar collapse toggle. Caret family is visually distinct from the
+  // month-navigation chevrons (◀ ▶) and clearly conveys vertical
+  // expand/collapse direction. Both exist in the installed
+  // @fluentui/react-icons version.
+  CaretUp24Regular,
+  CaretDown24Regular,
+  // Task 118: "open in full" affordance on the grid section. Same icon
+  // family used by task 111 Documents per-row Expand and FilePreview's
+  // "Open Record" button — consistent SpaarkeAi modal-launch UX.
+  Open24Regular,
 } from "@fluentui/react-icons";
 
 import {
@@ -238,6 +247,12 @@ const useStyles = makeStyles({
       display: "none",
     },
   },
+  // Task 118: filter row now also hosts the calendar collapse chevron at
+  // its right edge (flex spacer between the 3 filter fields and the
+  // chevron). Operator: "move the calendar collapse icon to the same row
+  // as the filters; allows the filters to still show when the calendars
+  // are collapsed and still filter the Event list." The chevron is
+  // always-visible regardless of strip collapse state.
   dateRangeRow: {
     display: "flex",
     flexDirection: "row",
@@ -257,7 +272,21 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
   },
-  // Task 116: calendar row = ◀ + strip (flex: 1) + ▶ + collapse toggle.
+  // Task 118: flex spacer pushes the collapse chevron to the right edge
+  // responsively at any viewport width. No media queries needed.
+  filterRowSpacer: {
+    flex: "1 1 auto",
+  },
+  // Task 118: container for the collapse chevron at the right edge of the
+  // filter row. Bottom-aligned so it sits flush with the From/To inputs
+  // (the dateRangeRow uses `alignItems: flex-end`).
+  collapseToggleSlot: {
+    display: "flex",
+    alignItems: "flex-end",
+    flexShrink: 0,
+  },
+  // Task 116: calendar row = ◀ + strip (flex: 1) + ▶. Task 118 REMOVED
+  // the in-row collapse chevron; it now lives on the filter row above.
   // The row itself is `flex-shrink: 0` so the grid below can claim
   // remaining vertical space via `flex: 1 1 auto` on `gridContainer`.
   calendarRow: {
@@ -269,9 +298,6 @@ const useStyles = makeStyles({
     ...shorthands.padding("0", "4px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
     minHeight: "280px",
-  },
-  calendarRowCollapsed: {
-    minHeight: "auto",
   },
   // The middle strip: hosts CalendarSection in horizontal layout. No
   // scrollbar — arrows are the navigation.
@@ -286,38 +312,22 @@ const useStyles = makeStyles({
     alignSelf: "center",
     flexShrink: 0,
   },
-  collapseButtonContainer: {
-    display: "flex",
-    alignItems: "center",
-    flexShrink: 0,
-    ...shorthands.padding("0", "0", "0", "4px"),
-    ...shorthands.borderLeft("1px", "solid", tokens.colorNeutralStroke2),
-  },
-  // When collapsed, the row shrinks to just hosting the expand button.
-  collapsedBar: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexShrink: 0,
-    ...shorthands.padding("4px", "8px"),
-    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
-  },
-  collapsedLabel: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground2,
-  },
   toolbarRow: {
     flexShrink: 0,
     ...shorthands.padding("0", "4px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
+  // Task 118: view selector row now hosts the grid "open in full" icon
+  // at the right edge (flex spacer between selector and icon button).
   viewSelectorRow: {
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
     ...shorthands.padding("8px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+  },
+  viewSelectorSpacer: {
+    flex: "1 1 auto",
   },
   gridContainer: {
     flex: "1 1 auto",
@@ -481,6 +491,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
     });
   }, []);
 
+  // ── Day-cell selection (task 118) ────────────────────────────────────────
+  // Click a day with associated events → grid filters to that single day.
+  // Re-click the same day → clears the filter (toggle). Click a different
+  // day → moves the filter. Owned here (not inside CalendarSection)
+  // because the filter dispatches through EventsPageContext.
+  const [selectedDate, setSelectedDate] = React.useState<Date | null>(null);
+
   // ── Date-range filter (top row) ──────────────────────────────────────────
   const [dateField, setDateField] = React.useState<string>(initialDateField);
   const [fromDate, setFromDate] = React.useState<string>("");
@@ -625,7 +642,90 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
     setCalendarFilter({ type: "clear" });
     setFromDate("");
     setToDate("");
+    setSelectedDate(null);
   }, [setCalendarFilter]);
+
+  // ── Day-cell click handler (task 118) ────────────────────────────────────
+  // CalendarSection emits the clicked date via `onSelectDate`. We:
+  //  1. Update local `selectedDate` state for visual highlight.
+  //  2. Dispatch a single-day range filter through EventsPageContext so
+  //     GridSection narrows to that day. We emit a range from/to = clicked
+  //     date (the existing EventsPageContext + GridSection plumbing
+  //     handles single-day ranges identically to multi-day ranges).
+  //  3. On toggle-off (CalendarSection emits `null`), clear the calendar
+  //     filter — but DON'T clobber the From/To inputs since the user may
+  //     still want those active.
+  //
+  // Day click takes precedence over From/To (operator priority). If the
+  // user later changes From/To, the divergence effect below clears
+  // `selectedDate`.
+  const onDaySelect = React.useCallback(
+    (date: Date | null) => {
+      setSelectedDate(date);
+      if (date === null) {
+        setCalendarFilter({ type: "clear" });
+        return;
+      }
+      const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      setCalendarFilter({
+        type: "range",
+        start: iso,
+        end: iso,
+        dateFields: [dateField],
+      });
+    },
+    [setCalendarFilter, dateField],
+  );
+
+  // ── Filter-divergence effect (task 118) ──────────────────────────────────
+  // If the From/To pickers (or any other component) push a calendar filter
+  // that doesn't match the current single-day selection, clear
+  // `selectedDate` so the day highlight doesn't lie about what's filtering
+  // the grid.
+  React.useEffect(() => {
+    if (!selectedDate) return;
+    const cf = filters.calendarFilter;
+    if (!cf || cf.type === "clear") {
+      setSelectedDate(null);
+      return;
+    }
+    if (cf.type === "single") {
+      const iso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`;
+      if (cf.date !== iso) setSelectedDate(null);
+      return;
+    }
+    if (cf.type === "range") {
+      const iso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`;
+      if (cf.start !== iso || cf.end !== iso) setSelectedDate(null);
+    }
+  }, [filters.calendarFilter, selectedDate]);
+
+  // ── Grid "open in full" (task 118) ───────────────────────────────────────
+  // Operator: "The grid needs to have an open icon to open a modal showing
+  // the sprk_events entity view." Mirrors the FilePreview "Open Record"
+  // pattern + task 111 per-row Documents Expand affordance.
+  const onOpenEventsList = React.useCallback(() => {
+    const xrm = getXrm();
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn(
+        "[CalendarWidget] Xrm.Navigation.navigateTo unavailable; cannot open entitylist modal.",
+      );
+      return;
+    }
+    try {
+      xrm.Navigation.navigateTo(
+        { pageType: "entitylist", entityName: EVENT_ENTITY_NAME },
+        {
+          target: 2,
+          width: { value: 80, unit: "%" },
+          height: { value: 80, unit: "%" },
+          position: 1,
+        },
+      );
+    } catch (e) {
+      console.error("[CalendarWidget] Failed to open entitylist modal:", e);
+    }
+  }, []);
 
   // ── Month navigation handlers (task 116) ─────────────────────────────────
   // Step = 1 month per click by default; Shift+click advances by the visible
@@ -647,7 +747,9 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* (1) Date-range filter row */}
+      {/* (1) Date-range filter row — task 118: chevron moved here, right-
+              justified, so the filter row remains visible (and continues
+              to drive the grid filter) when the calendar strip collapses. */}
       <div className={styles.dateRangeRow}>
         <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
@@ -681,26 +783,30 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             onChange={(_e, data) => setToDate(data.value)}
           />
         </div>
-      </div>
-
-      {/* (2) Calendar strip — collapsible. When collapsed, the strip
-              unmounts (state lives in this layout, not in CalendarSection
-              now that viewDate is controlled, so unmount/remount is free).
-              A slim bar with just the expand chevron remains. */}
-      {calendarCollapsed ? (
-        <div className={styles.collapsedBar}>
-          <span className={styles.collapsedLabel}>Calendar (collapsed)</span>
-          <Tooltip content="Expand calendar" relationship="label">
+        {/* Flex spacer pushes the chevron to the right edge responsively */}
+        <div className={styles.filterRowSpacer} />
+        <div className={styles.collapseToggleSlot}>
+          <Tooltip
+            content={calendarCollapsed ? "Expand calendar" : "Collapse calendar"}
+            relationship="label"
+          >
             <Button
               appearance="subtle"
-              icon={<ChevronDown20Regular />}
+              icon={calendarCollapsed ? <CaretDown24Regular /> : <CaretUp24Regular />}
               onClick={toggleCollapsed}
-              aria-expanded={false}
-              aria-label="Expand calendar"
+              aria-expanded={!calendarCollapsed}
+              aria-label={calendarCollapsed ? "Expand calendar" : "Collapse calendar"}
             />
           </Tooltip>
         </div>
-      ) : (
+      </div>
+
+      {/* (2) Calendar strip — task 118: only the strip itself hides when
+              collapsed. The filter row above and everything below remain
+              visible. The internal CalendarSection header (icon +
+              "Calendar" + separator) is suppressed in horizontal layout
+              per task 118. */}
+      {!calendarCollapsed && (
         <div className={styles.calendarRow}>
           <Tooltip content="Previous month (Shift+click: jump by window)" relationship="label">
             <Button
@@ -718,6 +824,8 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
               viewDate={viewDate}
               monthsToShow={monthsToShow}
               layout="horizontal"
+              selectedDate={selectedDate}
+              onSelectDate={onDaySelect}
             />
           </div>
           <Tooltip content="Next month (Shift+click: jump by window)" relationship="label">
@@ -729,17 +837,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
               aria-label="Next month"
             />
           </Tooltip>
-          <div className={styles.collapseButtonContainer}>
-            <Tooltip content="Collapse calendar" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<ChevronUp20Regular />}
-                onClick={toggleCollapsed}
-                aria-expanded={true}
-                aria-label="Collapse calendar"
-              />
-            </Tooltip>
-          </div>
         </div>
       )}
 
@@ -822,12 +919,23 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
         </Toolbar>
       </div>
 
-      {/* (4) View selector */}
+      {/* (4) View selector + grid open-in-full icon (task 118 — operator:
+              "the grid needs to have an open icon to open a modal showing
+              the sprk_events entity view"). */}
       <div className={styles.viewSelectorRow}>
         <ViewSelectorDropdown
           selectedViewId={selectedViewId}
           onViewChange={(viewId) => setSelectedViewId(viewId)}
         />
+        <div className={styles.viewSelectorSpacer} />
+        <Tooltip content="Open Events list" relationship="label">
+          <Button
+            appearance="subtle"
+            icon={<Open24Regular />}
+            onClick={onOpenEventsList}
+            aria-label="Open Events list view"
+          />
+        </Tooltip>
       </div>
 
       {/* (5) Grid — auto-binds to filters via EventsPageContext */}

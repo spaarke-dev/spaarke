@@ -11,7 +11,21 @@
  * - Handling filter output to parent component
  * - Supporting event date indicators from fetched data
  *
+ * Task 116 (Round 10): added controlled `viewDate` + `monthsToShow` + `layout`
+ * props for the Calendar workspace widget.
+ *
+ * Task 118 (Round 11): added controlled `selectedDate` + `onSelectDate` props.
+ * Day cells with associated events now render with a brand-tint background;
+ * clicking an event-day in the controlled-mode widget filters the grid to
+ * that single day (handled by the widget — this component just surfaces the
+ * click + emits via `onSelectDate`). In `horizontal` layout the internal
+ * Calendar header (icon + title + separator) and footer (clear + version)
+ * are suppressed because the Calendar widget owns those affordances on its
+ * own toolbar row.
+ *
  * @see projects/events-workspace-apps-UX-r1/tasks/061-events-page-integrate-calendar.poml
+ * @see projects/spaarke-ai-platform-unification-r3/tasks/116-calendar-widget-r10-polish.poml
+ * @see projects/spaarke-ai-platform-unification-r3/tasks/118-calendar-widget-r11-polish.poml
  */
 
 import * as React from "react";
@@ -119,6 +133,35 @@ export interface CalendarSectionProps {
    * identically without changes.
    */
   layout?: "vertical" | "horizontal";
+
+  /**
+   * Controlled selected date (task 118).
+   *
+   * When provided, the parent owns the single-day selection state. If the
+   * parent passes `null`, no day is highlighted as selected. When OMITTED,
+   * CalendarSection retains its prior internal `selectedDate` state +
+   * `onFilterChange` emission behavior (used by EventsPage's CalendarDrawer
+   * unchanged).
+   */
+  selectedDate?: Date | null;
+
+  /**
+   * Controlled selected-date change callback (task 118).
+   *
+   * Fired when the user clicks a day cell. The parent should:
+   *   - Update its `selectedDate` state to the new Date (or null if
+   *     toggling off).
+   *   - Drive the grid's date filter accordingly.
+   *
+   * When OMITTED, day clicks fall through to the legacy `onFilterChange`
+   * behavior (single-date filter emission). When PROVIDED, day clicks emit
+   * via `onSelectDate` ONLY; `onFilterChange` is still called for
+   * Shift+click range selections and footer-clear actions.
+   *
+   * Pass `null` from the handler to clear the selection (mirrors single-day
+   * toggle-off semantics).
+   */
+  onSelectDate?: (date: Date | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,13 +201,18 @@ const useStyles = makeStyles({
   // Task 116: horizontal layout variant. Row of months, no internal scroll
   // (the consuming widget bounds the width and uses external arrows to
   // navigate; we hide overflow so partial months don't appear cut off).
+  //
+  // Task 118: month-gap bumped from spacingHorizontalL (16px) → XL (20px)
+  // per operator feedback ("Add left and right spacing between each
+  // month"). Visual breathing room without sacrificing visible month
+  // count at typical workspace widths.
   calendarContentHorizontal: {
     flex: 1,
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-start",
     ...shorthands.padding("8px"),
-    ...shorthands.gap("16px"),
+    columnGap: tokens.spacingHorizontalXL,
     overflow: "hidden",
   },
   monthContainer: {
@@ -233,6 +281,19 @@ const useStyles = makeStyles({
   dayCellInRange: {
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
+    ":hover": {
+      backgroundColor: tokens.colorBrandBackground2Hover,
+    },
+  },
+  // Task 118: Days that have associated events get a brand-tint background
+  // + brand foreground + semibold weight, making the indicator visible at
+  // a glance ("blue background" per operator). This stacks under the
+  // existing tiny dot indicator (kept for the case where the user wants a
+  // smaller hint — e.g. inside a selected range cell).
+  dayWithEvents: {
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground1,
+    fontWeight: tokens.fontWeightSemibold,
     ":hover": {
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
@@ -355,7 +416,7 @@ function isSameDay(date1: Date, date2: Date): boolean {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 
 export const CalendarSection: React.FC<CalendarSectionProps> = ({
   eventDates = [],
@@ -365,6 +426,8 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   viewDate: viewDateProp,
   monthsToShow: monthsToShowProp,
   layout = "vertical",
+  selectedDate: selectedDateProp,
+  onSelectDate,
 }) => {
   const styles = useStyles();
   const today = new Date();
@@ -385,10 +448,22 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   const viewDate = viewDateProp ?? internalViewDate;
   const monthsToShowCount = monthsToShowProp ?? 3;
 
-  // Selection state
-  const [selectedDate, setSelectedDate] = React.useState<string | null>(
-    initialDate ?? null
-  );
+  // Selection state — supports task 118 controlled mode.
+  //
+  // When `onSelectDate` is provided, the parent owns the selection: we
+  // derive the displayed `selectedDate` from `selectedDateProp` and emit
+  // changes via `onSelectDate` instead of internal `setInternalSelectedDate`.
+  // When omitted (EventsPage CalendarDrawer), internal state drives the UI
+  // and `onFilterChange` carries the day click.
+  const isSelectedControlled = onSelectDate !== undefined;
+  const [internalSelectedDate, setInternalSelectedDate] = React.useState<
+    string | null
+  >(initialDate ?? null);
+  const selectedDate: string | null = isSelectedControlled
+    ? selectedDateProp
+      ? toIsoDateString(selectedDateProp)
+      : null
+    : internalSelectedDate;
   const [rangeStart, setRangeStart] = React.useState<string | null>(null);
   const [rangeEnd, setRangeEnd] = React.useState<string | null>(null);
 
@@ -402,55 +477,85 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
   }, [eventDates]);
 
   /**
-   * Handle date click
+   * Handle date click.
+   *
+   * Branches:
+   *  - Shift+click with an existing selection → range selection (legacy
+   *    behavior, emits via `onFilterChange`).
+   *  - Plain click in CONTROLLED selection mode (task 118) → emit through
+   *    `onSelectDate`, toggle off if the same day is re-clicked. The
+   *    parent (Calendar widget) is responsible for converting the date
+   *    into a grid filter (single-day range from/to = clicked date).
+   *  - Plain click in UNCONTROLLED mode (legacy EventsPage CalendarDrawer)
+   *    → use internal selection state + emit single-day filter via
+   *    `onFilterChange`.
    */
   const handleDateClick = React.useCallback(
     (date: Date, isShiftKey: boolean) => {
       const dateStr = toIsoDateString(date);
 
       if (isShiftKey && selectedDate) {
-        // Range selection
+        // Range selection (legacy path — same for controlled + uncontrolled).
         const start = selectedDate;
         const end = dateStr;
         setRangeStart(start);
         setRangeEnd(end);
-
-        // Emit range filter
         const filter: CalendarFilterRange = {
           type: "range",
           start: start < end ? start : end,
           end: start < end ? end : start,
         };
         onFilterChange(filter);
+        // In controlled mode, clear the single-day selection because we
+        // moved to a range — parent expects null when range takes over.
+        if (isSelectedControlled) {
+          onSelectDate?.(null);
+        }
+      } else if (isSelectedControlled) {
+        // Task 118 controlled path.
+        const isToggleOff = selectedDate === dateStr && !rangeStart;
+        setRangeStart(null);
+        setRangeEnd(null);
+        if (isToggleOff) {
+          onSelectDate?.(null);
+        } else {
+          // Re-emit a fresh Date (parent may need it for filter math).
+          onSelectDate?.(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
+        }
       } else {
-        // Single date selection
+        // Legacy uncontrolled path.
         if (selectedDate === dateStr && !rangeStart) {
           // Toggle off
-          setSelectedDate(null);
+          setInternalSelectedDate(null);
           setRangeStart(null);
           setRangeEnd(null);
           onFilterChange({ type: "clear" });
         } else {
           // Select new date
-          setSelectedDate(dateStr);
+          setInternalSelectedDate(dateStr);
           setRangeStart(null);
           setRangeEnd(null);
           onFilterChange({ type: "single", date: dateStr });
         }
       }
     },
-    [selectedDate, rangeStart, onFilterChange]
+    [selectedDate, rangeStart, onFilterChange, isSelectedControlled, onSelectDate]
   );
 
   /**
-   * Clear selection
+   * Clear selection (footer-clear button + horizontal layout omits the
+   * footer entirely; this is uncontrolled-mode only).
    */
   const handleClearSelection = React.useCallback(() => {
-    setSelectedDate(null);
+    if (isSelectedControlled) {
+      onSelectDate?.(null);
+    } else {
+      setInternalSelectedDate(null);
+    }
     setRangeStart(null);
     setRangeEnd(null);
     onFilterChange({ type: "clear" });
-  }, [onFilterChange]);
+  }, [onFilterChange, isSelectedControlled, onSelectDate]);
 
   /**
    * Check if a date is selected or in range
@@ -518,12 +623,22 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
               const dateStr = toIsoDateString(day);
               const hasEvents = eventDateMap.has(dateStr);
 
+              // Task 118: in-month event days get a stronger brand-tint
+              // background ("blue background" per operator). The class
+              // stack respects priority: selected > in-range > has-events
+              // > today > other-month base. We DO NOT apply the
+              // has-events tint to other-month days (they're already
+              // muted; tinting would compete visually).
+              const showEventsTint = hasEvents && !isOtherMonth && dateState !== "selected" && dateState !== "in-range";
+
               return (
                 <div
                   key={dayIdx}
                   className={`${styles.dayCell} ${
                     isOtherMonth ? styles.dayCellOtherMonth : ""
                   } ${isToday ? styles.dayCellToday : ""} ${
+                    showEventsTint ? styles.dayWithEvents : ""
+                  } ${
                     dateState === "selected" ? styles.dayCellSelected : ""
                   } ${dateState === "in-range" ? styles.dayCellInRange : ""}`}
                   onClick={(e) => handleDateClick(day, e.shiftKey)}
@@ -582,18 +697,29 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
     return null;
   }, [selectedDate, rangeStart, rangeEnd]);
 
+  // Task 118: in horizontal layout (Calendar workspace widget), the parent
+  // owns the chrome (toolbar row with collapse chevron, plus its own date-
+  // range filter row). The internal Calendar header (icon + "Calendar" +
+  // separator) and footer (clear + version) are visual duplicates here, so
+  // we suppress both. The EventsPage CalendarDrawer (vertical layout) is
+  // unaffected.
+  const isHorizontal = layout === "horizontal";
+
   return (
     <div className={styles.container} style={{ height }}>
-      {/* Header */}
-      <div className={styles.header}>
-        <div className={styles.headerTitle}>
-          <Calendar24Regular />
-          <span>Calendar</span>
+      {/* Header — suppressed in horizontal layout (task 118) */}
+      {!isHorizontal && (
+        <div className={styles.header}>
+          <div className={styles.headerTitle}>
+            <Calendar24Regular />
+            <span>Calendar</span>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Selection info banner */}
-      {selectionInfo && (
+      {/* Selection info banner — also suppressed in horizontal layout
+          (widget shows date selection via its own filter row + grid). */}
+      {!isHorizontal && selectionInfo && (
         <div className={styles.selectionInfo}>{selectionInfo}</div>
       )}
 
@@ -601,32 +727,32 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
           horizontal row (Calendar widget, task 116). */}
       <div
         className={
-          layout === "horizontal"
-            ? styles.calendarContentHorizontal
-            : styles.calendarContent
+          isHorizontal ? styles.calendarContentHorizontal : styles.calendarContent
         }
       >
         {monthsToShow.map(({ year, month }) => renderMonth(year, month))}
       </div>
 
-      {/* Footer */}
-      <div className={styles.footer}>
-        {hasSelection ? (
-          <Button
-            className={styles.clearButton}
-            appearance="subtle"
-            size="small"
-            icon={<DismissRegular />}
-            onClick={handleClearSelection}
-            aria-label="Clear selection"
-          >
-            Clear
-          </Button>
-        ) : (
-          <span />
-        )}
-        <Text className={styles.versionText}>v{VERSION}</Text>
-      </div>
+      {/* Footer — suppressed in horizontal layout (task 118) */}
+      {!isHorizontal && (
+        <div className={styles.footer}>
+          {hasSelection ? (
+            <Button
+              className={styles.clearButton}
+              appearance="subtle"
+              size="small"
+              icon={<DismissRegular />}
+              onClick={handleClearSelection}
+              aria-label="Clear selection"
+            >
+              Clear
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Text className={styles.versionText}>v{VERSION}</Text>
+        </div>
+      )}
     </div>
   );
 };
