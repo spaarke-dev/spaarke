@@ -52,6 +52,18 @@ export interface UseThreePaneLayoutOptions {
   defaultLeftVisible?: boolean;
   /** Initial right visibility (overridden by persisted state) */
   defaultRightVisible?: boolean;
+  /**
+   * (Task 117) Optional percentage-of-viewport initial width for the LEFT
+   * pane (e.g. 0.25 for 25%). Used only on first mount when sessionStorage
+   * has no persisted pixel width. See ThreePaneLayoutProps.defaultLeftWidthFrac
+   * for full precedence documentation.
+   */
+  defaultLeftWidthFrac?: number;
+  /**
+   * (Task 117) Optional percentage-of-viewport initial width for the RIGHT
+   * pane. See `defaultLeftWidthFrac`.
+   */
+  defaultRightWidthFrac?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,13 +86,45 @@ function safeSetItem(key: string, value: string): void {
   }
 }
 
-function loadPersistedWidth(key: string, defaultValue: number, min: number): number {
+/**
+ * (Task 117) Resolve the initial pane width with the three-tier precedence
+ * documented on ThreePaneLayoutProps.defaultLeftWidthFrac:
+ *   1. sessionStorage stored pixel width (user-dragged value)
+ *   2. `frac` × `window.innerWidth` when `frac` is provided
+ *   3. `defaultPx` (legacy pixel default)
+ *
+ * The computed value is clamped to at least `min`. `window.innerWidth` is
+ * used as the viewport reference because the layout's own bounding rect is
+ * not yet measurable on first mount.
+ */
+function resolveInitialWidth(
+  key: string,
+  defaultPx: number,
+  min: number,
+  frac: number | undefined
+): number {
+  // 1. Stored pixel width always wins (user-dragged value persists).
   const stored = safeGetItem(key);
   if (stored !== null) {
     const v = parseFloat(stored);
     if (Number.isFinite(v) && v >= min) return v;
   }
-  return defaultValue;
+
+  // 2. Percentage default — applied on cold mount when no stored value.
+  if (
+    frac !== undefined &&
+    Number.isFinite(frac) &&
+    frac > 0 &&
+    typeof window !== 'undefined' &&
+    Number.isFinite(window.innerWidth) &&
+    window.innerWidth > 0
+  ) {
+    const pxFromFrac = Math.round(window.innerWidth * frac);
+    return Math.max(min, pxFromFrac);
+  }
+
+  // 3. Legacy pixel default.
+  return Math.max(min, defaultPx);
 }
 
 function persistWidth(key: string, px: number): void {
@@ -126,6 +170,8 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
     storageKey = 'three-pane',
     defaultLeftVisible = true,
     defaultRightVisible = true,
+    defaultLeftWidthFrac,
+    defaultRightWidthFrac,
   } = options;
 
   // Storage keys derived from prefix
@@ -141,11 +187,16 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
   const dragStartWidthRef = useRef(0);
 
   // React state
+  // (Task 117) Initial widths resolved with three-tier precedence:
+  //   stored sessionStorage value > frac × window.innerWidth > legacy default.
+  // See `resolveInitialWidth` for details. When `defaultLeftWidthFrac` /
+  // `defaultRightWidthFrac` are undefined the behavior is identical to the
+  // pre-task-117 `loadPersistedWidth` path (full backwards compatibility).
   const [leftWidthPx, setLeftWidthPx] = useState<number>(() =>
-    loadPersistedWidth(leftWidthKey, defaultLeftWidthPx, minLeftWidthPx)
+    resolveInitialWidth(leftWidthKey, defaultLeftWidthPx, minLeftWidthPx, defaultLeftWidthFrac)
   );
   const [rightWidthPx, setRightWidthPx] = useState<number>(() =>
-    loadPersistedWidth(rightWidthKey, defaultRightWidthPx, minRightWidthPx)
+    resolveInitialWidth(rightWidthKey, defaultRightWidthPx, minRightWidthPx, defaultRightWidthFrac)
   );
   const [visibility, setVisibility] = useState<PanelVisibility>(() =>
     loadPersistedVisibility(visibilityKey, { left: defaultLeftVisible, right: defaultRightVisible })

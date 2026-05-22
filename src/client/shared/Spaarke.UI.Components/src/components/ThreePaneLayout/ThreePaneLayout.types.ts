@@ -80,6 +80,35 @@ export interface ThreePaneLayoutProps {
   defaultRightWidthPx?: number;
 
   /**
+   * (Task 117) Initial width for the LEFT pane as a fraction of the viewport
+   * (e.g. `0.25` for 25%). Applied ONLY on a fresh session where no per-user
+   * pixel width exists in sessionStorage. After the user drags the splitter
+   * the resulting pixel value is persisted and used for subsequent mounts.
+   *
+   * Precedence (highest to lowest) for the mount-time initial width:
+   *   1. sessionStorage stored pixel width (user-dragged value persists)
+   *   2. `defaultLeftWidthFrac` × `window.innerWidth` (NEW — percentage default)
+   *   3. `defaultLeftWidthPx` (legacy pixel default; still required as fallback
+   *      for SSR / non-browser environments and as a hard floor when the
+   *      computed pixel value is below the minimum width)
+   *
+   * When omitted, ThreePaneLayout uses the legacy `defaultLeftWidthPx` path
+   * (current behavior preserved for any consumer not opting in).
+   *
+   * Note: `window.innerWidth` is used as the viewport reference because the
+   * layout's own bounding rect is not yet measurable on the first mount
+   * (the container ref is populated post-mount). The SpaarkeAi shell fills
+   * the viewport, so this is an accurate proxy in practice.
+   */
+  defaultLeftWidthFrac?: number;
+
+  /**
+   * (Task 117) Initial width for the RIGHT pane as a fraction of the viewport.
+   * See `defaultLeftWidthFrac` for semantics and precedence.
+   */
+  defaultRightWidthFrac?: number;
+
+  /**
    * Minimum width for the left pane in pixels.
    * @default 180
    */

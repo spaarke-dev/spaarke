@@ -632,8 +632,29 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                   centerPane={<WorkspacePane />}
                   rightPane={<ContextPaneController />}
                   storageKey="spaarke-ai-r2-shell"
+                  /*
+                   * Task 117 (Round 10, 2026-05-22) — Operator request: on a
+                   * brand-new session with no saved pane widths, distribute
+                   * the three panes as 25% / 50% / 25% of the viewport
+                   * (Assistant / Workspace / Context) rather than the fixed
+                   * 340/400 pixel defaults (which produced ~17/50/33 on a
+                   * typical 2000px viewport — wildly off the desired layout).
+                   *
+                   * The fixed pixel defaults are retained as a fallback for
+                   * SSR / non-browser environments and as a hard floor when
+                   * the computed pixel value is below the minimum width.
+                   *
+                   * Precedence on each cold mount (see resolveInitialWidth):
+                   *   1. sessionStorage stored pixel width (user-dragged value
+                   *      persists — drag a splitter and the pixel value wins
+                   *      on subsequent reloads)
+                   *   2. defaultLeftWidthFrac × window.innerWidth (NEW)
+                   *   3. defaultLeftWidthPx (legacy pixel default)
+                   */
                   defaultLeftWidthPx={340}
                   defaultRightWidthPx={400}
+                  defaultLeftWidthFrac={0.25}
+                  defaultRightWidthFrac={0.25}
                   minLeftWidthPx={240}
                   minRightWidthPx={240}
                   minCenterWidthPx={320}

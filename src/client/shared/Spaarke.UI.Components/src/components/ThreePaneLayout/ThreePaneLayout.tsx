@@ -247,6 +247,8 @@ export function ThreePaneLayout({
   rightPane,
   defaultLeftWidthPx = 280,
   defaultRightWidthPx = 360,
+  defaultLeftWidthFrac,
+  defaultRightWidthFrac,
   minLeftWidthPx = 180,
   minRightWidthPx = 200,
   minCenterWidthPx = 300,
@@ -291,6 +293,8 @@ export function ThreePaneLayout({
   } = useThreePaneLayout({
     defaultLeftWidthPx,
     defaultRightWidthPx,
+    defaultLeftWidthFrac,
+    defaultRightWidthFrac,
     minLeftWidthPx,
     minRightWidthPx,
     minCenterWidthPx,
