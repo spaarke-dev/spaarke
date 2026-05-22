@@ -527,17 +527,18 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
   // setEventDates so any consumer relying on context.eventDates (current
   // widget + future consumers) sees the same data.
   //
-  // Date-field priority mirrors the date-range filter dropdown default
-  // (sprk_duedate first), falling back to other available date fields so
-  // events without a due date still appear if they have a scheduled start
-  // or creation date.
+  // Date-field priority per operator (Round 13 follow-up, 2026-05-22):
+  // "the date highlight should be based on due date or if no due date then
+  // created date." sprk_duedate first, createdon as the only fallback.
+  // sprk_startdate is intentionally skipped — events without a due date
+  // anchor to when they were created, not when they were scheduled to
+  // begin (which can mislead the user about deadline visibility).
   const handleRecordsLoaded = React.useCallback(
     (records: IEventRecord[]) => {
       const counts = new Map<string, number>();
       for (const r of records) {
         const dateStr =
           r.sprk_duedate ||
-          (r as unknown as { sprk_startdate?: string }).sprk_startdate ||
           (r as unknown as { createdon?: string }).createdon;
         if (!dateStr) continue;
         const d = new Date(dateStr);
