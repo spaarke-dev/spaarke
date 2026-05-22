@@ -1,14 +1,15 @@
 /**
- * Components module exports
+ * @spaarke/events-components — components barrel
  *
- * Components for the Events Custom Page:
- * - CalendarSection: Date-based filtering with multi-month calendar (Task 061)
- * - GridSection: Events data grid with WebAPI fetching (Task 061)
- * - AssignedToFilter: User filter dropdown (Task 063)
- * - Filter toolbar components (Tasks 064-066)
+ * Components for Events + Tasks surfaces (standalone EventsPage + Calendar
+ * workspace widget). Each component lives in its own folder so the package
+ * remains tree-shake-friendly.
  */
 
-export { CalendarSection } from "./CalendarSection";
+export {
+  CalendarSection,
+  CalendarDrawer,
+} from "./CalendarSection";
 export type {
   CalendarSectionProps,
   CalendarFilterOutput,
@@ -17,6 +18,7 @@ export type {
   CalendarFilterClear,
   CalendarFilterType,
   IEventDateInfo,
+  CalendarDrawerProps,
 } from "./CalendarSection";
 
 export { GridSection } from "./GridSection";
@@ -31,8 +33,20 @@ export type { RecordTypeFilterProps, IEventTypeOption } from "./RecordTypeFilter
 export { StatusFilter, getStatusOptions, getActionableStatuses } from "./StatusFilter";
 export type { StatusFilterProps, IStatusOption } from "./StatusFilter";
 
-// CalendarDrawer removed in Task 096 - Calendar is now in Xrm.App.sidePanes
-// Use CalendarSidePane web resource instead
+export { ColumnFilterHeader } from "./ColumnFilterHeader";
+export type {
+  ColumnFilterHeaderProps,
+  ColumnFilterType,
+  ColumnFilterOption,
+} from "./ColumnFilterHeader";
+
+export { ColumnHeaderMenu } from "./ColumnHeaderMenu";
+export type {
+  ColumnHeaderMenuProps,
+  ColumnMenuFilterType,
+  ColumnMenuFilterOption,
+  SortDirection,
+} from "./ColumnHeaderMenu";
 
 export {
   ViewSelectorDropdown,
@@ -44,18 +58,3 @@ export type {
   ViewSelectorDropdownProps,
   SavedView,
 } from "./ViewSelectorDropdown";
-
-export { ColumnFilterHeader } from "./ColumnFilterHeader";
-export type {
-  ColumnFilterHeaderProps,
-  ColumnFilterType,
-  ColumnFilterOption,
-} from "./ColumnFilterHeader";
-
-export { ColumnHeaderMenu } from "./ColumnHeaderMenu";
-export type {
-  ColumnHeaderMenuProps,
-  ColumnFilterType as ColumnMenuFilterType,
-  ColumnFilterOption as ColumnMenuFilterOption,
-  SortDirection,
-} from "./ColumnHeaderMenu";

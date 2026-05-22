@@ -36,6 +36,7 @@
     "@spaarke/ai-outputs": "file:../../client/shared/Spaarke.AI.Outputs",
     "@spaarke/ai-widgets": "file:../../client/shared/Spaarke.AI.Widgets",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@types/dompurify": "^3.0.5",
     "d3-force": "^3.0.0",

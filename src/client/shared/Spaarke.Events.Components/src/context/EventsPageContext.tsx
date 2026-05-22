@@ -21,7 +21,7 @@ import {
   CalendarFilterSingle,
   CalendarFilterRange,
   IEventDateInfo,
-} from "../components/CalendarSection";
+} from "../components/CalendarSection/CalendarSection";
 
 // ---------------------------------------------------------------------------
 // Types

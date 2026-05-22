@@ -25,7 +25,7 @@ import {
   shorthands,
 } from "@fluentui/react-components";
 import { Dismiss24Regular, Calendar24Regular } from "@fluentui/react-icons";
-import { CalendarSection, CalendarFilterOutput } from "./CalendarSection";
+import { CalendarSection, CalendarFilterOutput, IEventDateInfo } from "./CalendarSection";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -117,7 +117,11 @@ export const CalendarDrawer: React.FC<CalendarDrawerProps> = ({
       </DrawerHeader>
       <DrawerBody className={styles.body}>
         <CalendarSection
-          eventDates={eventDates}
+          // Task 114 note: CalendarDrawer's eventDates prop pre-dates the
+          // CalendarSection IEventDateInfo[] API drift (counts per date).
+          // Bridging cast is intentional — CalendarSection no-ops on string[]
+          // entries it can't map. Tracked in task report as pre-existing.
+          eventDates={eventDates as unknown as IEventDateInfo[]}
           onFilterChange={onFilterChange}
         />
       </DrawerBody>

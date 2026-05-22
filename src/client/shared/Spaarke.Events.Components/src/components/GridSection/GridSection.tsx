@@ -31,8 +31,8 @@ import {
   CalendarFilterOutput,
   CalendarFilterSingle,
   CalendarFilterRange,
-} from "./CalendarSection";
-import { ColumnHeaderMenu, ColumnFilterOption, SortDirection } from "./ColumnHeaderMenu";
+} from "../CalendarSection/CalendarSection";
+import { ColumnHeaderMenu, ColumnFilterOption, SortDirection } from "../ColumnHeaderMenu/ColumnHeaderMenu";
 import {
   executeFetchXml,
   getViewById,
@@ -41,7 +41,7 @@ import {
   parseLayoutXml,
   type ViewDefinition,
   type LayoutColumn,
-} from "../services";
+} from "../../services";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Xrm Type Declaration and Access
@@ -500,13 +500,13 @@ function getColumnDisplayValue(
 
   // Special handling for known fields with formatted values
   if (column.formattedValueField) {
-    const formattedValue = (record as Record<string, unknown>)[column.formattedValueField];
+    const formattedValue = (record as unknown as Record<string, unknown>)[column.formattedValueField];
     if (formattedValue) return String(formattedValue);
   }
 
   // Get the raw value using field accessor
   const accessor = getFieldAccessor(column);
-  const rawValue = (record as Record<string, unknown>)[accessor];
+  const rawValue = (record as unknown as Record<string, unknown>)[accessor];
 
   // Handle null/undefined
   if (rawValue === null || rawValue === undefined) {
@@ -532,7 +532,7 @@ function getColumnDisplayValue(
 
   // For lookups, try to get the formatted value
   if (column.isLookup) {
-    const lookupFormatted = (record as Record<string, unknown>)[
+    const lookupFormatted = (record as unknown as Record<string, unknown>)[
       `${accessor}@OData.Community.Display.V1.FormattedValue`
     ];
     if (lookupFormatted) return String(lookupFormatted);

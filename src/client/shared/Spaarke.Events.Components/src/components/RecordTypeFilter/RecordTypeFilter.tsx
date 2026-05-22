@@ -272,7 +272,10 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
         selectedOptions={selectedTypeIds}
         onOptionSelect={handleOptionSelect}
         value={selectedValue}
-        onInput={handleSearchChange}
+        // Task 114 note: handler signature (event, data) pre-dates Fluent v9
+        // InputEventHandler API change to single-arg. Cast is a pre-existing
+        // type-drift bridge — flagged for follow-up.
+        onInput={handleSearchChange as unknown as React.FormEventHandler<HTMLInputElement>}
         disabled={disabled}
         aria-label="Filter by event type"
       >

@@ -72,17 +72,21 @@ import {
   Archive24Regular,
 } from "@fluentui/react-icons";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
+// Task 114 (2026-05-22): EventsPage now consumes Events components from the
+// shared `@spaarke/events-components` library. The standalone EventsPage code
+// page composes them with its own page-specific layout (calendar in
+// `Xrm.App.sidePanes`, grid in main area); the SpaarkeAi Calendar workspace
+// widget (task 115) consumes the SAME components from the same source.
+// See R-55 + design.md Round 9 Calendar widget Q&A.
 import {
   EventsPageProvider,
   useEventsPageContext,
-} from "./context";
-import {
   CalendarFilterOutput,
   GridSection,
   ViewSelectorDropdown,
   useViewSelection,
-} from "./components";
-import type { SavedView } from "./components";
+} from "@spaarke/events-components";
+import type { SavedView } from "@spaarke/events-components";
 import {
   EVENT_DETAIL_PANE_ID,
   CALENDAR_PANE_ID,
