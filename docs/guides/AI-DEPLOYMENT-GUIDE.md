@@ -2,9 +2,13 @@
 
 > **Version**: 3.0
 > **Created**: 2025-12-28
-> **Updated**: 2026-05-17
+> **Updated**: 2026-05-17 (Auth v2 callout added 2026-05-20)
 > **Last Reviewed**: 2026-05-17
 > **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1 + AI Platform Unification R2
+
+---
+
+> **⚠️ Auth v2 Update (2026-05-19, per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))**: For the auth-specific portion of AI deployment (App Service settings incl. `Graph__ManagedIdentity__Enabled=true`, Dataverse env vars incl. `sprk_TenantId`, MI Graph permission grants, webhook signing keys, Exchange ApplicationAccessPolicy for mailbox-scoped Mail.* operations), follow [`auth-deployment-setup.md`](auth-deployment-setup.md) as the canonical operator runbook. This guide remains canonical for AI-specific resources (Cosmos RBAC, AI Search admin keys, OpenAI deployments, Document Intelligence). The `AzureAd__ClientSecret` patterns below are pre-v2 reference; in production environments where MI is enabled, the BFF MI is the canonical identity for Graph + Dataverse outbound. `EmailProcessing__WebhookSecret` is deprecated — use `EmailProcessing__WebhookSigningKey` (HMAC-SHA256, 48-byte base64) per Phase C.
 
 ---
 
@@ -613,7 +617,7 @@ Email-to-Document automation converts Dataverse email records to documents store
 | Setting | Required | Description | Default |
 |---------|----------|-------------|---------|
 | `EmailProcessing__EnableWebhook` | Yes | Enable Dataverse webhook triggers | `true` |
-| `EmailProcessing__WebhookSecret` | Yes | Shared secret for webhook validation | — |
+| `EmailProcessing__WebhookSigningKey` | Yes | Shared secret for webhook validation | — |
 | `EmailProcessing__DefaultContainerId` | Yes | SPE Container ID for email storage | — |
 | `EmailProcessing__EnablePolling` | No | Enable backup polling for missed emails | `true` |
 | `EmailProcessing__AutoIndexToRag` | No | Auto-queue emails for RAG indexing | `false` |
@@ -935,7 +939,7 @@ curl https://{api-url}/healthz
 | Setting | Value | Description |
 |---------|-------|-------------|
 | `EmailProcessing__EnableWebhook` | `true` | Enable webhook processing |
-| `EmailProcessing__WebhookSecret` | (configured) | Webhook validation secret |
+| `EmailProcessing__WebhookSigningKey` | (configured) | Webhook validation secret |
 | `EmailProcessing__DefaultContainerId` | (configured) | SPE Container for emails |
 | `EmailProcessing__EnablePolling` | `true` | Enable backup polling |
 | `EmailProcessing__AutoIndexToRag` | `false` | Auto-queue for RAG (set to `true` for testing) |

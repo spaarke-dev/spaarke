@@ -554,14 +554,20 @@ These phases add Graph subscription monitoring, backup polling, and email-to-doc
 The `GraphSubscriptionManager` needs to know where to direct Graph webhook notifications.
 
 ```bash
+# Auth v2 (ADR-028) Phase C: HMAC-SHA256 signing key (48-byte base64)
+SIGNING_KEY=$(openssl rand -base64 48)
+
 az webapp config appsettings set \
   --resource-group spe-infrastructure-westus2 \
   --name spe-api-dev-67e2xz \
   --settings Communication__WebhookNotificationUrl="https://spe-api-dev-67e2xz.azurewebsites.net/api/communications/incoming-webhook" \
-                Communication__WebhookSecret="{random-secret-key}"
+             Communication__WebhookSigningKey="$SIGNING_KEY" \
+             Communication__WebhookClientState="{graph-subscription-clientState-secret}"
 ```
 
-Replace `{random-secret-key}` with a random 32+ character string (used to validate webhook notifications from Graph).
+**Auth v2 contract (Phase C, ADR-028)**: the `/api/communications/incoming-webhook` endpoint validates inbound Microsoft Graph notifications using HMAC-SHA256 over the request body, with the signing key from `Communication__WebhookSigningKey` (48-byte base64; generate with `openssl rand -base64 48`). The header `X-Signature-256` is compared via `CryptographicOperations.FixedTimeEquals` (constant-time). The Graph-native `clientState` body validation runs in addition (separate secret). For production, store both in Key Vault and reference via `@Microsoft.KeyVault(...)`. See [`auth-deployment-setup.md`](auth-deployment-setup.md) §3.
+
+> **Legacy note**: pre-v2 code used `Communication__WebhookSecret` (no HMAC). That setting is no longer consumed by the v2 webhook handler.
 
 ### Step 8: Seed Communication Account Records
 
@@ -866,7 +872,7 @@ Release 2 is designed for multi-tenant deployment. When promoting to higher envi
 | `Communication__ApprovedSenders` | `mailbox-central@spaarke.com` | Environment-specific mailboxes | Sender list changes per tenant/environment |
 | `Communication__WebhookNotificationUrl` | `https://spe-api-dev-67e2xz...` | Environment-specific webhook URL | BFF API URL differs per environment |
 | `Communication__ArchiveContainerId` | Dev SPE container GUID | Production SPE container GUID | Documents archived to environment-specific container |
-| `Communication__WebhookSecret` | Dev secret value | New random secret | Different per environment for security |
+| `Communication__WebhookSigningKey` | Dev HMAC key (48-byte base64) | New HMAC key per env (`openssl rand -base64 48`) | Auth v2 Phase C — HMAC-SHA256 signing key; different per env for security. Old `Communication__WebhookSecret` setting deprecated. |
 | `sprk_BffApiBaseUrl` environment variable | Dev BFF URL | Production BFF URL | PCF controls call BFF at different URLs per environment |
 
 ### No Tenant-Specific Hardcoding

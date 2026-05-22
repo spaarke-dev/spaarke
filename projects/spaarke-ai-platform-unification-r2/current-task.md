@@ -1,16 +1,16 @@
 # Current Task - Spaarke AI Platform Unification R2
 
 > **Project**: spaarke-ai-platform-unification-r2
-> **Status**: deployed-testing
-> **Active Wave**: Post-deployment testing — bug fixes
-> **Last Updated**: 2026-05-18
+> **Status**: deployed + merged + auth-v2 resolved
+> **Active Wave**: None — project complete; held open only as a worktree for follow-up cleanup if any
+> **Last Updated**: 2026-05-19
 
 ## Quick Recovery
 
-**Next Action**: Deploy SprkChat 401 fix to dev + re-verify chat session/playbook calls
-**Last Checkpoint**: 401 auth fix applied to SprkChat hooks (uncommitted, builds clean)
-**Context**: 86/86 tasks complete. Deployed to dev. Functional bugs being triaged.
-**Branch**: work/spaarke-ai-platform-unification-r2 (pushed to origin at 24b78f65)
+**Next Action**: Project is complete. Consider closing worktree (`git worktree remove`) or repurposing for follow-up work.
+**Last Checkpoint**: Worktree fast-forwarded to `b40dc3e6` (origin/master). Branch pushed.
+**Context**: 86/86 tasks complete. R2 work merged to master. Auth v2 project (separate worktree `spaarke-wt-spaarke-auth-v2-and-hardening`) also complete and merged — the 401 root cause is resolved structurally.
+**Branch**: work/spaarke-ai-platform-unification-r2 @ b40dc3e6 (== origin/master). Branch is fully merged; can be deleted when ready.
 
 ## Deployment Status
 
@@ -36,7 +36,10 @@
 ### Fixed (committed at 2beddfe8)
 8. **Pre-existing stubs replaced**: WorkingDocumentService SPE upload, CreateTaskNodeExecutor, OutputOrchestratorService, ScopeManagementService
 
-### In Progress (2026-05-18 — uncommitted)
+### Resolved (2026-05-19 — via Spaarke Auth v2 merge to master)
+- **401 on POST /api/ai/chat/sessions and GET /api/ai/chat/playbooks** — resolved structurally by the Spaarke Auth v2 + Hardening project (separate worktree). The function-based auth contract eliminates the stale-token snapshot pattern that was the root cause. SprkChat hooks (`useChatSession`, `useChatPlaybooks`, `useChatContextMapping`) now accept `authenticatedFetch` from `@spaarke/auth` — fresh Bearer token per call + 401 retry + silent MSAL refresh. The interim patch prototyped here on 2026-05-18 was discarded; auth v2 supersedes it. See `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` for the design and ADR-028 for the canonical architecture.
+
+### Earlier (2026-05-18 — superseded by auth v2)
 - **401 on POST /api/ai/chat/sessions and GET /api/ai/chat/playbooks** — fix applied, awaiting commit + deploy.
   - **Root cause (CONFIRMED via App Insights)**: Expired access token. `CopilotAuth` warning trace at `2026-05-18T23:17:26Z` shows `IDX10223: Lifetime validation failed. The token is expired. ValidTo (UTC): '5/18/2026 3:29:02 PM', Current time (UTC): '5/18/2026 11:17:26 PM'` — token had been expired for nearly 8 hours when the request arrived. The page had been idle long enough for the cached token to expire, and SprkChat's hooks (`useChatSession`, `useChatPlaybooks`, `useChatContextMapping`) used raw `fetch()` with the `accessToken` React-prop captured at render time — no path to refresh on 401, no 401 retry. BFF auth config was fine all along (audience `api://1e40baad-...` and tenant `a221a95e-...` both match the token's claims).
   - **Why the auth provider didn't refresh proactively**: `useAiSession().token` exposes whatever token was cached when the AuthProvider initialised. React state doesn't actively poll for expiry — the stale token sits in the prop until something forces a refresh. `@spaarke/auth`'s `authenticatedFetch` is what forces it (calls `provider.getAccessToken()` per-request + clears cache + retries 3× on 401).

@@ -32,6 +32,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | [DEPLOYMENT-VERIFICATION-GUIDE.md](DEPLOYMENT-VERIFICATION-GUIDE.md) | Consolidated post-deploy verification: BFF API, PCF, code pages, web resources, infrastructure | 2026-04-05 | 2026-04-05 | New |
 | [CONFIGURATION-MATRIX.md](CONFIGURATION-MATRIX.md) | Complete reference of all BFF API configuration settings: sections, defaults, locations, Key Vault secrets | 2026-04-05 | 2026-04-05 | New |
 | [SECRET-ROTATION-PROCEDURES.md](SECRET-ROTATION-PROCEDURES.md) | Key Vault secret rotation procedures | 2026-04-05 | — | — |
+| [auth-deployment-setup.md](auth-deployment-setup.md) | **Spaarke Auth v2 (ADR-028) operator runbook** — new-environment setup: Dataverse env vars + App Service settings + Azure AD MI permissions + Dataverse Application User + Exchange ApplicationAccessPolicy (§7) + verification smoke tests | 2026-05-19 | 2026-05-19 | Production |
 | [SPAARKE-SELF-SERVICE-USER-REGISTRATION.md](SPAARKE-SELF-SERVICE-USER-REGISTRATION.md) | Self-service user registration system setup | 2026-04-04 | — | Phase 1 |
 | [DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md](DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md) | M365 Declarative Agent build and deployment | 2026-03-26 | — | Validated |
 
@@ -125,7 +126,7 @@ This directory contains practical guides for deploying, configuring, administeri
 
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
-| [DATAVERSE-AUTHENTICATION-GUIDE.md](DATAVERSE-AUTHENTICATION-GUIDE.md) | Definitive guide for Dataverse authentication | 2026-03-09 | — | — |
+| [DATAVERSE-AUTHENTICATION-GUIDE.md](DATAVERSE-AUTHENTICATION-GUIDE.md) | ⚠️ Pre-v2 guide describing `ServiceClient` + ClientSecret patterns. For Auth v2 canonical Dataverse access (MI via `DefaultAzureCredential` per ADR-028), see [auth-deployment-setup.md](auth-deployment-setup.md). This guide is retained for local-dev fallback patterns. | 2026-03-09 | 2026-05-20 | Legacy (pre-v2) |
 | [DATAVERSE-MCP-INTEGRATION-GUIDE.md](DATAVERSE-MCP-INTEGRATION-GUIDE.md) | Dataverse MCP server setup, 12 tools, usage patterns, troubleshooting | 2026-04-06 | 2026-04-06 | Current |
 | [DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md](DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md) | Creating and updating Dataverse schema | 2026-04-05 | — | — |
 | [HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md](HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md) | SPE container type and container provisioning | 2026-04-05 | — | — |

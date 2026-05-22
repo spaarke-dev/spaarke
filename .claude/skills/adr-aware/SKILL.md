@@ -34,11 +34,12 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 |---------------|-------------------|---------------|
 | **API Endpoint** | `*Endpoints.cs`, `*Handler.cs`, `Program.cs` routes | ADR-001, ADR-008, ADR-010 |
 | **AI Endpoint/Service** | `Api/Ai/*`, `*DocumentIntelligence*`, `*Analysis*`, `*Ai*` | ADR-013, ADR-015, ADR-016, ADR-018, ADR-019, ADR-020 |
-| **Authorization** | `*Authorization*.cs`, `*Filter.cs`, `*Policy*.cs` | ADR-003, ADR-008 |
+| **Authorization** | `*Authorization*.cs`, `*Filter.cs`, `*Policy*.cs` | ADR-003, ADR-008, **ADR-028** |
+| **Auth Library / Client Bootstrap** | `@spaarke/auth/**`, `*authInit*.ts`, `useAuth` consumers, `initAuth()` callers, `authenticatedFetch` callers | **ADR-028** |
 | **Caching** | `*Cache*.cs`, `IDistributedCache`, `IMemoryCache` | ADR-009 |
 | **Dataverse Plugin** | `*Plugin.cs` in plugins folder | ADR-002 |
-| **Graph/SPE Integration** | `*Spe*.cs`, `*Graph*.cs`, `*Drive*.cs` | ADR-007 |
-| **PCF Control** | `*.tsx` in pcf/, `ControlManifest.Input.xml` | ADR-006, ADR-011, ADR-012, ADR-021 |
+| **Graph/SPE Integration** | `*Spe*.cs`, `*Graph*.cs`, `*Drive*.cs`, `GraphClientFactory.cs` | ADR-007, **ADR-028** |
+| **PCF Control** | `*.tsx` in pcf/, `ControlManifest.Input.xml` | ADR-006, ADR-011, ADR-012, ADR-021, **ADR-028** (for any PCF calling BFF) |
 | **Webresource** | `*.js` in webresources/ | ADR-006 |
 | **DI Registration** | `Program.cs` DI section, `Add*` extension methods | ADR-010 |
 | **Background Worker** | `*Worker.cs`, `*Service.cs` implementing `BackgroundService` | ADR-001, ADR-004 |
@@ -90,7 +91,7 @@ BEFORE writing any code:
 | API Endpoint | `.claude/constraints/api.md` | `.claude/patterns/api/` | ADR-001, 008, 010 |
 | PCF Control | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/` | ADR-006, 011, 012, 021 |
 | Plugin | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/` | ADR-002 |
-| Auth/OAuth | `.claude/constraints/auth.md` | `.claude/patterns/auth/` | ADR-003, 008 |
+| Auth/OAuth | `.claude/constraints/auth.md` | `.claude/patterns/auth/` (incl. `spaarke-sso-binding.md`) | ADR-003, 008, **028** (canonical) |
 | Caching | `.claude/constraints/data.md` | `.claude/patterns/caching/` | ADR-009 |
 | AI Features | `.claude/constraints/ai.md` | `.claude/patterns/ai/` | ADR-013, 014, 015, 016 |
 | Background Jobs | `.claude/constraints/jobs.md` | — | ADR-001, 004, 017 |
@@ -167,6 +168,10 @@ Reference this table for common constraints. The source of truth is:
 | ADR-019 | API Errors | ProblemDetails standards | Ad-hoc error payloads/status codes |
 | ADR-020 | Versioning | Version APIs/jobs/contracts | Breaking changes without version bump |
 | ADR-021 | Fluent UI v9 Design | Use Fluent v9; dark mode; tokens | Hard-coded colors, Fluent v8 imports |
+| ADR-022 | PCF Platform Libraries | PCF uses React 16/17 (platform); Code Pages use React 19 (bundled) | `createRoot` in PCF; `useId()` in PCF |
+| ADR-026 | Code Page Build Standard | Vite + `vite-plugin-singlefile` + React 19 | Webpack/CRA for new Code Pages; no `viteSingleFile` |
+| ADR-027 | Subscription Isolation | Managed solutions for prod; env-separated subs | Unmanaged in prod; ad-hoc resource groups |
+| ADR-028 | Spaarke Auth Architecture (v2) | `useAuth()` + `authenticatedFetch`; MI for outbound; HMAC webhooks; tenant-specific authority | Raw `fetch(... Authorization: Bearer ...)`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, 6-strategy cascade, `ClientSecretCredential` for Graph when MI available, `/common` or `/organizations` authority |
 
 ---
 

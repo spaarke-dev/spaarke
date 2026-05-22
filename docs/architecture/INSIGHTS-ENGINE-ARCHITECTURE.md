@@ -1008,7 +1008,7 @@ In Bicep, the Function's UAMI gets role assignments to each target resource (Ser
 | #042 — Managed identity for Dataverse outbound | Same | Re-fetch in `InsightsSyncFunction` uses `DefaultAzureCredential` |
 | #044 — HMAC-SHA256 webhook signature validation | Ship Phase 1 with `clientState`; HMAC drops in when #044 lands | Copy validator code; do not fork |
 | #047 — Non-`common` `TenantId` in template | Insights Engine adopts the fix from day one | Per-tenant explicit TenantId in every Bicep deployment |
-| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Active auth design canon until ADR-027 lands | Engine auth design must be consistent with this canon |
+| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Pre-v2 audit doc; canonical auth ADR is now [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Engine auth design must be consistent with this canon |
 
 ---
 
@@ -1380,7 +1380,7 @@ These curated knowledge documents informed the Engine's design and are reference
 | [ADR-013](../adr/ADR-013-ai-architecture.md) | AI architecture; Engine is an extension of this |
 | [ADR-016](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md) | Rate limiting on Insight endpoints |
 | [ADR-019](../adr/ADR-019-problemdetails.md) | ProblemDetails error envelope |
-| ADR-027 (forthcoming) | Will codify auth design canon currently in `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`; Engine auth design must remain consistent |
+| [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Canonical Spaarke Auth v2 architecture (accepted 2026-05-19); Engine auth design must remain consistent |
 
 ### 17.6 Other Spaarke projects coordinating with this Engine
 
@@ -1511,13 +1511,13 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 
 | Decision | Choice | Rationale | ADR |
 |---|---|---|---|
-| Trust boundary | Intake Function — only external entry — D-22 | Dataverse native SBus integration is SAS-only. | ADR-027 (pending) |
-| Dataverse → Intake | `clientState` (transitional) → HMAC-SHA256 (target, Phase C #044). **Copy validator from BFF** — D-23 | Documented Dataverse webhook auth options. | ADR-027 (pending) |
-| All other hops | Managed Identity + Azure RBAC (UAMI). Zero SAS at target — D-24 | Transitional `clientState` is the only secret; gone post #044. | ADR-027 (pending) |
-| Non-webhook endpoints on Function App | `Microsoft.Identity.Web.AddMicrosoftIdentityWebApi`. NOT `@spaarke/auth` (client-side only) — D-25 | Canonical .NET inbound JWT validator. | ADR-027 (pending) |
-| TenantId | Explicit GUID, never `common` or `organizations` — D-26 | Per-tenant deployment threat model. Coordinate with Phase C #047. | ADR-027 (pending) |
-| Outbound | `DefaultAzureCredential` only. No `ClientSecretCredential` in new Functions — D-27 | Aligns with Phase C #041 + #042. | ADR-027 (pending) |
-| JWT validation | Local (no auth-service hop) — D-28 | `Microsoft.Identity.Web` validates locally with cached AAD metadata; extra hop adds latency without security benefit. | ADR-027 (pending) |
+| Trust boundary | Intake Function — only external entry — D-22 | Dataverse native SBus integration is SAS-only. | ADR-028 |
+| Dataverse → Intake | `clientState` (transitional) → HMAC-SHA256 (target, Phase C #044). **Copy validator from BFF** — D-23 | Documented Dataverse webhook auth options. | ADR-028 |
+| All other hops | Managed Identity + Azure RBAC (UAMI). Zero SAS at target — D-24 | Transitional `clientState` is the only secret; gone post #044. | ADR-028 |
+| Non-webhook endpoints on Function App | `Microsoft.Identity.Web.AddMicrosoftIdentityWebApi`. NOT `@spaarke/auth` (client-side only) — D-25 | Canonical .NET inbound JWT validator. | ADR-028 |
+| TenantId | Explicit GUID, never `common` or `organizations` — D-26 | Per-tenant deployment threat model. Coordinate with Phase C #047. | ADR-028 |
+| Outbound | `DefaultAzureCredential` only. No `ClientSecretCredential` in new Functions — D-27 | Aligns with Phase C #041 + #042. | ADR-028 |
+| JWT validation | Local (no auth-service hop) — D-28 | `Microsoft.Identity.Web` validates locally with cached AAD metadata; extra hop adds latency without security benefit. | ADR-028 |
 
 ### 19.7 Identity resolution, privilege, packagability
 
@@ -1844,7 +1844,7 @@ Phase 1 ships the Precedent layer architecture + scaffold (D-A26, D-A27). Phase 
 | #042 — MI for Dataverse outbound | Same | Re-fetch in `InsightsSyncFunction` uses `DefaultAzureCredential` |
 | #044 — HMAC-SHA256 webhook validation | Ship Phase 1 with `clientState`; HMAC drops in when #044 lands | Copy the same validator code; do not fork |
 | #047 — Non-`common` `TenantId` in template | Insights Engine Function appsettings adopt the fix from day one | Per-tenant explicit TenantId in every Bicep deployment |
-| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Active auth design canon until ADR-027 lands | Engine auth design must remain consistent |
+| `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` | Pre-v2 audit doc; canonical auth ADR is now [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Engine auth design must remain consistent |
 
 ### 21.7 LAVERN coordination items (from [`decisions.md`](../../projects/ai-spaarke-insights-engine-r1/decisions.md))
 
@@ -1885,24 +1885,37 @@ This section catalogs the architecturally significant options that are *not* par
 
 ### 22.2 Extracting the Engine from the BFF (`Sprk.Insights.Api`)
 
-**Status**: Not V1; trigger-driven Phase 3 candidate.
+**Status**: Not V1; governed by refined ADR-013 (2026-05-20). The trigger criteria below remain as useful evaluation signals, but extraction is not gated on them alone — it is gated on **all four exception criteria in refined ADR-013** being met, with a successor ADR amending ADR-013 before standing the service up.
 
-**What it would be**: a separate ASP.NET Core Minimal API service hosting `InsightsResolverService`, `Insights Agent`, the tool handlers, `LiveFactResolverService`, `IInsightGraph` consumers, and `IInsightArtifactStore`. Same auth model, same envelope contract, called by BFF and other surfaces (including the MCP server in §15) over HTTPS.
+**Authoritative policy**: see [refined ADR-013](../adr/ADR-013-ai-architecture.md) (Decision section). The categorical "no separate AI microservice" rule has been replaced with explicit technical criteria. This section catalogs the Engine-specific evaluation signals — it does NOT override ADR-013.
 
-**Why it might be needed**:
+**Evidence base**: [BFF AI Extraction Assessment 2026-05-20](../assessments/bff-ai-extraction-assessment-2026-05-20.md) examined extraction across all AI work in the BFF (not just the Engine) and concluded "keep in BFF" on operational grounds (latency budgets, transactional coupling, 100% of streaming endpoints are AI). The Engine inherits that conclusion: synthesis/agent code stays in BFF; only Functions for sync/extraction and (possibly) the MCP server in §15 are candidates for separate deployment.
 
-- The BFF is acknowledged to be evolving toward monolith. Adding the Engine's surface area (resolver, agent, tools, fact resolver, graph consumer, artifact store consumer) accelerates that trajectory.
-- The AI workload has very different latency / throughput characteristics than CRUD endpoints — independent scaling is valuable once volume justifies it.
+**What extraction would be (if it ever happens)**: a separate ASP.NET Core Minimal API service hosting `InsightsResolverService`, `Insights Agent`, the tool handlers, `LiveFactResolverService`, `IInsightGraph` consumers, and `IInsightArtifactStore`. Same auth model, same envelope contract, called by BFF and other surfaces (including the MCP server in §15) over HTTPS.
+
+**Why it might be considered** (evaluation signals — none are sufficient on their own):
+
+- The BFF is structurally AI-dominant (per 2026-05-20 assessment: 69% of `Services/` LOC). Adding the Engine's surface area accelerates that trajectory.
+- The AI workload has different latency / throughput characteristics than CRUD endpoints — independent scaling has theoretical appeal.
 - A dedicated service makes the MCP server (§15) cleaner — it consumes the Insights API directly rather than embedding in the BFF process.
 
-**Trigger criteria** (any one):
+**Engine-specific operational triggers** (useful signals, but extraction additionally requires meeting ADR-013's exception criteria):
 
 - BFF p95 latency on non-AI endpoints degrades by ≥ 30% after Phase 2 question catalog expansion.
 - Engine workload accounts for ≥ 40% of BFF compute spend.
 - A new client surface (Office Add-in, external partner API) needs Engine access without the rest of BFF — extracting is cheaper than building an adapter.
 - The MCP server (§15) graduates to its own deployment and the BFF-co-hosted shape becomes architecturally awkward.
 
-**Cost**: one more service to operate, monitor, and deploy. The auth model already supports the multi-service shape (UAMI, OBO, etc.), so the marginal complexity is bounded.
+**Why these triggers alone are not sufficient** (per 2026-05-20 assessment):
+
+- Engine synthesis has a <500ms TTFB requirement against BFF state — violating refined ADR-013 exception criterion #1 (no latency coupling)
+- Streaming + retroactive safety annotation + Cosmos session writes require single-process transactional coupling — violating exception criterion #2
+- The Engine's tool framework reuses `IChatClient`, `IRagService`, `IPlaybookService`, capability routing, safety perimeter — duplicating these in a separate service violates exception criterion #4 (no component duplication)
+- The 20 inbound CRUD→AI dependencies (Finance, Workspace, Jobs handlers) would still need to be addressed via facades regardless
+
+**What this means for the Engine**: V1 lives in the BFF. The MCP server (§15) is the natural FIRST extraction surface IF/WHEN any surface is extracted, because it has favorable shape (thin facade, external-facing, no internal latency coupling). Wholesale Engine extraction remains a possibility but requires the refined ADR-013 exception criteria to be met with documented evidence — not just one of the operational triggers above firing.
+
+**Cost (if extraction is ever pursued)**: one more service to operate, monitor, and deploy. The auth model already supports the multi-service shape (UAMI, OBO, etc.), so the marginal complexity is bounded. The 2026-05-20 assessment quantifies refactoring cost at ~3–4 weeks for the 20 inbound CRUD→AI dependencies that would have to be cleaned up before extraction is safe — work that the BFF remediation project's Outcome E is already addressing in-process.
 
 ### 22.3 Cross-customer benchmark Insights
 
@@ -2005,7 +2018,7 @@ This requires the production metrics infrastructure to be running and the corpus
 - [ADR-013 — AI Architecture](../adr/ADR-013-ai-architecture.md)
 - [ADR-016 — AI Cost, Rate Limit, and Backpressure](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md)
 - [ADR-019 — ProblemDetails](../adr/ADR-019-problemdetails.md)
-- ADR-027 (forthcoming) — Will codify the auth canon currently in [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)
+- [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Canonical Spaarke Auth v2 architecture (accepted 2026-05-19). Engine auth design must remain consistent.
 
 ### 23.4 Knowledge base (researcher-authored, 2026-05-19)
 

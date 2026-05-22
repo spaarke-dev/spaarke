@@ -140,7 +140,7 @@ Set once per Dataverse environment after solution import. No hardcoded values sh
 | `sprk_BffApiBaseUrl` | BFF API base URL |
 | `sprk_BffApiAppId` | BFF API OAuth audience |
 | `sprk_MsalClientId` | UI MSAL client ID for Entra ID sign-in |
-| `sprk_TenantId` | Entra ID tenant ID |
+| `sprk_TenantId` | Entra ID tenant ID. **v2 requirement (ADR-028)**: `initAuth()` reads this FIRST; Xrm frame-walk is fallback only. See [`auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §3. |
 | `sprk_AzureOpenAiEndpoint` | Azure OpenAI endpoint |
 | `sprk_ShareLinkBaseUrl` | Base URL for document share links |
 | `sprk_SharePointEmbeddedContainerId` | SPE Container ID |

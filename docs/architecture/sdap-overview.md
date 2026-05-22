@@ -292,11 +292,18 @@ All async work runs through Azure Service Bus with a single `ServiceBusJobProces
 
 ### Authentication & Authorization
 
+> **Canonical**: [ADR-028 Spaarke Auth Architecture (v2)](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) + [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) (operator runbook with §7 Exchange ApplicationAccessPolicy). Client surfaces use `useAuth()` + `authenticatedFetch` from `@spaarke/auth`. Server outbound (Graph + Dataverse app-only) uses `DefaultAzureCredential` when `Graph__ManagedIdentity__Enabled=true`.
+
 | Concern | Implementation | Reference |
 |---------|---------------|-----------|
-| **JWT Validation** | Azure AD via `Microsoft.Identity.Web` | Every endpoint |
+| **Client contract** | `useAuth()` + `authenticatedFetch` from `@spaarke/auth` (function-based, ADR-028) | All PCFs, Code Pages, Office Add-ins |
+| **JWT Validation** | Azure AD via `Microsoft.Identity.Web` (`AddMicrosoftIdentityWebApi`) | Every endpoint |
 | **OBO Token Exchange** | User token → Graph token (Redis-cached) | SPE file operations |
+| **App-only Graph** | `DefaultAzureCredential` (Managed Identity) per ADR-028 | Background jobs, system ops |
+| **Named API Key Schemes** | `BuilderAdminApiKey`, `RagApiKey` with constant-time compare (Phase C) | Inbound integrations |
+| **HMAC Webhook Validation** | HMAC-SHA256 on inbound Graph + Dataverse webhooks (Phase C) | Communication + Email modules |
 | **Endpoint Filters** | Per-resource authorization (not global middleware) | ADR-008 |
+| **Audit Middleware** | Per-request enrichment with `oid`, `appid`, `obo`, `tenantId`, `correlationId` (Phase C) | `Middleware/AuditEnrichmentMiddleware.cs` |
 | **Authorization Policies** | 26 named policies (file ops, container ops, admin) | Program.cs |
 | **Endpoint Filters** | 12 filters (DocumentAuth, AiAuth, FinanceAuth, OfficeAuth, etc.) | `Api/Filters/` |
 
@@ -485,6 +492,7 @@ All background work uses a standard schema. Handlers must be idempotent (at-leas
 | **ADR-007** | SpeFileStore Facade | All Graph calls through `SpeFileStore`. No `GraphServiceClient` injection outside facade. |
 | **ADR-008** | Endpoint Filters for Auth | No global middleware for resource authorization. Per-endpoint filters only. |
 | **ADR-009** | Redis-First Caching | No `IMemoryCache` except metadata. No hybrid L1/L2 without profiling proof. |
+| **ADR-028** | Spaarke Auth Architecture (v2) | Client: `useAuth()` + `authenticatedFetch` from `@spaarke/auth`. Server: `DefaultAzureCredential` (MI) for Graph + Dataverse app-only. HMAC webhook signing. Named API key schemes. Tenant-specific MSAL authority (INV-3/INV-6). |
 | **ADR-010** | DI Minimalism | Register concretes. Use feature modules (`AddXxxModule()`). |
 | **ADR-013** | AI Architecture | Extend BFF (no separate AI service). Endpoint filters for AI auth. Rate limit all AI endpoints. |
 | **ADR-015** | Data Governance | Log identifiers only — never document content, prompts, or model responses. |

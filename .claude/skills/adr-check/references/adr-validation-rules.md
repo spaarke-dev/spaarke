@@ -517,9 +517,58 @@ Write-Host "=== Check Complete ==="
 
 ---
 
-## ADR-013 and Later (Read the ADRs)
+## ADRs Without Inline Patterns (Read the ADRs)
 
-The rules above include grep/pattern checks for ADR-001–ADR-012. For ADR-013+ (and any ADR not covered by a pattern), validate by reading the current ADR index and the relevant ADR document(s):
+For any ADR not covered by an inline pattern in this file (currently ADR-013 through ADR-027), validate by reading the current ADR index and the relevant ADR document(s):
 
 - Source of truth: `docs/adr/README-ADRs.md`
-- Validate ADR-013–ADR-020 by checking the specific constraints and checklists inside each ADR.
+- Validate by checking the specific constraints and checklists inside each ADR.
+
+---
+
+## ADR-028: Spaarke Auth Architecture (v2)
+
+**Canonical**: `.claude/adr/ADR-028-spaarke-auth-architecture.md`. Function-based client contract (`useAuth()` + `authenticatedFetch` from `@spaarke/auth`); managed identity for server outbound; HMAC webhook signing; named API key auth schemes; tenant-specific MSAL authority.
+
+### Pattern checks (grep)
+
+```powershell
+# VIOLATION: Raw fetch with manual Authorization header (must use authenticatedFetch)
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx -Exclude "*.test.*","*.spec.*" |
+  Select-String -Pattern 'fetch\([^)]*headers[^)]*Authorization[^)]*Bearer' | Select-Object -First 200
+
+# VIOLATION: Retired token-transport symbols
+Get-ChildItem -Recurse -Path src -Include *.ts,*.tsx,*.js |
+  Select-String -Pattern 'tokenBridge|__SPAARKE_BFF_TOKEN__|BridgeStrategy|XrmStrategy|MsalSilentStrategy|MsalRedirectStrategy|BridgeAuthStrategy|SessionStorageStrategy|__spaarke_bff_token_cache__' |
+  Select-Object -First 200
+
+# VIOLATION: PublicClientApplication instantiated outside @spaarke/auth
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx |
+  Select-String -Pattern 'new PublicClientApplication\(' |
+  Where-Object { $_.Path -notmatch 'shared\\Spaarke\.Auth\\' } | Select-Object -First 200
+
+# CHECK: GraphClientFactory uses DefaultAzureCredential (canonical) when MI enabled
+Select-String -Path src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs -Pattern 'DefaultAzureCredential|ManagedIdentityCredential'
+
+# VIOLATION: ClientSecretCredential for app-only Graph (use DefaultAzureCredential when MI available)
+Get-ChildItem -Recurse -Path src/server -Include *.cs |
+  Select-String -Pattern 'new ClientSecretCredential' |
+  Where-Object { $_.Path -notmatch 'OBO|onBehalfOf' } | Select-Object -First 200
+
+# VIOLATION: MSAL authority /common or /organizations (INV-3 / INV-6)
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx,*.js |
+  Select-String -Pattern 'authority.*/(common|organizations)' | Select-Object -First 200
+
+# VIOLATION: accessToken typed as string prop (function-based contract retired this)
+Get-ChildItem -Recurse -Path src/client -Include *.ts,*.tsx |
+  Select-String -Pattern 'accessToken:\s*string|token:\s*string' |
+  Where-Object { $_.Path -notmatch 'shared\\Spaarke\.Auth\\' -and $_.Path -notmatch '\.test\.|\.spec\.' } | Select-Object -First 200
+```
+
+### Expected exemptions (D-AUTH-7 sites — NOT violations if justified inline)
+- SSE / EventSource setup where token must be in URL query (browser EventSource doesn't support headers)
+- XHR upload where the SDK requires `accessToken` injection at construction
+- Dataverse-direct Xrm.WebApi calls (different auth path from BFF)
+- Third-party SDK constructors that require a token string
+
+A finding is **only** a violation if the code site is NOT in the documented D-AUTH-7 exception list AND does not have an inline justification comment explaining why.

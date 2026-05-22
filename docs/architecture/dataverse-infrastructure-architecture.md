@@ -47,7 +47,7 @@ The key design decision is the **separation of data access from authorization de
 3. On cache miss: delegates to `DataverseAccessDataSource`
 4. `DataverseAccessDataSource` determines auth mode:
    - If `userAccessToken` is provided: performs OBO token exchange via MSAL to get Dataverse token
-   - If null: uses service principal (ClientSecretCredential or DefaultAzureCredential)
+   - If null: uses service principal — `DefaultAzureCredential` (canonical per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md); managed identity in Azure when `Graph__ManagedIdentity__Enabled=true`) with `ClientSecretCredential` fallback for local dev only
 5. Maps Azure AD Object ID to Dataverse `systemuserid` via OData query
 6. Queries document access by attempting direct record retrieval (success = Read access)
 7. Queries team memberships and security roles via OData association endpoints

@@ -93,5 +93,3 @@ If the popup appears, check the `authority:` value in the log:
 - [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../../AUDIT-FINDINGS-AUTH-SYSTEM.md) — original audit doc (design rationale for v2)
 - [`xrm-webapi-vs-bff-auth.md`](xrm-webapi-vs-bff-auth.md) — when to bootstrap vs skip
 - [`bff-url-normalization.md`](bff-url-normalization.md) — URL construction helper
-- [`.claude/archive/2026-05-19/DEPRECATED-msal-client.md`](../../archive/2026-05-19/DEPRECATED-msal-client.md) — pre-v2 MSAL client doc (archived)
-- [`.claude/archive/2026-05-19/DEPRECATED-spaarke-auth-initialization.md`](../../archive/2026-05-19/DEPRECATED-spaarke-auth-initialization.md) — pre-v2 bootstrap doc (archived)

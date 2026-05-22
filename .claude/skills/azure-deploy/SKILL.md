@@ -97,8 +97,13 @@ az account show --query "{Name:name, Id:id}" -o table
 | `docintel-api-key` | Document Intelligence key |
 | `redis-connection` | Redis connection string |
 | `appinsights-key` | Application Insights key |
+| `BFF-API-ClientSecret` | BFF app registration client secret — retained for OBO only (Graph/Dataverse app-only use MI per ADR-028) |
+| `Communication-WebhookSigningKey` | HMAC-SHA256 key for Communication webhooks (48-byte base64) |
+| `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key for Email webhooks (48-byte base64) |
 
 **Full environment reference**: See `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md` → Environment Configuration
+**Auth-specific runbook**: See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) — 10 sections including §5 MI Graph permission grants, §6 Dataverse Application User, §7 Exchange ApplicationAccessPolicy
+**Canonical auth ADR**: [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — function-based contract, MI for outbound, HMAC webhooks, named API keys
 
 ---
 

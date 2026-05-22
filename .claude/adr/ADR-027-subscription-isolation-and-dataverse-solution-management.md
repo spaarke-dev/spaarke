@@ -2,8 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Proposed |
+| **Status** | Accepted |
 | **Date** | 2026-03-13 |
+| **Accepted** | 2026-05-19 (in production: platform.bicep / customer.bicep split deployed) |
 
 ## Decisions
 

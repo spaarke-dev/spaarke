@@ -90,7 +90,9 @@ Both are listed in `knownClientApplications` on the BFF API app (`1e40baad-e065-
 
 **Historical reason**: PCF controls were the original SPA client and used the Dataverse App registration with a redirect URI pointing to the Dataverse org URL. When Code Pages were introduced, they required their own app registration because SPA redirect URIs must differ per registration — Code Pages run in a different context (HTML web resources loaded as iframes) and needed separate redirect URI configuration.
 
-**Future**: The planned `@spaarke/auth` shared package will standardize token acquisition across PCF and Code Pages, potentially allowing consolidation to a single app registration.
+**v2 update (ADR-028)**: `@spaarke/auth` standardizes token acquisition across PCF, Code Pages, and Office Add-ins via `useAuth()` / `authenticatedFetch`. Two separate client app registrations remain because PCF and Code Pages have different redirect URI requirements; consolidation requires SPA redirect-URI engineering and is not currently scheduled.
+
+**For new-environment setup, see**: [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) — 10-section operator runbook including §3 App Service settings, §5 MI Graph permission grants, §6 Dataverse Application User, §7 Exchange ApplicationAccessPolicy (required when Email/Communication modules enabled).
 
 ---
 
@@ -441,15 +443,15 @@ This is the complete flow for AI Summary/Analysis authorization:
    → Return 403 to PCF
 ```
 
-### MSAL Configuration for OBO
+### MSAL Configuration for OBO (delegated only)
 
 **Code Location**: `src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs`
 
 ```csharp
-// Build confidential client application
+// Build confidential client application — OBO requires a confidential client per OAuth spec
 var app = ConfidentialClientApplicationBuilder
     .Create(clientId: "1e40baad-e065-4aea-a8d4-4b7ab273458c")
-    .WithClientSecret(clientSecret: API_CLIENT_SECRET)  // l8b8Q~J...
+    .WithClientSecret(clientSecret: API_CLIENT_SECRET)  // BFF-API-ClientSecret from KV; retained for OBO only
     .WithAuthority(authority: "https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2")
     .Build();
 
@@ -461,6 +463,8 @@ var result = await app.AcquireTokenOnBehalfOf(
 
 string dataverseToken = result.AccessToken;
 ```
+
+> **Auth v2 (ADR-028) note**: This `ConfidentialClientApplication` + `AcquireTokenOnBehalfOf` pattern applies ONLY to OBO exchange (acting on behalf of a user). For **app-only** Dataverse calls (background jobs, system operations), v2 mandates `DefaultAzureCredential` (managed identity) — the BFF App Service's MI is the Dataverse Application User. See [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §6 for MI registration as Dataverse Application User.
 
 ### Required Azure AD Permissions
 

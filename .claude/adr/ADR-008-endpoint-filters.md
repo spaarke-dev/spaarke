@@ -88,6 +88,7 @@ app.UseMiddleware<DocumentSecurityMiddleware>();
 | [ADR-001](ADR-001-minimal-api.md) | Single middleware pipeline for cross-cutting only |
 | [ADR-003](ADR-003-authorization-seams.md) | Authorization service and rules pattern |
 | [ADR-019](ADR-019-problemdetails.md) | Return ProblemDetails on 401/403 |
+| [ADR-028](ADR-028-spaarke-auth-architecture.md) | Named API key schemes (`BuilderAdminApiKey`, `RagApiKey`), HMAC webhook validation, and audit-logging middleware are all realized as endpoint filters under this ADR |
 
 ---
 

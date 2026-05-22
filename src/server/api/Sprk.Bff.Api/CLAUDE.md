@@ -101,14 +101,25 @@ services.AddSingleton<GraphClientFactory>();
 services.AddScoped<ISpeFileStore, SpeFileStore>();  // Unnecessary interface
 ```
 
-## OBO (On-Behalf-Of) Flow
+## Auth (Spaarke Auth v2 — [ADR-028](../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md))
 
-The API uses OBO to exchange user tokens for Graph API tokens:
+**Server outbound (canonical)**: Graph + Dataverse use `DefaultAzureCredential` (managed identity) when `Graph__ManagedIdentity__Enabled=true`. `ClientSecretCredential` is local-dev fallback only.
+
+**Three auth paths** in the BFF:
+
+| Path | When | Mechanism |
+|---|---|---|
+| **OBO** (delegated) | User-initiated operation acting on behalf of the caller (e.g., user opens a doc) | User token exchanged for downstream Graph token. Still requires `BFF-API-ClientSecret` (confidential client per OAuth spec). |
+| **Managed Identity** (app-only, canonical) | Background jobs, system-level container ops, polling, indexing — no acting user | `DefaultAzureCredential` resolves the App Service's system-assigned MI. Mailbox-scoped Graph (`Mail.*`) ALSO requires Exchange `ApplicationAccessPolicy` scoping the MI to allowed mailboxes (Phase C). |
+| **Named API key schemes** | Inbound from trusted external systems (BuilderAdmin, Rag) | `AuthenticationHandler<>` per-scheme with `CryptographicOperations.FixedTimeEquals` constant-time compare. |
+
+### OBO flow (delegated path)
 
 ```
-PCF Control                    BFF API                      Graph API
+PCF Control / Code Page         BFF API                      Graph API
     |                              |                            |
     |-- Token A (user) ---------->|                            |
+    |  via authenticatedFetch     |                            |
     |                              |-- OBO Exchange ---------->|
     |                              |<-- Token B (graph) -------|
     |                              |                            |
@@ -117,8 +128,21 @@ PCF Control                    BFF API                      Graph API
 ```
 
 **Token Scopes:**
-- PCF requests: `api://{bff-client-id}/user_impersonation`
-- BFF exchanges for: `FileStorageContainer.Selected`, `Files.Read.All`
+- Client requests: `api://{bff-client-id}/SDAP.Access`
+- BFF exchanges for: `FileStorageContainer.Selected`, `Files.Read.All` (per operation)
+
+### Client contract (read this when authoring PCFs, Code Pages, or Office Add-ins)
+
+Per ADR-028, clients use `useAuth()` + `authenticatedFetch` from `@spaarke/auth`. The BFF is on the server side of this contract — endpoint handlers receive validated JWT, do OBO exchange when needed, return data. Do NOT add `accessToken: string` props to client components or require clients to send custom headers; clients use the `@spaarke/auth` standard contract.
+
+### Auth-related infrastructure files in this module
+
+- `Infrastructure/Graph/GraphClientFactory.cs` — Graph client construction (OBO + MI cascade per `Graph__ManagedIdentity__Enabled`)
+- `Services/GraphTokenCache.cs` — Server-side OBO token cache (Redis, ADR-009)
+- `Infrastructure/Auth/` — Webhook HMAC validation, named API key schemes (Phase C)
+- `Middleware/AuditEnrichmentMiddleware.cs` — Per-request enrichment with `oid`, `appid`, `obo`, `tenantId`, `correlationId`
+
+**Operator setup**: New environments follow [`docs/guides/auth-deployment-setup.md`](../../../../docs/guides/auth-deployment-setup.md) — 10-section runbook including §3 App Service settings, §5 MI Graph permission grants, §6 Dataverse Application User, §7 Exchange ApplicationAccessPolicy (required for Email/Communication modules).
 
 ## Endpoint Patterns
 
@@ -168,20 +192,35 @@ public async Task GetDocument_ReturnsStream_WhenDocumentExists()
 
 ## Configuration
 
-**Required settings (via Azure Key Vault or appsettings):**
+**Required settings** — full canonical inventory in [`docs/guides/auth-deployment-setup.md`](../../../../docs/guides/auth-deployment-setup.md) §3:
+
 ```json
 {
   "AzureAd": {
     "Instance": "https://login.microsoftonline.com/",
     "TenantId": "{tenant-id}",
     "ClientId": "{bff-client-id}",
-    "ClientSecret": "{bff-client-secret}"
+    "ClientSecret": "{bff-client-secret}"  // OBO ONLY (confidential client per OAuth spec). Graph + Dataverse use Managed Identity per ADR-028 when Graph__ManagedIdentity__Enabled=true. ClientSecret is fallback for local dev.
+  },
+  "Graph": {
+    "ManagedIdentity": {
+      "Enabled": "true"  // CANONICAL in Azure environments per ADR-028
+    }
   },
   "SharePointEmbedded": {
     "ContainerTypeId": "{container-type-id}"
+  },
+  "Communication": {
+    "WebhookSigningKey": "{kv-ref}",     // HMAC-SHA256 for Graph subscription webhooks
+    "WebhookClientState": "{kv-ref}"     // Graph-native subscription validation
+  },
+  "EmailProcessing": {
+    "WebhookSigningKey": "{kv-ref}"      // HMAC-SHA256 for Dataverse Service Endpoint webhooks
   }
 }
 ```
+
+> **Auth v2 (ADR-028) note**: `BFF-API-ClientSecret` (Key Vault) is retained ONLY for OBO. After Phase C, Graph + Dataverse app-only access uses `DefaultAzureCredential` (MI). When provisioning a new environment, follow the full auth runbook before setting `Graph__ManagedIdentity__Enabled=true` (especially §5 MI Graph permission grants and §7 Exchange ApplicationAccessPolicy if Email/Communication enabled).
 
 ## Common Patterns
 

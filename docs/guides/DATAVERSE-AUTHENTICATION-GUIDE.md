@@ -1,8 +1,20 @@
 # Dataverse Authentication Guide - Complete Reference
 
 **Purpose**: Definitive guide for Dataverse authentication in the Spaarke SDAP project
-**Last Updated**: 2026-03
-**Status**: PRODUCTION READY
+**Last Updated**: 2026-03 (Auth v2 callout added 2026-05-20)
+**Status**: Legacy reference (pre-Auth v2) — see Auth v2 callout below
+
+---
+
+> **⚠️ Auth v2 Update (2026-05-19, per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md))**
+>
+> As of Spaarke Auth v2 Phase C, **server-side Dataverse access uses the App Service's managed identity via `DefaultAzureCredential`** (when `Graph__ManagedIdentity__Enabled=true`). The `ServiceClient` + `AuthType=ClientSecret` connection-string pattern documented below is the **local-dev fallback only**.
+>
+> **For new-environment provisioning, follow** [`auth-deployment-setup.md`](auth-deployment-setup.md) (the canonical 10-section operator runbook) instead of this guide. That runbook covers §3 App Service settings, §5 Azure AD MI Graph permission grants, §6 Dataverse Application User (the MI is the App User), §7 Exchange ApplicationAccessPolicy.
+>
+> **`Dataverse-ClientSecret` is no longer consumed by production code paths.** It can be removed from Key Vault on environments where MI is enabled (after the MI cutover is verified by smoke test).
+>
+> **What's still canonical in this guide**: the local-dev `ServiceClient` connection-string pattern, `IDataverseService` interface, troubleshooting (HTTP error codes, MSAL exceptions), naming conventions. Treat the "PRODUCTION READY" assertion as historically accurate for the pre-v2 ClientSecret path; the v2 canonical production path is documented in the runbook.
 
 ---
 

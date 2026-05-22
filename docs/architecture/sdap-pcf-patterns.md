@@ -88,11 +88,13 @@ setupThemeListener(callback) → cleanup function stored for destroy()
 
 Theme utilities are imported from `@spaarke/ui-components`.
 
-### Authentication
+### Authentication (Spaarke Auth v2 — ADR-028)
 
-PCF controls that call the BFF API authenticate via `@spaarke/auth` (NOT direct `PublicClientApplication`). Runtime config is resolved from Dataverse environment variables (`sprk_BffApiBaseUrl`, `sprk_MsalClientId`, `sprk_BffApiAppId`) — `sprk_TenantId` is no longer required since `@spaarke/auth` resolves the tenant from `Xrm.Utility.getGlobalContext().organizationSettings.tenantId` via frame-walk. No hardcoded client IDs or tenant IDs in source.
+PCF controls that call the BFF API authenticate via `@spaarke/auth` using `initAuth()` + `useAuth()` + `authenticatedFetch` (NOT direct `PublicClientApplication`). Runtime config is resolved from Dataverse environment variables: `sprk_BffApiBaseUrl`, `sprk_MsalClientId`, `sprk_BffApiAppId`, **and `sprk_TenantId` (required in v2)**. `sprk_TenantId` is read first by `initAuth()`; Xrm frame-walk is a fallback only. Missing this env var causes the 401-after-refresh class of bugs documented in the 2026-05-19 hotfix. No hardcoded client IDs or tenant IDs in source.
 
-Token acquisition routes through `SpaarkeAuthProvider`'s 6-strategy chain (Cache, SessionStorage, Bridge, Xrm, MsalSilent, MsalPopup) so neighbor PCFs share tokens silently. MSAL config is binding: `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific `authority`. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) for the full canonical reference.
+Token acquisition routes through `SpaarkeAuthProvider`'s simplified two-layer model (per ADR-028): an `InMemoryCache` wrapper validates JWT `exp` with a 5-min buffer, delegating to a pluggable `AuthStrategy` (`BrowserMsalStrategy` for Dataverse PCFs + Code Pages; `OfficeNaaStrategy` for Office Add-ins). MSAL `localStorage` cache handles cross-tab/iframe sharing via browser SOP. `BroadcastChannel('spaarke-auth-events')` carries invalidation events only — never tokens. MSAL config is binding (INV-1..INV-8): `cacheLocation: 'localStorage'`, `storeAuthStateInCookie: true`, tenant-specific `authority` derived from `sprk_TenantId`. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) and [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) for the canonical reference, and [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) for new-environment operator setup.
+
+> **Pre-v2 historical**: The original 6-strategy cascade (CacheStrategy → SessionStorageStrategy → BridgeStrategy → XrmStrategy → MsalSilentStrategy → MsalPopupStrategy) was deleted in Spaarke Auth v2 (Phase A). BridgeStrategy (`window.__SPAARKE_BFF_TOKEN__`) and SessionStorageStrategy (`__spaarke_bff_token_cache__`) were retired because MSAL's `localStorage` cache covers their use cases through browser SOP. XrmStrategy was retired because Xrm tokens are Dataverse-scoped only.
 
 **Async init pattern** (virtual ReactControl, per ADR-022): the auth init call lives in the React host component's `useEffect`, NOT the PCF class's `init()`. `notifyOutputChanged()` does NOT reliably trigger `updateView()` for read-only controls, so async init must drive its own state.
 
