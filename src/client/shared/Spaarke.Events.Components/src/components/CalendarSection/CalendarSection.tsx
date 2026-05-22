@@ -348,10 +348,24 @@ const MONTHS = [
 ];
 
 /**
- * Convert Date to ISO date string (YYYY-MM-DD)
+ * Convert Date to ISO date string (YYYY-MM-DD).
+ *
+ * Task 120: use LOCAL date components (getFullYear/Month/Date) rather than
+ * `date.toISOString()` which converts to UTC. The latter causes off-by-one
+ * day bugs for users in any non-UTC timezone — a midnight local Date on
+ * Feb 3 in US Eastern (UTC-5) is correctly `2026-02-03` via local
+ * components but would be `2026-02-03T05:00:00Z` via toISOString (also
+ * 2026-02-03 — coincidentally fine for negative offsets) whereas in
+ * UTC+5 the same local Feb 3 midnight serializes to `2026-02-02T19:00:00Z`
+ * (= Feb 2). Using local components is correct regardless of offset and
+ * keys all day-cell membership checks (eventDateMap) symmetrically with
+ * widget-side derivation in CalendarWorkspaceWidget.
  */
 function toIsoDateString(date: Date): string {
-  return date.toISOString().split("T")[0];
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /**

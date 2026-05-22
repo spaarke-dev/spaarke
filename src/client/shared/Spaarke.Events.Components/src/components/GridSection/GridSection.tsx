@@ -139,6 +139,15 @@ export interface GridSectionProps {
   onSelectionChange?: (selectedIds: string[]) => void;
   /** Callback when data is loaded (returns record count) (Task 089) */
   onDataLoaded?: (recordCount: number) => void;
+  /**
+   * Callback when records are loaded (returns the full records array) (Task 120).
+   *
+   * Optional escape hatch so external consumers (e.g. CalendarWorkspaceWidget)
+   * can derive per-date counts for calendar event-day highlighting without
+   * duplicating the FetchXML/OData query. Fires alongside `onDataLoaded` on
+   * every successful fetch (including the empty-results case).
+   */
+  onRecordsLoaded?: (records: IEventRecord[]) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -664,6 +673,7 @@ export const GridSection: React.FC<GridSectionProps> = ({
   onRowClick,
   onSelectionChange,
   onDataLoaded,
+  onRecordsLoaded,
 }) => {
   const styles = useStyles();
 
@@ -757,6 +767,7 @@ export const GridSection: React.FC<GridSectionProps> = ({
         const mockData = getMockEvents(calendarFilter, assignedToFilter, eventTypeFilter, statusFilter);
         setEvents(mockData);
         onDataLoaded?.(mockData.length);
+        onRecordsLoaded?.(mockData);
         setLoading(false);
         return;
       }
@@ -805,6 +816,7 @@ export const GridSection: React.FC<GridSectionProps> = ({
         const loadedEvents = result.entities || [];
         setEvents(loadedEvents);
         onDataLoaded?.(loadedEvents.length);
+        onRecordsLoaded?.(loadedEvents);
         console.log(`[GridSection] FetchXML returned ${loadedEvents.length} records`);
         return;
       }
@@ -871,14 +883,16 @@ export const GridSection: React.FC<GridSectionProps> = ({
       const loadedEvents = result.entities || [];
       setEvents(loadedEvents);
       onDataLoaded?.(loadedEvents.length);
+      onRecordsLoaded?.(loadedEvents);
     } catch (err) {
       console.error("[GridSection] Error fetching events:", err);
       setError(err instanceof Error ? err.message : "Failed to load events");
       onDataLoaded?.(0);
+      onRecordsLoaded?.([]);
     } finally {
       setLoading(false);
     }
-  }, [calendarFilter, assignedToFilter, eventTypeFilter, statusFilter, viewDefinition, contextFilter, onDataLoaded]);
+  }, [calendarFilter, assignedToFilter, eventTypeFilter, statusFilter, viewDefinition, contextFilter, onDataLoaded, onRecordsLoaded]);
 
   // Fetch events on mount and when filter changes
   React.useEffect(() => {

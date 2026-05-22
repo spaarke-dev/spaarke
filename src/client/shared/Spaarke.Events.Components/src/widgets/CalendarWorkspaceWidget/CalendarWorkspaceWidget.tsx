@@ -106,6 +106,7 @@ import {
 import { CalendarSection } from "../../components/CalendarSection/CalendarSection";
 import type { IEventDateInfo } from "../../components/CalendarSection/CalendarSection";
 import { GridSection } from "../../components/GridSection/GridSection";
+import type { IEventRecord } from "../../components/GridSection/GridSection";
 import {
   ViewSelectorDropdown,
   useViewSelection,
@@ -312,13 +313,23 @@ const useStyles = makeStyles({
     alignSelf: "center",
     flexShrink: 0,
   },
+  // Task 120: toolbarRow wraps the <Toolbar> in a flex container so the
+  // "open in full" icon can sit right-justified on the same row as the
+  // CRUD toolbar buttons (operator: "can the open modal go on the same
+  // row (right justified) as the other grid controls"). Layout:
+  //   <Toolbar>{CRUD buttons}</Toolbar> | <flex spacer> | <Open button>
   toolbarRow: {
     flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
     ...shorthands.padding("0", "4px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
-  // Task 118: view selector row now hosts the grid "open in full" icon
-  // at the right edge (flex spacer between selector and icon button).
+  toolbarRowSpacer: {
+    flex: "1 1 auto",
+  },
+  // Task 120: view selector row no longer hosts the Open icon (moved up
+  // to toolbarRow). The row now contains only the ViewSelectorDropdown.
   viewSelectorRow: {
     flexShrink: 0,
     display: "flex",
@@ -326,14 +337,16 @@ const useStyles = makeStyles({
     ...shorthands.padding("8px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
-  viewSelectorSpacer: {
-    flex: "1 1 auto",
-  },
+  // Task 120: add breathing room between the calendar/toolbar/view-selector
+  // section and the grid header. Operator: "Add a little padding/margin
+  // space between the grid and the calendars." spacingVerticalL ≈ 16px
+  // matches Fluent v9's standard vertical rhythm without overpowering.
   gridContainer: {
     flex: "1 1 auto",
     display: "flex",
     flexDirection: "column",
     minHeight: "320px",
+    marginTop: tokens.spacingVerticalL,
   },
 });
 
@@ -444,6 +457,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
     eventDates,
     refreshTrigger,
     setCalendarFilter,
+    setEventDates,
     openEvent,
     refreshGrid,
   } = useEventsPageContext();
@@ -497,6 +511,49 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
   // day → moves the filter. Owned here (not inside CalendarSection)
   // because the filter dispatches through EventsPageContext.
   const [selectedDate, setSelectedDate] = React.useState<Date | null>(null);
+
+  // ── Event-day derivation (task 120) ──────────────────────────────────────
+  // Bug fix: prior to task 120, `eventDates` in EventsPageContext was never
+  // populated by the Calendar workspace widget — it defaulted to `[]` and
+  // CalendarSection's day-cell highlight (task 118) had nothing to match
+  // against. Effect: event-bearing days never showed the blue tint despite
+  // matching records in the grid.
+  //
+  // Fix: GridSection now exposes an `onRecordsLoaded` callback (task 120)
+  // emitting the post-fetch records. We derive per-date counts here using
+  // LOCAL date components (NOT toISOString — see CalendarSection's
+  // toIsoDateString rationale) to avoid the off-by-one UTC bug for users
+  // in non-zero UTC offsets. The result is dispatched through
+  // setEventDates so any consumer relying on context.eventDates (current
+  // widget + future consumers) sees the same data.
+  //
+  // Date-field priority mirrors the date-range filter dropdown default
+  // (sprk_duedate first), falling back to other available date fields so
+  // events without a due date still appear if they have a scheduled start
+  // or creation date.
+  const handleRecordsLoaded = React.useCallback(
+    (records: IEventRecord[]) => {
+      const counts = new Map<string, number>();
+      for (const r of records) {
+        const dateStr =
+          r.sprk_duedate ||
+          (r as unknown as { sprk_startdate?: string }).sprk_startdate ||
+          (r as unknown as { createdon?: string }).createdon;
+        if (!dateStr) continue;
+        const d = new Date(dateStr);
+        if (Number.isNaN(d.getTime())) continue;
+        // Local-date key — symmetric with CalendarSection's day-cell
+        // membership check (task 120 toIsoDateString fix).
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const next: IEventDateInfo[] = Array.from(counts.entries()).map(
+        ([date, count]) => ({ date, count }),
+      );
+      setEventDates(next);
+    },
+    [setEventDates],
+  );
 
   // ── Date-range filter (top row) ──────────────────────────────────────────
   const [dateField, setDateField] = React.useState<string>(initialDateField);
@@ -840,7 +897,10 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
         </div>
       )}
 
-      {/* (3) Full EventsPage toolbar */}
+      {/* (3) Full EventsPage toolbar — task 120: wraps <Toolbar> in a flex
+              row with the "Open events list" icon right-justified via a
+              flex spacer. Operator: "can the open modal go on the same row
+              (right justified) as the other grid controls." */}
       <div className={styles.toolbarRow}>
         <Toolbar size="small">
           <ToolbarButton
@@ -917,17 +977,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             Calendar
           </ToolbarButton>
         </Toolbar>
-      </div>
-
-      {/* (4) View selector + grid open-in-full icon (task 118 — operator:
-              "the grid needs to have an open icon to open a modal showing
-              the sprk_events entity view"). */}
-      <div className={styles.viewSelectorRow}>
-        <ViewSelectorDropdown
-          selectedViewId={selectedViewId}
-          onViewChange={(viewId) => setSelectedViewId(viewId)}
-        />
-        <div className={styles.viewSelectorSpacer} />
+        <div className={styles.toolbarRowSpacer} />
         <Tooltip content="Open Events list" relationship="label">
           <Button
             appearance="subtle"
@@ -938,7 +988,19 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
         </Tooltip>
       </div>
 
-      {/* (5) Grid — auto-binds to filters via EventsPageContext */}
+      {/* (4) View selector — task 120 removed the Open icon from this row
+              (moved up to the toolbar row per operator). Row now contains
+              only the dropdown. */}
+      <div className={styles.viewSelectorRow}>
+        <ViewSelectorDropdown
+          selectedViewId={selectedViewId}
+          onViewChange={(viewId) => setSelectedViewId(viewId)}
+        />
+      </div>
+
+      {/* (5) Grid — auto-binds to filters via EventsPageContext.
+              Task 120: `onRecordsLoaded` derives per-date counts for the
+              event-day highlight (drives `eventDates` in context). */}
       <div className={styles.gridContainer}>
         <GridSection
           calendarFilter={filters.calendarFilter}
@@ -950,6 +1012,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
           viewId={selectedViewId}
           onRowClick={openEvent}
           onSelectionChange={setSelectedIds}
+          onRecordsLoaded={handleRecordsLoaded}
           key={refreshTrigger}
         />
       </div>
