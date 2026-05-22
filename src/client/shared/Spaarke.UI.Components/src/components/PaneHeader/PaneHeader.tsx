@@ -235,7 +235,11 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
           {icon}
         </span>
       ) : null}
-      <Text className={styles.title} size={300}>
+      {/* (Task 096) Title size bumped 300 → 400 (≈ +2px, one Fluent v9 size
+          step up) per operator feedback 2026-05-22 — stronger visual hierarchy
+          on each pane title across all three SpaarkeAi panes. Token-based
+          (ADR-021 compliant). */}
+      <Text className={styles.title} size={400}>
         {title}
       </Text>
       {rightSlot ? (

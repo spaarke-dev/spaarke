@@ -181,6 +181,31 @@ export interface ThreePaneLayoutProps {
   centerPaneCollapseLabel?: string;
 
   /**
+   * (Task 096) Optional icon rendered, centered, in the collapsed LEFT strip
+   * INSTEAD of the rotated label text. When provided, the collapsed strip
+   * shows ONLY the icon — the `leftPaneCollapseLabel` text is retained as the
+   * strip's accessible name (aria-label) for screen readers but is not
+   * rendered visually. When omitted, the legacy rotated-text rendering is
+   * used (backwards compatible — LegalWorkspace standalone unchanged).
+   *
+   * Pass any Fluent v9 React icon component (typically the same icon the
+   * pane passes to `<PaneHeader>`).
+   */
+  leftCollapsedIcon?: React.ReactElement;
+
+  /**
+   * (Task 096) Optional icon rendered, centered, in the collapsed CENTER
+   * strip INSTEAD of the rotated label text. See `leftCollapsedIcon`.
+   */
+  centerCollapsedIcon?: React.ReactElement;
+
+  /**
+   * (Task 096) Optional icon rendered, centered, in the collapsed RIGHT
+   * strip INSTEAD of the rotated label text. See `leftCollapsedIcon`.
+   */
+  rightCollapsedIcon?: React.ReactElement;
+
+  /**
    * Optional additional CSS class name for the root container.
    */
   className?: string;

@@ -29,6 +29,21 @@ import { ThreePaneLayoutProps } from './ThreePaneLayout.types';
 import { useThreePaneLayout } from './useThreePaneLayout';
 
 // ---------------------------------------------------------------------------
+// Layout constants
+// ---------------------------------------------------------------------------
+
+/**
+ * (Task 096) Collapsed-strip width in pixels. Set to 48 to mirror the
+ * Model-Driven Apps left-nav collapsed-width, per operator feedback
+ * 2026-05-22. Previously the strips were 28px (left/right) and 36px
+ * (center) — both too narrow to read or click comfortably. Fluent v9 has
+ * no design token that matches MDA's left-nav width, so this is a
+ * deliberate layout-dimension literal (px); colors / spacing / borders
+ * elsewhere remain token-based.
+ */
+const COLLAPSED_STRIP_PX = 48;
+
+// ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only, no hard-coded colors (ADR-021)
 // ---------------------------------------------------------------------------
 
@@ -49,10 +64,11 @@ const useStyles = makeStyles({
     height: '100%',
   },
 
-  // Collapsed left strip — narrow click-to-expand indicator
+  // Collapsed left strip — narrow click-to-expand indicator.
+  // (Task 096) Width 48px (was 28px) mirrors MDA left-nav collapsed width.
   leftPaneCollapsed: {
-    flex: '0 0 28px',
-    minWidth: '28px',
+    flex: `0 0 ${COLLAPSED_STRIP_PX}px`,
+    minWidth: `${COLLAPSED_STRIP_PX}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
@@ -90,10 +106,11 @@ const useStyles = makeStyles({
     height: '100%',
   },
 
-  // Collapsed right strip — narrow click-to-expand indicator
+  // Collapsed right strip — narrow click-to-expand indicator.
+  // (Task 096) Width 48px (was 28px) mirrors MDA left-nav collapsed width.
   rightPaneCollapsed: {
-    flex: '0 0 28px',
-    minWidth: '28px',
+    flex: `0 0 ${COLLAPSED_STRIP_PX}px`,
+    minWidth: `${COLLAPSED_STRIP_PX}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
@@ -118,9 +135,10 @@ const useStyles = makeStyles({
   // (Task 094) Collapsed center strip — narrow click-to-expand indicator.
   // Visual treatment matches left/right strips; bordered on both sides to
   // distinguish it from neighbouring (possibly also collapsed) strips.
+  // (Task 096) Width 48px (was 36px) mirrors MDA left-nav collapsed width.
   centerPaneCollapsed: {
-    flex: '0 0 36px',
-    minWidth: '36px',
+    flex: `0 0 ${COLLAPSED_STRIP_PX}px`,
+    minWidth: `${COLLAPSED_STRIP_PX}px`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
@@ -143,7 +161,8 @@ const useStyles = makeStyles({
     },
   },
 
-  // Rotated label text for collapsed strips
+  // Rotated label text for collapsed strips (legacy / fallback when no
+  // collapsedIcon prop is provided — Task 096).
   collapsedLabel: {
     writingMode: 'vertical-rl',
     transform: 'rotate(180deg)',
@@ -152,6 +171,27 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     letterSpacing: '0.05em',
     userSelect: 'none',
+  },
+
+  /**
+   * (Task 096) Centered-icon container used INSIDE a collapsed strip when
+   * the consumer passes a `*CollapsedIcon` prop. Replaces the rotated-text
+   * identifier. The icon is centered vertically + horizontally in the strip
+   * and uses neutral foreground 2 (subdued) → 1 on hover (matches typical
+   * Fluent v9 icon-button affordance for clickable surfaces).
+   */
+  collapsedIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    flexGrow: 1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase400,
+    userSelect: 'none',
+    ':hover': {
+      color: tokens.colorNeutralForeground1,
+    },
   },
 
   // Smooth CSS transitions for collapse/expand — disabled during active drag
@@ -210,6 +250,16 @@ export function ThreePaneLayout({
   onToggleLeft,
   onToggleCenter,
   onToggleRight,
+  // (Task 096) Optional icon identifiers for collapsed strips.
+  // When provided, the icon replaces the rotated-text identifier in
+  // the corresponding pane's collapsed strip. The original
+  // `*PaneCollapseLabel` text is retained as the strip's accessible name
+  // via `aria-label` so screen readers still announce the pane name.
+  // When omitted, the legacy rotated-text rendering is used
+  // (backwards compatible — LegalWorkspace standalone unchanged).
+  leftCollapsedIcon,
+  centerCollapsedIcon,
+  rightCollapsedIcon,
   className,
 }: ThreePaneLayoutProps): JSX.Element {
   const styles = useStyles();
@@ -284,8 +334,21 @@ export function ThreePaneLayout({
             }
           }}
         >
-          <ChevronRight16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
-          <span className={styles.collapsedLabel}>{leftPaneCollapseLabel}</span>
+          {/* (Task 096) Render icon-only identifier when collapsedIcon prop
+              is supplied; otherwise fall through to legacy rotated-text
+              rendering for backwards compatibility (e.g. standalone
+              LegalWorkspace). aria-label on the outer button retains the
+              accessible name regardless of which visual path is chosen. */}
+          {leftCollapsedIcon ? (
+            <span className={styles.collapsedIcon} aria-hidden="true">
+              {leftCollapsedIcon}
+            </span>
+          ) : (
+            <>
+              <ChevronRight16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
+              <span className={styles.collapsedLabel}>{leftPaneCollapseLabel}</span>
+            </>
+          )}
         </div>
       )}
 
@@ -323,8 +386,17 @@ export function ThreePaneLayout({
             }
           }}
         >
-          <ChevronRight16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
-          <span className={styles.collapsedLabel}>{centerPaneCollapseLabel}</span>
+          {/* (Task 096) Icon-only or legacy rotated-text — see leftPaneCollapsed comment. */}
+          {centerCollapsedIcon ? (
+            <span className={styles.collapsedIcon} aria-hidden="true">
+              {centerCollapsedIcon}
+            </span>
+          ) : (
+            <>
+              <ChevronRight16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
+              <span className={styles.collapsedLabel}>{centerPaneCollapseLabel}</span>
+            </>
+          )}
         </div>
       )}
 
@@ -362,8 +434,17 @@ export function ThreePaneLayout({
             }
           }}
         >
-          <ChevronLeft16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
-          <span className={styles.collapsedLabel}>{rightPaneCollapseLabel}</span>
+          {/* (Task 096) Icon-only or legacy rotated-text — see leftPaneCollapsed comment. */}
+          {rightCollapsedIcon ? (
+            <span className={styles.collapsedIcon} aria-hidden="true">
+              {rightCollapsedIcon}
+            </span>
+          ) : (
+            <>
+              <ChevronLeft16Regular style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }} />
+              <span className={styles.collapsedLabel}>{rightPaneCollapseLabel}</span>
+            </>
+          )}
         </div>
       )}
     </div>
