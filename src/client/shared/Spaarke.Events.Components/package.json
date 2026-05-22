@@ -12,7 +12,8 @@
     "./hooks": "./src/hooks/index.ts",
     "./services": "./src/services/index.ts",
     "./context": "./src/context/index.ts",
-    "./types": "./src/types/index.ts"
+    "./types": "./src/types/index.ts",
+    "./widgets": "./src/widgets/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

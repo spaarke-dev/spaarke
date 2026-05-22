@@ -33,6 +33,14 @@
       "sortOrder": 3,
       "isDefault": false,
       "description": "LegalWorkspace documents section (Active Documents). Wave 3 task 110 verifies + add / expand affordances embed-safe in SpaarkeAi."
+    },
+    {
+      "name": "Calendar",
+      "sectionId": "calendar",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 4,
+      "isDefault": false,
+      "description": "Round-9 task 115. CalendarWorkspaceWidget from @spaarke/events-components — 3-month strip + date-range filter + EventsPage toolbar + view selector + grid of all events+tasks the user has access to. Event detail opens via Xrm.Navigation.navigateTo modal (NOT Xrm.App.sidePanes)."
     }
   ]
 }

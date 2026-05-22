@@ -18,3 +18,4 @@ export * from "./components";
 export * from "./context";
 export * from "./services";
 export type * from "./types";
+export * from "./widgets";
