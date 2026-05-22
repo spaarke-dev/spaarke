@@ -61,6 +61,9 @@ import type {
 import { useShellStage, usePaneCollapseContext } from "../shell/ThreePaneShell";
 import type { ShellStage } from "../shell/ThreePaneShell";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
+import { useContextTool } from "../../hooks/useContextTool";
+import { ContextPaneMenu } from "./ContextPaneMenu";
+import { SemanticSearchCriteriaTool } from "./SemanticSearchCriteriaTool";
 
 // ---------------------------------------------------------------------------
 // ContextStage — maps to each of the five named context rendering modes.
@@ -353,6 +356,17 @@ export function ContextPaneController(): React.JSX.Element {
   }, [paneCollapse]);
   const isContextExpanded = !(paneCollapse?.isCollapsed("context") ?? false);
 
+  // ── Tool selection (Task 095) ───────────────────────────────────────────
+  //
+  // The Context pane has a dropdown selector in its PaneHeader rightSlot
+  // (mirrors WorkspacePaneMenu). The user-selected tool is the SOURCE OF
+  // TRUTH for what the pane renders — it overrides ShellStage and server-
+  // driven context_update events. Persisted in localStorage via the
+  // `useContextTool` hook so a modal close (wizard, Semantic Search results)
+  // returns the pane to the chosen tool instead of going blank (the
+  // pre-task-095 bug for the welcome-stage GetStartedCards path).
+  const { selectedTool, setSelectedTool } = useContextTool();
+
   // Active widget slot — null until a context_update event arrives with a
   // successfully resolved widget component.
   const [activeWidget, setActiveWidget] = React.useState<ActiveWidgetSlot | null>(null);
@@ -622,7 +636,33 @@ export function ContextPaneController(): React.JSX.Element {
    *   Stage 4 'review':      Context adapts to active workspace tab via tab_change.
    */
   function renderContent(): React.ReactNode {
-    // Stage 1 — welcome: render the GetStartedCardsWidget (FR-18, FR-19, FR-21).
+    // Task 095 — `selectedTool` is the SOURCE OF TRUTH for what the pane
+    // renders. It overrides ShellStage and server-driven context_update events.
+    //
+    //   - 'semantic-search' → SemanticSearchCriteriaTool (always, regardless
+    //                         of ShellStage). Modal close behavior: selectedTool
+    //                         is persisted in localStorage, so the pane
+    //                         re-renders with this tool still selected — no
+    //                         blank pane.
+    //   - 'quick-start'     → fall through to the existing stage-aware
+    //                         rendering (welcome stage shows GetStartedCardsWidget,
+    //                         other stages show server-driven widgets). This
+    //                         path ALSO benefits from the persisted selectedTool:
+    //                         when a wizard popup closes, the pane re-renders
+    //                         with this branch selected, so GetStartedCardsWidget
+    //                         shows back up instead of the empty stage default.
+    if (selectedTool === "semantic-search") {
+      return (
+        <div className={styles.content} data-testid="context-pane-semantic-search">
+          <SemanticSearchCriteriaTool />
+        </div>
+      );
+    }
+
+    // selectedTool === "quick-start" — fall through to the existing logic.
+
+    // Stage 1 — welcome (or Quick Start tool selected on any stage): render the
+    // GetStartedCardsWidget (FR-18, FR-19, FR-21).
     //
     // The widget shows 7 action cards in a 2-column grid. Each card click
     // routes through `handleGetStartedCardClick` (defined above):
@@ -636,7 +676,19 @@ export function ContextPaneController(): React.JSX.Element {
     // context_update that requests 'playbook-gallery' on a non-welcome stage
     // resolves correctly. We do NOT auto-load it here anymore — the welcome
     // stage is now the GetStarted entry point per FR-18 / the R3 design.
-    if (currentStage === "welcome") {
+    //
+    // Task 095: on the welcome stage, Quick Start always wins. On non-welcome
+    // stages, Quick Start ALSO wins UNLESS the server has dispatched a
+    // context_update event that resolved to a real widget (activeWidget !==
+    // null) — that path is preserved so the existing Stage 3 (active-chat) /
+    // Stage 4 (review) widgets (FindingsWidget, ProgressTrackerWidget, etc.)
+    // continue to surface when the AI orchestrator drives them. When no
+    // server-driven widget is loaded, Quick Start's GetStartedCardsWidget
+    // appears as the default — which is the uniform fix for the "pane goes
+    // blank after modal close" bug (a wizard launch doesn't change
+    // selectedTool, so the pane returns to GetStartedCardsWidget when the
+    // modal closes).
+    if (currentStage === "welcome" || (selectedTool === "quick-start" && activeWidget === null && !isResolving)) {
       return (
         <div className={styles.content} data-testid="context-pane-welcome">
           <GetStartedCardsWidget onCardClick={handleGetStartedCardClick} />
@@ -795,9 +847,28 @@ export function ContextPaneController(): React.JSX.Element {
         onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
         expanded={isContextExpanded}
         rightSlot={
-          <Text className={styles.headerStageLabel} size={100}>
-            {stageLabelMap[contextStage]}
-          </Text>
+          /*
+            Task 095 — rightSlot now composes ContextPaneMenu + the existing
+            stage label in a flex row. The PaneHeader's rightSlot wrapper
+            applies stopPropagation on clicks (task 094) so the Menu trigger
+            does NOT accidentally collapse the pane. Belt-and-braces: the
+            stage label is non-interactive `Text` so it never bubbles a click.
+          */
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: tokens.spacingHorizontalS,
+            }}
+          >
+            <ContextPaneMenu
+              selectedTool={selectedTool}
+              onSelectTool={setSelectedTool}
+            />
+            <Text className={styles.headerStageLabel} size={100}>
+              {stageLabelMap[contextStage]}
+            </Text>
+          </div>
         }
       />
 
