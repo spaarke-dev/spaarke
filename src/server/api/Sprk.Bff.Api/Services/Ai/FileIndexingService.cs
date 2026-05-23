@@ -258,6 +258,15 @@ public sealed class FileIndexingService : IFileIndexingService
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
+        // Normalize documentId to lowercase. Dataverse GUIDs arrive in inconsistent case
+        // depending on the client: Xrm.Page.data.entity.getId() returns "{UPPER}", the
+        // Dataverse Web API client typically returns lowercase, and ribbon scripts strip
+        // braces but preserve case. Azure AI Search Edm.String filters are case-sensitive,
+        // so a Find Similar / chunk lookup keyed on a lowercased GUID would silently miss
+        // chunks indexed with an uppercase GUID. Normalize once on write — every downstream
+        // path can then assume lowercase.
+        documentId = documentId?.ToLowerInvariant();
+
         // Step 1: Chunk the text
         var chunks = await _chunkingService.ChunkTextAsync(text, null, cancellationToken);
 
