@@ -305,23 +305,26 @@ const useStyles = makeStyles({
   // visualization (also see the showEventsTint logic — task 122 removed
   // the in-range exclusion so this style applies regardless of range state).
   //
-  // Task 125 (Round 13 follow-up #4): operator: "when I hover over it the
-  // date disappears. it doesn't need to have hover over — just leave it
-  // blue." Root cause was the base `dayCell` :hover at line 276-278
-  // applying `backgroundColor: colorNeutralBackground1Hover` (light gray)
-  // and beating the previous `dayWithEvents:hover` which only set
-  // backgroundColor — the white text from the non-hover dayWithEvents
-  // stayed but the gray hover background won, making white-on-light-gray
-  // illegible. Fix: lock BOTH backgroundColor + color in :hover so the
-  // event-day appearance is identical to its rest state regardless of
-  // which cascade rule wins. No visual change on hover.
+  // Task 125 (R13 follow-up #4) attempt 1: lock hover to brand-blue/white via
+  // equal-specificity :hover rules. Did NOT win the cascade against
+  // dayCell:hover in production — operator reported "the date hover color
+  // changes" still occurring after task 125.
+  //
+  // Task 126 (R13 follow-up #5): use !important on the :hover declarations.
+  // Griffel atomic CSS appears to be deduplicating per-property at a level
+  // where source-order doesn't guarantee a winner between equal-specificity
+  // rules on different classes applied to the same element. !important is
+  // the pragmatic guarantee per operator's directive: "just leave it blue."
+  // Scoped strictly to dayWithEvents:hover so non-event cells still get
+  // their normal neutral hover from dayCell. No other rule in this file
+  // uses !important — this is a deliberate, narrow exception.
   dayWithEvents: {
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
     fontWeight: tokens.fontWeightSemibold,
     ":hover": {
-      backgroundColor: tokens.colorBrandBackground,
-      color: tokens.colorNeutralForegroundOnBrand,
+      backgroundColor: `${tokens.colorBrandBackground} !important`,
+      color: `${tokens.colorNeutralForegroundOnBrand} !important`,
     },
   },
   dayNumber: {
@@ -698,15 +701,20 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
                   }}
                 >
                   <span className={styles.dayNumber}>{day.getDate()}</span>
-                  {hasEvents && (
-                    <span
-                      className={`${styles.eventIndicator} ${
-                        dateState === "selected"
-                          ? styles.eventIndicatorSelected
-                          : ""
-                      }`}
-                    />
-                  )}
+                  {/*
+                    Task 126 (R13 follow-up #5, 2026-05-22): removed the
+                    `eventIndicator` dot. Operator asked "what is the 'dot'
+                    on some of the dates" — the dot was the LEGACY event
+                    indicator from before task 118 introduced the full
+                    brand-blue background. With the solid blue background +
+                    white text (dayWithEvents), the dot is redundant visual
+                    noise: both signals say "this day has events." Removing
+                    the dot leaves a cleaner single source of truth for the
+                    indicator. The `eventIndicator` + `eventIndicatorSelected`
+                    Griffel styles stay defined for now (in case a future
+                    minor variant wants the dot for other-month days, where
+                    showEventsTint is false but hasEvents is true).
+                  */}
                 </div>
               );
             })}
