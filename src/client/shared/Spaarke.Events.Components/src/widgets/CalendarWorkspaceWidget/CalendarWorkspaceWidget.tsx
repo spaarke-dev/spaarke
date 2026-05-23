@@ -316,31 +316,59 @@ const useStyles = makeStyles({
       display: "none",
     },
   },
+  // Task 134 (R13 follow-up #13, 2026-05-23): modern responsive layout.
+  // Operator: "the layout is not correct. there is no space between the
+  // fields. Is there another approach we can use that is modern and
+  // provides more flexibility for screen resolution/responsiveness."
+  //
+  // Outer container is FLEX so the filter-field grid (left) and the
+  // action group (right: Apply, Clear, chevron) can sit side-by-side
+  // and the action group can shrink-wrap to its own size while the grid
+  // takes the remaining width and wraps internally.
   dateRangeRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-end",
     flexWrap: "wrap",
-    ...shorthands.gap("12px"),
-    ...shorthands.padding("4px", "8px"),
+    rowGap: "12px",
+    columnGap: "16px",
+    ...shorthands.padding("8px", "12px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+  },
+  // Task 134: CSS Grid with `auto-fit + minmax` for the 5 filter fields.
+  //   - Each field has min width 140px, grows to share available space
+  //     equally (1fr) — consistent, predictable column widths regardless
+  //     of which fields are present.
+  //   - Grid `gap` provides visible horizontal AND vertical spacing
+  //     between fields automatically (16px / 12px).
+  //   - Wraps cleanly at narrow viewports without manual flex tuning.
+  // The grid takes the remaining row space (flex: 1) so the action group
+  // (Apply/Clear/chevron) sits to its right at small intrinsic width.
+  filterFieldsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+    columnGap: "16px",
+    rowGap: "12px",
+    alignItems: "end",
+    flex: "1 1 auto",
+    minWidth: "0",
+  },
+  // Task 134: action group (Apply, Clear, collapse chevron) sits at the
+  // right edge of the row. Uses flex so the small button widths shrink-
+  // wrap their content. Aligns to the bottom of the row (with the
+  // input fields, not the labels).
+  filterActions: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-end",
+    ...shorthands.gap("8px"),
+    flex: "0 0 auto",
   },
   dateRangeField: {
     display: "flex",
     flexDirection: "column",
-    ...shorthands.gap("2px"),
-    // Task 131: ~30% reduction from the original 140px.
-    minWidth: "96px",
-  },
-  // Task 133 (R13 follow-up #12, 2026-05-23): operator wants the three
-  // picklist fields (Event Type / Event Status / Filter by Date Field)
-  // narrower than From/To so all five fields plus Apply + Clear fit on
-  // one row. The dropdown content ("All" / "(none)" / type name) is
-  // short, so capping width here doesn't truncate. From/To inputs keep
-  // their natural width via the base dateRangeField class.
-  pickListField: {
-    flex: "0 0 auto",
-    width: "120px",
+    ...shorthands.gap("4px"),
+    minWidth: "0",
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -976,16 +1004,23 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* (1) Filter row — Task 131 reordered per operator: Event Type →
-              Event Status → Filter by Date Field → From → To → Apply →
-              Clear → collapse chevron. All Dropdowns + Inputs update
-              `pending` only. Apply copies pending → applied. */}
+      {/* (1) Filter row — Task 134 (R13 follow-up #13, 2026-05-23):
+              modern responsive layout. Outer container is FLEX with
+              two children:
+                (a) `filterFieldsGrid` — CSS Grid auto-fit (5 filter
+                    fields, consistent gaps, self-balancing widths).
+                (b) `filterActions`    — flex group (Apply, Clear,
+                    chevron) at the right edge, shrink-wrapped.
+              Provides predictable spacing + clean wrapping across
+              viewport widths without manual width-tuning each field.
+              Order preserved from task 131: Event Type → Event
+              Status → Filter by Date Field → From → To. */}
       <div className={styles.dateRangeRow}>
-        {/* Task 131: Event Type — first per operator's left-to-right order.
-            Fetched from sprk_eventtype_ref records (task 131 schema fix).
-            Task 133: pickListField caps width at 120px so all 5 filters +
-            Apply + Clear fit on one row at typical viewport widths. */}
-        <div className={`${styles.dateRangeField} ${styles.pickListField}`}>
+        <div className={styles.filterFieldsGrid}>
+        {/* Task 131: Event Type — first. Fetched from sprk_eventtype_ref
+            records (task 131 schema fix). Task 134 removed pickListField
+            width override — CSS Grid handles sizing. */}
+        <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Event Type</Label>
           <Dropdown
             value={eventTypeDisplay}
@@ -1006,8 +1041,8 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             ))}
           </Dropdown>
         </div>
-        {/* Task 131: Event Status — second. Task 133: pickListField width cap. */}
-        <div className={`${styles.dateRangeField} ${styles.pickListField}`}>
+        {/* Task 131: Event Status — second. Task 134: CSS Grid sizing. */}
+        <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Event Status</Label>
           <Dropdown
             value={eventStatusDisplay}
@@ -1032,8 +1067,8 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             ))}
           </Dropdown>
         </div>
-        {/* Task 131: Filter by Date Field — third. Task 133: pickListField width cap. */}
-        <div className={`${styles.dateRangeField} ${styles.pickListField}`}>
+        {/* Task 131: Filter by Date Field — third. Task 134: CSS Grid sizing. */}
+        <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
           <Dropdown
             value={dateFieldDisplay}
@@ -1072,10 +1107,14 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             }
           />
         </div>
-        {/* Task 130: Apply + Clear buttons. Apply visible when pending differs
-            from applied (something to commit). Clear visible whenever any
-            applied filter is non-default OR a calendar day is selected. */}
-        <div className={styles.filterButtonsSlot}>
+        </div>{/* /filterFieldsGrid */}
+        {/* Task 134: action group — Apply + Clear + collapse chevron. Sits
+            to the right of the filter grid. Each button shrink-wraps to its
+            content; the whole group is `flex: 0 0 auto` so it doesn't compete
+            with the grid for horizontal space. Apply visible only when
+            pending differs from applied; Clear visible whenever any applied
+            filter is non-default OR a calendar day is selected. */}
+        <div className={styles.filterActions}>
           {hasUnapplied && (
             <Button
               appearance="primary"
@@ -1096,10 +1135,6 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
               Clear
             </Button>
           )}
-        </div>
-        {/* Flex spacer pushes the chevron to the right edge */}
-        <div className={styles.filterRowSpacer} />
-        <div className={styles.collapseToggleSlot}>
           <Tooltip
             content={calendarCollapsed ? "Expand calendar" : "Collapse calendar"}
             relationship="label"
