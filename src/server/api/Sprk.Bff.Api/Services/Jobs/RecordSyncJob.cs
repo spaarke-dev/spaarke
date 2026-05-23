@@ -630,6 +630,16 @@ public class RecordSyncJob : BackgroundService
     // Watermark persistence via IDistributedCache
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Earliest watermark Dataverse will accept on a `modifiedon gt {value}` filter.
+    /// Dataverse's CrmDateTime minimum is 1753-01-01; DateTime.MinValue (year 0001)
+    /// is rejected with error 0x80040239: "DateTime is less than minimum value supported
+    /// by CrmDateTime." 1900-01-01 is a comfortable cushion above the floor and matches
+    /// the practical age of any record we'd be syncing.
+    /// </summary>
+    private static readonly DateTimeOffset DataverseSafeMinWatermark =
+        new(1900, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     public virtual async Task<DateTimeOffset> ReadWatermarkAsync(string entityType, CancellationToken ct)
     {
         var key  = $"{WatermarkKeyPrefix}{entityType}";
@@ -637,8 +647,9 @@ public class RecordSyncJob : BackgroundService
 
         if (string.IsNullOrEmpty(data) || !DateTimeOffset.TryParse(data, out var watermark))
         {
-            // Default: epoch — forces a full initial sync for this entity type.
-            return DateTimeOffset.MinValue;
+            // Default: 1900-01-01 — forces a full initial sync for this entity type.
+            // DateTime.MinValue (year 0001) is rejected by Dataverse CrmDateTime.
+            return DataverseSafeMinWatermark;
         }
 
         return watermark;
