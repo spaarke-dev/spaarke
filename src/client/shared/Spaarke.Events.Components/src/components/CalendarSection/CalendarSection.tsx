@@ -273,9 +273,31 @@ const useStyles = makeStyles({
     ...shorthands.padding("4px"),
     ...shorthands.borderRadius("4px"),
     cursor: "pointer",
+    // Task 127 (R13 follow-up #6): removed the base :hover from dayCell.
+    // The neutral-background hover now lives on `dayCellNeutralHover` and
+    // is applied conditionally only to cells that don't have a stronger
+    // background-changing class (event-day, selected, in-range). This
+    // eliminates the cross-class cascade fight that previously made the
+    // dayWithEvents :hover lose to dayCell :hover (the bug operator kept
+    // reporting in tasks 125 + 126). No !important needed anymore.
+  },
+  // Task 127: neutral hover applied conditionally only when no other
+  // background-changing class is present. Keeps hover feedback on
+  // "regular" cells without competing with event-day / selected / in-range
+  // visualizations.
+  dayCellNeutralHover: {
     ":hover": {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
+  },
+  // Task 127 (R13 follow-up #6): empty placeholder for days outside the
+  // displayed month. Operator: "keep dates only on its specific calendar."
+  // Renders a fixed-height invisible cell so the grid alignment is
+  // preserved but no day number, click handler, or hover effect exists.
+  // The eventIndicator dot is also suppressed here (see render loop).
+  dayCellEmpty: {
+    minHeight: "36px",
+    ...shorthands.padding("4px"),
   },
   dayCellOtherMonth: {
     color: tokens.colorNeutralForeground4,
@@ -305,27 +327,22 @@ const useStyles = makeStyles({
   // visualization (also see the showEventsTint logic — task 122 removed
   // the in-range exclusion so this style applies regardless of range state).
   //
-  // Task 125 (R13 follow-up #4) attempt 1: lock hover to brand-blue/white via
-  // equal-specificity :hover rules. Did NOT win the cascade against
-  // dayCell:hover in production — operator reported "the date hover color
-  // changes" still occurring after task 125.
-  //
-  // Task 126 (R13 follow-up #5): use !important on the :hover declarations.
-  // Griffel atomic CSS appears to be deduplicating per-property at a level
-  // where source-order doesn't guarantee a winner between equal-specificity
-  // rules on different classes applied to the same element. !important is
-  // the pragmatic guarantee per operator's directive: "just leave it blue."
-  // Scoped strictly to dayWithEvents:hover so non-event cells still get
-  // their normal neutral hover from dayCell. No other rule in this file
-  // uses !important — this is a deliberate, narrow exception.
+  // Task 122 → 125 → 126 → 127 history:
+  //   118: introduced soft-tint brand bg (lost in active From/To range)
+  //   122: switched to solid colorBrandBackground + white text (operator
+  //        wording: "blue background, white font")
+  //   125: tried equal-specificity :hover lock — cascade still lost
+  //   126: tried !important — still lost (operator: hover still bleeds)
+  //   127: ROOT-CAUSE FIX — removed the competing :hover from dayCell
+  //        and moved it to a separate `dayCellNeutralHover` class that's
+  //        only applied to cells without a stronger background-changing
+  //        class. Now there's no cascade fight; dayWithEvents simply has
+  //        no :hover at all (the rest-state styling persists). The
+  //        !important hack from 126 is removed.
   dayWithEvents: {
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
     fontWeight: tokens.fontWeightSemibold,
-    ":hover": {
-      backgroundColor: `${tokens.colorBrandBackground} !important`,
-      color: `${tokens.colorNeutralForegroundOnBrand} !important`,
-    },
   },
   dayNumber: {
     fontSize: tokens.fontSizeBase200,
@@ -680,11 +697,29 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
               // — they're already muted and competing tints would be noisy.
               const showEventsTint = hasEvents && !isOtherMonth && dateState !== "selected";
 
+              // Task 127 (R13 follow-up #6, 2026-05-22): operator wants
+              // other-month days completely hidden. Render an empty
+              // placeholder div that preserves grid alignment but has no
+              // day number, click handler, hover, or event indicator.
+              if (isOtherMonth) {
+                return <div key={dayIdx} className={styles.dayCellEmpty} aria-hidden="true" />;
+              }
+
+              // Task 127: dayCellNeutralHover applies ONLY when no other
+              // background-changing class is present. This prevents the
+              // cross-class :hover cascade fight that caused tasks 125/126
+              // to fail. dayWithEvents now has NO :hover at all (the
+              // rest-state blue persists since no rule overrides it).
+              const showNeutralHover =
+                !showEventsTint &&
+                dateState !== "selected" &&
+                dateState !== "in-range";
+
               return (
                 <div
                   key={dayIdx}
                   className={`${styles.dayCell} ${
-                    isOtherMonth ? styles.dayCellOtherMonth : ""
+                    showNeutralHover ? styles.dayCellNeutralHover : ""
                   } ${isToday ? styles.dayCellToday : ""} ${
                     showEventsTint ? styles.dayWithEvents : ""
                   } ${
@@ -701,20 +736,8 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
                   }}
                 >
                   <span className={styles.dayNumber}>{day.getDate()}</span>
-                  {/*
-                    Task 126 (R13 follow-up #5, 2026-05-22): removed the
-                    `eventIndicator` dot. Operator asked "what is the 'dot'
-                    on some of the dates" — the dot was the LEGACY event
-                    indicator from before task 118 introduced the full
-                    brand-blue background. With the solid blue background +
-                    white text (dayWithEvents), the dot is redundant visual
-                    noise: both signals say "this day has events." Removing
-                    the dot leaves a cleaner single source of truth for the
-                    indicator. The `eventIndicator` + `eventIndicatorSelected`
-                    Griffel styles stay defined for now (in case a future
-                    minor variant wants the dot for other-month days, where
-                    showEventsTint is false but hasEvents is true).
-                  */}
+                  {/* Task 126: legacy event-indicator dot removed (redundant
+                      with the solid brand-blue background from dayWithEvents). */}
                 </div>
               );
             })}
