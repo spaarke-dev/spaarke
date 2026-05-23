@@ -525,7 +525,15 @@ public partial class RagService : IRagService
         }
 
         // Index in batches (Azure AI Search limit is 1000 per batch)
+        var deploymentConfig = await _deploymentService.GetDeploymentConfigAsync(tenantId, cancellationToken);
         var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+
+        // Observability: surface the write destination for every batch — without this,
+        // a misconfigured deployment (wrong index name, wrong model) is invisible to operators.
+        _logger.LogInformation(
+            "Resolved deployment for tenant {TenantId}: Model={Model}, IndexName={IndexName}, Endpoint={Endpoint}, BatchSize={BatchSize}",
+            tenantId, deploymentConfig.Model, deploymentConfig.IndexName, searchClient.Endpoint, documentList.Count);
+
         var results = new List<IndexResult>();
 
         const int batchSize = 1000;
@@ -548,15 +556,26 @@ public partial class RagService : IRagService
 
             foreach (var result in indexResult.Results)
             {
-                results.Add(result.Succeeded
-                    ? IndexResult.Success(result.Key)
-                    : IndexResult.Failure(result.Key, result.ErrorMessage ?? "Unknown error"));
+                if (result.Succeeded)
+                {
+                    results.Add(IndexResult.Success(result.Key));
+                }
+                else
+                {
+                    // Observability: surface per-document Azure Search rejection reasons.
+                    // Aggregate batch logging hides which chunks failed and why.
+                    _logger.LogWarning(
+                        "Azure Search rejected chunk {ChunkKey} in {IndexName}: status={Status} error={ErrorMessage}",
+                        result.Key, deploymentConfig.IndexName, result.Status, result.ErrorMessage ?? "(no message)");
+                    results.Add(IndexResult.Failure(result.Key, result.ErrorMessage ?? "Unknown error"));
+                }
             }
         }
 
         var successCount = results.Count(r => r.Succeeded);
-        _logger.LogInformation("Batch indexed {SuccessCount}/{TotalCount} documents for tenant {TenantId}",
-            successCount, documentList.Count, tenantId);
+        _logger.LogInformation(
+            "Batch indexed {SuccessCount}/{TotalCount} documents for tenant {TenantId} to {IndexName}",
+            successCount, documentList.Count, tenantId, deploymentConfig.IndexName);
 
         return results;
     }
