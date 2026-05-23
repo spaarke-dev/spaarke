@@ -329,7 +329,13 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     ...shorthands.gap("2px"),
-    minWidth: "140px",
+    // Task 131 (R13 follow-up #10, 2026-05-23): operator: "reduce the
+    // width by about 30% so we can fit them all on the same line." Was
+    // 140px; now 96px (~30% narrower) so Event Type + Event Status +
+    // Filter by Date Field + From + To + Apply/Clear fit on one row at
+    // typical viewport widths. The flex-wrap on the parent still kicks
+    // in at narrow viewports so the row gracefully wraps.
+    minWidth: "96px",
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -621,9 +627,16 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
         return;
       }
       try {
+        // Task 131 (R13 follow-up #10, 2026-05-23): operator confirmed the
+        // correct schema names. The Event Type LOOKUP TABLE is
+        // `sprk_eventtype_ref` (NOT `sprk_eventtype`); its GUID column is
+        // `sprk_eventtype_refid`; the lookup FIELD on sprk_event is also
+        // `sprk_eventtype_ref` (resolved via the OData annotated value
+        // `_sprk_eventtype_ref_value` in GridSection's filter). Task 130
+        // used `sprk_eventtype` which produced 0 records → blank dropdown.
         const result = await xrm.WebApi.retrieveMultipleRecords(
-          "sprk_eventtype",
-          "?$select=sprk_eventtypeid,sprk_name" +
+          "sprk_eventtype_ref",
+          "?$select=sprk_eventtype_refid,sprk_name" +
             "&$filter=statecode eq 0" +
             "&$orderby=sprk_name asc" +
             "&$top=200",
@@ -632,7 +645,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
         /* eslint-disable @typescript-eslint/no-explicit-any */
         const types: IEventTypeOption[] = (result.entities || [])
           .map((t: any) => ({
-            id: t.sprk_eventtypeid,
+            id: t.sprk_eventtype_refid,
             name: t.sprk_name || "Unnamed Type",
           }))
           .filter((t: IEventTypeOption) => !!t.id);
@@ -958,48 +971,13 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* (1) Filter row — Date Field + From + To + Event Type + Event Status
-              + Apply + Clear + collapse chevron. All Dropdowns + Inputs
-              update `pending` only. Apply copies pending → applied. */}
+      {/* (1) Filter row — Task 131 reordered per operator: Event Type →
+              Event Status → Filter by Date Field → From → To → Apply →
+              Clear → collapse chevron. All Dropdowns + Inputs update
+              `pending` only. Apply copies pending → applied. */}
       <div className={styles.dateRangeRow}>
-        <div className={styles.dateRangeField}>
-          <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
-          <Dropdown
-            value={dateFieldDisplay}
-            selectedOptions={[pending.dateField]}
-            onOptionSelect={(_e, data) => {
-              const next = data.optionValue ?? DATE_FIELD_NONE;
-              setPending((prev) => ({ ...prev, dateField: next }));
-            }}
-          >
-            {DATE_FIELDS.map((f) => (
-              <Option key={f.value || "none"} value={f.value} text={f.label}>
-                {f.label}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-        <div className={styles.dateRangeField}>
-          <Label className={styles.dateRangeLabel}>From</Label>
-          <Input
-            type="date"
-            value={pending.fromDate}
-            onChange={(_e, data) =>
-              setPending((prev) => ({ ...prev, fromDate: data.value }))
-            }
-          />
-        </div>
-        <div className={styles.dateRangeField}>
-          <Label className={styles.dateRangeLabel}>To</Label>
-          <Input
-            type="date"
-            value={pending.toDate}
-            onChange={(_e, data) =>
-              setPending((prev) => ({ ...prev, toDate: data.value }))
-            }
-          />
-        </div>
-        {/* Task 130: Event Type (single-select, fetched from sprk_eventtype) */}
+        {/* Task 131: Event Type — first per operator's left-to-right order.
+            Fetched from sprk_eventtype_ref records (task 131 schema fix). */}
         <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Event Type</Label>
           <Dropdown
@@ -1021,7 +999,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             ))}
           </Dropdown>
         </div>
-        {/* Task 130: Event Status (single-select, static option set) */}
+        {/* Task 131: Event Status — second per operator's order. */}
         <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Event Status</Label>
           <Dropdown
@@ -1046,6 +1024,46 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
               </Option>
             ))}
           </Dropdown>
+        </div>
+        {/* Task 131: Filter by Date Field — third per operator's order. */}
+        <div className={styles.dateRangeField}>
+          <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
+          <Dropdown
+            value={dateFieldDisplay}
+            selectedOptions={[pending.dateField]}
+            onOptionSelect={(_e, data) => {
+              const next = data.optionValue ?? DATE_FIELD_NONE;
+              setPending((prev) => ({ ...prev, dateField: next }));
+            }}
+          >
+            {DATE_FIELDS.map((f) => (
+              <Option key={f.value || "none"} value={f.value} text={f.label}>
+                {f.label}
+              </Option>
+            ))}
+          </Dropdown>
+        </div>
+        {/* Task 131: From — fourth. */}
+        <div className={styles.dateRangeField}>
+          <Label className={styles.dateRangeLabel}>From</Label>
+          <Input
+            type="date"
+            value={pending.fromDate}
+            onChange={(_e, data) =>
+              setPending((prev) => ({ ...prev, fromDate: data.value }))
+            }
+          />
+        </div>
+        {/* Task 131: To — fifth. */}
+        <div className={styles.dateRangeField}>
+          <Label className={styles.dateRangeLabel}>To</Label>
+          <Input
+            type="date"
+            value={pending.toDate}
+            onChange={(_e, data) =>
+              setPending((prev) => ({ ...prev, toDate: data.value }))
+            }
+          />
         </div>
         {/* Task 130: Apply + Clear buttons. Apply visible when pending differs
             from applied (something to commit). Clear visible whenever any
