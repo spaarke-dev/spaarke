@@ -329,13 +329,18 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     ...shorthands.gap("2px"),
-    // Task 131 (R13 follow-up #10, 2026-05-23): operator: "reduce the
-    // width by about 30% so we can fit them all on the same line." Was
-    // 140px; now 96px (~30% narrower) so Event Type + Event Status +
-    // Filter by Date Field + From + To + Apply/Clear fit on one row at
-    // typical viewport widths. The flex-wrap on the parent still kicks
-    // in at narrow viewports so the row gracefully wraps.
+    // Task 131: ~30% reduction from the original 140px.
     minWidth: "96px",
+  },
+  // Task 133 (R13 follow-up #12, 2026-05-23): operator wants the three
+  // picklist fields (Event Type / Event Status / Filter by Date Field)
+  // narrower than From/To so all five fields plus Apply + Clear fit on
+  // one row. The dropdown content ("All" / "(none)" / type name) is
+  // short, so capping width here doesn't truncate. From/To inputs keep
+  // their natural width via the base dateRangeField class.
+  pickListField: {
+    flex: "0 0 auto",
+    width: "120px",
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -977,8 +982,10 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
               `pending` only. Apply copies pending → applied. */}
       <div className={styles.dateRangeRow}>
         {/* Task 131: Event Type — first per operator's left-to-right order.
-            Fetched from sprk_eventtype_ref records (task 131 schema fix). */}
-        <div className={styles.dateRangeField}>
+            Fetched from sprk_eventtype_ref records (task 131 schema fix).
+            Task 133: pickListField caps width at 120px so all 5 filters +
+            Apply + Clear fit on one row at typical viewport widths. */}
+        <div className={`${styles.dateRangeField} ${styles.pickListField}`}>
           <Label className={styles.dateRangeLabel}>Event Type</Label>
           <Dropdown
             value={eventTypeDisplay}
@@ -999,8 +1006,8 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             ))}
           </Dropdown>
         </div>
-        {/* Task 131: Event Status — second per operator's order. */}
-        <div className={styles.dateRangeField}>
+        {/* Task 131: Event Status — second. Task 133: pickListField width cap. */}
+        <div className={`${styles.dateRangeField} ${styles.pickListField}`}>
           <Label className={styles.dateRangeLabel}>Event Status</Label>
           <Dropdown
             value={eventStatusDisplay}
@@ -1025,8 +1032,8 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             ))}
           </Dropdown>
         </div>
-        {/* Task 131: Filter by Date Field — third per operator's order. */}
-        <div className={styles.dateRangeField}>
+        {/* Task 131: Filter by Date Field — third. Task 133: pickListField width cap. */}
+        <div className={`${styles.dateRangeField} ${styles.pickListField}`}>
           <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
           <Dropdown
             value={dateFieldDisplay}
