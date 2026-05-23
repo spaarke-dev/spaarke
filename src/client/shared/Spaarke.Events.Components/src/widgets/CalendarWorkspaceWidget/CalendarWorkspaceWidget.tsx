@@ -286,6 +286,14 @@ const useStyles = makeStyles({
     alignItems: "flex-end",
     flexShrink: 0,
   },
+  // Task 122: container for the Clear-date-filter button. Bottom-aligned
+  // like collapseToggleSlot so it lines up flush with the From/To inputs.
+  // Conditionally rendered only when fromDate || toDate (filter is active).
+  dateRangeClearSlot: {
+    display: "flex",
+    alignItems: "flex-end",
+    flexShrink: 0,
+  },
   // Task 116: calendar row = ◀ + strip (flex: 1) + ▶. Task 118 REMOVED
   // the in-row collapse chevron; it now lives on the filter row above.
   // The row itself is `flex-shrink: 0` so the grid below can claim
@@ -841,6 +849,23 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             onChange={(_e, data) => setToDate(data.value)}
           />
         </div>
+        {/* Task 122: explicit Clear button on the filter row. Only renders
+            when a From or To date is set (otherwise it's a dead affordance).
+            Click clears both date inputs + the calendarFilter in context so
+            the grid + day-highlight return to the unfiltered state. Reuses
+            the same handler the Calendar toolbar button uses. */}
+        {(fromDate || toDate) && (
+          <div className={styles.dateRangeClearSlot}>
+            <Tooltip content="Clear date filter" relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<Dismiss24Regular />}
+                onClick={onCalendarToolbarClick}
+                aria-label="Clear date filter"
+              />
+            </Tooltip>
+          </div>
+        )}
         {/* Flex spacer pushes the chevron to the right edge responsively */}
         <div className={styles.filterRowSpacer} />
         <div className={styles.collapseToggleSlot}>

@@ -222,10 +222,23 @@ const useStyles = makeStyles({
   // the bottom margin from `monthContainer` is irrelevant because flex
   // gap supplies the spacing. We share `monthContainer` for the grid + day
   // structure and override marginBottom for horizontal here.
+  //
+  // Task 122 (Round 13 follow-up #3): operator feedback "visually the
+  // calendars run into each other" — add a subtle light vertical divider
+  // on the LEFT edge of every horizontal month EXCEPT the first one. The
+  // existing flex columnGap supplies the surrounding whitespace; this
+  // border sits centered within that gap and clearly demarcates one
+  // month from the next without competing with the day-cell content.
   monthContainerHorizontal: {
     marginBottom: 0,
     flex: "1 1 0",
     minWidth: "240px",
+    paddingLeft: tokens.spacingHorizontalL,
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    ":first-of-type": {
+      paddingLeft: 0,
+      borderLeft: "none",
+    },
   },
   monthHeader: {
     display: "flex",
@@ -285,17 +298,18 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorBrandBackground2Hover,
     },
   },
-  // Task 118: Days that have associated events get a brand-tint background
-  // + brand foreground + semibold weight, making the indicator visible at
-  // a glance ("blue background" per operator). This stacks under the
-  // existing tiny dot indicator (kept for the case where the user wants a
-  // smaller hint — e.g. inside a selected range cell).
+  // Task 122 (Round 13 follow-up #2): solid brand-background + white text
+  // per operator's exact wording — "blue background, white font" — replacing
+  // task 118's softer brand-tint that proved invisible inside an active
+  // From/To range. Event-day indicator now wins visually over the range
+  // visualization (also see the showEventsTint logic — task 122 removed
+  // the in-range exclusion so this style applies regardless of range state).
   dayWithEvents: {
-    backgroundColor: tokens.colorBrandBackground2,
-    color: tokens.colorBrandForeground1,
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
     fontWeight: tokens.fontWeightSemibold,
     ":hover": {
-      backgroundColor: tokens.colorBrandBackground2Hover,
+      backgroundColor: tokens.colorBrandBackgroundHover,
     },
   },
   dayNumber: {
@@ -637,13 +651,19 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
               const dateStr = toIsoDateString(day);
               const hasEvents = eventDateMap.has(dateStr);
 
-              // Task 118: in-month event days get a stronger brand-tint
-              // background ("blue background" per operator). The class
-              // stack respects priority: selected > in-range > has-events
-              // > today > other-month base. We DO NOT apply the
-              // has-events tint to other-month days (they're already
-              // muted; tinting would compete visually).
-              const showEventsTint = hasEvents && !isOtherMonth && dateState !== "selected" && dateState !== "in-range";
+              // Task 122 (Round 13 follow-up #2): event-day highlight must
+              // dominate the in-range visualization. Operator showed a screenshot
+              // where May 25 (a day with events, within an active From/To range)
+              // had NO blue highlight because the in-range state suppressed
+              // showEventsTint. Now the event-day tint shows REGARDLESS of
+              // in-range — the solid colorBrandBackground (dayWithEvents style,
+              // task 122) is visually stronger than the in-range stroke, so
+              // the user sees the event indicator even within an active
+              // date-range filter. The `selected` state still wins (explicit
+              // user click on a day should highlight more strongly than a
+              // passive event-day indicator). Other-month days remain excluded
+              // — they're already muted and competing tints would be noisy.
+              const showEventsTint = hasEvents && !isOtherMonth && dateState !== "selected";
 
               return (
                 <div
