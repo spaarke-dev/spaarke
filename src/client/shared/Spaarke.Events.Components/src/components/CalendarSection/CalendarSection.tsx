@@ -306,11 +306,22 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorBrandForeground1,
   },
+  // Task 128 (R13 follow-up #7, 2026-05-22): distinguish a USER-SELECTED
+  // day visually from an event-day highlight. Operator reported confusion
+  // when both Feb 3 (event) and Feb 16 (clicked) showed identical solid-
+  // blue backgrounds — they read "two events" when really one was just a
+  // stale click selection. Selected days now use the darker
+  // `colorBrandBackgroundSelected` token so a user-clicked day is
+  // visibly more saturated than the passive event-day highlight
+  // (colorBrandBackground). Adds a 2px inset ring via boxShadow as a
+  // secondary cue ("this is an active selection, not a passive
+  // indicator").
   dayCellSelected: {
-    backgroundColor: tokens.colorBrandBackground,
+    backgroundColor: tokens.colorBrandBackgroundSelected,
     color: tokens.colorNeutralForegroundOnBrand,
+    boxShadow: `inset 0 0 0 2px ${tokens.colorBrandStroke1}`,
     ":hover": {
-      backgroundColor: tokens.colorBrandBackgroundHover,
+      backgroundColor: tokens.colorBrandBackgroundSelected,
     },
   },
   dayCellInRange: {

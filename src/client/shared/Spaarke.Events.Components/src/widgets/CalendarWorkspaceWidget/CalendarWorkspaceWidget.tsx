@@ -907,14 +907,15 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             onChange={(_e, data) => setToDate(data.value)}
           />
         </div>
-        {/* Task 122 + 124: explicit Clear button on the filter row. Only
-            renders when a From or To date is set (otherwise it's a dead
-            affordance). Click clears both date inputs + the calendarFilter
-            in context so the grid + day-highlight return to the unfiltered
-            state. Reuses the same handler the Calendar toolbar button uses.
-            Task 124: uses small text "Clear" instead of a Dismiss icon —
-            operator: "we have way too many 'x' all over the UI." */}
-        {(fromDate || toDate) && (
+        {/* Task 122 + 124 + 128: explicit Clear button on the filter row.
+            Renders when ANY date filter is active — From / To range
+            OR a day clicked on the calendar (selectedDate). Operator
+            (R13 follow-up #7): "the clear button in the filter should
+            show when a date in the calendar selected, and clear the
+            calendar filter." Click handler `onCalendarToolbarClick`
+            already clears all three (setFromDate("") + setToDate("") +
+            setSelectedDate(null) + setCalendarFilter({type:"clear"})). */}
+        {(fromDate || toDate || selectedDate) && (
           <div className={styles.dateRangeClearSlot}>
             <Button
               appearance="subtle"
