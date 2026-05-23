@@ -767,7 +767,10 @@ export const GridSection: React.FC<GridSectionProps> = ({
         const mockData = getMockEvents(calendarFilter, assignedToFilter, eventTypeFilter, statusFilter);
         setEvents(mockData);
         onDataLoaded?.(mockData.length);
-        onRecordsLoaded?.(mockData);
+        // Task 127: onRecordsLoaded is fired by a separate effect that watches
+        // filteredEvents — so consumers (Calendar widget) see the GRID's
+        // displayed records, not the raw fetch. This matters because client-
+        // side column filters can hide records that the BFF returned.
         setLoading(false);
         return;
       }
@@ -816,7 +819,7 @@ export const GridSection: React.FC<GridSectionProps> = ({
         const loadedEvents = result.entities || [];
         setEvents(loadedEvents);
         onDataLoaded?.(loadedEvents.length);
-        onRecordsLoaded?.(loadedEvents);
+        // Task 127: see note above — onRecordsLoaded fires via separate effect.
         console.log(`[GridSection] FetchXML returned ${loadedEvents.length} records`);
         return;
       }
@@ -883,16 +886,16 @@ export const GridSection: React.FC<GridSectionProps> = ({
       const loadedEvents = result.entities || [];
       setEvents(loadedEvents);
       onDataLoaded?.(loadedEvents.length);
-      onRecordsLoaded?.(loadedEvents);
+      // Task 127: see note above — onRecordsLoaded fires via separate effect.
     } catch (err) {
       console.error("[GridSection] Error fetching events:", err);
       setError(err instanceof Error ? err.message : "Failed to load events");
+      setEvents([]);  // Task 127: clear events so filteredEvents memo + effect drive onRecordsLoaded([]).
       onDataLoaded?.(0);
-      onRecordsLoaded?.([]);
     } finally {
       setLoading(false);
     }
-  }, [calendarFilter, assignedToFilter, eventTypeFilter, statusFilter, viewDefinition, contextFilter, onDataLoaded, onRecordsLoaded]);
+  }, [calendarFilter, assignedToFilter, eventTypeFilter, statusFilter, viewDefinition, contextFilter, onDataLoaded]);
 
   // Fetch events on mount and when filter changes
   React.useEffect(() => {
@@ -1026,6 +1029,20 @@ export const GridSection: React.FC<GridSectionProps> = ({
 
     return result;
   }, [events, columnFilters, sortConfig]);
+
+  // Task 127 (R13 follow-up #6, 2026-05-22): operator reported the Calendar
+  // widget was highlighting dates for records that were NOT visible in the
+  // grid. Root cause: prior to this task, onRecordsLoaded fired at each
+  // fetch site with the RAW fetched `loadedEvents` — not with the
+  // post-client-filter `filteredEvents`. So if the BFF returned records
+  // that the column filters subsequently excluded from the grid, the
+  // calendar would still highlight their effective dates. Fix: drive
+  // onRecordsLoaded from `filteredEvents` via this effect so the calendar
+  // always reflects what the grid is actually displaying. Fires on
+  // initial mount, every fetch, and every filter / sort change.
+  React.useEffect(() => {
+    onRecordsLoaded?.(filteredEvents);
+  }, [filteredEvents, onRecordsLoaded]);
 
   /**
    * Get active columns - use dynamic columns from layoutXml if available,
