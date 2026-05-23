@@ -4,9 +4,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
+using Azure.Core;
+using Azure.Identity;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace Sprk.Bff.Api.Services.Jobs;
@@ -190,23 +193,69 @@ public class RecordSyncJob : BackgroundService
 
     private readonly IDistributedCache _cache;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<RecordSyncJob> _logger;
     private readonly RecordSyncOptions _options;
 
     private SearchClient? _searchClient;
+
+    // Dataverse token caching (mirrors ExternalParticipationService pattern per ADR-028).
+    private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
+    private AccessToken? _currentToken;
 
     // ─────────────────────────────────────────────────────────────────────────
 
     public RecordSyncJob(
         IDistributedCache cache,
         IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
         IOptions<RecordSyncOptions> options,
         ILogger<RecordSyncJob> logger)
     {
         _cache             = cache             ?? throw new ArgumentNullException(nameof(cache));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _configuration     = configuration     ?? throw new ArgumentNullException(nameof(configuration));
         _options           = options?.Value    ?? throw new ArgumentNullException(nameof(options));
         _logger            = logger            ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Acquires a Dataverse access token via Managed Identity (canonical per ADR-028).
+    /// Tokens are cached until 5 minutes before expiry. Concurrent callers are serialized
+    /// behind a semaphore so a token refresh fires at most once.
+    /// </summary>
+    /// <remarks>
+    /// Requires the BFF Managed Identity to be registered as a Dataverse Application User
+    /// in the target environment — see docs/guides/auth-deployment-setup.md §6.
+    /// </remarks>
+    private async Task<string> GetDataverseTokenAsync(string dataverseUrl, CancellationToken ct)
+    {
+        await _tokenSemaphore.WaitAsync(ct);
+        try
+        {
+            if (_currentToken is { } cached && cached.ExpiresOn > DateTimeOffset.UtcNow.AddMinutes(5))
+            {
+                return cached.Token;
+            }
+
+            // Prefer the BFF's configured MI client ID. Falls back to default credential
+            // resolution if the setting is missing (covers local dev with env-var creds).
+            var managedIdentityClientId = _configuration["ManagedIdentity:ClientId"];
+            var credential = string.IsNullOrEmpty(managedIdentityClientId)
+                ? new DefaultAzureCredential()
+                : new DefaultAzureCredential(new DefaultAzureCredentialOptions
+                {
+                    ManagedIdentityClientId = managedIdentityClientId
+                });
+
+            var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
+            _currentToken = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct);
+            return _currentToken.Value.Token;
+        }
+        finally
+        {
+            _tokenSemaphore.Release();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -382,6 +431,10 @@ public class RecordSyncJob : BackgroundService
 
         using var http = _httpClientFactory.CreateClient("RecordSyncDataverse");
 
+        // Acquire Dataverse MI token once per cycle. The cache inside GetDataverseTokenAsync
+        // serves all entity queries in this cycle and refreshes only if expiry is near.
+        var dataverseToken = await GetDataverseTokenAsync(baseUrl, ct);
+
         // ISO 8601 OData-compatible datetime literal (no timezone suffix — Dataverse expects UTC Z)
         var watermarkStr = watermark.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 
@@ -402,6 +455,7 @@ public class RecordSyncJob : BackgroundService
             ct.ThrowIfCancellationRequested();
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             request.Headers.Add("Prefer",
                 "odata.include-annotations=OData.Community.Display.V1.FormattedValue," +
