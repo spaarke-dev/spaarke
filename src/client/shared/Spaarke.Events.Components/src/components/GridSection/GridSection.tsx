@@ -313,6 +313,31 @@ function buildDateFilter(filter: CalendarFilterOutput | null): string {
 
   console.log("[GridSection] Building date filter:", filter, "fields:", dateFields);
 
+  // Task 129 (R13 follow-up #8, 2026-05-23): apply the sprk_duedate →
+  // createdon fallback chain to the grid filter so clicking a highlighted
+  // calendar day always returns the events that contributed to the
+  // highlight. The calendar's handleRecordsLoaded (task 121) derives
+  // event dates as `sprk_duedate || createdon`. The grid filter was
+  // strict-due-date-only, producing empty results for records highlighted
+  // via the createdon fallback. Operator (2026-05-23): "the calendar day
+  // is highlighted indicating an Event, but when I click on the day there
+  // is nothing shown in the grid... for Mar 3 and Mar 30."
+  //
+  // Helper: emit `(field ge X and field le Y)` with the createdon fallback
+  // appended when the field is sprk_duedate and we're in single-field mode.
+  function fieldRange(field: string, start: string, end: string): string {
+    const f = field.toLowerCase();
+    const primary = `(${f} ge ${start} and ${f} le ${end})`;
+    // Fallback only when the primary field is sprk_duedate. Records without
+    // a due date are matched via createdon — same semantic as the calendar
+    // highlight's task-121 fallback.
+    if (f === "sprk_duedate") {
+      const fallback = `(${f} eq null and createdon ge ${start} and createdon le ${end})`;
+      return `(${primary} or ${fallback})`;
+    }
+    return primary;
+  }
+
   if (filter.type === "single") {
     const singleFilter = filter as CalendarFilterSingle;
     // For single date, filter events on that specific date
@@ -321,14 +346,13 @@ function buildDateFilter(filter: CalendarFilterOutput | null): string {
     const dateEnd = `${singleFilter.date}T23:59:59Z`;
 
     if (dateFields.length === 1) {
-      const field = dateFields[0].toLowerCase();
-      return `(${field} ge ${dateStart} and ${field} le ${dateEnd})`;
+      return fieldRange(dateFields[0], dateStart, dateEnd);
     }
-    // Multiple fields - OR logic
-    const conditions = dateFields.map((field) => {
-      const f = field.toLowerCase();
-      return `(${f} ge ${dateStart} and ${f} le ${dateEnd})`;
-    });
+    // Multiple fields - OR logic (no fallback; the OR semantic already
+    // includes all specified fields).
+    const conditions = dateFields.map((field) =>
+      `(${field.toLowerCase()} ge ${dateStart} and ${field.toLowerCase()} le ${dateEnd})`,
+    );
     return `(${conditions.join(" or ")})`;
   }
 
@@ -339,14 +363,12 @@ function buildDateFilter(filter: CalendarFilterOutput | null): string {
     const rangeEnd = `${rangeFilter.end}T23:59:59Z`;
 
     if (dateFields.length === 1) {
-      const field = dateFields[0].toLowerCase();
-      return `(${field} ge ${rangeStart} and ${field} le ${rangeEnd})`;
+      return fieldRange(dateFields[0], rangeStart, rangeEnd);
     }
-    // Multiple fields - OR logic
-    const conditions = dateFields.map((field) => {
-      const f = field.toLowerCase();
-      return `(${f} ge ${rangeStart} and ${f} le ${rangeEnd})`;
-    });
+    // Multiple fields - OR logic (see note above).
+    const conditions = dateFields.map((field) =>
+      `(${field.toLowerCase()} ge ${rangeStart} and ${field.toLowerCase()} le ${rangeEnd})`,
+    );
     return `(${conditions.join(" or ")})`;
   }
 
@@ -1694,16 +1716,23 @@ function getMockEvents(
   // Apply date filter to mock data
   if (filter && filter.type !== "clear") {
     filteredEvents = filteredEvents.filter((event) => {
-      if (!event.sprk_duedate) return false;
-      const dueDate = event.sprk_duedate.split("T")[0];
+      // Task 129 (R13 follow-up #8, 2026-05-23): mirror buildDateFilter's
+      // sprk_duedate → createdon fallback chain so the mock-data path
+      // matches the OData production path. Records without a due date
+      // are matched via createdon — same semantic as the calendar
+      // highlight's task-121 fallback.
+      const createdon = (event as unknown as { createdon?: string }).createdon;
+      const effectiveDate = event.sprk_duedate || createdon;
+      if (!effectiveDate) return false;
+      const eventDate = effectiveDate.split("T")[0];
 
       if (filter.type === "single") {
-        return dueDate === (filter as CalendarFilterSingle).date;
+        return eventDate === (filter as CalendarFilterSingle).date;
       }
 
       if (filter.type === "range") {
         const range = filter as CalendarFilterRange;
-        return dueDate >= range.start && dueDate <= range.end;
+        return eventDate >= range.start && eventDate <= range.end;
       }
 
       return true;
