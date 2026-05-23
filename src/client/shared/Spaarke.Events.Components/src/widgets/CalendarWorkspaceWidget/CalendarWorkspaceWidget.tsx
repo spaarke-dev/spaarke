@@ -330,6 +330,13 @@ const useStyles = makeStyles({
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
+    // Task 124: vertical gap between the calendar carousel above and the
+    // toolbar/grid below. Operator: "add a little spacing between the
+    // bottom of the calendars section and the top of the grid." The
+    // marginTop applies whether the calendar is expanded or collapsed —
+    // when collapsed the calendarRow is gone but the filter row still
+    // sits flush; the breathing room reads as natural section spacing.
+    marginTop: tokens.spacingVerticalL,
     ...shorthands.padding("0", "4px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
@@ -541,9 +548,23 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
   // sprk_startdate is intentionally skipped — events without a due date
   // anchor to when they were created, not when they were scheduled to
   // begin (which can mislead the user about deadline visibility).
+  // Task 124: auto-anchor signature ref. Operator screenshot showed a Task
+  // with createdon = Apr 2 visible in the grid but the calendar strip
+  // started at May (today's month), so the highlight was outside the
+  // visible window and the operator concluded the highlight didn't work.
+  // Auto-anchor: when records load AND none of their effective dates
+  // (sprk_duedate || createdon) fall in the currently visible months
+  // [viewDate .. viewDate + monthsToShow - 1], shift viewDate to the
+  // month containing the EARLIEST event date so the highlight is
+  // immediately visible. Signature ref prevents re-anchoring on every
+  // refresh — only auto-anchors once per distinct records-set (keyed by
+  // a hash of sorted event-date keys).
+  const lastAutoAnchorSignatureRef = React.useRef<string | null>(null);
+
   const handleRecordsLoaded = React.useCallback(
     (records: IEventRecord[]) => {
       const counts = new Map<string, number>();
+      const eventDateObjects: Date[] = [];
       for (const r of records) {
         const dateStr =
           r.sprk_duedate ||
@@ -555,13 +576,50 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
         // membership check (task 120 toIsoDateString fix).
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
         counts.set(key, (counts.get(key) ?? 0) + 1);
+        eventDateObjects.push(d);
       }
       const next: IEventDateInfo[] = Array.from(counts.entries()).map(
         ([date, count]) => ({ date, count }),
       );
       setEventDates(next);
+
+      // Task 124: auto-anchor to the earliest event's month if none of the
+      // event dates fall within the currently visible window. Prevents the
+      // "I don't see the highlight" confusion when the only event happens
+      // to be outside the default current+next-N-months view. Signature
+      // dedupes: same records set → no re-anchor (preserves the user's
+      // explicit navigation away from auto-anchored months).
+      if (eventDateObjects.length === 0) return;
+      const sortedKeys = Array.from(counts.keys()).sort();
+      const signature = sortedKeys.join("|");
+      if (lastAutoAnchorSignatureRef.current === signature) return;
+
+      // Compute the visible window: [viewDate ... viewDate + monthsToShow - 1].
+      // Use first-of-month for comparison so we ignore day-of-month noise.
+      const visibleStart = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+      const visibleEnd = new Date(
+        viewDate.getFullYear(),
+        viewDate.getMonth() + monthsToShow,
+        0, // last day of (viewDate.month + monthsToShow - 1)
+      );
+      const anyInVisible = eventDateObjects.some(
+        (d) => d >= visibleStart && d <= visibleEnd,
+      );
+      if (anyInVisible) {
+        // At least one event is already visible — leave the user's viewDate alone.
+        lastAutoAnchorSignatureRef.current = signature;
+        return;
+      }
+
+      // Auto-anchor to the earliest event's month.
+      const earliest = eventDateObjects.reduce(
+        (acc, d) => (d < acc ? d : acc),
+        eventDateObjects[0],
+      );
+      setViewDate(new Date(earliest.getFullYear(), earliest.getMonth(), 1));
+      lastAutoAnchorSignatureRef.current = signature;
     },
-    [setEventDates],
+    [setEventDates, viewDate, monthsToShow],
   );
 
   // ── Date-range filter (top row) ──────────────────────────────────────────
@@ -849,21 +907,23 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             onChange={(_e, data) => setToDate(data.value)}
           />
         </div>
-        {/* Task 122: explicit Clear button on the filter row. Only renders
-            when a From or To date is set (otherwise it's a dead affordance).
-            Click clears both date inputs + the calendarFilter in context so
-            the grid + day-highlight return to the unfiltered state. Reuses
-            the same handler the Calendar toolbar button uses. */}
+        {/* Task 122 + 124: explicit Clear button on the filter row. Only
+            renders when a From or To date is set (otherwise it's a dead
+            affordance). Click clears both date inputs + the calendarFilter
+            in context so the grid + day-highlight return to the unfiltered
+            state. Reuses the same handler the Calendar toolbar button uses.
+            Task 124: uses small text "Clear" instead of a Dismiss icon —
+            operator: "we have way too many 'x' all over the UI." */}
         {(fromDate || toDate) && (
           <div className={styles.dateRangeClearSlot}>
-            <Tooltip content="Clear date filter" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<Dismiss24Regular />}
-                onClick={onCalendarToolbarClick}
-                aria-label="Clear date filter"
-              />
-            </Tooltip>
+            <Button
+              appearance="subtle"
+              size="small"
+              onClick={onCalendarToolbarClick}
+              aria-label="Clear date filter"
+            >
+              Clear
+            </Button>
           </div>
         )}
         {/* Flex spacer pushes the chevron to the right edge responsively */}
