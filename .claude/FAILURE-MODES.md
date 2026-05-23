@@ -21,11 +21,14 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 
 ### Anti-patterns
 - [AP-1: Skill prescribes X but X is wrong (`/pcf-deploy` "NEVER use `build:prod`")](#ap-1-skill-prescribes-x-but-x-is-wrong)
+- [AP-2: Optional field in BFF contract that two clients drift apart on (orphan RAG chunks)](#ap-2-optional-field-in-bff-contract-that-two-clients-drift-apart-on)
+- [AP-3: GUID case mismatch between Xrm and Web API clients (case-sensitive AI Search filters)](#ap-3-guid-case-mismatch-between-xrm-and-web-api-clients)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
 - [G-2: Default health-check window sized for old behavior (Linux cold start)](#g-2-default-health-check-window-sized-for-old-behavior)
 - [G-3: Zero-second GitHub Actions workflow failures are startup failures, not test failures](#g-3-zero-second-github-actions-workflow-failures-are-startup-failures-not-test-failures)
+- [G-4: AI Search index field created without `filterable: true` cannot be made filterable later](#g-4-ai-search-index-field-created-without-filterable-true-cannot-be-made-filterable-later)
 
 ---
 
@@ -131,6 +134,106 @@ Changed `TaskCompleted` (not a real event) to `Stop`. Commit: `8ca796ab`.
 - When a workflow shows 0-second failure, look at action version mismatches FIRST, test logic last
 
 **Evidence**: Phase 0 task 003 inventory at `projects/ai-procedure-quality-r1/notes/inventory/workflows.md` enumerates the 5 affected workflows and the suspect actions.
+
+---
+
+### AP-2: Optional field in BFF contract that two clients drift apart on
+
+**Title**: `/api/ai/rag/index-file` accepts `documentId` as optional. The Document Upload Wizard never sent it; the "Send to Index" ribbon did. Result: every wizard-uploaded file produced **orphan chunks** in `spaarke-knowledge-index-v2` (indexed but with `documentId=null`).
+
+**Date**: 2026-05-22 (caught after multi-month regression visible only as `sprk_searchindexed=No` on Dataverse Document records)
+
+**Classification**: Anti-pattern (contract was "valid" — the field is genuinely optional for some callers — but the wizard treated it as not-needed when in fact it was load-bearing for the downstream UX)
+
+**What happened**: The BFF endpoint's [`FileIndexRequest.DocumentId`](../../src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs) is typed `string?` and the Dataverse tracking-field write at `RagEndpoints.cs:480` is gated on `if (!string.IsNullOrEmpty(request.DocumentId))`. The wizard's `triggerRagIndexing` at [`uploadOrchestrator.ts:447`](../../src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.ts) sent `{ driveId, itemId, fileName, tenantId }` only. `record.recordId` was available in the caller's scope but never threaded through. The endpoint responded 200, chunks landed in the index without `documentId` or `parentEntityType`, and the user-facing affordances that join chunks back to Dataverse (Search Indexed toggle, Find Similar, Open from search results, DocumentRelationshipViewer graph) all silently failed.
+
+**Root cause**:
+1. **Two entry points, one contract, asymmetric callers.** The "Send to Index" ribbon was built by the team that knew it needed `documentId` (it looks the doc up to construct the request anyway). The Document Upload Wizard was built by a different work stream that thought of indexing as a fire-and-forget "send file bytes" call.
+2. **Fire-and-forget client call swallows server signals.** The wizard's `.catch(err => logger.warn(...))` made every error a warning — never an error toast, never blocked the success indicator.
+3. **No regression test asserts the indexed → linked → searchable lifecycle**.
+4. **No telemetry on the indexing pipeline** before 2026-05-22 — `LogInformation` calls inside `RagService` and `FileIndexingService` did not include the resolved index name or per-chunk failure reasons. Even when investigation started, the data wasn't there.
+5. **No cross-check between the Dataverse "Search Indexed" field and the actual index state** — two observation surfaces, no reconciliation.
+
+**Fix**: commit `dd288532` (wizard now passes `documentId` + `parentEntity`), commit `15f82369` (BFF diagnostic logs + silent-success guard at `FileIndexingService:316` — `Success = allSucceeded && results.Count > 0`), commit `fbbaee29` (paired with AP-3 fix). See [`.claude/patterns/ai/indexing-pipeline.md`](patterns/ai/indexing-pipeline.md) for the canonical contract.
+
+**Prevention**:
+- Any new BFF endpoint that has a "linkage" side effect (writing to Dataverse, updating tracking fields, etc.) should treat the linkage as **part of the contract**, not as an optional optimization. Either make the field required or move the linkage to a separate explicit endpoint.
+- Client-side fire-and-forget patterns should log at `error` level (not `warn`) on non-2xx, and include response body excerpts. Hidden warnings hide regressions for months.
+- Add the indexing pipeline to the [observability-as-contract checklist](#observability-as-contract): every indexing call should emit `Resolved deployment ... IndexName=...` so the destination is auditable from logs alone.
+
+**Evidence**: project artifacts at `projects/ai-search-indexing-fix/ISSUE.md` (original investigation, 2026-05-19) and the today-session resolution that produced commits `15f82369`, `dd288532`, `fbbaee29`.
+
+---
+
+### AP-3: GUID case mismatch between Xrm and Web API clients
+
+**Title**: `Xrm.Page.data.entity.getId()` returns `{UPPERCASE-GUID}`; the Dataverse Web API client returns `lowercase-guid`. Azure AI Search `Edm.String` filters are case-sensitive. So the same document ended up indexed with two different documentId casings depending on which entry point was used — and downstream lookups by either casing missed half the data.
+
+**Date**: 2026-05-22 (discovered during AP-2 investigation when Find Similar worked for wizard-uploaded files but failed for Send-to-Index'd ones)
+
+**Classification**: Anti-pattern (well-known Dataverse gotcha that should have been normalized at the boundary but wasn't)
+
+**What happened**: After AP-2 was fixed, a follow-up test showed:
+- Wizard upload of "Deposition Transcript" → `documentId=ca7d0dda-...` (lowercase) → Find Similar works
+- Send-to-Index on "Settlement Memo" → `documentId=3FBA84FA-...` (uppercase) → Find Similar fails
+
+Both chunks were correctly indexed and linked — but the Find Similar lookup queries by the document's lowercase Dataverse GUID against an index where some chunks had uppercase IDs. `Edm.String eq` doesn't match across cases.
+
+**Root cause**:
+- The wizard uses the Dataverse Web API client (`createCodePageDataverseClient`), which returns lowercase GUIDs.
+- The ribbon at [`sprk_DocumentOperations.js:2146`](../../src/client/webresources/js/sprk_DocumentOperations.js) uses `Xrm.Page` / `getId()`, which returns `{UPPERCASE}`. It strips braces but doesn't normalize case.
+- The BFF passes whatever it receives through to the index unchanged.
+- Azure AI Search `Edm.String` equality is case-sensitive (vector search, full-text search, and `search.ismatch` are not — but `eq` is).
+
+**Fix**: commit `fbbaee29`
+1. BFF (defensive): `FileIndexingService.IndexTextInternalAsync` normalizes `documentId` to lowercase at the single convergence point — covers all three entry points (OBO, app-only, content-only).
+2. Ribbon (clean contract): `sprk_DocumentOperations.js:sendToIndex` `.toLowerCase()`s the documentIds in all three context paths (selectedItemIds, form context, SelectedControl getGrid).
+
+Existing uppercase chunks in dev were intentionally left as-is per owner decision (would re-incur indexing cost; dev data only). They'll heal on the next Send to Index for each doc.
+
+**Prevention**:
+- Treat Dataverse GUIDs as if they have a canonical form (lowercase, no braces) and **normalize at every boundary** that crosses a system (Dataverse ↔ BFF ↔ AI Search ↔ external API). Don't trust callers.
+- When designing an index schema, prefer using fields with case-insensitive analyzers (e.g., `Edm.String` filterable with the default analyzer is fine for full-text but case-sensitive for `eq` — consider a normalizer if exact-match comparisons must be case-insensitive).
+- Type-safe ID wrappers would help long-term. Today every GUID is a `string` in TypeScript and C#; both languages have the tools to make a stronger guarantee (branded types in TS, `record struct DocumentId(Guid Value)` in C#).
+
+**Evidence**: commit `fbbaee29`, live Azure Search records showing both casings coexisting after the 2026-05-22 test session.
+
+---
+
+### G-4: AI Search index field created without `filterable: true` cannot be made filterable later
+
+**Title**: Azure AI Search makes most field properties **immutable after creation**. If a `Collection(Edm.String)` field is created without `filterable: true`, any query that tries to filter on it (e.g., the AIPU2-027 privilege-group security filter) returns 400 — and the only fix is to create a NEW field or rebuild the entire index.
+
+**Date**: 2026-05-19 (discovered when a Portal-added `privilege_group_ids` field on `spaarke-knowledge-index-v2` had `filterable: false` and no way to change it)
+
+**Classification**: Gotcha (Azure platform constraint; not obvious unless you've hit it)
+
+**What happened**: The `privilege_group_ids` field was supposed to be deployed from `infrastructure/ai-search/spaarke-knowledge-index-v2.json:228` (which correctly declares `filterable: true, retrievable: true`), but the deploy script [`scripts/ai-search/Deploy-IndexSchemas.ps1:42`](../../scripts/ai-search/Deploy-IndexSchemas.ps1) targeted the **wrong index name** (`spaarke-knowledge-index` vs the actually-used `-v2`), so the schema file was never applied. When a 400 error surfaced for null writes, the field was added manually via the Azure Portal UI to unblock the immediate problem — and Portal defaults landed `filterable: false`. Subsequent attempts to change it via REST API returned: *"Existing field 'privilege_group_ids' cannot be modified."*
+
+**Root cause**:
+1. **Azure AI Search field properties are largely immutable post-creation.** `filterable`, `searchable`, `sortable`, `facetable`, and `analyzer` cannot be changed after a field is first created. Only the field-level `retrievable` flag and a few collection-level settings (synonym maps, scoring profiles) are mutable.
+2. **Portal "Add field" UI defaults are not the same as the schema-file declared values.** Portal-added fields land with conservative defaults.
+3. **Deploy script bug compounded**: schema file was correct, deploy script targeted the wrong index name, so the live index never received the canonical schema.
+
+**Fix** — short-term (dev): leave `privilege_group_ids` on dev `spaarke-knowledge-index-v2` as `filterable: false`. The privilege filter in `RagService.cs:817` will return 400 on retrieval queries in dev (affects chat/RAG retrieval only; semantic search PCF does NOT use this filter). This is acceptable for dev where security boundaries are relaxed and the cost of re-indexing 739 docs would be wasted on a test environment.
+
+**Fix** — long-term (demo + production):
+1. Provision the index from `infrastructure/ai-search/spaarke-knowledge-index-v2.json` **directly via the REST API** (not the Portal UI). Use `PUT /indexes/{name}?api-version=2024-07-01` with the schema file's body.
+2. After fixing `scripts/ai-search/Deploy-IndexSchemas.ps1` so `IndexMap` targets `spaarke-knowledge-index-v2`, run the script during environment provisioning.
+3. Verify before declaring the environment ready:
+   ```bash
+   curl -s -H "api-key: $KEY" "https://{search-svc}.search.windows.net/indexes/spaarke-knowledge-index-v2?api-version=2024-07-01" \
+     | python -c "import sys,json; d=json.load(sys.stdin); f=[x for x in d['fields'] if x['name']=='privilege_group_ids'][0]; print(f)"
+   # Expect: filterable=True, retrievable=True
+   ```
+
+**Prevention**:
+- **Treat index schemas as immutable code, not as Portal UI artifacts.** Schema lives in `infrastructure/ai-search/*.json` and is the source of truth. The Portal is for inspection only.
+- **Deploy-IndexSchemas.ps1 needs a CI smoke test** that compares the live index field set to the schema file. Drift detection prevents this from happening to the next environment.
+- **For new environments**: provision the index **first**, then enable any code paths that filter on its fields. Don't let a code feature ship that filters on a field the live index doesn't have configured for filtering.
+- **For new index fields**: when adding a field to an existing index, deploy the schema change first via `PATCH /indexes/{name}` (NOT Portal UI). If a `Collection(Edm.String)` field needs `filterable: true`, that's the only chance to set it.
+
+**Evidence**: live dev index field config at 2026-05-22 confirms `filterable: false`. Existing project `projects/ai-search-indexing-fix/ISSUE.md` §2 documents the original 400 incident and the Portal-add workaround. Schema file `infrastructure/ai-search/spaarke-knowledge-index-v2.json:228` shows the canonical correct declaration that should land in new environments.
 
 ---
 
