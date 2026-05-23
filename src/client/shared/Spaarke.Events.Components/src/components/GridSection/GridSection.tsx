@@ -338,12 +338,33 @@ function buildDateFilter(filter: CalendarFilterOutput | null): string {
     return primary;
   }
 
+  // Task 133 (R13 follow-up #12, 2026-05-23): timezone fix. The prior
+  // implementation appended a literal `T00:00:00Z` / `T23:59:59Z` to
+  // the date string, producing UTC bounds. But the calendar HIGHLIGHT
+  // derives day-keys using LOCAL date components (task 120's
+  // toIsoDateString uses `d.getFullYear/Month/Date`). The mismatch
+  // caused records whose stored UTC timestamp falls in one UTC day
+  // but a different LOCAL day to match the wrong filter window.
+  // Example operator-reported: sprk_duedate = 2026-03-12T03:00:00Z
+  // displays as "Mar 11" in Eastern (UTC-5), and the calendar
+  // highlights March 11. But clicking March 12 matched this record
+  // because UTC March 12 window includes 03:00Z.
+  //
+  // Fix: convert local-date strings to UTC ISO bounds that align with
+  // LOCAL day boundaries. localDateToUtcBounds("2026-03-12") in
+  // Eastern returns start = "2026-03-12T05:00:00.000Z" and
+  // end = "2026-03-13T04:59:59.999Z" — exactly the UTC range that
+  // corresponds to local March 12 00:00 - 23:59.
+  function localDateToUtcBounds(localDateStr: string): { start: string; end: string } {
+    const [y, m, d] = localDateStr.split("-").map(Number);
+    const startLocal = new Date(y, m - 1, d, 0, 0, 0, 0);
+    const endLocal = new Date(y, m - 1, d, 23, 59, 59, 999);
+    return { start: startLocal.toISOString(), end: endLocal.toISOString() };
+  }
+
   if (filter.type === "single") {
     const singleFilter = filter as CalendarFilterSingle;
-    // For single date, filter events on that specific date
-    // Use ge/lt to match any time on that date (handles datetime fields)
-    const dateStart = `${singleFilter.date}T00:00:00Z`;
-    const dateEnd = `${singleFilter.date}T23:59:59Z`;
+    const { start: dateStart, end: dateEnd } = localDateToUtcBounds(singleFilter.date);
 
     if (dateFields.length === 1) {
       return fieldRange(dateFields[0], dateStart, dateEnd);
@@ -358,9 +379,10 @@ function buildDateFilter(filter: CalendarFilterOutput | null): string {
 
   if (filter.type === "range") {
     const rangeFilter = filter as CalendarFilterRange;
-    // For range, filter events from start date 00:00 to end date 23:59
-    const rangeStart = `${rangeFilter.start}T00:00:00Z`;
-    const rangeEnd = `${rangeFilter.end}T23:59:59Z`;
+    // Range start = LOCAL midnight of the start date; range end =
+    // LOCAL end-of-day of the end date. Both converted to UTC ISO.
+    const { start: rangeStart } = localDateToUtcBounds(rangeFilter.start);
+    const { end: rangeEnd } = localDateToUtcBounds(rangeFilter.end);
 
     if (dateFields.length === 1) {
       return fieldRange(dateFields[0], rangeStart, rangeEnd);
