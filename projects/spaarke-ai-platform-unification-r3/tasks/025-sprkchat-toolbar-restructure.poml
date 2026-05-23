@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Restructure SprkChat toolbar: remove Export Word, add + attach, move strip above input (FR-08, FR-09)</title>
+    <phase>Phase B — Assistant pane</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>023, 024</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, fluent-ui, shared-components, ui-cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies shared `SprkChat.tsx` consumed across solutions; removes a public-facing affordance (Export Word) and adds a new button (+ Attach) wired to a new hook. UI structural change + cross-consumer impact = FULL rigor.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Restructure the SprkChat input toolbar per FR-08 + FR-09. Remove the `SprkChatExportWord`
+    ("Open in Word") button entirely. Add a new `+` (AttachRegular) button bound to the
+    `useChatFileAttachment.addFiles` from task 024. Move BOTH the existing prompt menu and
+    the new `+` button to a horizontal flex strip rendered ABOVE the conversation input
+    (single row, `spacingHorizontalS` between items). Render attachment chips above the
+    strip when files are present, with `×` remove control wired to `removeFile`.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 developer comfortable with shared-component refactoring,
+    consumer-impact analysis, and Fluent v9 layout primitives (`makeStyles`, tokens, flex
+    layouts with spacing tokens).
+  </role>
+
+  <goal>
+    `SprkChat.tsx` no longer references `SprkChatExportWord` (import + JSX both removed).
+    A new `+` button (Fluent v9 `Button` with `AttachRegular` icon) is rendered in a
+    horizontal strip ALONGSIDE the prompt menu, ABOVE the input box. Above the strip, when
+    `files.length &gt; 0`, a chip strip renders the current attachments with `×` remove
+    controls. Layout: `[ chips ]` (if any) / `[ Prompt menu ▾ ] [ + Attach ]` / `[ Input ]`
+    — three vertical zones, the middle one a single horizontal row with `spacingHorizontalS`.
+    Native file picker opens on `+` click; selected files flow into the hook.
+  </goal>
+
+  <context>
+    <background>
+      FR-08 + FR-09 implement Moment 1: Arrival's input zone. Removing "Open in Word" is
+      a scope-disciplined cleanup — that export path was R1-era. The `+` attach button is
+      the visible entry point for FR-07's multi-file flow. Task 024 built the hook; this
+      task wires it into the UI. Task 026 then takes the resulting `attachments[]` and
+      sends them in the chat-message payload.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">SprkChat is shared. Removing the Export Word button affects all consumers — survey for any consumer that explicitly relies on it before deletion. If found, add a prop to opt-back-in temporarily (and open a follow-up to migrate that consumer).</constraint>
+    <constraint source="ADR-021">All new layout uses Fluent v9 `makeStyles` with `tokens.spacingHorizontalS`, `tokens.spacingVerticalS`, and token-based colors. No hex, no `rgba()`, no Fluent v8.</constraint>
+    <constraint source="ADR-022">React 19. Consume the `useChatFileAttachment` hook from task 024 inside SprkChat. Pass `attachments`, `files`, `addFiles`, `removeFile` references to the appropriate JSX zones.</constraint>
+    <constraint source="ADR-025">`AttachRegular` from `@fluentui/react-icons` (Fluent v9). No new SVG web resources.</constraint>
+    <constraint source="ADR-028">No auth changes in this task. The hook itself makes no BFF calls (extraction is client-side). Payload wiring is task 026.</constraint>
+    <constraint source="spec">FR-08: Export Word button absent. FR-09: prompt menu + `+` in a single horizontal strip ABOVE input with `spacingHorizontalS`. Chip strip above that when files present.</constraint>
+    <constraint source="project">This task touches ONLY `SprkChat.tsx`. Coordinate with task 023 (also edits this file) — 023 lands first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read SprkChat.tsx (post-023)">
+      Open `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`.
+      Confirm task 023's disabled-condition change is in place. Locate (a) the
+      `SprkChatExportWord` import + JSX, (b) the prompt menu JSX, (c) the input JSX, and
+      (d) the surrounding container layout.
+    </step>
+    <step order="2" name="Remove SprkChatExportWord">
+      Delete the `SprkChatExportWord` import and the JSX that renders it. Remove any
+      now-orphaned helper imports (e.g., Word-export utility). Survey consumers via grep
+      for `SprkChatExportWord` — none should remain after this edit.
+    </step>
+    <step order="3" name="Wire useChatFileAttachment hook">
+      Import `useChatFileAttachment` from `./hooks/useChatFileAttachment`. Call the hook
+      in the SprkChat function body. Destructure `{ files, attachments, addFiles, removeFile, clearAll }`.
+      Hold `attachments` for task 026's payload wiring (do not consume yet — leave a clearly
+      labelled TODO).
+    </step>
+    <step order="4" name="Add `+` attach button">
+      Add a Fluent v9 `Button` with `icon={&lt;AttachRegular /&gt;}`, ARIA label "Attach files".
+      On click: open a hidden `&lt;input type="file" multiple accept="text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" /&gt;`
+      via a ref, and pass the resulting `FileList` to `addFiles`.
+    </step>
+    <step order="5" name="Build the horizontal strip above input">
+      Restructure the input zone into three vertical regions inside a `makeStyles`-classed
+      wrapper:
+      1. (conditional) chip strip — renders `files.map((f) =&gt; &lt;Chip onDismiss={() =&gt; removeFile(i)} /&gt;)` with `spacingHorizontalS` between chips. Hidden when `files.length === 0`.
+      2. controls strip — `display: flex`, `gap: tokens.spacingHorizontalS`, contains `[ Prompt menu ▾ ] [ + Attach ]` on a single row.
+      3. input box — existing `SprkChatInput`.
+    </step>
+    <step order="6" name="Chip remove + status visuals">
+      Each chip displays the filename, MIME-derived icon (or filetype suffix), and either a
+      spinner (status `'extracting'`), check mark (`'ready'`), or warning (`'error'`).
+      `×` button calls `removeFile(index)`. Errored chips show the error tooltip on hover.
+      Use Fluent v9 `Chip` and `Tooltip` from `@fluentui/react-components`.
+    </step>
+    <step order="7" name="Visual + accessibility verification">
+      Smoke in Vite dev: cold load shows `[ Prompt ▾ ] [ + ]` strip; click `+` → file picker
+      opens; pick 2 files → 2 chips appear above strip with extracting → ready transition;
+      click `×` on chip → chip removed. Keyboard test: Tab to `+` → Enter opens picker;
+      Tab through chips → Enter on `×` removes. Toggle dark mode → all tokens render
+      correctly.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read SprkChat.tsx + useChatFileAttachment.ts</tool>
+    <tool name="Edit">Remove ExportWord, add `+` button, restructure layout</tool>
+    <tool name="Grep">Survey `SprkChatExportWord` consumers (should be zero)</tool>
+    <tool name="Bash">Run `npm run build` and `npm test` to validate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx</output>
+    <output type="report">Task completion report citing consumer-survey result, layout verification, and chip interaction screenshots</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SprkChat.tsx` does not import or render `SprkChatExportWord`.</criterion>
+    <criterion testable="true">A Fluent v9 `Button` with `AttachRegular` icon and ARIA label "Attach files" is rendered alongside the prompt menu in a horizontal flex strip with `spacingHorizontalS` between items, ABOVE the input box.</criterion>
+    <criterion testable="true">Clicking the `+` button opens a native file picker accepting only the 4 allowed MIME types.</criterion>
+    <criterion testable="true">Selecting files invokes `addFiles` on the `useChatFileAttachment` hook (verified via test or instrumentation).</criterion>
+    <criterion testable="true">When `files.length &gt; 0`, a chip strip renders above the controls strip; each chip shows filename + status visual + `×` remove control bound to `removeFile`.</criterion>
+    <criterion testable="true">Layout visually matches: `[ chip strip ]` (conditional) / `[ Prompt menu ▾ ] [ + Attach ]` / `[ Input ]` — three vertical zones.</criterion>
+    <criterion testable="true">No hex literals, no `rgba()` literals introduced; all spacing uses `tokens.spacingHorizontal*` / `tokens.spacingVertical*`.</criterion>
+    <criterion testable="true">Keyboard navigation works for `+`, chip remove `×`, and prompt menu (Tab, Enter, Escape).</criterion>
+    <criterion testable="true">`npm run build` succeeds for both `@spaarke/ui-components` and SpaarkeAi.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="toolbar layout (FR-08, FR-09)">
+      Open SpaarkeAi welcome state. Verify (a) no "Open in Word" button visible, (b)
+      `[ Prompt ▾ ] [ + ]` row above input, (c) `spacingHorizontalS` between items.
+    </test>
+    <test name="file picker + chip flow">
+      Click `+` → file picker opens with only the 4 allowed MIME filters. Pick 2 .txt
+      files → 2 chips appear above strip, transition extracting → ready. Click `×` on
+      first chip → chip removed; second chip remains.
+    </test>
+    <test name="error chip visual">
+      Pick a corrupted PDF (or a file matching MIME but un-parseable). Verify the chip
+      reaches status `'error'` with a warning indicator and hover tooltip showing the
+      error message.
+    </test>
+    <test name="dark-mode compliance (NFR-06, ADR-021)">
+      Toggle dark mode. Verify `+` button, prompt menu, chips, and chip `×` controls all
+      render with correct token-based colors. No hex literal leaks. Contrast passes WCAG
+      2.1 AA on the chip strip.
+    </test>
+    <test name="keyboard accessibility (NFR-05)">
+      Tab through: prompt menu → `+` button → input. Shift+Tab from `+` returns focus to
+      prompt. Enter on `+` opens file picker.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 025" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

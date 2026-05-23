@@ -76,4 +76,26 @@ public interface ISessionPersistenceService
     /// <param name="session">The session document to upsert.</param>
     /// <param name="ct">Cancellation token.</param>
     Task PersistSessionAsync(StoredSession session, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persists workspace tabs[] + activeTabId for a session (NFR-09 write-through).
+    ///
+    /// Loads the existing <see cref="StoredSession"/> by (sessionId, tenantId), updates only
+    /// <see cref="StoredSession.Tabs"/>, <see cref="StoredSession.ActiveTabId"/>, and
+    /// <see cref="StoredSession.LastActivity"/>, then writes the document back through both
+    /// stores (Redis hot + Cosmos warm) using the same write-through pattern as
+    /// <see cref="PersistMessageAsync"/> (D-06).
+    /// </summary>
+    /// <param name="sessionId">Session identifier.</param>
+    /// <param name="tenantId">Tenant identifier (Cosmos partition key /tenantId per ADR-015).</param>
+    /// <param name="tabs">The new tab list (replaces existing).</param>
+    /// <param name="activeTabId">The active tab id at the time of save; may be the Home tab id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> if the session was found and updated; <c>false</c> if the session does not exist.</returns>
+    Task<bool> SaveTabsAsync(
+        string sessionId,
+        string tenantId,
+        IReadOnlyList<StoredWorkspaceTab> tabs,
+        string? activeTabId,
+        CancellationToken cancellationToken = default);
 }

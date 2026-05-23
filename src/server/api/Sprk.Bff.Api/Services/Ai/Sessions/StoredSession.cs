@@ -43,6 +43,24 @@ public class StoredSession
     [JsonPropertyName("widgetStates")]
     public Dictionary<string, string> WidgetStates { get; set; } = [];
 
+    /// <summary>
+    /// Workspace tabs (non-Home only) persisted via write-through (NFR-09).
+    /// Home tab is recreated by ensureHomeTab() on every WorkspacePane mount.
+    /// Tab order is preserved. Empty list for sessions with no non-Home tabs open.
+    /// Older Cosmos documents that pre-date this field deserialize cleanly to an empty list
+    /// (additive schema evolution per ADR-015).
+    /// </summary>
+    [JsonPropertyName("tabs")]
+    public List<StoredWorkspaceTab> Tabs { get; set; } = [];
+
+    /// <summary>
+    /// Active tab id at the time of the last save. May be the Home tab id ("home") or one of
+    /// the ids in <see cref="Tabs"/>. Used by the client on restore to set the active selection.
+    /// Null for sessions that pre-date this field.
+    /// </summary>
+    [JsonPropertyName("activeTabId")]
+    public string? ActiveTabId { get; set; }
+
     /// <summary>UTC timestamp when the session was first created.</summary>
     [JsonPropertyName("createdAt")]
     public DateTimeOffset CreatedAt { get; set; }

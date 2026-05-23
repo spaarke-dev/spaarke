@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Redeploy sprk_workspacelayoutwizard + register in Deploy-WizardCodePages.ps1 (Bug 3 fix)</title>
+    <phase>F (Verification — remediation)</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>032, 033, 070</dependencies>
+    <blocks>072</blocks>
+    <tags>deploy, dataverse, frontend, ops</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy correction + small script update. Touches deployed infrastructure (Dataverse web resource) and one PowerShell deploy script. No source-code logic changes.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single deploy action; can't parallelize with itself.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Fix Bug 3 from operator smoke feedback: the "Create new workspace" popup in
+    SpaarkeAi's WorkspacePaneMenu is empty because the `sprk_workspacelayoutwizard`
+    web resource was not redeployed by task 070 (which only deployed `sprk_spaarkeai`).
+    Build + redeploy the wizard's web resource so the task 032/033 templateFilter
+    URL-param-parsing reaches Dataverse, AND add this wizard to
+    `scripts/Deploy-WizardCodePages.ps1` so future deploys cover it automatically.
+  </prompt>
+
+  <role>
+    Spaarke deployment operator comfortable with Vite Code Page build, Dataverse web
+    resource deployment, and small PowerShell script edits. Verifies the wizard renders
+    after deploy via manual click in Power Apps.
+  </role>
+
+  <goal>
+    `sprk_workspacelayoutwizard` is updated in `https://spaarkedev1.crm.dynamics.com` with
+    the latest build (includes task 032/033 changes); Power Apps "Create new workspace"
+    popup renders the wizard with the 6-template subset; `scripts/Deploy-WizardCodePages.ps1`
+    now includes this wizard for future deploys.
+  </goal>
+
+  <context>
+    <background>
+      Task 070's deploy memo confirms only two artifacts were deployed: BFF API and
+      `sprk_spaarkeai` web resource. The WorkspaceLayoutWizard is a SEPARATE web resource
+      (`sprk_workspacelayoutwizard`) deployed by a different solution. Diagnostic agents
+      confirmed:
+      - Source code at `src/solutions/WorkspaceLayoutWizard/src/main.tsx` correctly parses
+        the `templateFilter` URL query param (task 032's change).
+      - Source code at `App.tsx` correctly accepts the `templateFilter` prop (task 033's
+        change).
+      - Local build artifact at `src/solutions/WorkspaceLayoutWizard/dist/sprk_workspacelayoutwizard.html`
+        already includes these changes (built today).
+      - `scripts/Deploy-WizardCodePages.ps1` does NOT include `sprk_workspacelayoutwizard`
+        in its `$webResources` array (omitted from the wizard list).
+
+      Two fixes needed:
+      1. Deploy the existing local build to Dataverse.
+      2. Add the wizard to `Deploy-WizardCodePages.ps1` for durability.
+    </background>
+    <relevant-files>
+      <file>src/solutions/WorkspaceLayoutWizard/dist/sprk_workspacelayoutwizard.html</file>
+      <file>src/solutions/WorkspaceLayoutWizard/src/main.tsx</file>
+      <file>scripts/Deploy-WizardCodePages.ps1</file>
+      <file>scripts/Deploy-SpaarkeAi.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use ONLY existing canonical scripts. Pattern for deploy: copy from `scripts/Deploy-SpaarkeAi.ps1` if needed for one-off, but the canonical durable home is `Deploy-WizardCodePages.ps1`.</constraint>
+    <constraint source="project">No source-code logic changes. Build + deploy + script registration only.</constraint>
+    <constraint source="ADR-026">SpaarkeAi-family is a full-page Code Page; same deploy semantics as task 070.</constraint>
+    <constraint source="ADR-028">Deploy auth uses `az login` (already confirmed working in task 070).</constraint>
+    <constraint source="project">Verify the deploy by reading the deploy script output (no UI navigation required — Power Apps verification happens in Wave 7 smoke).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify local build exists + freshness">
+      Confirm `src/solutions/WorkspaceLayoutWizard/dist/sprk_workspacelayoutwizard.html` exists and is newer than the task 032/033 source changes (commit timestamps). If stale, run `cd src/solutions/WorkspaceLayoutWizard && npm run build`.
+    </step>
+    <step order="2" name="Read existing Deploy-WizardCodePages.ps1 structure">
+      Read `scripts/Deploy-WizardCodePages.ps1` lines 41-58 (the `$webResources` array). Understand the entry shape (Name / DisplayName / Type / Path).
+    </step>
+    <step order="3" name="Add sprk_workspacelayoutwizard to Deploy-WizardCodePages.ps1">
+      Append to the `$webResources` array:
+      ```
+      @{
+          Name = 'sprk_workspacelayoutwizard';
+          DisplayName = 'Workspace Layout Wizard';
+          Type = 1;  # HTML
+          Path = 'src\solutions\WorkspaceLayoutWizard\dist\sprk_workspacelayoutwizard.html';
+      }
+      ```
+      Match the exact formatting + ordering convention used by sibling entries.
+    </step>
+    <step order="4" name="Deploy via updated Deploy-WizardCodePages.ps1">
+      Run `scripts/Deploy-WizardCodePages.ps1` (no parameters — defaults to spaarkedev1.crm.dynamics.com). Stream output. Confirm `sprk_workspacelayoutwizard` upload succeeds + customizations published.
+    </step>
+    <step order="5" name="Update deploy memo">
+      Append a section to `projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md` documenting this supplemental deploy:
+      - What was deployed (sprk_workspacelayoutwizard, build hash if available)
+      - Deploy timestamp
+      - Reason (Bug 3 fix; smoke feedback)
+      - Script change committed (Deploy-WizardCodePages.ps1 now includes this wizard)
+    </step>
+    <step order="6" name="Update task status + TASK-INDEX">
+      Update task 066 POML → completed. Update TASK-INDEX row 066 → ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Deploy script + source files</tool>
+    <tool name="Edit">scripts/Deploy-WizardCodePages.ps1 — add wizard entry</tool>
+    <tool name="Bash">PowerShell to build (if needed) + deploy</tool>
+    <tool name="Write">Update deploy memo</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">scripts/Deploy-WizardCodePages.ps1 (MODIFIED — entry added)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md (APPENDED — supplemental deploy section)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Local build at src/solutions/WorkspaceLayoutWizard/dist/sprk_workspacelayoutwizard.html exists and is post-commit-2e9c4105.</criterion>
+    <criterion testable="true">scripts/Deploy-WizardCodePages.ps1 contains a new entry for sprk_workspacelayoutwizard with the correct path.</criterion>
+    <criterion testable="true">Deploy-WizardCodePages.ps1 ran against dev Dataverse and reported sprk_workspacelayoutwizard upload + publish success.</criterion>
+    <criterion testable="true">Deploy memo at notes/deploys/2026-05-20-deploy.md has a supplemental section documenting this deploy.</criterion>
+    <criterion testable="true">Standalone LegalWorkspace continues to function (FR-25 — wizard URL with no templateFilter param still shows all 9 templates).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Execute via `task-execute` skill. Deploy itself uses `Deploy-WizardCodePages.ps1` after the script is updated.
+  </execution>
+
+  <notes>
+    Completed 2026-05-20. Local build at `src/solutions/WorkspaceLayoutWizard/dist/sprk_workspacelayoutwizard.html`
+    (1,536 KB) was already fresh (newer than both `src/main.tsx` and `src/App.tsx`) — no rebuild required.
+    Appended `sprk_workspacelayoutwizard` entry to `scripts/Deploy-WizardCodePages.ps1` `$webResources` array
+    (Type=1 HTML, path `src\solutions\WorkspaceLayoutWizard\dist\sprk_workspacelayoutwizard.html`), matching
+    sibling entry formatting. Ran the script against `https://spaarkedev1.crm.dynamics.com`:
+    `[13/13] UPDATE sprk_workspacelayoutwizard (1536 KB)` → resource GUID `9a58d6a6-8a2c-f111-88b5-7ced8d1dc988`;
+    `[PUBLISH] Publishing 3 web resources... Published!`. Appended a "Supplemental Deploy" section to
+    `notes/deploys/2026-05-20-deploy.md` documenting the deploy. Backwards-compat (FR-25 / NFR-10) preserved:
+    no source-code changes in this task — templateFilter prop still defaults to undefined, so standalone
+    LegalWorkspace continues to render all 9 templates.
+  </notes>
+</task>

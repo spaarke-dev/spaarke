@@ -46,9 +46,9 @@ export type { ISprkChatUploadZoneProps, UploadedDocument } from './SprkChatUploa
 // Document upload status (Phase 3E: upload processing feedback)
 export { SprkChatDocumentStatus } from './SprkChatDocumentStatus';
 
-// Word export button (Phase 3E: Open in Word action)
-export { SprkChatExportWord } from './SprkChatExportWord';
-export type { ISprkChatExportWordProps } from './SprkChatExportWord';
+// Word export button removed (FR-08, task 025 — replaced by toolbar restructure).
+// `SprkChatExportWord` is no longer exported from `@spaarke/ui-components`.
+// The file remains in the tree as historical reference but is unreferenced.
 
 // Hooks
 // Note: useSseStream is exported from src/hooks/useSseStream (canonical) via src/hooks/index.ts.
@@ -56,6 +56,25 @@ export type { ISprkChatExportWordProps } from './SprkChatExportWord';
 // are barrel-exported from src/index.ts. Import from '@spaarke/ui-components' directly.
 export { useChatSession } from './hooks/useChatSession';
 export { useChatPlaybooks } from './hooks/useChatPlaybooks';
+
+// FR-07: multi-file chat attachment hook (task 024)
+export {
+  useChatFileAttachment,
+  MAX_ATTACHMENTS,
+  MAX_FILE_BYTES,
+  MAX_PDF_PAGES,
+  ALLOWED_MIME_TYPES,
+} from './hooks/useChatFileAttachment';
+export type {
+  ChatAttachment,
+  AttachmentChip,
+  AttachmentChipStatus,
+  AttachmentError,
+  AttachmentErrorReason,
+  AttachmentExtractionErrorCallback,
+  UseChatFileAttachmentOptions,
+  IUseChatFileAttachmentResult,
+} from './hooks/useChatFileAttachment';
 
 // Hooks (cross-pane selection)
 export { useSelectionListener } from './hooks/useSelectionListener';
@@ -70,6 +89,7 @@ export type {
   IChatSseEvent,
   ISprkChatMessageProps,
   ISprkChatInputProps,
+  ISprkChatInputHandle,
   ISprkChatContextSelectorProps,
   ISprkChatPredefinedPromptsProps,
   ISprkChatHighlightRefineProps,

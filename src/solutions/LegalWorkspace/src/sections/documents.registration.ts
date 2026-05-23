@@ -14,6 +14,13 @@
  * ref — the title writes a setter into the ref on mount, and the body calls it
  * when the view changes. This avoids lifting state into the workspace root.
  *
+ * R8 Wave 3 task 111 (2026-05-22): the rendered DocumentsTab is now in GRID
+ * MODE — 2 columns × 10 rows = 20-card cap with no scrollbar. Operator request
+ * for the Dataverse-seeded "Documents" system workspace embedded via
+ * WorkspaceLayoutWidget → LegalWorkspaceApp. Overflow falls through the
+ * existing "Open documents list" / "View all..." handler so users still
+ * reach all sprk_document records when total > 20.
+ *
  * Standards: ADR-012 (shared components), ADR-021 (Fluent v9)
  */
 
@@ -188,9 +195,12 @@ interface IDocumentsSectionContentProps {
   onCountChange?: (count: number) => void;
   onRefetchReady?: (refetch: () => void) => void;
   onControllerReady?: (setView: (view: ISelectedView) => void) => void;
+  onShowMore?: () => void;
   maxVisible?: number;
   scope?: "my" | "all";
   businessUnitId?: string;
+  /** When set, renders cards in a CSS grid (columns × maxRows, no scrollbar). */
+  gridMode?: { columns: number; maxRows: number };
 }
 
 const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
@@ -199,9 +209,11 @@ const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
   onCountChange,
   onRefetchReady,
   onControllerReady,
+  onShowMore,
   maxVisible,
   scope,
   businessUnitId,
+  gridMode,
 }) => {
   const [selectedView, setSelectedView] = React.useState<ISelectedView>({ viewId: undefined, viewType: undefined });
 
@@ -222,6 +234,8 @@ const DocumentsSectionContent: React.FC<IDocumentsSectionContentProps> = ({
     selectedViewType: selectedView.viewType,
     onCountChange,
     onRefetchReady,
+    onShowMore,
+    gridMode,
   });
 };
 
@@ -325,7 +339,14 @@ export const documentsRegistration: SectionRegistration = {
           React.createElement(DocumentsSectionContent, {
             service: context.service as DataverseService,
             userId: context.userId,
-            maxVisible: 6,
+            // R8 Wave 3 task 111: render a 2 wide × 10 tall grid (20 cards
+            // max). Operator (2026-05-22) requested NO scrollbar on the
+            // embedded "Documents" system workspace, so the cap is also the
+            // hard visual limit. Overflow ("View all...") reuses the existing
+            // onOpenDocumentsDialog handler so users still reach the full
+            // sprk_document view when totalCount > 20.
+            maxVisible: 20,
+            gridMode: { columns: 2, maxRows: 10 },
             scope: context.scope,
             businessUnitId: context.businessUnitId,
             onCountChange: context.onBadgeCountChange,
@@ -336,6 +357,8 @@ export const documentsRegistration: SectionRegistration = {
             onControllerReady: (setView) => {
               contentControllerRef.current = setView;
             },
+            onShowMore: () =>
+              context.onOpenDocumentsDialog?.(selectedViewIdRef.current),
           }),
         ),
     };

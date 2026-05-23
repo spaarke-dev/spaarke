@@ -43,18 +43,23 @@ export interface WorkspacePaneEvent {
   /**
    * Discriminant for the specific workspace event.
    *
-   * - `widget_load`        — a widget has been mounted and is ready
-   * - `widget_update`      — widget data has changed (refresh signal)
-   * - `widget_action`      — a user action was performed inside a widget
-   * - `tab_change`         — the active workspace tab changed
-   * - `tab_count_change`   — the number of open tabs changed (drives Stage 3↔4 transitions)
-   * - `selection_changed`  — the user selected (or cleared) text inside a widget
-   * - `tabs_clear`         — all workspace tabs should be cleared (exclusive playbook selection)
-   * - `wizard_step`        — the ConversationPane requests a wizard step navigation or field update
-   * - `entity_resolved`    — Dataverse entity context has been resolved (drives Stage 2→3)
-   * - `session_reset`      — the active session was cleared; all panes reset to Stage 1
+   * - `widget_load`            — a widget has been mounted and is ready
+   * - `widget_update`          — widget data has changed (refresh signal)
+   * - `widget_action`          — a user action was performed inside a widget
+   * - `tab_change`             — the active workspace tab changed
+   * - `tab_count_change`       — the number of open tabs changed (drives Stage 3↔4 transitions)
+   * - `selection_changed`      — the user selected (or cleared) text inside a widget
+   * - `tabs_clear`             — all workspace tabs should be cleared (exclusive playbook selection)
+   * - `wizard_step`            — the ConversationPane requests a wizard step navigation or field update
+   * - `entity_resolved`        — Dataverse entity context has been resolved (drives Stage 2→3)
+   * - `session_reset`          — the active session was cleared; all panes reset to Stage 1
+   * - `active_widget_changed`  — the active workspace tab changed; carries widgetType + widgetData +
+   *                              tabId + displayName so downstream panes (Assistant, Context) can
+   *                              adapt their view to the new active context (Round 4 Fix 4 signal
+   *                              infrastructure — no consumers yet, just the foundation for future
+   *                              pane coordination)
    */
-  type: 'widget_load' | 'widget_update' | 'widget_action' | 'tab_change' | 'tab_count_change' | 'selection_changed' | 'tabs_clear' | 'wizard_step' | 'entity_resolved' | 'session_reset';
+  type: 'widget_load' | 'widget_update' | 'widget_action' | 'tab_change' | 'tab_count_change' | 'selection_changed' | 'tabs_clear' | 'wizard_step' | 'entity_resolved' | 'session_reset' | 'active_widget_changed';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -84,6 +89,21 @@ export interface WorkspacePaneEvent {
    *   tabCount === 0 → reset toward Stage 1 (welcome)
    */
   tabCount?: number;
+
+  /**
+   * Human-readable display name for the affected widget tab.
+   *
+   * Optional on `widget_load`: when present, the WorkspacePane subscriber uses
+   * it as the tab title instead of falling back to the registry metadata's
+   * generic `displayName`. This is how `WorkspacePaneMenu` makes a workspace
+   * tab show the chosen layout's name (e.g. "Corporate Workspace") rather than
+   * the generic "Workspace" registry label.
+   *
+   * Required on `active_widget_changed`: carries the currently-active tab's
+   * display name so downstream panes can show "Active context: Corporate
+   * Workspace" without re-querying the tab manager.
+   */
+  displayName?: string;
 
   // ── selection_changed fields ──────────────────────────────────────────────
 

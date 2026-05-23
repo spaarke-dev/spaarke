@@ -30,6 +30,15 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src"),
+    // Task 114 (2026-05-22): @spaarke/events-components hosts the
+    // CalendarSection/GridSection/filter components consumed by both the
+    // standalone EventsPage code page AND the Calendar workspace widget
+    // (task 115). Wiring done here so task 115 can immediately import.
+    path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+    // Round 4 Fix 4 (2026-05-21): @spaarke/legal-workspace is aliased to the
+    // LegalWorkspace solution source so SpaarkeAi can embed the full
+    // workspace experience as a tab widget without copying section factories.
+    path.resolve(__dirname, "../LegalWorkspace/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -88,6 +97,15 @@ export default defineConfig({
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src/**/*.ts"),
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src/**/*.ts"),
+        // Task 114 (2026-05-22): transpile Spaarke.Events.Components source
+        // so SpaarkeAi can embed Events components via the
+        // @spaarke/events-components alias (Calendar widget — task 115).
+        path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.ts"),
+        // Round 4 Fix 4 (2026-05-21): transpile LegalWorkspace source so
+        // SpaarkeAi can embed LegalWorkspaceApp via the @spaarke/legal-workspace alias.
+        path.resolve(__dirname, "../LegalWorkspace/src/**/*.tsx"),
+        path.resolve(__dirname, "../LegalWorkspace/src/**/*.ts"),
       ],
     }),
     // Inline all JS/CSS into a single HTML file for Dataverse web resource deployment (ADR-026)
@@ -111,7 +129,24 @@ export default defineConfig({
       "@spaarke/ai-outputs": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Outputs/src"),
       "@spaarke/ai-context/src": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src"),
       "@spaarke/ai-context": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Context/src"),
+      // Task 114 (2026-05-22): @spaarke/events-components is the shared
+      // library that hosts CalendarSection/GridSection/filters/etc consumed
+      // by both EventsPage and the SpaarkeAi Calendar workspace widget
+      // (task 115). Wired here so task 115's section factory can import
+      // immediately without further vite/tsconfig plumbing.
+      "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      // Round 4 Fix 4 (2026-05-21): alias the LegalWorkspace solution source as
+      // a "package" so SpaarkeAi can embed the full workspace experience inside
+      // a workspace pane tab via `import { LegalWorkspaceApp } from "@spaarke/legal-workspace"`.
+      // Standalone LegalWorkspace's main.tsx → App.tsx entry is unaffected
+      // (FR-25 / NFR-10 — only NEW exports added to LegalWorkspace).
+      "@spaarke/legal-workspace/src": path.resolve(__dirname, "../LegalWorkspace/src"),
+      "@spaarke/legal-workspace": path.resolve(__dirname, "../LegalWorkspace/src"),
     },
+    // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
+    // .gitignore) never silently shadow source. See Task 112 (2026-05-22).
+    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx", ".json"],
     // Force single copy of shared packages across the bundle (ADR-022: no duplicate React)
     dedupe: [
       "react",

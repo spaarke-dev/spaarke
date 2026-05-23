@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Extend SessionPersistenceService with workspace tabs[] (NFR-09 fix)</title>
+    <phase>F (Verification) — remediation</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>011, 030, 050, 063</dependencies>
+    <blocks>070</blocks>
+    <tags>bff-api, react, frontend, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies both BFF (.cs DTO + persistence service) and frontend (.tsx + .ts) code. Touches the Cosmos schema (additive). Multi-file dependency graph. Code-review + adr-check required at Step 9.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches WorkspaceTabManager.ts and WorkspacePane.tsx (both modified by earlier Phase C tasks); touches BFF persistence DTO. Sequential remediation only.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Close the NFR-09 gap surfaced by task 063: non-Home workspace tabs are not persisted across page refresh. Extend the existing R2 SessionPersistenceService schema with a tabs[] field, wire write-through on tab mutations from WorkspaceTabManager, and restore tabs on WorkspacePane mount. This is the strict-compliance path for the spec's NFR-09 acceptance criterion: "open 3 non-Home tabs + refresh → all 3 tabs (and active selection) restored."
+  </prompt>
+
+  <role>
+    Full-stack engineer with .NET 8 Minimal API + Cosmos DB persistence experience AND React 19 + TypeScript familiarity. Comfortable making coordinated frontend + backend changes that preserve backwards compatibility.
+  </role>
+
+  <goal>
+    A working tab persistence pipeline: (a) `StoredSession.Tabs: List&lt;StoredWorkspaceTab&gt;` field added in BFF; (b) `SessionPersistenceService` writes tabs through on every mutation; (c) `WorkspaceTabManager.serializeForPersistence()` + `restoreFromPersistence(tabs)` methods added; (d) `WorkspacePane.tsx` wires write-through after addTab/closeTab/setActiveTab/clearAllTabs and calls restore on mount; (e) NFR-09 acceptance test passes manually OR via an automated test.
+  </goal>
+
+  <context>
+    <background>
+      Task 063 backwards-compat verification confirmed UQ-03: `WorkspaceTabManager.ts` has no persistence (no localStorage, no sessionStorage, no BFF write-through). R2's `SessionPersistenceService` serializes AI session state (messages, widgetStates, summary) to Cosmos but NOT the workspace tabs array. So when the user opens 3 non-Home tabs and refreshes the page, all 3 are lost.
+
+      NFR-09 explicitly requires: "Tabs (Home + non-Home) and active workspace layout survive page refresh via existing session-restore pipeline (Cosmos write-through, R2 D-06)."
+
+      The fix extends the existing pipeline rather than introducing a new persistence layer. R2 D-06 (write-through Cosmos persistence) is the canonical pattern — we just add the tabs payload to the existing flow.
+
+      **Key files**:
+      - Server-side schema: [`src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs) — Cosmos DTO; partition key `/tenantId`; already has `WidgetStates: Dictionary&lt;string, string&gt;` and `Messages: List&lt;SessionMessage&gt;` patterns to follow
+      - Server-side persistence: [`src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs) — implements ISessionPersistenceService; has Save/Load methods
+      - Server-side interface: [`src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ISessionPersistenceService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ISessionPersistenceService.cs)
+      - Server-side restore: [`src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionRestoreService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionRestoreService.cs)
+      - Client-side tab manager: [`src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts`](../../src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts) — plain TypeScript class; `WorkspaceTab` interface has `Component: React.ComponentType` (not serializable — must exclude)
+      - Client-side WorkspacePane: [`src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`](../../src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx) — owns the tab manager and the BFF call sites; uses `authenticatedFetch` from `@spaarke/auth`
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ISessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionRestoreService.cs</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionPersistenceServiceTests.cs (if exists; else colocate new)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-09 (Persistence): Tabs (Home + non-Home) and active workspace layout survive page refresh via existing session-restore pipeline.</constraint>
+    <constraint source="spec">FR-25 / NFR-10: Standalone LegalWorkspace MUST continue to function identically. The tab-persistence change is SpaarkeAi-only — LegalWorkspace must not be affected.</constraint>
+    <constraint source="ADR-013">AI architecture: extend the BFF in-process; no new service.</constraint>
+    <constraint source="ADR-015">Cosmos sessions container partition key is `/tenantId`. Tabs[] field is additive to existing StoredSession DTO.</constraint>
+    <constraint source="ADR-028">All client→BFF calls use `authenticatedFetch` from `@spaarke/auth`. No token snapshots.</constraint>
+    <constraint source="root-CLAUDE.md §10">BFF Hygiene — extension stays within `Sprk.Bff.Api`, no new DI module. Cite placement decision in code comment.</constraint>
+    <constraint source="ADR-010">No new DI feature modules; register any new service in an existing module.</constraint>
+    <constraint source="project">Component instances (React.ComponentType) are NOT serializable. `serializeForPersistence()` must extract only `{id, kind, widgetType, widgetData, displayName}` — the Component is re-resolved via `resolveWorkspaceWidget(widgetType)` on restore.</constraint>
+    <constraint source="project">Home tab is canonical and not persisted (it's recreated by `ensureHomeTab()` on every mount). Only non-Home tabs need to be serialized.</constraint>
+    <constraint source="project">Write-through must be debounced/coalesced — rapid tab operations (e.g., FIFO eviction adding+removing) should not flood the BFF with parallel saves. Use a small queue or last-write-wins with ~200ms debounce.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-cosmos-persistence.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/backwards-compat-verification.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Investigate existing persistence pipeline">
+      Read SessionPersistenceService.cs and ISessionPersistenceService.cs to understand the current Save/Load API. Find the existing call sites (where ChatSessionManager / ChatEndpoints invokes Save). Confirm the write-through pattern. Verify the StoredSession DTO field-add is additive and backwards-compatible (Cosmos document evolves cleanly — older docs without Tabs field will deserialize with `Tabs == null` or empty list).
+    </step>
+    <step order="2" name="Define StoredWorkspaceTab record">
+      In `src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/`, add `StoredWorkspaceTab.cs` (record or class with `[JsonPropertyName]` attributes):
+      ```csharp
+      public record StoredWorkspaceTab(
+          [property: JsonPropertyName("id")] string Id,
+          [property: JsonPropertyName("widgetType")] string WidgetType,
+          [property: JsonPropertyName("widgetData")] JsonElement? WidgetData,
+          [property: JsonPropertyName("displayName")] string DisplayName);
+      ```
+      Note: `kind` is omitted because Home is not persisted (always recreated by ensureHomeTab). Only widget kind reaches this DTO.
+      `widgetData` uses `JsonElement` for opaque pass-through — server doesn't interpret payload, just stores it for re-hydration on restore.
+    </step>
+    <step order="3" name="Extend StoredSession schema">
+      Edit `StoredSession.cs` — add field after `WidgetStates`:
+      ```csharp
+      /// &lt;summary&gt;
+      /// Workspace tabs (non-Home only) persisted via write-through (NFR-09).
+      /// Home tab is recreated by ensureHomeTab() on every WorkspacePane mount and
+      /// is not persisted. Tab order is preserved. Empty list for sessions that
+      /// have no non-Home tabs open.
+      /// &lt;/summary&gt;
+      [JsonPropertyName("tabs")]
+      public List&lt;StoredWorkspaceTab&gt; Tabs { get; set; } = [];
+
+      /// &lt;summary&gt;
+      /// Active tab id at the time of the last save. May be the Home tab id ("home")
+      /// or one of the ids in Tabs. Used by the client on restore to set the
+      /// active selection.
+      /// &lt;/summary&gt;
+      [JsonPropertyName("activeTabId")]
+      public string? ActiveTabId { get; set; }
+      ```
+      Both fields default-initialised so older Cosmos docs deserialise cleanly.
+    </step>
+    <step order="4" name="Extend ISessionPersistenceService + SessionPersistenceService">
+      Find the existing Save/Update method signatures in ISessionPersistenceService.cs and SessionPersistenceService.cs. Add (or modify) a method `SaveTabsAsync(sessionId, tenantId, tabs, activeTabId, ct)` that:
+      - Loads existing StoredSession by (sessionId, tenantId)
+      - Updates only the Tabs + ActiveTabId fields (and LastActivity)
+      - Saves back via the existing Cosmos UpsertAsync pattern
+      - Optimistic concurrency / no-op if session not found (return false; client should handle gracefully)
+      Alternatively: extend existing Save method to accept tabs as an optional parameter — choose whichever matches existing patterns better.
+      DI registration: per ADR-010, register in the EXISTING AiPersistenceModule.cs (no new module). Verify registration is unchanged unless adding a new public method requires a new interface method.
+    </step>
+    <step order="5" name="Add HTTP endpoint for tab write-through">
+      In an appropriate endpoint file (most likely the same AI endpoints group — e.g., `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` if sessions live there, OR a sibling like `SessionEndpoints.cs`), add a new MapPost route:
+      ```
+      PATCH /api/ai/chat/sessions/{sessionId}/tabs
+      Body: { tabs: [...], activeTabId?: string }
+      ```
+      MUST inherit existing endpoint filter chain: `.AddAiAuthorizationFilter().RequireRateLimiting("ai-stream")` (or equivalent — preserve ADR-008 compliance). Return 204 NoContent on success; 404 if session doesn't exist.
+      Test the endpoint compiles and `dotnet build src/server/api/Sprk.Bff.Api/` is clean.
+    </step>
+    <step order="6" name="Extend WorkspaceTabManager with serialize/restore">
+      Add methods to `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts`:
+      ```ts
+      /** Serializable view of a non-Home tab. */
+      export interface SerializableWorkspaceTab {
+        id: string;
+        widgetType: string;
+        widgetData: unknown;
+        displayName: string;
+      }
+
+      /** Returns serializable snapshot of non-Home tabs only (Home is recreated by ensureHomeTab). */
+      serializeForPersistence(): { tabs: SerializableWorkspaceTab[]; activeTabId: string | null }
+
+      /** Replaces non-Home tabs from a persisted snapshot. Resolves widget components asynchronously. Idempotent. */
+      restoreFromPersistence(snapshot: { tabs: SerializableWorkspaceTab[]; activeTabId: string | null }): Promise&lt;void&gt;
+      ```
+      Restore semantics:
+      - Skip restore if there's already a non-Home tab open (avoid clobbering current session state).
+      - Resolve each `widgetType` via the existing `resolveWorkspaceWidget(widgetType)` factory — re-hydrates the Component.
+      - Set active tab to `snapshot.activeTabId` if it's in the restored set, else keep current.
+      - Emit no events; mutations call existing onChange callback so React state updates naturally.
+    </step>
+    <step order="7" name="Wire write-through in WorkspaceTabManager mutation methods">
+      Modify the WorkspaceTabManager class to call a new `onPersistChange?: (snapshot) => void` callback after every state-mutating operation (`addTab`, `closeTab`, `setActiveTab`, `clearAllTabs`). The callback is injected by `WorkspacePane.tsx`. Debounce the callback at the WorkspacePane level (not in the manager) to avoid coupling React to the plain TS class.
+    </step>
+    <step order="8" name="Wire write-through + restore in WorkspacePane.tsx">
+      Modify `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`:
+
+      **Write-through (on every state change)**:
+      Add a debounced (200ms) effect that POSTs to `PATCH /api/ai/chat/sessions/{sessionId}/tabs` via `authenticatedFetch` whenever the manager emits onPersistChange. Use `useDebouncedEffect` or a simple `useEffect` + `setTimeout` + cleanup. Body = `manager.serializeForPersistence()`.
+
+      **Restore on mount**:
+      On WorkspacePane mount (and whenever `sessionId` changes), fetch the session via the existing R2 session-restore endpoint OR add a GET sibling to the new PATCH (`GET /api/ai/chat/sessions/{sessionId}/tabs` returning `{ tabs, activeTabId }`). Call `manager.restoreFromPersistence(...)`. Wrap in try/catch — on failure, log via `errorTelemetry` (task 013) and continue with empty state (degrade gracefully).
+
+      Failure mode: if restore takes &gt;500ms, NFR-02 (session restore p95 &lt;500ms) is at risk. Measure during testing.
+    </step>
+    <step order="9" name="Tests — BFF unit tests for SessionPersistenceService.SaveTabsAsync">
+      In the existing BFF test project (or new file under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/`), add tests:
+      - SaveTabs_NoExistingSession_ReturnsFalse
+      - SaveTabs_WithEmptyList_SetsEmptyTabsField
+      - SaveTabs_WithMultipleTabs_PersistsAllAndOrder
+      - SaveTabs_UpdatesActiveTabId
+      - SaveTabs_OldSessionWithoutTabsField_BackwardsCompatible (round-trip: load a Cosmos doc that pre-dates the schema, save it back — the new field is added cleanly)
+      Use NSubstitute or Moq matching existing project patterns. Mock Cosmos container or use the existing test fixture if there is one.
+    </step>
+    <step order="10" name="Tests — Frontend manager tests for serialize/restore">
+      Add to the existing `src/solutions/SpaarkeAi/src/components/workspace/__tests__/WorkspaceTabManager.test.ts`:
+      - serializeForPersistence_emptyManager_returnsEmptyTabsArray
+      - serializeForPersistence_homeOnly_excludesHomeTab
+      - serializeForPersistence_threeWidgetTabs_returnsAllInOrder
+      - restoreFromPersistence_emptyManager_addsAllTabs
+      - restoreFromPersistence_managerWithExistingNonHomeTabs_noOps (safety: don't clobber active session)
+      - restoreFromPersistence_setsActiveTabIdIfInSet
+      - restoreFromPersistence_invalidWidgetType_gracefullySkips
+    </step>
+    <step order="11" name="Manual smoke test the acceptance criterion">
+      In a deployed environment (or local Vite dev with mock BFF), perform the exact NFR-09 acceptance test:
+      1. Open SpaarkeAi welcome state.
+      2. From the Context pane GetStartedCards, open 3 wizards as Workspace tabs (e.g., Create Matter, Create Project, Find Similar).
+      3. Verify 3 non-Home tabs + Home = 4 tabs total.
+      4. Refresh the page (Ctrl+R / Cmd+R).
+      5. Verify ALL 3 non-Home tabs restored, in the same order, with the same active selection.
+      Document the result in `notes/nfr-09-verification.md`.
+    </step>
+    <step order="12" name="Final verification + status updates">
+      Run quality gates:
+      - `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors, no new warnings
+      - `dotnet test` on the BFF test project (ignore the pre-existing 49 broken tests flagged in task 051 — verify your new tests pass in isolation if needed)
+      - `npm run build` in `src/client/shared/Spaarke.UI.Components` (if shared lib touched) — should not be
+      - `npm run build` in `src/solutions/SpaarkeAi` — clean
+      - Manual smoke test (step 11) PASS
+      Update task 065 POML → completed. Update TASK-INDEX row 065 → ✅. Update task 063 follow-up note → resolved.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read C# source + TS source</tool>
+    <tool name="Grep">Find call sites and existing patterns</tool>
+    <tool name="Glob">Locate test files</tool>
+    <tool name="Edit">Modify source files</tool>
+    <tool name="Write">Create new files (StoredWorkspaceTab.cs, possibly new endpoint file)</tool>
+    <tool name="Bash">Build + test commands; manual smoke instrumentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredWorkspaceTab.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/StoredSession.cs (MODIFIED — add Tabs + ActiveTabId)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ISessionPersistenceService.cs (MODIFIED — add SaveTabsAsync)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (MODIFIED — implement SaveTabsAsync + load round-trip)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs OR similar (MODIFIED — add PATCH/GET tabs endpoint pair, filter chain preserved)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts (MODIFIED — serialize/restore + onPersistChange callback)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (MODIFIED — debounced write-through + restore on mount)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Sessions/SessionPersistenceServiceTabsTests.cs (NEW)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/workspace/__tests__/WorkspaceTabManager.test.ts (MODIFIED — serialize/restore cases)</output>
+    <output type="notes">projects/spaarke-ai-platform-unification-r3/notes/nfr-09-verification.md (NEW — manual smoke evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">StoredSession.cs has a `Tabs: List&lt;StoredWorkspaceTab&gt;` field with `[JsonPropertyName("tabs")]` and a default empty list (backwards compatible with older Cosmos documents).</criterion>
+    <criterion testable="true">SessionPersistenceService has a method that persists tabs + activeTabId for a given sessionId/tenantId; verified by unit test that loads + saves a session.</criterion>
+    <criterion testable="true">A `PATCH /api/ai/chat/sessions/{sessionId}/tabs` endpoint exists with the same auth + rate-limit filter chain as the sibling `/messages` endpoint (verified by `git diff` showing `.AddAiAuthorizationFilter().RequireRateLimiting(...)` on the MapPatch / MapPost line).</criterion>
+    <criterion testable="true">WorkspaceTabManager has `serializeForPersistence()` returning `{tabs, activeTabId}` excluding the Home tab and the React Component field.</criterion>
+    <criterion testable="true">WorkspaceTabManager has `restoreFromPersistence(snapshot)` that re-hydrates non-Home tabs by re-resolving each widgetType through the registry; no-ops if manager already has non-Home tabs.</criterion>
+    <criterion testable="true">WorkspacePane.tsx writes tabs through to BFF on mutation (debounced ~200ms) via `authenticatedFetch` from `@spaarke/auth`; no `accessToken` props.</criterion>
+    <criterion testable="true">WorkspacePane.tsx restores tabs on mount; on failure emits telemetry via `errorTelemetry` and degrades gracefully (empty state).</criterion>
+    <criterion testable="true">Manual smoke: open 3 non-Home tabs → refresh page → all 3 tabs (and active selection) restored. Evidence in `notes/nfr-09-verification.md`.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with 0 errors and no new warnings vs baseline.</criterion>
+    <criterion testable="true">`npm run build` in `src/solutions/SpaarkeAi` succeeds with 0 errors.</criterion>
+    <criterion testable="true">Standalone LegalWorkspace continues to function identically (FR-25 not regressed) — the change is SpaarkeAi-only.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task was opened in response to task 063 surfacing the NFR-09 gap (UQ-03 confirmed). It was foreseen in spec.md (UQ-03), design.md §H, plan.md R-5, and README.md R-5 as a possible follow-on; the project owner chose strict NFR-09 compliance (open task now) over deferral (Phase H follow-up).
+
+    Frontend/backend coordination: this is the only Wave-7-style task remaining before Phase G deploy. After task 065 lands, Phase G (070 deploy + 071-074 smoke) can proceed.
+
+    Performance note: write-through must be debounced (~200ms) so that a FIFO eviction (which adds + removes in rapid succession) doesn't flood the BFF. Restore on mount must complete &lt;500ms to preserve NFR-02 (session restore p95 &lt;500ms). Measure during smoke test; if restore is slow, consider including tabs in the existing R2 session-restore response payload (avoids a second round trip).
+
+    Cosmos schema evolution: the Tabs field is purely additive (defaults to empty list). Older session documents without the field deserialise cleanly. No migration script needed.
+  </notes>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`. Multi-file task (BFF + frontend + tests) — the skill's Step 8.0 multi-file work decomposition guidance applies. Recommended sub-agent split: (a) BFF agent (StoredSession + persistence service + endpoint + BFF tests); (b) Frontend agent (WorkspaceTabManager + WorkspacePane + manager tests). Coordinate via the shared API surface (PATCH /tabs request/response shape).
+  </execution>
+</task>

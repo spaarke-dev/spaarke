@@ -18,7 +18,7 @@
 import * as React from 'react';
 import { makeStyles, shorthands, tokens, Textarea, Button, Text } from '@fluentui/react-components';
 import { SendRegular, PromptRegular } from '@fluentui/react-icons';
-import { ISprkChatInputProps } from './types';
+import { ISprkChatInputProps, ISprkChatInputHandle } from './types';
 import { SlashCommandMenu } from '../SlashCommandMenu/SlashCommandMenu';
 import { useSlashCommands } from '../../hooks/useSlashCommands';
 import { DEFAULT_SLASH_COMMANDS, type SlashCommand } from '../SlashCommandMenu/slashCommandMenu.types';
@@ -87,13 +87,14 @@ const DEFAULT_MAX_CHAR_COUNT = 2000;
  * />
  * ```
  */
-export const SprkChatInput: React.FC<ISprkChatInputProps> = ({
+export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInputProps>(({
   onSend,
   disabled = false,
   maxCharCount = DEFAULT_MAX_CHAR_COUNT,
   placeholder = 'Type a message...',
   dynamicSlashCommands,
-}) => {
+  hideSlashButton = false,
+}, ref) => {
   const styles = useStyles();
   const [value, setValue] = React.useState<string>('');
 
@@ -180,6 +181,42 @@ export const SprkChatInput: React.FC<ISprkChatInputProps> = ({
     inputRef.current?.focus();
   }, [hookHandleInputChange]);
 
+  // ── Imperative handle (FR-09, task 025) ──────────────────────────────────
+  // Expose `triggerSlashMode()` so a parent toolbar (SprkChat's strip above the
+  // input) can open the slash menu without re-implementing the wiring.
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      triggerSlashMode: () => handleSlashButtonClick(),
+    }),
+    [handleSlashButtonClick],
+  );
+
+  // ── Cursor focus restoration after streaming (task 082, UX fix #1) ────────
+  // When the response stream completes the parent flips `disabled` from true
+  // back to false. At that moment, return focus to the textarea so the user
+  // can immediately type the next message without clicking back into the box.
+  // Tracking the prior disabled value via a ref ensures we only refocus on the
+  // true→false transition (not on mount or on every render while disabled is
+  // already false).
+  const prevDisabledRef = React.useRef<boolean>(disabled);
+  React.useEffect(() => {
+    const wasDisabled = prevDisabledRef.current;
+    prevDisabledRef.current = disabled;
+
+    if (wasDisabled && !disabled) {
+      // Streaming just completed — restore focus to the input.
+      // Wait one frame so any layout/aria changes from the disabled flip
+      // settle before focusing (avoids losing focus to an intermediate
+      // re-render in Fluent Textarea).
+      const handle = requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(handle);
+    }
+    return undefined;
+  }, [disabled]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -197,16 +234,22 @@ export const SprkChatInput: React.FC<ISprkChatInputProps> = ({
         />
 
         <div className={styles.inputRow}>
-          {/* [/] button — opens slash command menu; appearance="subtle" per spec-FR-09 */}
-          <Button
-            appearance="subtle"
-            icon={<PromptRegular />}
-            onClick={handleSlashButtonClick}
-            disabled={disabled}
-            aria-label="Open slash commands"
-            title="Open slash commands (/)"
-            data-testid="slash-command-button"
-          />
+          {/* [/] button — opens slash command menu; appearance="subtle" per spec-FR-09.
+              FR-09 (task 025): when SprkChat hosts its own prompt-menu button in a
+              strip above the input, it passes `hideSlashButton` to avoid the
+              duplicate affordance. The slash menu remains reachable by typing `/`
+              or via the `triggerSlashMode()` imperative handle. */}
+          {!hideSlashButton && (
+            <Button
+              appearance="subtle"
+              icon={<PromptRegular />}
+              onClick={handleSlashButtonClick}
+              disabled={disabled}
+              aria-label="Open slash commands"
+              title="Open slash commands (/)"
+              data-testid="slash-command-button"
+            />
+          )}
 
           <Textarea
             className={styles.textarea}
@@ -244,6 +287,8 @@ export const SprkChatInput: React.FC<ISprkChatInputProps> = ({
       </div>
     </div>
   );
-};
+});
+
+SprkChatInput.displayName = 'SprkChatInput';
 
 export default SprkChatInput;

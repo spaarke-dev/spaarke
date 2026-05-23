@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Analysis Builder intent widgets — email-compose + meeting-schedule (FR-19)</title>
+    <phase>Phase D — Context pane</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Two net-new widget definitions that open Analysis Builder pre-configured with a specific intent. No new business logic — straightforward wrappers around existing Analysis Builder invocation API. STANDARD rigor: net-new wizard widget definitions with clear constraints, no major refactoring, no shared-file touches.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build two net-new wizard widgets that open the Analysis Builder pre-configured for two
+    specific intents per FR-19:
+    (a) `email-compose` — Analysis Builder configured for the compose-email flow (triggered
+        from the GetStartedCards "Send Email" card).
+    (b) `meeting-schedule` — Analysis Builder configured for the schedule-meeting flow
+        (triggered from the GetStartedCards "Schedule Meeting" card).
+    Both register in `WorkspaceWidgetRegistry`. First step: search the repo for the existing
+    Analysis Builder invocation API to determine the correct contract for passing an intent.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer experienced with AI Analysis Builder workflows,
+    widget wrappers, and widget-registry registration patterns. Comfortable searching the
+    codebase to discover existing component contracts before authoring new wrappers.
+  </role>
+
+  <goal>
+    Two new files exist under `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/`:
+    `EmailComposeWidget.tsx` (or canonical name) and `MeetingScheduleWidget.tsx` (or canonical
+    name). Each renders the Analysis Builder component pre-configured with the appropriate
+    intent (`'email-compose'` or `'meeting-schedule'`). Both are registered in
+    `WorkspaceWidgetRegistry` under widget types `email-compose` and `meeting-schedule`
+    respectively (these MUST match task 042's dispatched strings). When a `widget_load`
+    event for either type fires on the `workspace` channel, the corresponding widget opens
+    Analysis Builder in the correct mode.
+  </goal>
+
+  <context>
+    <background>
+      FR-19 routes Send Email and Schedule Meeting GetStartedCards card clicks to the
+      Analysis Builder — Spaarke's existing AI-driven multi-step composition surface. Rather
+      than building new bespoke wizards, the cards leverage Analysis Builder pre-configured
+      with the appropriate intent. The exact invocation contract (prop name, value space) is
+      to be discovered from existing usage in the codebase — Analysis Builder is already
+      shipping somewhere in src/, and the search-first approach honors OC-04 reuse.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailComposeWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/MeetingScheduleWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Analysis Builder is consumed from its existing location — do NOT copy-paste its internals. Use the canonical invocation API discovered in step 1.</constraint>
+    <constraint source="ADR-021">No hex literals, no `rgba(...)` literals, no Fluent v8. Wrapper styling (minimal) uses `tokens.*`.</constraint>
+    <constraint source="ADR-022">React 19 only. No React 16 fallbacks.</constraint>
+    <constraint source="ADR-025">Any icons used (e.g., for tab title or wrapper chrome) come from `@fluentui/react-icons` Fluent v9.</constraint>
+    <constraint source="ADR-028">No `accessToken` props or state in the wrappers. Analysis Builder uses `authenticatedFetch` internally per ADR-028 — verify by grep before relying on it. If a token snapshot is present in Analysis Builder, flag as a finding (separate fix outside this task).</constraint>
+    <constraint source="spec">FR-19 widget_type strings MUST match exactly: `email-compose` and `meeting-schedule`. These are the strings dispatched by task 042's onCardClick handler.</constraint>
+    <constraint source="project">If Analysis Builder lives in a solution package, import via the package boundary (don't reach into private internals). If it does not expose an intent-prefill API today, document the gap in `notes/` and choose between (a) adding the API as part of this task or (b) opening a follow-up — but do NOT build a fake Analysis Builder copy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Discover Analysis Builder invocation API">
+      Grep the repo for `AnalysisBuilder`, `analysis-builder`, `analysisBuilder`. Locate the
+      component/entry point (likely in `src/client/code-pages/AnalysisWorkspace/` or similar).
+      Read its prop signature to determine how an "intent" is passed (prop name might be
+      `intent`, `mode`, `prefilledAction`, or similar). Document the contract in the wrapper
+      file header comment.
+    </step>
+    <step order="2" name="If no intent-prefill API exists, decide path">
+      If Analysis Builder does not accept an intent today, choose:
+      <steps>
+        <step>Option A: Add an `intent?: string` prop to Analysis Builder + ship in this task (small, well-scoped).</step>
+        <step>Option B: Open a follow-up + ship the widgets as placeholders that route to Analysis Builder without prefill (degraded behavior).</step>
+      </steps>
+      Prefer Option A if the change is small. Document the choice in `notes/` and surface to the user
+      if scope expands significantly.
+    </step>
+    <step order="3" name="Create EmailComposeWidget.tsx (or canonical name)">
+      Scaffold a thin wrapper that renders Analysis Builder with `intent='email-compose'`.
+      Component should be self-contained — it manages no state beyond rendering Analysis
+      Builder in the correct mode and handling widget-tab lifecycle (open/close).
+    </step>
+    <step order="4" name="Create MeetingScheduleWidget.tsx (or canonical name)">
+      Analogous to step 3, with `intent='meeting-schedule'`.
+    </step>
+    <step order="5" name="Register both in WorkspaceWidgetRegistry">
+      Add registrations using the existing pattern (lazy-import factory). Widget types
+      `email-compose` and `meeting-schedule` MUST match task 042's dispatched strings exactly.
+    </step>
+    <step order="6" name="Smoke-test via widget_load event">
+      Build the Spaarke.AI.Widgets package and consuming solution. Click "Send Email" card in
+      GetStartedCards — confirm Analysis Builder opens in compose-email mode. Click "Schedule
+      Meeting" — confirm Analysis Builder opens in schedule-meeting mode.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read Analysis Builder source + existing wizard widget wrappers as blueprint</tool>
+    <tool name="Write">Create two new widget files</tool>
+    <tool name="Edit">Update WorkspaceWidgetRegistry to register both wrappers; possibly extend Analysis Builder prop signature if needed</tool>
+    <tool name="Grep">Find Analysis Builder component + verify auth pattern</tool>
+    <tool name="Bash">Run `npm run build` against Spaarke.AI.Widgets</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailComposeWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/MeetingScheduleWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</output>
+    <output type="report">Task completion report confirming both widgets exist, are registered, and open Analysis Builder with the correct intent</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Analysis Builder invocation API has been identified and documented in the wrapper file header.</criterion>
+    <criterion testable="true">`EmailComposeWidget.tsx` (or canonical name) exists and opens Analysis Builder with `intent='email-compose'` (or equivalent prop per discovered API).</criterion>
+    <criterion testable="true">`MeetingScheduleWidget.tsx` (or canonical name) exists and opens Analysis Builder with `intent='meeting-schedule'`.</criterion>
+    <criterion testable="true">`WorkspaceWidgetRegistry` registers both wrappers under widget types `email-compose` and `meeting-schedule` exactly.</criterion>
+    <criterion testable="true">Dispatching `widget_load` on `workspace` channel with `email-compose` opens Analysis Builder in compose-email mode.</criterion>
+    <criterion testable="true">Dispatching `widget_load` on `workspace` channel with `meeting-schedule` opens Analysis Builder in schedule-meeting mode.</criterion>
+    <criterion testable="true">No `accessToken` props introduced (ADR-028 invariants preserved).</criterion>
+    <criterion testable="true">No hex literals, no `rgba(...)` literals in new code.</criterion>
+    <criterion testable="true">`npm run build` succeeds with no new TS / lint errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="EmailCompose widget opens via widget_load">
+      In SpaarkeAi welcome state, click the Send Email card. Confirm Analysis Builder opens as a new
+      top-tab in the Workspace pane in compose-email mode (verify the initial state / step indicator
+      reflects the email-compose intent).
+    </test>
+    <test name="MeetingSchedule widget opens via widget_load">
+      Click the Schedule Meeting card. Confirm Analysis Builder opens as a new top-tab in the
+      Workspace pane in schedule-meeting mode.
+    </test>
+    <test name="Analysis Builder retains normal flow">
+      Within each opened widget, walk through the Analysis Builder steps. Confirm functionality matches
+      standalone Analysis Builder for the equivalent intent.
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, NFR-06)">
+      Toggle dark mode. Confirm Analysis Builder adapts correctly (inherited Fluent v9 tokens).
+    </test>
+    <test name="No console errors during widget mount">
+      Open browser devtools, open each widget, confirm zero errors.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 044" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at STANDARD rigor.
+  </execution>
+</task>

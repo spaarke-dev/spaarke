@@ -176,13 +176,30 @@ public static class DailyBriefingEndpoints
     {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
 
-        // Validate request has at least some data to narrate
+        // Empty-payload tolerance: the frontend `useDailyBriefing` hook may send a request
+        // with all collections empty when the user has no notifications, no priority items,
+        // and no channel content to narrate (e.g., fresh inbox, no overdue work).
+        // Treat this as a normal "nothing to narrate" condition and return 200 with an empty
+        // bullets/channels response — the client renders an empty state (per FR-16 /
+        // task 035 graceful-empty UX). Returning 400 here would force the hook into its
+        // 400-special-case branch and surface as a misleading "Bad Request" in App Insights.
         if (request.Categories.Length == 0 && request.PriorityItems.Length == 0 && request.Channels.Length == 0)
         {
-            return Results.Problem(
-                statusCode: 400,
-                title: "Bad Request",
-                detail: "Request must include at least one category, priority item, or channel.");
+            logger.LogInformation(
+                "Empty narrate request — returning empty bullets (no notifications to narrate).");
+
+            return TypedResults.Ok(new DailyBriefingNarrateResponse
+            {
+                Tldr = new TldrResult
+                {
+                    Briefing = string.Empty,
+                    TopAction = string.Empty,
+                    CategoryCount = 0,
+                    PriorityItemCount = 0
+                },
+                ChannelNarratives = [],
+                GeneratedAtUtc = DateTimeOffset.UtcNow
+            });
         }
 
         logger.LogInformation(

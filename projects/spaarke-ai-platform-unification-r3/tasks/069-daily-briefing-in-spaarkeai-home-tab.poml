@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Daily Briefing as SpaarkeAi Home tab default content (Option Z minimum scope; Bug 2 visual fix)</title>
+    <phase>F (Verification — remediation)</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>034, 067, 068, 070</dependencies>
+    <blocks>072</blocks>
+    <tags>react, frontend, shared-components, refactoring, architecture, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-solution refactor (LegalWorkspace + shared lib + SpaarkeAi). Touches Daily Briefing infrastructure (hook + component + registration). FR-25/NFR-10 risk surface — standalone LegalWorkspace must continue to render Daily Briefing identically. Multi-file dependency graph.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-solution refactor — single coordinated sequence to preserve FR-25.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the minimum-scope Option Z direction (operator's 2026-05-20 decision):
+    SpaarkeAi's Workspace Home tab default content is the Daily Briefing section. Hoist
+    Daily Briefing infrastructure (useDailyBriefing + DailyBriefingSection + registration)
+    from LegalWorkspace to @spaarke/ui-components so both solutions consume it from the
+    shared lib. Update SpaarkeAi's WorkspaceHomeTab to render Daily Briefing as the
+    default Home content. Standalone LegalWorkspace continues to render Daily Briefing
+    identically. Both web resources redeployed.
+  </prompt>
+
+  <role>
+    Senior React + TypeScript engineer comfortable with monorepo refactors, shared-library
+    design, and cross-solution build verification. Familiar with task 034 (Daily Briefing
+    creation), task 035 (429 + empty state), task 067 (builder hoist), and the ADR-012
+    cross-cutting-component constraint.
+  </role>
+
+  <goal>
+    @spaarke/ui-components exports useDailyBriefing + DailyBriefingSection + a
+    dailyBriefing SectionRegistration. LegalWorkspace's sectionRegistry.ts imports the
+    registration from shared lib (instead of solution-local). SpaarkeAi's WorkspaceHomeTab
+    renders Daily Briefing as the default Home content (no longer placeholder). Both web
+    resources redeployed; standalone LegalWorkspace verified identical; Bug 2 visual is
+    materially addressed for the default case.
+  </goal>
+
+  <context>
+    <background>
+      Operator 2026-05-20 feedback round 1 surfaced Bug 2: SpaarkeAi Workspace pane shows
+      structural layout but no actual section content. Task 067 hoisted the canonical
+      builder (buildDynamicWorkspaceConfig) to @spaarke/ui-components but left the 6
+      section factories solution-local because they each have legal-domain coupling
+      (sprk_event, sprk_document, sprk_todo, etc.) — per ADR-012's prohibition on
+      hard-coding Dataverse entity names in shared components.
+
+      The operator chose Option Z: SpaarkeAi has a DIFFERENT workspace surface than
+      LegalWorkspace. After clarification, the minimum scope is: SpaarkeAi's Home tab
+      defaults to Daily Briefing. New workspace tabs are created by user wizards / AI
+      outputs (existing mechanism).
+
+      The Daily Briefing factory is the LEAST legal-domain-coupled of the 6:
+      - useDailyBriefing.ts calls /api/ai/daily-briefing/narrate via authenticatedFetch
+        (shared @spaarke/auth) — no Dataverse entity references
+      - DailyBriefingSection.tsx renders Fluent v9 Card + bullets — no domain coupling
+      - dailyBriefing.registration.ts is small; passes config to factory
+
+      Task 067's per-factory inventory classified Daily Briefing as "solution-local" but
+      the only cited reason was "AI feature stack expansion in shared lib violates
+      ADR-013 placement governance." ADR-013 governs BFF placement (server-side), not
+      frontend consumption. Multiple solutions consuming the same BFF AI endpoint via
+      shared frontend code is NOT an ADR-013 violation. Therefore Daily Briefing is
+      safely hoistable to @spaarke/ui-components — revisiting task 067's Option L
+      specifically for this section.
+
+      This task closes Bug 2 visually for the default case (Daily Briefing in Home tab).
+      Future content (multi-section Home, recent AI sessions, etc.) is deferred to next
+      review or follow-on.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/useDailyBriefing.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/DailyBriefingSection.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/index.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceHomeTab.tsx</file>
+      <file>scripts/Deploy-SpaarkeAi.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Daily Briefing infrastructure (hook + section + registration) is consumed by 2+ solutions — it belongs in @spaarke/ui-components. The factory is safe to hoist because it does not hard-code Dataverse entity names (it calls a BFF AI endpoint, which is shared infrastructure).</constraint>
+    <constraint source="ADR-013">Daily Briefing extends the BFF in-process; ADR-013 governs server-side AI architecture and is NOT violated by frontend consumers sharing the AI BFF endpoint. Verify the hook calls only existing AI endpoints (no new AI service).</constraint>
+    <constraint source="ADR-014">AI caching — preserve the 5-minute per-user TTL cache from task 034. Verify it works correctly after hoist (cache key uses tenantId from @spaarke/auth getAuthProvider).</constraint>
+    <constraint source="ADR-016">AI rate limits — preserve graceful 429 degradation from task 035. The error UI lives in DailyBriefingSection.tsx; verify it works in both solutions.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only.</constraint>
+    <constraint source="ADR-028">No accessToken props. Use authenticatedFetch + buildBffApiUrl from @spaarke/auth.</constraint>
+    <constraint source="spec">FR-25 / NFR-10: Standalone LegalWorkspace MUST continue to render Daily Briefing identically. Visual diff = before. The hoist is a refactor not a redesign.</constraint>
+    <constraint source="spec">FR-24: Daily Briefing 429 telemetry. After hoist, ensure telemetry callbacks still fire. The hybrid pattern from task 035 (local trackEvent + optional onRateLimitError prop) should be PRESERVED — verify how it survives the hoist.</constraint>
+    <constraint source="project">Use the re-export shim pattern from task 067 to preserve LegalWorkspace's existing import paths. Files that imported the old path should continue working.</constraint>
+    <constraint source="project">SpaarkeAi consumes via the public @spaarke/ui-components barrel (no deep imports).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/067-shared-lib-hoist-summary.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/drafts/067-factory-inventory.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inspect current Daily Briefing files">
+      Read the 3 source files in `src/solutions/LegalWorkspace/src/sections/dailyBriefing/`:
+      - `useDailyBriefing.ts` — hook + 5-min TTL cache (verify it only uses @spaarke/auth, no LegalWorkspace-specific imports)
+      - `DailyBriefingSection.tsx` — Card component with success/429/empty/other-error rendering
+      - `dailyBriefing.registration.ts` — section factory
+      Document any LegalWorkspace-local imports that need attention. If any of these reach into legal-domain code, STOP and report — Daily Briefing may not be safely hoistable as initially assumed.
+    </step>
+
+    <step order="2" name="Hoist useDailyBriefing.ts to shared lib">
+      Copy `useDailyBriefing.ts` to
+      `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/useDailyBriefing.ts`.
+      Verify all imports resolve from shared lib + @spaarke/auth (no LegalWorkspace paths).
+      Preserve the 5-min TTL cache implementation per ADR-014.
+    </step>
+
+    <step order="3" name="Hoist DailyBriefingSection.tsx to shared lib">
+      Copy `DailyBriefingSection.tsx` to
+      `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/DailyBriefingSection.tsx`.
+      Verify Fluent v9 tokens only (ADR-021). Verify the 429/empty/other-error rendering survives. PRESERVE the optional `onRateLimitError` callback prop for telemetry injection (task 035 hybrid pattern).
+    </step>
+
+    <step order="4" name="Hoist dailyBriefing.registration.ts to shared lib">
+      Copy the registration file to
+      `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/dailyBriefing.registration.ts`.
+      Update internal imports to relative paths within shared lib.
+    </step>
+
+    <step order="5" name="Export from shared lib barrel">
+      Add to `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/index.ts`:
+      ```ts
+      export { useDailyBriefing } from './sections/dailyBriefing/useDailyBriefing';
+      export type { DailyBriefingState, DailyBriefingError } from './sections/dailyBriefing/useDailyBriefing';
+      export { DailyBriefingSection } from './sections/dailyBriefing/DailyBriefingSection';
+      export type { DailyBriefingSectionProps } from './sections/dailyBriefing/DailyBriefingSection';
+      export { dailyBriefingRegistration } from './sections/dailyBriefing/dailyBriefing.registration';
+      ```
+      Verify root index.ts barrel re-exports (auto via WorkspaceShell barrel).
+    </step>
+
+    <step order="6" name="Replace LegalWorkspace local files with re-export shims">
+      Per task 067's re-export shim pattern:
+      - `src/solutions/LegalWorkspace/src/sections/dailyBriefing/useDailyBriefing.ts` becomes a re-export: `export { useDailyBriefing } from "@spaarke/ui-components";` + same for types
+      - Same for `DailyBriefingSection.tsx` and `dailyBriefing.registration.ts`
+      - This preserves any existing imports in LegalWorkspace code (no other change required).
+    </step>
+
+    <step order="7" name="Build + verify shared lib + LegalWorkspace">
+      - `cd src/client/shared/Spaarke.UI.Components && npm run build` → tsc clean
+      - `cd src/solutions/LegalWorkspace && npm run build` → vite clean, bundle size within noise vs pre-task baseline (569.84 KB gzip)
+      - If either fails, STOP and fix before proceeding. Standalone LegalWorkspace verification is the FR-25 risk surface.
+    </step>
+
+    <step order="8" name="Rewire SpaarkeAi WorkspaceHomeTab to use Daily Briefing">
+      In `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceHomeTab.tsx`:
+      - Import `dailyBriefingRegistration` (or `DailyBriefingSection` directly) from `@spaarke/ui-components`
+      - Replace the placeholder `buildFoundationalConfig` (or the local placeholder registry) so the Home tab renders Daily Briefing as the default section
+      - Build a layout with one row containing Daily Briefing
+      - Wire the SectionFactoryContext appropriately (bffBaseUrl, authenticatedFetch via useAiSession or similar — see how the existing code obtains these)
+      - Optionally pass an `onRateLimitError` callback that emits SpaarkeAi-side telemetry (TELEMETRY_DAILY_BRIEFING_429 from errorTelemetry.ts task 013)
+    </step>
+
+    <step order="9" name="Build + verify SpaarkeAi">
+      - `cd src/solutions/SpaarkeAi && npm run build` → vite clean
+      - Document bundle delta (Daily Briefing adds modest weight; estimate +10-20 KB gzip from new section + AI BFF call code)
+    </step>
+
+    <step order="10" name="Deploy both web resources">
+      - `scripts/Deploy-SpaarkeAi.ps1` (no params) → updates sprk_spaarkeai
+      - `scripts/Deploy-LegalWorkspaceCustomPage.ps1` or equivalent → updates sprk_corporateworkspace (Glob for the correct script if name differs)
+      - Run `scripts/Test-Deployment.ps1` for sanity check
+    </step>
+
+    <step order="11" name="Update deploy memo">
+      Append "Supplemental Deploy — Task 069" section to `projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md`:
+      - What was deployed (both web resources)
+      - Why (Option Z minimum scope: Daily Briefing in SpaarkeAi Home tab; Bug 2 visual fix for default case)
+      - Bundle size deltas
+      - Deploy timestamps + resource IDs
+    </step>
+
+    <step order="12" name="Update task status + project docs">
+      - Task 069 POML → completed
+      - TASK-INDEX row 069 → ✅
+      - Update plan.md Risk Register: note Bug 2 visual fix (default case) RESOLVED in task 069
+      - Update `notes/067-shared-lib-hoist-summary.md` with a note that Daily Briefing was hoisted in task 069 (revisiting Option L decision)
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Source files across 3 solutions</tool>
+    <tool name="Edit">Modify shared lib + LegalWorkspace + SpaarkeAi files</tool>
+    <tool name="Write">New shared lib files; deploy memo append</tool>
+    <tool name="Bash">npm install/build commands; deploy script invocations</tool>
+    <tool name="Grep">Find import sites + verify FR-25 preservation</tool>
+    <tool name="Glob">Locate LegalWorkspace deploy script</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/* (NEW — 3 hoisted files)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/index.ts (MODIFIED — new exports)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/* (REPLACED with re-export shims — 3 files)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspaceHomeTab.tsx (MODIFIED — uses Daily Briefing as default Home content)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md (APPENDED — Task 069 supplemental deploy)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">@spaarke/ui-components public barrel exports useDailyBriefing, DailyBriefingSection, dailyBriefingRegistration (+ associated types).</criterion>
+    <criterion testable="true">@spaarke/ui-components builds clean (tsc).</criterion>
+    <criterion testable="true">LegalWorkspace builds clean (vite); bundle size within noise vs pre-task baseline (569.84 KB gzip from task 067).</criterion>
+    <criterion testable="true">LegalWorkspace's sectionRegistry.ts continues to compose Daily Briefing alongside other legal-domain factories — visually identical for users.</criterion>
+    <criterion testable="true">Standalone LegalWorkspace's existing Daily Briefing rendering is BYTE-IDENTICAL after refactor (FR-25 / NFR-10).</criterion>
+    <criterion testable="true">SpaarkeAi WorkspaceHomeTab renders Daily Briefing section as default Home content (not placeholder).</criterion>
+    <criterion testable="true">SpaarkeAi builds clean (vite); bundle delta documented.</criterion>
+    <criterion testable="true">Daily Briefing 429 graceful degradation still works (FR-16, NFR-11 preserved).</criterion>
+    <criterion testable="true">Daily Briefing empty state still works (FR-16; OC-08 message).</criterion>
+    <criterion testable="true">No new accessToken props (ADR-028); 5-min TTL cache preserved (ADR-014).</criterion>
+    <criterion testable="true">Both web resources redeployed; deploy memo appended.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task implements the MINIMUM SCOPE of Option Z (operator's 2026-05-20 direction).
+    Future expansions of SpaarkeAi Home tab content (more sections, AI session list, etc.)
+    are deferred to next review.
+
+    The hoist revisits task 067's per-factory inventory decision specifically for
+    Daily Briefing. Other 5 legal-domain factories (getStarted, quickSummary,
+    latestUpdates, todo, documents) CORRECTLY stay solution-local per ADR-012's
+    Dataverse-entity-strings rule.
+
+    After this task, SpaarkeAi's Workspace pane has materially different content from
+    LegalWorkspace (per Option Z): SpaarkeAi shows Daily Briefing; LegalWorkspace shows
+    its 6 legal-domain sections. Both consume the same Daily Briefing component from
+    shared lib.
+
+    Architectural follow-on (NOT in this task, captured for next review):
+    Pane-coordination rules (Assistant ↔ Workspace ↔ Context state sync) — the operator
+    flagged this as a separate cross-cutting architectural concern. Likely a follow-on
+    project or new ADR.
+
+    ---
+
+    ## Completion (2026-05-21)
+
+    All 12 steps complete. Both web resources deployed + published to spaarkedev1.
+
+    **Inspection finding**: Daily Briefing files were portable as expected — useDailyBriefing.ts had
+    one local import (`authInit.ts`) and DailyBriefingSection.tsx had one (`telemetry.ts`). These
+    were refactored into the function-based auth contract (ADR-028) when hoisted: the shared hook
+    accepts `authenticatedFetch` + `tenantId` as parameters; the shared component delegates 429
+    telemetry to a consumer-supplied `onRateLimitError` callback.
+
+    **Architectural decision (registration as factory)**: Other section registrations are static
+    consts because they close over LegalWorkspace-local helpers. Daily Briefing in shared lib
+    cannot close over `@spaarke/auth` (peer-deps would force the shared lib to depend on it).
+    Solution: exported `createDailyBriefingRegistration(options): SectionRegistration` as a
+    factory. Both consumers (LegalWorkspace shim, SpaarkeAi Home tab) call the factory with
+    their own auth deps.
+
+    **Bundle deltas**:
+    - LegalWorkspace: -0.81 KB gzip (-0.14%) — within FR-25 noise.
+    - SpaarkeAi: -0.52 KB gzip (-0.06%) — added Daily Briefing factory + section import, REMOVED
+      bulky placeholder registry builder (~150 LOC removed). Wash.
+    - Shared lib: tsc clean, no bundling.
+
+    **FR-25 / NFR-10 verification**: Standalone LegalWorkspace shim path:
+    - `sections/dailyBriefing/dailyBriefing.registration.ts` (LegalWorkspace) preserves the same
+      `dailyBriefingRegistration: SectionRegistration` const signature consumed by sectionRegistry.ts.
+    - `sections/dailyBriefing/DailyBriefingSection.tsx` (LegalWorkspace) preserves the optional
+      onRateLimitError prop signature; when no callback is supplied, the shim falls back to local
+      `trackEvent(TELEMETRY_EVENT_DAILY_BRIEFING_429, ...)` — EXACT same event name as pre-069.
+    - `sections/dailyBriefing/useDailyBriefing.ts` (LegalWorkspace) preserves the
+      `useDailyBriefing(): DailyBriefingState` signature.
+    - Bundle delta -0.14% confirms code-path equivalence.
+
+    **Deploy timestamps + resource IDs**:
+    - SpaarkeAi (sprk_spaarkeai): `5206a442-3451-f111-bec7-7ced8d1dc988` — 2,897 KB
+    - LegalWorkspace (sprk_corporateworkspace): `8b7e8863-020d-f111-8342-7ced8d1dc988` — 1,984 KB
+
+    **Compliance**: ADR-012 ✅ / ADR-013 ✅ / ADR-014 ✅ (5-min TTL preserved, per-tenant) /
+    ADR-016 ✅ (graceful 429 + Retry) / ADR-021 ✅ (no new hex/rgba) / ADR-028 ✅ (no accessToken
+    props; function-based contract via factory).
+
+    **Status**: Bug 2 visual fix landed for the default Home tab case. Operator visual smoke
+    check (SpaarkeAi Workspace Home tab shows Daily Briefing bullets / 429 card / empty state) is
+    the next gate.
+
+    See [`notes/deploys/2026-05-20-deploy.md`](../notes/deploys/2026-05-20-deploy.md) (Task 069
+    supplemental section) for full deploy details.
+  </notes>
+
+  <execution>
+    Execute via `task-execute` skill. Multi-file refactor; single coordinated agent
+    sequence (per task 067 precedent — sub-agent split led to incorrect portability
+    diagnosis; single agent with full context is safer).
+  </execution>
+</task>
