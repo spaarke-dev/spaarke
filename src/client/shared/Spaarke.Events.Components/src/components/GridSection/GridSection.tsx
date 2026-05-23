@@ -434,14 +434,21 @@ function buildStatusFilter(statusCodes: number[] | undefined): string {
     return "";
   }
 
+  // Task 132 (R13 follow-up #11, 2026-05-23): operator reported
+  // OData error 2147879048: "A binary operator with incompatible types
+  // was detected... 'Edm.Int32' and 'Edm.String' for operator kind
+  // 'Equal'." `sprk_eventstatus` is Edm.Int32 in Dataverse, but the
+  // prior implementation wrapped the value in single quotes
+  // (`sprk_eventstatus eq '0'`) treating it as Edm.String. The previous
+  // code comment incorrectly claimed it was a "string field." Fixed:
+  // emit the integer unquoted (`sprk_eventstatus eq 0`) and use
+  // unquoted integers in the Microsoft.Dynamics.CRM.In list too.
   if (statusCodes.length === 1) {
-    // Single status - simple equality filter (string field)
-    return `sprk_eventstatus eq '${statusCodes[0]}'`;
+    return `sprk_eventstatus eq ${statusCodes[0]}`;
   }
 
-  // Multiple statuses - use 'in' filter with string values
-  // Dataverse uses Microsoft.Dynamics.CRM.In for multi-value comparisons
-  const values = statusCodes.map((code) => `'${code}'`).join(",");
+  // Multiple statuses — use 'in' filter with integer values (no quotes).
+  const values = statusCodes.join(",");
   return `Microsoft.Dynamics.CRM.In(PropertyName='sprk_eventstatus',PropertyValues=[${values}])`;
 }
 
