@@ -1,8 +1,8 @@
 # SpaarkeAi Workspace Architecture
 
-> **Purpose**: End-to-end reference for the SpaarkeAi three-pane shell as it stands after Round 8 (Option B / system layouts in Dataverse). Documents the cold-load → widget render data flow, component boundaries, auth path, BFF surface, and storage contract.
+> **Purpose**: End-to-end reference for the SpaarkeAi three-pane shell as it stands after Round 13 (Calendar widget polish + all-panes-collapsed empty state + 25/50/25 pane fracs). Documents the cold-load → widget render data flow, component boundaries, auth path, BFF surface, and storage contract.
 >
-> **Last reviewed**: 2026-05-22 (Task 113, Round 8). Periodic review required — this file does NOT auto-update.
+> **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) to cover R10–R13 deltas. Periodic review required — this file does NOT auto-update.
 
 ---
 
@@ -220,17 +220,20 @@ The SpaarkeAi `useWorkspaceLayouts` hook (`src/solutions/SpaarkeAi/src/hooks/use
 | `ownerid` | Lookup(User/Team) | User isolation for non-system records |
 | `statecode` | State | 0 = Active |
 
-### 6.2 The 5 system layouts shipped today
+### 6.2 The 6 system layouts shipped today
 
 | # | Layout name | Source | `sprk_layouttemplateid` | Sections (sectionsJson) | Default? |
 |---|---|---|---|---|---|
 | 1 | Corporate Workspace | Hard-coded (`SystemWorkspaceLayouts.cs`) — GUID `00000000-0000-0000-0000-000000000001` | `3-row-mixed` | row-1: get-started + quick-summary; row-2: latest-updates; row-3: todo + documents | No |
 | 2 | Daily Briefing | Dataverse-seeded (Task 108) | `single-column` | daily-briefing | **YES (dev seed)** |
 | 3 | Smart To Do List | Dataverse-seeded | `single-column` | todo | No |
-| 4 | My Work | Dataverse-seeded | `single-column` | quick-summary | No |
+| 4 | My Work | Dataverse-seeded | `single-column` | quick-summary (6 cards: My Matters, My Projects, Assign Work, Open Tasks, Communications, Invoices — task 110) | No |
 | 5 | Documents | Dataverse-seeded | `single-column` | documents | No |
+| 6 | Calendar | Dataverse-seeded (Task 115, Round 9) | `single-column` | calendar | No |
 
-The 4 Dataverse-seeded layouts come from `scripts/system-layouts.json` via `Deploy-SystemWorkspaceLayouts.ps1`. Operator decision Option B (2026-05-22): every workspace — hard-coded, Dataverse-system, user-created — flows through the same `widget_load → WorkspaceLayoutWidget → LegalWorkspaceApp(embedded) → section factories` pipeline.
+The 5 Dataverse-seeded layouts come from `scripts/system-layouts.json` via `Deploy-SystemWorkspaceLayouts.ps1`. Operator decision Option B (2026-05-22): every workspace — hard-coded, Dataverse-system, user-created — flows through the same `widget_load → WorkspaceLayoutWidget → LegalWorkspaceApp(embedded) → section factories` pipeline.
+
+**Calendar is architecturally distinct from the other 5 sections** (task 115): the Calendar section is a 62-line REGISTRATION SHIM in `src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` that delegates rendering entirely to `CalendarWorkspaceWidget` from the shared `@spaarke/events-components` library (task 114). The other 5 sections embed via the same `LegalWorkspaceApp(embedded)` pipeline but their factories reach into LegalWorkspace-local components + `DataverseService` + `FeedTodoSyncContext`. Calendar's "shared-lib widget + thin LW section shim" pattern is the **proven canonical model** for future widgets that should be reusable across non-LegalWorkspace hosts. See the [componentization audit §2A](./SPAARKEAI-COMPONENTIZATION-AUDIT.md) for the implications.
 
 ---
 
@@ -247,7 +250,30 @@ The 4 Dataverse-seeded layouts come from `scripts/system-layouts.json` via `Depl
 | `sprk_ai2_chatSessionId` | sessionStorage | `AiSessionProvider` | Active chat session ID |
 | `sprk_ai2_playbookId` | sessionStorage | `AiSessionProvider` | Active playbook ID |
 | `lw-layout-cache-*` | sessionStorage | LegalWorkspace `layoutCache.ts` | Cached workspace layouts list + active layout |
-| `spaarke-ai-r2-shell` (key namespace) | sessionStorage | `ThreePaneLayout` | Pane split widths |
+| `spaarke-ai-r2-shell` (key namespace) | sessionStorage | `ThreePaneLayout` | Pane split widths. Concrete keys: `spaarke-ai-r2-shell-left-width-px`, `spaarke-ai-r2-shell-right-width-px` |
+| `spaarke:calendar:collapsed` | localStorage | `CalendarWorkspaceWidget` (task 116) | Persists the calendar-strip collapse toggle so the strip stays hidden across reloads when the operator collapses it. Filter row remains visible when collapsed (task 118). |
+
+### 7.1 Pane-width precedence (task 117)
+
+`ThreePaneLayout` now resolves initial pane widths via a three-tier precedence chain (per `useThreePaneLayout.resolveInitialWidth`):
+
+1. **Stored pixel width** — sessionStorage `${storageKey}-left-width-px` / `${storageKey}-right-width-px`. Whatever the user last dragged. Always wins on remount.
+2. **Frac × `window.innerWidth`** — applied only on cold mount when no stored value is present, when the corresponding `defaultLeftWidthFrac` / `defaultRightWidthFrac` prop is defined and finite > 0, and when `typeof window !== 'undefined'`. SpaarkeAi passes `defaultLeftWidthFrac={0.25}` + `defaultRightWidthFrac={0.25}` → 25/50/25 of the current viewport.
+3. **Legacy `defaultLeftWidthPx` / `defaultRightWidthPx`** — fixed pixel fallback for SSR / non-browser environments. SpaarkeAi still passes 340 / 400 here so the chain has a final fallback.
+
+LegalWorkspace does NOT consume `ThreePaneLayout` at all (it uses `WorkspaceGrid`-based section rendering) — confirmed in task 117. The frac props are SpaarkeAi-only today.
+
+### 7.2 All-panes-collapsed empty state (task 119)
+
+When the user simultaneously collapses all three panes (Assistant + Workspace + Context — three 48px strips clustered against the left edge), `ThreePaneLayout` renders an empty-state overlay as a sibling of the three collapsed strips:
+
+- Layout: `flex: 1 1 auto`, vertical-centered column, `colorNeutralBackground2`.
+- Visual: 64px `EmojiSmileSlight24Regular`, "Welcome back" text (`fontSizeBase400`, `colorNeutralForeground3`), primary `Button` labeled "Open" (autoFocused for keyboard-Enter recovery).
+- ARIA: `<div role="region" aria-label="All panes are collapsed">`.
+- Action: clicking "Open" calls `resetToFracDefaults()` on `useThreePaneLayout` (recomputes left/right widths from `frac × window.innerWidth`, clamped to min, AND persists the new pixel values to sessionStorage so they OVERWRITE any prior user-dragged values), then guarded `onToggleLeft/Center/Right(true)` calls to un-collapse all three panes.
+- Operator semantics: "force 25/50/25 always" — discards any previously user-dragged widths intentionally.
+
+The overlay is contained entirely inside `ThreePaneLayout`; no SpaarkeAi-side change was required (ThreePaneShell already wires the collapse states + toggle callbacks since task 094).
 
 ---
 
@@ -286,3 +312,10 @@ The 4 Dataverse-seeded layouts come from `scripts/system-layouts.json` via `Depl
 - [`AI-ARCHITECTURE.md`](./AI-ARCHITECTURE.md) — broader AI pipeline (orchestration, tool catalog)
 - [`AUTH-AND-BFF-URL-PATTERN.md`](./AUTH-AND-BFF-URL-PATTERN.md) — auth + URL pattern reference
 - [`code-pages-architecture.md`](./code-pages-architecture.md) — Code Page packaging
+
+---
+
+## 11. Document changelog
+
+- **2026-05-22 (task 113)**: initial publication (post-R9 state). Documented the cold-load pipeline, embedded LegalWorkspaceApp pattern, 4-stage shell lifecycle, BFF surface, Dataverse schema, 5 system layouts, and storage contract.
+- **2026-05-22 (task 123)**: refreshed through R13. Added Calendar widget (task 115) as 6th system layout + its distinct "shared-lib widget + thin LW shim" architecture, `@spaarke/events-components` shared lib (task 114), pane-width fracs precedence chain (task 117), all-panes-collapsed overlay UX + `resetToFracDefaults()` recovery (task 119), `spaarke:calendar:collapsed` localStorage key (task 116), QuickSummary 6-card expansion (task 110). Calendar widget polish history (tasks 116/118/120/121/122) is captured in the componentization audit and the build-a-widget guide; this file references the architectural surface only.

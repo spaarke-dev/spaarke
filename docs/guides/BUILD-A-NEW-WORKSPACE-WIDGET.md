@@ -1,8 +1,8 @@
 # Build a New Workspace Widget
 
-> **Purpose**: Step-by-step tutorial for adding a new system workspace (or extending the existing pipeline). Walks through the file edits, the Dataverse seed update, the BFF impact analysis, and the deploy sequence. Includes a worked example: the **Calendar widget** the operator has requested for a future round.
+> **Purpose**: Step-by-step tutorial for adding a new system workspace (or extending the existing pipeline). Walks through the file edits, the Dataverse seed update, the BFF impact analysis, and the deploy sequence. Includes a worked example: the **Calendar widget** — now a real shipped implementation (tasks 114/115, Round 9, 2026-05-22) rather than a forward projection.
 >
-> **Last reviewed**: 2026-05-22 (Task 113). Periodic review required.
+> **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) — Calendar widget shipped + Pattern D added + new pitfalls. Periodic review required.
 
 > **Required reading before starting**:
 > - [`../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — pipeline reference
@@ -18,8 +18,23 @@ Before writing code, classify the new feature:
 
 ```
 Is the new widget a "workspace" — i.e. one or more sections inside the workspace pipeline?
-├── YES → Pattern A: Section factory + Dataverse layout (RECOMMENDED for most cases)
-│         Examples: Daily Briefing, My Work, Documents, Smart To Do List, Calendar
+├── YES → Does the section need to be reusable across non-LegalWorkspace hosts
+│         (or does the implementation already live in / fit a shared lib)?
+│         ├── YES → Pattern D: SHARED-LIB WIDGET + THIN LW SHIM (Calendar pattern)
+│         │         Worked example: Calendar (tasks 114 + 115)
+│         │         - Widget proper in @spaarke/<lib>-components
+│         │         - LegalWorkspace registration is a ~60-line shim that imports
+│         │           the widget and renders it
+│         │         - The 5 original sections (get-started, quick-summary,
+│         │           latest-updates, todo, documents) do NOT yet follow this —
+│         │           they remain LW-internal (still Pattern A); only NEW widgets
+│         │           should default to Pattern D unless there's a reason not to
+│         │
+│         └── NO  → Pattern A: Section factory + Dataverse layout (LW-internal)
+│                   Examples: Daily Briefing, My Work, Documents, Smart To Do List
+│                   The section component lives in src/solutions/LegalWorkspace/
+│                   and the registration factory reaches into LW-local
+│                   DataverseService / FeedTodoSyncContext / hooks
 │
 └── NO  → Is it a one-off Code Page dispatcher (open an existing wizard) or AI output?
           ├── Code Page dispatcher → Pattern B: register a new workspace widget type with a
@@ -31,7 +46,7 @@ Is the new widget a "workspace" — i.e. one or more sections inside the workspa
               Examples: RedlineViewer, AnalysisEditor
 ```
 
-**This guide focuses on Pattern A** — the operator's "Calendar" request is the worked example. Patterns B and C follow simpler paths in `register-workspace-widgets.ts` and are not unique to this guide.
+**Pattern D is the recommended default for new widgets going forward** (task 115 proved it). Pattern A is still valid for sections that genuinely belong inside LegalWorkspace (e.g. they reuse `FeedTodoSyncContext` or LW-specific data shapes). Patterns B and C follow simpler paths in `register-workspace-widgets.ts` and are not unique to this guide.
 
 ---
 
@@ -243,28 +258,77 @@ Pattern C (AI output) — body of MyNewWidget renders the AI tool's output paylo
 
 ---
 
-## 5. Worked example: Calendar widget
+## 5. Worked example: Calendar widget (shipped tasks 114 + 115, 2026-05-22)
 
-**Operator request (anticipated future round)**: "Add a Calendar system workspace that shows upcoming events and deadlines, with a per-card open affordance and a 'view all' link to the full calendar."
+**Operator request (Round 9, 2026-05-22)**: "Add a Calendar system workspace that surfaces all events + tasks the user has access to (matches standalone EventsPage), with a full Events toolbar, a horizontal month strip, and event detail opens as a modal via `Xrm.Navigation.navigateTo` (NOT `Xrm.App.sidePanes`)."
+
+This shipped end-to-end in two tasks:
+
+- **Task 114** (`53e3323e`) — hoisted EventsPage components to a new shared library `@spaarke/events-components` so the standalone EventsPage code page AND the embedded Calendar widget could share components (architectural unity).
+- **Task 115** (`cc83a68a`) — built `CalendarWorkspaceWidget` in the shared lib, wrote the 62-line LegalWorkspace section shim, added the Dataverse-system layout entry, and deployed.
+
+It is the canonical **Pattern D** example.
 
 ### 5.1 Scope decision (Step 1)
 
-Single-section workspace, single Dataverse data source (`sprk_workitem` or similar event entity). Maps to Pattern A.
+Operator decided Pattern D (NOT Pattern A) because:
+- The Events components are already used by a standalone Code Page (EventsPage / `sprk_eventspage`). The Calendar workspace and the standalone EventsPage should share the components — operator-stated "architectural unity."
+- The widget's data access is Xrm.WebApi-only via the shared services in `@spaarke/events-components/services/` — no LegalWorkspace coupling needed.
 
-### 5.2 Component implementation (Step 2)
+### 5.2 Hoist the shared library (task 114)
 
-New files:
-- `src/solutions/LegalWorkspace/src/components/Calendar/CalendarSection.tsx`
-- `src/solutions/LegalWorkspace/src/components/Calendar/CalendarItemCard.tsx`
-- `src/solutions/LegalWorkspace/src/hooks/useCalendarEvents.ts` (Xrm.WebApi fetch hook with scope-aware filter)
+Created `src/client/shared/Spaarke.Events.Components/` with:
+- `components/` — CalendarSection (+ CalendarDrawer), GridSection, AssignedToFilter, RecordTypeFilter, StatusFilter, ColumnFilterHeader, ColumnHeaderMenu, ViewSelectorDropdown
+- `services/` — Xrm.WebApi-based FetchXML query builders
+- `hooks/` — view + filter hooks
+- `context/` — EventsPageContext + EventsPageProvider
+- `types/` — IEventRecord, IEventDateInfo, filter type unions
+- `utils/` — date helpers
+- `widgets/` (added in task 115)
 
-The `CalendarSection` accepts `webApi`, `userId`, `scope`, `businessUnitId` props and renders a chronological list of upcoming events. Each `CalendarItemCard` shows date/time, title, related entity, and an Open button.
+Barrel file `src/index.ts` exports the public surface. EventsPage migrated to import from `@spaarke/events-components`; pre-existing standalone import paths in EventsPage were re-wired.
 
-### 5.3 Registration (Steps 3 + 4)
+### 5.3 Build the widget (task 115)
 
-Create `src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` per the template in §2.
+`src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx` (~1100 LOC) composes:
 
-Add to `sectionRegistry.ts`:
+- Date-range filter row inline: Fluent v9 `<Dropdown>` for date-field selection + two `<Input type="date">` for From/To + collapse caret on the right edge (task 118).
+- Single `<CalendarSection layout="horizontal">` with responsive month count (1→5 by viewport breakpoints via ResizeObserver) + external ◀ ▶ arrow navigation. The strip is collapsible — persists in `localStorage["spaarke:calendar:collapsed"]` (task 116).
+- Full Events toolbar: `<Toolbar size="small">` with 9 CRUD buttons (New/Delete/Complete/Close/Cancel/On Hold/Archive/Refresh/Calendar) + flex spacer + `<Open24Regular>` icon at right (task 120 moved the Open icon here from the view-selector row).
+- View-selector row: `<ViewSelectorDropdown>` with `useViewSelection` defaulted to Active Events.
+- `<GridSection>` auto-binding via `EventsPageContext.filters`, with `onRecordsLoaded={handleRecordsLoaded}` (task 120 added this prop) feeding event-date highlighting back into the calendar.
+
+Side-pane behavior: the widget overrides `Xrm.App.sidePanes` and instead uses `Xrm.Navigation.navigateTo({pageType:'entitylist', entityName:'sprk_event'}, {target:2, width:80%, height:80%})` for the Open click target — matches task 111 Documents Expand UX.
+
+### 5.4 Write the LegalWorkspace shim (task 115)
+
+`src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` is 62 lines total. The factory:
+
+```ts
+import { CalendarWorkspaceWidget } from "@spaarke/events-components";
+
+export const calendarRegistration: SectionRegistration = {
+  id: "calendar",
+  label: "Calendar",
+  description: "All events + tasks you have access to",
+  icon: CalendarLtr24Regular,
+  category: "data",
+  defaultHeight: "720px",
+  factory(_context: SectionFactoryContext): ContentSectionConfig {
+    return {
+      id: "calendar",
+      type: "content",
+      title: "Calendar",
+      style: { overflow: "hidden" },
+      renderContent: () => React.createElement(CalendarWorkspaceWidget),
+    };
+  },
+};
+```
+
+Note that `factory` does NOT forward `SectionFactoryContext` props — the widget is self-contained via `Xrm.WebApi` + the shared `@spaarke/events-components` services. This is the defining trait of Pattern D versus Pattern A.
+
+### 5.5 Register in `sectionRegistry.ts` (task 115)
 
 ```ts
 import { calendarRegistration } from "./sections/calendar.registration";
@@ -276,45 +340,54 @@ export const SECTION_REGISTRY: readonly SectionRegistration[] = [
   todoRegistration,
   documentsRegistration,
   dailyBriefingRegistration,
-  calendarRegistration,                  // NEW
+  calendarRegistration,                  // task 115
 ] as const;
 ```
 
-### 5.4 Layout seed (Steps 5 + 6)
+### 5.6 Add the layout seed + deploy (task 115)
 
-Add to `scripts/system-layouts.json`:
+`scripts/system-layouts.json`:
 
 ```json
 {
   "name": "Calendar",
   "sectionId": "calendar",
   "layoutTemplateId": "single-column",
-  "sortOrder": 4,
-  "isDefault": false,
-  "description": "Upcoming events and deadlines."
+  "sortOrder": 5,
+  "isDefault": false
 }
 ```
 
 Run `pwsh scripts/Deploy-SystemWorkspaceLayouts.ps1 -EnvironmentUrl <url>`.
 
-### 5.5 Verification (Step 7)
+Deploy LegalWorkspace via `code-page-deploy`. Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` so the new `@spaarke/events-components` lib lands in the SpaarkeAi bundle (the lib is a workspace dep — bundle delta was ~+30 KB gzip).
 
-The Workspaces dropdown should now show `Daily Briefing | Smart To Do List | My Work | Documents | Calendar` in the system section, plus any user layouts.
+### 5.7 Polish rounds — R10–R13
 
-Click **Calendar** → tab opens with title "Calendar" → `LegalWorkspaceApp(embedded, initialWorkspaceId=<calendarLayoutId>)` mounts → `WorkspaceGrid` resolves sectionsJson `["calendar"]` → factory returns `ContentSectionConfig` for "Calendar" → `WorkspaceShell` renders the section → `CalendarSection` component fetches events via `useCalendarEvents(webApi, userId, scope, businessUnitId)` → cards render.
+After the initial Round 9 ship, the widget got 6 follow-up polish rounds based on operator smoke testing:
 
-### 5.6 What changes are NOT required
+- **Task 116** (R10) — horizontal-strip responsive month count + external ◀ ▶ arrow navigation + collapsible strip (`spaarke:calendar:collapsed`).
+- **Task 118** (R11) — collapse chevron moved to filter row right edge (filter row stays visible when calendar collapsed); CaretUp/Down24 icons distinct from month chevrons; "📅 Calendar" sub-heading removed; ~20px gap between months; event-day highlighting via `dayWithEvents` Griffel class + click-to-filter via new `selectedDate` / `onSelectDate` controlled props on `CalendarSection`; grid Open icon.
+- **Task 120** (R13) — event-day highlight bug fix: `GridSection` got optional `onRecordsLoaded` callback; widget added `handleRecordsLoaded` to derive `IEventDateInfo[]` from records using LOCAL date components + dispatch `setEventDates`; `CalendarSection.toIsoDateString` rewritten to use local components (UTC timezone bug fix). Grid spacing: `marginTop: tokens.spacingVerticalL` on grid container. Open icon moved from view-selector row to toolbar row.
+- **Task 121** (R13 follow-up) — calendar date fallback policy: removed `sprk_startdate` from the chain. Events without a due date anchor to `sprk_duedate || createdon` only.
+- **Task 122** (R13 follow-up #2) — removed `dateState !== "in-range"` exclusion from `showEventsTint` so event-day highlight wins over From/To range visualization; `dayWithEvents` uses solid `colorBrandBackground` + `colorNeutralForegroundOnBrand` ("blue background, white font"); Clear button on filter row (Dismiss24Regular, conditionally rendered when `fromDate || toDate` non-empty); inter-month divider via `borderLeft: 1px solid colorNeutralStroke2` on every non-first horizontal month container.
 
-- **NO** changes to SpaarkeAi source code — the existing `workspace` widget type covers every new layout.
-- **NO** changes to BFF — the existing `WorkspaceLayoutService.GetLayoutsAsync` already includes ALL `sprk_issystem=true` records via `QueryDataverseSystemLayoutsAsync`.
+The polish-round history demonstrates how Pattern D scales: every change landed in `@spaarke/events-components` (shared lib) and the standalone EventsPage benefited from most of them automatically (the timezone fix in particular). The LW section shim was untouched after the initial ship.
+
+### 5.8 What changes were NOT required
+
+- **NO** changes to SpaarkeAi source code (zero across all 9 tasks 114–122) — the existing `workspace` widget type covers every new layout.
+- **NO** changes to BFF — the existing `WorkspaceLayoutService.GetLayoutsAsync` already includes ALL `sprk_issystem=true` records via `QueryDataverseSystemLayoutsAsync`. Zero BFF endpoints / services / DI / NuGet / publish-size delta on any of tasks 114–122.
 - **NO** changes to `@spaarke/ai-widgets` — `WorkspaceLayoutWidget` is unchanged.
 - **NO** new auth wiring — `useAuth` + `authenticatedFetch` + `Xrm.WebApi` already in place.
-- **NO** new ADRs — Pattern A is the established pattern.
+- **NO** new ADRs — Pattern D extends Pattern A's pipeline with a clean placement choice.
 
-### 5.7 What IS NOT clean about this (operator's audit question, honest answer)
+### 5.9 What's still imperfect (honest answer)
 
-- **The section factory lives inside LegalWorkspace.** If you wanted to build a Calendar widget WITHOUT touching LegalWorkspace (e.g. embed it in a different host like Outlook), today's only path is to embed `LegalWorkspaceApp` again or duplicate the section factory. See [`SPAARKEAI-COMPONENTIZATION-AUDIT.md`](../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) §2.
-- **Xrm.WebApi vs BFF**: the new `useCalendarEvents` hook uses Xrm.WebApi (consistent with QuickSummary). If the section ever needs aggregation across tenants or AI grounding, it would shift to a new BFF endpoint — but the decision criteria for "when to add a BFF call vs use Xrm.WebApi" is NOT documented today. See audit §4.
+- **`CalendarSidePane` (separate web resource)** carries its own legacy copy of `CalendarSection` divergent from `@spaarke/events-components`. Pre-existing follow-up flagged across 114/115/116/118/119/120/121/122 — pending reconciliation.
+- **Bulk-action handlers** are partially duplicated between standalone EventsPage's `App.tsx` and `CalendarWorkspaceWidget`. Pending extraction to a shared `useEventsBulkActions` hook.
+- **`CalendarDrawer.eventDates: string[]` vs `IEventDateInfo[]` API drift** — the drawer still accepts strings, the widget produces `IEventDateInfo[]`. Pending reconciliation.
+- **Xrm.WebApi vs BFF decision criteria** STILL undocumented at the `docs/standards/` level. Task 114 reinforced the unwritten norm (all Events services use Xrm.WebApi); the rationale is not codified. See audit §4.
 
 ---
 
@@ -341,11 +414,16 @@ Total: 5 new files + 2 edits + 2 commands. NO SpaarkeAi changes. NO BFF changes.
 |---|---|---|
 | Forgot to add to `SECTION_REGISTRY` | Tab opens but section doesn't render | Dev-mode console warns about unknown section ID — check `sectionRegistry.ts` |
 | Duplicate section ID | Dev-mode `console.error` at load | Pick a unique ID |
-| `sortOrder` collision with existing system layouts | Layout appears in unexpected dropdown position | Verify all 4 existing `sortOrder` values (0..3) and pick the next free integer |
+| `sortOrder` collision with existing system layouts | Layout appears in unexpected dropdown position | Verify all existing `sortOrder` values (the 5 Dataverse-system layouts use 1..5) and pick the next free integer |
 | Tried to set TWO layouts `isDefault: true` | Only one appears as default; other behaves as non-default | Only ONE Dataverse-system layout can be the global default |
 | Section needs auth-bearing fetch from BFF | Uses `webApi` instead — works in MDA, but fails when embedded in a future non-Xrm host | Use `authenticatedFetch` from a new hook; pass `bffBaseUrl` from `SectionFactoryContext` |
 | Forgot to seed the layout | Workspaces dropdown doesn't show the new entry | Run `Deploy-SystemWorkspaceLayouts.ps1`; verify with the API query in §2.6 |
-| Section behaves differently in embedded vs standalone | Section uses LegalWorkspace-internal context (e.g. FeedTodoSyncContext) that doesn't exist if its provider isn't mounted | Only depend on `SectionFactoryContext`; if you need extra context, hoist its provider into `WorkspaceShell` |
+| Section behaves differently in embedded vs standalone | Section uses LegalWorkspace-internal context (e.g. FeedTodoSyncContext) that doesn't exist if its provider isn't mounted | Only depend on `SectionFactoryContext`; if you need extra context, hoist its provider into `WorkspaceShell`. **Pattern D widgets (Calendar-style) avoid this trap by design** — they live in a shared lib and never reach into LW. |
+| **Timezone-asymmetric date keys** (NEW, task 120) | Event-day highlight does not appear on the expected calendar cell for users in positive UTC offsets | Any new component that derives date-only keys from a `Date` must use LOCAL components (`getFullYear/Month/Date`) — never `date.toISOString().split('T')[0]`. The widget side that PRODUCES `IEventDateInfo[]` and the calendar side that CONSUMES `eventDateMap` must use the same key derivation. See task 120's diagnosis (CAUSE D). |
+| **Filter-state conflicts with passive indicators** (NEW, task 122) | A passive visual indicator (event-day highlight, today, in-range, etc.) gets clobbered by an active filter-state indicator | When a component has multiple visual states (selected, in-range, has-events, today, other-month, etc.), be deliberate about which states are mutually exclusive vs which can coexist. Task 122 fixed an exclusion bug where `dateState !== "in-range"` suppressed the event-day tint inside an active From/To range. General rule: explicit user actions (selected) win, but passive indicators (has-events) should still be visible whenever possible. |
+| **Field-priority chain for date derivation** (NEW, task 121) | The date used for highlighting / sorting doesn't match what the user expects from the UI | When a record-set drives a date-based highlight, use the SAME field-priority chain the user expects from the UI. For Events: `sprk_duedate → createdon` (operator decision task 121 — skipped `sprk_startdate` because events without a due date should anchor to creation date, not scheduled-start, which can mislead about deadline visibility). Document the rationale; operator expectations rarely match the schema's apparent semantic order. |
+| **localStorage key drift between sessions** (NEW, task 116) | Per-component collapse state doesn't persist | Use a consistent key scheme. New `spaarke:calendar:collapsed` follows the same `spaarke:<surface>:<feature>` pattern as `spaarke:workspace:pinned-list` + `spaarke:panes:collapsed`. See SPAARKEAI-WORKSPACE-ARCHITECTURE.md §7. |
+| **Pattern A vs Pattern D placement choice not justified upfront** (NEW) | Section ships as LW-internal (Pattern A) but later needs to be reused in a non-LW host | Decide Pattern A vs D before writing code (see §1 decision tree). New widgets default to Pattern D unless they genuinely depend on LW-internal context. The 5 original sections are Pattern A because they predate Pattern D — they're not the model for new widgets. |
 
 ---
 

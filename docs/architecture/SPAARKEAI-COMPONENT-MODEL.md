@@ -1,8 +1,8 @@
 # SpaarkeAi Component Model
 
-> **Purpose**: Inventory of the shared libraries (`@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`) and solution-local components that compose the SpaarkeAi three-pane shell. Includes the PaneEventBus contract.
+> **Purpose**: Inventory of the shared libraries (`@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`, `@spaarke/events-components`) and solution-local components that compose the SpaarkeAi three-pane shell. Includes the PaneEventBus contract.
 >
-> **Last reviewed**: 2026-05-22 (Task 113, Round 8). Periodic review required.
+> **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) to cover R10–R13 deltas. Periodic review required.
 
 ---
 
@@ -22,11 +22,23 @@ Path: `src/client/shared/Spaarke.UI.Components/src/`. Barrel: `index.ts` → `* 
 
 | Component | Path | Notes |
 |---|---|---|
-| `ThreePaneLayout` | `components/ThreePaneLayout/` | Three-pane shell with draggable splitters + per-pane collapse (Task 094 + 100) + custom collapsed-strip icons (Task 096) |
+| `ThreePaneLayout` | `components/ThreePaneLayout/` | Three-pane shell with draggable splitters + per-pane collapse (Task 094 + 100) + custom collapsed-strip icons (Task 096) + percentage-of-viewport initial widths via `defaultLeftWidthFrac` / `defaultRightWidthFrac` (Task 117) + all-panes-collapsed empty-state overlay with "Welcome back" + Open button (Task 119). |
 | `PaneHeader` | `components/PaneHeader/` | Shared pane title bar with icon, title, optional `rightSlot`, optional `onCollapse` (Task 010 + 094) |
 | `PageChrome` | `components/PageChrome/` | Standalone Code Page chrome (Page header + ThemeToggle); used by LegalWorkspace standalone |
 | `PanelSplitter` | `components/PanelSplitter/` | Generic horizontal/vertical splitter |
 | `SidePane` | `components/SidePane/` | Slide-in side pane (used by `ManageWorkspacesPane`) |
+
+#### 2.1.1 `ThreePaneLayout` API additions since task 113
+
+Task 117 + 119 added the following to keep the layout primitive context-agnostic while still supporting SpaarkeAi's percentage-based defaults + recovery affordance:
+
+- **Props** (`ThreePaneLayoutProps`):
+  - `defaultLeftWidthFrac?: number` — e.g. `0.25` for 25% of `window.innerWidth` on cold mount when no sessionStorage value is stored. Falls back to `defaultLeftWidthPx` for SSR / non-browser. (Task 117.)
+  - `defaultRightWidthFrac?: number` — same semantics for the right pane. (Task 117.)
+- **Hook result** (`UseThreePaneLayoutResult`):
+  - `resetToFracDefaults: () => void` — recomputes left/right widths from `frac × window.innerWidth` clamped to per-pane minimums, AND persists the new pixel values to sessionStorage so they OVERWRITE any user-dragged values. Invoked by the all-panes-collapsed Open button. Does NOT touch visibility — caller (the layout itself in the empty-state overlay) chains the toggle calls. (Task 119.)
+- **Rendering**:
+  - When `!isLeftVisible && !isCenterVisible && !isRightVisible`, the layout renders an empty-state overlay as a sibling of the three 48px collapsed strips: `flex: 1 1 auto` column with `EmojiSmileSlight24Regular`, "Welcome back" text, and an `autoFocus` primary `Button` labeled "Open" wrapped in `<div role="region" aria-label="All panes are collapsed">`. (Task 119.)
 
 ### 2.2 WorkspaceShell rendering pipeline
 
@@ -165,7 +177,67 @@ The package is consumed by `WorkspaceLayoutWidget` (in `@spaarke/ai-widgets`) wh
 
 ---
 
-## 6. Solution-local components — SpaarkeAi
+## 6. `@spaarke/events-components` (Events + Tasks surface — task 114)
+
+Path: `src/client/shared/Spaarke.Events.Components/src/`. Hoisted from the standalone EventsPage solution in **task 114 (Round 8, 2026-05-22)** so the same Events components could be reused inside the SpaarkeAi Calendar workspace widget (task 115). Pure data + UI; no BFF dependency; auth via `Xrm.WebApi` (ADR-028); Fluent v9 only (ADR-021); React 19 (ADR-022). Public exports:
+
+### 6.1 Components
+
+| Component | Path | Notes |
+|---|---|---|
+| `CalendarSection` | `components/CalendarSection/` | Month-grid calendar with `horizontal` and `vertical` layouts, From/To range, click-to-filter, event-day highlight, controlled `selectedDate` prop (task 116/118/120/122). |
+| `CalendarDrawer` | `components/CalendarSection/` | Side drawer wrapper around `CalendarSection` used by the standalone EventsPage. |
+| `GridSection` | `components/GridSection/` | Records grid with FetchXML / OData fetch paths + sort + filter + `onRecordsLoaded` callback (task 120) for event-date derivation. |
+| `AssignedToFilter` | `components/AssignedToFilter/` | User-picker filter for the grid. |
+| `RecordTypeFilter` | `components/RecordTypeFilter/` | Event-type (option-set) filter. |
+| `StatusFilter` + `getStatusOptions` + `getActionableStatuses` | `components/StatusFilter/` | Status (option-set + state) filter. |
+| `ColumnFilterHeader` | `components/ColumnFilterHeader/` | Column-header inline filter affordance. |
+| `ColumnHeaderMenu` | `components/ColumnHeaderMenu/` | Column-header context menu (sort + filter + show/hide). |
+| `ViewSelectorDropdown` + `useViewSelection` + `EVENT_VIEWS` + `DEFAULT_VIEW_ID` | `components/ViewSelectorDropdown/` | Saved-view selector + active-view hook. |
+
+### 6.2 Widgets
+
+| Widget | Path | Notes |
+|---|---|---|
+| `CalendarWorkspaceWidget` | `widgets/CalendarWorkspaceWidget/` | The embedded Calendar widget. ~1100 LOC. Composes: date-range filter row (Dropdown + From/To inputs + Clear button + collapse caret), single `<CalendarSection layout="horizontal">` with responsive month count (1→5 by viewport breakpoints) and external ◀ ▶ arrow navigation, full Events toolbar (`<Toolbar>` with 9 CRUD buttons + flex-spacer + Open icon — task 120), `<ViewSelectorDropdown>` row, `<GridSection>` with `onRecordsLoaded={handleRecordsLoaded}` driving the event-day highlight (task 120). Side-pane behavior overridden: `Xrm.Navigation.navigateTo` modal at 80%×80% instead of `Xrm.App.sidePanes`. |
+
+### 6.3 Shared services + hooks + context + types + utils
+
+- `services/` — FetchXML query builder + Dataverse helpers (Xrm.WebApi only).
+- `hooks/` — view + filter hooks.
+- `context/` — `EventsPageContext` + `EventsPageProvider` (filters, calendarFilter, selectedDate, eventDates, callbacks like `onOpenEvent`).
+- `types/` — `IEventRecord`, `IEventDateInfo`, filter type unions.
+- `utils/` — date helpers (local-date `toIsoDateString` symmetric across CalendarSection + widget — task 120).
+
+### 6.4 Consumers (architectural unity goal)
+
+| Consumer | Purpose |
+|---|---|
+| `src/solutions/EventsPage/` | Standalone Code Page `sprk_eventspage` — full-page Events surface. |
+| `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget` consumed by `src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` | The Calendar system workspace inside SpaarkeAi (task 115). 62-line LW shim delegates entirely to the shared widget. |
+| `src/solutions/CalendarSidePane/` (separate web resource) | Has its own legacy copy of `CalendarSection` divergent from the shared lib — flagged as a pre-existing follow-up across tasks 114–122. |
+
+The presence of `@spaarke/events-components` is the first instance of "one components inventory, two consumers" since the original ADR-012 layering — see [componentization audit §9](./SPAARKEAI-COMPONENTIZATION-AUDIT.md).
+
+### 6.5 `CalendarSection` controlled-mode props (tasks 116 + 118)
+
+`CalendarSection` was extended in task 116/118 to support controlled-mode embedding inside a widget that owns the calendar's interaction state:
+
+| Prop | Type | Default | Purpose |
+|---|---|---|---|
+| `viewDate?` | `Date` | uncontrolled internal | When provided, the calendar treats this as the anchor month. The widget owns "what month am I showing." |
+| `monthsToShow?` | `number` | 3 | How many months to render. The widget recomputes this from viewport breakpoints via ResizeObserver (1 → 5 months at 480/768/1024/1280px). |
+| `layout?` | `"vertical" \| "horizontal"` | `vertical` | Vertical = stacked (EventsPage CalendarDrawer); horizontal = strip (Calendar widget). In horizontal mode the internal header + selectionInfo + footer are suppressed (task 118) — the widget owns those affordances on its own filter / toolbar rows. |
+| `selectedDate?` | `Date \| null` | `null` | Controlled-mode highlighted day. When `onSelectDate` is provided, parent owns selection. (Task 118.) |
+| `onSelectDate?` | `(date: Date \| null) => void` | undefined | Day-click handler. Single-click emits via `onSelectDate`; Shift-click still hits `onFilterChange` for range selection. |
+
+The widget wires these together: `selectedDate` widget state + `onDaySelect` callback that updates local state for visual highlight, dispatches `EventsPageContext.setCalendarFilter({type:'range', start:iso, end:iso, dateFields:[dateField]})` (single-day range — re-uses the existing range plumbing in `GridSection`), and clears on null toggle-off. A filter-divergence `useEffect` watches `filters.calendarFilter` so that if the active filter no longer matches local `selectedDate` (because user changed From/To or another component dispatched), `selectedDate` resets to `null` — the day highlight cannot lie about what's actually filtering.
+
+This is the model for future "controlled component" patterns in the shared lib.
+
+---
+
+## 7. Solution-local components — SpaarkeAi
 
 Path: `src/solutions/SpaarkeAi/src/`. These are NOT shared. Reusable from other Code Pages only via copy-paste or future hoisting.
 
@@ -191,7 +263,7 @@ Path: `src/solutions/SpaarkeAi/src/`. These are NOT shared. Reusable from other 
 
 ---
 
-## 7. Solution-local components — LegalWorkspace
+## 8. Solution-local components — LegalWorkspace
 
 Path: `src/solutions/LegalWorkspace/src/`. The "monolithic" workspace surface that SpaarkeAi embeds.
 
@@ -218,13 +290,13 @@ Path: `src/solutions/LegalWorkspace/src/`. The "monolithic" workspace surface th
 
 ---
 
-## 8. PaneEventBus contract
+## 9. PaneEventBus contract
 
-### 8.1 Bus instance lifetime
+### 9.1 Bus instance lifetime
 
 A SINGLE `PaneEventBus` instance per shell mount, provided via `PaneEventBusProvider` (lives at the top of `ThreePaneShell`). Every component below it that calls `usePaneEvent` or `useDispatchPaneEvent` shares the same bus.
 
-### 8.2 Channel summary
+### 9.2 Channel summary
 
 | Channel | Type union | Notes |
 |---|---|---|
@@ -233,7 +305,7 @@ A SINGLE `PaneEventBus` instance per shell mount, provided via `PaneEventBusProv
 | `conversation` | `ConversationPaneEvent` (5 event types) | Chat / playbook events |
 | `safety` | `SafetyPaneEvent` (2 event types) | Groundedness annotations |
 
-### 8.3 Subscribe / dispatch hooks
+### 9.3 Subscribe / dispatch hooks
 
 ```ts
 // Subscribe (registered as a useEffect internally)
@@ -246,7 +318,7 @@ const dispatch = useDispatchPaneEvent();
 dispatch('workspace', { type: 'widget_load', widgetType: 'workspace', widgetData: {...} });
 ```
 
-### 8.4 Important dispatch patterns
+### 9.4 Important dispatch patterns
 
 1. **Subscription-race** — dispatching from a `useEffect` declared BEFORE the subscriber's `useEffect` lands on a zero-subscriber channel. Fix: defer to a macrotask via `setTimeout(..., 0)`. See `WorkspacePane.tsx:340-540` block comments.
 2. **`widget_load` dispatch contract**:
@@ -257,7 +329,7 @@ dispatch('workspace', { type: 'widget_load', widgetType: 'workspace', widgetData
 
 ---
 
-## 9. Cross-references
+## 10. Cross-references
 
 - [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](./SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — end-to-end pipeline diagram + storage contract
 - [`SPAARKEAI-COMPONENTIZATION-AUDIT.md`](./SPAARKEAI-COMPONENTIZATION-AUDIT.md) — honest reuse audit; calls out the dual `useWorkspaceLayouts` and section-factory coupling

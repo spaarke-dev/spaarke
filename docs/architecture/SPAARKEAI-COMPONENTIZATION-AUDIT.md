@@ -1,8 +1,8 @@
 # SpaarkeAi Componentization Audit
 
-> **Purpose**: Honest assessment of whether the SpaarkeAi workspace pipeline (as it stands after Round 8 / Option B) is componentized and reusable. Catalogs every coupling and gap that affects maintenance + extendability, with prioritized remediation guidance.
+> **Purpose**: Honest assessment of whether the SpaarkeAi workspace pipeline (as it stands after Round 13 / Calendar widget + R10–R13 polish) is componentized and reusable. Catalogs every coupling and gap that affects maintenance + extendability, with prioritized remediation guidance.
 >
-> **Last reviewed**: 2026-05-22 (Task 113, Round 8). Periodic review required — coupling lands as the codebase grows.
+> **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) to incorporate the Calendar widget result (task 115) as the proven canonical "shared-lib widget + thin LW shim" pattern. Periodic review required — coupling lands as the codebase grows.
 
 ---
 
@@ -75,6 +75,27 @@ To use `quick-summary` from a new host:
 
 This is a multi-round effort. Estimated effort: ~6-10 hours per section × 5 sections = 30-50 hours total. The dailyBriefing hoist alone took 12 hours (Task 067).
 
+### 2A. Calendar section: the proven canonical pattern (task 115, Round 9)
+
+The Calendar section (task 115, 2026-05-22) ships the **first true "shared-lib widget + thin LW section shim" implementation** in SpaarkeAi. It is the model future widgets should follow.
+
+**What shipped**:
+
+- The widget proper — `CalendarWorkspaceWidget` (~1100 LOC) — lives in `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/`. It composes shared `CalendarSection` + `GridSection` + `ViewSelectorDropdown` + Events filter components, all from `@spaarke/events-components` (task 114).
+- The LegalWorkspace section registration — `src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` — is a **62-line shim** that delegates rendering entirely to the shared widget. No LW-internal coupling is introduced (no `DataverseService`, no `FeedTodoSyncContext`, no LW hooks). The factory accepts `SectionFactoryContext` but does not forward any of it — the widget is self-contained via `Xrm.WebApi` + shared services.
+
+**Why this matters for the §2 prediction**:
+
+The original §2 said section factories are LegalWorkspace-internal and the only path to a workspace section was either embed all of LegalWorkspaceApp or reproduce each section's full dependency closure. **Calendar disproves the strong form of that claim**: it shows you CAN build a workspace section that reuses the LegalWorkspaceApp pipeline (sectionsJson, WorkspaceShell, embedded mode) WITHOUT becoming LW-internal — you just have to put the implementation in a shared lib and let the LW-side registration be a one-screen shim.
+
+**Implication for the 5 original sections**:
+
+The original §2 remediation backlog said hoist each of the 5 existing sections (get-started, quick-summary, latest-updates, todo, documents) at ~6–10 hours each (30–50 hours total). **Calendar's existence reduces the urgency of that backlog** — there is now a proven path to reuse without hoisting, *as long as the new functionality is in a shared lib from day one*. The 5 existing sections only NEED to be hoisted when a non-LegalWorkspace host needs them (e.g. a future Outlook side pane, Teams app, MDA form embed). Until that day, the 5 can stay LW-local; the audit's prediction has been narrowed but not falsified.
+
+**Future widgets should follow the Calendar pattern** (codified in the build-a-widget guide as Pattern D — see [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) §1).
+
+**Remediation backlog update** (see §8): item 5 ("Hoist remaining 5 section factories") priority is now **DEFER until a non-LegalWorkspace host enters the roadmap**. The other 5 sections are not at risk of growing more LW-internal coupling — they're stable. Hoist incrementally only on a forcing function.
+
 ---
 
 ## 3. `WorkspaceLayoutWidget` is hard-wired to `LegalWorkspaceApp`
@@ -113,7 +134,7 @@ This is a small refactor IF we make `LegalWorkspaceApp` an implementation of the
 | `useChatFileAttachment` | BFF (chat endpoints) | AI session state |
 | Tab persistence (`PATCH /api/ai/chat/sessions/{id}/tabs`) | BFF | Server-side persistence |
 
-The Wave 3a operator brief on My Work card counts explicitly said "use Xrm.WebApi like the existing 4 cards" — but the rationale is NOT in any guide today.
+The Wave 3a operator brief on My Work card counts explicitly said "use Xrm.WebApi like the existing 4 cards" — but the rationale is NOT in any guide today. Task 114 (Events components hoist) reinforced the unwritten norm: every service in `@spaarke/events-components/services/` uses Xrm.WebApi exclusively. The pattern is consistent in practice; it remains undocumented as a decision rule.
 
 **Why it matters**:
 - **New section authors guess wrong**: a developer writing a new section may default to BFF because it feels more "modern", adding load to the BFF without need. Or they default to Xrm and miss cases that need server-side aggregation.
@@ -125,7 +146,7 @@ The Wave 3a operator brief on My Work card counts explicitly said "use Xrm.WebAp
 - **Use Xrm.WebApi when**: data is in Dataverse, the call is read-only OR a simple CRUD, no server-side merge / cross-tenant / AI grounding required, callsite already has Xrm context, and there's no plan to embed in non-MDA hosts.
 - **Use BFF when**: server-side merge logic (e.g. system + user layouts), AI-curated content, cross-tenant aggregation, NFR-09 session persistence, future-host portability anticipated, or the data needs SharePoint Embedded access.
 
-Estimated effort: ~2 hours to write the addendum + cross-link from CLAUDE.md §11 + relevant docs.
+Estimated effort: ~2 hours to write the addendum + cross-link from CLAUDE.md §11 + relevant docs. **Recommended next round** — this is the highest-priority doc-only item; every subsequent section author will hit the question.
 
 ---
 
@@ -220,6 +241,24 @@ Already works today. Users build via WorkspaceLayoutWizard; sectionsJson referen
 
 Pattern C from the build guide — single registration in `register-workspace-widgets.ts` + a `WorkspaceWidgetComponent` impl. NO LegalWorkspace involvement. The 7 R1 wrapped widgets + the 4 wizard dispatchers + redline-viewer + the workspace embed all follow this pattern.
 
+### 7.7 "Add a NEW shared-lib widget (Calendar-style)" — score: CLEAN (proven by task 115)
+
+The Calendar widget shipped this pattern end-to-end:
+
+1. **Hoist the components to a shared lib** (or reuse an existing one). Task 114 hoisted the Events components from `src/solutions/EventsPage/` to a new `@spaarke/events-components` package (~12 hours including barrel + import surgery + tsc + vite).
+2. **Build the widget component in the shared lib**, composing the lib's primitives. Task 115's `CalendarWorkspaceWidget` (~1100 LOC) lives in `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/`.
+3. **Write the LegalWorkspace section registration shim** — a 60-line file in `src/solutions/LegalWorkspace/src/sections/<name>.registration.ts` that imports the widget from the shared lib and returns a `ContentSectionConfig` with `renderContent: () => React.createElement(<Widget>)`.
+4. **Register the shim** in `src/solutions/LegalWorkspace/src/sectionRegistry.ts`.
+5. **Add a Dataverse-system layout entry** in `scripts/system-layouts.json`.
+6. **Run the seed script** `pwsh scripts/Deploy-SystemWorkspaceLayouts.ps1 -EnvironmentUrl <url>`.
+7. **Deploy LegalWorkspace** via `code-page-deploy`.
+
+Effort breakdown for a new widget that reuses existing shared-lib components: ~1–2 days. Longer if the widget needs new shared components.
+
+Effort breakdown for a Calendar-equivalent new widget that needs a NEW shared lib (hoist included): ~3–5 days.
+
+No SpaarkeAi source changes. No BFF changes. No new `@spaarke/ai-widgets` registrations. The `workspace` widget type (registration #16 in `register-workspace-widgets.ts`) is the universal entry point for every Dataverse-defined layout.
+
 ---
 
 ## 8. Prioritized remediation backlog
@@ -230,7 +269,7 @@ Pattern C from the build guide — single registration in `register-workspace-wi
 | 2 | Document embedded-mode contract formally (§5) | 3h | MEDIUM (prevents host-impl drift) | YES — write it alongside the architecture doc |
 | 3 | Consolidate the dual `useWorkspaceLayouts` (§1) | 8h | MEDIUM (eliminates drift risk) | Next round — bundle with the section-hoist roadmap |
 | 4 | Introduce `WorkspaceRenderer` interface (§3) | 4h | LOW today / HIGH if multi-host needed | Defer until a non-MDA host is on the roadmap |
-| 5 | Hoist remaining 5 section factories (§2) | 30-50h | HIGH long-term, LOW today | Hoist incrementally — one section per round, starting with the most-reused first |
+| 5 | Hoist remaining 5 section factories (§2) | 30-50h | LOW today (Calendar §2A proves the pattern works without hoisting the 5) / HIGH if multi-host on roadmap | **DEFER** — hoist incrementally only when a non-LegalWorkspace host actually needs them. Calendar's "shared-lib widget + thin LW shim" pattern shows you can grow NEW reuse-safe widgets without back-fitting the existing 5. |
 | 6 | Hoist runtimeConfig to `@spaarke/auth` (§6b) | 4h | LOW (works today, but cleaner) | Defer until next auth-package round |
 | 7 | Make section registry plug-in style (§7.4) | 6h | LOW today, HIGH if third-party sections wanted | Defer |
 
@@ -254,6 +293,8 @@ The audit wouldn't be honest if it only listed gaps. The following ARE well-comp
 8. **NFR-09 tab persistence** — debounced write-through, restore on mount, 404 = benign. Clean.
 9. **MAX_WORKSPACE_TABS FIFO** — bounded tab count with deterministic eviction. Bounded memory.
 10. **The Vite single-file build** — every Code Page bundles its own React 19 + Fluent v9 (per ADR-022 / ADR-026). No host-provided framework collision.
+11. **`@spaarke/events-components`** (task 114) — clean componentization: one components inventory, two consumers (standalone EventsPage code page + the SpaarkeAi Calendar workspace widget). No BFF dependency. Auth via `Xrm.WebApi` only. Pure data + UI primitives + a single composing widget. The package mirrors the architectural unity goal of Round 8 Option B (one workspace concept) — now extended to events components.
+12. **The Calendar widget itself** (task 115) — the section registration in LegalWorkspace is a 62-line shim with zero LW-internal coupling. All rendering, data access, and UX logic lives in the shared lib. This proves the "shared-lib widget + thin LW shim" pattern works and is the canonical model for future widgets.
 
 ---
 
@@ -271,6 +312,6 @@ The §1 + §4 + §5 items are doc + small-refactor wins that pay back every futu
 
 - [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](./SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — pipeline reference
 - [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) — inventory
-- [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) — tutorial with Calendar worked example
+- [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) — tutorial; Calendar worked example is now a real shipped implementation (task 115), not a forward projection
 - [`../assessments/bff-ai-extraction-assessment-2026-05-20.md`](../assessments/bff-ai-extraction-assessment-2026-05-20.md) — adjacent BFF audit; provides the model for this audit
 - [`../../.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) — binding rule before any BFF addition
