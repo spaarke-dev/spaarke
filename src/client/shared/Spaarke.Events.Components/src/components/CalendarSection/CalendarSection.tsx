@@ -304,12 +304,24 @@ const useStyles = makeStyles({
   // From/To range. Event-day indicator now wins visually over the range
   // visualization (also see the showEventsTint logic — task 122 removed
   // the in-range exclusion so this style applies regardless of range state).
+  //
+  // Task 125 (Round 13 follow-up #4): operator: "when I hover over it the
+  // date disappears. it doesn't need to have hover over — just leave it
+  // blue." Root cause was the base `dayCell` :hover at line 276-278
+  // applying `backgroundColor: colorNeutralBackground1Hover` (light gray)
+  // and beating the previous `dayWithEvents:hover` which only set
+  // backgroundColor — the white text from the non-hover dayWithEvents
+  // stayed but the gray hover background won, making white-on-light-gray
+  // illegible. Fix: lock BOTH backgroundColor + color in :hover so the
+  // event-day appearance is identical to its rest state regardless of
+  // which cascade rule wins. No visual change on hover.
   dayWithEvents: {
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
     fontWeight: tokens.fontWeightSemibold,
     ":hover": {
-      backgroundColor: tokens.colorBrandBackgroundHover,
+      backgroundColor: tokens.colorBrandBackground,
+      color: tokens.colorNeutralForegroundOnBrand,
     },
   },
   dayNumber: {
