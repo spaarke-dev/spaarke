@@ -306,22 +306,19 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorBrandForeground1,
   },
-  // Task 128 (R13 follow-up #7, 2026-05-22): distinguish a USER-SELECTED
-  // day visually from an event-day highlight. Operator reported confusion
-  // when both Feb 3 (event) and Feb 16 (clicked) showed identical solid-
-  // blue backgrounds — they read "two events" when really one was just a
-  // stale click selection. Selected days now use the darker
-  // `colorBrandBackgroundSelected` token so a user-clicked day is
-  // visibly more saturated than the passive event-day highlight
-  // (colorBrandBackground). Adds a 2px inset ring via boxShadow as a
-  // secondary cue ("this is an active selection, not a passive
-  // indicator").
+  // Task 129 (R13 follow-up #8, 2026-05-23): operator: "the blue color
+  // variants are very close — perhaps use grey?" Switched the selected-
+  // day background from `colorBrandBackgroundSelected` (still blue, just
+  // darker) to `colorNeutralBackgroundInverted` (a true grey/near-black)
+  // with `colorNeutralForegroundInverted` (light text). Now visually
+  // unambiguous: blue = event-day; grey = user-clicked. Inset ring
+  // (colorNeutralStroke1) preserved as secondary "active selection" cue.
   dayCellSelected: {
-    backgroundColor: tokens.colorBrandBackgroundSelected,
-    color: tokens.colorNeutralForegroundOnBrand,
-    boxShadow: `inset 0 0 0 2px ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorNeutralBackgroundInverted,
+    color: tokens.colorNeutralForegroundInverted,
+    boxShadow: `inset 0 0 0 2px ${tokens.colorNeutralStroke1}`,
     ":hover": {
-      backgroundColor: tokens.colorBrandBackgroundSelected,
+      backgroundColor: tokens.colorNeutralBackgroundInverted,
     },
   },
   dayCellInRange: {
