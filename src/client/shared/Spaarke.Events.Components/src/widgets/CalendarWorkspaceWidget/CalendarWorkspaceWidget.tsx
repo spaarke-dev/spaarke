@@ -330,25 +330,24 @@ const useStyles = makeStyles({
     flexDirection: "row",
     alignItems: "flex-end",
     flexWrap: "wrap",
-    rowGap: "12px",
-    columnGap: "16px",
+    // Task 135: use the `gap` shorthand instead of separate rowGap +
+    // columnGap longhands. Griffel handles the shorthand reliably; the
+    // longhands appeared to be silently dropped in task 134.
+    gap: "12px 16px",
     ...shorthands.padding("8px", "12px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
-  // Task 134: CSS Grid with `auto-fit + minmax` for the 5 filter fields.
-  //   - Each field has min width 140px, grows to share available space
-  //     equally (1fr) — consistent, predictable column widths regardless
-  //     of which fields are present.
-  //   - Grid `gap` provides visible horizontal AND vertical spacing
-  //     between fields automatically (16px / 12px).
-  //   - Wraps cleanly at narrow viewports without manual flex tuning.
-  // The grid takes the remaining row space (flex: 1) so the action group
-  // (Apply/Clear/chevron) sits to its right at small intrinsic width.
+  // Task 134 → 135: CSS Grid with `auto-fit + minmax` for the 5 filter
+  // fields. Task 134 attempt used `columnGap` + `rowGap` longhands but
+  // Griffel's atomic CSS appeared to drop them. Task 135 uses the
+  // `gap` shorthand (Griffel-friendly) and bumps to 24px column-gap
+  // for clearly visible spacing. Plus belt-and-suspenders: explicit
+  // `paddingRight` on `dateRangeField` guarantees visible separation
+  // even if the grid gap isn't honored.
   filterFieldsGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-    columnGap: "16px",
-    rowGap: "12px",
+    gap: "12px 24px",
     alignItems: "end",
     flex: "1 1 auto",
     minWidth: "0",
@@ -369,6 +368,15 @@ const useStyles = makeStyles({
     flexDirection: "column",
     ...shorthands.gap("4px"),
     minWidth: "0",
+    // Task 135: guarantee visible horizontal separation between adjacent
+    // grid cells. We rely PRIMARILY on filterFieldsGrid's `gap: 12px 24px`
+    // for spacing, but Griffel atomic CSS has been unreliable with grid
+    // longhand gap properties in this stack (operator reported "still no
+    // space" after task 134's columnGap fix). Adding paddingRight directly
+    // on each grid cell creates a hard floor of 12px right-padding —
+    // visible separation even if Griffel drops the grid gap. The rightmost
+    // column gets a harmless extra 12px of trailing padding.
+    paddingRight: "12px",
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
