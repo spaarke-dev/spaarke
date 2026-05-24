@@ -351,16 +351,25 @@ const useStyles = makeStyles({
     ...shorthands.gap("4px"),
     flex: "0 0 140px",
     minWidth: "0",
-    // Task 139 (R13 follow-up #18, 2026-05-24): horizontal spacing
-    // between fields is now applied via INLINE `style={{ marginRight:
-    // 28 }}` at the JSX call sites instead of here. Inline styles
-    // bypass Griffel's atomic-CSS handling entirely — the browser
-    // gets a plain `style="margin-right:28px"` attribute that no
-    // other CSS rule can override. Tasks 134-138 tried four
-    // Griffel-based approaches (gap longhand, gap shorthand, padding-
-    // Right, marginRight here in the Griffel class) — all emitted
-    // smaller-than-configured values in this stack per operator's
-    // DevTools confirmation.
+    // Task 140 (R13 follow-up #19, 2026-05-24): operator confirmed via
+    // DOM inspection that style="margin-right:28px" IS on each field
+    // div, but Fluent v9 Dropdown's intrinsic `min-width` (one of its
+    // 47 atomic classes sets it to ~240px) was OVERFLOWING the 140px
+    // field box, painting OVER the 28px margin-right space. The
+    // visible "no gap" was actually the Dropdown of field N occluding
+    // the margin between field N and field N+1.
+    //
+    // Fix: descendant selector overrides Fluent's min-width on both
+    // the .fui-Dropdown wrapper and .fui-Input wrapper inside this
+    // field, forcing them to fit the 140px field box.
+    "> .fui-Dropdown": {
+      minWidth: "0",
+      width: "100%",
+    },
+    "> .fui-Input": {
+      minWidth: "0",
+      width: "100%",
+    },
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
