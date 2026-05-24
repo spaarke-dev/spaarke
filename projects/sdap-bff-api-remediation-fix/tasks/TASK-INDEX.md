@@ -2,7 +2,7 @@
 
 > **Project**: BFF API Remediation & Publish Debt
 > **Created**: 2026-05-20 by `/project-pipeline`
-> **Total tasks**: 60 (Phase 0–6 + wrap-up)
+> **Total tasks**: 61 (Phase 0–6 + wrap-up). Added 038 (DI baseline) per ADR-010 binding clarification 2026-05-24.
 > **Calendar estimate**: 4–6 weeks (bake-window dominated)
 
 ## Status Legend
@@ -58,7 +58,7 @@
 
 ---
 
-## Phase 3 — Baseline (8 tasks)
+## Phase 3 — Baseline (9 tasks)
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
@@ -69,7 +69,8 @@
 | 034 | Deployed file SHA-256s via Kudu VFS | 🔲 | Yes (Group E) | STANDARD | 022 |
 | 035 | Current publish + zip metrics | 🔲 | Yes (Group E) | STANDARD | 022 |
 | 036 | Reflection-load probe baseline | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 037 | Archive extraction-assessment + commit BASELINE.md | 🔲 | No | STANDARD | 030–036 |
+| 038 | DI registration count baseline (ADR-010 measurable binding) | 🔲 | Yes (Group E) | STANDARD | 022 |
+| 037 | Archive extraction-assessment + commit BASELINE.md | 🔲 | No | STANDARD | 030–036, 038 |
 
 ---
 
@@ -158,7 +159,7 @@
 | **B** | 1 | 010, 011, 012, 013, 014 | 008 complete | Read-only `dotnet list` + grep commands |
 | **C** | 1 | 016, 017 | 008 complete | Read-only inventory commands (different domains: binaries vs Azure) |
 | **D** | 2 | 020, 021 | 018 complete | Independent tier sorting |
-| **E** | 3 | 030, 031, 032, 034, 035, 036 | 022 complete | Read-only baselines; **033 sequential (48h calendar gate)** |
+| **E** | 3 | 030, 031, 032, 034, 035, 036, 038 | 022 complete | Read-only baselines; **033 sequential (48h calendar gate)** |
 | **F** | 4 | 047, 048, 049, 050 | 046 complete | Facade migration in separate consumer modules; no shared files |
 
 **Phase 6 has NO parallel group** — all `.claude/` paths are main-session-only per sub-agent write boundary (root CLAUDE.md §3).
@@ -186,7 +187,7 @@
                       → 090 (Wrap-up)
 ```
 
-**Longest dependency chain**: 001 → 008 → 015 → 018 → 022 → 033 (48h calendar) → 040 → 041 → 042 (each 24h bake) → 054 → 060 → 061 (48h bake) → 062 → 063 (7d bake) → 070 → 090
+**Longest dependency chain**: 001 → 008 → 015 → 018 → 022 → 033 (48h calendar) → 037 (depends on 038) → 040 → 041 → 042 (each 24h bake) → 054 → 060 → 061 (48h bake) → 062 → 063 (7d bake) → 070 → 090
 
 **Calendar duration estimate**: 4–6 weeks dominated by 48h dev / 48h demo / 7d prod bake windows.
 

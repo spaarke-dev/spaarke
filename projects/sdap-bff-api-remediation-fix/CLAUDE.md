@@ -112,15 +112,27 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 ## Key Technical Constraints
 
-**Binding ADR rules** (see plan.md §2 for full list):
-- ✅ MUST route external CRUD→AI consumers through `Services/Ai/PublicContracts/` facade (refined **ADR-013**, binding for FR-E1/FR-E2)
+**Binding ADR rules** (see plan.md §2 for full table with binding-strength column):
+
+*Technical invariants (system-enforced):*
+- ✅ MUST keep Kiota packages version-matched (currently `1.21.2`) — chain-mismatch causes runtime errors
+- ✅ MUST preserve `IJobHandler<T>` interface + JobType string dispatch (ADR-004)
+- ❌ MUST NOT set `<PublishTrimmed>` or `<PublishAot>` — reflection-hostile to Graph SDK / Identity.Web / EF / DI / serializers
+
+*Project disciplines (measurably enforced via tasks):*
+- ✅ MUST route external CRUD→AI consumers through `Services/Ai/PublicContracts/` facade (refined **ADR-013**; FR-E1/FR-E2 enforce; FR-E2 grep acceptance at task 053)
+- ✅ MUST stay within ADR-010 DI registration delta of +4 to +8 vs Phase 3 baseline (task 038 baseline; task 054 verification)
 - ✅ MUST publish to `deploy/api-publish/` (NOT `/tmp` — anti-pattern #16)
-- ✅ MUST keep Kiota packages version-matched at `1.21.2`
-- ✅ MUST use `Deploy-BffApi.ps1` for all BFF deploys
+- ✅ MUST use `Deploy-BffApi.ps1` for all BFF deploys (hash-verify + health-check + slot-swap rollback)
 - ✅ MUST load [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) for any BFF-touching task
-- ❌ MUST NOT set `<PublishTrimmed>` or `<PublishAot>` (reflection-hostile)
+
+*Project-scope bindings (apply during this remediation only):*
+- ❌ MUST NOT move BFF endpoints to Functions during remediation (would introduce second moving variable into Phase 4 bakes — post-project move is separate design)
 - ❌ MUST NOT add new direct CRUD→AI dependencies (use facade)
 - ❌ MUST NOT bump Kiota individually, Graph SDK, .NET TFM, or pre-release AI packages
+
+*Operational:*
+- ✅ Phase 1–4 work targets dev subscription only (`spe-api-dev-67e2xz`); demo/prod isolated per ADR-027(a)
 
 **Code-State Deltas from Spec** (verified during pipeline pre-flight):
 
@@ -182,15 +194,16 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 | ADR | Title | Relevance |
 |-----|-------|-----------|
-| [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) | Minimal API + Workers | Single deployable; preserved |
-| [ADR-004](../../.claude/adr/ADR-004-job-contract.md) | Job Contract | FR-E3 handler relocation preserves `IJobHandler<T>` contract |
-| [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) | SpeFileStore Facade | **Canonical model for Outcome E facade** (task 046) |
-| [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) | Endpoint Filters | Authorization preserved |
-| [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) | DI Minimalism | Known violation (99+ vs ≤15); **no-worsen rule applies** |
-| [ADR-013](../../.claude/adr/ADR-013-ai-architecture.md) | AI Architecture (refined 2026-05-20) | **BINDING for FR-E1/FR-E2 facade requirement** |
-| [ADR-027](../../.claude/adr/ADR-027-subscription-isolation-managed-solutions.md) | Subscription Isolation | Phase 5 promotion process |
-| [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Spaarke Auth | Auth flows preserved |
-| ADR-029 (forthcoming) | BFF Publish Hygiene | **Created in Phase 6 task 076/077** |
+| [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) | Minimal API + Workers | **Project-scope binding**: do not move endpoints to Functions during remediation (out-of-band Functions unaffected; post-project move is separate design) |
+| [ADR-004](../../.claude/adr/ADR-004-job-contract.md) | Job Contract | **Technical invariant**: FR-E3 preserves `IJobHandler<T>` + JobType string dispatch |
+| [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) | SpeFileStore Facade | **Pattern reference**: canonical model for Outcome E facade (task 046) |
+| [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) | Endpoint Filters | **Preserved by no-change** (filter signatures unchanged in task 050) |
+| [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) | DI Minimalism | **Measurable project binding**: known violation (99+ vs ≤15) is out of scope; task 038 captures baseline, task 054 verifies Phase 4 delta within expected +4 to +8 (Outcome E facade adds registrations; consumer-side dependencies go down separately) |
+| [ADR-013](../../.claude/adr/ADR-013-ai-architecture.md) | AI Architecture (refined 2026-05-20) | **Technical binding for FR-E1/FR-E2 facade requirement** |
+| [ADR-027 (a)](../../.claude/adr/ADR-027-subscription-isolation-managed-solutions.md) | Subscription Isolation | **Real, operational**: Phase 1–4 hits dev subscription only; demo/prod target their own subscriptions |
+| [ADR-027 (b)](../../.claude/adr/ADR-027-subscription-isolation-managed-solutions.md) | Managed Solutions | **Conditionally applicable**: applies to Power Platform components (not this BFF App Service deploy directly); relevant only if canonical Phase 5 prod process bundles related Power Platform updates |
+| [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Spaarke Auth v2 | **Preserved by no-change** |
+| ADR-029 (forthcoming) | BFF Publish Hygiene | **Becomes binding when Phase 6 lands** (tasks 076/077) |
 
 ### Applicable Constraints
 

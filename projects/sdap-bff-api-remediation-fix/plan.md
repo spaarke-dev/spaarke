@@ -25,17 +25,20 @@
 
 ### Design Constraints
 
-**From ADRs** (must comply):
+**From ADRs** (binding strength clarified 2026-05-24):
 
-- **ADR-001** (Minimal API + Workers) — single Minimal API App Service; Functions only for narrow out-of-band integration
-- **ADR-004** (Job Contract) — Service Bus job handlers use `IJobHandler<T>` pattern; FR-E3 handler relocation preserves contract
-- **ADR-007** (SpeFileStore Facade) — facade-over-Graph-SDK pattern; **canonical model for Outcome E facade design**
-- **ADR-008** (Endpoint Filters) — authorization via endpoint filters; preserved
-- **ADR-010** (DI Minimalism) — known violation (99+ vs ≤15); not fixed here, but no change may worsen the count
-- **ADR-013 (refined 2026-05-20)** (AI Architecture) — extension policy with four exception criteria; **REQUIRES** `Services/Ai/PublicContracts/` facades for external CRUD consumers (binding for FR-E1, FR-E2)
-- **ADR-027** (Subscription Isolation) — managed solutions for prod; informs Phase 5
-- **ADR-028** (Spaarke Auth Architecture) — auth flows preserved; no change
-- **ADR-029 (NEW — Phase 6 deliverable)** — publish hygiene policy; output of FR-D1
+| ADR | Binding strength | What it binds for THIS project |
+|---|---|---|
+| **ADR-001** Minimal API + Workers | **Project-scope** (not architectural absolute) | Do NOT move BFF endpoints to Functions during remediation — adds a second moving variable to Phase 4 bakes. Out-of-band Functions (existing webhook/Service Bus triggers) are unaffected. Moving endpoints to Functions post-project is a separate design conversation. |
+| **ADR-004** Job Contract | **Technical invariant** (interface-enforced) | FR-E3 handler relocation preserves `IJobHandler<T>` + JobType string dispatch. Service Bus message contract unchanged. |
+| **ADR-007** SpeFileStore Facade | **Pattern reference** | Canonical model for Outcome E facade design (task 046). Mirror the file/method shape. |
+| **ADR-008** Endpoint Filters | **Preserved by no-change** | Auth filters not edited during Outcome E migration (filter signatures preserved per task 050). |
+| **ADR-010** DI Minimalism | **Measurable project binding** (new) | Known violation (99+ vs ≤15) is out of scope to fix. **Task 038** captures baseline; **task 054 (gate)** verifies Phase 4 final delta is in expected range (+4 to +8 from Outcome E facade interfaces, then justified) OR larger delta requires written justification. Note: Outcome E REGISTRATION count goes UP slightly (facade adds); CONSUMER-SIDE DEPENDENCY count goes DOWN (~59 fewer constructor params) — these are distinct metrics. |
+| **ADR-013 refined 2026-05-20** AI Architecture | **Technical binding** | REQUIRES `Services/Ai/PublicContracts/` facades for external CRUD consumers. FR-E1/FR-E2 enforce. |
+| **ADR-027 (a)** Subscription Isolation | **Real, operational** | Phase 1–4 work targets `spe-api-dev-67e2xz` only (dev subscription). Per-environment Key Vault refs, connection strings, App Insights instances are subscription-scoped. Phase 5 demo/prod target their own subscriptions. |
+| **ADR-027 (b)** Managed Solutions | **Conditionally applicable** | Managed-solution discipline applies to Power Platform components (entities, forms, web resources, PCF, plugins). This project remediates an App Service — managed solutions are NOT directly involved unless the canonical Phase 5 prod process (UQ-02) bundles related Power Platform component updates. |
+| **ADR-028** Spaarke Auth v2 | **Preserved by no-change** | No auth flow modifications in this project. |
+| **ADR-029** NEW BFF Publish Hygiene | **Becomes binding when Phase 6 lands** | Output of FR-D1 (tasks 076/077). After publication, every future BFF PR is governed. |
 
 **From Spec**:
 
@@ -207,11 +210,11 @@ Per [root CLAUDE.md §3 — Sub-Agent Write Boundary](../../CLAUDE.md), any task
 - [ ] MEDIUM tier candidates documented (task 021)
 - [ ] HIGH tier candidates + REJECT list + commit CANDIDATES.md (task 022)
 
-### Phase 3 — Baseline (8 tasks: 030–037)
+### Phase 3 — Baseline (9 tasks: 030–038)
 
 **Objectives:**
 1. Capture verified-good behavior pre-Phase-4
-2. Establish numerical baselines for App Insights, tests, warnings, publish metrics
+2. Establish numerical baselines for App Insights, tests, warnings, publish metrics, DI registrations
 
 **Deliverables:**
 - [ ] Test suite baseline (task 030)
@@ -221,6 +224,7 @@ Per [root CLAUDE.md §3 — Sub-Agent Write Boundary](../../CLAUDE.md), any task
 - [ ] Deployed file SHA-256s via Kudu (task 034)
 - [ ] Publish + zip metrics (task 035)
 - [ ] Reflection-load probe baseline (task 036)
+- [ ] DI registration count baseline (task 038) — **makes ADR-010 binding measurable**
 - [ ] Archive extraction-assessment + commit BASELINE.md (task 037)
 
 ### Phase 4 — Apply changes (15 tasks: 040–054)

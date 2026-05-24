@@ -1,0 +1,92 @@
+<task id="038" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>DI registration count baseline + Outcome E expected delta</title>
+    <status>not-started</status>
+    <estimated-effort>20 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, baseline, di, adr-010, phase-3</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only grep across DI modules; no file conflicts with Group E siblings</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Capture the DI registration count for `Sprk.Bff.Api` as the Phase 3 baseline. This makes the ADR-010 binding enforceable rather than aspirational: instead of a vague "no-worsen" promise, Phase 4 tasks can verify their delta against this measurable baseline, and the Phase 4 gate (task 054) confirms Outcome E delivers a NET REDUCTION (the only outcome that should change the count materially).
+
+    Background: ADR-010 targets ≤15 non-framework DI registrations. The BFF is known to be at ~99+ (a separate architectural project will address). THIS project commits to: (a) tracking the exact baseline, (b) verifying no Phase 4 candidate worsens it, (c) confirming Outcome E delivers net reduction (facade adds ~4 interfaces; consumer migrations should remove ~59 direct injections → expected net delta around -55).
+  </prompt>
+
+  <role>.NET DI / module-structure analyst.</role>
+
+  <goal>
+    File `baseline/di-registrations.txt` containing:
+    1. Total count of `AddSingleton` + `AddScoped` + `AddTransient` + `AddHostedService` calls in `src/server/api/Sprk.Bff.Api/Infrastructure/DI/`
+    2. Per-module breakdown (one row per `*Module.cs` file)
+    3. Per-lifetime breakdown
+    4. Expected post-Outcome-E delta (facade introductions vs consumer migrations)
+    5. Comparison to ADR-010 target (≤15) — documents the known gap
+  </goal>
+
+  <inputs>
+    <file purpose="di-modules">src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+    <file purpose="program">src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file purpose="adr">.claude/adr/ADR-010-di-minimalism.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">≤15 non-framework registrations (target; known violation at ~99+)</constraint>
+    <constraint source="spec.md §Out of Scope">Fixing the ADR-010 violation is NOT in scope; this task ONLY measures</constraint>
+    <constraint source="project (this task)">Establishes the measurable baseline that makes ADR-010 binding enforceable in Phase 4</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Without this measurement, the ADR-010 "no-worsen" claim is unenforceable — Phase 4 changes could silently add registrations and we'd have no way to detect it. This task converts the aspirational binding into a measurable one. Task 054 (Phase 4 gate) then verifies the actual delta against the prediction here.
+
+      Outcome E's expected impact on DI count:
+      - Task 046 ADDS: 4+ facade interfaces (`IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi`) plus their implementations → +8 registrations (or fewer if a single PublicContractsModule registers them collectively)
+      - Tasks 047–050 REMOVE: ~59 direct consumer-side injections of `IOpenAiClient` / `IPlaybookService` (these were already registered in AnalysisServicesModule, so the REGISTRATIONS don't change — only the INJECTION SITES do)
+      - Task 051 (handler relocation): namespace change only; DI registration unchanged (JobType string dispatch by name)
+      - **Net expected delta: ~+4 to +8 from facade interfaces; consumer migration changes injection sites but not registration count**
+
+      Correction: the "net reduction" framing in prior planning was wrong. The DI REGISTRATION count goes UP by the facade additions; what goes DOWN is the consumer-side DEPENDENCY count (constructor parameter count across 59 files). Both metrics matter but they're distinct. This task measures registrations; the FR-E2 grep acceptance (task 053) measures consumer-side dependencies.
+    </background>
+    <dependencies><dependency task="022" status="not-started">Phase 2 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`mkdir -p projects/sdap-bff-api-remediation-fix/baseline/`</step>
+    <step order="2">Total count: `grep -rEc "\.Add(Singleton|Scoped|Transient|HostedService)\b" src/server/api/Sprk.Bff.Api/Infrastructure/DI/ | awk -F: '{sum+=$2} END {print sum}'`</step>
+    <step order="3">Per-module breakdown: same grep per `*Module.cs` file</step>
+    <step order="4">Per-lifetime breakdown: count each of Singleton / Scoped / Transient / HostedService separately</step>
+    <step order="5">Also grep `Program.cs` for any direct DI calls outside modules</step>
+    <step order="6">Write `baseline/di-registrations.txt` with: total, per-module table, per-lifetime table, ADR-010 gap notation (current vs ≤15), expected Outcome E delta calculation</step>
+    <step order="7">Update TASK-INDEX.md task 038 status</step>
+  </steps>
+
+  <tools>
+    <tool name="git">grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/baseline/di-registrations.txt</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Total DI registration count captured (single number)</criterion>
+    <criterion testable="true">Per-module breakdown present (one row per *Module.cs)</criterion>
+    <criterion testable="true">Per-lifetime breakdown present (Singleton / Scoped / Transient / HostedService)</criterion>
+    <criterion testable="true">ADR-010 gap documented (current count vs ≤15 target)</criterion>
+    <criterion testable="true">Expected Outcome E delta calculation present and explained</criterion>
+  </acceptance-criteria>
+</task>
