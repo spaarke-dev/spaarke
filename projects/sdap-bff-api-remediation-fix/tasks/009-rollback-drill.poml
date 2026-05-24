@@ -1,0 +1,95 @@
+<task id="009" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Rollback drill — verify NFR-06 (<10 min) under realistic conditions</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>Project owner</assigned>
+    <started></started>
+    <completed></completed>
+    <tags>coordination, governance, phase-0, rollback, operational</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operational drill; sequential before Phase 0 gate (008). Cannot run in parallel with other tasks because it deploys to and reverts on dev environment</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Execute a real rollback drill on `spe-api-dev-67e2xz` to establish:
+    (a) the operator can complete `git revert` + `Deploy-BffApi.ps1` rollback within NFR-06's 10-minute window, and
+    (b) the wall-clock baseline timing for confidence during Phase 4 bake-window regressions.
+
+    Per senior review G5: NFR-06 was previously aspirational ("rehearsal in Phase 0 if process is unfamiliar" — unverifiable). This task makes NFR-06 measurable before Phase 4 begins.
+
+    Per revised NFR-08 (2026-05-24): operator-only model means the owner alone executes both the deploy AND the rollback. No second human approver required. AI-directed checks (`adr-check` + `code-review` at task-execute Step 9.5) provide verification rigor; CI guards provide mechanical enforcement.
+  </prompt>
+
+  <role>Project owner (operator) — single-operator drill.</role>
+
+  <goal>
+    Two deliverables:
+    1. `baseline/rollback-drill.md` — records: deploy timestamp, revert timestamp, redeploy timestamp, total elapsed, NFR-06 pass/fail, any friction encountered (auth prompts, missing tooling, slow Azure responses, etc.).
+    2. Confidence: the operator has executed the rollback path end-to-end in the last 24h before Phase 4 starts. If wall-clock > 10 min, identify the bottleneck (likely candidates: hash-verify delay, slot-swap latency, healthz retry window) and document mitigation BEFORE Phase 4.
+  </goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="deploy-skill">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="nfr-source">projects/sdap-bff-api-remediation-fix/spec.md (NFR-06)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md NFR-06">Rollback executable within 10 minutes of decision</constraint>
+    <constraint source="spec.md NFR-07">Dev environment only (`spe-api-dev-67e2xz`)</constraint>
+    <constraint source="spec.md NFR-08 revised 2026-05-24">Operator-only model; no second human approver required</constraint>
+    <constraint source=".claude/constraints/azure-deployment.md">Use `Deploy-BffApi.ps1` (hash-verify + health-check + slot-swap rollback)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      During Phase 4, each candidate enters a 24–48h bake window. If App Insights surfaces a regression mid-bake (e.g., 18h in), the operator must execute rollback under time pressure. NFR-06 binds rollback to <10 min — but that's only meaningful if the operator has rehearsed the path recently. Skill atrophies; tooling drifts (auth tokens expire, Azure CLI version mismatches, slot-swap quirks).
+
+      This drill is a one-time investment that converts a verbal commitment into a wall-clock-verified capability. Cost: ~30 min including a no-op deploy + revert. Value: confidence that the rollback path actually works at the moment regression is detected.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off (must precede operational work)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Create a trivial no-op branch (e.g., add a comment to a test fixture) and commit</step>
+    <step order="2">Note start timestamp. Run `Deploy-BffApi.ps1 -Environment dev`. Wait for healthz green.</step>
+    <step order="3">Note "decision" timestamp (simulating "regression detected"). Run `git revert HEAD --no-edit`.</step>
+    <step order="4">Run `Deploy-BffApi.ps1 -Environment dev` to redeploy the reverted state. Wait for healthz green.</step>
+    <step order="5">Note end timestamp. Compute total elapsed from "decision" to "healthz green on reverted state."</step>
+    <step order="6">If &lt;10 min: NFR-06 pass. Document in `baseline/rollback-drill.md`.</step>
+    <step order="7">If &gt;10 min: identify bottleneck. Document mitigation. Re-run if needed.</step>
+    <step order="8">Clean up: delete the no-op branch (or leave merged-and-reverted on work branch — operator choice).</step>
+    <step order="9">Update TASK-INDEX.md status of task 009 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+    <tool name="git">revert + push</tool>
+    <tool name="az">healthz verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/baseline/rollback-drill.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Wall-clock elapsed from "decision" to "healthz green on reverted state" recorded</criterion>
+    <criterion testable="true">Elapsed ≤ 10 minutes (NFR-06 pass) OR mitigation documented for any bottleneck</criterion>
+    <criterion testable="true">Drill executed by project owner (operator-only model per NFR-08 revised)</criterion>
+    <criterion testable="true">baseline/rollback-drill.md committed with timestamps + friction notes</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,6 +1,6 @@
 <task id="051" project="sdap-bff-api-remediation-fix">
   <metadata>
-    <title>Relocate 6 AI-coupled job handlers to `Services/Ai/Jobs/` (FR-E3)</title>
+    <title>Relocate AI-coupled job handlers to `Services/Ai/Jobs/` (FR-E3 — inventory-derived list)</title>
     <status>not-started</status>
     <estimated-effort>3 hours</estimated-effort>
     <assigned>AI agent (developer)</assigned>
@@ -11,31 +11,30 @@
     <rigor>FULL</rigor>
   </metadata>
 
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
   <prompt>
-    Move 6 AI-coupled job handlers from `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/` to
-    NEW directory `src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/`:
+    Move AI-coupled job handlers from `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/` to
+    NEW directory `src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/`. **Handler list is inventory-derived** per the "AI-coupled rule" defined in Phase 0 task 007 (per spec.md FR-E3 revised + senior-review G1): a handler is AI-coupled if its assembly references `Sprk.Bff.Api.Services.Ai.*` AND does NOT require `Spaarke.Dataverse` / `Microsoft.Xrm.Sdk`. The authoritative list comes from Phase 1 outputs (task 015 reflection probe + task 014 static usage map).
+
+    Preliminary list from initial design (6 handlers — NON-BINDING):
     - AppOnlyDocumentAnalysisJobHandler
     - EmailAnalysisJobHandler
-    - AttachmentClassificationJobHandler
+    - AttachmentClassificationJobHandler ← senior review G1: may be CRUD-coupled (verify)
     - RagIndexingJobHandler
-    - InvoiceExtractionJobHandler
+    - InvoiceExtractionJobHandler ← senior review G1: may be CRUD-coupled (verify)
     - ProfileSummaryJobHandler
 
-    All 6 confirmed at pipeline pre-flight. JobType string registration MUST be unchanged
-    (dispatch is by string in ServiceBusJobProcessor). `IJobHandler<T>` contract preserved
-    (ADR-004). After relocation these handlers are AI-internal and may keep direct `IOpenAiClient` /
-    `IPlaybookService` references.
+    Senior review G1 also flagged 3 handlers possibly belonging in the relocation list (BulkRagIndexing, DocumentProcessing, InvoiceIndexing). Phase 1 inventory is the source of truth.
 
-    CRITICAL: NEW `Services/Ai/Jobs/` is DISTINCT from existing `Services/Ai/Handlers/` (which
-    contains `GenericAnalysisHandler` and is unrelated to this work).
+    Common to all relocated handlers: JobType string registration MUST be unchanged (dispatch is by string in ServiceBusJobProcessor). `IJobHandler<T>` contract preserved (ADR-004). After relocation these handlers are AI-internal and may keep direct `IOpenAiClient` / `IPlaybookService` references.
+
+    CRITICAL: NEW `Services/Ai/Jobs/` is DISTINCT from existing `Services/Ai/Handlers/` (which contains `GenericAnalysisHandler` and is unrelated to this work).
   </prompt>
 
   <role>Senior .NET developer with job-handler + DI familiarity.</role>
 
   <goal>
-    All 6 handlers at new paths `Services/Ai/Jobs/*.cs`; old paths absent; JobProcessingModule
-    DI registration succeeds; integration tests pass; JobType dispatch tests pass (jobs route
-    to handlers by string, unchanged).
+    All handlers from the Phase 1 inventory-derived list at new paths `Services/Ai/Jobs/*.cs`; old paths absent for those moved; JobProcessingModule DI registration succeeds; integration tests pass; JobType dispatch tests pass (jobs route to handlers by string, unchanged). Handler count + identities recorded in EXECUTION-LOG.md for FR-E3 SC-24 verification.
   </goal>
 
   <inputs>

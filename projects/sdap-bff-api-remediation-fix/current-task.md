@@ -19,7 +19,9 @@
 *No tasks have been executed yet — pipeline scaffolding only.*
 
 ### Critical Context
-Project scaffolding (README, plan, CLAUDE.md, 60 POML tasks) was generated 2026-05-20 by `/project-pipeline`. No phase work has begun. **Sequencing**: Owner decided 2026-05-20 to wait for `spaarke-ai-platform-unification-r2` refinement testing to complete before starting Phase 0 (avoids dev-environment contention + Outcome E file conflicts). Phase 0 carries 7 open questions (UQ-01…UQ-07) that gate Phase 1 start.
+Project scaffolding (README, plan, CLAUDE.md, 63 POML tasks — revised 2026-05-24) was generated 2026-05-20 by `/project-pipeline`. No phase work has begun. Senior review 2026-05-24 applied: +009 (rollback drill), +082 (FR-C6 CI gate, binding), +038 (DI baseline), repurposed 002 (operator-only model), expanded 004 (all active BFF projects). UQ-01 RESOLVED (operator-only model per NFR-08 revised); UQ-02..UQ-07 remain. Outcome E commits 046–051 squash-merge as single atomic PR per plan.md PR-2.
+
+**Sequencing**: Owner decided 2026-05-20 to wait for `spaarke-ai-platform-unification-r2` refinement testing to complete before starting Phase 0 (avoids dev-environment contention + Outcome E file conflicts). Phase 0 carries 6 open questions (UQ-02…UQ-07) that gate Phase 1 start, plus task 009 rollback drill (G5).
 
 ---
 

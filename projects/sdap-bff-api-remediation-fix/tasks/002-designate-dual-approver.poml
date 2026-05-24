@@ -1,55 +1,60 @@
 <task id="002" project="sdap-bff-api-remediation-fix">
   <metadata>
-    <title>Designate dual approver for MEDIUM/HIGH-tier changes (UQ-01)</title>
+    <title>Document operator-only approval model (UQ-01 resolved 2026-05-24)</title>
     <status>not-started</status>
-    <estimated-effort>1 hour</estimated-effort>
+    <estimated-effort>15 minutes</estimated-effort>
     <assigned>Project owner</assigned>
     <started></started>
     <completed></completed>
     <tags>coordination, governance, phase-0</tags>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Independent owner coordination ask; no file conflicts with sibling Group A tasks</parallel-reason>
+    <parallel-reason>Independent owner decision; no file conflicts with sibling Group A tasks</parallel-reason>
     <rigor>STANDARD</rigor>
   </metadata>
 
   <prompt>
-    Identify and confirm the dual approver who, alongside the project owner, must sign off on
-    every MEDIUM/HIGH-tier candidate in Phase 4 and on the demo→prod promotion in Phase 5.
-    spec.md §Assumptions defaults this to "Auth team lead" given the BFF's auth surface; the owner
-    confirms or overrides. Without this, Phase 4 MEDIUM/HIGH cannot start.
+    Document that this project uses the **operator-only approval model** per revised NFR-08 (2026-05-24). UQ-01 ("Who is the dual approver?") is resolved: there is no dual approver. Verification rigor for MEDIUM/HIGH-tier candidates (Phase 4) and Phase 5 promotions comes from:
+
+    1. **AI-directed checks** — `task-execute` skill's mandatory `adr-check` + `code-review` gates at Step 9.5 (FULL rigor)
+    2. **CI guards** — FR-C1 through FR-C6 (non-Linux RID, sourcemaps, vuln transitives, oversize publish, direct AI injection)
+    3. **Owner judgment** — sign-off authority
+
+    This task replaces the original "designate a second human approver" — the dual-approver enterprise pattern is explicitly NOT used for this project. Rationale: single project owner + AI-directed coding procedures provide effective check-and-balance without the friction of a second human approver.
   </prompt>
 
-  <role>Project coordinator.</role>
+  <role>Project owner.</role>
 
   <goal>
-    Dual approver named in writing (PR comment or task notes), with the approver's acknowledgment
-    that they accept the role. Phase 0 checklist item 6 (design.md §6) marked complete.
+    Operator-only approval model documented in `CLAUDE.md → Decisions Made`. UQ-01 marked RESOLVED.
   </goal>
 
   <inputs>
     <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
-    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md (NFR-08 revised + UQ-01 resolution)</file>
+    <file purpose="project-claude">projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
   </inputs>
 
   <constraints>
-    <constraint source="design.md §3">Dual approver required for MEDIUM/HIGH-tier candidates AND prod promotion</constraint>
-    <constraint source="spec.md NFR-08">Dual approval required for MEDIUM/HIGH tier and all prod promotions</constraint>
+    <constraint source="spec.md NFR-08 revised 2026-05-24">Owner sign-off + AI-directed verification model; dual-approver enterprise pattern NOT used</constraint>
+    <constraint source="spec.md UQ-01 RESOLVED 2026-05-24">Operator-only model adopted</constraint>
   </constraints>
 
   <knowledge>
     <files>
-      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
-      <file>.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+      <file>.claude/skills/task-execute/SKILL.md</file>
     </files>
   </knowledge>
 
   <context>
     <background>
-      The BFF is the heart of the system with high blast radius. Sole-approver risk on MEDIUM/HIGH
-      changes is unacceptable. spec.md defaults to Auth team lead based on BFF's auth surface
-      (8 distinct auth flows per AUDIT-FINDINGS-AUTH-SYSTEM.md), but any senior engineer with
-      adequate context is acceptable.
+      Originally, design.md §3 added "dual approver required for MEDIUM/HIGH tier candidates" to mitigate sole-approver risk — a concern that makes sense when multiple humans share codebase ownership. For Spaarke's actual operating model (single project owner + AI-directed coding procedures), the dual-approver pattern adds friction without proportional benefit.
+
+      The AI-directed checks (adr-check, code-review at task-execute Step 9.5) provide the "second pair of eyes" doing technical verification. The owner provides judgment + sign-off. Combined with FR-C1–C6 CI guards (mechanical enforcement), the verification rigor is preserved without a second human approver bottleneck.
+
+      Senior review 2026-05-24 confirmed: with FR-C6 (new direct-AI-injection CI gate) added and existing CI guards enforced, all MEDIUM/HIGH-tier risk surfaces have mechanical or AI-directed gates.
     </background>
     <dependencies>
       <dependency task="001" status="not-started">Owner sign-off must complete first</dependency>
@@ -57,23 +62,24 @@
   </context>
 
   <steps>
-    <step order="1">Owner identifies dual approver candidate</step>
-    <step order="2">Approver confirms acceptance of the role (written ACK)</step>
-    <step order="3">Update Phase 0 checklist item 6 to checked</step>
-    <step order="4">Record approver name in CLAUDE.md → Decisions Made section</step>
+    <step order="1">Record decision in `CLAUDE.md → Decisions Made` (entry already added 2026-05-24 — verify present)</step>
+    <step order="2">Confirm spec.md NFR-08 (revised) and UQ-01 (RESOLVED) reflect this decision</step>
+    <step order="3">Confirm no remaining task POMLs require "dual approver ACK" — verify task 054, 060, 062 use revised language</step>
+    <step order="4">Update Phase 0 checklist item 6 to checked with note: "Operator-only model — UQ-01 resolved 2026-05-24"</step>
     <step order="5">Update TASK-INDEX.md status of task 002 from 🔲 to ✅</step>
   </steps>
 
   <tools><tool name="git">PR comment / commit for record</tool></tools>
 
   <outputs>
-    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made entry)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made entry confirms operator-only model)</output>
     <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Dual approver named in CLAUDE.md Decisions Made section</criterion>
-    <criterion testable="true">Approver's written ACK exists (PR comment or task notes)</criterion>
+    <criterion testable="true">CLAUDE.md Decisions Made contains operator-only model entry</criterion>
+    <criterion testable="true">spec.md UQ-01 shows RESOLVED status</criterion>
+    <criterion testable="true">spec.md NFR-08 reflects revised owner-sign-off + AI-verification model</criterion>
     <criterion testable="true">Phase 0 checklist item 6 marked complete</criterion>
   </acceptance-criteria>
 </task>

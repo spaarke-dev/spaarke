@@ -3,7 +3,7 @@
     <title>Vuln patch 2 (count + identity refined post-Phase 1)</title>
     <status>not-started</status>
     <estimated-effort>2 hours active + 24-48h bake</estimated-effort>
-    <assigned>AI agent (developer) + dual approver</assigned>
+    <assigned>AI agent (developer); owner sign-off via NFR-08 revised model</assigned>
     <tags>bff-api, security, outcome-b, phase-4, deploy</tags>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
@@ -12,7 +12,7 @@
   </metadata>
 
   <prompt>
-    Placeholder task for the second vuln patch identified by Phase 1 task 011. The specific package, CVE, and bump target depend on the vulnerable.txt scan output. Treated as MEDIUM tier — dual approver required. 24-48h bake.
+    Placeholder task for the second vuln patch identified by Phase 1 task 011. The specific package, CVE, and bump target depend on the vulnerable.txt scan output. Treated as MEDIUM tier — owner (per NFR-08 revised) required. 24-48h bake.
   </prompt>
 
   <role>Security-aware .NET developer.</role>
@@ -25,7 +25,7 @@
   </inputs>
 
   <constraints>
-    <constraint source="design.md §3">Dual approver required for MEDIUM tier</constraint>
+    <constraint source="design.md §3">Owner sign-off + AI-directed verification (NFR-08 revised) for MEDIUM tier; no second human approver</constraint>
     <constraint source="spec.md §Out of Scope">No Graph SDK / Kiota individual bumps</constraint>
   </constraints>
 
@@ -45,7 +45,7 @@
   <steps>
     <step order="1">Read CANDIDATES.md for the specific package + target version</step>
     <step order="2">If no second vuln remains: mark task as ⏸ (deferred — not needed); update TASK-INDEX</step>
-    <step order="3">Else: dual approver acks; single commit bump; build + test (±5% baseline)</step>
+    <step order="3">Else: owner (per NFR-08 revised) acks; single commit bump; build + test (±5% baseline)</step>
     <step order="4">Deploy to dev; smoke test; 24-48h bake</step>
     <step order="5">Re-run vuln scan: target CVE resolved</step>
     <step order="6">Log to EXECUTION-LOG.md; mark ✅</step>

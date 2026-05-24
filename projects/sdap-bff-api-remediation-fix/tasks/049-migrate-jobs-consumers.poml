@@ -11,6 +11,7 @@
     <rigor>FULL</rigor>
   </metadata>
 
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
   <prompt>
     Migrate ~2 Jobs consumers (`InvoiceIndexingJobHandler`, `EmbeddingMigrationService` — confirmed at pre-flight; spec said 6 but those are the AI-coupled HANDLERS being relocated by task 051, not "CRUD→AI consumers") to facade. NOTE PF-3 scope clarification: the 6 handlers from task 051 may need facade refactoring as part of their relocation — verify against inventory before splitting work.
   </prompt>

@@ -59,7 +59,7 @@
 | Framework-dependent `linux-x64` publish | App Service is unambiguously Linux | ~25–30 MB uncompressed / ~10 MB compressed savings |
 | Small focused facade interfaces (`IBriefingAi`, `IInvoiceAi`, etc.) | Easier testing, lower coupling, simpler deprecation | UQ-07 default (owner confirms in Phase 0) |
 | Hard-fail size guard at baseline+10% | Forces explicit acknowledgment of regressions | FR-C5 + `-AllowOversize` escape |
-| Dual-approval for MEDIUM/HIGH tier + prod | Heart-of-system; SPOF unacceptable | NFR-08 (Phase 4 MEDIUM/HIGH + Phase 5 prod) |
+| **Operator-only approval model** (revised 2026-05-24) — owner sign-off + AI-directed verification + CI guards | Spaarke uses AI-directed coding procedures (`task-execute` invokes `adr-check` + `code-review` at Step 9.5 FULL rigor) + mechanical CI gates (FR-C1–C6); dual-approver enterprise pattern is unnecessary friction for single-owner operating model | Replaces dual-approver pattern across Phase 4 MEDIUM/HIGH + Phase 5 prod; see NFR-08 (revised) |
 
 ### Discovered Resources
 
@@ -112,8 +112,8 @@
 ### Phase Structure
 
 ```
-Phase 0 — Pre-flight resolution         (1–2 days,    8 tasks: 001–008)
-  └─ Resolve UQ-01…UQ-07 + dual approver + sign-offs
+Phase 0 — Pre-flight resolution         (1–2 days,    9 tasks: 001–009)
+  └─ Resolve UQ-01..UQ-07 (UQ-01 operator-only) + active-BFF-projects enumeration + rollback drill + sign-offs
 
 Phase 1 — Inventory (READ-ONLY)         (1 day,       9 tasks: 010–018)
   └─ INVENTORY.md authoritative snapshot
@@ -121,34 +121,37 @@ Phase 1 — Inventory (READ-ONLY)         (1 day,       9 tasks: 010–018)
 Phase 2 — Categorize candidates         (1–2 days,    3 tasks: 020–022)
   └─ CANDIDATES.md with SAFE / MEDIUM / HIGH / REJECT tiers
 
-Phase 3 — Baseline                      (2–3 days,    8 tasks: 030–037)
-  └─ BASELINE.md + 48h App Insights window
+Phase 3 — Baseline                      (2–3 days,    9 tasks: 030–038)
+  └─ BASELINE.md + 48h App Insights window + DI registration count baseline
 
 Phase 4 — Apply changes (one per bake)  (2–3 weeks,  15 tasks: 040–054)
   ├─ Outcome A track: SAFE candidates (sequential by 24h bake)
   ├─ Outcome B track: vuln patches (sequential by tier)
-  └─ Outcome E track: facade + migration + handler relocation (parallel with A)
+  └─ Outcome E track: facade + migration + handler relocation (parallel with A);
+                       commits 046–051 squash-merge as single atomic PR (G9)
 
 Phase 5 — Promote demo + prod           (1–2 weeks,   4 tasks: 060–063, conditional on UQ-02)
   └─ Cumulative changeset → demo (48h bake) → prod (7d observation)
 
-Phase 6 — Prevention / codification     (3–5 days,   12 tasks: 070–081)
-  └─ All sequential; .claude/ paths = main-session-only
+Phase 6 — Prevention / codification     (3–5 days,   13 tasks: 070–082)
+  └─ All sequential; .claude/ paths = main-session-only; task 082 = FR-C6 CI gate (M5 binding)
 
 Wrap-up                                 (1 day,       1 task:  090)
   └─ LESSONS-LEARNED + repo-cleanup
+
+Total: 63 tasks
 ```
 
 ### Critical Path
 
-001 → 008 (Phase 0 gate) → 015/018 (Phase 1 reflection probe + INVENTORY.md) → 020–022 (CANDIDATES.md) → 030/033/036/037 (Phase 3 baseline + 48h calendar gate) → 040 → 041 → 042 (Outcome A SAFE candidates, 24h bake each) → 053/054 (Outcome E acceptance + Phase 4 gate) → 060/061 (demo) → 062/063 (prod, conditional) → 070–081 (codification) → 090
+001 → 009 (rollback drill) + 002…007 (Phase 0 sign-offs, parallel-safe Group A) → 008 (Phase 0 gate) → 015/018 (Phase 1 reflection probe + INVENTORY.md) → 020–022 (CANDIDATES.md) → 030/033/036/037/038 (Phase 3 baseline + 48h calendar gate + DI baseline) → 040 → 041 → 042 (Outcome A SAFE candidates, 24h bake each) → 053/054 (Outcome E acceptance + Phase 4 gate) → 060/061 (demo) → 062/063 (prod, conditional) → 070–082 (codification incl. FR-C6 gate task 082) → 090
 
 ### High-Risk Items
 
 - **015** Reflection-load dynamic probe — code instrumentation; localhost-only diagnostic flag
 - **033** App Insights 48h baseline — calendar gate before Phase 4 can start
 - **040/041/042** Outcome A SAFE candidates — each 24h bake; reflection-load probe must match baseline post-change
-- **062** Production deploy — conditional on UQ-02; dual approver + ops authorization
+- **062** Production deploy — conditional on UQ-02; owner sign-off + AI verification + ops team authorization (per NFR-08 revised; ops still required for canonical prod process)
 
 ### Parallel-Safety Boundaries
 
@@ -158,21 +161,24 @@ Per [root CLAUDE.md §3 — Sub-Agent Write Boundary](../../CLAUDE.md), any task
 
 ## 4. Phase Breakdown
 
-### Phase 0 — Pre-flight resolution (8 tasks: 001–008)
+### Phase 0 — Pre-flight resolution (9 tasks: 001–009)
 
 **Objectives:**
-1. Resolve all 7 open questions (UQ-01…UQ-07) from spec
-2. Designate dual approver for MEDIUM/HIGH tier changes
-3. Coordinate baseline-capture window with sibling projects
-4. Determine Phase 5 scope (in-project vs follow-up)
+1. Resolve open questions (UQ-01 operator-only / UQ-02..UQ-07) from spec
+2. Document operator-only approval model per revised NFR-08 (no dual approver)
+3. Enumerate + coordinate ALL active BFF-touching projects (expanded scope per senior-review M3)
+4. Verify rollback capability via wall-clock drill (NFR-06 / senior-review G5)
+5. Determine Phase 5 scope (in-project vs follow-up)
 
 **Deliverables:**
 - [ ] Owner sign-off on design §3 Resolved Decisions (task 001)
-- [ ] Dual approver designated (UQ-01) (task 002)
+- [ ] Operator-only approval model documented (UQ-01 RESOLVED) (task 002)
 - [ ] Prod deploy process determined (UQ-02) (task 003)
-- [ ] Sibling project coordination (UQ-03, UQ-04) (tasks 004, 005)
+- [ ] All active BFF-touching projects enumerated + coordinated (task 004, expanded scope)
+- [ ] Insights Engine baseline window + facade adoption agreement (UQ-04 + G4) (task 005)
 - [ ] CI ceiling confirmed (UQ-05) (task 006)
-- [ ] Outcome E scope + facade granularity confirmed (UQ-06, UQ-07) (task 007)
+- [ ] Outcome E scope + facade granularity + G1 handler reconciliation (UQ-06, UQ-07, G1) (task 007)
+- [ ] Rollback drill wall-clock recorded (G5 / NFR-06) (task 009)
 - [ ] Phase 0 gate review passed (task 008)
 
 **Inputs**: spec.md, design.md, owner decision authority
@@ -272,7 +278,7 @@ Per [root CLAUDE.md §3 — Sub-Agent Write Boundary](../../CLAUDE.md), any task
 
 If UQ-02 = "no canonical prod process": tasks 062/063 deferred to follow-up project; demo deploy + bake remain in scope.
 
-### Phase 6 — Prevention / codification (12 tasks: 070–081)
+### Phase 6 — Prevention / codification (13 tasks: 070–082)
 
 **Objectives:**
 1. Make debt-return loud and obvious via CI gates
@@ -294,10 +300,38 @@ All tasks `parallel-safe: false` (sequential main-session per sub-agent write bo
 - [ ] `.claude/skills/bff-deploy/SKILL.md` Publish Hygiene + next-review-date (task 079; FR-D3)
 - [ ] `.claude/FAILURE-MODES.md` new entry (task 080; FR-D4)
 - [ ] `src/server/api/Sprk.Bff.Api/CLAUDE.md` Publish Hygiene + AI Boundary + bff-extensions ref (task 081; FR-D7)
+- [ ] **FR-C6 CI gate: block direct CRUD→AI dependency injection (task 082; senior-review M5 binding)** — converts Outcome E into a permanent architectural boundary
 
 ### Wrap-up (1 task: 090)
 
 - [ ] Project wrap-up: README→Complete, plan→✅, LESSONS-LEARNED.md commit, code-review, adr-check, repo-cleanup (task 090)
+
+---
+
+## 4.5. Process Rules (binding for project execution)
+
+### PR-1 — Dependabot deferral during project window (senior-review G8)
+
+Dependabot PRs touching `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` or its transitive chains are **AUTO-DEFERRED** to the project owner during this project (do not auto-merge). The project owner triages weekly. If a Dependabot PR conflicts with task 043–045 (vuln patches), defer the Dependabot PR.
+
+Rationale: 15+ open Dependabot PRs touch BFF csproj. During the 4-6 week project window, additional Dependabot PRs may land. A mid-Phase-4 Dependabot merge would either (a) invalidate a 24-48h bake window or (b) bump a chain-locked dependency (e.g., Microsoft.Graph) silently. Auto-deferral with weekly triage prevents both.
+
+### PR-2 — Outcome E single atomic PR (senior-review G9, owner binding 2026-05-24)
+
+Tasks 046–051 are executed individually per their POML files (each task gets its own commit on a feature branch, preserving per-task rigor and review granularity in commit messages). However, ALL 6 commits are bundled into a **SINGLE ATOMIC PR** for merge to master.
+
+Rationale: 59-file structural refactor cannot be safely `git revert`ed mid-Phase-4-bake (unrelated changes may land on top during the bake window). A single squashed merge unit means clean atomic rollback if Phase 4 surveillance detects regression. Trade-off accepted: lose per-task PR-review granularity in exchange for clean rollback path.
+
+Mechanism: branch `feature/outcome-e-facade-migration` accumulates commits 046→047→048→049→050→051; PR opened against master with squash-merge strategy enforced; PR description summarizes each commit's contribution.
+
+### PR-3 — Approval model (senior-review NFR-08 reframe 2026-05-24)
+
+**Operator-only approval model.** All MEDIUM/HIGH-tier Phase 4 candidates and Phase 5 promotions require:
+- (a) owner sign-off
+- (b) AI-directed verification via `task-execute` skill's mandatory `adr-check` + `code-review` gates at Step 9.5 (FULL rigor for code-touching tasks)
+- (c) passing CI guards (FR-C1–C6)
+
+The dual-approver enterprise pattern is explicitly NOT used. Spaarke's single-owner + AI-directed-coding operating model provides effective check-and-balance without the friction of a second human approver. Ops team coordination for Phase 5 prod deploy is separate (operational requirement; not an approval gate).
 
 ---
 
@@ -318,8 +352,13 @@ All tasks `parallel-safe: false` (sequential main-session per sub-agent write bo
 
 | Dependency | Location | Status |
 |------------|----------|--------|
-| `sdap-bff-api-and-performance-enhancement-r1` | `projects/sdap-bff-api-and-performance-enhancement-r1/` | Active — UQ-03 coordination needed |
-| `ai-spaarke-insights-engine-r1` | `projects/ai-spaarke-insights-engine-r1/` | Pre-implementation — UQ-04 coordination needed |
+| **All active BFF-touching projects** (per Phase 0 task 004 expanded scope, senior-review M3) | enumerated at Phase 0; deploy freeze commitment per project | Operator confirms coordination at Phase 0 gate |
+| `sdap-bff-api-and-performance-enhancement-r1` | `projects/sdap-bff-api-and-performance-enhancement-r1/` | Active — UQ-03 + M3 coordination |
+| `auth-sso-and-email-wizard-2026-05` | active worktree | UQ-03 + M3 expanded — ~30 BFF consumers affected |
+| `sdap-file-upload-document-r2` | active worktree | UQ-03 + M3 expanded |
+| `spaarke-self-service-registration` | active worktree | UQ-03 + M3 expanded |
+| `ai-spaarke-insights-engine-r1` | `projects/ai-spaarke-insights-engine-r1/` | Pre-implementation — UQ-04 coordination + facade adoption agreement (G4) |
+| `ai-spaarke-action-engine-r1` | queued for after this remediation per 2026-05-22 decision | Sequenced after Phase 6 codification |
 | `Deploy-BffApi.ps1` | `scripts/Deploy-BffApi.ps1` | Production-ready |
 | ADR-013 (refined) | `.claude/adr/ADR-013-ai-architecture.md` | Already published 2026-05-20 |
 | `.claude/constraints/bff-extensions.md` | Already in place | Binding |
@@ -385,10 +424,10 @@ All tasks `parallel-safe: false` (sequential main-session per sub-agent write bo
 | R2 | Insights Engine Phase 1 inflates baseline mid-project | Medium | Medium | Phase 0 coordination (UQ-04); baseline outside integration window |
 | R3 | Non-Linux RID needed for a missed code path | Low | Medium | Dev-first; healthz catches startup failure |
 | R4 | CI guard blocks legitimate future need | Low | Low | `[allow-size-growth]` / `[allow-vuln]` PR-label escapes (FR-C4) |
-| R5 | Prod regresses despite full validation | Very low | Very high | Cumulative pre-tested; rollback documented; dual approval |
+| R5 | Prod regresses despite full validation | Very low | Very high | Cumulative pre-tested; rollback documented + rehearsed (task 009); operator-only sign-off per NFR-08 revised + ops team for prod |
 | R6 | Scope creep (".NET 9 / DI fix while we're at it") | Medium | High | §Out of Scope binding; additions = separate projects |
 | R7 | Long bake windows starve project | Medium | Low | Calendar duration set up front (4–6 weeks) |
-| R8 | Sole approver unavailable | Medium | Medium | Phase 0 names dual approver (UQ-01) |
+| R8 | ~~Sole approver unavailable~~ — **RESOLVED 2026-05-24**: operator-only model per NFR-08 revised; AI-directed `adr-check` + `code-review` + CI guards (FR-C1–C6) provide check-and-balance without a second human approver | n/a | n/a | n/a |
 | R9 | Vuln patch introduces behavioral change | Medium per package | Medium | Each as own Phase 4 candidate with full bake; no batching |
 | R10 | Pre-release package churn (Azure.AI.Projects beta.8, etc.) | Low | High | REJECT tier in §4 Out of Scope; pinning rationale binding |
 
@@ -399,7 +438,7 @@ All tasks `parallel-safe: false` (sequential main-session per sub-agent write bo
 1. **Operator runs Phase 0 sign-offs** — invoke `/task-execute projects/sdap-bff-api-remediation-fix/tasks/001-*.poml` once tasks are generated
 2. **Tasks generated**: ~55 POML files across Phase 0–6 + wrap-up (next step in pipeline)
 3. **After Phase 0 gate**: proceed to Phase 1 (read-only inventory; mostly parallel-safe)
-4. **Phase 4 onward**: 24–48h bake windows + dual-approval — NOT autonomous
+4. **Phase 4 onward**: 24–48h bake windows + owner sign-off + AI verification (NFR-08 revised) — NOT autonomous
 
 ---
 

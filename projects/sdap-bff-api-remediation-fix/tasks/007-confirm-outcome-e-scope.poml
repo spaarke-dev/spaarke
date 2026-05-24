@@ -14,12 +14,21 @@
   </metadata>
 
   <prompt>
-    Resolve two related UQ items:
+    Resolve THREE related items:
     - UQ-06: Should `Spaarke.Core` and `Spaarke.Dataverse` package lists be inventoried only,
       or also pruned in this project? Default: inventory only (spec.md §Assumptions).
     - UQ-07: Should the Outcome E facade be one large interface (`IBffAiPublicContracts` with
       ~15 methods) or several small focused interfaces (`IBriefingAi`, `IInvoiceAi`,
       `IRecordMatchingAi`, `IWorkspacePrefillAi`)? Default per design §3: small focused.
+    - **G1 handler reconciliation (senior review item #1, 2026-05-24)**: The 6 AI-coupled handlers
+      named in FR-E3 may be inaccurate. Senior review found 7 actually AI-coupled handlers
+      (AppOnlyDocumentAnalysis, BulkRagIndexing, DocumentProcessing, EmailAnalysis,
+      InvoiceIndexing, ProfileSummary, RagIndexing) and 2 originally listed handlers
+      (AttachmentClassification, InvoiceExtraction) may actually be CRUD-coupled. Define the
+      "AI-coupled rule" (per spec.md FR-E3 revised: handler references `Sprk.Bff.Api.Services.Ai.*`
+      AND does NOT require Spaarke.Dataverse / Microsoft.Xrm.Sdk) and confirm Phase 1 task 015
+      (reflection probe) + task 014 (static usage map) will produce the authoritative handler
+      list. Task 051 then uses that list, not the preliminary 6-handler list from initial design.
 
     Also confirm the scope-drift finding from pipeline pre-flight (PF-3): actual CRUD→AI
     consumer count is ~59 files, not the spec's "20". Outcome E task scope will defer to Phase 1
@@ -33,6 +42,7 @@
     - UQ-06 answer (inventory-only OR also prune)
     - UQ-07 answer (large interface OR small focused)
     - PF-3 acknowledgment: facade migration scope deferred to Phase 1 output
+    - G1 acknowledgment: AI-coupled rule defined; preliminary 6-handler list from initial design is non-binding; Phase 1 inventory produces authoritative list for task 051
   </goal>
 
   <inputs>
@@ -81,9 +91,10 @@
     <step order="2">Decide UQ-06 (inventory-only vs prune)</step>
     <step order="3">Decide UQ-07 (large interface vs small focused — small focused is design default)</step>
     <step order="4">Acknowledge PF-3 scope deferral (Outcome E task list uses inventory-derived consumer list)</step>
-    <step order="5">Record decisions in CLAUDE.md Decisions Made section</step>
-    <step order="6">Update Phase 0 checklist item 9 (Outcome E scope) to checked</step>
-    <step order="7">Update TASK-INDEX.md status of task 007 from 🔲 to ✅</step>
+    <step order="5">**G1 reconciliation**: confirm AI-coupled rule per spec.md FR-E3 revised; acknowledge preliminary 6-handler list is non-binding; commit task 051 to use Phase 1 inventory output (task 015 reflection probe + task 014 static usage map) as the authoritative handler list</step>
+    <step order="6">Record decisions in CLAUDE.md Decisions Made section</step>
+    <step order="7">Update Phase 0 checklist item 9 (Outcome E scope) to checked</step>
+    <step order="8">Update TASK-INDEX.md status of task 007 from 🔲 to ✅</step>
   </steps>
 
   <tools><tool name="git">Update CLAUDE.md + task index</tool></tools>
@@ -97,6 +108,7 @@
     <criterion testable="true">UQ-06 answer documented (inventory-only / prune)</criterion>
     <criterion testable="true">UQ-07 answer documented (large / small focused)</criterion>
     <criterion testable="true">PF-3 scope deferral explicitly acknowledged</criterion>
+    <criterion testable="true">G1: AI-coupled rule defined; task 051 commits to Phase 1 inventory-derived handler list</criterion>
     <criterion testable="true">Phase 0 checklist item 9 marked complete</criterion>
   </acceptance-criteria>
 </task>

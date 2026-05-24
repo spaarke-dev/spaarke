@@ -23,6 +23,8 @@
 
     NOTE: `Services/Ai/Handlers/` already exists (with GenericAnalysisHandler) — `PublicContracts/`
     is a NEW sibling subdirectory.
+
+    **Merge strategy (senior-review G9, owner-binding 2026-05-24)**: Tasks 046–051 are committed individually for per-task POML rigor and review granularity, BUT all 6 commits are bundled into a **single atomic PR** for merge. Rationale: 59-file structural refactor cannot be safely `git revert`ed mid-bake. Squash-merge gives clean atomic rollback if Phase 4 regression appears. See plan.md Process Rules section.
   </prompt>
 
   <role>Senior .NET developer with ADR-007 facade-pattern familiarity.</role>

@@ -3,7 +3,7 @@
     <title>Deploy cumulative changeset to `spaarke-demo`</title>
     <status>not-started</status>
     <estimated-effort>2 hours</estimated-effort>
-    <assigned>Project owner + dual approver</assigned>
+    <assigned>Project owner + owner (per NFR-08 revised)</assigned>
     <tags>bff-api, deploy, promote, phase-5</tags>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
@@ -15,7 +15,7 @@
     Deploy the cumulative Phase 4 changeset to `spaarke-demo` via `Deploy-BffApi.ps1` (or canonical demo deploy process if documented). Dual approver authorization required.
   </prompt>
 
-  <role>Deploy engineer + dual approver.</role>
+  <role>Deploy engineer + owner (per NFR-08 revised).</role>
   <goal>Demo deploy succeeds; healthz green; smoke tests pass.</goal>
 
   <inputs>
@@ -25,7 +25,7 @@
 
   <constraints>
     <constraint source="ADR-027">Managed solutions for prod (and demo where applicable)</constraint>
-    <constraint source="NFR-08">Dual approval required</constraint>
+    <constraint source="NFR-08 revised 2026-05-24">Owner sign-off + AI-directed verification + CI guards; no second human approver</constraint>
   </constraints>
 
   <knowledge>

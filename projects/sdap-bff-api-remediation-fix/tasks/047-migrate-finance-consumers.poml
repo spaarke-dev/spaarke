@@ -11,6 +11,7 @@
     <rigor>FULL</rigor>
   </metadata>
 
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
   <prompt>
     Migrate the 3 Finance consumers (InvoiceAnalysisService, InvoiceSearchService, IInvoiceAnalysisService — confirmed at pipeline pre-flight) to consume `Services/Ai/PublicContracts/IInvoiceAi` instead of `IOpenAiClient` / `IPlaybookService` directly. Behavior preservation verified by existing tests.
   </prompt>

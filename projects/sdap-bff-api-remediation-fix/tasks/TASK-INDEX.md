@@ -2,7 +2,7 @@
 
 > **Project**: BFF API Remediation & Publish Debt
 > **Created**: 2026-05-20 by `/project-pipeline`
-> **Total tasks**: 61 (Phase 0–6 + wrap-up). Added 038 (DI baseline) per ADR-010 binding clarification 2026-05-24.
+> **Total tasks**: 63 (Phase 0–6 + wrap-up). Revised 2026-05-24 per senior review: added 009 (rollback drill / G5), 038 (DI baseline / ADR-010), 082 (FR-C6 CI gate / M5 binding); repurposed 002 (operator-only model per UQ-01 RESOLVED + NFR-08 revised); expanded 004 scope (all active BFF projects per M3).
 > **Calendar estimate**: 4–6 weeks (bake-window dominated)
 
 ## Status Legend
@@ -17,18 +17,19 @@
 
 ---
 
-## Phase 0 — Pre-flight resolution (8 tasks)
+## Phase 0 — Pre-flight resolution (9 tasks)
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
 | 001 | Owner sign-off on design.md §3 Resolved Decisions | 🔲 | No | STANDARD | — |
-| 002 | Designate dual approver (UQ-01) | 🔲 | Yes (Group A) | STANDARD | 001 |
+| 002 | Document operator-only approval model (UQ-01 RESOLVED 2026-05-24) | 🔲 | Yes (Group A) | STANDARD | 001 |
 | 003 | Determine prod deploy process scope (UQ-02) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 004 | Coordinate with `sdap-bff-api-and-performance-enhancement-r1` (UQ-03) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 005 | Coordinate baseline window with `ai-spaarke-insights-engine-r1` (UQ-04) | 🔲 | Yes (Group A) | STANDARD | 001 |
+| 004 | Enumerate + coordinate ALL active BFF-touching projects (UQ-03 expanded per M3) | 🔲 | Yes (Group A) | STANDARD | 001 |
+| 005 | Coordinate baseline window + facade adoption agreement (UQ-04 + G4) | 🔲 | Yes (Group A) | STANDARD | 001 |
 | 006 | Confirm CI guard size ceiling (UQ-05) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 007 | Confirm Outcome E scope + facade granularity (UQ-06, UQ-07) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 008 | Phase 0 gate review — all checkboxes resolved | 🔲 | No | STANDARD | 002–007 |
+| 007 | Confirm Outcome E scope + facade granularity + G1 handler reconciliation (UQ-06, UQ-07, G1) | 🔲 | Yes (Group A) | STANDARD | 001 |
+| 009 | Rollback drill — verify NFR-06 (<10 min) wall-clock (G5) | 🔲 | No | STANDARD | 001 |
+| 008 | Phase 0 gate review — all checkboxes resolved | 🔲 | No | STANDARD | 002–007, 009 |
 
 ---
 
@@ -124,7 +125,7 @@
 
 ---
 
-## Phase 6 — Prevention / codification (12 tasks; all sequential main-session for `.claude/` paths)
+## Phase 6 — Prevention / codification (13 tasks; all sequential; mix of `.claude/` + `scripts/` + `.github/`; 082 = FR-C6 binding per senior-review M5)
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
@@ -140,6 +141,7 @@
 | 079 | `.claude/skills/bff-deploy/SKILL.md` update (FR-D3) | 🔲 | No (.claude/) | STANDARD | 076 |
 | 080 | `.claude/FAILURE-MODES.md` new entry (FR-D4) | 🔲 | No (.claude/) | STANDARD | 054 |
 | 081 | `src/server/api/Sprk.Bff.Api/CLAUDE.md` Publish Hygiene + AI Boundary (FR-D7) | 🔲 | No | STANDARD | 076, 079 |
+| **082** | **CI: fail direct CRUD→AI dependency injection (FR-C6, M5 binding)** | 🔲 | No | STANDARD | 054, 046, 074 |
 
 ---
 
@@ -147,7 +149,7 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 090 | Project wrap-up — README→Complete, plan→✅, LESSONS-LEARNED.md, code-review, adr-check, repo-cleanup | 🔲 | No | STANDARD | 081, 090 prerequisites |
+| 090 | Project wrap-up — README→Complete, plan→✅, LESSONS-LEARNED.md, code-review, adr-check, repo-cleanup | 🔲 | No | STANDARD | 081, 082 |
 
 ---
 
@@ -162,32 +164,34 @@
 | **E** | 3 | 030, 031, 032, 034, 035, 036, 038 | 022 complete | Read-only baselines; **033 sequential (48h calendar gate)** |
 | **F** | 4 | 047, 048, 049, 050 | 046 complete | Facade migration in separate consumer modules; no shared files |
 
-**Phase 6 has NO parallel group** — all `.claude/` paths are main-session-only per sub-agent write boundary (root CLAUDE.md §3).
+**Phase 6 has NO parallel group** — all `.claude/` paths are main-session-only per sub-agent write boundary (root CLAUDE.md §3). Task 082 (FR-C6 CI gate) is added at end of Phase 6.
 
-**Phase 4 outside Group F has NO parallel execution** — bake windows force sequential execution (one change per deploy).
+**Phase 4 outside Group F has NO parallel execution** — bake windows force sequential execution (one change per deploy). Outcome E tasks 046–051 are committed individually but bundled into a **single atomic squash-merge PR** per plan.md PR-2 (G9 owner binding).
+
+**Task 009 (rollback drill)** is sequential within Phase 0 (cannot run with other tasks because it deploys + reverts on dev environment); it's a dependency of Phase 0 gate 008.
 
 ---
 
 ## Critical Path
 
 ```
-001 → 008 (Phase 0 gate)
+001 → [009 + Group A: 002, 003, 004, 005, 006, 007 in parallel] → 008 (Phase 0 gate)
   → 015 + 018 (Phase 1 INVENTORY.md gate, after reflection probe + group B/C complete)
     → 020/021 → 022 (Phase 2 CANDIDATES.md)
-      → 030–037 (Phase 3 BASELINE.md, 48h calendar gate on 033)
+      → 030–037+038 (Phase 3 BASELINE.md, 48h calendar gate on 033, DI baseline 038)
         → 040 → 041 → 042 (Outcome A SAFE, 24h bake each)
         ║   ║
         ║   └─ 043 → 044 → 045 (Outcome B vuln patches, sequential)
         ║
-        └─ 046 → [047/048/049/050 parallel] → 051 (Outcome E)
+        └─ 046 → [047/048/049/050 parallel] → 051 (Outcome E — single squash-merge PR)
               → 052 → 053 → 054 (verification + Phase 4 gate)
                 → 060 → 061 (Phase 5 demo + 48h bake)
                   → 062 → 063 (Phase 5 prod + 7d, conditional on UQ-02)
-                    → 070–081 (Phase 6 codification, sequential)
+                    → 070–082 (Phase 6 codification, sequential; 082 = FR-C6 gate)
                       → 090 (Wrap-up)
 ```
 
-**Longest dependency chain**: 001 → 008 → 015 → 018 → 022 → 033 (48h calendar) → 037 (depends on 038) → 040 → 041 → 042 (each 24h bake) → 054 → 060 → 061 (48h bake) → 062 → 063 (7d bake) → 070 → 090
+**Longest dependency chain**: 001 → 009 → 008 → 015 → 018 → 022 → 033 (48h calendar) → 037 (depends on 038) → 040 → 041 → 042 (each 24h bake) → 054 → 060 → 061 (48h bake) → 062 → 063 (7d bake) → 070 → 082 → 090
 
 **Calendar duration estimate**: 4–6 weeks dominated by 48h dev / 48h demo / 7d prod bake windows.
 
@@ -200,10 +204,10 @@
 | 015 | Reflection-load probe needs build instrumentation (`Program.cs` localhost-only diagnostic flag) | Single-purpose commit; revert after baseline captured |
 | 033 | 48h App Insights baseline window blocks Phase 4 start | Coordinate with sibling-project owners; capture outside integration window |
 | 040, 041, 042 | Each Outcome A SAFE candidate has 24h dev bake | Sequential execution + App Insights monitoring per per-candidate procedure |
-| 043 | NU1903 HIGH Kiota Abstractions patch may force version chain bump (Graph SDK chain-lock) | Treat as MEDIUM-tier with dual approval; verify Kiota chain alignment before commit |
+| 043 | NU1903 HIGH Kiota Abstractions patch may force version chain bump (Graph SDK chain-lock) | Treat as MEDIUM-tier with owner sign-off + AI verification per NFR-08 revised; verify Kiota chain alignment before commit |
 | 047–050 | Group F parallel migration touches `Sprk.Bff.Api/Services/` — risk of merge conflicts | Distinct consumer subfolders (Finance/Workspace/Jobs/Dataverse) — verify no shared file edits across agents |
 | 051 | Handler relocation distinct from existing `Services/Ai/Handlers/` | Task documentation explicitly states the distinction; commit message includes clarification |
-| 062 | Production deploy — high blast radius | Dual approver + ops authorization required; cumulative pre-tested changeset; 10-min rollback rehearsed |
+| 062 | Production deploy — high blast radius | Owner sign-off + AI verification (NFR-08 revised) + ops team authorization required; cumulative pre-tested changeset; 10-min rollback rehearsed (task 009) |
 
 ---
 

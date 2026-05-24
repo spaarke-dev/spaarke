@@ -3,13 +3,13 @@
     <title>Phase 0 gate review — all checkboxes resolved</title>
     <status>not-started</status>
     <estimated-effort>30 minutes</estimated-effort>
-    <assigned>Project owner + dual approver</assigned>
+    <assigned>Project owner</assigned>
     <started></started>
     <completed></completed>
     <tags>coordination, governance, phase-0, gate</tags>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Gate task; sequential after 002–007 complete</parallel-reason>
+    <parallel-reason>Gate task; sequential after 002–007 + 009 complete</parallel-reason>
     <rigor>STANDARD</rigor>
   </metadata>
 
@@ -19,12 +19,10 @@
     cleared to enter Phase 1. Without this gate Phase 1 cannot start.
   </prompt>
 
-  <role>Project owner + dual approver — joint review.</role>
+  <role>Project owner (operator-only model per NFR-08 revised 2026-05-24).</role>
 
   <goal>
-    All 9 Phase 0 checklist items in design.md §6 are confirmed complete (item 7 was pre-resolved
-    by extraction assessment); UQ-01…UQ-07 each has a documented answer in CLAUDE.md → Decisions
-    Made section; Phase 1 is authorized to begin.
+    All Phase 0 checklist items confirmed complete; UQ-01 RESOLVED (operator-only); UQ-02..UQ-07 each has a documented answer in CLAUDE.md → Decisions Made section; senior-review M3 (active BFF projects enumeration via expanded task 004) complete; G5 rollback drill (task 009) wall-clock recorded; Phase 1 is authorized to begin.
   </goal>
 
   <inputs>
@@ -50,27 +48,32 @@
   <context>
     <background>
       This is the formal authorization point. Without this gate, Phase 1 inventory work cannot
-      begin. The gate verifies that the project has its dual approver, sibling-coordination,
-      baseline-window scheduling, and prod-process decision in place.
+      begin. The gate verifies that the project has operator-only approval model documented,
+      sibling-coordination (expanded scope per M3), baseline-window scheduling, prod-process
+      decision, and a verified rollback capability (NFR-06 wall-clock confirmed via task 009).
     </background>
     <dependencies>
-      <dependency task="002" status="not-started">Dual approver designated</dependency>
-      <dependency task="003" status="not-started">Prod deploy process determined</dependency>
-      <dependency task="004" status="not-started">Perf project coordinated</dependency>
-      <dependency task="005" status="not-started">Insights Engine baseline window coordinated</dependency>
-      <dependency task="006" status="not-started">CI ceiling confirmed</dependency>
-      <dependency task="007" status="not-started">Outcome E scope + facade confirmed</dependency>
+      <dependency task="002" status="not-started">Operator-only model documented (UQ-01 resolved)</dependency>
+      <dependency task="003" status="not-started">Prod deploy process determined (UQ-02)</dependency>
+      <dependency task="004" status="not-started">All active BFF-touching projects enumerated + coordinated (M3 expanded scope)</dependency>
+      <dependency task="005" status="not-started">Insights Engine baseline window + facade adoption agreement (UQ-04 + G4)</dependency>
+      <dependency task="006" status="not-started">CI ceiling confirmed (UQ-05)</dependency>
+      <dependency task="007" status="not-started">Outcome E scope + facade + G1 handler reconciliation (UQ-06, UQ-07, G1)</dependency>
+      <dependency task="009" status="not-started">Rollback drill wall-clock recorded (G5 / NFR-06 verification)</dependency>
     </dependencies>
   </context>
 
   <steps>
-    <step order="1">Verify tasks 001–007 all show ✅ in TASK-INDEX.md</step>
-    <step order="2">Verify each UQ-01…UQ-07 has a corresponding Decisions Made entry in CLAUDE.md</step>
-    <step order="3">Verify Phase 0 checklist items 1–9 in design.md §6 are all checked (item 7 pre-resolved)</step>
+    <step order="1">Verify tasks 001–007 + 009 all show ✅ in TASK-INDEX.md</step>
+    <step order="2">Verify each UQ-01…UQ-07 has a corresponding Decisions Made entry in CLAUDE.md (UQ-01 marked RESOLVED — operator-only)</step>
+    <step order="3">Verify design.md §6 Phase 0 — all items checked</step>
     <step order="4">Verify Phase 5 scope decision (tasks 062, 063 status: 🔲 in-scope OR ⏸ deferred)</step>
-    <step order="5">Owner + dual approver record joint gate approval (PR comment or commit)</step>
-    <step order="6">Update CLAUDE.md → Project Status from "Phase 0 pending" to "Phase 1 ready"</step>
-    <step order="7">Update TASK-INDEX.md status of task 008 from 🔲 to ✅</step>
+    <step order="5">Verify rollback drill (task 009) wall-clock ≤ 10 min OR mitigation documented (NFR-06)</step>
+    <step order="6">Verify expanded BFF-touching project enumeration (task 004 / M3) present in CLAUDE.md</step>
+    <step order="7">Verify Insights Engine facade adoption agreement (task 005 / G4) recorded</step>
+    <step order="8">Owner records gate approval (PR comment or commit) — operator-only model per NFR-08 revised</step>
+    <step order="9">Update CLAUDE.md → Project Status from "Phase 0 pending" to "Phase 1 ready"</step>
+    <step order="10">Update TASK-INDEX.md status of task 008 from 🔲 to ✅</step>
   </steps>
 
   <tools><tool name="git">Phase 0 gate approval commit</tool></tools>
@@ -78,14 +81,15 @@
   <outputs>
     <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Project Status update)</output>
     <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
-    <output type="report">Gate approval comment or commit with owner + dual approver record</output>
+    <output type="report">Gate approval comment or commit with owner record (operator-only model)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Tasks 001–007 all ✅ in TASK-INDEX.md</criterion>
-    <criterion testable="true">CLAUDE.md → Decisions Made has 7 UQ entries</criterion>
-    <criterion testable="true">design.md §6 Phase 0 — all 9 boxes checked</criterion>
+    <criterion testable="true">Tasks 001–007 + 009 all ✅ in TASK-INDEX.md</criterion>
+    <criterion testable="true">CLAUDE.md → Decisions Made has entries for UQ-01 (RESOLVED) through UQ-07 + M3 enumeration + G4 facade agreement + G5 rollback drill</criterion>
+    <criterion testable="true">design.md §6 Phase 0 — all boxes checked</criterion>
     <criterion testable="true">CLAUDE.md → Project Status updated to "Phase 1 ready"</criterion>
-    <criterion testable="true">Joint owner + dual approver gate ACK recorded</criterion>
+    <criterion testable="true">Owner gate ACK recorded (operator-only model)</criterion>
+    <criterion testable="true">NFR-06 rollback wall-clock ≤ 10 min OR mitigation plan documented</criterion>
   </acceptance-criteria>
 </task>

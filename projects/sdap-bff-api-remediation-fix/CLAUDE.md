@@ -28,7 +28,7 @@
 ### Project Metadata
 - **Project Name**: sdap-bff-api-remediation-fix
 - **Type**: Backend remediation (BFF API) + documentation codification
-- **Complexity**: High — 5 outcomes × 7 phases × ~55 tasks; 4–6 week calendar
+- **Complexity**: High — 5 outcomes × 7 phases × 63 tasks (revised 2026-05-24); 4–6 week calendar
 - **Module touched**: `src/server/api/Sprk.Bff.Api/`
 - **Sub-agent write boundary**: All `.claude/` updates (Phase 6) are main-session-only
 
@@ -173,6 +173,19 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 - **2026-05-20**: Outcome E uses small focused facade interfaces (`IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi`) per UQ-07 default. Owner confirms in Phase 0 task 007.
 - **2026-05-20**: Master pulled into work branch at pipeline pre-flight (PF-1 resolution). Build verified passing (0 errors, 17 warnings).
 - **2026-05-20**: **Sequencing decision (owner)** — `spaarke-ai-platform-unification-r2` finishes initial test-feedback refinements FIRST; THEN this BFF remediation project starts Phase 0. Rationale: r2 just deployed and is in active refinement testing on the same dev environment (`spe-api-dev-67e2xz`); r2 touches many Outcome E target files (`Services/Ai/Chat/`, `Api/Ai/ChatEndpoints.cs`, etc.); Phase 3 48h App Insights baseline + Phase 4 24-48h bake windows need a quiet dev environment. Sequential avoids merge conflicts in Outcome E and ensures clean observation windows. Operator signals "r2 refinement complete" before invoking `/task-execute 001`.
+
+- **2026-05-24**: **Senior architect review applied (8 Must items + dual-approver removal)**. Reviewer findings at `~/.claude/plans/merry-popping-meerkat.md`. Changes:
+  - **NEW FR-C6** + new task 082: CI gate blocks direct CRUD→AI dependency injection (owner-binding per M5). Converts Outcome E from one-time refactor into permanent architectural boundary.
+  - **NEW task 009** rollback drill (G5): wall-clock NFR-06 verification before Phase 4 begins; operator-only.
+  - **Outcome E squash** (G9 owner-binding): tasks 046–051 committed individually but bundled into single atomic PR for clean rollback. See plan.md PR-2.
+  - **Dependabot deferral rule** (G8): plan.md PR-1 — Dependabot PRs touching BFF csproj auto-deferred to weekly owner triage.
+  - **G1 handler reconciliation**: FR-E3 6-handler list is non-binding; Phase 1 inventory produces authoritative list per "AI-coupled rule" (handler references `Services.Ai.*` AND not CRUD-coupled). Task 051 uses inventory output.
+  - **G2 grep scope**: FR-E2 acceptance grep is production-scope-only (excludes tests, DI module special-cased). Task 053 updated.
+  - **G3 PR template**: task 074 bundles `.github/pull_request_template.md` refresh — adds ADR-013/028/029, Justification section, label-gating instructions.
+  - **G4 Insights Engine facade agreement**: task 005 produces written agreement for Insights Engine PRs post-task-046 to use facade. Belt-and-suspenders to FR-C6.
+  - **M3 expanded BFF-coordination scope**: task 004 renamed + scope expanded to enumerate ALL active BFF-touching projects (not just perf-enhancement). Per `git worktree list` + memory.
+
+- **2026-05-24**: **Operator-only approval model (NFR-08 revised; UQ-01 RESOLVED)**. Rationale: Spaarke uses AI-directed coding procedures (`task-execute` invokes `adr-check` + `code-review` at Step 9.5 FULL rigor) + mechanical CI gates (FR-C1–C6). Combined, these provide the "second pair of eyes" doing technical verification. The owner provides judgment + sign-off. Dual-approver enterprise pattern is unnecessary friction for single-owner operating model. Applied to spec.md NFR-08, plan.md PR-3, all Phase 4/5 task POMLs. Task 002 repurposed from "designate dual approver" to "document operator-only model."
 
 ---
 

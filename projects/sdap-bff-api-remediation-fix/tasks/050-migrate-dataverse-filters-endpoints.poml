@@ -11,6 +11,7 @@
     <rigor>FULL</rigor>
   </metadata>
 
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
   <prompt>
     Migrate remaining CRUD→AI consumers across Dataverse (0 files actual per pre-flight; spec said 2), `Api/Filters/` (1 file: `PlaybookAuthorizationFilter`; spec said 5+), and Api endpoints (6 additional files: `DailyBriefingEndpoints`, `PlaybookEndpoints`, `ChatEndpoints`, `AiPlaybookBuilderEndpoints`, `AgentEndpoints`, `WorkspaceMatterEndpoints` — confirmed at pre-flight). Use facade interfaces from task 046.
 

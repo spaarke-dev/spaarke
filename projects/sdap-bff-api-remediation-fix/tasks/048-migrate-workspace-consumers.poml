@@ -11,6 +11,7 @@
     <rigor>FULL</rigor>
   </metadata>
 
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
   <prompt>
     Migrate ~2 Workspace consumers (`MatterPreFillService`, `BriefingService` — confirmed at pipeline pre-flight; spec said 4) to consume `IBriefingAi` / `IWorkspacePrefillAi` facade interfaces.
 

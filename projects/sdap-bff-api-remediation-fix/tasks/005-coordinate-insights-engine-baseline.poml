@@ -14,18 +14,19 @@
   </metadata>
 
   <prompt>
-    Confirm with the `ai-spaarke-insights-engine-r1` project owner WHEN Phase 1 integration is
-    expected to land in `Sprk.Bff.Api`. This project's Phase 3 baseline must be captured EITHER
-    fully BEFORE the Insights Engine integration starts OR fully AFTER it is stable — never
-    mid-integration (would invalidate App Insights baseline metrics).
+    Two distinct deliverables:
+
+    1. **Baseline timing coordination (original UQ-04)**: Confirm with the `ai-spaarke-insights-engine-r1` project owner WHEN Phase 1 integration is expected to land in `Sprk.Bff.Api`. This project's Phase 3 baseline must be captured EITHER fully BEFORE the Insights Engine integration starts OR fully AFTER it is stable — never mid-integration (would invalidate App Insights baseline metrics).
+
+    2. **Facade adoption agreement (senior-review G4 / item #4, 2026-05-24)**: Obtain WRITTEN agreement that Insights Engine PRs merging AFTER Phase 4 task 046 (facade creation) MUST consume `Services/Ai/PublicContracts/` facade interfaces rather than injecting `IOpenAiClient` / `IPlaybookService` directly. Belt-and-suspenders to FR-C6 CI gate (lands in Phase 6 task 082); during the gap between task 046 and task 082, this written agreement is the only thing preventing Insights Engine's new code from violating Outcome E.
   </prompt>
 
   <role>Project coordinator.</role>
 
   <goal>
-    Documented agreement: either (a) baseline captured before integration window starts, or
-    (b) baseline deferred until after integration is stable. Calendar window for Phase 3 task 033
-    (48h App Insights baseline) reserved.
+    Two documented agreements:
+    (a) Baseline window choice: pre-integration OR post-stable; specific calendar window reserved for Phase 3 task 033.
+    (b) Insights Engine facade adoption commitment for any PR merged after Phase 4 task 046.
   </goal>
 
   <inputs>
@@ -63,9 +64,10 @@
     <step order="1">Contact `ai-spaarke-insights-engine-r1` owner</step>
     <step order="2">Confirm Phase 1 integration target dates</step>
     <step order="3">Choose baseline window: pre-integration OR post-stable</step>
-    <step order="4">Record decision and scheduled baseline window in CLAUDE.md</step>
-    <step order="5">Update Phase 0 checklist item 4 to checked</step>
-    <step order="6">Update TASK-INDEX.md status of task 005 from 🔲 to ✅</step>
+    <step order="4">Obtain WRITTEN agreement that any Insights Engine PR merged after this project's Phase 4 task 046 uses `Services/Ai/PublicContracts/` facade interfaces — NOT direct injection of `IOpenAiClient`/`IPlaybookService` (senior review G4)</step>
+    <step order="5">Record both decisions (baseline window + facade adoption commitment) in CLAUDE.md → Decisions Made</step>
+    <step order="6">Update Phase 0 checklist item 4 to checked</step>
+    <step order="7">Update TASK-INDEX.md status of task 005 from 🔲 to ✅</step>
   </steps>
 
   <tools><tool name="git">Update CLAUDE.md + task index</tool></tools>
@@ -77,6 +79,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">UQ-04 answer recorded with scheduled baseline window</criterion>
+    <criterion testable="true">Written facade-adoption agreement recorded for Insights Engine PRs post-task-046 (G4)</criterion>
     <criterion testable="true">Phase 0 checklist item 4 marked complete</criterion>
   </acceptance-criteria>
 </task>

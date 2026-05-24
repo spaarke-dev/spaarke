@@ -63,7 +63,7 @@ The project is considered **complete** when:
 
 **Outcome D — Codification**
 - [ ] Deploy-script size guard hard-fails by default (SC-11)
-- [ ] CI guards: non-Linux RID, `*.js.map`, vulnerable-transitive HIGH (SC-12, SC-13, SC-14)
+- [ ] CI guards: non-Linux RID, `*.js.map`, vulnerable-transitive HIGH, **direct CRUD→AI injection (FR-C6 / SC-28)** (SC-12, SC-13, SC-14, SC-28)
 - [ ] `deploy-bff-api.yml` G-2 health-check + G-3 actions versions fixed (SC-15, SC-16)
 - [ ] ADR-029 published — concise + full + indexed (SC-17)
 - [ ] `.claude/constraints/azure-deployment.md` updated with Publish Hygiene (SC-18)
@@ -119,8 +119,8 @@ The project is considered **complete** when:
 | Reflection-loaded code breaks after package removal | High | Medium | Tiered risk + Phase 1 dynamic probe + 24–48h bake + App Insights monitoring; REJECT trimming/AOT |
 | Insights Engine Phase 1 inflates baseline mid-project | Medium | Medium | Phase 0 coordination with Engine owner; capture baseline OUTSIDE integration window |
 | Vuln transitive bump introduces behavioral change | Medium | Medium per package | Treat each as own Phase 4 candidate with full bake; do not batch |
-| Production regresses despite full validation | Very high | Very low | Cumulative pre-tested changeset; rollback via `git revert` + `Deploy-BffApi.ps1`; dual approval |
-| Sole-approver unavailable | Medium | Medium | Phase 0 names dual approver; approval can come from either |
+| Production regresses despite full validation | Very high | Very low | Cumulative pre-tested changeset; rollback via `git revert` + `Deploy-BffApi.ps1`; owner sign-off + AI verification (NFR-08 revised) + ops team; rollback drill rehearsed (task 009) |
+| ~~Sole-approver unavailable~~ — n/a from 2026-05-24 | n/a | n/a | Operator-only model per NFR-08 revised; AI-directed `adr-check` + `code-review` + CI guards provide check-and-balance |
 | Scope creep ("upgrade .NET 9 while we're at it") | High | Medium | §Out of Scope is binding; additions become separate projects |
 
 ## Dependencies
@@ -141,4 +141,5 @@ The project is considered **complete** when:
 | 2026-05-19 | 0.1 | Initial approach.md framing | Project owner |
 | 2026-05-20 | 0.2 | design.md revised after extraction assessment; Outcome E added | Multi-turn design conversation |
 | 2026-05-20 | 0.3 | spec.md authored from design.md (308 lines) | design-to-spec |
-| 2026-05-20 | 0.4 | Project scaffolding generated (README, plan, CLAUDE.md, ~55 tasks) | project-pipeline |
+| 2026-05-20 | 0.4 | Project scaffolding generated (README, plan, CLAUDE.md, 60 tasks) | project-pipeline |
+| 2026-05-24 | 0.5 | Senior architect review applied (8 Must items + dual-approver removal). +009 (rollback drill), +038 (DI baseline), +082 (FR-C6 CI gate, binding); +Process Rules; task count 60→63. UQ-01 RESOLVED (operator-only NFR-08 revised). | Senior review + project owner |
