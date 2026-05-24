@@ -316,39 +316,27 @@ const useStyles = makeStyles({
       display: "none",
     },
   },
-  // Task 137 (R13 follow-up #16, 2026-05-24): operator wants FIXED-width
-  // fields with constant visible gaps, wrapping when row narrows.
-  // Task 136's `flex: 1 0 140px` made fields grow to fill remaining
-  // space — at wide viewports each field became ~220px and the 24px
-  // gap looked proportionally small. Operator: "what I would expect
-  // is that the space between the fields is constant, and if the
-  // screen width reduces then the fields would go to the next line."
+  // Task 138 (R13 follow-up #17, 2026-05-24): operator confirmed via
+  // DevTools that the gap CSS is being emitted but is much narrower
+  // than 28px configured. Griffel's `gap` shorthand isn't emitting the
+  // column-gap value reliably in this stack across tasks 134-137.
+  // Falling back to explicit `marginRight` on each field — old-school
+  // CSS that works regardless of any Griffel atomic-CSS quirks.
   //
-  // New approach:
-  //   - Each field: `flex: 0 0 140px` (fixed 140px, NO grow, NO shrink).
-  //     Deliberate compact width per operator "picklist width can be
-  //     reduced to provide more space."
-  //   - Gap bumped to `12px 28px` for clear visual breathing room.
-  //   - Action group: `flex: 0 0 auto` + `marginLeft: auto` pushes it
-  //     to the right edge WITHOUT using a flex-spacer (a spacer with
-  //     flex: 1 would consume all remaining width and block flex-wrap
-  //     from engaging when needed). The auto-margin sits the actions
-  //     at the right when there's space, and wraps with the row when
-  //     there isn't.
+  // The row gap (row-gap when fields wrap) still uses Griffel's
+  // shorthands.gap single-arg form (vertical-only, which Griffel
+  // handles reliably).
   dateRangeRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-end",
     flexWrap: "wrap",
-    gap: "12px 28px",
+    rowGap: "12px",
     ...shorthands.padding("8px", "12px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
   // Task 137: action group uses `margin-left: auto` to right-align
-  // without disrupting flex-wrap. When all items fit on one row, the
-  // auto margin pushes actions to the right edge. When the row is
-  // too narrow and actions wrap to a new line, the auto margin still
-  // right-aligns them on their new row.
+  // without disrupting flex-wrap.
   filterActions: {
     display: "flex",
     flexDirection: "row",
@@ -361,12 +349,16 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     ...shorthands.gap("4px"),
-    // Task 137: fixed-width fields. `0 0 140px` = no grow, no shrink,
-    // exactly 140px. Fields stay compact even when row has empty space
-    // (the action group's marginLeft:auto eats the extra). Wrap
-    // engages when total items exceed row width.
     flex: "0 0 140px",
     minWidth: "0",
+    // Task 138: explicit horizontal spacing between fields via
+    // marginRight. This is the reliable old-school approach since
+    // Griffel's gap shorthand wasn't emitting the column-gap value
+    // (operator confirmed visually + via DevTools). Every field gets
+    // 28px right-margin; the last field's trailing margin is consumed
+    // by the action group's marginLeft:auto, so it's invisible to
+    // the user.
+    marginRight: "28px",
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
