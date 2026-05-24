@@ -1,11 +1,12 @@
 <task id="002" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Document operator-only approval model (UQ-01 resolved 2026-05-24)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>15 minutes</estimated-effort>
+    <actual-effort>~5 min (verification only — decision already made 2026-05-24)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>coordination, governance, phase-0</tags>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -82,4 +83,14 @@
     <criterion testable="true">spec.md NFR-08 reflects revised owner-sign-off + AI-verification model</criterion>
     <criterion testable="true">Phase 0 checklist item 6 marked complete</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      UQ-01 verification task. The operator-only model decision was already recorded in CLAUDE.md
+      on 2026-05-24 (before this task ran). This task verified all references are consistent:
+      spec.md NFR-08 revised + UQ-01 RESOLVED, design.md §6 Phase 0 item 6 marked N/A via override,
+      Phase 4/5 task POMLs (043, 044, 045, 054, 060, 062, 008) scrubbed of dual-approver references.
+      Added explicit Task 002 entry to CLAUDE.md Phase 0 Group A Decisions section.
+    </completion-summary>
+  </notes>
 </task>

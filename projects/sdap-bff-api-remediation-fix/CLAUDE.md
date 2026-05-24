@@ -193,6 +193,26 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 ---
 
+### Phase 0 Group A Decisions (tasks 002–007 — completed 2026-05-24)
+
+- **Task 002 — UQ-01 RESOLVED**: Operator-only approval model documented. spec.md NFR-08 (revised) + UQ-01 (RESOLVED) verified accurate. Phase 0 checklist item 6 marked N/A via override. Verification rigor comes from: (a) AI-directed `adr-check` + `code-review` at task-execute Step 9.5, (b) CI guards FR-C1–C6 (mechanical), (c) owner judgment + sign-off authority.
+
+- **Task 003 — UQ-02 = YES**: Canonical prod deploy process EXISTS at [`docs/procedures/production-release.md`](../../docs/procedures/production-release.md) (Last Updated 2026-04-06; Owner: Platform Operations). Drives 3 deployment tracks: Dataverse (SpaarkeMaster solution via `pac`), Azure (BFF API via `Deploy-BffApi.ps1` + Office Add-ins via `Deploy-OfficeAddins.ps1`), Reference Data (playbooks, chat context, Copilot agent). Sequential per-environment; gated by `Validate-DeployedEnvironment.ps1`; tagged via git tag at completion. Master orchestration: `scripts/Deploy-Release.ps1`. **Tasks 062 + 063 stay in scope.** Phase 5 includes prod deploy + 7-day observation as originally designed.
+
+- **Task 004 — UQ-03 expanded (M3)**: 24 active worktree branches enumerated; ALL at 0 commits ahead of master at Phase 0 close. No unmerged BFF work exists. Dev environment (`spe-api-dev-67e2xz`) is effectively quiet for Phase 3 baseline capture. **Operator followup commitment (residual risk)**: New BFF-touching work CAN start in any branch during the 4-6 week project window. Operator commits to: (a) run `git log master..<branch> -- src/server/api/Sprk.Bff.Api/` weekly during Phase 3-4 to surface new entrants, (b) coordinate sequencing if any branch starts BFF-touching work mid-bake. Not a hard blocker for Phase 0 gate.
+
+- **Task 005 — UQ-04 + G4**: Insights Engine project (`work/ai-spaarke-insights-engine-r1`) verified pre-implementation (0 commits ahead of master). **Baseline window decision**: capture Phase 3 baseline NOW (pre-integration) — Engine has not started integration so no contamination risk. **G4 facade adoption agreement**: PENDING WRITTEN AGREEMENT — operator must contact Engine owner to confirm any Engine PR merged after this project's Phase 4 task 046 (facade creation) uses `Services/Ai/PublicContracts/` facade rather than direct `IOpenAiClient`/`IPlaybookService` injection. Belt-and-suspenders to FR-C6 CI gate (lands in Phase 6 task 082). Flagged as operator action item before Phase 4 task 046 starts; not blocking Phase 0 close.
+
+- **Task 006 — UQ-05 CI guard size ceiling = baseline + 10%** (design.md §3 default applied; owner ACK via task 001). Baseline captured in Phase 3 task 035; current pre-Outcome-A baseline is ~75.2 MB compressed (per 2026-05-24 smoke-test deploy). If Phase 3 baseline after Outcome A SAFE candidates is ~60 MB, ceiling = ~66 MB. Consumable by Phase 6 task 070 (`Deploy-BffApi.ps1` hard-fail size guard) and CI step (FR-C5). Owner reserves right to tighten to +5% after Outcome A measurable results.
+
+- **Task 007 — UQ-06, UQ-07, PF-3, G1**:
+  - **UQ-06**: `Spaarke.Core` + `Spaarke.Dataverse` package lists = **inventory-only** (default). No pruning in this project. Wider audit is a separate follow-up project.
+  - **UQ-07**: Outcome E facade granularity = **small focused interfaces** per design default. Phase 4 task 046 creates `IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi` (final list may evolve based on Phase 1 inventory).
+  - **PF-3**: Outcome E task scope defers to Phase 1 inventory output (CRUD→AI consumers count ~59 files / 148 occurrences, not spec's 20). Tasks 047–050 use inventory-derived consumer list. Spec.md left intact; Phase 1 inventory is authoritative.
+  - **G1 handler reconciliation**: AI-coupled rule defined per FR-E3 revised — a handler is AI-coupled if it references `Sprk.Bff.Api.Services.Ai.*` AND does NOT require `Spaarke.Dataverse` / `Microsoft.Xrm.Sdk` namespaces. Preliminary 6-handler list in initial design is **non-binding**. Task 051 commits to using Phase 1 inventory output (task 015 reflection probe + task 014 static usage map) as the authoritative handler list.
+
+---
+
 ## Implementation Notes
 
 <!-- Add notes about gotchas, workarounds, or important learnings during implementation -->

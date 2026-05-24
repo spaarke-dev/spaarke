@@ -161,15 +161,15 @@ Phases are a strict pipeline — each one's evidence is the next one's input. Wi
 
 **Goal**: Resolve uncertainty BEFORE work starts. Concrete checklist (no work proceeds until every box is checked):
 
-1. ☐ Owner sign-off on this design.md
-2. ☐ Owner sign-off on §3 Resolved Decisions
-3. ☐ Verify no in-flight deploy from `sdap-bff-api-and-performance-enhancement-r1`
-4. ☐ Coordinate baseline-capture window with `ai-spaarke-insights-engine-r1` owner (capture BEFORE Engine integration starts, or after stable — never mid-integration)
-5. ☐ Decide: is Phase 5 (prod promotion) in this project, OR is this project dev+demo only? Depends on prod deploy process existing.
-6. ☐ Identify dual-approver for MEDIUM/HIGH candidates (likely Auth team lead given BFF auth scope)
-7. ☐ ~~Run extraction-assessment CC-PROMPT~~ **DONE 2026-05-20** — see [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md). Conclusion: keep in BFF, add Outcome E. No further action.
-8. ☐ Verify the test project path matches reality: `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj`
-9. ☐ Confirm Outcome E scope with owner: facade introduction (~10 file edits) + AI-coupled job handler relocation (~6 file moves) + BFF CLAUDE.md documentation update. Estimated 3–5 days; runs in parallel with Phase 4 SAFE candidates.
+1. ☑ Owner sign-off on this design.md — **ACK'd 2026-05-24 via task 001**
+2. ☑ Owner sign-off on §3 Resolved Decisions — **ACK'd 2026-05-24 via task 001 (all 9 as-is, including operator-only override of #9)**
+3. ☑ Verify no in-flight deploy from `sdap-bff-api-and-performance-enhancement-r1` (task 004 — scope expanded to all active BFF-touching projects) — **2026-05-24: enumerated all 24 worktrees; 0 commits ahead of master across the board; dev environment quiet for Phase 3 baseline**
+4. ☑ Coordinate baseline-capture window with `ai-spaarke-insights-engine-r1` owner (capture BEFORE Engine integration starts, or after stable — never mid-integration) (task 005) — **2026-05-24: pre-integration window chosen (Engine has 0 ahead of master); G4 written facade agreement flagged as operator followup before task 046**
+5. ☑ Decide: is Phase 5 (prod promotion) in this project, OR is this project dev+demo only? Depends on prod deploy process existing. (task 003) — **2026-05-24: YES, canonical process exists at docs/procedures/production-release.md; Phase 5 in scope**
+6. ☑ ~~Identify dual-approver for MEDIUM/HIGH candidates~~ **N/A — overridden 2026-05-24 via operator-only model (NFR-08 revised, UQ-01 RESOLVED). Task 002 repurposed to document the model.**
+7. ☑ ~~Run extraction-assessment CC-PROMPT~~ **DONE 2026-05-20** — see [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md). Conclusion: keep in BFF, add Outcome E. No further action.
+8. ☑ Verify the test project path matches reality: `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` — **verified at pipeline pre-flight 2026-05-20; reconfirmed in task 007**
+9. ☑ Confirm Outcome E scope with owner: facade introduction (~10 file edits) + AI-coupled job handler relocation (~6 file moves) + BFF CLAUDE.md documentation update. Estimated 3–5 days; runs in parallel with Phase 4 SAFE candidates. (task 007) — **2026-05-24: ACK'd. UQ-06=inventory-only, UQ-07=small focused, PF-3 deferred to Phase 1, G1 handler list deferred to Phase 1**
 
 **Risk**: None. All planning.
 

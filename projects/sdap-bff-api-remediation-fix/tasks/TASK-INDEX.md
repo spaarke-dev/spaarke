@@ -21,13 +21,13 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 001 | Owner sign-off on design.md §3 Resolved Decisions | 🔲 | No | STANDARD | — |
-| 002 | Document operator-only approval model (UQ-01 RESOLVED 2026-05-24) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 003 | Determine prod deploy process scope (UQ-02) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 004 | Enumerate + coordinate ALL active BFF-touching projects (UQ-03 expanded per M3) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 005 | Coordinate baseline window + facade adoption agreement (UQ-04 + G4) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 006 | Confirm CI guard size ceiling (UQ-05) | 🔲 | Yes (Group A) | STANDARD | 001 |
-| 007 | Confirm Outcome E scope + facade granularity + G1 handler reconciliation (UQ-06, UQ-07, G1) | 🔲 | Yes (Group A) | STANDARD | 001 |
+| 001 | Owner sign-off on design.md §3 Resolved Decisions | ✅ | No | STANDARD | — |
+| 002 | Document operator-only approval model (UQ-01 RESOLVED 2026-05-24) | ✅ | Yes (Group A) | STANDARD | 001 |
+| 003 | Determine prod deploy process scope (UQ-02) | ✅ | Yes (Group A) | STANDARD | 001 |
+| 004 | Enumerate + coordinate ALL active BFF-touching projects (UQ-03 expanded per M3) | ✅ | Yes (Group A) | STANDARD | 001 |
+| 005 | Coordinate baseline window + facade adoption agreement (UQ-04 + G4) | ✅ | Yes (Group A) | STANDARD | 001 |
+| 006 | Confirm CI guard size ceiling (UQ-05) | ✅ | Yes (Group A) | STANDARD | 001 |
+| 007 | Confirm Outcome E scope + facade granularity + G1 handler reconciliation (UQ-06, UQ-07, G1) | ✅ | Yes (Group A) | STANDARD | 001 |
 | 009 | Rollback drill — verify NFR-06 (<10 min) wall-clock (G5) | 🔲 | No | STANDARD | 001 |
 | 008 | Phase 0 gate review — all checkboxes resolved | 🔲 | No | STANDARD | 002–007, 009 |
 

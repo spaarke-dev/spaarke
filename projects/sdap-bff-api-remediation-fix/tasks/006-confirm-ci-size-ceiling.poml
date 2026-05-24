@@ -1,11 +1,12 @@
 <task id="006" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Confirm CI guard size ceiling: baseline+10% default (UQ-05)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>15 minutes</estimated-effort>
+    <actual-effort>~5 min (design default applied; owner ACK via task 001)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>coordination, phase-0, ci-cd</tags>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -76,4 +77,17 @@
     <criterion testable="true">Numeric size ceiling (percentage or MB) recorded in CLAUDE.md</criterion>
     <criterion testable="true">Value is consumable by Phase 6 task 070 implementation</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      UQ-05 = baseline + 10% (design.md §3 default applied; owner ACK via task 001 covers this). Current
+      pre-Outcome-A baseline is ~75.2 MB compressed (per 2026-05-24 smoke-test deploy). If Phase 3 baseline
+      after Outcome A SAFE candidates is ~60 MB, ceiling = ~66 MB. Phase 3 task 035 captures the
+      authoritative baseline; Phase 6 task 070 consumes the +10% formula in Deploy-BffApi.ps1 hard-fail
+      guard + CI step (FR-C5). Owner reserves right to tighten to +5% after Outcome A measurable results.
+    </completion-summary>
+    <ceiling-formula>baseline + 10%</ceiling-formula>
+    <baseline-source>Phase 3 task 035 (compressed publish.zip size)</baseline-source>
+    <consumed-by>Phase 6 task 070 (Deploy-BffApi.ps1 hard-fail size guard); CI gate per FR-C5</consumed-by>
+  </notes>
 </task>

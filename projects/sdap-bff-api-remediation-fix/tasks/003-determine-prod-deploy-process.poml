@@ -1,11 +1,12 @@
 <task id="003" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Determine prod deploy process scope (UQ-02; decides Phase 5)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~10 min (docs/procedures search + Deploy-Release.ps1 verification)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>coordination, governance, phase-0, deploy</tags>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -86,4 +87,20 @@
     <criterion testable="true">If NO: tasks 062, 063 marked ⏸ deferred in TASK-INDEX.md</criterion>
     <criterion testable="true">Phase 0 checklist item 5 marked complete</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Investigation: Glob'd docs/procedures/, docs/guides/ and found docs/procedures/production-release.md
+      (Last Updated 2026-04-06; Owner: Platform Operations). It documents the canonical 3-track release:
+      (1) Dataverse SpaarkeMaster solution via pac, (2) Azure BFF API via Deploy-BffApi.ps1 + Office Add-ins
+      via Deploy-OfficeAddins.ps1, (3) Reference Data via Deploy-NotificationPlaybooks.ps1 +
+      Deploy-ChatContextMappings.ps1 + Deploy-CopilotAgent.ps1. Master orchestration: scripts/Deploy-Release.ps1
+      (verified present). Validation: scripts/Validate-DeployedEnvironment.ps1. Sequential per-environment.
+      Tagged via git tag at completion.
+    </completion-summary>
+    <answer>YES — canonical prod deploy process exists</answer>
+    <doc-path>docs/procedures/production-release.md</doc-path>
+    <orchestration-script>scripts/Deploy-Release.ps1</orchestration-script>
+    <impact>Tasks 062 + 063 STAY IN SCOPE. Phase 5 includes prod deploy + 7-day observation as originally designed. Phase 5 procedure must invoke Deploy-Release.ps1 (or the canonical 3-track sequence) — NOT a bespoke prod-deploy procedure.</impact>
+  </notes>
 </task>

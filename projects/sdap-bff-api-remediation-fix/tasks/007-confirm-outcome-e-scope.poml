@@ -1,11 +1,12 @@
 <task id="007" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Confirm Outcome E scope + facade granularity (UQ-06, UQ-07)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 min (design defaults applied; owner ACK via task 001 covers UQ-06/UQ-07)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>coordination, phase-0, ai-boundary, facade</tags>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -111,4 +112,14 @@
     <criterion testable="true">G1: AI-coupled rule defined; task 051 commits to Phase 1 inventory-derived handler list</criterion>
     <criterion testable="true">Phase 0 checklist item 9 marked complete</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      All four sub-decisions resolved with design defaults; owner ACK via task 001 covered them.
+    </completion-summary>
+    <uq-06>inventory-only (Spaarke.Core + Spaarke.Dataverse package lists; no pruning in this project)</uq-06>
+    <uq-07>small focused interfaces (IBriefingAi, IInvoiceAi, IRecordMatchingAi, IWorkspacePrefillAi); final list may evolve from Phase 1 inventory</uq-07>
+    <pf-3>Outcome E task scope (047-050) defers to Phase 1 inventory output (~59 files / 148 occurrences, not spec's 20). Spec.md left intact.</pf-3>
+    <g1>AI-coupled rule per FR-E3 revised: handler references Sprk.Bff.Api.Services.Ai.* AND does NOT require Spaarke.Dataverse / Microsoft.Xrm.Sdk. Preliminary 6-handler list non-binding. Task 051 uses Phase 1 task 014 (static usage map) + task 015 (reflection probe) output as authoritative handler list.</g1>
+  </notes>
 </task>

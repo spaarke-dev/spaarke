@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-20
+> **Last Updated**: 2026-05-24
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none |
+| **Task** | none (001 complete; awaiting dispatch of Group A) |
 | **Step** | — |
-| **Status** | **READY FOR PHASE 0** — all sequencing prerequisites resolved 2026-05-24 |
-| **Next Action** | Run `/task-execute projects/sdap-bff-api-remediation-fix/tasks/001-owner-signoff-resolved-decisions.poml` to begin Phase 0 |
+| **Status** | 001 ✅ COMPLETE. Phase 0 Group A unblocked (tasks 002, 003, 004, 005, 006, 007 parallel-safe; task 009 sequential by parallel-reason). |
+| **Next Action** | Dispatch Phase 0 Group A in parallel: ONE message with MULTIPLE Skill(task-execute) invocations for tasks 002–007. Run task 009 (rollback drill) sequentially. Task 008 (Phase 0 gate) waits on all. |
 
 ### Files Modified This Session
 *No tasks have been executed yet — pipeline scaffolding only.*
@@ -55,6 +55,7 @@ Project scaffolding (README, plan, CLAUDE.md, 63 POML tasks — revised 2026-05-
 ### Decisions Made
 
 - **2026-05-20**: Pipeline scaffolding generated. Code-state deltas captured in `CLAUDE.md` (PF-3 CRUD→AI count drift; `Services/Ai/Handlers/` vs new `Jobs/` distinction; active NU1903 HIGH on `Microsoft.Kiota.Abstractions 1.21.2`).
+- **2026-05-24** (task 001 — completed): Owner ACK'd all 9 §3 Resolved Decisions as-is. Operator-only override of decision #9 (per 2026-05-24 model change) confirmed. design.md §6 Phase 0 checklist items 1, 2, 6, 7 now checked (1+2 via this task; 6 via 2026-05-24 operator-only model; 7 via 2026-05-20 extraction assessment).
 
 ---
 

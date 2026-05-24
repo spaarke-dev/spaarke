@@ -1,11 +1,12 @@
 <task id="005" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Coordinate baseline window with `ai-spaarke-insights-engine-r1` (UQ-04)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30 minutes</estimated-effort>
+    <actual-effort>~5 min (verified Engine branch state; baseline window chosen; G4 flagged as followup)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>coordination, phase-0</tags>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -82,4 +83,23 @@
     <criterion testable="true">Written facade-adoption agreement recorded for Insights Engine PRs post-task-046 (G4)</criterion>
     <criterion testable="true">Phase 0 checklist item 4 marked complete</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Insights Engine project (`work/ai-spaarke-insights-engine-r1`) verified pre-implementation (0 commits
+      ahead of master). Baseline window decision: capture Phase 3 baseline NOW (pre-integration). Engine has
+      not started integration so no App Insights contamination risk.
+    </completion-summary>
+    <baseline-window>Pre-integration. Phase 3 task 033 to start when convenient.</baseline-window>
+    <g4-status>PENDING WRITTEN AGREEMENT — operator action item before Phase 4 task 046 starts.</g4-status>
+    <operator-action-required>
+      Before Phase 4 task 046 (facade creation), operator MUST contact Insights Engine project owner and
+      obtain written agreement (PR comment, Slack/Teams/email, or commit to that project's design.md) that
+      any Insights Engine PR merged after Phase 4 task 046 uses `Services/Ai/PublicContracts/` facade
+      interfaces rather than direct `IOpenAiClient`/`IPlaybookService` injection. This is belt-and-suspenders
+      to FR-C6 CI gate (lands in Phase 6 task 082) — during the gap between task 046 (Phase 4) and task 082
+      (Phase 6), this written agreement is the only thing preventing Insights Engine's new code from
+      violating Outcome E.
+    </operator-action-required>
+  </notes>
 </task>

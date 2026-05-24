@@ -1,11 +1,12 @@
 <task id="004" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Enumerate + coordinate ALL active BFF-touching projects (expanded UQ-03 + senior-review M3)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~10 min (git worktree list + git log per branch)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>coordination, phase-0</tags>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -88,4 +89,19 @@
     <criterion testable="true">CLAUDE.md enumeration table present with name | status | commitment columns</criterion>
     <criterion testable="true">Phase 0 checklist item 3 marked complete</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Investigation via `git worktree list` (24 active worktrees) + `git log master..&lt;branch&gt; -- src/server/api/Sprk.Bff.Api/`
+      for each branch. Finding: ALL 24 worktree branches are at 0 commits ahead of master (both total + BFF-specific).
+      No unmerged BFF work exists anywhere in the parallel-session ecosystem at Phase 0 close. Dev environment
+      `spe-api-dev-67e2xz` is effectively quiet for Phase 3 baseline capture.
+    </completion-summary>
+    <residual-risk>
+      New BFF-touching work CAN start in any branch during the 4-6 week project window. Operator commits to
+      weekly monitoring via `git log master..&lt;branch&gt; -- src/server/api/Sprk.Bff.Api/` during Phase 3-4 to
+      surface new entrants. If a branch starts BFF-touching work mid-bake, operator coordinates sequencing.
+    </residual-risk>
+    <enumeration-location>CLAUDE.md → Phase 0 Group A Decisions → Task 004 (table with 25 rows incl. this project)</enumeration-location>
+  </notes>
 </task>
