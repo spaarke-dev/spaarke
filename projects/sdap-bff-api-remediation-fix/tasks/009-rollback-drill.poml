@@ -1,11 +1,12 @@
 <task id="009" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Rollback drill — verify NFR-06 (<10 min) under realistic conditions</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30 minutes</estimated-effort>
+    <actual-effort>~4 minutes wall-clock total (drill + measurements)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24T16:17:41-04:00</started>
+    <completed>2026-05-24T16:21:35-04:00</completed>
     <tags>coordination, governance, phase-0, rollback, operational</tags>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
@@ -92,4 +93,26 @@
     <criterion testable="true">Drill executed by project owner (operator-only model per NFR-08 revised)</criterion>
     <criterion testable="true">baseline/rollback-drill.md committed with timestamps + friction notes</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Drill executed end-to-end on dev. NFR-06 PASS at 2 min 23 sec (target &lt; 10 min, ~24% of budget).
+      Drill change: /ping response 'pong' → 'pong-drill-2026-05-24' in EndpointMappingExtensions.cs:79.
+      Two deploys: drill deploy (1m 18s) then redeploy after revert (2m 12s including auto-recover).
+      Full report: baseline/rollback-drill.md.
+    </completion-summary>
+    <nfr-06-result>PASS — 2 min 23 sec (target &lt; 10 min)</nfr-06-result>
+    <silent-file-lock-encountered>
+      YES — redeploy hit the documented FAILURE-MODES G-2 scenario. 4 critical DLLs (Spaarke.Core.dll,
+      Sprk.Bff.Api.exe, Sprk.Bff.Api.dll, Spaarke.Dataverse.dll) were NOT replaced on first
+      `az webapp deploy --type zip` attempt despite HTTP 200 + success message. Hash-verify caught
+      it; auto-recover (stop → Kudu zipdeploy → start) succeeded. This is REAL-WORLD VALIDATION
+      that hardened Deploy-BffApi.ps1 protects against silent deploy failures. Phase 4 can rely on it.
+    </silent-file-lock-encountered>
+    <drill-provenance-commits>
+      <commit hash="0c620068">test(rollback-drill): no-op /ping response change for NFR-06 wall-clock verification</commit>
+      <commit hash="ba810663">Revert "test(rollback-drill): no-op /ping response change for NFR-06 wall-clock verification"</commit>
+      Net branch effect: zero. Drill commits left in history as provenance.
+    </drill-provenance-commits>
+  </notes>
 </task>

@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: Phase 0 (Pre-flight resolution) — pending
-- **Last Updated**: 2026-05-20
-- **Current Task**: Not started
-- **Next Action**: Operator runs `/task-execute projects/sdap-bff-api-remediation-fix/tasks/001-owner-signoff-resolved-decisions.poml`
+- **Phase**: **Phase 1 READY** (Phase 0 complete + gated 2026-05-24)
+- **Last Updated**: 2026-05-24
+- **Current Task**: Phase 0 gate task 008 ✅; Phase 1 inventory not yet started
+- **Next Action**: Dispatch Phase 1 Group B + C inventory tasks in parallel — `/task-execute projects/sdap-bff-api-remediation-fix/tasks/010-direct-transitive-package-list.poml` (and parallel siblings 011, 012, 013, 014, 016, 017 per TASK-INDEX Parallel Execution Groups). Task 015 (reflection probe) runs sequentially. Task 018 (CI workflow inventory + commit INVENTORY.md) waits on 010-017.
 
 ---
 

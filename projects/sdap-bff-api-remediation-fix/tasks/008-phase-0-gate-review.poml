@@ -1,11 +1,12 @@
 <task id="008" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Phase 0 gate review — all checkboxes resolved</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30 minutes</estimated-effort>
+    <actual-effort>~5 minutes (verification of prerequisites; all dependencies completed in this session)</actual-effort>
     <assigned>Project owner</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>coordination, governance, phase-0, gate</tags>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
@@ -92,4 +93,29 @@
     <criterion testable="true">Owner gate ACK recorded (operator-only model)</criterion>
     <criterion testable="true">NFR-06 rollback wall-clock ≤ 10 min OR mitigation plan documented</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Phase 0 gate verified. All 9 Phase 0 checklist items (design.md §6) closed. All 7 open questions
+      (UQ-01..UQ-07) have documented answers in CLAUDE.md Decisions Made. Senior-review items applied
+      (M3 expanded BFF coordination scope, G4 Insights Engine facade agreement flagged, G5 rollback
+      drill executed with NFR-06 PASS). Operator-only gate ACK recorded via this commit. Project
+      cleared for Phase 1.
+    </completion-summary>
+    <gate-verification>
+      <item ok="true">Tasks 001-007 + 009 status ✅ in TASK-INDEX.md (verified)</item>
+      <item ok="true">UQ-01 RESOLVED (operator-only); UQ-02 YES (prod process exists); UQ-03 enumerated (all 24 worktrees 0-ahead); UQ-04 pre-integration; UQ-05 baseline+10%; UQ-06 inventory-only; UQ-07 small focused interfaces</item>
+      <item ok="true">design.md §6 Phase 0 items 1, 2, 3, 4, 5, 6 (N/A via override), 7 (pre-resolved), 8, 9 all ☑</item>
+      <item ok="true">Tasks 062, 063 status changed ⏸ → 🔲 (UQ-02 YES = in scope)</item>
+      <item ok="true">CLAUDE.md Project Status: "Phase 1 READY"</item>
+      <item ok="true">G4 Insights Engine facade adoption agreement: PENDING WRITTEN AGREEMENT (operator followup before Phase 4 task 046)</item>
+      <item ok="true">G5 rollback drill: NFR-06 PASS at 2m 23s (target &lt; 10 min); silent file-lock encountered and auto-recovered; documented in baseline/rollback-drill.md</item>
+    </gate-verification>
+    <residual-operator-action-items>
+      Two items NOT blocking Phase 0 but tracked:
+      1. **Weekly BFF-touching monitoring** (task 004 followup) — `git log master..&lt;branch&gt; -- src/server/api/Sprk.Bff.Api/` weekly during Phase 3-4 to surface new entrants
+      2. **G4 written facade agreement** (task 005 followup) — contact Insights Engine project owner BEFORE Phase 4 task 046 (facade creation) to confirm any Engine PR merged after task 046 uses Services/Ai/PublicContracts/ facade rather than direct injection
+    </residual-operator-action-items>
+    <phase-1-authorization>Phase 1 is AUTHORIZED to begin. Dispatch Phase 1 Group B + C parallel tasks: 010, 011, 012, 013, 014, 016, 017 (Group B/C); 015 sequential; 018 waits on 010-017.</phase-1-authorization>
+  </notes>
 </task>

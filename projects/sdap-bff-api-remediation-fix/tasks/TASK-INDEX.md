@@ -28,8 +28,8 @@
 | 005 | Coordinate baseline window + facade adoption agreement (UQ-04 + G4) | ✅ | Yes (Group A) | STANDARD | 001 |
 | 006 | Confirm CI guard size ceiling (UQ-05) | ✅ | Yes (Group A) | STANDARD | 001 |
 | 007 | Confirm Outcome E scope + facade granularity + G1 handler reconciliation (UQ-06, UQ-07, G1) | ✅ | Yes (Group A) | STANDARD | 001 |
-| 009 | Rollback drill — verify NFR-06 (<10 min) wall-clock (G5) | 🔲 | No | STANDARD | 001 |
-| 008 | Phase 0 gate review — all checkboxes resolved | 🔲 | No | STANDARD | 002–007, 009 |
+| 009 | Rollback drill — verify NFR-06 (<10 min) wall-clock (G5) | ✅ | No | STANDARD | 001 |
+| 008 | Phase 0 gate review — all checkboxes resolved | ✅ | No | STANDARD | 002–007, 009 |
 
 ---
 
@@ -120,8 +120,8 @@
 |---|---|---|---|---|---|
 | 060 | Deploy cumulative changeset to `spaarke-demo` | 🔲 | No | FULL | 054 |
 | 061 | Demo smoke test + 48h bake | 🔲 | No (48h bake) | FULL | 060 |
-| 062 | Production deploy (conditional on UQ-02) | ⏸ | No | FULL | 061 |
-| 063 | 7-day prod observation + LESSONS-LEARNED entries (conditional) | ⏸ | No (7d bake) | FULL | 062 |
+| 062 | Production deploy (UQ-02 RESOLVED YES 2026-05-24 — uses Deploy-Release.ps1) | 🔲 | No | FULL | 061 |
+| 063 | 7-day prod observation + LESSONS-LEARNED entries | 🔲 | No (7d bake) | FULL | 062 |
 
 ---
 
