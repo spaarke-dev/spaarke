@@ -187,6 +187,10 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 - **2026-05-24**: **Operator-only approval model (NFR-08 revised; UQ-01 RESOLVED)**. Rationale: Spaarke uses AI-directed coding procedures (`task-execute` invokes `adr-check` + `code-review` at Step 9.5 FULL rigor) + mechanical CI gates (FR-C1–C6). Combined, these provide the "second pair of eyes" doing technical verification. The owner provides judgment + sign-off. Dual-approver enterprise pattern is unnecessary friction for single-owner operating model. Applied to spec.md NFR-08, plan.md PR-3, all Phase 4/5 task POMLs. Task 002 repurposed from "designate dual approver" to "document operator-only model."
 
+- **2026-05-24**: **r3 sequencing dependency resolved — Phase 0 unblocked.** `work/spaarke-ai-platform-unification-r3` completed refinement testing (15 commits closing tasks 126-140: Calendar widget UX work) and merged to master at commit `8acf9bc7`. This worktree re-synced with new master; build verified (0 errors, 17 warnings — unchanged). The 2026-05-20 sequencing decision is satisfied. Phase 0 is now ready to begin when operator invokes `/task-execute projects/sdap-bff-api-remediation-fix/tasks/001-owner-signoff-resolved-decisions.poml`.
+
+- **2026-05-24**: **`feature/production-environment-setup-r2` branch abandoned (housekeeping).** Encountered the branch during master-sync audit (1 stranded commit from 2026-04-24: docs consolidation of ENVIRONMENT-DEPLOYMENT-GUIDE + PRODUCTION-DEPLOYMENT-GUIDE → SPAARKE-DEPLOYMENT-GUIDE). Project itself was completed 2026-03-20; this was a post-completion docs cleanup that was never finished. Test merge revealed 4 conflicts including 2 modify/delete on the source guides (master updated them in past 4 weeks via R2 docs refactoring + auth-doc-drift). Effort to integrate: ~70 min of careful porting. Decision: abandon (delete branch + worktree). If consolidation still wanted, redo fresh against current master state. Not blocking this BFF project (docs-only). Remote branch deleted; worktree tracking pruned 2026-05-24.
+
 ---
 
 ## Implementation Notes
