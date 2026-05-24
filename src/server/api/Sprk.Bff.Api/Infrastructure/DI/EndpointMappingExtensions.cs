@@ -76,7 +76,7 @@ public static class EndpointMappingExtensions
             .AllowAnonymous()
             .RequireRateLimiting("anonymous"); // Task AUTHV2-049 — anonymous + hits Dataverse; 10/min per IP
 
-        app.MapGet("/ping", () => Results.Text("pong-drill-2026-05-24"))
+        app.MapGet("/ping", () => Results.Text("pong"))
             .AllowAnonymous()
             .WithTags("Health")
             .WithDescription("Lightweight health check for warm-up agents. Returns 'pong' without authentication.");
