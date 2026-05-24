@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>UI smoke — Context pane FR-17..FR-22 in deployed Power Apps host</title>
+    <phase>Phase G — Deploy + Smoke</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>090</blocks>
+    <tags>pcf, frontend, e2e-test, fluent-ui, ui-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Manual + automated UI smoke testing in deployed environment. STANDARD rigor — no production code edits; FAILs spawn follow-up tasks.</rigor-reason>
+    <parallel-group>G-smoke</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Smoke against deployed environment — read-only. Parallel with sibling smoke tasks 071, 072, 074.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run UI smoke testing of the Context pane against FR-17..FR-22 acceptance criteria in
+    the deployed Power Apps host (deployed via task 070). Use the `ui-test` skill. Record
+    pass/fail per sub-criterion in
+    `projects/spaarke-ai-platform-unification-r3/notes/smoke-context.md`. Open follow-up
+    remediation tasks for any FAIL.
+  </prompt>
+
+  <role>
+    Frontend QA tester comfortable with `ui-test` skill and the Context pane structure:
+    shared PaneHeader, GetStarted cards (welcome stage), wizard launch surfaces
+    (create-matter, assign-work), stage label rename, PlaybookGalleryWidget retention on
+    non-welcome stages.
+  </role>
+
+  <goal>
+    A smoke report at
+    `projects/spaarke-ai-platform-unification-r3/notes/smoke-context.md` records pass/fail
+    for each of the 6 Context pane sub-criteria (FR-17..FR-22). All PASS OR follow-up
+    remediation tasks exist for each FAIL.
+  </goal>
+
+  <context>
+    <background>
+      FR-17..FR-22 specify the Context pane welcome-state redesign: shared PaneHeader (lifted
+      to `@spaarke/ui-components`); 7 GetStarted cards in 2-column scrollable grid; Create
+      Matter card opens `create-matter-wizard` as a new top-tab in the Workspace pane;
+      Assign Work card invokes `sprk_createworkassignmentwizard` via `Xrm.Navigation.navigateTo`
+      in the Power Apps host; welcome-stage label reads "Get Started" (renamed from "Gallery");
+      PlaybookGalleryWidget retained for non-welcome stages; dark-mode parity.
+    </background>
+    <relevant-files>
+      <file>Deployed SpaarkeAi instance (from task 070)</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md (FR-17..FR-22)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All 6 sub-criteria below must be PASS for this task to PASS. Any FAIL opens a remediation follow-up task and blocks task 090 wrap-up.</constraint>
+    <constraint source="spec">FR-20 — Assign Work card invokes `sprk_createworkassignmentwizard` via `Xrm.Navigation.navigateTo`. Smoke verifies this only when running inside the Power Apps host; Vite dev environment shows a placeholder per A-2 design assumption (not the smoke target).</constraint>
+    <constraint source="spec">FR-22 — `stageLabelMap.welcome === 'Get Started'`. The welcome-stage label MUST read "Get Started" (not "Gallery").</constraint>
+    <constraint source="project">Use the `ui-test` skill for automated checks; manual verification is acceptable for visual judgment items.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm task 070 deploy success">
+      Read latest deploy memo. Confirm success.
+    </step>
+    <step order="2" name="Open SpaarkeAi welcome state in Power Apps host">
+      Navigate to deployed SpaarkeAi. Focus on the Context pane region in welcome stage.
+    </step>
+    <step order="3" name="Invoke ui-test per sub-criterion">
+      For each of the 6 sub-criteria, invoke `ui-test` skill or perform manual verification.
+      Capture evidence.
+    </step>
+    <step order="4" name="Aggregate results">
+      Write smoke report to `projects/spaarke-ai-platform-unification-r3/notes/smoke-context.md`.
+    </step>
+    <step order="5" name="Open remediation tasks for FAILs">
+      For any FAIL, draft follow-up POML and add to TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Deploy memo, spec</tool>
+    <tool name="Skill">`ui-test` skill</tool>
+    <tool name="Write">Smoke report; follow-up POMLs</tool>
+    <tool name="Edit">TASK-INDEX.md if opening follow-up tasks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/smoke-context.md</output>
+    <output type="docs">Follow-up POML tasks for any FAIL</output>
+    <output type="report">Task completion report with roll-up verdict</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-17: Shared PaneHeader is rendered at the top of the Context pane (consumed from `@spaarke/ui-components`, not inline JSX).</criterion>
+    <criterion testable="true">FR-18: 7 GetStarted cards are visible on the welcome state in a 2-column scrollable grid.</criterion>
+    <criterion testable="true">FR-19: Clicking the "Create Matter" card opens `create-matter-wizard` as a new top-tab in the Workspace pane.</criterion>
+    <criterion testable="true">FR-20: Clicking "Assign Work" invokes `sprk_createworkassignmentwizard` via `Xrm.Navigation.navigateTo` (Power Apps host).</criterion>
+    <criterion testable="true">FR-22: Welcome-stage label reads "Get Started" (not "Gallery").</criterion>
+    <criterion testable="true">FR-21: On non-welcome stages (e.g., active chat stage), PlaybookGalleryWidget is retained.</criterion>
+    <criterion testable="true">Dark-mode parity: theme toggle produces no contrast regressions on the Context pane.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Shared PaneHeader visible">
+      Inspect Context pane chrome. Confirm the PaneHeader is the shared
+      `@spaarke/ui-components` primitive (the same component used by Assistant + Workspace
+      panes) — visual style identical across all three panes.
+    </test>
+    <test name="7 GetStarted cards in 2-column scrollable grid">
+      Count rendered cards on welcome stage. Confirm exactly 7. Confirm the grid uses 2
+      columns and scrolls vertically when cards exceed the pane height.
+    </test>
+    <test name="Create Matter card → wizard opens as new Workspace tab">
+      Click the Create Matter card. Confirm a new tab labeled "Create Matter" (or similar)
+      opens in the Workspace pane and the wizard renders inside it.
+    </test>
+    <test name="Assign Work → Xrm.Navigation.navigateTo invocation">
+      Click the Assign Work card. Confirm `Xrm.Navigation.navigateTo` was invoked with
+      `sprk_createworkassignmentwizard` (capture via browser devtools network/console, or
+      observe the wizard dialog opening in the Power Apps host).
+    </test>
+    <test name="Welcome stage label reads Get Started">
+      Confirm the stage label in the Context PaneHeader right-slot reads "Get Started" on
+      welcome stage (NOT "Gallery").
+    </test>
+    <test name="PlaybookGalleryWidget retained on non-welcome stages">
+      Transition to a non-welcome stage (e.g., send a chat message that progresses the
+      shell). Confirm the Context pane now shows PlaybookGalleryWidget (not GetStarted cards).
+    </test>
+    <test name="Dark-mode parity">
+      Toggle dark mode. Confirm Context pane background, card surfaces, dividers, and icons
+      adapt via Fluent v9 tokens. No contrast regression.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill. Smoke checks invoke the
+    `ui-test` skill.
+  </execution>
+</task>

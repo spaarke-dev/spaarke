@@ -4,6 +4,8 @@ import {
   TaskListSquareLtrRegular,
   PersonAddRegular,
   CheckboxCheckedRegular,
+  MailRegular,
+  ReceiptRegular,
 } from "@fluentui/react-icons";
 
 import { buildOwnerFilter } from "../../services/queryHelpers";
@@ -41,10 +43,16 @@ export interface IQuickSummaryCardConfig {
 }
 
 /**
- * Ordered list of 4 metric cards for the Quick Summary row.
+ * Ordered list of 6 metric cards for the Quick Summary row.
  *
  * Each card fires a count query via useQuickSummaryCounts and opens
  * the corresponding system view via navigateToEntityList on click.
+ *
+ * Cards 1-4 (My Matters, My Projects, Assign Work, Open Tasks) shipped
+ * in Round 6. Cards 5-6 (Communications, Invoices) were added in Round 8
+ * Wave 3 (task 110, 2026-05-22) per the operator's "My Work" system
+ * workspace request — these reuse the QuickSummary section verbatim and
+ * surface 6 cards in a 2x3 grid (see QuickSummaryRow grid CSS).
  */
 export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
   {
@@ -108,6 +116,42 @@ export const QUICK_SUMMARY_CARDS: IQuickSummaryCardConfig[] = [
     badgeFilter: (ctx) => {
       const now = new Date().toISOString();
       return `${buildOwnerFilter(ctx)} and sprk_todoflag eq true and sprk_todostatus ne 100000002 and sprk_duedate lt ${now}`;
+    },
+  },
+  {
+    // Round 8 Wave 3 (task 110, 2026-05-22).
+    // View: "Active Communications" (default system view, querytype=0).
+    id: "communications",
+    title: "Communications",
+    icon: MailRegular,
+    ariaLabel: "View communications",
+    entityName: "sprk_communication",
+    primaryKey: "sprk_communicationid",
+    viewId: "2bf1c5a5-0eca-4f37-92df-2e3c386dee98",
+    countFilter: (ctx) => `${buildOwnerFilter(ctx)} and statecode eq 0`,
+    badgeType: "new",
+    badgeFilter: (ctx) => {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      return `${buildOwnerFilter(ctx)} and statecode eq 0 and createdon ge ${d.toISOString()}`;
+    },
+  },
+  {
+    // Round 8 Wave 3 (task 110, 2026-05-22).
+    // View: "Active Invoices" (default system view, isdefault=true).
+    id: "invoices",
+    title: "Invoices",
+    icon: ReceiptRegular,
+    ariaLabel: "View invoices",
+    entityName: "sprk_invoice",
+    primaryKey: "sprk_invoiceid",
+    viewId: "2220a3bc-330e-4405-b441-3605df961878",
+    countFilter: (ctx) => `${buildOwnerFilter(ctx)} and statecode eq 0`,
+    badgeType: "new",
+    badgeFilter: (ctx) => {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      return `${buildOwnerFilter(ctx)} and statecode eq 0 and createdon ge ${d.toISOString()}`;
     },
   },
 ];

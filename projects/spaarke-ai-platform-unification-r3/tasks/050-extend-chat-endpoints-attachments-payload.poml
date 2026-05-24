@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Extend ChatEndpoints to accept attachments[] payload (FR-07 backend half) — CONDITIONAL</title>
+    <phase>Phase E — Backend (conditional on spike 001 outcome)</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>051</blocks>
+    <tags>bff-api, api, endpoints, ai, conditional</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the BFF `Sprk.Bff.Api` ChatEndpoints — a load-bearing C# endpoint definition. Per CLAUDE.md §10 BFF Hygiene, any addition to `Sprk.Bff.Api` requires explicit placement justification + ADR-013 compliance. ADR-008 endpoint-filter inheritance must be preserved. Single-LLM-call invariant (D-01) must be preserved. FULL rigor with Step 9.5 code-review + adr-check.</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Pairs with task 051 (tests). Different files; both can be drafted concurrently in the same wave, though 051 verification depends on 050 build being green.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    ONLY EXECUTE if task 001 spike result determined the chat endpoint requires server-side
+    extension to accept attachments[]. If the spike concluded "client-side extraction only,
+    no BFF changes required," mark this task SKIPPED in TASK-INDEX.md and stop.
+
+    Extend the BFF chat endpoint `POST /api/ai/chat/sessions/{sessionId}/messages` in
+    `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` to accept an optional
+    `attachments: Array&lt;{filename, contentType, textContent}&gt;` field on the request DTO.
+    Validate the payload, pass the attachment text into the existing single LLM call's
+    context, and preserve the single-LLM-call invariant (D-01). All existing endpoint
+    filters (auth, rate limit, validation, problem-details) inherit per ADR-008. No new
+    feature module or DI registration is created (ADR-013 — extend BFF in-process).
+  </prompt>
+
+  <role>
+    Senior .NET 8 backend developer experienced with Minimal API endpoint definitions in
+    Sprk.Bff.Api. Familiar with ADR-008 endpoint-filter inheritance, ADR-013 AI architecture
+    (in-process extension, no new service), and the single-LLM-call invariant D-01 enforced
+    by AnalysisOrchestrationService / chat orchestrator. Comfortable working in the
+    `Services/Ai/PublicContracts/` facade boundary established by the 2026-05-20 BFF AI
+    extraction assessment.
+  </role>
+
+  <goal>
+    `ChatEndpoints.cs` accepts an optional `Attachments` list on the message-send request DTO,
+    validated for: max 5 entries (additional rejected with 400), max 10 MB per textContent
+    field (NFR-04), and contentType in the allow-list (`text/plain`, `text/markdown`,
+    `application/pdf`,
+    `application/vnd.openxmlformats-officedocument.wordprocessingml.document`). Disallowed
+    MIME types are rejected with 400 + problem-details. The validated attachment text is
+    appended to the single existing LLM call's user-message context — there is still exactly
+    ONE LLM call per user turn. Existing endpoint filters (auth, rate limit) continue to
+    fire on the modified endpoint. Build succeeds with no new warnings; no new CVE; no new
+    NuGet packages introduced.
+  </goal>
+
+  <context>
+    <background>
+      FR-07 enables multi-file attachments in the Assistant input strip. Task 001 (the spike)
+      determined whether attachment text extraction stays purely client-side (PDF.js +
+      mammoth before chat send) or whether the BFF endpoint also needs to accept the
+      extracted text in its message payload. If the spike concluded the latter, this task
+      wires the request DTO. Per ADR-013 + CLAUDE.md §10, this is an in-process extension
+      of an existing endpoint — no new feature module, no new DI registration.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/spikes/fr07-attachments-spike-result.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">All existing endpoint filters (auth, rate-limit, validation, problem-details) MUST continue to fire on the modified endpoint. Do not bypass the filter pipeline. Validation errors return RFC 7807 problem-details.</constraint>
+    <constraint source="ADR-013">This is an in-process extension of an existing BFF endpoint, not a new service. No new feature module, no new DI registration in `Program.cs`. Do not inject `IOpenAiClient` or other AI-internal types directly — use the existing chat orchestration path already wired through the endpoint.</constraint>
+    <constraint source="ADR-010">DI minimalism — no new DI registrations. Reuse the existing chat services already injected by the endpoint.</constraint>
+    <constraint source="ADR-019">Validation failures return RFC 7807 problem-details, not bespoke error shapes.</constraint>
+    <constraint source="ADR-028">Endpoint auth continues to be enforced by existing endpoint filters; no token snapshotting; do not introduce new auth code paths.</constraint>
+    <constraint source="spec">D-01 single-LLM-call invariant — attachment text is appended to the SAME LLM call's user-message context. Do NOT trigger a separate LLM call for extraction or summary.</constraint>
+    <constraint source="spec">NFR-04 — max 10 MB per attachment textContent; max 5 attachments per message.</constraint>
+    <constraint source="spec">Allowed MIME types: `text/plain`, `text/markdown`, `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`. Reject all others with 400 + problem-details.</constraint>
+    <constraint source="bff-extensions">Per CLAUDE.md §10 + `.claude/constraints/bff-extensions.md`: extension is in-place on an existing endpoint, with NO new packages. Verify `dotnet list package --vulnerable --include-transitive` reports no new HIGH-severity CVE. Verify publish size is unchanged (no new NuGet refs added).</constraint>
+    <constraint source="project">CONDITIONAL: if spike 001 concluded BFF extension is NOT needed, mark this task SKIPPED and do not proceed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify spike 001 outcome">
+      Read `projects/spaarke-ai-platform-unification-r3/notes/spikes/fr07-attachments-spike-result.md`
+      (or the equivalent spike result memo). Confirm the recommendation is "extend BFF endpoint."
+      If the recommendation is "client-side only," mark this task SKIPPED in TASK-INDEX.md and
+      stop. Do not proceed with code changes.
+    </step>
+    <step order="2" name="Read existing ChatEndpoints + DTO">
+      Open `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs`. Identify the `POST /api/ai/chat/sessions/{sessionId}/messages`
+      handler and the request DTO it binds (likely `SendMessageRequest` or similar). Note the
+      existing endpoint filter chain registered on this endpoint group.
+    </step>
+    <step order="3" name="Add Attachments to request DTO">
+      Add an optional `IReadOnlyList&lt;ChatAttachmentDto&gt; Attachments` property (or
+      equivalent) to the request DTO. Define `ChatAttachmentDto` with three fields:
+      `Filename` (string), `ContentType` (string), `TextContent` (string). Default to empty
+      list when absent. Place the DTO alongside the existing request DTO in the same file
+      or a sibling DTOs file — keep the change minimal.
+    </step>
+    <step order="4" name="Implement validation rules">
+      Inside the handler (before invoking the chat orchestration path), validate:
+      <list>
+        <item>`Attachments.Count &lt;= 5` → otherwise return 400 ProblemDetails with title "Too many attachments."</item>
+        <item>Each `TextContent.Length &lt;= 10 * 1024 * 1024` (10 MB UTF-16; use a const) → otherwise 400 ProblemDetails.</item>
+        <item>Each `ContentType` is in the allow-list (`text/plain`, `text/markdown`, `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`) → otherwise 400 ProblemDetails listing the rejected type.</item>
+      </list>
+      Use existing `Results.Problem(...)` helpers consistent with ADR-019.
+    </step>
+    <step order="5" name="Pass attachments into single LLM call context">
+      Append the validated attachment text into the SAME user-message context that already
+      feeds the existing chat orchestration call. Use a simple, deterministic concatenation
+      format (e.g., `--- Attachment: {filename} ({contentType}) ---\n{textContent}\n`) so the
+      LLM has clear file boundaries. Do NOT introduce a separate LLM call for extraction or
+      summary — the single-LLM-call invariant D-01 is non-negotiable.
+    </step>
+    <step order="6" name="Verify endpoint filter inheritance">
+      Confirm the existing endpoint filter chain (auth filter, rate-limit filter, validation
+      filter, problem-details filter) still applies to the modified handler. No filter should
+      be moved or removed. Add an inline comment near the handler header noting filter
+      inheritance per ADR-008.
+    </step>
+    <step order="7" name="Build BFF + verify no new warnings">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/`. Verify zero new compiler warnings.
+      Run `dotnet list package --vulnerable --include-transitive` and verify no NEW
+      HIGH-severity CVE versus the pre-change baseline.
+    </step>
+    <step order="8" name="Optional: smoke against running BFF">
+      If a local BFF is running, send a sample request with 0, 1, and 5 attachments through
+      curl/Postman; confirm 200 OK with attachment text reflected in the model response, and
+      400 on 6+ / oversized / disallowed-MIME variants.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing ChatEndpoints.cs, spike result, DTO files</tool>
+    <tool name="Edit">Modify ChatEndpoints.cs + DTO</tool>
+    <tool name="Grep">Locate existing endpoint filter registration, RFC 7807 helpers</tool>
+    <tool name="Bash">`dotnet build src/server/api/Sprk.Bff.Api/`; `dotnet list package --vulnerable --include-transitive`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</output>
+    <output type="code">DTO for ChatAttachmentDto (inline or sibling file)</output>
+    <output type="report">Task completion report confirming endpoint accepts validated attachments[], single-LLM-call invariant preserved, all endpoint filters still apply</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spike 001 outcome was verified before proceeding; if outcome was "client-side only," this task is marked SKIPPED.</criterion>
+    <criterion testable="true">Request DTO accepts optional `Attachments: ChatAttachmentDto[]` field with `Filename`, `ContentType`, `TextContent`.</criterion>
+    <criterion testable="true">Request with 1, 3, or 5 attachments is accepted; 6+ is rejected with 400 RFC 7807 problem-details.</criterion>
+    <criterion testable="true">`TextContent` &gt; 10 MB is rejected with 400 RFC 7807 problem-details.</criterion>
+    <criterion testable="true">`ContentType` outside the allow-list is rejected with 400 RFC 7807 problem-details.</criterion>
+    <criterion testable="true">Validated attachment text is appended to the existing SINGLE LLM call's user-message context — no second LLM call is introduced (D-01 preserved).</criterion>
+    <criterion testable="true">All existing endpoint filters (auth, rate limit, validation, problem-details) continue to apply per ADR-008.</criterion>
+    <criterion testable="true">`dotnet build` succeeds with zero new warnings; `dotnet list package --vulnerable --include-transitive` reports no new HIGH-severity CVE; no new NuGet packages added.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 050" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

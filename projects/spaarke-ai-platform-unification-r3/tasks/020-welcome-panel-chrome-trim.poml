@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Trim WelcomePanel chrome to prompt + Recent Conversations (FR-04, FR-05)</title>
+    <phase>Phase B — Assistant pane</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001, 010, 011, 012, 013</dependencies>
+    <blocks></blocks>
+    <tags>react, frontend, fluent-ui, ui-cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a .tsx file in the SpaarkeAi solution; FR-mapping (FR-04 + FR-05) with explicit acceptance criteria and dark-mode requirement (NFR-06). FULL protocol ensures code-review + adr-check gates run.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Reduce the WelcomePanel chrome on the SpaarkeAi welcome state to match Moment 1: Arrival.
+    Keep ONLY the central "How can I help you today?" prompt (size 400, no icon) and the
+    "Recent Conversations" section. Remove the sparkle icon, the "Welcome to Spaarke AI"
+    heading, and the four hardcoded prompt cards (Analyze a Document, Research a Topic,
+    Financial Analysis, Find Documents). No new components, no token changes — pure JSX
+    deletions plus a verification of remaining elements.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer comfortable surgically deleting JSX while
+    preserving accessibility, layout proportions, and dark-mode token usage in a Vite
+    Code Page surface.
+  </role>
+
+  <goal>
+    A modified `WelcomePanel.tsx` whose visible chrome on the welcome state is reduced to
+    (a) the prompt "How can I help you today?" rendered at size 400 with no leading icon,
+    and (b) the existing "Recent Conversations" section (unchanged behavior, pagination
+    via `/ai/chat/sessions?limit=5`). All four hardcoded prompt cards, the sparkle icon,
+    and the "Welcome to Spaarke AI" heading are absent. Manual smoke in Vite dev confirms
+    the cleaned layout; dark mode shows no regressions.
+  </goal>
+
+  <context>
+    <background>
+      FR-04 and FR-05 are the chrome-trim half of the Assistant pane refactor. The four
+      hardcoded prompt cards were a R2-era helper meant as discoverability scaffolding;
+      Moment 1: Arrival redesign replaces them with a clean, minimal welcome that pushes
+      the user toward the chat input (now editable on cold load per FR-06, handled in
+      task 023) and toward Recent Conversations for resume. This task is the simplest
+      Phase B deliverable and a sequence-safe parallel sibling to 021/024.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">No new shared components are needed for this task. Do not introduce or duplicate primitives that should live in `@spaarke/ui-components`. If a candidate for extraction appears, note it but do not lift in this task.</constraint>
+    <constraint source="ADR-021">All retained styling must use Fluent v9 `tokens.*`. No hex literals, no `rgba(...)` literals. Verify dark mode after the trim — no regressions allowed.</constraint>
+    <constraint source="ADR-022">React 19 only. No React 16 fallbacks. Do not add legacy patterns.</constraint>
+    <constraint source="ADR-025">No new SVG web resources. The sparkle icon being removed is a Fluent v9 icon; deletion is purely JSX, not a webresource cleanup.</constraint>
+    <constraint source="ADR-028">Do not touch any auth surface in this task. `/ai/chat/sessions?limit=5` already routes through `authenticatedFetch` in the Recent Conversations section — leave that behavior untouched.</constraint>
+    <constraint source="spec">MUST preserve "Recent Conversations" section behavior exactly (FR-05). MUST NOT alter the `useChatSession` lazy-creation contract.</constraint>
+    <constraint source="project">This task touches ONLY `WelcomePanel.tsx`. Do not modify any other file. If a sibling file appears to need a change, surface it as a follow-up note, not an edit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/bff-url-normalization.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read WelcomePanel.tsx">
+      Open `src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx`. Identify (a) the sparkle
+      icon import + render site, (b) the "Welcome to Spaarke AI" heading JSX block, (c) the
+      4 hardcoded prompt card JSX block, (d) the "How can I help you today?" prompt, and
+      (e) the "Recent Conversations" section. Note their exact source lines for surgical edits.
+    </step>
+    <step order="2" name="Remove sparkle + heading">
+      Delete the sparkle icon JSX and the "Welcome to Spaarke AI" heading JSX block. Remove any
+      newly-orphaned imports (`SparkleRegular` or similar) from the import block. Preserve any
+      surrounding `<div>` containers that still wrap retained content.
+    </step>
+    <step order="3" name="Remove the 4 prompt cards">
+      Delete the JSX block that renders the four hardcoded prompt cards (Analyze a Document,
+      Research a Topic, Financial Analysis, Find Documents) and any local helper data structures
+      (e.g., a `welcomePrompts` array) that only fed those cards. Remove now-orphaned imports.
+    </step>
+    <step order="4" name="Verify the central prompt">
+      Confirm the "How can I help you today?" element remains rendered at Fluent v9 typography
+      size 400 with no leading icon. If a previous version paired it with an icon, drop the icon.
+      Keep token-based color (e.g., `tokens.colorNeutralForeground1`) — no hex.
+    </step>
+    <step order="5" name="Verify Recent Conversations untouched">
+      Confirm the "Recent Conversations" section still renders, still paginates to last 5 via
+      `/ai/chat/sessions?limit=5` through `authenticatedFetch`, and that the click-to-resume
+      handler (`setChatSessionId`) is unchanged. Do not edit this section.
+    </step>
+    <step order="6" name="Local visual verification">
+      Start the SpaarkeAi Vite dev server (or run `npm run build` then load the bundle in Power
+      Apps host) and confirm: (a) no sparkle icon, (b) no heading, (c) no 4 prompt cards, (d)
+      "How can I help you today?" present at size 400, (e) Recent Conversations renders, (f)
+      light + dark mode both look correct (no contrast regressions).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read WelcomePanel.tsx and confirm surrounding context</tool>
+    <tool name="Edit">Surgically delete JSX blocks and orphaned imports</tool>
+    <tool name="Grep">Find any external consumers of removed exports (should be none)</tool>
+    <tool name="Bash">Run `npm run build` against SpaarkeAi to verify no TS / lint errors</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx</output>
+    <output type="report">Task completion report citing the four removed elements and confirming the two retained ones</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WelcomePanel.tsx` does not contain a sparkle icon import or render site.</criterion>
+    <criterion testable="true">`WelcomePanel.tsx` does not contain the string "Welcome to Spaarke AI".</criterion>
+    <criterion testable="true">`WelcomePanel.tsx` does not contain any of the four hardcoded prompt card labels ("Analyze a Document", "Research a Topic", "Financial Analysis", "Find Documents").</criterion>
+    <criterion testable="true">`WelcomePanel.tsx` still contains the string "How can I help you today?" rendered at Fluent v9 size 400 with no leading icon.</criterion>
+    <criterion testable="true">The "Recent Conversations" section is present and uses `authenticatedFetch` for `/ai/chat/sessions?limit=5` (no auth contract changes).</criterion>
+    <criterion testable="true">`npm run build` (or `npm run build:prod`) against SpaarkeAi succeeds with no new TS / lint errors and no orphan-import warnings.</criterion>
+    <criterion testable="true">Manual smoke shows no dark-mode regression in the trimmed panel.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="welcome chrome trim — light mode">
+      Navigate to SpaarkeAi welcome state in Vite dev (or Power Apps host). Verify absence of
+      sparkle icon, "Welcome to Spaarke AI" heading, and 4 prompt cards. Verify presence of
+      "How can I help you today?" and Recent Conversations.
+    </test>
+    <test name="welcome chrome trim — dark mode (NFR-06)">
+      Toggle Power Apps theme (or browser) to dark mode and reload SpaarkeAi welcome state.
+      Verify (a) no hex color leaks, (b) Recent Conversations contrast is correct, (c) the
+      central prompt is legible. No `#`-literal regressions allowed per ADR-021.
+    </test>
+    <test name="auth invariant">
+      Open browser DevTools network tab; trigger Recent Conversations load. Confirm
+      `/ai/chat/sessions?limit=5` is called via `authenticatedFetch` (Authorization header
+      present, no `accessToken` query string).
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 020" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

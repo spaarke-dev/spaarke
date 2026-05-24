@@ -67,9 +67,68 @@ export type {
   LayoutTemplateRow,
 } from "./layoutTemplates";
 
+// Dynamic workspace config builder (hoisted in task 067 from LegalWorkspace)
+export {
+  buildDynamicWorkspaceConfig,
+  SYSTEM_DEFAULT_LAYOUT_JSON,
+} from "./buildDynamicWorkspaceConfig";
+export type {
+  LayoutJson,
+  LayoutJsonRow,
+  WorkspaceScope,
+} from "./buildDynamicWorkspaceConfig";
+
 // Style hooks (optional, for advanced consumers)
 export {
   useWorkspaceShellStyles,
   useSectionContentPaddingStyles,
   useToolbarDividerStyles,
 } from "./WorkspaceShell.styles";
+
+// Daily Briefing section (hoisted in task 069 from LegalWorkspace).
+// The hook + section component are context-agnostic — consumers supply
+// `authenticatedFetch` and optionally `tenantId` / `onRateLimitError`.
+// The registration is a FACTORY (not a static const) because consumer-supplied
+// auth deps must close over the factory call; see comments in
+// `dailyBriefing.registration.ts` for rationale.
+export { useDailyBriefing } from "./sections/dailyBriefing/useDailyBriefing";
+export type {
+  DailyBriefingState,
+  DailyBriefingError,
+  UseDailyBriefingOptions,
+  // task 086 / Round 4 Fix 3 — exposed so consumers wiring
+  // `loadNotificationContext` can type their payload builders.
+  NarrateRequest,
+  NotificationCategoryDto,
+  PriorityItemDto,
+  ChannelNarrationInput,
+  ChannelItemDto,
+} from "./sections/dailyBriefing/useDailyBriefing";
+
+export {
+  DailyBriefingSection,
+  TELEMETRY_EVENT_DAILY_BRIEFING_429,
+} from "./sections/dailyBriefing/DailyBriefingSection";
+export type { DailyBriefingSectionProps } from "./sections/dailyBriefing/DailyBriefingSection";
+
+export { createDailyBriefingRegistration } from "./sections/dailyBriefing/dailyBriefing.registration";
+export type { CreateDailyBriefingRegistrationOptions } from "./sections/dailyBriefing/dailyBriefing.registration";
+
+// Wizard launchers (hoisted in Round 4 Fix 2 / task 085 — see file header).
+// Shared Xrm.Navigation.navigateTo wrappers for the seven Get Started wizards.
+// Reused by SpaarkeAi's ContextPaneController; LegalWorkspace's WorkspaceGrid
+// continues to use its own local handlers for FR-25 byte-stability.
+export {
+  launchCreateMatterWizard,
+  launchCreateProjectWizard,
+  launchSummarizeFilesWizard,
+  launchFindSimilarWizard,
+  launchAssignWorkWizard,
+  launchPlaybookIntent,
+} from "./wizardLaunchers";
+export type {
+  BaseLauncherOptions,
+  SummarizeFilesLauncherOptions,
+  FindSimilarLauncherOptions,
+  PlaybookIntentLauncherOptions,
+} from "./wizardLaunchers";

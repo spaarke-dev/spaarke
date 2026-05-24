@@ -377,6 +377,195 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// 12. email-compose — Analysis Builder intent dispatcher (task 044, FR-19)
+//     Category: ai — opens the Analysis Builder (Playbook Library Code Page)
+//     pre-configured for the compose-email flow.
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may compose multiple emails concurrently.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Send Email Message" card). Renaming this string would break the
+   * GetStartedCards → Analysis Builder routing path.
+   */
+  'email-compose',
+  {
+    displayName: 'Send Email',
+    category: 'ai',
+    icon: 'Mail24Regular',
+    /**
+     * allowMultiple=true: users may have several email-compose dispatcher tabs
+     * if they re-launched the card multiple times.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=100: positioned after the existing wizards (80–90).
+     */
+    defaultOrder: 100,
+  },
+  () =>
+    import('./EmailComposeWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 13. meeting-schedule — Analysis Builder intent dispatcher (task 044, FR-19)
+//     Category: ai — opens the Analysis Builder (Playbook Library Code Page)
+//     pre-configured for the schedule-meeting flow.
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may schedule multiple meetings concurrently.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Schedule New Meeting" card). Renaming this string would break the
+   * GetStartedCards → Analysis Builder routing path.
+   */
+  'meeting-schedule',
+  {
+    displayName: 'Schedule Meeting',
+    category: 'ai',
+    icon: 'CalendarAdd24Regular',
+    /**
+     * allowMultiple=true: users may have several meeting-schedule dispatcher
+     * tabs if they re-launched the card multiple times.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=110: positioned just after email-compose.
+     */
+    defaultOrder: 110,
+  },
+  () =>
+    import('./MeetingScheduleWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 14. create-project-wizard — Existing Create Project Code Page dispatcher (task 043, FR-19)
+//     Category: wizard — opens the existing `sprk_createprojectwizard` Code Page
+//     via Xrm.Navigation.navigateTo (REUSE per OC-04 / ADR-012, NOT re-authored).
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may launch multiple Create Project dialogs
+//     in distinct workspace tabs.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Create New Project" card). Renaming this string would break the
+   * GetStartedCards → Create Project routing path.
+   */
+  'create-project-wizard',
+  {
+    displayName: 'Create New Project',
+    category: 'wizard',
+    icon: 'FolderAdd24Regular',
+    /**
+     * allowMultiple=true: users may have several Create Project dispatcher tabs
+     * if they re-launched the card multiple times. The underlying Code Page
+     * itself is a singleton modal — only one dialog is visible at a time —
+     * but the widget tab persists for relaunch.
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=120: positioned just after meeting-schedule (110).
+     */
+    defaultOrder: 120,
+  },
+  () =>
+    import('./CreateProjectWizardWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 15. find-similar-wizard — Existing Find Similar Code Page dispatcher (task 043, FR-19)
+//     Category: wizard — opens the existing `sprk_findsimilar` Code Page
+//     via Xrm.Navigation.navigateTo (REUSE per OC-04 / ADR-012, NOT re-authored).
+//     Widget type string MUST match task 042's dispatched `widget_load` event
+//     payload exactly — do NOT rename.
+//     allowMultiple=true — users may launch multiple Find Similar searches
+//     in distinct workspace tabs.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Type string MUST match the FR-19 mapping (task 042's onCardClick dispatch
+   * for "Find Similar" card). Renaming this string would break the
+   * GetStartedCards → Find Similar routing path.
+   */
+  'find-similar-wizard',
+  {
+    displayName: 'Find Similar Documents',
+    category: 'wizard',
+    icon: 'DocumentSearch24Regular',
+    /**
+     * allowMultiple=true: users may have several Find Similar dispatcher tabs
+     * if they re-launched the card multiple times (e.g. comparing different
+     * source documents in parallel).
+     */
+    allowMultiple: true,
+    /**
+     * defaultOrder=130: positioned just after create-project-wizard (120).
+     */
+    defaultOrder: 130,
+  },
+  () =>
+    import('./FindSimilarWizardWidget') as Promise<{
+      default: import('../../types/widget-types').WorkspaceWidgetComponent;
+    }>
+);
+
+// ---------------------------------------------------------------------------
+// 16. workspace — Embedded LegalWorkspaceApp (Round 4 Fix 4, 2026-05-21)
+//     Category: workspace — opens the chosen workspace layout as a single
+//     workspace tab via the embedded LegalWorkspaceApp surface
+//     (`embedded={true}`). Triggered by WorkspacePaneMenu's "Switch Workspace"
+//     handler in SpaarkeAi. The widget data carries `{ layoutId, layoutName }`
+//     — `layoutId` is passed as `initialWorkspaceId` so the embedded
+//     useWorkspaceLayouts hook activates the chosen layout on mount.
+//
+//     allowMultiple=true — a session may have multiple workspace tabs open
+//     (e.g. Corporate Workspace + Litigation Workspace side-by-side via the
+//     tab manager). The FIFO cap on MAX_WORKSPACE_TABS still applies.
+// ---------------------------------------------------------------------------
+
+registerWorkspaceWidget(
+  /**
+   * Widget type string MUST match the value dispatched by
+   * `WorkspacePaneMenu.tsx` when the user selects a layout from "Switch
+   * Workspace". The string is intentionally plain "workspace" — there is one
+   * workspace widget type and it always renders LegalWorkspaceApp.
+   */
+  'workspace',
+  {
+    displayName: 'Workspace',
+    category: 'workspace',
+    icon: 'AppsListRegular',
+    allowMultiple: true,
+    /**
+     * defaultOrder=140: positioned after the existing intent dispatchers
+     * (email-compose 100, meeting-schedule 110, create-project 120,
+     * find-similar 130).
+     */
+    defaultOrder: 140,
+  },
+  () =>
+    import('./WorkspaceLayoutWidget').then((m) => ({
+      default: m.WorkspaceLayoutWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
+    })),
+);
+
+// ---------------------------------------------------------------------------
 // Public registration function (called from index.ts side-effect import)
 // ---------------------------------------------------------------------------
 

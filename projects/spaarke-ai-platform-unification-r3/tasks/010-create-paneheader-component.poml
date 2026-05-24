@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Create shared &lt;PaneHeader&gt; component in @spaarke/ui-components</title>
+    <phase>Phase A — Foundations</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>022, 030, 040</blocks>
+    <tags>react, frontend, fluent-ui, shared-components</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates net-new code in `@spaarke/ui-components` (the shared library). This component is consumed by all three pane refactors (B/C/D phases) — visual + token correctness is load-bearing. ADR-012 (shared components) and ADR-021 (Fluent v9 tokens, no hex) both apply. FULL rigor with code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a new `&lt;PaneHeader&gt;` shared component in `@spaarke/ui-components` that all
+    three SpaarkeAi panes (Assistant, Workspace, Context) will consume. The component
+    accepts three props — `title`, optional `icon`, optional `rightSlot` — and matches
+    the canonical visual style of the existing Context-pane header. This is the
+    foundational primitive for FR-01 and unblocks Phase B/C/D pane refactors.
+  </prompt>
+
+  <role>
+    React 19 + Fluent UI v9 component author for a shared design-system library. Bias
+    toward `makeStyles` + `tokens.*`, no hex literals, semantic ARIA, and a tiny,
+    composable API surface. Write a snapshot test alongside.
+  </role>
+
+  <goal>
+    A new component folder
+    `src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/` containing
+    `PaneHeader.tsx`, `index.ts`, and a snapshot test. The component is exported from the
+    library's root `src/index.ts` and builds clean via the shared-components workspace
+    build. Visual style matches `ContextPaneController.tsx:142-171, 691-700`.
+  </goal>
+
+  <context>
+    <background>
+      FR-01 establishes a single shared pane-header primitive used by ConversationPane,
+      WorkspacePane, and ContextPaneController. Today only ContextPaneController has the
+      canonical visual treatment (icon + title + right-slot). Lifting it into
+      `@spaarke/ui-components` per ADR-012 means subsequent tasks 022 (Assistant),
+      030 (Workspace), and 040 (Context migration) can all consume one component.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Context-agnostic shared components MUST live in `@spaarke/ui-components`, not solution-local. PaneHeader is context-agnostic (icon + title + slot) and is the canonical example of this rule.</constraint>
+    <constraint source="ADR-021">Use Fluent v9 tokens only — `tokens.colorBrandForeground1`, `tokens.spacingHorizontal*`, `tokens.fontSizeBase*`, etc. NO hex literals, NO `rgba(...)` literals, NO Fluent v8. Dark-mode safe by construction.</constraint>
+    <constraint source="ADR-025">Icons come from `@fluentui/react-icons` (Fluent v9). The `icon` prop accepts a `React.ReactNode` so any v9 icon can be passed in. Do NOT introduce new SVG web resources.</constraint>
+    <constraint source="ADR-022">React 19 only. No React 16 fallbacks. Use `makeStyles` + `mergeClasses` per Fluent v9 v19-compatible patterns.</constraint>
+    <constraint source="project">Component must accept exactly three props: `title: string`, `icon?: React.ReactNode`, `rightSlot?: React.ReactNode`. Do not add extra props in this task — Phase B/C/D will extend if needed.</constraint>
+    <constraint source="project">The component must NOT import anything from solution-specific code paths (`src/solutions/...`). All dependencies must come from Fluent v9 + React + `@spaarke/ui-components` internals.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read canonical reference">
+      Open `src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx`
+      and read lines 142-171 and 691-700. Extract the visual primitives: container
+      layout (flex row), icon color (`colorBrandForeground1`), title typography, gap
+      tokens, and right-slot alignment. Note token names so the new component matches.
+    </step>
+    <step order="2" name="Create the component folder">
+      Create `src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/`. This
+      becomes a sibling of existing component folders in the shared library.
+    </step>
+    <step order="3" name="Implement PaneHeader.tsx">
+      Write `PaneHeader.tsx` exporting `interface PaneHeaderProps { title: string;
+      icon?: React.ReactNode; rightSlot?: React.ReactNode; }` and a
+      `export const PaneHeader: React.FC&lt;PaneHeaderProps&gt;`. Use `makeStyles` for
+      layout (flex, gap via `tokens.spacingHorizontalS` or `M`), apply
+      `tokens.colorBrandForeground1` to the icon wrapper, and use `tokens.fontSizeBase400`
+      (or whatever the canonical reference uses) for the title. Add ARIA: the root is a
+      `&lt;header&gt;` element or has `role="heading"` semantics with appropriate
+      `aria-level`. Do NOT use hex / rgba literals.
+    </step>
+    <step order="4" name="Create index.ts barrel">
+      Write `src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/index.ts`
+      that re-exports `PaneHeader` and `PaneHeaderProps`.
+    </step>
+    <step order="5" name="Export from library root">
+      Edit `src/client/shared/Spaarke.UI.Components/src/index.ts` to add
+      `export * from './components/PaneHeader';` (or the equivalent matching the file's
+      existing pattern — read it first to be consistent).
+    </step>
+    <step order="6" name="Add snapshot test">
+      Create a colocated test (e.g. `PaneHeader.test.tsx`) that renders the component
+      with all three props provided and asserts (a) the title text is present,
+      (b) `icon` and `rightSlot` are rendered, (c) snapshot stability. Use the existing
+      test harness conventions in the shared library (check for an existing
+      `*.test.tsx` file to match style).
+    </step>
+    <step order="7" name="Build and verify">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` if node_modules is stale,
+      then `npm run build` in the shared-components workspace. Confirm zero TypeScript
+      errors and zero new lint warnings. If a lint rule for hex/rgba exists per ADR-021,
+      confirm it passes.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read canonical reference + existing shared component patterns</tool>
+    <tool name="Write">Create new component files</tool>
+    <tool name="Edit">Update library barrel export in `src/index.ts`</tool>
+    <tool name="Bash">npm build + test in the shared-components workspace</tool>
+    <tool name="Grep">Confirm no solution-local imports leaked in; confirm no hex/rgba literals</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/PaneHeader.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/PaneHeader.test.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (modified — adds PaneHeader export)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`PaneHeader` is importable as `import { PaneHeader } from '@spaarke/ui-components'`.</criterion>
+    <criterion testable="true">The component renders all three props correctly: `title` as visible text, `icon` in a brand-foreground-colored wrapper, `rightSlot` aligned to the right.</criterion>
+    <criterion testable="true">Visual style (layout, spacing, icon color, title size) matches the canonical Context-pane header at `ContextPaneController.tsx:142-171, 691-700`.</criterion>
+    <criterion testable="true">Source contains zero hex literals (`#xxxxxx`) and zero `rgba(...)` literals — all colors and spacing come from `tokens.*`.</criterion>
+    <criterion testable="true">Snapshot test exists and passes.</criterion>
+    <criterion testable="true">`npm run build` in the shared-components workspace succeeds with zero TypeScript errors and zero new lint warnings.</criterion>
+    <criterion testable="true">No imports from `src/solutions/...` anywhere in `PaneHeader.tsx` or its test (verifies ADR-012 context-agnostic constraint).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    FULL rigor applies — code-review + adr-check at Step 9.5 because this is net-new code in
+    the shared component library and is consumed by all three pane refactors downstream.
+  </execution>
+</task>

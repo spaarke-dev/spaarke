@@ -51,7 +51,11 @@ export const quickSummaryRegistration: SectionRegistration = {
   description: "Key metrics at a glance",
   icon: DataBarVerticalRegular,
   category: "overview",
-  defaultHeight: "180px",
+  // Round 8 Wave 3 (task 110, 2026-05-22): bumped from "180px" to "440px"
+  // to fit the 6-card 2x3 grid (each card ~120px tall + row gaps + section
+  // padding). The 180px height was sized for the 4-card single-row layout
+  // that shipped in Round 6.
+  defaultHeight: "440px",
 
   factory(context: SectionFactoryContext): ContentSectionConfig {
     const toolbar = React.createElement(

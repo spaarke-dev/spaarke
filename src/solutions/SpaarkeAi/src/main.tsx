@@ -47,6 +47,17 @@ import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
 import { App } from "./App";
 import type { IRuntimeConfig } from "@spaarke/auth";
+// Round 4 Fix 4.1 (2026-05-21): SpaarkeAi embeds `LegalWorkspaceApp` as a
+// workspace tab widget. LegalWorkspace has its OWN runtime-config singleton
+// (separate from SpaarkeAi's) — when embedded, code paths in the LegalWorkspace
+// tree call `getBffBaseUrl()` which reads from LegalWorkspace's singleton.
+// Without this dual-init call, document preview and other actions inside the
+// embedded tree throw "[LegalWorkspace] Runtime config not initialized."
+//
+// Both singletons receive the SAME `IRuntimeConfig` so they agree on bffBaseUrl
+// / scope / clientId / tenantId. The two are distinct in-process instances by
+// design — embedding does not collapse them; it just keeps both warm.
+import { setLegalWorkspaceRuntimeConfig } from "@spaarke/legal-workspace";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -103,8 +114,70 @@ async function fetchClientConfig(): Promise<IRuntimeConfig> {
 }
 
 
+// ---------------------------------------------------------------------------
+// Task 105 (2026-05-22) — Suppress LegalWorkspace's `useDailyDigestAutoPopup`
+// when LegalWorkspaceApp is embedded inside SpaarkeAi.
+//
+// Background:
+//   LegalWorkspace's `WorkspaceGrid.tsx` unconditionally calls
+//   `useDailyDigestAutoPopup({ webApi, userId })` on mount. That hook (see
+//   `src/solutions/LegalWorkspace/src/hooks/useDailyDigestAutoPopup.ts`) opens
+//   `sprk_dailyupdate` as a modal Code Page on first run per browser session,
+//   guarded by `sessionStorage.getItem("spaarke_dailyDigestShown")`.
+//
+//   Inside SpaarkeAi, LegalWorkspaceApp is embedded as a workspace tab widget
+//   (`@spaarke/ai-widgets/.../WorkspaceLayoutWidget.tsx`) whenever the user has
+//   pinned a workspace — task 101's auto-open dispatches `widget_load` for
+//   each pinned layout on cold load (`WorkspacePane.tsx` lines 401-457). The
+//   first such embed runs the hook, the hook fires the modal, and the operator
+//   sees a "Daily Briefing" popup automatically appearing inside SpaarkeAi.
+//
+//   Operator feedback (Round 8, 2026-05-22):
+//     "Remove the Daily Briefing popup when the app loads."
+//
+// Fix:
+//   Set the hook's sessionStorage sentinel BEFORE any React tree mounts. The
+//   hook then short-circuits at its `if (sessionStorage.getItem(SESSION_KEY))
+//   return;` guard (file referenced above, lines ~65-70).
+//
+// Scope:
+//   - SpaarkeAi-only: standalone LegalWorkspace runs in a SEPARATE browser tab
+//     with its OWN sessionStorage, so this write does not affect that app.
+//   - LegalWorkspace source files untouched (FR-25 / NFR-10 preserved).
+//   - The inline Daily Briefing section in the Workspace pane's Home tab
+//     (`WorkspaceHomeTab.tsx`, task 086) is UNAFFECTED — it renders via
+//     `createDailyBriefingRegistration` + `WorkspaceShell` and does NOT use
+//     `Xrm.Navigation.navigateTo`. Operator still sees Daily Briefing content
+//     inline; only the auto-launched MODAL is suppressed.
+//
+//   The flag value `"suppressed-by-spaarkeai"` is informational only — the
+//   hook checks ANY truthy value at the key. Existing "shown" / "opted-out"
+//   values from prior SpaarkeAi loads remain valid; we only set when no value
+//   is already present so we don't clobber an operator-side opt-out.
+// ---------------------------------------------------------------------------
+
+const DAILY_DIGEST_SESSION_KEY = "spaarke_dailyDigestShown";
+
+function suppressLegalWorkspaceDailyDigestAutoPopup(): void {
+  try {
+    if (!sessionStorage.getItem(DAILY_DIGEST_SESSION_KEY)) {
+      sessionStorage.setItem(DAILY_DIGEST_SESSION_KEY, "suppressed-by-spaarkeai");
+    }
+  } catch {
+    // sessionStorage may be unavailable (private browsing, sandboxed iframe).
+    // Failure is non-fatal — the hook's own try/catch around sessionStorage
+    // means it will skip the auto-popup in those same constrained contexts.
+  }
+}
+
+
 async function bootstrap(): Promise<void> {
   const t0 = performance.now();
+
+  // Task 105: suppress LegalWorkspace's Daily Digest auto-popup BEFORE any
+  // React tree (including any embedded LegalWorkspaceApp instances) mounts.
+  // See the docblock above this bootstrap() definition for full rationale.
+  suppressLegalWorkspaceDailyDigestAutoPopup();
 
   // -------------------------------------------------------------------------
   // 1. Resolve runtime config
@@ -142,6 +215,24 @@ async function bootstrap(): Promise<void> {
   }
 
   setRuntimeConfig(config);
+
+  // Round 4 Fix 4.1 (2026-05-21): also initialize LegalWorkspace's runtime
+  // config singleton with the SAME resolved config so the embedded
+  // LegalWorkspaceApp's code paths (e.g. `getBffBaseUrl()` from navigateTo
+  // handlers + `useWorkspaceLayouts` BFF fetch + document preview) find an
+  // initialized singleton instead of throwing. Both singletons hold equivalent
+  // values; they remain distinct in-process instances.
+  try {
+    setLegalWorkspaceRuntimeConfig(config);
+  } catch (err) {
+    // Non-fatal — if the embedded LegalWorkspace init fails, embedded paths
+    // will surface their own "runtime config not initialized" error and the
+    // standalone code paths in SpaarkeAi continue to work.
+    console.warn(
+      "[SpaarkeAi] setLegalWorkspaceRuntimeConfig failed; embedded LegalWorkspace paths may error:",
+      err,
+    );
+  }
 
   // Cache config to localStorage so subsequent visits resolve instantly
   // without needing Xrm or a BFF fetch.

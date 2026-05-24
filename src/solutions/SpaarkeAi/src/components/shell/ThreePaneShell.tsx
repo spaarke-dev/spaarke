@@ -57,6 +57,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens, Toaster, useToastController, useId, Toast, ToastTitle } from "@fluentui/react-components";
+import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
 import { ThreePaneLayout } from "@spaarke/ui-components";
 import {
   PaneEventBusProvider,
@@ -73,6 +74,8 @@ import { ContextPaneController } from "../context/ContextPaneController";
 import { WorkspacePane } from "../workspace/WorkspacePane";
 import { useSessionRestore } from "../../hooks/useSessionRestore";
 import type { SessionRestoreSpec } from "../../hooks/useSessionRestore";
+import { usePaneCollapse } from "../../hooks/usePaneCollapse";
+import type { PaneId } from "../../hooks/usePaneCollapse";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state type (four-stage, design.md Section 2.3)
@@ -138,6 +141,32 @@ export function useShellStage(): ShellStageContextValue {
     );
   }
   return ctx;
+}
+
+// ---------------------------------------------------------------------------
+// PaneCollapseContext — exposes each pane's collapse-toggle handle to the
+// pane subtrees so they can wire their own <PaneHeader onCollapse={...} />.
+// Lives inside ThreePaneShell because the shell owns the layout + the
+// `usePaneCollapse` state. Task 094.
+// ---------------------------------------------------------------------------
+
+export interface PaneCollapseContextValue {
+  isCollapsed: (id: PaneId) => boolean;
+  toggle: (id: PaneId) => void;
+}
+
+export const PaneCollapseContext = React.createContext<PaneCollapseContextValue | null>(
+  null
+);
+PaneCollapseContext.displayName = "PaneCollapseContext";
+
+/**
+ * Consume the pane-collapse controller from inside any of the three panes.
+ * Returns `null` if rendered outside `<ThreePaneShell>` so consumers can
+ * detect the standalone case (e.g. when the pane is unit-tested directly).
+ */
+export function usePaneCollapseContext(): PaneCollapseContextValue | null {
+  return React.useContext(PaneCollapseContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +582,29 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
     };
   }, [entityLogicalName, entityId, matterId]);
 
+  // ── Pane collapse state (Task 094) ──────────────────────────────────────
+  //
+  // Operator request: click any pane's HEADER to collapse it to a narrow
+  // vertical strip (mirrors SmartToDo column collapse). All three panes
+  // can be collapsed simultaneously; state persists across sessions via
+  // localStorage so refresh restores the user's preference. See
+  // `usePaneCollapse.ts` for the implementation + persistence shape.
+  const paneCollapse = usePaneCollapse();
+  const paneCollapseCtx = React.useMemo<PaneCollapseContextValue>(
+    () => ({
+      isCollapsed: paneCollapse.isCollapsed,
+      toggle: paneCollapse.toggle,
+    }),
+    [paneCollapse.isCollapsed, paneCollapse.toggle]
+  );
+
+  const leftCollapsed = paneCollapse.isCollapsed("assistant");
+  const centerCollapsed = paneCollapse.isCollapsed("workspace");
+  const rightCollapsed = paneCollapse.isCollapsed("context");
+  const toggleLeft = React.useCallback(() => paneCollapse.toggle("assistant"), [paneCollapse]);
+  const toggleCenter = React.useCallback(() => paneCollapse.toggle("workspace"), [paneCollapse]);
+  const toggleRight = React.useCallback(() => paneCollapse.toggle("context"), [paneCollapse]);
+
   return (
     <PaneEventBusProvider>
       <AiSessionProvider
@@ -561,26 +613,77 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
       >
         <ShellStageManager>
           <SessionRestoreManager sessionId={sessionId}>
-            <div className={styles.shell}>
-              {/*
-               * ThreePaneLayout dimensions match R1 App.tsx values (340/400/240/240/320).
-               * storageKey is namespaced to the R2 shell so sessionStorage is isolated
-               * from any residual R1 keys.
-               */}
-              <ThreePaneLayout
-                leftPane={<ConversationPane />}
-                centerPane={<WorkspacePane />}
-                rightPane={<ContextPaneController />}
-                storageKey="spaarke-ai-r2-shell"
-                defaultLeftWidthPx={340}
-                defaultRightWidthPx={400}
-                minLeftWidthPx={240}
-                minRightWidthPx={240}
-                minCenterWidthPx={320}
-                leftPaneCollapseLabel="Show AI Chat"
-                rightPaneCollapseLabel="Show Context"
-              />
-            </div>
+            <PaneCollapseContext.Provider value={paneCollapseCtx}>
+              <div className={styles.shell}>
+                {/*
+                 * ThreePaneLayout dimensions match R1 App.tsx values (340/400/240/240/320).
+                 * storageKey is namespaced to the R2 shell so sessionStorage is isolated
+                 * from any residual R1 keys.
+                 *
+                 * Task 094: leftCollapsed / centerCollapsed / rightCollapsed +
+                 * the matching toggle callbacks fully drive the layout's collapse
+                 * state from `usePaneCollapse` (localStorage-backed). Each pane's
+                 * PaneHeader also wires `onCollapse` so clicking the header
+                 * collapses the pane. The collapsed-strip click in the layout
+                 * re-expands.
+                 */}
+                <ThreePaneLayout
+                  leftPane={<ConversationPane />}
+                  centerPane={<WorkspacePane />}
+                  rightPane={<ContextPaneController />}
+                  storageKey="spaarke-ai-r2-shell"
+                  /*
+                   * Task 117 (Round 10, 2026-05-22) — Operator request: on a
+                   * brand-new session with no saved pane widths, distribute
+                   * the three panes as 25% / 50% / 25% of the viewport
+                   * (Assistant / Workspace / Context) rather than the fixed
+                   * 340/400 pixel defaults (which produced ~17/50/33 on a
+                   * typical 2000px viewport — wildly off the desired layout).
+                   *
+                   * The fixed pixel defaults are retained as a fallback for
+                   * SSR / non-browser environments and as a hard floor when
+                   * the computed pixel value is below the minimum width.
+                   *
+                   * Precedence on each cold mount (see resolveInitialWidth):
+                   *   1. sessionStorage stored pixel width (user-dragged value
+                   *      persists — drag a splitter and the pixel value wins
+                   *      on subsequent reloads)
+                   *   2. defaultLeftWidthFrac × window.innerWidth (NEW)
+                   *   3. defaultLeftWidthPx (legacy pixel default)
+                   */
+                  defaultLeftWidthPx={340}
+                  defaultRightWidthPx={400}
+                  defaultLeftWidthFrac={0.25}
+                  defaultRightWidthFrac={0.25}
+                  minLeftWidthPx={240}
+                  minRightWidthPx={240}
+                  minCenterWidthPx={320}
+                  leftPaneCollapseLabel="Assistant"
+                  centerPaneCollapseLabel="Workspace"
+                  rightPaneCollapseLabel="Context"
+                  /*
+                   * Task 096 introduced the `*CollapsedIcon` props on
+                   * ThreePaneLayout. Each collapsed strip now renders the
+                   * same icon the pane's PaneHeader shows when expanded:
+                   *   Assistant  → ChatRegular        (task 097)
+                   *   Workspace  → AppsListRegular    (task 098 follow-up)
+                   *   Context    → DocumentRegular    (task 099 follow-up)
+                   * The rotated-text fallback is no longer used in SpaarkeAi.
+                   * Operator feedback (2026-05-22): "in collapse mode use the
+                   * icon only as the pane identifier, not the words."
+                   */
+                  leftCollapsedIcon={<ChatRegular />}
+                  centerCollapsedIcon={<AppsListRegular />}
+                  rightCollapsedIcon={<DocumentRegular />}
+                  leftCollapsed={leftCollapsed}
+                  centerCollapsed={centerCollapsed}
+                  rightCollapsed={rightCollapsed}
+                  onToggleLeft={toggleLeft}
+                  onToggleCenter={toggleCenter}
+                  onToggleRight={toggleRight}
+                />
+              </div>
+            </PaneCollapseContext.Provider>
           </SessionRestoreManager>
         </ShellStageManager>
       </AiSessionProvider>

@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>UI smoke — Assistant pane FR-02..FR-09 in deployed Power Apps host</title>
+    <phase>Phase G — Deploy + Smoke</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>090</blocks>
+    <tags>pcf, frontend, e2e-test, fluent-ui, ui-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Manual + automated UI smoke testing in deployed environment. STANDARD rigor — no production code edits in this task; if a smoke check fails, a remediation follow-up task is opened.</rigor-reason>
+    <parallel-group>G-smoke</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Smoke against deployed environment — read-only. Parallel with sibling smoke tasks 072, 073, 074 (different surfaces, no contention).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run UI smoke testing of the Assistant pane against FR-02..FR-09 acceptance criteria in
+    the deployed Power Apps host (deployed via task 070). Use the `ui-test` skill. Record
+    pass/fail per sub-criterion in
+    `projects/spaarke-ai-platform-unification-r3/notes/smoke-assistant.md`. Open follow-up
+    remediation tasks for any FAIL; otherwise this task PASSES and contributes to the Phase
+    G smoke battery.
+  </prompt>
+
+  <role>
+    Frontend QA tester comfortable using the `ui-test` skill (Chrome integration) to exercise
+    Power Apps model-driven app surfaces and Code Pages. Familiar with FR-02..FR-09 acceptance
+    criteria from the project spec.
+  </role>
+
+  <goal>
+    A smoke report at
+    `projects/spaarke-ai-platform-unification-r3/notes/smoke-assistant.md` records pass/fail
+    for each of the 8 Assistant pane sub-criteria (FR-02..FR-09). All sub-criteria PASS
+    OR follow-up remediation tasks exist for each FAIL.
+  </goal>
+
+  <context>
+    <background>
+      FR-02..FR-09 specify the Assistant pane welcome state: ChatRegular icon + "Assistant"
+      title in PaneHeader, no top-level tab buttons (single conversation per session), History
+      overlay accessed via right-slot icon, welcome panel content + 4 prompt cards, no "Open
+      in Word" surface, input editable on cold load, multi-file attach with chip strip, prompt
+      menu + `+` strip above input, dark-mode parity.
+    </background>
+    <relevant-files>
+      <file>Deployed SpaarkeAi instance (from task 070)</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md (FR-02..FR-09)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All 8 sub-criteria below must be PASS for this task to PASS. Any FAIL opens a remediation follow-up task and blocks task 090 wrap-up.</constraint>
+    <constraint source="project">Use the `ui-test` skill for automated checks; manual verification is acceptable for sub-criteria that require visual judgment (e.g., dark-mode parity).</constraint>
+    <constraint source="project">Smoke report MUST list each sub-criterion individually with PASS / FAIL + evidence (screenshot path, ui-test output, or descriptive note).</constraint>
+    <constraint source="ADR-021">Dark-mode parity sub-criterion uses Fluent v9 tokens — no hex/rgba is acceptable in the rendered UI.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-025-icon-library-and-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm task 070 deploy success">
+      Read the deploy memo at `projects/spaarke-ai-platform-unification-r3/notes/deploys/`.
+      Confirm the latest deploy is SUCCESS and Test-Deployment.ps1 reported healthy.
+    </step>
+    <step order="2" name="Open deployed SpaarkeAi in Power Apps host">
+      Navigate to the deployed SpaarkeAi Code Page in the Power Apps host (model-driven app
+      shell). Confirm cold-load welcome state renders.
+    </step>
+    <step order="3" name="Invoke ui-test skill for each sub-criterion">
+      For each of the 8 sub-criteria below, invoke the `ui-test` skill (or perform manual
+      verification where automation is impractical). Capture evidence per sub-criterion.
+    </step>
+    <step order="4" name="Aggregate results into smoke report">
+      Create `projects/spaarke-ai-platform-unification-r3/notes/smoke-assistant.md` with
+      header (date, env, commit SHA from task 070 memo), table of 8 sub-criteria with
+      PASS/FAIL + evidence, and roll-up verdict.
+    </step>
+    <step order="5" name="Open remediation tasks for FAILs">
+      For any sub-criterion that FAILs, draft a follow-up POML task (one per FAIL cluster)
+      and add to TASK-INDEX.md. Block task 090 wrap-up until remediated.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Deploy memo, spec</tool>
+    <tool name="Skill">`ui-test` skill for automated browser checks</tool>
+    <tool name="Write">Smoke report; follow-up POML tasks if FAILs</tool>
+    <tool name="Edit">TASK-INDEX.md if opening follow-up tasks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/smoke-assistant.md</output>
+    <output type="docs">Follow-up POML tasks for any FAIL</output>
+    <output type="report">Task completion report with roll-up verdict (all 8 PASS or N FAILs with remediation tasks)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-02: PaneHeader icon is `ChatRegular` from `@fluentui/react-icons`.</criterion>
+    <criterion testable="true">FR-02: PaneHeader title reads "Assistant".</criterion>
+    <criterion testable="true">FR-03: No top-level tab buttons visible (single conversation per session).</criterion>
+    <criterion testable="true">FR-04: History overlay opens when the right-slot history icon is clicked; renders past sessions.</criterion>
+    <criterion testable="true">FR-05/FR-06: Welcome state shows "Welcome to Spaarke AI" heading + exactly 4 prompt cards + NO "Open in Word" surface.</criterion>
+    <criterion testable="true">FR-08: Input is editable on cold load (no skeleton lock); cursor focuses correctly.</criterion>
+    <criterion testable="true">FR-07: Multi-file attach works (1-5 files); chip strip renders attached file names with dismiss affordance.</criterion>
+    <criterion testable="true">FR-09: Prompt-menu trigger + `+` attach strip render above the input.</criterion>
+    <criterion testable="true">Dark-mode parity: switching theme produces no contrast regressions on the Assistant pane.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="ChatRegular icon visible in PaneHeader">
+      Open SpaarkeAi. Confirm the Assistant pane's PaneHeader displays the `ChatRegular`
+      icon in `tokens.colorBrandForeground1`. Compare against `@fluentui/react-icons`
+      `ChatRegular` glyph reference.
+    </test>
+    <test name="PaneHeader title reads Assistant">
+      Confirm the PaneHeader title is exactly "Assistant" (case-sensitive).
+    </test>
+    <test name="No tab buttons visible">
+      Confirm zero tab-button affordances are visible in the Assistant pane chrome.
+    </test>
+    <test name="History overlay opens on right-slot icon click">
+      Click the history icon (right-slot of Assistant PaneHeader). Confirm a History overlay
+      panel opens, listing past sessions. Close the overlay; confirm dismiss works.
+    </test>
+    <test name="Welcome state — heading + 4 prompt cards + no Open in Word">
+      <steps>
+        <step>Confirm "Welcome to Spaarke AI" heading is rendered.</step>
+        <step>Confirm exactly 4 prompt cards are visible.</step>
+        <step>Confirm there is NO "Open in Word" button or surface anywhere on the welcome state.</step>
+      </steps>
+    </test>
+    <test name="Input editable on cold load">
+      On cold load (fresh navigation, no prior interaction), click the input. Confirm cursor
+      focuses immediately and characters can be typed.
+    </test>
+    <test name="Multi-file attach with chip strip">
+      Click `+` attach. Select 3 files (e.g., a .txt, a .md, a small .pdf). Confirm 3 chips
+      render above the input with filename + dismiss affordance. Dismiss one chip; confirm
+      it disappears.
+    </test>
+    <test name="Prompt-menu trigger + `+` strip above input">
+      Confirm the prompt-menu trigger and `+` attach strip are visually positioned ABOVE
+      the input (per the spec, not below).
+    </test>
+    <test name="Dark-mode parity">
+      Toggle dark mode via Power Apps user settings. Confirm: background adapts via
+      `tokens.colorNeutralBackground1`; text adapts via `tokens.colorNeutralForeground1`;
+      icons remain in brand foreground. No contrast/visibility regressions.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The smoke tests within MUST be executed via the `ui-test` skill.
+  </execution>
+</task>

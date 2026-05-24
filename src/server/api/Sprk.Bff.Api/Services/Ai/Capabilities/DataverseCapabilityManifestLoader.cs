@@ -27,9 +27,15 @@ namespace Sprk.Bff.Api.Services.Ai.Capabilities;
 /// </list>
 ///
 /// When the table is empty the method returns an empty list.
-/// When the table does not exist or Dataverse is unreachable an
-/// <see cref="InvalidOperationException"/> is thrown so the caller can decide
-/// whether to abort startup or fall back to empty.
+/// When the table does not exist (HTTP 404 / "Resource not found" 400 from Dataverse
+/// indicating a missing entity), the method ALSO returns an empty list and logs a
+/// warning. This is the expected state for environments that have not yet had the
+/// `sprk_aicapability` table provisioned (e.g., fresh dev environments). The chat
+/// pipeline degrades gracefully: tool calls remain unavailable but the rest of the
+/// chat flow proceeds.
+/// Other transient failures (5xx, network errors) still throw so the
+/// <see cref="ManifestRefreshService"/> stale-on-error policy can retain the
+/// existing manifest.
 /// </summary>
 public sealed class DataverseCapabilityManifestLoader : ICapabilityManifestLoader
 {
@@ -97,6 +103,24 @@ public sealed class DataverseCapabilityManifestLoader : ICapabilityManifestLoade
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            // Missing-entity tolerance: when the `sprk_aicapability` table doesn't exist
+            // in the target environment (typical for fresh dev envs), Dataverse returns
+            // either 404 (NotFound) or 400 with a body containing "Resource not found"
+            // or "Could not find a property named". Treat these as "no capabilities
+            // registered" and return empty — do NOT throw, so chat tool detection still
+            // runs (just with zero tools available) and ManifestRefreshService does not
+            // log a noisy stack trace on every refresh tick.
+            if (IsMissingEntityResponse(response.StatusCode, body))
+            {
+                _logger.LogWarning(
+                    "Dataverse table '{EntitySet}' is not provisioned in this environment " +
+                    "({StatusCode}). AI chat tools will be unavailable until the table is " +
+                    "created. Returning empty manifest.",
+                    EntitySetName, response.StatusCode);
+                return Array.Empty<CapabilityManifestEntry>();
+            }
+
             _logger.LogError(
                 "Dataverse query for '{EntitySet}' failed: {StatusCode} — {Body}",
                 EntitySetName, response.StatusCode, body);
@@ -126,6 +150,34 @@ public sealed class DataverseCapabilityManifestLoader : ICapabilityManifestLoade
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Detects whether a non-success Dataverse response indicates the queried
+    /// entity (table) does not exist in this environment. Treated as a graceful
+    /// "empty manifest" condition rather than an error.
+    ///
+    /// Dataverse signals missing-entity in two ways:
+    ///   - HTTP 404 (NotFound) — the entity set path is unknown
+    ///   - HTTP 400 with body containing "Resource not found" or
+    ///     "Could not find a property named" — the table exists but a column is missing
+    ///     OR the OData $select references an unknown navigation property.
+    /// </summary>
+    internal static bool IsMissingEntityResponse(System.Net.HttpStatusCode statusCode, string body)
+    {
+        if (statusCode == System.Net.HttpStatusCode.NotFound)
+            return true;
+
+        if (statusCode == System.Net.HttpStatusCode.BadRequest && !string.IsNullOrEmpty(body))
+        {
+            // Dataverse error bodies are JSON with a string "message" property. Match on
+            // the well-known phrases without parsing JSON (cheaper + tolerant of format drift).
+            return body.Contains("Resource not found for the segment", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("does not exist", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
 
     private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken)
     {

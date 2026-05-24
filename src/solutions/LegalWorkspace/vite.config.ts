@@ -25,6 +25,10 @@ function resolveSharedLibDeps(): import("vite").Plugin {
   const sharedLibPaths = [
     path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
     path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
+    // Task 114 (2026-05-22): @spaarke/events-components hosts Events +
+    // Tasks components. LegalWorkspace consumes them when task 115 adds a
+    // Calendar section factory to its section registry.
+    path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -76,6 +80,9 @@ export default defineConfig({
         "src/**/*.ts",
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.ts"),
+        // Task 114 (2026-05-22): transpile Events components source.
+        path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.ts"),
       ],
     }),
     viteSingleFile(),
@@ -85,7 +92,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
+      // Task 114 (2026-05-22): pre-wired so task 115's Calendar section
+      // factory in LegalWorkspace can import from @spaarke/events-components
+      // without further plumbing.
+      "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
     },
+    // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
+    // .gitignore) never silently shadow source. See Task 112 (2026-05-22).
+    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx", ".json"],
     // Force deduplication for shared packages
     dedupe: [
       "react",

@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Smoke remediation: Bug 1 (chat box) + UX-A (Recent Conversations) + UX-B (all wizards as popups)</title>
+    <phase>F (Verification — remediation)</phase>
+    <status>completed</status>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>020, 021, 023, 025, 042, 067, 070</dependencies>
+    <blocks>071, 072, 073</blocks>
+    <tags>react, frontend, ui-cleanup, refactoring, ux</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Three concurrent UI changes in SpaarkeAi affecting smoke-blocking issues. Touches ConversationPane.tsx, WelcomePanel.tsx, and ContextPaneController.tsx. Each change must preserve existing functionality on the non-affected paths. Code-review + ADR check applies.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Three changes touch different files but each requires verifying the whole welcome flow renders correctly. Single coordinated agent is cleaner than parallel.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Apply 3 smoke-remediation fixes to SpaarkeAi based on operator feedback (2026-05-20 smoke round 1):
+
+    (Bug 1) Restructure ConversationPane welcome state so the chat input is visible — currently SprkChat is mutually exclusive with WelcomePanel.
+
+    (UX-A) Remove the "Recent Conversations" section from WelcomePanel — pattern is "start blank; use History overlay to resume past sessions".
+
+    (UX-B) Change GetStartedCards click handlers for Create Matter + Summarize Files to use Xrm.Navigation popup (matching the other 5 cards' pattern) instead of dispatching widget_load events that embed R2 widgets as Workspace tabs. Keep the embedded widgets registered in WorkspaceWidgetRegistry — they're still usable via direct widget_load from other parts of the system; we're just changing the ContextPaneController click-handler routing.
+
+    Build + redeploy SpaarkeAi.
+  </prompt>
+
+  <role>
+    React + TypeScript engineer comfortable with SpaarkeAi solution layout, ConversationPane composition flow, and Xrm.Navigation dispatch patterns. Familiar with task 042's onCardClick wiring + task 045's AssignWorkWizardLauncher pattern.
+  </role>
+
+  <goal>
+    After this task:
+    - Assistant pane shows a usable chat input on cold load (Bug 1 resolved; FR-06 truly satisfied).
+    - Welcome state contains ONLY "How can I help you today?" + the chat input (no Recent Conversations).
+    - All 7 GetStartedCards uniformly use Xrm.Navigation popup (Create Matter + Summarize Files now match the other 5).
+    - SpaarkeAi rebuilt + redeployed to dev.
+    - Standalone LegalWorkspace and R2 widget consumers unaffected.
+  </goal>
+
+  <context>
+    <background>
+      Smoke feedback identified:
+      1. Assistant pane has no chat box. Diagnostic confirmed `ConversationPane.tsx` welcome-stage ternary mounts WelcomePanel OR SprkChat, never both. WelcomePanel only renders the "How can I help you today?" prompt + Recent Conversations; SprkChat (input owner) never mounts on cold load.
+      2. Recent Conversations should be removed — pattern is "start blank; History overlay handles resume".
+      3. UX consistency: 5/7 GetStartedCards already use Xrm.Navigation popups (Create Project, Find Similar, Send Email, Schedule Meeting, Assign Work). The remaining 2 (Create Matter, Summarize Files) dispatch widget_load events that mount embedded R2 wizard widgets as Workspace tabs. Operator wants all 7 consistent on popup pattern.
+
+      Architectural note (preserved): R2 CreateMatterWizardWidget + DocumentUploadWizardWidget remain registered in WorkspaceWidgetRegistry. The embedded-tab structure stays available for other use cases (e.g., future R5 work). Only the CONTEXT-PANE click handlers change to dispatch popup navigation.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AssignWorkWizardLauncher.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentUploadWizardWidget.tsx</file>
+      <file>scripts/Deploy-SpaarkeAi.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-06 (input editable on cold load) MUST be functionally true after this task — chat input visible AND typeable BEFORE any session exists.</constraint>
+    <constraint source="spec">FR-25 / NFR-10: Standalone LegalWorkspace MUST continue to function identically. WelcomePanel.tsx + ConversationPane.tsx are SpaarkeAi-only; standalone LegalWorkspace doesn't consume them — verify nothing in ContextPaneController.tsx change leaks to standalone LegalWorkspace.</constraint>
+    <constraint source="ADR-012">No new shared-lib changes. All edits are SpaarkeAi-local.</constraint>
+    <constraint source="ADR-021">No new hex/rgba literals. Fluent v9 tokens only.</constraint>
+    <constraint source="ADR-022">React 19 patterns.</constraint>
+    <constraint source="ADR-028">No new accessToken props; all BFF calls (if any) via authenticatedFetch.</constraint>
+    <constraint source="project">Do NOT delete or unregister CreateMatterWizardWidget / DocumentUploadWizardWidget from WorkspaceWidgetRegistry. They remain available for widget_load dispatch from non-ContextPane sources. Only change the click-handler routing in ContextPaneController.</constraint>
+    <constraint source="project">Bug 1 fix must NOT add a SecondCopyOfWelcomePanel. The welcome content (prompt) lives ABOVE SprkChat in the same render path; SprkChat is always rendered; only the welcome content above is conditional on welcome stage.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/notes/smoke-playbook.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read current state">
+      Read ConversationPane.tsx (especially lines ~687-929: showWelcomePanel logic, the ternary), WelcomePanel.tsx (the RecentConversationsSection + props), and ContextPaneController.tsx (the handleGetStartedCardClick handler from task 042).
+
+      Also locate the Code Page webresource names for Create Matter + Summarize Files:
+      - Grep for `sprk_creatematter` to find Create Matter Code Page name
+      - Grep for `sprk_documentupload` or `sprk_document_upload` for Document Upload Code Page name
+      - Confirm both exist as Dataverse web resources. If they don't exist as standalone Code Pages, STOP and report — embedded-only widgets can't be popup-launched without their Code Page being deployed.
+    </step>
+
+    <step order="2" name="Bug 1 fix — restructure ConversationPane welcome state">
+      In `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`:
+      - Find the ternary at ~line 818: `{showWelcomePanel ? <WelcomePanel ... /> : <div ...><SprkChat /></div>}`
+      - Replace with a structure where SprkChat is ALWAYS rendered, and welcome content sits above it when in welcome stage:
+        ```tsx
+        {showWelcomePanel && (
+          <div className={styles.welcomeHeader}>
+            <Text as="h2" size={400} weight="semibold">How can I help you today?</Text>
+          </div>
+        )}
+        <div className={styles.chatRegion} role="region" aria-label="AI Chat">
+          <SprkChat ... />
+        </div>
+        ```
+      - Note: this REPLACES the dependence on WelcomePanel for the welcome content; WelcomePanel becomes a tiny shell or can be deleted. EVALUATE during implementation:
+        - Option A: Keep WelcomePanel as a thin component containing just the heading + inline-rendered (no Recent Conversations); ConversationPane uses it as the welcome header content.
+        - Option B: Inline the "How can I help you today?" Text directly in ConversationPane; delete WelcomePanel.tsx entirely.
+        Prefer Option A if WelcomePanel is referenced elsewhere; Option B if it's only used by ConversationPane post-cleanup.
+      - Add appropriate makeStyles entries (welcomeHeader: padding + center alignment via Fluent v9 tokens).
+    </step>
+
+    <step order="3" name="UX-A fix — remove Recent Conversations">
+      In WelcomePanel.tsx (or wherever the welcome content lives after step 2):
+      - Remove `RecentConversationsSection` import.
+      - Remove the JSX block that renders `<RecentConversationsSection ... />`.
+      - Remove the `useRecentSessions` hook call if it's no longer used elsewhere.
+      - Remove related styles (recentSessionCard, etc.) if no longer needed.
+      - Update the file header JSDoc to reflect the new welcome content (just the heading + chat input).
+      - DO NOT delete RecentConversationsSection.tsx or its hook — they may be used by HistoryOverlay (task 022) or other consumers. Just remove from WelcomePanel.
+    </step>
+
+    <step order="4" name="UX-B fix — Create Matter + Summarize Files use Xrm.Navigation">
+      In ContextPaneController.tsx, find handleGetStartedCardClick (task 042's wiring).
+
+      Currently the switch (or if-else) dispatches widget_load for:
+      - 'create-matter' → widget_load with 'create-matter-wizard'
+      - 'summarize-files' (or 'document-upload') → widget_load with 'document-upload-wizard'
+
+      Change to dispatch Xrm.Navigation.navigateTo (matching the pattern from task 045 AssignWorkWizardLauncher):
+      - 'create-matter' → navigateTo({ pageType: 'webresource', webresourceName: 'sprk_creatematterwizard', data: 'bffBaseUrl=...' })
+      - 'summarize-files' → navigateTo({ pageType: 'webresource', webresourceName: 'sprk_documentuploadwizard' (or the correct name from step 1 grep), data: 'bffBaseUrl=...' })
+
+      Use the feature-detect + fallback pattern from AssignWorkWizardLauncher (window.Xrm check, return status object if absent, calling site decides UI fallback).
+
+      RECOMMENDED implementation:
+      - Either extend AssignWorkWizardLauncher into a generic "launchCodePageWizard(webresourceName, options)" helper in @spaarke/ai-widgets,
+      - OR inline the Xrm.Navigation call directly in handleGetStartedCardClick (smaller blast radius; consistent with how SendEmail/MeetingSchedule were handled).
+      Prefer the inline approach if it matches the existing pattern from task 042.
+
+      KEEP CreateMatterWizardWidget + DocumentUploadWizardWidget registered in WorkspaceWidgetRegistry. Do NOT remove their registrations or source files. Only change how ContextPaneController routes the click.
+    </step>
+
+    <step order="5" name="Build + lint">
+      - `cd src/solutions/SpaarkeAi && npm run build` — verify clean
+      - Optionally `cd src/client/shared/Spaarke.UI.Components && npm run build` if any shared-lib code was touched (should not be)
+      - Verify dark-mode tokens still compliant (no hex/rgba introduced)
+      - Capture new SpaarkeAi bundle size (expected: SLIGHTLY SMALLER due to removed RecentConversations imports — note delta)
+    </step>
+
+    <step order="6" name="Redeploy SpaarkeAi">
+      Run `scripts/Deploy-SpaarkeAi.ps1` (no parameters — defaults to dev). Capture output. Confirm web resource sprk_spaarkeai updated + customizations published.
+    </step>
+
+    <step order="7" name="Update deploy memo">
+      Append a "Supplemental Deploy — Task 068" section to `projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md`:
+      - What was deployed (sprk_spaarkeai)
+      - Why (Bug 1 + UX-A + UX-B remediation per smoke feedback)
+      - Bundle size delta
+      - Deploy timestamp
+    </step>
+
+    <step order="8" name="Update task status + TASK-INDEX">
+      - Task 068 POML → completed
+      - TASK-INDEX row 068 → ✅
+      - Update plan.md Risk Register: note Bug 1 + UX-A + UX-B RESOLVED in this task
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Source files</tool>
+    <tool name="Edit">Modify 3 SpaarkeAi tsx/ts files</tool>
+    <tool name="Grep">Locate Code Page web-resource names + verify they exist</tool>
+    <tool name="Bash">npm build + Deploy-SpaarkeAi.ps1</tool>
+    <tool name="Write">Deploy memo append</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (MODIFIED — SprkChat always rendered)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx (MODIFIED or DELETED — Recent Conversations removed; possibly inlined to ConversationPane)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx (MODIFIED — Create Matter + Summarize Files routes through Xrm.Navigation)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md (APPENDED — supplemental deploy section)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ConversationPane.tsx renders SprkChat unconditionally in the welcome render path; the input is visible on cold load (verified by grep for ternary removal + structural check).</criterion>
+    <criterion testable="true">"How can I help you today?" still appears in welcome state (above SprkChat).</criterion>
+    <criterion testable="true">"Recent Conversations" section is NOT rendered in welcome state.</criterion>
+    <criterion testable="true">ContextPaneController.tsx Create Matter card click invokes Xrm.Navigation.navigateTo with sprk_creatematterwizard (not widget_load dispatch).</criterion>
+    <criterion testable="true">ContextPaneController.tsx Summarize Files card click invokes Xrm.Navigation.navigateTo with sprk_documentuploadwizard (or correct name) (not widget_load dispatch).</criterion>
+    <criterion testable="true">CreateMatterWizardWidget + DocumentUploadWizardWidget remain registered in WorkspaceWidgetRegistry (verified by grep for unchanged registration lines).</criterion>
+    <criterion testable="true">SpaarkeAi vite build clean (0 errors).</criterion>
+    <criterion testable="true">Standalone LegalWorkspace untouched (FR-25) — no changes to standalone code page paths.</criterion>
+    <criterion testable="true">sprk_spaarkeai redeployed to dev Dataverse via Deploy-SpaarkeAi.ps1 with success.</criterion>
+    <criterion testable="true">Deploy memo appended with supplemental section.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the "Cluster 1 + UX-B" remediation per the 2026-05-20 operator feedback decisions. Three concurrent edits in SpaarkeAi-local code; no shared-lib or LegalWorkspace changes.
+
+    Task 069 (separate; not yet created) will tackle Cluster 2 — SpaarkeAi's "AI-first" workspace surface per the operator's Option Z direction. That's a bigger redesign requiring scope clarification.
+
+    Bug 2 visual fix (Workspace pane placeholder content) is NOT addressed in this task — it's coupled to task 069's Option Z direction.
+
+    Architectural pane-coordination work (Assistant ↔ Workspace ↔ Context state sync) is deferred to next review.
+
+    ## Completion notes (2026-05-20)
+
+    **Status**: ✅ Completed. Deploy verified to spaarkedev1.
+
+    **Option chosen for step 2**: Option A — WelcomePanel kept as a thin heading-only shell (~90 lines from prior 485). Rationale: ConversationPane is the only consumer (verified via grep), but keeping the component boundary preserves test isolation, JSDoc continuity, and a clear "welcome heading" abstraction. ConversationPane no longer dictates the heading literal.
+
+    **Code Page web-resource names resolved**:
+    - Create Matter → `sprk_creatematterwizard` (precedent: `LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx:225`).
+    - Summarize Files → `sprk_summarizefileswizard` (precedent: `LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx:280`). NOTE: differs from the POML's "sprk_documentuploadwizard" hint; that name belongs to the embedded DocumentUploadWizardWidget which is a SEPARATE Code Page deployed by the dialog-shell project. The card labeled "Summarize Files" maps to the SummarizeFilesWizard Code Page (Task 014c of the dialog-shell project) — this is the canonical popup target.
+
+    **WorkspaceWidgetRegistry preservation**: CreateMatterWizardWidget + DocumentUploadWizardWidget remain registered. No `register-workspace-widgets.ts` changes. Verified by grep.
+
+    **Build delta**: SpaarkeAi 800.18 → 799.01 KB gzip (−1.17 KB). LegalWorkspace not rebuilt (no changes).
+
+    **Files modified**:
+    - `src/solutions/SpaarkeAi/src/components/WelcomePanel.tsx` (REWRITTEN — 485 → ~90 lines)
+    - `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` (welcome render restructured; orphan handlers removed; welcomeWrapper style removed; JSDoc updated)
+    - `src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx` (added `launchCodePagePopup` module-level helper; routed two cards through it)
+    - `projects/spaarke-ai-platform-unification-r3/notes/deploys/2026-05-20-deploy.md` (supplemental section appended)
+    - `projects/spaarke-ai-platform-unification-r3/plan.md` (risk register entries updated)
+    - `projects/spaarke-ai-platform-unification-r3/tasks/TASK-INDEX.md` (row 068 → ✅)
+
+    **Deploy**: `sprk_spaarkeai` Resource ID `5206a442-3451-f111-bec7-7ced8d1dc988` published to spaarkedev1.
+
+    **FR-25 / NFR-10 verification**: All three modified files are SpaarkeAi-local (`src/solutions/SpaarkeAi/...`). Standalone LegalWorkspace not touched and not rebuilt.
+
+    **Operator smoke validation**: Required as next gate before task 069.
+  </notes>
+
+  <execution>
+    Execute via `task-execute` skill. Single coordinated agent. Multi-file change but small enough that Step 8.0 decomposition is not required.
+  </execution>
+</task>

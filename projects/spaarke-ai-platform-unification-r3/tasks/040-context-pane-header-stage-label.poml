@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ai-platform-unification-r3">
+  <metadata>
+    <title>Migrate ContextPaneController to shared PaneHeader + stage label rename (FR-17, FR-22)</title>
+    <phase>Phase D — Context pane</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>042</blocks>
+    <tags>react, frontend, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a load-bearing .tsx file (ContextPaneController) whose existing header is the canonical visual reference for the entire PaneHeader primitive. ADR-012 (load-bearing) compliance is at stake: this is the consumption site that proves PaneHeader visual parity. Stage-label rename is small but ships with the same file edit.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ContextPaneController.tsx — the same file edited by task 042 (welcome-stage widget swap). Must serialize.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Migrate `ContextPaneController.tsx` to consume the shared `<PaneHeader>` primitive from
+    `@spaarke/ui-components` (Phase A task 010) per FR-17, replacing the existing inline
+    header JSX. The existing header style at lines 142-171 and 691-700 is THE canonical
+    visual reference for PaneHeader — preserve every aspect of that style (icon color,
+    typography, spacing, right-slot composition). Additionally, rename the welcome-stage
+    label from "Gallery" to "Get Started" per FR-22 by updating `stageLabelMap.welcome`.
+  </prompt>
+
+  <role>
+    React 19 + Fluent v9 frontend developer experienced refactoring three-pane shell
+    surfaces, comfortable replacing inline JSX with a shared primitive while preserving
+    pixel-perfect visual parity. Familiar with PaneEventBus subscriber graphs and stage
+    lifecycle wiring.
+  </role>
+
+  <goal>
+    `ContextPaneController.tsx` renders `<PaneHeader title="Context" icon={DocumentRegular}&gt;`
+    from `@spaarke/ui-components` at the top of the pane. The right-slot of PaneHeader
+    contains the existing stage label (e.g., "Get Started" on welcome stage). The
+    `stageLabelMap.welcome` value is changed from "Gallery" to "Get Started". Visual
+    rendering before and after this change is INDISTINGUISHABLE in both light and dark
+    modes (the existing style IS the canonical reference). All tab-related local state
+    is preserved (this task does NOT touch widget-resolution logic — that is task 042).
+  </goal>
+
+  <context>
+    <background>
+      FR-17 migrates the Context pane to the unified PaneHeader primitive established in
+      Phase A (task 010). Critically, the existing header style in ContextPaneController
+      (lines 142-171, 691-700) is the design source-of-truth for PaneHeader itself — so
+      after migration the Context pane should look pixel-identical. This task pairs the
+      header migration with FR-22 (stage label rename) since both edit the same file and
+      both are foundational for the Phase D welcome-state redesign. The actual welcome-stage
+      widget swap (GetStartedCardsWidget vs PlaybookGalleryWidget) is task 042.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">PaneHeader is consumed from `@spaarke/ui-components` — do NOT duplicate the component locally. Import via the package path, not a relative file path. The existing inline header JSX MUST be replaced, not retained.</constraint>
+    <constraint source="ADR-021">Icon color must use `tokens.colorBrandForeground1`. No hex literals, no `rgba(...)` literals, no Fluent v8. Header background and dividers must consume Fluent v9 neutral-background/stroke tokens.</constraint>
+    <constraint source="ADR-022">React 19 only. No React 16 fallbacks. Do not add `useEffect` dependency-array workarounds for removed inline header state.</constraint>
+    <constraint source="ADR-025">DocumentRegular icon comes from `@fluentui/react-icons` (Fluent v9). No new SVG web resources.</constraint>
+    <constraint source="ADR-028">No `accessToken` props or state introduced. Any BFF calls in the pane continue to use `authenticatedFetch`. Do not snapshot tokens.</constraint>
+    <constraint source="spec">PaneHeader visual style MUST match the pre-change ContextPaneController header exactly — this file's existing style IS the canonical reference (per plan §2 Discovered Resources). Pixel-identical parallel rendering is the acceptance bar.</constraint>
+    <constraint source="project">This task touches ONLY `ContextPaneController.tsx` and only the header JSX + `stageLabelMap.welcome`. Widget-resolution logic for welcome stage is OWNED by task 042 — do NOT modify it here. Leave a clear TODO comment if the rightSlot composition needs adjustment in 042.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r3/plan.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read ContextPaneController.tsx — note canonical header">
+      Open `src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx`. Read
+      lines 142-171 and 691-700 carefully — this inline header JSX is the canonical visual
+      model. Note the icon usage, typography classes, spacing tokens, divider, and right-slot
+      composition (the stage label currently lives in this slot).
+    </step>
+    <step order="2" name="Add PaneHeader + DocumentRegular imports">
+      Import `PaneHeader` from `@spaarke/ui-components` (export added by task 010) and
+      `DocumentRegular` from `@fluentui/react-icons`. Use the package path, not a relative
+      import.
+    </step>
+    <step order="3" name="Replace inline header JSX with PaneHeader">
+      Replace the inline header JSX (the block currently rendering icon + "Context" title +
+      stage label) with `&lt;PaneHeader title="Context" icon={&lt;DocumentRegular /&gt;} rightSlot={&lt;StageLabel ... /&gt;} /&gt;`.
+      The existing stage label JSX (or a small inline span using `stageLabelMap[stage]`) moves
+      into the `rightSlot` prop verbatim. Remove any now-orphaned local styles that the
+      shared PaneHeader supplies.
+    </step>
+    <step order="4" name="Rename stageLabelMap.welcome — Gallery → Get Started">
+      Locate `stageLabelMap` (or equivalent constant). Change `welcome: 'Gallery'` to
+      `welcome: 'Get Started'`. Leave other stage labels untouched.
+    </step>
+    <step order="5" name="Visual parity check — light + dark mode">
+      Build SpaarkeAi (`npm run build` against the solution). In Vite dev or Power Apps host,
+      compare the new Context pane header against the pre-change version (git stash + reload
+      if needed). Spacing, typography, icon alignment, and right-slot positioning MUST be
+      indistinguishable. Repeat in dark mode. Capture screenshots if available; commit a
+      short visual-diff note in `notes/visual-diffs/040-pane-header.md` if any subtle
+      discrepancies surface.
+    </step>
+    <step order="6" name="Verify welcome-stage label reads Get Started">
+      Load the SpaarkeAi welcome state. Confirm the right-side stage label in the Context
+      pane header reads "Get Started" (not "Gallery"). Switch to a non-welcome stage and
+      confirm the corresponding label still renders correctly.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read ContextPaneController.tsx + the new PaneHeader source for prop signature</tool>
+    <tool name="Edit">Replace inline header JSX, add imports, rename stage label constant</tool>
+    <tool name="Grep">Find any other consumers of `stageLabelMap.welcome` that may need updating</tool>
+    <tool name="Bash">Run `npm run build` against SpaarkeAi to verify no TS / lint errors</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</output>
+    <output type="report">Task completion report confirming PaneHeader migration with visual parity + stage label rename</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ContextPaneController.tsx` imports `PaneHeader` from `@spaarke/ui-components` and `DocumentRegular` from `@fluentui/react-icons`.</criterion>
+    <criterion testable="true">The inline header JSX block (previously lines ~142-171) is replaced with a single `&lt;PaneHeader title="Context" icon={&lt;DocumentRegular /&gt;} rightSlot={...} /&gt;` element.</criterion>
+    <criterion testable="true">The stage label (e.g., "Get Started" on welcome) renders inside the PaneHeader rightSlot.</criterion>
+    <criterion testable="true">`stageLabelMap.welcome === 'Get Started'` (renamed from "Gallery").</criterion>
+    <criterion testable="true">Visual parity check confirms the new header is indistinguishable from the pre-change header in both light and dark modes (the existing style IS the canonical reference).</criterion>
+    <criterion testable="true">`npm run build` succeeds with no new TS / lint errors.</criterion>
+    <criterion testable="true">No `accessToken` props introduced (ADR-028 invariants preserved).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="PaneHeader visual parity — light mode">
+      Open SpaarkeAi welcome state. Verify Context pane shows `<PaneHeader>` with DocumentRegular
+      icon in brand color, title "Context", and right-slot showing "Get Started". Compare side-by-side
+      against the pre-change reference — they must be indistinguishable.
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, NFR-06)">
+      Toggle dark mode in D365 settings (or Vite dev theme toggle). Verify:
+      <steps>
+        <step>Header background adapts via Fluent v9 neutral-background tokens (no white in dark mode)</step>
+        <step>Title text adapts via neutral-foreground tokens (no black in dark mode)</step>
+        <step>DocumentRegular icon stays in brand foreground 1 (visible in both themes)</step>
+        <step>Divider/stroke uses Fluent v9 stroke tokens</step>
+      </steps>
+    </test>
+    <test name="Stage label reads Get Started on welcome">
+      Load welcome state. Confirm right-side stage label in Context pane header reads "Get Started" (not "Gallery").
+    </test>
+    <test name="Stage label switches correctly on non-welcome stages">
+      Trigger a stage transition (e.g., via a chat message that moves the shell into active stage). Confirm the stage label updates to the appropriate non-welcome value.
+    </test>
+    <test name="No console errors">
+      Open browser devtools. Confirm zero JavaScript errors or React warnings on pane mount and stage transition.
+    </test>
+  </ui-tests>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    The user invokes it via "work on task 040" / "continue" / similar trigger phrases per the
+    Auto-Detection Rules in the project CLAUDE.md. Do NOT read this POML file and implement
+    manually — `task-execute` ensures ADRs are loaded, `current-task.md` is tracked, and the
+    Step 9.5 code-review + adr-check gates run at FULL rigor.
+  </execution>
+</task>

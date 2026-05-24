@@ -2152,18 +2152,23 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
         var isGridContext = false;
 
         // Determine context: form or grid/subgrid
+        // Normalize every GUID to lowercase + strip braces. Xrm APIs return GUIDs in
+        // {UPPERCASE} form; Azure AI Search Edm.String filters are case-sensitive, and
+        // lookups elsewhere (Find Similar, related-doc joins) use lowercase. Normalizing
+        // here gives one consistent shape for the BFF and the index. BFF also normalizes
+        // defensively, but cleaner contract to do it at the source.
         if (selectedItemIds && selectedItemIds.length > 0) {
             // Grid or subgrid context
             documentIds = selectedItemIds.map(function(id) {
-                return id.replace(/[{}]/g, "");
+                return id.replace(/[{}]/g, "").toLowerCase();
             });
             isGridContext = true;
             console.log("[Spaarke.Document] SendToIndex - grid context with", documentIds.length, "documents");
         } else if (primaryControl && primaryControl.data && primaryControl.data.entity) {
             // Form context
             var docInfo = Spaarke.Document.Utils.getDocumentInfo(primaryControl);
-            documentIds = [docInfo.id];
-            console.log("[Spaarke.Document] SendToIndex - form context for document:", docInfo.id);
+            documentIds = [(docInfo.id || "").replace(/[{}]/g, "").toLowerCase()];
+            console.log("[Spaarke.Document] SendToIndex - form context for document:", documentIds[0]);
         } else if (primaryControl && primaryControl.getGrid) {
             // SelectedControl from grid/subgrid
             var selectedRows = primaryControl.getGrid().getSelectedRows();
@@ -2171,7 +2176,7 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
                 selectedRows.forEach(function(row) {
                     var rowData = row.getData();
                     if (rowData && rowData.entity) {
-                        var id = rowData.entity.getId().replace(/[{}]/g, "");
+                        var id = rowData.entity.getId().replace(/[{}]/g, "").toLowerCase();
                         documentIds.push(id);
                     }
                 });

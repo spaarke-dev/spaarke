@@ -106,9 +106,51 @@ function parseLayoutJson(sectionsJson: string): LayoutJson {
 // Hook
 // ---------------------------------------------------------------------------
 
+/**
+ * Options for `useWorkspaceLayouts`.
+ *
+ * Round 4 Fix 4.1 (2026-05-21): added the `embedded` flag so multiple instances
+ * of LegalWorkspaceApp can coexist as sibling tabs inside SpaarkeAi without
+ * clobbering each other's active-layout state. When `embedded=true`, the hook:
+ *   - NEVER reads `sessionStorage` cache (each tab gets its own deep-linked
+ *     layout from `initialWorkspaceId` — cache is shared across tabs).
+ *   - NEVER writes `sessionStorage` cache (avoids polluting the global
+ *     "Switch Workspace" picker's pinned layout from a tab's selection).
+ *   - Uses `initialWorkspaceId` as the source of truth for the active layout;
+ *     falls back to the BFF default only if the deep-link is missing or 404s.
+ *
+ * Standalone LegalWorkspace continues to call this hook without `embedded`,
+ * so the cache-first hydration path is preserved (FR-25 / NFR-10 — no
+ * behavioural change to the standalone bundle).
+ */
+export interface UseWorkspaceLayoutsOptions {
+  /** Deep-link target layout id (preferred over BFF default when set). */
+  initialWorkspaceId?: string;
+  /**
+   * When `true`, suppress sessionStorage cache reads + writes so each embedded
+   * tab is isolated from sibling tabs and from the SpaarkeAi menu's pinned
+   * choice. Defaults to `false` for backwards compatibility.
+   */
+  embedded?: boolean;
+}
+
+/**
+ * Backwards-compatible overload: callers may pass either the legacy
+ * `initialWorkspaceId` positional argument (LegalWorkspace's existing call
+ * shape) or the new options object. We normalize both to an internal shape.
+ */
 export function useWorkspaceLayouts(
-  initialWorkspaceId?: string,
+  initialWorkspaceIdOrOptions?: string | UseWorkspaceLayoutsOptions,
 ): UseWorkspaceLayoutsResult {
+  // Normalize the legacy positional arg vs the new options object.
+  const opts: UseWorkspaceLayoutsOptions =
+    typeof initialWorkspaceIdOrOptions === "object" &&
+    initialWorkspaceIdOrOptions !== null
+      ? initialWorkspaceIdOrOptions
+      : { initialWorkspaceId: initialWorkspaceIdOrOptions };
+  const initialWorkspaceId = opts.initialWorkspaceId;
+  const embedded = opts.embedded === true;
+
   const [layouts, setLayouts] = useState<WorkspaceLayoutDto[]>([]);
   const [activeLayout, setActiveLayout] = useState<WorkspaceLayoutDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -133,9 +175,14 @@ export function useWorkspaceLayouts(
       // -----------------------------------------------------------------
       // Cache-first: if sessionStorage has layout data, use it for instant
       // render and then continue to revalidate from the API in the background.
+      //
+      // Round 4 Fix 4.1: embedded mode SKIPS cache reads entirely. Each
+      // embedded LegalWorkspaceApp tab inside SpaarkeAi must show its own
+      // `initialWorkspaceId` workspace — not the cached "last-active"
+      // workspace which is shared across all tabs.
       // -----------------------------------------------------------------
-      const cachedList = getCachedLayoutsList();
-      const cachedActive = getCachedActiveLayout();
+      const cachedList = embedded ? null : getCachedLayoutsList();
+      const cachedActive = embedded ? null : getCachedActiveLayout();
       const hasCachedData = cachedList && cachedList.length > 0 && cachedActive;
 
       if (hasCachedData && !cancelled && mountedRef.current) {
@@ -255,10 +302,15 @@ export function useWorkspaceLayouts(
         if (!cancelled && mountedRef.current) {
           setActiveLayout(resolvedActive);
 
-          // Update sessionStorage cache for instant render on next navigation
-          setCachedActiveLayout(resolvedActive);
-          const listToCache = allLayouts.length > 0 ? allLayouts : [SYSTEM_DEFAULT_LAYOUT];
-          setCachedLayoutsList(listToCache);
+          // Update sessionStorage cache for instant render on next navigation.
+          // Round 4 Fix 4.1: embedded mode NEVER writes cache so it doesn't
+          // pollute the SpaarkeAi WorkspacePaneMenu's pinned-layout state nor
+          // a sibling tab's deep-link.
+          if (!embedded) {
+            setCachedActiveLayout(resolvedActive);
+            const listToCache = allLayouts.length > 0 ? allLayouts : [SYSTEM_DEFAULT_LAYOUT];
+            setCachedLayoutsList(listToCache);
+          }
         }
 
         setIsLoading(false);
@@ -278,7 +330,7 @@ export function useWorkspaceLayouts(
     fetchLayouts();
 
     return () => { cancelled = true; };
-  }, [fetchKey, initialWorkspaceId]);
+  }, [fetchKey, initialWorkspaceId, embedded]);
 
   // -------------------------------------------------------------------------
   // Switch active layout
@@ -290,7 +342,10 @@ export function useWorkspaceLayouts(
       const found = layouts.find((l) => l.id === layoutId);
       if (found) {
         setActiveLayout(found);
-        setCachedActiveLayout(found);
+        // Round 4 Fix 4.1: embedded mode never writes cache (see effect above).
+        if (!embedded) {
+          setCachedActiveLayout(found);
+        }
         return;
       }
 
@@ -305,7 +360,9 @@ export function useWorkspaceLayouts(
             const layout: WorkspaceLayoutDto = await res.json();
             if (mountedRef.current) {
               setActiveLayout(layout);
-              setCachedActiveLayout(layout);
+              if (!embedded) {
+                setCachedActiveLayout(layout);
+              }
             }
           } else {
             console.warn(
@@ -317,7 +374,7 @@ export function useWorkspaceLayouts(
         }
       })();
     },
-    [layouts],
+    [layouts, embedded],
   );
 
   // -------------------------------------------------------------------------

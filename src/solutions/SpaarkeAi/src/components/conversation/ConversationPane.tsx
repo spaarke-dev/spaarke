@@ -1,10 +1,13 @@
 /**
- * ConversationPane.tsx — R2 left pane for the SpaarkeAi three-pane shell.
+ * ConversationPane.tsx — R3 left pane for the SpaarkeAi three-pane shell.
  *
  * Replaces R1's LeftPane + ChatPanel combination. Composes:
- *   - Tab bar: "Chat" and "History" tabs (mirrors R1 LeftPane pattern)
- *   - Chat tab: WelcomePanel (no session, no entity) or SprkChat (session active)
- *   - History tab: ChatHistoryPanel (session list with resume/delete)
+ *   - Pane header: shared <PaneHeader> primitive from @spaarke/ui-components
+ *     (FR-02, task 021) — "Assistant" title + ChatRegular brand-color icon.
+ *     The header's rightSlot is reserved for the History side-overlay trigger
+ *     (FR-03 / OC-01) wired by task 022.
+ *   - Welcome state: WelcomePanel (no session, no entity, no pending message)
+ *   - Active chat: SprkChat (session active, entity context, or playbook selected)
  *
  * Key R1 → R2 migration changes:
  *   - Auth and session state consumed from useAiSession() (R2 AiSessionProvider)
@@ -50,7 +53,9 @@
  * @see AiSessionProvider.tsx — session + streaming + PaneEventBus routing (R2)
  * @see PlaybookGalleryWidget.tsx — dispatches playbook-selected (AIPU2-086/102)
  * @see WelcomePanel.tsx — welcome experience (unchanged from R1)
- * @see ChatHistoryPanel.tsx — history tab panel (now wired to useAiSession)
+ * @see ChatHistoryPanel.tsx — rewired to a side-overlay by task 022 (FR-03 / OC-01)
+ * @see PaneHeader.tsx (@spaarke/ui-components) — shared header primitive (FR-01, task 010)
+ * @see ADR-012 — Shared component library (PaneHeader lives in @spaarke/ui-components)
  * @see ADR-021 — Fluent v9, dark mode via FluentProvider (no hardcoded colors)
  * @see ADR-022 — React 19 Code Pages (hooks, functional components, bundled)
  */
@@ -68,26 +73,33 @@ import {
 } from "@fluentui/react-components";
 import {
   ChatRegular,
-  HistoryRegular,
   EditRegular,
   DismissRegular,
   ArrowResetRegular,
   CheckmarkCircleRegular,
 } from "@fluentui/react-icons";
-import { SprkChat } from "@spaarke/ui-components";
+// PaneHeader is the canonical pane-header primitive lifted into the shared
+// library in Phase A task 010 (ADR-012). It owns the icon brand-color treatment
+// and the right-slot container — see PaneHeader.tsx in @spaarke/ui-components.
+import { PaneHeader, SprkChat } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
-import { ChatHistoryPanel } from "../ChatHistoryPanel";
-import { useShellStage, useRestoreContext } from "../shell/ThreePaneShell";
+import {
+  useShellStage,
+  useRestoreContext,
+  usePaneCollapseContext,
+} from "../shell/ThreePaneShell";
+import { HistoryMenu } from "./HistoryOverlay";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Which tab is active in the left pane. */
-type LeftPaneView = "chat" | "history";
+// NOTE (task 021, FR-02): The legacy `LeftPaneView` ("chat" | "history") tab
+// model was removed when the Chat/History tab buttons were replaced by the
+// shared <PaneHeader>. History becomes a side-overlay (OC-01) wired in task 022.
 
 /**
  * State for the "Refine this?" selection chip shown above the SprkChat input.
@@ -117,42 +129,23 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
 
-  // ── Tab bar (mirrors R1 LeftPane.tsx tabBar pattern) ─────────────────────
-  tabBar: {
-    flexShrink: 0,
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke1,
-    backgroundColor: tokens.colorNeutralBackground1,
-    paddingLeft: tokens.spacingHorizontalXS,
-    paddingRight: tokens.spacingHorizontalXS,
-    paddingTop: "2px",
-    paddingBottom: "0px",
-    gap: tokens.spacingHorizontalXS,
-    minHeight: "36px",
-  },
-  tabButton: {
-    borderRadius: "0px",
-    height: "36px",
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
-    fontSize: tokens.fontSizeBase200,
-  },
-  tabButtonActive: {
-    borderBottomWidth: "2px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorBrandStroke1,
-    color: tokens.colorBrandForeground1,
-  },
+  // NOTE (task 021, FR-02): The legacy tab-bar styles (`tabBar`, `tabButton`,
+  // `tabButtonActive`) were removed when the Chat/History tab buttons were
+  // replaced by the shared <PaneHeader> primitive. Visual treatment now lives
+  // inside @spaarke/ui-components/PaneHeader (matches ContextPaneController
+  // header — canonical reference per plan §2).
 
   // ── Pane content area ─────────────────────────────────────────────────────
+  //
+  // task 068 (Bug 1): now a flex column so the (optional) welcome heading
+  // and the always-mounted chat region stack correctly. The chat region
+  // grows to fill remaining vertical space via `chatWrapper.flex: 1`.
   content: {
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   },
 
   // ── Auth loading state ────────────────────────────────────────────────────
@@ -166,20 +159,19 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
-  // ── Chat tab wrappers ─────────────────────────────────────────────────────
+  // ── Chat region wrapper ───────────────────────────────────────────────────
+  //
+  // task 068 (Bug 1): chatWrapper is the always-rendered chat region. It
+  // grows to fill the remaining height below the optional welcome heading
+  // via `flex: 1`. The legacy `welcomeWrapper` (previously a 100%-height
+  // shell around WelcomePanel's Recent Conversations list) was removed
+  // when WelcomePanel became a heading-only shell.
   chatWrapper: {
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
-    height: "100%",
     display: "flex",
     flexDirection: "column",
-  },
-  welcomeWrapper: {
-    flex: 1,
-    minHeight: 0,
-    overflow: "hidden",
-    height: "100%",
   },
 
   // ── Playbook header strip (AIPU2-102) ────────────────────────────────────
@@ -361,20 +353,25 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * ConversationPane — left slot of ThreePaneLayout for the SpaarkeAi Code Page (R2).
+ * ConversationPane — left slot of ThreePaneLayout for the SpaarkeAi Code Page (R3).
  *
- * Renders a tab bar with "Chat" and "History" tabs, delegating to WelcomePanel
- * or SprkChat (chat tab) and ChatHistoryPanel (history tab). All session and
- * streaming state is consumed from useAiSession() — this component contains
- * no auth or SSE logic of its own.
+ * Renders a shared <PaneHeader> ("Assistant" + ChatRegular brand-color icon).
+ * Below the header the chat region (SprkChat) is ALWAYS mounted — when in the
+ * welcome stage a small WelcomePanel heading ("How can I help you today?")
+ * sits above it (task 068, Bug 1 fix). History is reached via the PaneHeader
+ * rightSlot HistoryOverlay (task 022, OC-01). All session and streaming state
+ * is consumed from useAiSession() — this component contains no auth or SSE
+ * logic of its own.
  *
- * Welcome → ActiveChat transition:
- *   1. User clicks a prompt button → pendingMessage is set → SprkChat mounts
- *      with predefinedPrompts → toLoading() advances the shell stage.
+ * Welcome → ActiveChat transition (task 068):
+ *   1. Cold load: SprkChat is mounted with the WelcomePanel heading above.
+ *      The user types directly into the chat input — there are no prompt
+ *      buttons or Recent Conversations cards (UX-A removed).
  *   2. SprkChat sends the first message → onSessionCreated fires → chatSessionId
- *      becomes non-null → WelcomePanel is permanently hidden.
- *   3. User resumes a session from WelcomePanel → handleResumeSession calls
- *      setChatSessionId → chatSessionId becomes non-null → SprkChat loads history.
+ *      becomes non-null → WelcomePanel heading disappears; chat continues.
+ *   3. Session resume: HistoryOverlay (PaneHeader history icon) calls
+ *      setChatSessionId → chatSessionId becomes non-null → SprkChat loads
+ *      the prior session's messages.
  */
 export function ConversationPane(): React.JSX.Element {
   const styles = useStyles();
@@ -399,6 +396,19 @@ export function ConversationPane(): React.JSX.Element {
   // ── Shell stage transitions ─────────────────────────────────────────────
   const { toLoading, reset } = useShellStage();
 
+  // ── Pane collapse (Task 094) ────────────────────────────────────────────
+  //
+  // The Assistant pane participates in the three-pane collapse/expand
+  // feature owned by the shell. Clicking the PaneHeader (anywhere except
+  // the History icon) toggles collapse via `paneCollapse.toggle('assistant')`.
+  // When the context is null (e.g. ConversationPane rendered in isolation
+  // by tests) collapse is simply disabled.
+  const paneCollapse = usePaneCollapseContext();
+  const handleHeaderCollapse = React.useCallback(() => {
+    paneCollapse?.toggle("assistant");
+  }, [paneCollapse]);
+  const isAssistantExpanded = !(paneCollapse?.isCollapsed("assistant") ?? false);
+
   // ── Session restore context (AIPU2-106) ─────────────────────────────────
   const restoreCtx = useRestoreContext();
   const [summaryExpanded, setSummaryExpanded] = React.useState(false);
@@ -409,8 +419,21 @@ export function ConversationPane(): React.JSX.Element {
   // bus-driven equivalent of the direct toLoading() call below.
   const dispatch = useDispatchPaneEvent();
 
-  // ── Tab state ───────────────────────────────────────────────────────────
-  const [activeView, setActiveView] = React.useState<LeftPaneView>("chat");
+  // NOTE (task 021, FR-02): The legacy `activeView` tab state ("chat" | "history")
+  // was removed when the Chat/History tab buttons were replaced by <PaneHeader>.
+  // The History UI becomes a side-overlay (OC-01) wired below via the
+  // <PaneHeader> rightSlot — see HistoryOverlay and historyOpen state.
+
+  // ── History dropdown (task 097 — was OverlayDrawer in task 022) ─────────
+  //
+  // Operator smoke 2026-05-22 flagged the icon-only History button + slide-in
+  // OverlayDrawer as inconsistent with Workspace + Context panes which use a
+  // Fluent v9 `<Menu>` dropdown in the PaneHeader rightSlot. Task 097 replaces
+  // the overlay with `<HistoryMenu>` — a self-contained Menu+MenuPopover that
+  // renders the session list inline. The Menu manages its own open/close
+  // state so there's no `historyOpen` boolean here anymore. Selecting a
+  // session still calls setChatSessionId, which resumes the conversation via
+  // the existing AiSessionProvider flow.
 
   // ── Playbook selection state (AIPU2-102) ────────────────────────────────
   //
@@ -555,41 +578,15 @@ export function ConversationPane(): React.JSX.Element {
 
   // ── WelcomePanel callbacks ──────────────────────────────────────────────
 
-  /**
-   * handlePromptSelected — called when the user clicks a prompt button in WelcomePanel.
-   *
-   * Sets pendingMessage to trigger the WelcomePanel → SprkChat transition.
-   * Also:
-   *   - Calls toLoading() directly to advance the shell stage (Stage 1 → Stage 2).
-   *   - Dispatches 'first_message' on the conversation bus channel so
-   *     ShellStageManager's bus subscriber also receives the signal (belt-and-braces:
-   *     direct call handles the common case; bus event handles any future
-   *     components that subscribe to conversation/first_message independently).
-   */
-  const handlePromptSelected = React.useCallback(
-    (message: string) => {
-      setPendingMessage(message);
-      toLoading();
-      dispatch("conversation", {
-        type: "first_message",
-        suggestionText: message,
-      } as Parameters<typeof dispatch>[1]);
-    },
-    [toLoading, dispatch]
-  );
-
-  /**
-   * handleResumeSession — called when the user clicks a recent session card.
-   *
-   * Directly sets chatSessionId, which collapses the WelcomePanel and
-   * causes SprkChat to mount with sessionId set (resume existing session).
-   */
-  const handleResumeSession = React.useCallback(
-    (sessionId: string) => {
-      setChatSessionId(sessionId);
-    },
-    [setChatSessionId]
-  );
+  // ── Removed handlers (task 068, Bug 1 + UX-A) ───────────────────────────
+  //
+  // `handlePromptSelected` (welcome prompt buttons) and `handleResumeSession`
+  // (Recent Conversations card click) were removed when WelcomePanel was
+  // reduced to a heading-only shell. The chat input is now the cold-load
+  // discoverability surface (FR-06) and session resume is reached via the
+  // PaneHeader history icon → HistoryOverlay (task 022, FR-03 / OC-01).
+  // HistoryOverlay's `onSelectSession` wires directly to `setChatSessionId`
+  // (see render below), so no callback wrapper is required.
 
   // ── Selection chip handlers (AIPU2-101) ─────────────────────────────────
 
@@ -732,50 +729,34 @@ export function ConversationPane(): React.JSX.Element {
 
   return (
     <div className={styles.root}>
-      {/* ── Tab bar — Chat / History toggle (mirrors R1 LeftPane.tsx) ───── */}
-      <div className={styles.tabBar} role="tablist" aria-label="AI Chat navigation">
-        <Button
-          appearance="subtle"
-          role="tab"
-          aria-selected={activeView === "chat"}
-          icon={<ChatRegular />}
-          className={
-            activeView === "chat"
-              ? `${styles.tabButton} ${styles.tabButtonActive}`
-              : styles.tabButton
-          }
-          onClick={() => setActiveView("chat")}
-          size="small"
-        >
-          <Text
-            size={200}
-            weight={activeView === "chat" ? "semibold" : "regular"}
-          >
-            Chat
-          </Text>
-        </Button>
-
-        <Button
-          appearance="subtle"
-          role="tab"
-          aria-selected={activeView === "history"}
-          icon={<HistoryRegular />}
-          className={
-            activeView === "history"
-              ? `${styles.tabButton} ${styles.tabButtonActive}`
-              : styles.tabButton
-          }
-          onClick={() => setActiveView("history")}
-          size="small"
-        >
-          <Text
-            size={200}
-            weight={activeView === "history" ? "semibold" : "regular"}
-          >
-            History
-          </Text>
-        </Button>
-      </div>
+      {/* ── Pane header — shared <PaneHeader> primitive (FR-02, task 021) ───── */}
+      {/*
+       * Replaces the legacy Chat/History tab-bar with the canonical pane-header
+       * lifted to @spaarke/ui-components in Phase A task 010 (ADR-012). Icon
+       * color is applied internally by PaneHeader via tokens.colorBrandForeground1
+       * (ADR-021 — no hex / no rgba literals).
+       *
+       * task 097 (operator smoke 2026-05-22): rightSlot now hosts <HistoryMenu>
+       * — a Fluent v9 dropdown matching the Workspace ("Workspace ▾") and
+       * Context ("Tools ▾") pane menus. Replaces the prior HistoryRegular
+       * icon-only button + OverlayDrawer (task 022) which read as MDA-style
+       * and broke pane-trigger consistency. The session list renders inline
+       * in the MenuPopover; selecting a session calls setChatSessionId, which
+       * resumes the conversation via the existing AiSessionProvider flow.
+       */}
+      <PaneHeader
+        title="Assistant"
+        icon={<ChatRegular />}
+        onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
+        expanded={isAssistantExpanded}
+        rightSlot={
+          <HistoryMenu
+            onSelectSession={setChatSessionId}
+            bffBaseUrl={bffBaseUrl}
+            authenticatedFetch={authenticatedFetch}
+          />
+        }
+      />
 
       {/* ── Playbook header strip (AIPU2-102) ──────────────────────────────── */}
       {/*
@@ -807,126 +788,115 @@ export function ConversationPane(): React.JSX.Element {
       )}
 
       {/* ── Active panel content ─────────────────────────────────────────── */}
+      {/*
+       * task 068 (Bug 1 — smoke remediation):
+       *   The previous welcome ⇄ active ternary mounted WelcomePanel OR SprkChat
+       *   but NEVER both, so the chat input was missing on cold load. SprkChat
+       *   is now ALWAYS rendered; the welcome heading (WelcomePanel — reduced
+       *   to a heading-only shell in task 068) sits ABOVE the chat region when
+       *   `showWelcomePanel === true`. This satisfies FR-06 (input editable on
+       *   cold load) and matches operator-validated behaviour from the smoke.
+       *
+       * task 021 (FR-02): the previous `activeView === "history"` branch was
+       *   removed. History is no longer a tab — it becomes a side-overlay
+       *   wired via the <PaneHeader> rightSlot in task 022 (OC-01).
+       */}
       <div
         className={styles.content}
-        role="tabpanel"
-        aria-label={activeView === "chat" ? "AI Chat" : "Chat History"}
+        role="region"
+        aria-label="AI Chat"
       >
-        {activeView === "history" ? (
-          // History tab — ChatHistoryPanel is now wired to useAiSession
-          // via its own internal context consumption (R2 updated version).
-          <ChatHistoryPanel />
-        ) : showWelcomePanel ? (
-          // Chat tab — Welcome state: no session, no entity, no pending message, no playbook.
-          // WelcomePanel reads auth surface from useAiSession() internally; no
-          // token/bffBaseUrl props (Spaarke Auth v2 §H-4 — no token snapshots).
-          <div className={styles.welcomeWrapper}>
-            <WelcomePanel
-              onPromptSelected={handlePromptSelected}
-              onResumeSession={handleResumeSession}
-            />
-          </div>
-        ) : (
-          // Chat tab — Active state: session exists, entity context present,
-          // prompt selected, or a playbook was chosen from the gallery (AIPU2-102).
-          //
-          // onPaneEvent is wired to streaming.onPaneEvent from AiSessionProvider.
-          // This is the R1 → R2 migration point:
-          //   R1: streaming?.onPaneEvent (single-subscriber ref in StandaloneAiProvider)
-          //   R2: streaming.onPaneEvent (routes to PaneEventBus channels — multi-subscriber)
-          //
-          // All other SprkChat props are mapped identically to R1 ChatPanel.tsx.
-          //
-          // "Refine this?" chip (AIPU2-101):
-          //   When selectionChip is non-null a chip bar appears above SprkChat showing
-          //   a truncated preview of the selected text. Clicking the chip populates
-          //   predefinedPrompts with a refinement prompt and clears the chip.
-          <div className={styles.chatWrapper}>
-            {/* ── Stale entity warning (AIPU2-106) ── */}
-            {restoreCtx?.hasStaleEntities && (
-              <div className={styles.restoreStaleWarning} role="alert">
-                Some referenced entities have changed since this session was saved.
-                Results may differ from the original analysis.
-              </div>
-            )}
+        {/* Welcome heading — visible only when no session, no entity, no
+            pending message, and no playbook. Sits above SprkChat. */}
+        {showWelcomePanel && <WelcomePanel />}
 
-            {/* ── Conversation restore summary (AIPU2-106) ── */}
-            {restoreCtx?.conversationSummary && (
-              <div
-                className={styles.restoreSummaryBlock}
-                role="region"
-                aria-label="Previous conversation summary"
-                onClick={() => setSummaryExpanded((prev) => !prev)}
-              >
-                <div className={styles.restoreSummaryHeader}>
-                  {summaryExpanded ? "▼" : "▶"} Previous conversation
+        {/* Chat region — ALWAYS rendered. Hosts the restore banners,
+            "Refine this?" chip bar, and SprkChat itself. */}
+        <div className={styles.chatWrapper}>
+          {/* ── Stale entity warning (AIPU2-106) ── */}
+          {restoreCtx?.hasStaleEntities && (
+            <div className={styles.restoreStaleWarning} role="alert">
+              Some referenced entities have changed since this session was saved.
+              Results may differ from the original analysis.
+            </div>
+          )}
+
+          {/* ── Conversation restore summary (AIPU2-106) ── */}
+          {restoreCtx?.conversationSummary && (
+            <div
+              className={styles.restoreSummaryBlock}
+              role="region"
+              aria-label="Previous conversation summary"
+              onClick={() => setSummaryExpanded((prev) => !prev)}
+            >
+              <div className={styles.restoreSummaryHeader}>
+                {summaryExpanded ? "▼" : "▶"} Previous conversation
+              </div>
+              {summaryExpanded && (
+                <div className={styles.restoreSummaryContent}>
+                  {restoreCtx.conversationSummary}
                 </div>
-                {summaryExpanded && (
-                  <div className={styles.restoreSummaryContent}>
-                    {restoreCtx.conversationSummary}
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            {/* ── "Refine this?" chip bar — visible only when workspace text is selected ── */}
-            {selectionChip !== null && (
-              <div className={styles.refinementChipBar} role="region" aria-label="Refinement suggestion">
-                <Text className={styles.refinementChipLabel}>Refine this?</Text>
-                <Tooltip
-                  content={selectionChip.selectedText}
-                  relationship="description"
-                  positioning="above-start"
+          {/* ── "Refine this?" chip bar — visible only when workspace text is selected ── */}
+          {selectionChip !== null && (
+            <div className={styles.refinementChipBar} role="region" aria-label="Refinement suggestion">
+              <Text className={styles.refinementChipLabel}>Refine this?</Text>
+              <Tooltip
+                content={selectionChip.selectedText}
+                relationship="description"
+                positioning="above-start"
+              >
+                <Tag
+                  className={styles.refinementChipTag}
+                  appearance="brand"
+                  icon={<EditRegular />}
+                  onClick={handleChipClick}
+                  role="button"
+                  aria-label={`Refine selected text from ${selectionChip.contextLabel}`}
                 >
-                  <Tag
-                    className={styles.refinementChipTag}
-                    appearance="brand"
-                    icon={<EditRegular />}
-                    onClick={handleChipClick}
-                    role="button"
-                    aria-label={`Refine selected text from ${selectionChip.contextLabel}`}
-                  >
-                    <span className={styles.refinementChipTagText}>
-                      {selectionChip.selectedText.length > 40
-                        ? `${selectionChip.selectedText.slice(0, 37)}…`
-                        : selectionChip.selectedText}
-                    </span>
-                  </Tag>
-                </Tooltip>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<DismissRegular />}
-                  className={styles.refinementChipDismiss}
-                  aria-label="Dismiss refinement suggestion"
-                  onClick={handleChipDismiss}
-                />
-              </div>
-            )}
-
-            {/* ── SprkChat — fills remaining height below the chip bar ── */}
-            {/*
-              Spaarke Auth v2 §H-4: pass `authenticatedFetch` (for one-shot BFF
-              calls) and `getAccessToken` (escape hatch for SSE ReadableStream)
-              instead of a snapshotted `accessToken: string`. Task 023 owns the
-              SprkChat API change that consumes these props.
-            */}
-            <div className={mergeClasses(styles.sprkChatFlex)}>
-              <SprkChat
-                apiBaseUrl={bffBaseUrl}
-                authenticatedFetch={authenticatedFetch}
-                getAccessToken={getAccessToken}
-                sessionId={chatSessionId ?? undefined}
-                playbookId={playbookId}
-                onSessionCreated={handleSessionCreated}
-                onPlaybookChange={handlePlaybookChange}
-                predefinedPrompts={predefinedPrompts}
-                hostContext={hostContext}
-                onPaneEvent={streaming.onPaneEvent ?? null}
+                  <span className={styles.refinementChipTagText}>
+                    {selectionChip.selectedText.length > 40
+                      ? `${selectionChip.selectedText.slice(0, 37)}…`
+                      : selectionChip.selectedText}
+                  </span>
+                </Tag>
+              </Tooltip>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<DismissRegular />}
+                className={styles.refinementChipDismiss}
+                aria-label="Dismiss refinement suggestion"
+                onClick={handleChipDismiss}
               />
             </div>
+          )}
+
+          {/* ── SprkChat — fills remaining height below the chip bar ── */}
+          {/*
+            Spaarke Auth v2 §H-4: pass `authenticatedFetch` (for one-shot BFF
+            calls) and `getAccessToken` (escape hatch for SSE ReadableStream)
+            instead of a snapshotted `accessToken: string`. Task 023 owns the
+            SprkChat API change that consumes these props.
+          */}
+          <div className={mergeClasses(styles.sprkChatFlex)}>
+            <SprkChat
+              apiBaseUrl={bffBaseUrl}
+              authenticatedFetch={authenticatedFetch}
+              getAccessToken={getAccessToken}
+              sessionId={chatSessionId ?? undefined}
+              playbookId={playbookId}
+              onSessionCreated={handleSessionCreated}
+              onPlaybookChange={handlePlaybookChange}
+              predefinedPrompts={predefinedPrompts}
+              hostContext={hostContext}
+              onPaneEvent={streaming.onPaneEvent ?? null}
+            />
           </div>
-        )}
+        </div>
       </div>
 
       {/* ── Playbook confirmation toast (AIPU2-102, auto-dismissed after 3 s) ── */}
