@@ -1,9 +1,12 @@
 <task id="010" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Direct + transitive package list</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>15 minutes</estimated-effort>
+    <actual-effort>~2 minutes</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, inventory, read-only, phase-1</tags>
     <parallel-group>B</parallel-group>
     <parallel-safe>true</parallel-safe>

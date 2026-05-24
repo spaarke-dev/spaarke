@@ -1,9 +1,12 @@
 <task id="016" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Native binary + wwwroot asset inventory + size-by-category</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~10 minutes (using existing deploy/api-publish/ from rollback drill)</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, inventory, publish, phase-1</tags>
     <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>

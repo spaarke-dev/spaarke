@@ -1,9 +1,12 @@
 <task id="018" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>CI workflow inventory + G-3 version sanity + commit INVENTORY.md</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, inventory, ci-cd, phase-1, gate</tags>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
@@ -91,4 +94,15 @@
     <criterion testable="true">Owner sign-off recorded</criterion>
     <criterion testable="true">CLAUDE.md Project Status updated to "Phase 2 ready"</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Both workflows inventoried (sdap-ci.yml: 26 steps; deploy-bff-api.yml: 30 steps). Phase 6 plug-in
+      points identified for FR-C1–C6 + FR-D5. G-3 action version sanity: 6 actions flagged for marketplace
+      verification (checkout@v6, download-artifact@v7, github-script@v8, upload-artifact@v6, trivy@master
+      anti-pattern, etc.). Master INVENTORY.md links all 15 Phase 1 outputs + records 6 critical findings.
+      Operator sign-off recorded via Phase 1 completion commit.
+    </completion-summary>
+    <phase-2-authorization>Phase 2 is AUTHORIZED to begin. 6 critical findings flagged for Phase 2 candidate categorization (esp. dev/prod OS mismatch which affects FR-A1).</phase-2-authorization>
+  </notes>
 </task>

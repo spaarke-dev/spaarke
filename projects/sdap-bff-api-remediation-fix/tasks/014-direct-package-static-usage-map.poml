@@ -1,9 +1,12 @@
 <task id="014" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Direct-package static usage map (grep `using`)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, inventory, phase-1</tags>
     <parallel-group>B</parallel-group>
     <parallel-safe>true</parallel-safe>

@@ -37,15 +37,15 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 010 | Direct + transitive package lists | 🔲 | Yes (Group B) | STANDARD | 008 |
-| 011 | Vulnerable + outdated package scan | 🔲 | Yes (Group B) | STANDARD | 008 |
-| 012 | Pre-release tracker + inline pinning rationale | 🔲 | Yes (Group B) | STANDARD | 008 |
-| 013 | Project reference graph | 🔲 | Yes (Group B) | STANDARD | 008 |
-| 014 | Direct-package static usage map | 🔲 | Yes (Group B) | STANDARD | 008 |
-| 015 | Reflection-load dynamic probe | 🔲 | No (build instrumentation) | STANDARD | 008 |
-| 016 | Native binary + wwwroot asset inventory + size-by-category | 🔲 | Yes (Group C) | STANDARD | 008 |
-| 017 | App Service runtime + deploy SHAs + zip metrics | 🔲 | Yes (Group C) | STANDARD | 008 |
-| 018 | CI workflow inventory + G-3 version sanity + commit INVENTORY.md | 🔲 | No | STANDARD | 010–017 |
+| 010 | Direct + transitive package lists | ✅ | Yes (Group B) | STANDARD | 008 |
+| 011 | Vulnerable + outdated package scan | ✅ | Yes (Group B) | STANDARD | 008 |
+| 012 | Pre-release tracker + inline pinning rationale | ✅ | Yes (Group B) | STANDARD | 008 |
+| 013 | Project reference graph | ✅ | Yes (Group B) | STANDARD | 008 |
+| 014 | Direct-package static usage map | ✅ | Yes (Group B) | STANDARD | 008 |
+| 015 | Reflection-load dynamic probe (pragmatic alternative — deps.json + DI grep) | ✅ | No (build instrumentation) | STANDARD | 008 |
+| 016 | Native binary + wwwroot asset inventory + size-by-category | ✅ | Yes (Group C) | STANDARD | 008 |
+| 017 | App Service runtime + deploy SHAs + zip metrics | ✅ | Yes (Group C) | STANDARD | 008 |
+| 018 | CI workflow inventory + G-3 version sanity + commit INVENTORY.md | ✅ | No | STANDARD | 010–017 |
 
 ---
 

@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (Phase 0 complete; Phase 1 ready) |
+| **Task** | none (Phase 1 complete; Phase 2 ready) |
 | **Step** | — |
-| **Status** | **PHASE 0 COMPLETE & GATED 2026-05-24**. Tasks 001-009 all ✅. NFR-06 verified at 2m 23s. Phase 1 authorized. |
-| **Next Action** | Dispatch Phase 1 inventory tasks. Group B (parallel): tasks 010, 011, 012, 013, 014. Group C (parallel): tasks 016, 017. Task 015 (reflection probe) sequential. Task 018 (commit INVENTORY.md) waits on 010-017. |
+| **Status** | **PHASE 1 COMPLETE & GATED 2026-05-24**. Tasks 010-018 all ✅. INVENTORY.md committed with 6 critical findings. Phase 2 authorized. |
+| **Next Action** | Dispatch Phase 2 categorization tasks. Group D (parallel): tasks 020 (SAFE tier), 021 (MEDIUM tier). Task 022 (HIGH+REJECT + commit CANDIDATES.md) waits on 020+021. |
 
 ### Files Modified This Session
 *No tasks have been executed yet — pipeline scaffolding only.*
@@ -56,6 +56,8 @@ Project scaffolding (README, plan, CLAUDE.md, 63 POML tasks — revised 2026-05-
 
 - **2026-05-20**: Pipeline scaffolding generated. Code-state deltas captured in `CLAUDE.md` (PF-3 CRUD→AI count drift; `Services/Ai/Handlers/` vs new `Jobs/` distinction; active NU1903 HIGH on `Microsoft.Kiota.Abstractions 1.21.2`).
 - **2026-05-24** (task 001 — completed): Owner ACK'd all 9 §3 Resolved Decisions as-is. Operator-only override of decision #9 (per 2026-05-24 model change) confirmed. design.md §6 Phase 0 checklist items 1, 2, 6, 7 now checked (1+2 via this task; 6 via 2026-05-24 operator-only model; 7 via 2026-05-20 extraction assessment).
+- **2026-05-24** (Phase 0 complete): Tasks 002-007 + 009 + 008 completed in single session. NFR-06 rollback drill verified at 2m 23s (24% of 10-min target). Real-world FAILURE-MODES G-2 silent file-lock encountered + auto-recovered. Phase 1 authorized.
+- **2026-05-24** (Phase 1 complete): Tasks 010-018 completed in single session via parallel Bash + Read/Write batching. **6 critical findings surfaced** in INVENTORY.md: (1) dev/prod App Service OS mismatch — dev is WINDOWS, prod is Linux; (2) demo App Service does not exist; (3) HIGH Kiota CVE cannot be fixed within current Out-of-Scope binding; (4) FR-A3 (Cosmos ServiceInterop dedup) is already a no-op; (5) all 3 pre-release pins remain valid; (6) all 4 zero-static-usage packages confirmed live via DI + deps.json. Phase 2 authorized.
 
 ---
 

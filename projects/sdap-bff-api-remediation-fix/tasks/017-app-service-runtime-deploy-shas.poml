@@ -1,9 +1,12 @@
 <task id="017" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>App Service runtime confirmation + current deploy SHAs + zip metrics</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30 minutes</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, inventory, azure, phase-1</tags>
     <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -73,4 +76,27 @@
     <criterion testable="true">deployed-sha256.txt covers every .dll in publish</criterion>
     <criterion testable="true">publish-metrics.txt shows current vs baseline drift</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Captured Azure runtime + SHA-256s + zip metrics. SHA-256 covers 223 loadable artifacts (.dll/.exe/.pdb/.deps.json/.runtimeconfig.json/web.config) recursively across deploy/api-publish/.
+    </completion-summary>
+    <critical-finding>
+      Original POML criterion "Linux (os: true)" is INCORRECT for dev. Dev App Service `spe-api-dev-67e2xz`
+      is actually WINDOWS (`kind: "app"`, `reserved: false`, `netFrameworkVersion: "v8.0"`, plan P2v3).
+      Prod `spaarke-bff-prod` IS Linux as design assumed (`kind: "app,linux"`, `reserved: true`).
+      The dev/prod OS mismatch is the highest-impact Phase 1 finding — see INVENTORY.md Finding 1.
+    </critical-finding>
+    <demo-env-status>
+      NOT FOUND in Azure subscription. Only 2 BFF App Services exist: dev (Windows) + prod (Linux).
+      Phase 5 task 060 ("Deploy cumulative changeset to spaarke-demo") may require demo provisioning
+      OR Phase 5 scope-down to dev → prod direct. Flagged in INVENTORY.md Finding 2.
+    </demo-env-status>
+    <publish-metrics-vs-drift-point>
+      Current: 75.2 MB compressed / 212 MB uncompressed / 287 files / 216 DLLs (top-level)
+      2026-05-19 drift: 75.19 MB / 212 MB
+      CONCLUSION: Zero further drift since 2026-05-19. The remediation target is well-calibrated.
+    </publish-metrics-vs-drift-point>
+  </notes>
+</task>
 </task>

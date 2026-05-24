@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: **Phase 1 READY** (Phase 0 complete + gated 2026-05-24)
+- **Phase**: **Phase 2 READY** (Phase 1 complete + INVENTORY.md gate signed 2026-05-24)
 - **Last Updated**: 2026-05-24
-- **Current Task**: Phase 0 gate task 008 ✅; Phase 1 inventory not yet started
-- **Next Action**: Dispatch Phase 1 Group B + C inventory tasks in parallel — `/task-execute projects/sdap-bff-api-remediation-fix/tasks/010-direct-transitive-package-list.poml` (and parallel siblings 011, 012, 013, 014, 016, 017 per TASK-INDEX Parallel Execution Groups). Task 015 (reflection probe) runs sequentially. Task 018 (CI workflow inventory + commit INVENTORY.md) waits on 010-017.
+- **Current Task**: Phase 1 complete (tasks 010-018 all ✅); 6 critical findings flagged for Phase 2
+- **Next Action**: Dispatch Phase 2 categorization tasks — `/task-execute projects/sdap-bff-api-remediation-fix/tasks/020-tier-safe-candidates.poml` (Group D parallel siblings 020, 021). Task 022 (commit CANDIDATES.md) waits on 020+021.
 
 ---
 
@@ -192,6 +192,31 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 - **2026-05-24**: **`feature/production-environment-setup-r2` branch abandoned (housekeeping).** Encountered the branch during master-sync audit (1 stranded commit from 2026-04-24: docs consolidation of ENVIRONMENT-DEPLOYMENT-GUIDE + PRODUCTION-DEPLOYMENT-GUIDE → SPAARKE-DEPLOYMENT-GUIDE). Project itself was completed 2026-03-20; this was a post-completion docs cleanup that was never finished. Test merge revealed 4 conflicts including 2 modify/delete on the source guides (master updated them in past 4 weeks via R2 docs refactoring + auth-doc-drift). Effort to integrate: ~70 min of careful porting. Decision: abandon (delete branch + worktree). If consolidation still wanted, redo fresh against current master state. Not blocking this BFF project (docs-only). Remote branch deleted; worktree tracking pruned 2026-05-24.
 
 ---
+
+### Phase 1 Inventory Findings (tasks 010–018 — completed 2026-05-24)
+
+**6 critical findings** documented in [`inventory/INVENTORY.md`](./inventory/INVENTORY.md). Summary:
+
+1. **🚨 dev/prod App Service OS mismatch** — dev (`spe-api-dev-67e2xz`) is **Windows** (`reserved: false`, .NET 8 on P2v3); prod (`spaarke-bff-prod`) is **Linux**. design.md §2.4 "App Service is unambiguously Linux" is wrong for dev. **FR-A1 (`--runtime linux-x64`) needs revision**: split per-env, consolidate dev to Linux, or accept multi-RID. Phase 2 candidate categorization MUST address this.
+
+2. **🚨 Demo App Service does not exist** — Azure subscription enumeration found only dev + prod. No `spaarke-demo`. Phase 5 task 060 ("Deploy cumulative changeset to spaarke-demo") needs operator clarification: provision demo OR scope-down to dev→prod direct.
+
+3. **🚨 HIGH Kiota CVE blocked by current scope** — Microsoft.Kiota.Abstractions 1.21.2 has GHSA-7j59-v9qr-6fq9 (HIGH). Latest is 2.0.0 (major bump); requires Microsoft.Graph 5.101.0 → 6.x. Spec §Out of Scope forbids both. Phase 2 must decide: revisit scope OR accept risk pending separate Graph SDK upgrade project. Also 2 HIGH on transitive `System.Security.Cryptography.Xml 8.0.1` may be fixable via IdentityModel bumps.
+
+4. **FR-A3 is already a no-op** — Cosmos `ServiceInterop.dll` is NOT FOUND in current publish. Upstream Cosmos SDK 3.47.0 resolved the historical duplication. Phase 4 task 042 may drop entirely.
+
+5. **All 3 pre-release pinning rationales remain valid** — Azure.AI.OpenAI, Microsoft.Agents.AI, Azure.AI.Projects chain pins all hold per FR-B3 re-verification.
+
+6. **All 4 zero-static-usage packages confirmed live** — Microsoft.Agents.AI, Microsoft.Agents.Hosting.AspNetCore, Microsoft.Extensions.Http.Polly, OpenTelemetry verified via DI registration grep + presence in Sprk.Bff.Api.deps.json (526 entries). Phase 2 must mark all 4 KEEP regardless of static-grep zero finding.
+
+**Key metrics (Phase 1 baseline)**:
+- Compressed publish: 75.2 MB (target ≤ 60 MB; -15.2 MB over baseline; matches 2026-05-19 drift point exactly)
+- Uncompressed publish: 212 MB (target ≤ 150 MB; -62 MB over)
+- 44 direct packages / 526 deps.json entries / 287 files / 216 DLLs
+- 4 sourcemap files in `wwwroot/playbook-builder/assets/` (FR-A2 target)
+- 10 RIDs in `runtimes/` totaling ~77 MB native (FR-A1 trim opportunity: ~54-67 MB savings depending on target OS)
+
+**Phase 2 input ready**: Phase 2 candidate categorization tasks (020-022) consume this inventory + 6 critical findings.
 
 ### Phase 0 Group A Decisions (tasks 002–007 — completed 2026-05-24)
 

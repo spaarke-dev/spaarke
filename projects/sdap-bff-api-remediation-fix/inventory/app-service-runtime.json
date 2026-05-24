@@ -1,0 +1,35 @@
+{
+  "_captured": "2026-05-24",
+  "_critical_finding": "Dev and prod App Services run DIFFERENT operating systems. design.md §2.4 'App Service is unambiguously Linux' is wrong for dev.",
+  "_implication_for_fr_a1": "FR-A1 (publish --runtime linux-x64) is correct for prod but WRONG for dev. Phase 2 candidate categorization must address this.",
+
+  "dev": {
+    "name": "spe-api-dev-67e2xz",
+    "resource_group": "spe-infrastructure-westus2",
+    "kind": "app",
+    "reserved": false,
+    "os": "Windows",
+    "linuxFxVersion": "",
+    "windowsFxVersion": null,
+    "netFrameworkVersion": "v8.0",
+    "location": "West US 2",
+    "sku": "PremiumV3",
+    "plan": "spe-plan-dev-67e2xz (P2v3, kind: app, reserved: false)"
+  },
+
+  "prod": {
+    "name": "spaarke-bff-prod",
+    "resource_group": "rg-spaarke-platform-prod",
+    "kind": "app,linux",
+    "reserved": true,
+    "os": "Linux",
+    "location": "West US 2",
+    "_note": "Linux App Service per design's stated assumption"
+  },
+
+  "demo": {
+    "_status": "NOT FOUND in current subscription enumeration",
+    "_implication": "Phase 5 task 060 (deploy cumulative changeset to spaarke-demo) requires demo App Service to exist. Either (a) demo is provisioned later in the project lifecycle, or (b) the demo target is in a different subscription not visible to this account, or (c) Phase 5 needs operator review.",
+    "_operator_action": "Confirm demo environment status BEFORE Phase 5 task 060 starts"
+  }
+}
