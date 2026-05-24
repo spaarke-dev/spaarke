@@ -316,46 +316,34 @@ const useStyles = makeStyles({
       display: "none",
     },
   },
-  // Task 134 (R13 follow-up #13, 2026-05-23): modern responsive layout.
-  // Operator: "the layout is not correct. there is no space between the
-  // fields. Is there another approach we can use that is modern and
-  // provides more flexibility for screen resolution/responsiveness."
+  // Task 136 (R13 follow-up #15, 2026-05-23): flatten layout to a single
+  // flex row so fields + actions wrap together. Operator: "make these
+  // responsive so that if not fitting on one line then will go to
+  // second line just before the gap goes to zero." Task 134's CSS
+  // Grid + separate action group made the actions float to the right
+  // of a wrapping grid, looking visually disconnected.
   //
-  // Outer container is FLEX so the filter-field grid (left) and the
-  // action group (right: Apply, Clear, chevron) can sit side-by-side
-  // and the action group can shrink-wrap to its own size while the grid
-  // takes the remaining width and wraps internally.
+  // New approach — single flex row, all items siblings:
+  //   - Each field is a flex item with `flex: 1 0 140px` (grow to
+  //     share, base 140px, NO shrink). Base width prevents columns
+  //     from shrinking below 140px → forces flex-wrap when parent
+  //     can't accommodate all items.
+  //   - Action group is `flex: 0 0 auto` — sits with fields, wraps
+  //     naturally as a single block.
+  //   - `gap: 12px 24px` shorthand emits row-gap + column-gap
+  //     reliably via Griffel.
   dateRangeRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-end",
     flexWrap: "wrap",
-    // Task 135: use the `gap` shorthand instead of separate rowGap +
-    // columnGap longhands. Griffel handles the shorthand reliably; the
-    // longhands appeared to be silently dropped in task 134.
-    gap: "12px 16px",
+    gap: "12px 24px",
     ...shorthands.padding("8px", "12px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
-  // Task 134 → 135: CSS Grid with `auto-fit + minmax` for the 5 filter
-  // fields. Task 134 attempt used `columnGap` + `rowGap` longhands but
-  // Griffel's atomic CSS appeared to drop them. Task 135 uses the
-  // `gap` shorthand (Griffel-friendly) and bumps to 24px column-gap
-  // for clearly visible spacing. Plus belt-and-suspenders: explicit
-  // `paddingRight` on `dateRangeField` guarantees visible separation
-  // even if the grid gap isn't honored.
-  filterFieldsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-    gap: "12px 24px",
-    alignItems: "end",
-    flex: "1 1 auto",
-    minWidth: "0",
-  },
-  // Task 134: action group (Apply, Clear, collapse chevron) sits at the
-  // right edge of the row. Uses flex so the small button widths shrink-
-  // wrap their content. Aligns to the bottom of the row (with the
-  // input fields, not the labels).
+  // Task 136: action group sits inline with the fields as one flex
+  // item. When the row wraps, this group goes to a new line as a unit
+  // (Apply + Clear + chevron stay together).
   filterActions: {
     display: "flex",
     flexDirection: "row",
@@ -367,16 +355,12 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     ...shorthands.gap("4px"),
+    // Task 136: flex sizing per-field. `1 0 140px` = grow to share,
+    // base 140px, NO shrink. Forces flex-wrap when row gets too narrow
+    // instead of squeezing fields. minWidth: 0 lets the dropdown
+    // content not bloat the field's natural width.
+    flex: "1 0 140px",
     minWidth: "0",
-    // Task 135: guarantee visible horizontal separation between adjacent
-    // grid cells. We rely PRIMARILY on filterFieldsGrid's `gap: 12px 24px`
-    // for spacing, but Griffel atomic CSS has been unreliable with grid
-    // longhand gap properties in this stack (operator reported "still no
-    // space" after task 134's columnGap fix). Adding paddingRight directly
-    // on each grid cell creates a hard floor of 12px right-padding —
-    // visible separation even if Griffel drops the grid gap. The rightmost
-    // column gets a harmless extra 12px of trailing padding.
-    paddingRight: "12px",
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -1012,22 +996,17 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* (1) Filter row — Task 134 (R13 follow-up #13, 2026-05-23):
-              modern responsive layout. Outer container is FLEX with
-              two children:
-                (a) `filterFieldsGrid` — CSS Grid auto-fit (5 filter
-                    fields, consistent gaps, self-balancing widths).
-                (b) `filterActions`    — flex group (Apply, Clear,
-                    chevron) at the right edge, shrink-wrapped.
-              Provides predictable spacing + clean wrapping across
-              viewport widths without manual width-tuning each field.
-              Order preserved from task 131: Event Type → Event
-              Status → Filter by Date Field → From → To. */}
+      {/* (1) Filter row — Task 136 (R13 follow-up #15, 2026-05-23):
+              flattened to a single flex row. All 7 items (5 fields +
+              1 action group) wrap together as siblings. Each field
+              uses `flex: 1 0 140px` so when the row narrows below
+              ~770px (5 × 140px + 4 × 24px gap + ~50px actions), the
+              entire group wraps cleanly to multiple lines without
+              the actions floating separately. Order preserved from
+              task 131: Event Type → Event Status → Filter by Date
+              Field → From → To → Apply → Clear → Chevron. */}
       <div className={styles.dateRangeRow}>
-        <div className={styles.filterFieldsGrid}>
-        {/* Task 131: Event Type — first. Fetched from sprk_eventtype_ref
-            records (task 131 schema fix). Task 134 removed pickListField
-            width override — CSS Grid handles sizing. */}
+        {/* Task 131: Event Type. Fetched from sprk_eventtype_ref records. */}
         <div className={styles.dateRangeField}>
           <Label className={styles.dateRangeLabel}>Event Type</Label>
           <Dropdown
@@ -1115,13 +1094,10 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
             }
           />
         </div>
-        </div>{/* /filterFieldsGrid */}
-        {/* Task 134: action group — Apply + Clear + collapse chevron. Sits
-            to the right of the filter grid. Each button shrink-wraps to its
-            content; the whole group is `flex: 0 0 auto` so it doesn't compete
-            with the grid for horizontal space. Apply visible only when
-            pending differs from applied; Clear visible whenever any applied
-            filter is non-default OR a calendar day is selected. */}
+        {/* Task 136: action group — Apply + Clear + collapse chevron.
+            Now a sibling flex item of the 5 fields. When the parent
+            row's flex-wrap kicks in, this whole group moves to a new
+            line as one block (Apply + Clear + chevron stay together). */}
         <div className={styles.filterActions}>
           {hasUnapplied && (
             <Button
