@@ -31,21 +31,19 @@
 
 ## 🚨 Critical findings (require Phase 2 owner attention)
 
-### Finding 1 — Dev/prod App Service OS mismatch
-- **dev** `spe-api-dev-67e2xz` = **Windows** (`reserved: false`, `kind: "app"`)
-- **prod** `spaarke-bff-prod` = **Linux** (`reserved: true`, `kind: "app,linux"`)
-- design.md §2.4 claim ("App Service is unambiguously Linux") is **wrong for dev**
-- **FR-A1 implication**: `--runtime linux-x64` publishes the right binaries for prod but WRONG for dev. Phase 2 must decide:
-  - (a) split CI publish flag per-env (linux-x64 → prod, win-x64 → dev)
-  - (b) consolidate dev to Linux App Service to match prod
-  - (c) keep multi-RID publish and accept ~70 MB overhead
-- See [`native-binaries.md`](./native-binaries.md) for trim savings under each strategy
+### Finding 1 — ✅ RESOLVED 2026-05-24 (via task 019)
+- **Original finding**: dev `spe-api-dev-67e2xz` = Windows; prod `spaarke-bff-prod` = Linux; design assumption wrong for dev
+- **Resolution**: New Linux App Service `spaarke-bff-dev` provisioned in `rg-spaarke-dev` (West US 2). UAMI `mi-bff-api-dev` attached cross-RG; all 173 App Settings migrated (2 colon-keys skipped, both had `__` siblings); full UAMI → Dataverse chain verified via `/healthz/dataverse` returning 200. Old Windows dev parallel-running pending operator-paced cutover.
+- **All 3 envs now Linux**: dev (`spaarke-bff-dev`), demo (`spaarke-bff-demo`), prod (`spaarke-bff-prod`). FR-A1 (`--runtime linux-x64`) applies cleanly across all envs.
+- See [`baseline/linux-dev-migration.md`](../baseline/linux-dev-migration.md) for full migration record + operator cutover checklist.
 
-### Finding 2 — Demo App Service does not exist
-- Azure subscription enumeration shows only `spe-api-dev-67e2xz` (dev) and `spaarke-bff-prod` (prod)
-- No `spaarke-demo` App Service found
-- **Phase 5 task 060** ("Deploy cumulative changeset to spaarke-demo") presumes a demo env that doesn't exist today
-- **Operator action required**: confirm whether demo is provisioned later or whether Phase 5 needs to scope-down to dev → prod direct
+### Finding 2 — ✅ RESOLVED (terminology confusion)
+- Original finding was wrong: I queried only the dev subscription. Demo is in a separate subscription (`2ff9ee48-6f1d-4664-865c-f11868dd1b50`).
+- **Actual topology**:
+  - dev: `spaarke-bff-dev` (Linux, new) + `spe-api-dev-67e2xz` (Windows, legacy) — both in dev subscription
+  - demo: `spaarke-bff-demo` (Linux) in `rg-spaarke-demo` (demo subscription)
+  - prod: `spaarke-bff-prod` (Linux) in `rg-spaarke-platform-prod` (dev subscription) — exists but **NOT actively used yet**
+- **Phase 5 implication**: prod is functional but hasn't been used. First real prod deploy via task 062 is a milestone, not a routine promotion. App Insights signal during 7-day prod observation (task 063) will be sparse — adjust expectations accordingly.
 
 ### Finding 3 — HIGH vuln (NU1903 on Kiota) cannot be fixed within current scope
 - Microsoft.Kiota.Abstractions 1.21.2 has GHSA-7j59-v9qr-6fq9 (HIGH)

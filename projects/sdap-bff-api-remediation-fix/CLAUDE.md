@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: **Phase 2 READY** (Phase 1 complete + INVENTORY.md gate signed 2026-05-24)
+- **Phase**: **Phase 2 IN PROGRESS** (task 020 candidates-safe.md drafted; tasks 021/022 next)
 - **Last Updated**: 2026-05-24
-- **Current Task**: Phase 1 complete (tasks 010-018 all ✅); 6 critical findings flagged for Phase 2
-- **Next Action**: Dispatch Phase 2 categorization tasks — `/task-execute projects/sdap-bff-api-remediation-fix/tasks/020-tier-safe-candidates.poml` (Group D parallel siblings 020, 021). Task 022 (commit CANDIDATES.md) waits on 020+021.
+- **Current Task**: Phase 1 complete + task 019 Linux dev migration done; Finding 1 RESOLVED; task 020 SAFE candidates drafted
+- **Next Action**: Complete tasks 021 (MEDIUM candidates) + 022 (HIGH/REJECT + commit CANDIDATES.md)
 
 ---
 
