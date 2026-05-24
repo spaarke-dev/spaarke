@@ -316,50 +316,56 @@ const useStyles = makeStyles({
       display: "none",
     },
   },
-  // Task 136 (R13 follow-up #15, 2026-05-23): flatten layout to a single
-  // flex row so fields + actions wrap together. Operator: "make these
-  // responsive so that if not fitting on one line then will go to
-  // second line just before the gap goes to zero." Task 134's CSS
-  // Grid + separate action group made the actions float to the right
-  // of a wrapping grid, looking visually disconnected.
+  // Task 137 (R13 follow-up #16, 2026-05-24): operator wants FIXED-width
+  // fields with constant visible gaps, wrapping when row narrows.
+  // Task 136's `flex: 1 0 140px` made fields grow to fill remaining
+  // space — at wide viewports each field became ~220px and the 24px
+  // gap looked proportionally small. Operator: "what I would expect
+  // is that the space between the fields is constant, and if the
+  // screen width reduces then the fields would go to the next line."
   //
-  // New approach — single flex row, all items siblings:
-  //   - Each field is a flex item with `flex: 1 0 140px` (grow to
-  //     share, base 140px, NO shrink). Base width prevents columns
-  //     from shrinking below 140px → forces flex-wrap when parent
-  //     can't accommodate all items.
-  //   - Action group is `flex: 0 0 auto` — sits with fields, wraps
-  //     naturally as a single block.
-  //   - `gap: 12px 24px` shorthand emits row-gap + column-gap
-  //     reliably via Griffel.
+  // New approach:
+  //   - Each field: `flex: 0 0 140px` (fixed 140px, NO grow, NO shrink).
+  //     Deliberate compact width per operator "picklist width can be
+  //     reduced to provide more space."
+  //   - Gap bumped to `12px 28px` for clear visual breathing room.
+  //   - Action group: `flex: 0 0 auto` + `marginLeft: auto` pushes it
+  //     to the right edge WITHOUT using a flex-spacer (a spacer with
+  //     flex: 1 would consume all remaining width and block flex-wrap
+  //     from engaging when needed). The auto-margin sits the actions
+  //     at the right when there's space, and wraps with the row when
+  //     there isn't.
   dateRangeRow: {
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-end",
     flexWrap: "wrap",
-    gap: "12px 24px",
+    gap: "12px 28px",
     ...shorthands.padding("8px", "12px"),
     ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
   },
-  // Task 136: action group sits inline with the fields as one flex
-  // item. When the row wraps, this group goes to a new line as a unit
-  // (Apply + Clear + chevron stay together).
+  // Task 137: action group uses `margin-left: auto` to right-align
+  // without disrupting flex-wrap. When all items fit on one row, the
+  // auto margin pushes actions to the right edge. When the row is
+  // too narrow and actions wrap to a new line, the auto margin still
+  // right-aligns them on their new row.
   filterActions: {
     display: "flex",
     flexDirection: "row",
     alignItems: "flex-end",
     ...shorthands.gap("8px"),
     flex: "0 0 auto",
+    marginLeft: "auto",
   },
   dateRangeField: {
     display: "flex",
     flexDirection: "column",
     ...shorthands.gap("4px"),
-    // Task 136: flex sizing per-field. `1 0 140px` = grow to share,
-    // base 140px, NO shrink. Forces flex-wrap when row gets too narrow
-    // instead of squeezing fields. minWidth: 0 lets the dropdown
-    // content not bloat the field's natural width.
-    flex: "1 0 140px",
+    // Task 137: fixed-width fields. `0 0 140px` = no grow, no shrink,
+    // exactly 140px. Fields stay compact even when row has empty space
+    // (the action group's marginLeft:auto eats the extra). Wrap
+    // engages when total items exceed row width.
+    flex: "0 0 140px",
     minWidth: "0",
   },
   dateRangeLabel: {
