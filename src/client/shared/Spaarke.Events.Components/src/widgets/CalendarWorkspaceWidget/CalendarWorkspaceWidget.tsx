@@ -351,14 +351,16 @@ const useStyles = makeStyles({
     ...shorthands.gap("4px"),
     flex: "0 0 140px",
     minWidth: "0",
-    // Task 138: explicit horizontal spacing between fields via
-    // marginRight. This is the reliable old-school approach since
-    // Griffel's gap shorthand wasn't emitting the column-gap value
-    // (operator confirmed visually + via DevTools). Every field gets
-    // 28px right-margin; the last field's trailing margin is consumed
-    // by the action group's marginLeft:auto, so it's invisible to
-    // the user.
-    marginRight: "28px",
+    // Task 139 (R13 follow-up #18, 2026-05-24): horizontal spacing
+    // between fields is now applied via INLINE `style={{ marginRight:
+    // 28 }}` at the JSX call sites instead of here. Inline styles
+    // bypass Griffel's atomic-CSS handling entirely — the browser
+    // gets a plain `style="margin-right:28px"` attribute that no
+    // other CSS rule can override. Tasks 134-138 tried four
+    // Griffel-based approaches (gap longhand, gap shorthand, padding-
+    // Right, marginRight here in the Griffel class) — all emitted
+    // smaller-than-configured values in this stack per operator's
+    // DevTools confirmation.
   },
   dateRangeLabel: {
     fontSize: tokens.fontSizeBase200,
@@ -1005,7 +1007,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
               Field → From → To → Apply → Clear → Chevron. */}
       <div className={styles.dateRangeRow}>
         {/* Task 131: Event Type. Fetched from sprk_eventtype_ref records. */}
-        <div className={styles.dateRangeField}>
+        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>Event Type</Label>
           <Dropdown
             value={eventTypeDisplay}
@@ -1027,7 +1029,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
           </Dropdown>
         </div>
         {/* Task 131: Event Status — second. Task 134: CSS Grid sizing. */}
-        <div className={styles.dateRangeField}>
+        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>Event Status</Label>
           <Dropdown
             value={eventStatusDisplay}
@@ -1053,7 +1055,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
           </Dropdown>
         </div>
         {/* Task 131: Filter by Date Field — third. Task 134: CSS Grid sizing. */}
-        <div className={styles.dateRangeField}>
+        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>Filter by Date Field</Label>
           <Dropdown
             value={dateFieldDisplay}
@@ -1071,7 +1073,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
           </Dropdown>
         </div>
         {/* Task 131: From — fourth. */}
-        <div className={styles.dateRangeField}>
+        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>From</Label>
           <Input
             type="date"
@@ -1082,7 +1084,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({
           />
         </div>
         {/* Task 131: To — fifth. */}
-        <div className={styles.dateRangeField}>
+        <div className={styles.dateRangeField} style={{ marginRight: 28 }}>
           <Label className={styles.dateRangeLabel}>To</Label>
           <Input
             type="date"
