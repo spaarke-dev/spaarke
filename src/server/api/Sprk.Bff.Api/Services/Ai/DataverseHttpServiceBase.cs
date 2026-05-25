@@ -2,8 +2,6 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
-using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -27,18 +25,17 @@ public abstract class DataverseHttpServiceBase
     protected DataverseHttpServiceBase(
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger logger)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        // AUTHV2-042 + BFF-FIX-2026-05-24: managed identity credential pinned to UAMI clientId
-        // when configured. See ManagedIdentityCredentialFactory for the canonical pattern.
-        _credential = ManagedIdentityCredentialFactory.Create(configuration);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

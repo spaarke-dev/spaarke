@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
@@ -58,6 +57,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
         RagTelemetry telemetry,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
+        TokenCredential credential,
         ILogger<BulkRagIndexingJobHandler> logger)
     {
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
@@ -66,6 +66,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _credential = credential ?? throw new ArgumentNullException(nameof(credential));
 
         _httpClient = httpClientFactory.CreateClient("DataverseBatch");
 
@@ -73,9 +74,6 @@ public class BulkRagIndexingJobHandler : IJobHandler
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
-
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

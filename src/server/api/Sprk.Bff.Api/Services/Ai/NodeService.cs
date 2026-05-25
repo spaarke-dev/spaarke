@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -38,17 +37,17 @@ public class NodeService : INodeService
     public NodeService(
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<NodeService> logger)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

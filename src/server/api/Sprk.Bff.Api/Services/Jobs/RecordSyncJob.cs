@@ -5,7 +5,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
 using Azure.Core;
-using Azure.Identity;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Caching.Distributed;
@@ -194,6 +193,7 @@ public class RecordSyncJob : BackgroundService
     private readonly IDistributedCache _cache;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly TokenCredential _credential;
     private readonly ILogger<RecordSyncJob> _logger;
     private readonly RecordSyncOptions _options;
 
@@ -210,12 +210,14 @@ public class RecordSyncJob : BackgroundService
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         IOptions<RecordSyncOptions> options,
+        TokenCredential credential,
         ILogger<RecordSyncJob> logger)
     {
         _cache             = cache             ?? throw new ArgumentNullException(nameof(cache));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _configuration     = configuration     ?? throw new ArgumentNullException(nameof(configuration));
         _options           = options?.Value    ?? throw new ArgumentNullException(nameof(options));
+        _credential        = credential        ?? throw new ArgumentNullException(nameof(credential));
         _logger            = logger            ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -238,18 +240,8 @@ public class RecordSyncJob : BackgroundService
                 return cached.Token;
             }
 
-            // Prefer the BFF's configured MI client ID. Falls back to default credential
-            // resolution if the setting is missing (covers local dev with env-var creds).
-            var managedIdentityClientId = _configuration["ManagedIdentity:ClientId"];
-            var credential = string.IsNullOrEmpty(managedIdentityClientId)
-                ? new DefaultAzureCredential()
-                : new DefaultAzureCredential(new DefaultAzureCredentialOptions
-                {
-                    ManagedIdentityClientId = managedIdentityClientId
-                });
-
             var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
-            _currentToken = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct);
+            _currentToken = await _credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct);
             return _currentToken.Value.Token;
         }
         finally

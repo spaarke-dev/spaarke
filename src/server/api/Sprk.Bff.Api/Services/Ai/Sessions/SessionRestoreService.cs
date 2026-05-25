@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using Azure.Core;
-using Azure.Identity;
 
 namespace Sprk.Bff.Api.Services.Ai.Sessions;
 
@@ -51,17 +50,20 @@ public class SessionRestoreService : ISessionRestoreService
     private readonly ISessionPersistenceService _persistence;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly TokenCredential _credential;
     private readonly ILogger<SessionRestoreService> _logger;
 
     public SessionRestoreService(
         ISessionPersistenceService persistence,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<SessionRestoreService> logger)
     {
         _persistence = persistence;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _credential = credential;
         _logger = logger;
     }
 
@@ -359,10 +361,9 @@ public class SessionRestoreService : ISessionRestoreService
 
     private async Task<string> AcquireDataverseTokenAsync(string dataverseUrl, CancellationToken ct)
     {
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        var credential = new DefaultAzureCredential();
+        // Uses the DI-injected TokenCredential (UAMI-pinned via ManagedIdentityCredentialFactory).
         var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
-        var tokenResponse = await credential.GetTokenAsync(
+        var tokenResponse = await _credential.GetTokenAsync(
             new TokenRequestContext([scope]),
             ct);
 

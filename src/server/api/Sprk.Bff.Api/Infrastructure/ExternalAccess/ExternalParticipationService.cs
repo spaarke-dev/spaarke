@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Caching.Distributed;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -22,6 +21,7 @@ public class ExternalParticipationService
     private readonly HttpClient _httpClient;
     private readonly IDistributedCache _cache;
     private readonly IConfiguration _configuration;
+    private readonly TokenCredential _credential;
     private readonly ILogger<ExternalParticipationService> _logger;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -35,11 +35,13 @@ public class ExternalParticipationService
         HttpClient httpClient,
         IDistributedCache cache,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<ExternalParticipationService> logger)
     {
         _httpClient = httpClient;
         _cache = cache;
         _configuration = configuration;
+        _credential = credential;
         _logger = logger;
     }
 
@@ -215,16 +217,8 @@ public class ExternalParticipationService
             var dataverseUrl = _configuration["Dataverse:ServiceUrl"]
                 ?? throw new InvalidOperationException("Dataverse:ServiceUrl is required");
 
-            var managedIdentityClientId = _configuration["ManagedIdentity:ClientId"]
-                ?? throw new InvalidOperationException("ManagedIdentity:ClientId is required");
-
-            var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-            {
-                ManagedIdentityClientId = managedIdentityClientId
-            });
-
             var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
-            _currentToken = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct);
+            _currentToken = await _credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct);
             return _currentToken.Value.Token;
         }
         finally

@@ -3,9 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Caching.Distributed;
-using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
@@ -42,21 +40,20 @@ public class PlaybookService : IPlaybookService
     public PlaybookService(
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<PlaybookService> logger,
         IDistributedCache? cache = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _cache = cache;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         // IMPORTANT: BaseAddress must end with trailing slash, otherwise relative URLs replace the last segment
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        // AUTHV2-042 + BFF-FIX-2026-05-24: managed identity credential pinned to UAMI clientId
-        // when configured. See ManagedIdentityCredentialFactory for the canonical pattern.
-        _credential = ManagedIdentityCredentialFactory.Create(configuration);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

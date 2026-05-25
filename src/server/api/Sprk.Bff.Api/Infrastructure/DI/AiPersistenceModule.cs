@@ -1,4 +1,4 @@
-using Azure.Identity;
+using Azure.Core;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Fluent;
 using Microsoft.Extensions.Logging;
@@ -59,11 +59,11 @@ public static class AiPersistenceModule
                 "Add this setting to appsettings.json or Azure App Service configuration.");
 
         // CosmosClient: singleton — thread-safe, manages connection pool internally.
-        // DefaultAzureCredential: no connection strings in code or config (ADR-015).
+        // TokenCredential (UAMI-pinned) injected from DI singleton; no connection strings (ADR-015).
         // SerializerOptions: use System.Text.Json for consistency with the rest of the BFF.
-        services.AddSingleton(_ =>
+        services.AddSingleton(sp =>
         {
-            var credential = new DefaultAzureCredential();
+            var credential = sp.GetRequiredService<TokenCredential>();
             return new CosmosClientBuilder(endpoint, credential)
                 .WithSerializerOptions(new CosmosSerializationOptions
                 {

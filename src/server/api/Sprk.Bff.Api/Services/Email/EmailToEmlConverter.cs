@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using Sprk.Bff.Api.Configuration;
@@ -29,48 +28,27 @@ public class EmailToEmlConverter : IEmailToEmlConverter
     private const int DirectionSent = 100000001;
 
     /// <summary>
-    /// Creates a new EmailToEmlConverter with default credential from configuration.
+    /// Creates a new EmailToEmlConverter. TokenCredential is injected from the DI singleton
+    /// (pinned to UAMI ClientId via ManagedIdentityCredentialFactory).
     /// </summary>
     public EmailToEmlConverter(
         HttpClient httpClient,
         IOptions<EmailProcessingOptions> options,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<EmailToEmlConverter> logger)
-        : this(httpClient, options, configuration, logger, credential: null)
-    {
-    }
-
-    /// <summary>
-    /// Creates a new EmailToEmlConverter with an optional custom TokenCredential (for testing).
-    /// </summary>
-    internal EmailToEmlConverter(
-        HttpClient httpClient,
-        IOptions<EmailProcessingOptions> options,
-        IConfiguration configuration,
-        ILogger<EmailToEmlConverter> logger,
-        TokenCredential? credential)
     {
         _httpClient = httpClient;
         _options = options.Value;
         _configuration = configuration;
         _logger = logger;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         // Important: BaseAddress must end with '/' for relative URIs to combine correctly
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-
-        // Use provided credential or create from configuration
-        if (credential != null)
-        {
-            _credential = credential;
-        }
-        else
-        {
-            // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-            _credential = new DefaultAzureCredential();
-        }
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
