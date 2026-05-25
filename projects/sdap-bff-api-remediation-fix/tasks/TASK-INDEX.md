@@ -48,6 +48,7 @@
 | 018 | CI workflow inventory + G-3 version sanity + commit INVENTORY.md | ✅ | No | STANDARD | 010–017 |
 | 019 | Migrate dev BFF from Windows to Linux App Service (pre-Phase-2 infra; resolves Finding 1) | ✅ | No | STANDARD | 018 |
 | 023 | Multi-identity credential refactor — DI-singleton TokenCredential (auth-r2 follow-on bug; Phase 2.5 discovery) | ✅ | No | FULL | 022 |
+| 024 | URL source-of-truth refactor — PCFs + Code Pages read sprk_BffApiBaseUrl env var; remove hardcoded fallbacks (post-cutover cleanup; surfaced during Phase 3 baseline 2026-05-25) | 🔄 | No (multi-deploy) | FULL | 019, 023 |
 
 ---
 

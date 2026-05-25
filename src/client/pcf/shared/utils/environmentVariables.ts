@@ -83,15 +83,24 @@ function normalizeBffUrl(raw: string): string {
 const CACHE_DURATION_MS = 5 * 60 * 1000;
 
 /**
- * Default fallback values for development
- * These should ONLY be used in development - production should always use environment variables
+ * Default fallback values.
+ *
+ * IMPORTANT (task 024, 2026-05-25): URL-bearing values are intentionally EMPTY.
+ * Hardcoded URL fallbacks caused silent breakage when `spe-api-dev-67e2xz` was
+ * decommissioned during Linux migration — consumers received a deleted URL and
+ * failed with `ERR_NAME_NOT_RESOLVED`. The Dataverse env var
+ * `sprk_BffApiBaseUrl` is now the sole source of truth.
+ *
+ * Consumers MUST handle the empty-string case by throwing a clear error when
+ * the underlying env var is not configured (see `getApiBaseUrl` below and
+ * `SpeDocumentViewerHost.tsx` post-task-024 for the canonical pattern).
  */
 const DEFAULT_VALUES: Record<KnownEnvironmentVariable, string> = {
-  sprk_BffApiBaseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
+  sprk_BffApiBaseUrl: '', // task 024: no URL fallback; throw on missing in getApiBaseUrl
   sprk_BffApiAppId: '',
   sprk_MsalClientId: '',
   sprk_TenantId: '',
-  sprk_AzureOpenAiEndpoint: 'https://spaarke-openai-dev.openai.azure.com/',
+  sprk_AzureOpenAiEndpoint: '', // task 024: no URL fallback (parity with BFF URL)
   sprk_ApplicationInsightsKey: '',
   sprk_SharePointEmbeddedContainerId: '',
   sprk_DefaultPlaybookId: '',
@@ -235,6 +244,14 @@ export async function getEnvironmentVariableOrDefault(
  */
 export async function getApiBaseUrl(webApi: ComponentFramework.WebApi): Promise<string> {
   const raw = await getEnvironmentVariableOrDefault(webApi, 'sprk_BffApiBaseUrl');
+  if (!raw || !raw.trim()) {
+    throw new Error(
+      "[Spaarke.EnvVar] sprk_BffApiBaseUrl Dataverse environment variable is not configured. " +
+      "Set it in the SpaarkeCore solution to the host of the target BFF API " +
+      "(e.g., 'https://spaarke-bff-dev.azurewebsites.net'). No hardcoded fallback is " +
+      "supplied (task 024) to prevent silent breakage when the URL changes."
+    );
+  }
   return normalizeBffUrl(raw);
 }
 

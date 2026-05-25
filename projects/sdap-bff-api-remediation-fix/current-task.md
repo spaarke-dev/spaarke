@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-25 (Phase 3 close — BASELINE.md committed)
+> **Last Updated**: 2026-05-25 (task 024.A complete — SpeDocumentViewer v1.0.27 deployed + user-verified)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — Phase 3 closed (BASELINE.md committed). Phase 4 task 040 is the next executable task once two gates clear. |
-| **Step** | — |
-| **Status** | **Phase 4 BLOCKED on two gates** — (1) 48h App Insights calendar gate (task 033) earliest closes 2026-05-27 UTC; (2) operator G4 facade adoption agreement with Insights Engine owner (UQ-04 residual, needed before task 046). All Phase 3 metric-capture tasks are done; BASELINE.md is the authoritative reference point. |
-| **Next Action** | **WAIT** for the 48h calendar gate to close + operator to secure G4 agreement. THEN start Phase 4 with task 040 (`--runtime linux-x64` framework-dependent publish). In the meantime, residual operator items (Graph email subscription PATCH-or-wait, weekly worktree branch monitoring) can proceed. |
+| **Task** | task 024 (URL source-of-truth refactor) — IN PROGRESS. Sub-step A (SpeDocumentViewer) ✅ DONE this session. Sub-steps B/C/D pending. |
+| **Step** | 024.A complete (2026-05-25). User verified Document + SPE preview works on dev with v1.0.27. Multiple other BFF calls also smoke-tested as working. Solution zip artifact: `src/client/pcf/SpeDocumentViewer/solution/bin/SpaarkeSpeDocumentViewer_v1.0.27.zip` |
+| **Status** | **Phase 4 still BLOCKED on two gates** (48h App Insights window 2026-05-27 + G4 facade adoption agreement). Task 024 remains in flight (sub-steps B/C/D), but does NOT block Phase 4 — it's parallel-track cleanup work surfaced during Phase 3 baseline. |
+| **Next Action** | (1) Phase 3 gate watch: 48h App Insights window closes 2026-05-27 UTC — capture metrics per `baseline/app-insights-baseline-start.md`, then unblock Phase 4. (2) Task 024.B: audit + refactor remaining PCFs (EmailProcessingMonitor, UniversalQuickCreate, UniversalDatasetGrid, SemanticSearchControl, RelatedDocumentCount, DocumentRelationshipViewer, AssociationResolver, ScopeConfigEditor) per the same pattern used for SpeDocumentViewer. (3) Task 024.C: audit Code Pages. (4) Task 024.D: update build-time `.env.development` files. (5) Task 024 final acceptance grep + commit. |
 
 ### Files Modified This Session
 
@@ -29,7 +29,8 @@
 | `6bfe193a` | task 023 checkpoint — DI-singleton TokenCredential WIP |
 | `7fb1776f` | task 023 COMPLETE — auth-r2 architectural fix (19 services refactored) |
 | `ca38909a` | checkpoint — task 023 done; Phase 3 ready |
-| **(pending)** | **Phase 3 COMPLETE — old Windows dev decommissioned + 8 of 9 baseline tasks done + BASELINE.md** |
+| `0a8dae14` | **Phase 3 COMPLETE — BASELINE.md committed; old Windows dev decommissioned; 8 of 9 baseline tasks done** |
+| **(pending)** | **task 024.A — SpeDocumentViewer v1.0.27 deployed + user-verified (URL source-of-truth refactor; bffApiUrl property removed; env-var-driven)** |
 
 ### Critical Context
 
@@ -113,6 +114,7 @@ Resume with `/task-execute projects/sdap-bff-api-remediation-fix/tasks/040-publi
 - **2026-05-24** (Phase 2): 3 SAFE, 1 MEDIUM, 0 HIGH, 15 REJECT. Kiota HIGH CVE accepted risk per Decision C.1.
 - **2026-05-24/25** (task 023): Architectural DI-singleton TokenCredential refactor over band-aid per user direction. 19 services refactored. Zero `new DefaultAzureCredential()` in BFF prod code remaining.
 - **2026-05-25** (Phase 3 close): Old Windows dev decommissioned (`az webapp delete` + `az appservice plan delete` both succeeded). BASELINE.md committed. 8 of 9 Phase 3 tasks complete; only 033 (48h calendar gate) remains in flight. Test project found to have 69 compile errors (mixed task 023 fallout + pre-existing breakage from other projects); test project repair flagged out-of-scope for separate sub-project. 1 candidate 404 regression in `/api/office/quickcreate/{entityType}`; 2 server-errors in finance recalculate endpoints — both flagged for Phase 4 investigation but not blocking. ADR-010 gap measured at 265 registrations (target ≤15).
+- **2026-05-25** (task 024.A — URL source-of-truth refactor for SpeDocumentViewer): User's Document detail page broke immediately after decommission — `useDocumentPreview` fetched `spe-api-dev-67e2xz/api/documents/.../view-url` (ERR_NAME_NOT_RESOLVED). Root cause: per-instance `bffApiUrl` PCF property in form customization explicitly set to old URL. Per user direction ("Architectural fix + Full sweep + Remove fallbacks"), refactored SpeDocumentViewerHost.tsx to async-resolve URL from Dataverse env var `sprk_BffApiBaseUrl` via `getApiBaseUrl(webApi)`. Removed `bffApiUrl` property from manifest. Updated `environmentVariables.ts` to throw clear error if env var missing (no URL fallback). Bumped version 1.0.26 → 1.0.27 in 7 places (manifest source + UI footer + packed manifest + source manifest mirror + Solution.xml + solution.xml + pack.ps1). Built (426KB bundle, 0 old-URL refs verified). Packed `SpaarkeSpeDocumentViewer_v1.0.27.zip`. Imported via `pac solution import --force-overwrite --publish-changes` to SPAARKE DEV 1. User republished Custom Page + verified preview + multiple other BFF calls working. Task 024 sub-steps B (other PCFs), C (Code Pages), D (`.env.development` files) remain pending.
 
 ---
 

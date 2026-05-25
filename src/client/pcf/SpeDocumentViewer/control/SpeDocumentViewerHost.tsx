@@ -28,6 +28,7 @@ import {
 import { initializeAuth } from './authInit';
 import { DocumentViewerApp } from './SpeDocumentViewer';
 import { createLogger } from '@spaarke/ui-components/dist/utils/logger';
+import { getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 const logger = createLogger('SpeDocumentViewerHost');
 
@@ -157,6 +158,7 @@ export interface ISpeDocumentViewerHostProps {
 export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ context, correlationId }) => {
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [bffApiUrl, setBffApiUrl] = useState<string>('');
   const [isDarkTheme, setIsDarkTheme] = useState(() => getEffectiveDarkMode(context));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -164,7 +166,8 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
   const tenantId = ctxAny.parameters?.tenantId?.raw || '';
   const clientAppId = ctxAny.parameters?.clientAppId?.raw || '';
   const bffAppId = ctxAny.parameters?.bffAppId?.raw || '';
-  const bffApiUrl = ctxAny.parameters?.bffApiUrl?.raw || 'https://spe-api-dev-67e2xz.azurewebsites.net';
+  // bffApiUrl resolved from sprk_BffApiBaseUrl Dataverse env var (single source of truth).
+  // Per-instance PCF property removed (task 024) — every environment must keep the env var current.
   const enableEdit = ctxAny.parameters?.enableEdit?.raw ?? true;
   const enableDelete = ctxAny.parameters?.enableDelete?.raw ?? false;
   const enableDownload = ctxAny.parameters?.enableDownload?.raw ?? true;
@@ -178,6 +181,8 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
   const designMode = isDesignMode(context);
 
   // Auth init — runs once on mount (skipped in design mode).
+  // Resolves BFF URL from sprk_BffApiBaseUrl Dataverse env var FIRST, then initializes auth.
+  // This replaces the per-instance bffApiUrl PCF property (removed in task 024).
   useEffect(() => {
     if (designMode) return;
     let cancelled = false;
@@ -186,7 +191,15 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
         if (!tenantId || !clientAppId || !bffAppId) {
           throw new Error('Missing required configuration: tenantId, clientAppId, and bffAppId must be provided');
         }
-        await initializeAuth(tenantId, clientAppId, bffAppId, bffApiUrl);
+        // Resolve BFF base URL from Dataverse env var (single source of truth across all clients)
+        const resolvedBffUrl = await getApiBaseUrl(ctxAny.webAPI);
+        if (!resolvedBffUrl) {
+          throw new Error('sprk_BffApiBaseUrl Dataverse environment variable is not set or empty. Configure it in the SpaarkeCore solution.');
+        }
+        if (cancelled) return;
+        setBffApiUrl(resolvedBffUrl);
+        logger.logInfo('SpeDocumentViewer', `Resolved BFF URL from sprk_BffApiBaseUrl: ${resolvedBffUrl}`);
+        await initializeAuth(tenantId, clientAppId, bffAppId, resolvedBffUrl);
         if (!cancelled) {
           setAuthReady(true);
           logger.logInfo('SpeDocumentViewer', '@spaarke/auth initialized');
@@ -204,7 +217,7 @@ export const SpeDocumentViewerHost: React.FC<ISpeDocumentViewerHostProps> = ({ c
       }
     })();
     return () => { cancelled = true; };
-  }, [tenantId, clientAppId, bffAppId, bffApiUrl, designMode]);
+  }, [tenantId, clientAppId, bffAppId, designMode, ctxAny.webAPI]);
 
   // Theme listener
   useEffect(() => {

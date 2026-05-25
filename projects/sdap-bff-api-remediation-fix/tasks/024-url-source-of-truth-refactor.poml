@@ -1,0 +1,111 @@
+<task id="024" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>URL source-of-truth refactor — every PCF + Code Page reads sprk_BffApiBaseUrl env var; remove all hardcoded fallbacks (post-cutover cleanup)</title>
+    <status>in-progress</status>
+    <estimated-effort>1–2 sessions (multiple staged deploys)</estimated-effort>
+    <assigned>AI agent + operator (deploy approvals)</assigned>
+    <tags>bff-api, pcf, code-page, migration, post-cutover-cleanup, phase-2.5</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Each PCF/Code Page deploy is sequential (version bump + build + import + custom-page republish + verification); failure isolation requires per-component bake</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Surfaced during Phase 3 baseline (2026-05-25): user's Document detail page broke after the old Windows dev `spe-api-dev-67e2xz` was decommissioned. Root cause: client code had THREE layers of stale URL references — (1) per-PCF-instance `bffApiUrl` property in form customization, (2) manifest `default-value`, (3) hardcoded `||` fallback in source — all pointing at the now-deleted URL. Even though the Dataverse env var `sprk_BffApiBaseUrl` was correctly updated to `https://spaarke-bff-dev.azurewebsites.net` during task 019 cutover, the PCFs were reading from per-instance properties instead.
+
+    This task implements the user-approved architectural fix: every Spaarke client surface (PCF + Code Page) reads the BFF URL from the Dataverse env var `sprk_BffApiBaseUrl` at init time. Per-instance manifest properties + hardcoded fallbacks are removed. Single source of truth across the platform — future URL migrations are a one-line env var update with zero per-form edits.
+
+    Reference architecture: `src/client/shared/Spaarke.Auth/src/resolveRuntimeConfig.ts` (canonical env-var resolution for Code Pages) + `src/client/pcf/shared/utils/environmentVariables.ts:getApiBaseUrl()` (canonical for PCFs).
+  </prompt>
+
+  <role>.NET / React / PCF architect. Multi-component deployment lead.</role>
+
+  <goal>
+    Every Spaarke client surface (PCF + Code Page) resolves the BFF URL from Dataverse env var `sprk_BffApiBaseUrl` at init time. Zero hardcoded `spe-api-dev-67e2xz` (or any specific URL) fallbacks remain in active source code. Every affected component is rebuilt + redeployed at a new version. User confirms end-to-end functionality on each component.
+  </goal>
+
+  <inputs>
+    <file purpose="canonical-pcf-resolver">src/client/pcf/shared/utils/environmentVariables.ts</file>
+    <file purpose="canonical-codepage-resolver">src/client/shared/Spaarke.Auth/src/resolveRuntimeConfig.ts</file>
+    <file purpose="user-incident-evidence">projects/sdap-bff-api-remediation-fix/current-task.md (2026-05-25 entry)</file>
+    <file purpose="cutover-record">projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md</file>
+    <file purpose="deploy-guide">docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="user-2026-05-25">Full sweep, not surgical. Remove fallbacks entirely (throw on missing env var) — not just update the URL. Per user direction: 'fix the root cause not band-aid'.</constraint>
+    <constraint source="user-2026-05-25">Architectural fix: PCFs read from sprk_BffApiBaseUrl env var, NOT from per-instance manifest property. Remove `bffApiUrl` properties from manifests entirely.</constraint>
+    <constraint source="root CLAUDE.md PCF section">PCF version bump in 4 locations (manifest source, UI footer, Solution.xml, Solution Control Manifest). Hard refresh required after deploy.</constraint>
+    <constraint source="docs/guides/PCF-DEPLOYMENT-GUIDE.md">Use `npm run build:prod` (NOT `npm run build`). pac solution pack + import for prod deploys. Republish Custom Page in maker if applicable.</constraint>
+    <constraint source="task 019 cutover">Live dev env var sprk_BffApiBaseUrl = https://spaarke-bff-dev.azurewebsites.net (already set). Refactored components inherit correct URL automatically.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/shared/utils/environmentVariables.ts</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewerHost.tsx</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/ControlManifest.Input.xml</file>
+      <file>src/client/shared/Spaarke.Auth/src/resolveRuntimeConfig.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase 2.5 discovery (after task 019 Linux migration + task 023 DI-singleton auth refactor). User's Document + SPE preview broke when old Windows dev `spe-api-dev-67e2xz` was decommissioned at the start of Phase 3 baseline capture (2026-05-25, commit 0a8dae14 era). Grep surfaced 107 files containing the old URL; classified into 5 layers:
+
+        1. Active runtime per-instance PCF property values (Dataverse form XML) — fires for THIS user's incident
+        2. Manifest default-value attributes
+        3. Source code `||` fallback literals
+        4. Shared util DEFAULT_VALUES fallbacks
+        5. JSDoc / docs / .env.development (build-time only or no impact)
+
+      The architectural fix (chosen by user) eliminates layers 1-4 entirely by making the env var the single source of truth. Layer 5 (docs/comments) is updated for hygiene but not technical correctness.
+    </background>
+    <dependencies>
+      <dependency task="019" status="completed">Linux dev migration + env var cutover (sprk_BffApiBaseUrl already points at new URL)</dependency>
+      <dependency task="023" status="completed">DI-singleton TokenCredential refactor (server side; this task is client side)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Sub-step A: refactor SpeDocumentViewer PCF (in progress 2026-05-25 — getApiBaseUrl from shared util; remove bffApiUrl property; bump 1.0.26 → 1.0.27; npm install + build:prod + solution pack + pac solution import + Custom Page republish + user verification).</step>
+    <step order="2">Sub-step B: audit other PCFs that read bffApiUrl from manifest property — EmailProcessingMonitor (per-host pattern), UniversalQuickCreate, UniversalDatasetGrid, SemanticSearchControl, RelatedDocumentCount, DocumentRelationshipViewer, AssociationResolver, ScopeConfigEditor. For each: apply same refactor pattern (read env var, remove manifest property, version bump, build, deploy).</step>
+    <step order="3">Sub-step C: audit Code Pages (DocumentRelationshipViewer, SemanticSearch, others) — they should already use resolveRuntimeConfig from @spaarke/auth (env-var-based). Verify and remove any per-page hardcoded fallbacks.</step>
+    <step order="4">Sub-step D: refactor `src/client/pcf/shared/utils/environmentVariables.ts` — remove DEFAULT_VALUES entry for sprk_BffApiBaseUrl; make getApiBaseUrl throw with a clear error message if env var is missing. Schedule AFTER all PCFs have been refactored to call getApiBaseUrl (so removing the fallback doesn't break unmigrated PCFs).</step>
+    <step order="5">Sub-step E: update build-time .env.development files in: src/solutions/SpaarkeAi, LegalWorkspace, DocumentUploadWizard, SpeAdminApp, external-spa, code-pages/PlaybookBuilder, code-pages/AnalysisWorkspace. Change BFF URL to spaarke-bff-dev.azurewebsites.net. These only affect local dev; no deploy needed but devs running locally will need the update.</step>
+    <step order="6">Sub-step F: clean up JSDoc / inline example URLs in shared library files (Spaarke.UI.Components, Spaarke.AI.Widgets, Spaarke.Auth doc-comment example). No code changes; documentation hygiene only.</step>
+    <step order="7">Sub-step G: final grep verification — `grep -r spe-api-dev-67e2xz src/` should return zero matches in active runtime source (only commit-message-style references in `projects/` history are acceptable). Update current-task.md + TASK-INDEX.md and commit final state.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">install + build:prod per affected PCF/Code Page</tool>
+    <tool name="pac">solution pack + import + publish-all per affected solution</tool>
+    <tool name="Power Apps Maker">Custom Page republish per affected page (operator-only step)</tool>
+    <tool name="git">grep + commit staged sweep</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Every Spaarke PCF + Code Page refactored to read sprk_BffApiBaseUrl from Dataverse env var at init</output>
+    <output type="code">All `bffApiUrl` (or equivalent) manifest properties removed</output>
+    <output type="code">All `|| 'https://spe-api-dev-67e2xz...'` source-code fallbacks removed</output>
+    <output type="code">`environmentVariables.ts` no longer carries DEFAULT_VALUES for sprk_BffApiBaseUrl; throws on missing</output>
+    <output type="deploy">Every affected PCF redeployed at bumped version + verified by user</output>
+    <output type="report">Per-component deploy log appended to current-task.md (component, old-version, new-version, deploy timestamp, verification outcome)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rE "spe-api-dev-67e2xz" src/ | grep -v -E "(\.md:|//|\\*|dist_temp/|node_modules/|\.env\.development|/Solution/.*bundle\.js)"` returns ZERO matches (active runtime source is clean; comments + already-rebuilt bundle.js + docs are excluded)</criterion>
+    <criterion testable="true">Every refactored PCF reads URL from `getApiBaseUrl(webApi)` (or equivalent env-var resolver) at init; no `ctxAny.parameters?.bffApiUrl?.raw` reads remain</criterion>
+    <criterion testable="true">`environmentVariables.ts` DEFAULT_VALUES has NO entry for `sprk_BffApiBaseUrl` (entry removed)</criterion>
+    <criterion testable="true">`getApiBaseUrl` throws with clear error when sprk_BffApiBaseUrl env var is unset</criterion>
+    <criterion testable="true">User verifies Document + SPE file preview works end-to-end on new dev (proves refactor preserves functionality)</criterion>
+    <criterion testable="true">User verifies at least one OTHER Spaarke surface (Custom Page using a different PCF) also works post-refactor</criterion>
+    <criterion testable="true">All affected components have version bumped in 4 places (manifest, UI footer, Solution.xml, Solution Control Manifest)</criterion>
+    <criterion testable="true">All `.env.development` files in solutions/code-pages point at `spaarke-bff-dev.azurewebsites.net`</criterion>
+  </acceptance-criteria>
+</task>

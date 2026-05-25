@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.26" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.27" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="value" display-name-key="Value_Display_Key" description-key="Value_Desc_Key" of-type="SingleLine.Text" usage="bound" required="true"/>
     <property name="documentId" display-name-key="DocumentId_Display_Key" description-key="Document ID (GUID). If empty, uses form record ID." of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="bffApiUrl" display-name-key="BffApiUrl_Display_Key" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false" default-value="https://spe-api-dev-67e2xz.azurewebsites.net"/>
     <property name="clientAppId" display-name-key="ClientAppId_Display_Key" description-key="PCF Client Application ID for MSAL" of-type="SingleLine.Text" usage="input" required="true"/>
     <property name="bffAppId" display-name-key="BffAppId_Display_Key" description-key="BFF Application ID for scope construction" of-type="SingleLine.Text" usage="input" required="true"/>
     <property name="tenantId" display-name-key="TenantId_Display_Key" description-key="Azure AD Tenant ID" of-type="SingleLine.Text" usage="input" required="true"/>
