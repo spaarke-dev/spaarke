@@ -597,6 +597,7 @@ CRITICAL ADRs to always check:
   - ADR-002: Thin plugins (<50ms, no HTTP)
   - ADR-007: Graph types isolated
   - ADR-008: Endpoint filters for auth
+  - ADR-013 (refined 2026-05-20): AI architecture — CRUD code MUST consume AI via Services/Ai/PublicContracts/ facades (no direct injection of IOpenAiClient, IPlaybookService, or other AI-internal types into CRUD code)
   - ADR-028: Spaarke Auth v2 contract — client: useAuth() + authenticatedFetch (no raw fetch with Authorization headers, no accessToken: string props, no tokenBridge/__SPAARKE_BFF_TOKEN__, no PublicClientApplication outside @spaarke/auth); server: DefaultAzureCredential (MI) for Graph/Dataverse when MI enabled; HMAC webhook signing; tenant-specific MSAL authority (INV-3/INV-6)
 
 IF violations found:
@@ -605,6 +606,55 @@ IF violations found:
 
 See: .claude/skills/adr-check/ for detailed ADR validation rules
 ```
+
+### Step 6.5: BFF Hygiene Check (Conditional — CLAUDE.md §10)
+
+**Trigger condition**: any file in scope is under:
+- `src/server/api/Sprk.Bff.Api/**`
+- `src/server/shared/Spaarke.Core/**`
+- `src/server/shared/Spaarke.Dataverse/**`
+
+If trigger condition is met, run the binding §10 pre-merge checklist from [`.claude/constraints/bff-extensions.md`](../../constraints/bff-extensions.md):
+
+```
+LOAD .claude/constraints/bff-extensions.md (full file — it is the source of truth)
+
+APPLY Section A (Pre-Merge Checklist — Binding):
+  1. Placement Justification stated in PR description or design.md?
+     (Even "obviously in BFF" requires a one-sentence justification per §10.)
+  2. Relevant ADRs cited in PR/design? (ADR-001, ADR-007, ADR-008, ADR-010, ADR-013 most common)
+  3. Publish-size impact verified? (only if NuGet packages added)
+     - Baseline: ~60 MB compressed per .claude/constraints/azure-deployment.md
+     - Run: dotnet publish --runtime linux-x64; inspect output size
+  4. NO new direct CRUD→AI dependency?
+     - CHECK: grep diff for new injections of IOpenAiClient, IPlaybookService, or other Services/Ai/ internal types into code OUTSIDE Services/Ai/
+     - If found in CRUD code (Finance/Workspace/Jobs handlers outside Services/Ai/) → Violation; must use Services/Ai/PublicContracts/ facade
+  5. Feature-module DI used? (per ADR-010 — Add{Feature}Module() extension, not flat Program.cs registrations)
+
+APPLY Section B (New Package References) — only if .csproj changed:
+  - dotnet list package --vulnerable --include-transitive — flag any new HIGH-severity CVE
+  - Pre-release packages (-beta, -rc, -preview) require inline csproj comment justifying
+
+APPLY Section C (New Endpoints) — only if MapPost/MapPut/MapGet added:
+  - Minimal API (not MVC controllers)?
+  - Endpoint-filter authorization (.AddEndpointFilter<...>())?
+  - Results.Problem(...) for errors (RFC 7807)?
+  - Registered via Map{Feature}Endpoints extension, NOT directly in Program.cs?
+
+APPLY Section D (New Background Work) — only if IHostedService/IJobHandler added:
+  - Uses IJobHandler<T> per ADR-004 (not free-form IHostedService)?
+  - AI-coupled jobs in Services/Ai/Jobs/ (not Services/Jobs/Handlers/)?
+
+FLAG SEVERITIES:
+  - Missing Placement Justification → Critical (binding §10 imperative)
+  - New direct CRUD→AI dep → Critical (per refined ADR-013)
+  - New HIGH-severity CVE → Critical
+  - Endpoint added directly in Program.cs → Warning (ADR-001/008)
+  - Feature-module pattern not followed → Warning (ADR-010)
+  - Publish-size verification skipped when packages added → Warning
+```
+
+See: [`.claude/constraints/bff-extensions.md`](../../constraints/bff-extensions.md) for full rules; [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) for the evidence base.
 
 ### Step 7: Technology-Specific Checks
 

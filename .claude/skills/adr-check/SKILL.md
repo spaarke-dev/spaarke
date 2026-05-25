@@ -63,10 +63,26 @@ Quick reference of key constraints:
 | ADR-008 | Endpoint filters | Global `UseAuthorization` middleware |
 | ADR-009 | Redis-first | `IMemoryCache` for cross-request caching |
 | ADR-010 | DI minimalism | Interfaces with single implementation |
+| ADR-013 (refined 2026-05-20) | AI architecture — facade discipline for CRUD→AI consumption | CRUD code injecting `IOpenAiClient`, `IPlaybookService`, or other AI-internal interfaces directly (must consume via `Services/Ai/PublicContracts/` facades); AI work proposed in BFF without checking refined ADR-013 decision criteria |
 | ADR-021 | Fluent v9 design system | `@fluentui/react` (v8), hard-coded colors, missing FluentProvider |
 | ADR-028 | Spaarke Auth v2 client contract | Raw `fetch(... headers: { Authorization: \`Bearer ${...}\` })`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, `BridgeStrategy`/`XrmStrategy`/`MsalSilentStrategy` references, `accessToken: string` typed props, `PublicClientApplication` instantiated outside `@spaarke/auth`, `ClientSecretCredential` for Graph when MI available, MSAL authority `/common` or `/organizations` |
 
 Note: This table is not exhaustive. Validate against the full ADR index in `docs/adr/README-ADRs.md`.
+
+### Step 2.5: Load BFF Hygiene Constraints (Conditional)
+
+If any file in scope is under:
+- `src/server/api/Sprk.Bff.Api/**`
+- `src/server/shared/Spaarke.Core/**`
+- `src/server/shared/Spaarke.Dataverse/**`
+
+Then ALSO load and apply [`.claude/constraints/bff-extensions.md`](../../constraints/bff-extensions.md) — this is the binding pre-merge checklist for BFF additions per root CLAUDE.md §10. Treat each MUST rule in that file as an ADR-equivalent compliance check. The 5-rule pre-merge checklist (Section A) is mandatory; rules in Sections B–E apply by change type.
+
+Flag as **Violation** (not Warning) any addition that:
+- Lacks a Placement Justification in the PR/design.md (§10 imperative)
+- Introduces a new direct CRUD→AI dependency (must use `Services/Ai/PublicContracts/` facade)
+- Adds a NuGet package without publish-size verification or CVE check
+- Adds endpoints directly in `Program.cs` instead of through a `Map{Feature}Endpoints` extension
 
 ### Step 3: Run Validation Checks
 
