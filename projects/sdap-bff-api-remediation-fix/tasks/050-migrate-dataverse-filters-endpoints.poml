@@ -1,7 +1,7 @@
 <task id="050" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Migrate Dataverse + Filters + Endpoints consumers to facade (FR-E2 part 4)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>5 hours</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, ai-boundary, facade, migration, outcome-e, phase-4</tags>

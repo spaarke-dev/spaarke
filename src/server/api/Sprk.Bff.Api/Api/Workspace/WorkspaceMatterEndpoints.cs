@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Api.Workspace;
@@ -160,7 +161,7 @@ public static class WorkspaceMatterEndpoints
 
     private static async Task HandleAiSummary(
         AiSummaryRequest request,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -215,7 +216,7 @@ public static class WorkspaceMatterEndpoints
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
 
-            var summaryText = await openAiClient.GetCompletionAsync(prompt, cancellationToken: timeoutCts.Token);
+            var summaryText = await briefingAi.GenerateNarrativeAsync(prompt, cancellationToken: timeoutCts.Token);
 
             var resultJson = JsonSerializer.Serialize(new { summary = summaryText.Trim() }, JsonOptions);
             await WriteSSEAsync(response, AnalysisStreamChunk.Result(resultJson), ct);

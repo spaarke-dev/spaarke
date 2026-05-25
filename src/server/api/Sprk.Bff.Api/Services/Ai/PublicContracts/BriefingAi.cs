@@ -28,13 +28,19 @@ public sealed class BriefingAi : IBriefingAi
     /// <inheritdoc />
     public Task<string> GenerateNarrativeAsync(
         string prompt,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
 
-        // Delegate to the underlying client with default model + token settings.
-        // Per ADR-007, the facade does NOT layer additional defaults — those live in
-        // OpenAiClient where they can be reasoned about in one place.
-        return _openAi.GetCompletionAsync(prompt, cancellationToken: cancellationToken);
+        // Delegate to the underlying client. Per ADR-007, the facade does NOT layer
+        // additional defaults — model selection and other token settings live in
+        // OpenAiClient where they can be reasoned about in one place. Token-cap, however,
+        // is a per-call concern the caller already controls today (daily-briefing passes
+        // 300/500; matter-summary passes null), so it's surfaced on the facade.
+        return _openAi.GetCompletionAsync(
+            prompt,
+            maxOutputTokens: maxOutputTokens,
+            cancellationToken: cancellationToken);
     }
 }

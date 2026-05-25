@@ -27,15 +27,21 @@ public interface IBriefingAi
 {
     /// <summary>
     /// Generate a complete narrative response from a single prompt (non-streaming).
-    /// Used for short, deterministic narrative enhancement (e.g., portfolio briefings)
-    /// where the caller assembles the prompt and consumes the full response as a string.
+    /// Used for short, deterministic narrative enhancement (e.g., portfolio briefings,
+    /// daily-briefing summarization, matter AI summary) where the caller assembles the
+    /// prompt and consumes the full response as a string.
     /// </summary>
     /// <param name="prompt">The prompt text. The caller is responsible for prompt construction
     /// (the facade does not load playbooks or apply system prompts).</param>
+    /// <param name="maxOutputTokens">Optional max-output-tokens cap. Pass <c>null</c> to use
+    /// the underlying client default. The daily-briefing consumers pass explicit caps
+    /// (300 for summary/channel narration, 500 for TL;DR) to bound response length and cost;
+    /// the matter-summary consumer leaves it unset.</param>
     /// <param name="cancellationToken">Cancellation token. Callers typically pair this with
     /// a timeout (e.g., 3 s for the briefing-card path) so that AI failure cannot block CRUD response.</param>
     /// <returns>The generated text response. May be empty if the model produced no output.</returns>
     Task<string> GenerateNarrativeAsync(
         string prompt,
+        int? maxOutputTokens = null,
         CancellationToken cancellationToken = default);
 }

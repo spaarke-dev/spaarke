@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -56,7 +57,7 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<IResult> Summarize(
         DailyBriefingSummaryRequest request,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -80,7 +81,7 @@ public static class DailyBriefingEndpoints
         {
             var prompt = BuildBriefingPrompt(request);
 
-            var briefingText = await openAiClient.GetCompletionAsync(
+            var briefingText = await briefingAi.GenerateNarrativeAsync(
                 prompt,
                 maxOutputTokens: 300,
                 cancellationToken: cancellationToken);
@@ -169,7 +170,7 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<IResult> HandleNarrate(
         DailyBriefingNarrateRequest request,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -209,10 +210,10 @@ public static class DailyBriefingEndpoints
         try
         {
             // Fire TL;DR prompt and all channel narration prompts in parallel
-            var tldrTask = GetTldrAsync(request, openAiClient, logger, cancellationToken);
+            var tldrTask = GetTldrAsync(request, briefingAi, logger, cancellationToken);
 
             var channelTasks = request.Channels.Select(channel =>
-                GetChannelNarrationAsync(channel, openAiClient, logger, cancellationToken));
+                GetChannelNarrationAsync(channel, briefingAi, logger, cancellationToken));
 
             var allTasks = new List<Task> { tldrTask };
             var channelTaskList = channelTasks.ToList();
@@ -268,13 +269,13 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<TldrResult> GetTldrAsync(
         DailyBriefingNarrateRequest request,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         ILogger logger,
         CancellationToken cancellationToken)
     {
         var prompt = BuildNarrateTldrPrompt(request);
 
-        var briefingText = await openAiClient.GetCompletionAsync(
+        var briefingText = await briefingAi.GenerateNarrativeAsync(
             prompt,
             maxOutputTokens: 500,
             cancellationToken: cancellationToken);
@@ -309,7 +310,7 @@ public static class DailyBriefingEndpoints
     /// </summary>
     private static async Task<ChannelNarrationResult?> GetChannelNarrationAsync(
         ChannelNarrationInput channel,
-        IOpenAiClient openAiClient,
+        IBriefingAi briefingAi,
         ILogger logger,
         CancellationToken cancellationToken)
     {
@@ -326,7 +327,7 @@ public static class DailyBriefingEndpoints
         {
             var prompt = BuildChannelNarrationPrompt(channel);
 
-            var responseJson = await openAiClient.GetCompletionAsync(
+            var responseJson = await briefingAi.GenerateNarrativeAsync(
                 prompt,
                 maxOutputTokens: 300,
                 cancellationToken: cancellationToken);
