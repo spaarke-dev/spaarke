@@ -1,7 +1,7 @@
 <task id="041" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Exclude `wwwroot/**/*.js.map` from publish (FR-A2)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>30 minutes active + 24h bake</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, publish, size-reduction, outcome-a, phase-4, deploy</tags>

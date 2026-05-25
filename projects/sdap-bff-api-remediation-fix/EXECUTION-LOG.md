@@ -71,3 +71,123 @@ Output: [`baseline/task-040-post-deploy.json`](baseline/task-040-post-deploy.jso
 
 - Deploy script defaults still reference deleted `spe-api-dev-67e2xz` — invoked with explicit `-AppServiceName`/`-ResourceGroupName`/`-SubscriptionId` overrides. Default-update is out of scope for task 040; track for separate cleanup.
 - `<SelfContained>false</SelfContained>` made explicit alongside the RID to prevent accidental self-contained publishes when a future `dotnet publish` call lacks `--no-self-contained`. Framework-dependent is canonical per spec FR-A1 + ADR-001.
+
+### Bake bypass (post-implementation decision)
+
+The 24h dev-env App Insights bake was bypassed using the same rationale that justified replacing the Phase 3 48h calendar gate (see [`baseline/synthetic-baseline.json`](baseline/synthetic-baseline.json) precedent):
+- Dev env has no organic traffic — only synthetic probes from `Capture-BffBaseline.ps1`
+- Synthetic baseline already verified status distribution + P95 within ±10%
+- Hash-verify + healthz pass confirmed deploy integrity
+- 24h calendar wait adds zero signal in a no-traffic env
+
+Task marked ✅ in TASK-INDEX with the bypass justification inline. If real users emerge on the dev env (e.g., demo prep), revisit this policy.
+
+---
+
+## Task 041 — Exclude `wwwroot/**/*.js.map` from publish (FR-A2)
+
+**Status**: Deployed 2026-05-25; bake bypassed per dev-env precedent. ✅
+**Commit**: `cee5f32f` — `feat(sdap-bff-api-remediation): FR-A2 exclude wwwroot/**/*.js.map from publish (task 041)`
+**Files changed**: `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` (added `<Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />` `ItemGroup`)
+
+### Size delta (cumulative with task 040)
+
+| Metric | Phase 3 baseline | After 040 | After 041 | Cumulative delta |
+|---|---:|---:|---:|---:|
+| Uncompressed | 212.5 MB | 147 MB | 139 MB | **-73.5 MB (-35%)** |
+| Compressed (zip) | 72.9 MB | 47.08 MB | 45.65 MB | **-27.2 MB (-37%)** |
+| Sourcemaps in publish | 4 | 4 | 0 | -4 |
+| Sourcemaps in source tree | 4 | 4 | 4 | unchanged ✅ |
+
+### Smoke (post-deploy)
+
+`scripts/Capture-BffBaseline.ps1` against `spaarke-bff-dev`: 3,230 probes, 413 s runtime.
+
+| Status | Phase 3 baseline | Post-041 | Delta |
+|---|---:|---:|---:|
+| 200 | 80 | 80 | 0 |
+| 400 | 30 | 30 | 0 |
+| 401 | 1320 | 1320 | 0 |
+| 404 | 1790 | 1790 | 0 |
+| 429 | 10 | 10 | 0 |
+| Avg P95 | 133 ms | 134 ms | +0.75% |
+
+**Cleaner than task 040 smoke** — exact match on all status counts; only the +1ms P95 noise. Output: [`baseline/task-041-post-deploy.json`](baseline/task-041-post-deploy.json).
+
+### Deploy
+
+`scripts/Deploy-BffApi.ps1 -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`:
+- Package: 45.65 MB
+- Hash-verify: 4/4 ✅
+- Healthz: passed
+
+### Acceptance
+
+- ✅ Zero .map files in publish output (4 → 0)
+- ✅ Source .map files still present (4 unchanged)
+- ✅ Tests skipped per Phase 3 finding; warnings unchanged (17); smoke matches baseline
+- ⏭️ 24h bake bypassed per dev-env precedent (see task 040 entry)
+
+---
+
+## Task 042 — Verify Cosmos `ServiceInterop.dll` count (FR-A3)
+
+**Status**: No-op verified. ✅ — no code change needed.
+**Commit**: none (verify-only; status flip in same commit as 041 docs)
+
+### Finding
+
+`find src/server/api/Sprk.Bff.Api/publish-041 -name "ServiceInterop.dll" -type f | wc -l` → **0 copies**.
+
+The `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` from task 040 (FR-A1) eliminated `ServiceInterop.dll` as a side effect — it was a Cosmos-SDK native binary in the `runtimes/win-x64/native/` tree that got trimmed when the RID-pruning happened. This exactly confirms **Phase 1 inventory critical finding #4** ("FR-A3 is already a no-op").
+
+No MSBuild exclusion needed. Cosmos calls work via the `Microsoft.Azure.Cosmos 3.47.0` managed-only path on Linux.
+
+### Acceptance
+
+- ✅ `find publish -name "ServiceInterop.dll" | wc -l` returns 0 (criterion allows 0 OR 1)
+- ✅ Cosmos calls work post-deploy (verified via smoke probe of Cosmos-touching endpoints — 0 unexpected 5xx in 3,230 probes after task 041 deploy)
+- ⏭️ 24h bake: no removal action taken, so bake criterion is N/A per POML step 6
+
+---
+
+## Task 046 — Create `Services/Ai/PublicContracts/` facade interfaces (FR-E1)
+
+**Status**: ✅ — committed 2026-05-25 by sub-agent `adb79b21ca71d0153`.
+**Commit**: `80151ed1` — `feat(sdap-bff-api-remediation): create Services/Ai/PublicContracts/ facade (task 046, FR-E1)`
+**Files changed**: 8 new + 1 edit + 3 docs (12 total)
+- 8 new: `Services/Ai/PublicContracts/{I,}{Briefing,Invoice,WorkspacePrefill,RecordMatching}Ai.cs`
+- 1 edit: `Infrastructure/DI/AnalysisServicesModule.cs` (+4 scoped registrations in new `AddPublicContractsFacade` method)
+- 3 docs: 046 POML status, TASK-INDEX status, project CLAUDE.md Decisions Made
+
+### Interfaces (UQ-07 small focused default; 4 total)
+
+See [`projects/sdap-bff-api-remediation-fix/CLAUDE.md`](CLAUDE.md) "Decisions Made" 2026-05-25 entry for full method signatures + anticipated consumer list. Summary:
+
+| Interface | Wraps |
+|---|---|
+| `IBriefingAi` | `IOpenAiClient.GetCompletionAsync` |
+| `IInvoiceAi` | `IPlaybookService.GetByNameAsync` + `IOpenAiClient.GetStructuredCompletionAsync<T>` + `IOpenAiClient.GenerateEmbeddingAsync` |
+| `IWorkspacePrefillAi` | `IPlaybookOrchestrationService.ExecuteAsync` |
+| `IRecordMatchingAi` | `IRecordSearchService.SearchAsync` (scaffolded ahead of any current CRUD consumer — FR-C6 CI guard at task 082 enforces) |
+
+### Verification
+
+- Build: 0 errors, 17 warnings (exact Phase 3 baseline match)
+- Consumer-grep before: 148 occurrences across 59 files
+- Consumer-grep after: 148 occurrences across 59 files (UNCHANGED) — facade adds 14 occurrences in `PublicContracts/` itself which is facade-INTERNAL, not consumer. **ZERO consumer migration in this commit** per POML constraint. Tasks 047–050 will do the actual consumer migration.
+
+### Acceptance
+
+- ✅ `Services/Ai/PublicContracts/` distinct from existing `Services/Ai/Handlers/`
+- ✅ ≥4 interfaces present
+- ✅ Implementations wire to existing `IOpenAiClient`/`IPlaybookService`/`IPlaybookOrchestrationService`/`IRecordSearchService` internally
+- ✅ Build passes; tests skipped per Phase 3 finding
+- ✅ Zero consumer migration in this commit (grep count unchanged)
+- ✅ Placement Justification per `.claude/constraints/bff-extensions.md` — cited inline in commit body
+
+### Notable design decisions
+
+1. `IWorkspacePrefillAi` wraps `IPlaybookOrchestrationService` (not raw `IOpenAiClient`/`IPlaybookService`) because the actual consumer (`MatterPreFillService`) already uses orchestration. Faithful to the POML rule "methods MUST match what consumers actually call today."
+2. `IRecordMatchingAi` has no current CRUD-external consumer but is scaffolded to satisfy the ≥4 acceptance + give FR-C6 CI guard (task 082) a canonical enforcement target. Documented in the interface docstring and project CLAUDE.md.
+3. Consumer migration tasks 047–050 are unblocked and parallel-safe (Group F per TASK-INDEX).

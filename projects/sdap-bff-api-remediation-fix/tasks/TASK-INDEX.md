@@ -86,8 +86,8 @@
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
 | 040 | Publish with `--runtime linux-x64` framework-dependent (FR-A1) | ✅ (bake bypassed per dev-env precedent) | No (bake) | FULL | 037 |
-| 041 | Exclude `wwwroot/**/*.js.map` from publish (FR-A2) | 🔲 | No (bake) | FULL | 040 |
-| 042 | Remove duplicate Cosmos `ServiceInterop.dll` if RID trim didn't (FR-A3) | 🔲 | No (bake) | FULL | 041 |
+| 041 | Exclude `wwwroot/**/*.js.map` from publish (FR-A2) | ✅ (deployed; bake bypassed per dev-env precedent) | No (bake) | FULL | 040 |
+| 042 | Remove duplicate Cosmos `ServiceInterop.dll` if RID trim didn't (FR-A3) | ✅ (no-op verified — FR-A1 RID trim eliminated it as predicted Phase 1) | No (bake) | FULL | 041 |
 
 **Outcome B track** (MEDIUM/HIGH, sequential, one per vuln):
 

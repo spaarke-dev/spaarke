@@ -1,7 +1,7 @@
 <task id="042" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Remove duplicate Cosmos `ServiceInterop.dll` if FR-A1 didn't (FR-A3)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour active + 24h bake</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, publish, size-reduction, outcome-a, phase-4, deploy</tags>
