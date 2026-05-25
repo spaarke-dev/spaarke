@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
 using Azure.Identity;
+using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -35,10 +36,9 @@ public abstract class DataverseHttpServiceBase
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        // Local dev: AzureCliCredential leg of the chain picks up `az login`.
-        // Production: App Service managed identity is used; requires MI to be configured as Dataverse Application User.
-        _credential = new DefaultAzureCredential();
+        // AUTHV2-042 + BFF-FIX-2026-05-24: managed identity credential pinned to UAMI clientId
+        // when configured. See ManagedIdentityCredentialFactory for the canonical pattern.
+        _credential = ManagedIdentityCredentialFactory.Create(configuration);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

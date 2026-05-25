@@ -47,6 +47,7 @@
 | 017 | App Service runtime + deploy SHAs + zip metrics | ✅ | Yes (Group C) | STANDARD | 008 |
 | 018 | CI workflow inventory + G-3 version sanity + commit INVENTORY.md | ✅ | No | STANDARD | 010–017 |
 | 019 | Migrate dev BFF from Windows to Linux App Service (pre-Phase-2 infra; resolves Finding 1) | ✅ | No | STANDARD | 018 |
+| 023 | Multi-identity credential refactor — DI-singleton TokenCredential (auth-r2 follow-on bug; Phase 2.5 discovery) | 🔄 | No | FULL | 022 |
 
 ---
 
