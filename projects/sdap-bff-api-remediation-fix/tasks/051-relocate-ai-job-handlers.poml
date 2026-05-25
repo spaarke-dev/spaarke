@@ -1,7 +1,7 @@
 <task id="051" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Relocate AI-coupled job handlers to `Services/Ai/Jobs/` (FR-E3 — inventory-derived list)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, ai-boundary, jobs, outcome-e, phase-4</tags>

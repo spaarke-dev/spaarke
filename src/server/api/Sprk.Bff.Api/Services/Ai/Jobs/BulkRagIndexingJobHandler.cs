@@ -6,7 +6,9 @@ using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
 
-namespace Sprk.Bff.Api.Services.Jobs.Handlers;
+using Sprk.Bff.Api.Services.Jobs;
+
+namespace Sprk.Bff.Api.Services.Ai.Jobs;
 
 /// <summary>
 /// Job handler for bulk RAG document indexing.

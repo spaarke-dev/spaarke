@@ -5,7 +5,9 @@ using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 
-namespace Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs;
+
+namespace Sprk.Bff.Api.Services.Ai.Jobs;
 
 /// <summary>
 /// Configuration options for the embedding migration service.

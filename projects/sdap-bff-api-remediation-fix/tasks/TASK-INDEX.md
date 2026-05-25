@@ -106,7 +106,7 @@
 | 048 | Migrate Workspace consumers (Group F) | ✅ | Yes (Group F) | FULL | 046 |
 | 049 | Migrate Jobs consumers (Group F) | ✅ | Yes (Group F) | FULL | 046 |
 | 050 | Migrate Dataverse + Filters + Endpoints consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |
-| 051 | Relocate 6 AI-coupled job handlers to `Services/Ai/Jobs/` (FR-E3) | 🔲 | No | FULL | 047, 048, 049, 050 |
+| 051 | Relocate AI-coupled job handlers to `Services/Ai/Jobs/` (FR-E3; post-G1 reality: 4 handlers + EmbeddingMigrationService = 5 files) | ✅ | No | FULL | 047, 048, 049, 050 |
 
 **Verification**:
 

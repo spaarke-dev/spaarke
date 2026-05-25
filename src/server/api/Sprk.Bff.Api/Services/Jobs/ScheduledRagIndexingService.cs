@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 

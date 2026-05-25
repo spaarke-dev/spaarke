@@ -6,7 +6,9 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
 
-namespace Sprk.Bff.Api.Services.Jobs.Handlers;
+using Sprk.Bff.Api.Services.Jobs;
+
+namespace Sprk.Bff.Api.Services.Ai.Jobs;
 
 /// <summary>
 /// Job handler for profile summary extraction from documents.

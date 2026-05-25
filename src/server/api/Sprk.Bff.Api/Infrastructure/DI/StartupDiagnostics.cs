@@ -40,7 +40,7 @@ public static class StartupDiagnostics
         // Test AppOnlyDocumentAnalysisJobHandler
         try
         {
-            var handler = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
+            var handler = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler>();
             startupLogger.LogInformation("  \u2705 AppOnlyDocumentAnalysisJobHandler: {Status}", handler != null ? "Available" : "NULL");
         }
         catch (Exception ex)
