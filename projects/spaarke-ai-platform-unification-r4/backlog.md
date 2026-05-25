@@ -1,13 +1,93 @@
 # Spaarke AI Platform Unification R4 — Consolidated Backlog
 
-> **Status**: Pre-spec scoping. Items below are flagged in the R3 project notes / docs / audits but not yet decided for R4 scope. The intent of this document is to review, decide IN / OUT / DEFER for each item, then formalize the IN items into `spec.md`.
+> **Status**: **Scoping decisions made 2026-05-25.** See "R4 Scoping Decisions" section below for the formal IN / DEFER list. The full analysis (Categories A-F + Decision Matrix) is preserved below for reference, but `plan.md` is now the authoritative project plan.
 >
 > **Date created**: 2026-05-24
-> **Compiled from**: R3 design.md, r8-plan.md, backwards-compat-verification.md, bundle-size-verification.md, 067-shared-lib-hoist-summary.md, spike 001 memo, deploys/2026-05-20-deploy.md (multiple sections), SPAARKEAI-COMPONENTIZATION-AUDIT.md.
->
+> **Date decisions finalized**: 2026-05-25
 > **R3 final commit**: `59c1ac3f` (R3 branch) / `3813af32` (master) — task 140 (Fluent Dropdown min-width fix).
->
-> **Self-contained**: Every item below includes the source quote, the technical detail, why it matters, recommended remediation, and rough effort estimate. No cross-references required for first-pass review.
+
+---
+
+## R4 Scoping Decisions (2026-05-25)
+
+After review, the operator made the following IN / DEFER decisions plus added a new **Group W** (Workspace + Dashboard architecture) capturing the conversation work on the SpaarkeAi widget framework and LegalWorkspace-as-dashboard-engine framing.
+
+### Status legend
+- **IN**: Confirmed for R4 scope.
+- **DEFER**: Not in R4; tracked but no near-term work planned. May convert to a separate project or wait for forcing function.
+- **MODIFIED**: Item taken into scope with a change to original scope/effort.
+
+### Decisions table
+
+| ID | Item | Decision | Notes |
+|---|---|---|---|
+| **A-1** | Stages 2-4 (active chat / review / complete) header treatment | DEFER | Moment 2 scope |
+| **A-2** | ADR-025 (PaneEventBus) + ADR-026 (stage lifecycle) | **IN** | ~6h doc |
+| **A-3** | AI-vs-User visual + AIReasoningSurface convention | DEFER | Major strategy work; out of R4 scope |
+| **A-4** | File-attachment policy (FR-07) | **IN — MODIFIED** | **Operator: actual code change (not just doc); raise cap to 25 MB.** ~6h (code + policy doc) |
+| **A-5** | Persistence of non-Home tabs across session restore | **IN — MODIFIED** | **Operator: verify first — user feedback says tabs ARE persisting; the operator-visible issue is that browser reopen lands on last tab rather than home/default. Separate from original UQ-03 finding.** Verify-then-fix: ~2h verify + ~4-8h fix depending on what's actually broken |
+| **B-1** | `.gitignore` for tracked build artifacts | **IN** | ~1h |
+| **B-2** | `@spaarke/ai-widgets` tsc cross-rootDir build error | **IN** | ~3h |
+| **B-3** | Telemetry constant rename | **IN** | ~2h |
+| **B-4** | `WorkspaceLayoutDto.modifiedOn` missing | **IN** | ~2h |
+| **B-5** | BFF PUT → PATCH with ETag | **IN** | ~4-6h |
+| **B-6** | `CalendarSidePane` divergent `CalendarSection` | **IN** | ~4h |
+| **B-7** | `useEventsBulkActions` hook extraction | **IN** | ~3h |
+| **B-8** | `CalendarDrawer.eventDates` API drift | **IN** | ~3h |
+| **B-9** | `Spaarke.UI.Components` ESLint v9 migration | **IN** | ~2h |
+| **B-10** | Standalone EventsPage redeploy | **IN** | ~30min |
+| **B-11** | Type-drift casts cleanup | **IN** | ~4h |
+| **C-1** | Xrm.WebApi vs BFF decision criteria doc | **IN** | ~2h |
+| **C-2** | Embedded-mode contract doc | **IN** | ~3h |
+| **C-3** | Consolidate dual `useWorkspaceLayouts` hooks | **IN** | ~8h |
+| **C-4** | `WorkspaceLayoutWidget` hard-wired to LegalWorkspaceApp (introduce `WorkspaceRenderer` interface) | **IN** | ~4h |
+| **C-5** | Hoist remaining 5 section factories | DEFER (or RETIRE) | Forcing function absent; Calendar precedent gives forward path. R3 conversation concluded this is non-blocking. |
+| **C-6** | Hoist `runtimeConfig` to `@spaarke/auth` | DEFER | Works today; cleaner later |
+| **C-7** | Section registry plug-in style | DEFER | No 3rd-party section requirement |
+| **D-1** = A-5 | SessionPersistence tab state | (see A-5) | Combined into A-5 work |
+| **D-2** | Bundle-size Option 2 (separate web resources) | **IN — ADR ONLY** | **Operator: ADR amendment only; no implementation in R4.** ~4h doc |
+| **D-3** | Bundle-analyzer verification deferred | DEFER | Only matters with D-2 implementation |
+| **E-1** | R3 project wrap-up (task 090) | **IN** | ~2h — first item in R4 |
+| **F-1** | BFF placement-justification audit of R3 (retroactive) | **IN — LIGHT** | **Operator: light notation only.** ~1-2h memo |
+| **F-2** | `Services/Ai/PublicContracts/` facade audit | **IN** | ~2h audit |
+| **F-3** | Publish-size baseline + per-task verification rule | **IN** | ~1h |
+
+### NEW: Group W — Workspace + Dashboard architecture
+
+Added during 2026-05-25 review based on the conversation that established the two-wrapper mental model (Dashboard wrapper via `LegalWorkspaceApp` + Direct widget wrapper via `WorkspaceWidgetRegistry`) and uncovered the wizard catalog bug.
+
+| ID | Item | Effort | Why |
+|---|---|---|---|
+| **W-1** | **Write `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`** — new authoritative architecture doc framing surfaces (Assistant/Workspace/Context), the two-wrapper model (Dashboard wrapper + Direct widget wrapper), mount sources (user picker / Assistant / Context), dual-use pattern (Calendar / Daily Briefing), LegalWorkspace as dashboard engine | ~6h | The model exists in the code but is not written down anywhere. Future authors need this. |
+| **W-2** | **Rewrite `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`** — replace single-path guide with decision tree: composable section (Pattern D) vs sophisticated single-purpose widget (direct) vs dual-use (both). Include corrected "widget" terminology distinguishing tab-content widgets vs modal-launcher dispatchers vs Context pane widgets. | ~3h | Existing guide pre-dates the conversation's terminology refinement |
+| **W-3** | **Fix WorkspaceLayoutWizard catalog drift** — replace hardcoded `SECTION_CATALOG` (5 entries) in `WorkspaceLayoutWizard/src/App.tsx` with read from `SECTION_REGISTRY` (7 entries today, growable). Calendar and Daily Briefing become pickable in the dashboard builder. Future sections auto-appear. | ~3h | **Real bug.** Discovered during R4 scoping. The TODO comment in the code says "In a production build this would be fetched from GET /api/workspace/sections" — it was never wired up. |
+| **W-4** | **Wire Assistant → Workspace mount source** — first end-to-end demo of `PaneEventBus.workspace.widget_load` dispatched FROM the Assistant pane. Example: user uploads PDF in chat → DocumentViewer widget appears as a workspace tab. Proves the surface model works beyond user picker. | ~8h | The bus mechanism exists; no Assistant-side caller dispatches today |
+| **W-5** | **Wire Context → Workspace mount source (one wizard)** — pick one wizard (e.g., Create Project) → add "Add result to Workspace" final step → mounts result widget as workspace tab. Establishes the pattern; future wizards follow. | ~6h | Same — bus exists, no Context-side caller dispatches today |
+| **W-6** | **Document LegalWorkspace code page retirement** — record the decision to stop deploying `sprk_corporateworkspace` (the standalone LegalWorkspace web resource). LegalWorkspace continues as a library consumed via embed in SpaarkeAi only. Update deploy scripts. | ~2h | Operator stated 2026-05-25: "the existing legal workspace code page is likely to not be used anymore (replaced by the new sprk ai UI/UX); the components are still useful but we won't deploy the code page UI" |
+
+**Group W total**: ~28h
+
+### Backlog totals
+
+| Tier | Items | Estimated effort |
+|---|---|---|
+| IN items (decided 2026-05-25) | 28 items | ~88h |
+| Group W (new architecture work) | 6 items | ~28h |
+| **Combined R4 scope** | **34 items** | **~116h (~14-15 working days)** |
+| DEFERRED items | 8 items | n/a (not in R4) |
+
+### Phase strategy (high level — full detail in plan.md)
+
+1. **Phase 0 — R3 wrap-up + retroactive memo** (~4h): E-1, F-1
+2. **Phase 1 — Documentation round** (~21h): W-1, W-2, A-2, C-1, C-2, D-2 ADR, F-3
+3. **Phase 2 — BFF governance audit** (~2h): F-2
+4. **Phase 3 — Critical verification + fix** (~10h): A-5 (verify-then-fix tab persistence)
+5. **Phase 4 — Workspace builder fix + mount-source wiring** (~17h): W-3, W-4, W-5, W-6
+6. **Phase 5 — Substantive code changes** (~27h): A-4, C-3, C-4, B-4, B-5, B-6
+7. **Phase 6 — Build hygiene cluster** (~21h): B-1, B-2, B-3, B-7, B-8, B-9, B-10, B-11
+8. **Phase 7 — R4 wrap-up** (~2h): lessons-learned, README → Complete, /repo-cleanup
+
+See `plan.md` for full phase breakdown, dependencies, acceptance criteria, and risk register.
 
 ---
 
