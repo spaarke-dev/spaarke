@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040 — Publish with `--runtime linux-x64` framework-dependent (FR-A1)** — STARTED but paused for context handoff. POML loaded. No file edits made yet. |
-| **Step** | Step 0 complete (rigor declared FULL; POML loaded). Ready to begin Step 1 (decide csproj `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` vs `Deploy-BffApi.ps1` flag). POML reading shows csproj-preferred per `.claude/constraints/azure-deployment.md`. |
-| **Status** | Phase 4 task 040 IN-PROGRESS (paused at step 0/11). G4 RESOLVED via Insights Engine SPEC.md formalization. Email-send 403 remains task 025 (independent followup). |
-| **Next Action** | **POST-COMPACT**: resume task 040 by running `/task-execute projects/sdap-bff-api-remediation-fix/tasks/040-publish-linux-x64.poml`. Step 1 = decide csproj `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` vs `Deploy-BffApi.ps1` `--runtime linux-x64` flag (csproj preferred). Then steps 2–11 per POML (build, test, publish, inspect runtimes/, deploy to dev, smoke test, log size delta to `EXECUTION-LOG.md`, 24h bake). Expected save: ~25–30 MB uncompressed, ~10 MB compressed. **No file edits started this session — clean handoff.** Task 025 (email-send 403) and Office Add-ins / CopilotAgent rebuilds remain as deferred followups. |
+| **Task** | **040 — Publish with `--runtime linux-x64` (FR-A1)** — DEPLOYED 2026-05-25; in 24h bake window (closes 2026-05-26 UTC). |
+| **Step** | Steps 1–8 + 10 COMPLETE. Step 9 (24h bake) IN FLIGHT — operator-bound; not blocking start of next task. |
+| **Status** | Task 040 ✅ deployed; bake window monitoring deferred to operator. Phase 4 Outcome A SAFE candidates: task 040 done (this) → task 041 (sourcemap exclusion) → task 042 (Cosmos ServiceInterop, already no-op per Phase 1 finding). Outcome E facade track (046–054) independent — can start in parallel. |
+| **Next Action** | Operator: monitor App Insights for 24h (no new exception types, error rate within 10% baseline, P95 within 10%). Next AI work: `/task-execute projects/sdap-bff-api-remediation-fix/tasks/041-exclude-wwwroot-sourcemaps.poml` (independent of 040 bake — can start now since it touches different files). Then 046 (facade interfaces). |
 
 ### Files Modified This Session
 

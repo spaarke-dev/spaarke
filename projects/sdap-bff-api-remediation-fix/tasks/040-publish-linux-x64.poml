@@ -1,7 +1,7 @@
 <task id="040" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Publish with `--runtime linux-x64` framework-dependent (FR-A1)</title>
-    <status>not-started</status>
+    <status>in-progress-bake</status>
     <estimated-effort>1 hour active + 24h bake</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, publish, size-reduction, outcome-a, phase-4, deploy</tags>

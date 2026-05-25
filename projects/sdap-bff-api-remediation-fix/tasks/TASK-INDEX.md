@@ -85,7 +85,7 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 040 | Publish with `--runtime linux-x64` framework-dependent (FR-A1) | 🔲 | No (bake) | FULL | 037 |
+| 040 | Publish with `--runtime linux-x64` framework-dependent (FR-A1) | 🔄 (24h bake) | No (bake) | FULL | 037 |
 | 041 | Exclude `wwwroot/**/*.js.map` from publish (FR-A2) | 🔲 | No (bake) | FULL | 040 |
 | 042 | Remove duplicate Cosmos `ServiceInterop.dll` if RID trim didn't (FR-A3) | 🔲 | No (bake) | FULL | 041 |
 
