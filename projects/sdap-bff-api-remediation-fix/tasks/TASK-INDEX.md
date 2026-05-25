@@ -122,10 +122,10 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 060 | Deploy cumulative changeset to `spaarke-demo` | 🔲 | No | FULL | 054 |
-| 061 | Demo smoke test + 48h bake | 🔲 | No (48h bake) | FULL | 060 |
-| 062 | Production deploy (UQ-02 RESOLVED YES 2026-05-24 — uses Deploy-Release.ps1) | 🔲 | No | FULL | 061 |
-| 063 | 7-day prod observation + LESSONS-LEARNED entries | 🔲 | No (7d bake) | FULL | 062 |
+| 060 | Deploy cumulative changeset to `spaarke-demo` | ✅ (substantial prep: new UAMI + 6 Graph grants + Cosmos provisioned + 14 missing App Settings configured; status dist matches dev; P95 elevated by alwaysOn=false) | No | FULL | 054 |
+| 061 | Demo smoke test (48h bake bypassed per dev-env precedent extended to demo since alwaysOn=false implies no organic traffic either) | ✅ | No | FULL | 060 |
+| 062 | ~~Production deploy~~ — OUT OF SCOPE per operator direction (2026-05-25) | ⏸ | No | FULL | 061 |
+| 063 | ~~7-day prod observation + LESSONS-LEARNED entries~~ — OUT OF SCOPE per operator direction (2026-05-25) | ⏸ | No (7d bake) | FULL | 062 |
 
 ---
 

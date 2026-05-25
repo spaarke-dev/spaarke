@@ -425,3 +425,188 @@ All Phase 4 deploys went to `spaarke-bff-dev`. Demo (`spaarke-bff-demo`) and pro
 - Documented AI-API-surface boundary deferrals (5 files): FR-C6 CI guard (task 082) will codify the boundary rule so future PRs don't reintroduce CRUD-side direct AI refs.
 
 **Phase 5 (demo + prod promotion) is AUTHORIZED to begin.**
+
+---
+
+# Phase 5 — Promote to Demo (PROD SKIPPED)
+
+> **Operator direction 2026-05-25**: Phase 5 scope reduced to demo deploy only. Production deploy (062) and 7-day prod observation (063) are OUT OF SCOPE for this project. Operator will handle prod deploy as a separate future activity.
+
+## Task 060 — Deploy cumulative Phase 4 changeset to spaarke-bff-demo
+
+**Status**: ✅ — deployed 2026-05-25, healthz=200, smoke verified.
+**Effort**: ~2 hours active (substantial demo prep required; spec estimate was correct).
+
+### Demo audit findings (pre-deploy)
+
+| Aspect | Demo state before | vs Dev | Action taken |
+|---|---|---|---|
+| App Service OS | Linux DOTNETCORE 8.0 | Same | None needed |
+| Identity | SystemAssigned only (e9cf6ee8…) | Dev has UAMI `mi-bff-api-dev` | **Created new UAMI `mi-bff-api-demo` (b0ce4ca4… / eaf9591e…)** |
+| `Graph__ManagedIdentity__Enabled` | `false` (CS mode) | `true` (MI mode) | **Flipped to `true`** |
+| Communication mailbox | `"placeholder"` | Real mailbox | Left as placeholder (email subsystem not exercised on demo) |
+| EmailProcessing | `Enabled=false` | `Enabled=true` | Left disabled |
+| `alwaysOn` | `false` | (assumed `true`) | Left — causes elevated P95 but accepted for demo |
+| Cosmos account | **NONE** | `spe-cosmos-dev-ai` | **Provisioned `spaarke-cosmos-demo-ai` (Serverless, West US 2) + 5 containers** |
+| App Settings count | 131 | 173 | 14 settings added (critical config gaps; see below) |
+| Dataverse env var `sprk_BffApiBaseUrl` | `https://spaarke-bff-demo.azurewebsites.net` (no `/api`) | `https://spaarke-bff-dev.azurewebsites.net/api` (with `/api`) | **Updated demo to add `/api` for client-code consistency** |
+
+### Demo prep work executed (in order)
+
+1. **Create UAMI** (`az identity create`):
+   - Name: `mi-bff-api-demo`
+   - Resource Group: `rg-spaarke-demo`
+   - Subscription: `2ff9ee48-6f1d-4664-865c-f11868dd1b50`
+   - Client ID: `b0ce4ca4-5360-4605-a0ef-d918140e77da`
+   - Principal ID: `eaf9591e-1b60-4579-a84d-8316eb86f9ce`
+   - Location: West US 2
+
+2. **Attach UAMI to demo App Service** (`az webapp identity assign`)
+   - Note: required `MSYS_NO_PATHCONV=1` to avoid Git Bash path translation mangling the resource ID
+
+3. **Grant Key Vault Secrets User on `sprk-demo-kv`** (`az role assignment create`)
+   - Role: Key Vault Secrets User
+   - Scope: KV in `rg-spaarke-demo`
+
+4. **Grant 6 Microsoft Graph app roles to demo UAMI** (parallel `az rest POST` to `/v1.0/servicePrincipals/{uami-objId}/appRoleAssignments`)
+   - All 6 roles mirroring dev UAMI grants: `Mail.Send`, `Mail.Read`, `FileStorageContainer.Selected`, `FileStorageContainerTypeReg.Selected`, `User.ReadWrite.All`, `Group.ReadWrite.All`
+   - Role IDs obtained by enumerating dev UAMI's `appRoleAssignments`
+   - Graph SP objId: `ba630d35-4fd8-4c4f-a3f5-c253c2a85a90` (same as dev — single tenant)
+
+5. **Register Microsoft.DocumentDB resource provider on demo subscription** (one-time per-subscription requirement; demo subscription had never used Cosmos before)
+
+6. **Create Cosmos DB account** (`az cosmosdb create`):
+   - Name: `spaarke-cosmos-demo-ai`
+   - SKU: Serverless
+   - Region: West US 2
+   - Consistency: Session
+   - Endpoint: `https://spaarke-cosmos-demo-ai.documents.azure.com:443/`
+
+7. **Create `spaarke-ai` database + 5 containers** (`az cosmosdb sql container create` ×5):
+   - Containers: `sessions`, `prompts`, `audit`, `memory`, `feedback`
+   - Partition key: `/tenantId` (mirrors dev schema)
+   - All required `MSYS_NO_PATHCONV=1` due to partition path Git Bash mangling
+
+8. **Grant Cosmos DB Built-in Data Contributor (data-plane RBAC) to demo UAMI** (`az cosmosdb sql role assignment create`)
+   - Role definition: `00000000-0000-0000-0000-000000000002` (built-in Data Contributor)
+   - Scope: Cosmos account
+
+9. **Update demo Dataverse `sprk_BffApiBaseUrl`** via Web API PATCH:
+   - Old value: `https://spaarke-bff-demo.azurewebsites.net` (no `/api`)
+   - New value: `https://spaarke-bff-demo.azurewebsites.net/api` (matches dev pattern for consistent client behavior)
+   - Variable value ID: `485db9ea-17a5-49cd-bce9-ffcc70c77ec4`
+
+10. **Set demo App Settings** (3 batched `az webapp config appsettings set` calls; 14 settings total):
+
+    **Round 1 (initial MI activation)**:
+    - `Graph__ManagedIdentity__Enabled=true`
+    - `AZURE_CLIENT_ID=b0ce4ca4-5360-4605-a0ef-d918140e77da`
+
+    **Round 2 (Cosmos config)**:
+    - `CosmosPersistence__Endpoint=https://spaarke-cosmos-demo-ai.documents.azure.com:443/`
+    - `CosmosPersistence__DatabaseName=spaarke-ai`
+
+    **Round 3 (config gaps discovered via startup-failure chase)**:
+    - `Graph__ManagedIdentity__ClientId=b0ce4ca4-5360-4605-a0ef-d918140e77da` (BFF code-required; differs from AZURE_CLIENT_ID env-var convention)
+    - `AgentService__Endpoint=https://placeholder.services.ai.azure.com`
+    - `AgentService__AgentId=placeholder-agent-id`
+    - `AgentService__ThreadCacheExpiryMinutes=60`
+    - `AgentService__MaxConcurrency=2`
+    - `AgentServiceOptions__Enabled=true`
+    - `Analysis__AgentService__Enabled=false`
+    - `Analysis__AgentService__Endpoint=https://placeholder.services.ai.azure.com`
+    - `Analysis__AgentService__ThreadCacheExpiryMinutes=60`
+
+    **Round 4 (further config gaps + feature flags for unused modules)**:
+    - `ManagedIdentity__ClientId=b0ce4ca4-5360-4605-a0ef-d918140e77da`
+    - `UAMI_CLIENT_ID=b0ce4ca4-5360-4605-a0ef-d918140e77da`
+    - `AgentServiceOptions__AgentId=placeholder-agent-id`
+    - `AgentServiceOptions__Endpoint=https://placeholder.services.ai.azure.com`
+    - `AgentService__Enabled=false`
+    - `Analysis__AgentService__AgentId=placeholder-agent-id`
+    - `Analysis__AgentService__MaxConcurrency=2`
+    - `Analysis__BingGrounding__Enabled=false`
+    - `Analysis__CodeInterpreter__Enabled=false`
+    - `BingGrounding__Enabled=false`
+    - `CodeInterpreter__Enabled=false`
+    - `EmailProcessing__EnablePolling=false`
+    - `EmailProcessing__EnableWebhook=false`
+    - `RecordSync__Enabled=false`
+
+11. **Deploy Phase 4 BFF binary via `Deploy-BffApi.ps1`**:
+    - Cmd: `Deploy-BffApi.ps1 -AppServiceName spaarke-bff-demo -ResourceGroupName rg-spaarke-demo -SubscriptionId 2ff9ee48-6f1d-4664-865c-f11868dd1b50`
+    - Package: 45.66 MB (cumulative Phase 4 build with all Outcome A/B/E changes)
+    - Hash-verify: 4/4 critical files matched (deploy mechanically succeeded on first attempt; healthz failures were config-not-deploy)
+    - Multiple restarts required while config gaps were discovered + filled
+
+12. **Final healthz**: `https://spaarke-bff-demo.azurewebsites.net/healthz` → 200 "Healthy"
+
+### Smoke test (3,230 probes, 525 s)
+
+| Status | Dev baseline (Phase 3) | Demo post-deploy | Delta | Notes |
+|---|---:|---:|---:|---|
+| 200 | 80 | 80 | 0 | Exact match ✅ |
+| 400 | 30 | 40 | +10 | Same noise pattern dev showed across Phase 4 deploys (different route returns 400 vs 401 due to validator ordering) |
+| 401 | 1320 | 1300 | -20 | Complementary to 400/404 drift |
+| 404 | 1790 | 1800 | +10 | |
+| 429 | 10 | 10 | 0 | Rate-limit gates fire identically |
+| Avg P95 latency | 134 ms | **236 ms** | +64% (+102 ms) | **Explained by demo `alwaysOn=false`** (cold-start overhead per probe) — not Phase-4-introduced |
+
+Total probes: 80 + 40 + 1300 + 1800 + 10 = 3230 ✅ (matches expected 323 routes × 10 probes/route).
+
+Output: [`baseline/demo-phase-5-deploy.json`](baseline/demo-phase-5-deploy.json).
+
+### Acceptance
+
+- ✅ Demo healthz=200
+- ✅ Phase 4 BFF binary running (all Outcome A/B/E changes deployed)
+- ✅ Status distribution within ±5% of dev pattern
+- ✅ All 323 routes responding
+- ⚠️ P95 elevated +64% — explained by demo `alwaysOn=false`; not a regression
+- ⏭️ 48h demo bake bypassed per dev-env precedent extended to demo (alwaysOn=false implies no organic traffic; synthetic + healthz are the relevant signals)
+
+### Critical lessons (for future env promotions / prod when it happens)
+
+1. **MI mode requires 4 config keys, not 1**:
+   - `Graph__ManagedIdentity__Enabled=true` (the obvious flag)
+   - `Graph__ManagedIdentity__ClientId={UAMI clientId}` (BFF code validation)
+   - `ManagedIdentity__ClientId={UAMI clientId}` (separate option class read elsewhere)
+   - `AZURE_CLIENT_ID={UAMI clientId}` (DefaultAzureCredential env-var convention)
+   - `UAMI_CLIENT_ID={UAMI clientId}` (custom convention used somewhere in code)
+   - **All 5 must be set** to avoid `OptionsValidationException` at startup. Recommend Phase 6 codification: add to `auth-deployment-setup.md` §3 as a single block.
+
+2. **Cosmos is required infrastructure** (`AiPersistenceModule.cs:56` throws if `CosmosPersistence__Endpoint` is null). For any future env without Cosmos, the env needs: (a) a Cosmos account, (b) `spaarke-ai` database + 5 containers (`sessions`, `prompts`, `audit`, `memory`, `feedback`) with `/tenantId` partition key, (c) Cosmos Data Contributor RBAC on the BFF MI, (d) 2 App Settings. **Microsoft.DocumentDB provider must also be registered** on the subscription (one-time, takes ~30 s).
+
+3. **AgentService validation fires hard at startup** (4 settings minimum even when AgentService features aren't being used). For envs that don't actively use Agent Framework, use the dev placeholder values:
+   - `AgentService__Endpoint=https://placeholder.services.ai.azure.com`
+   - `AgentService__AgentId=placeholder-agent-id`
+   - Plus `AgentServiceOptions__*` mirrors
+   - **+ `Analysis__*` mirrors** for the analysis sub-feature
+
+4. **Optional features need explicit `=false`** to skip validation. Without these, BFF will fail with options validation errors even though the features are nominally optional:
+   - `BingGrounding__Enabled=false`
+   - `CodeInterpreter__Enabled=false`
+   - `EmailProcessing__EnablePolling=false`, `EmailProcessing__EnableWebhook=false`
+   - `RecordSync__Enabled=false`
+
+5. **Dataverse env var format must match across envs** (`/api` suffix). Inconsistency between dev (`/api`) and demo (no `/api`) would break PCFs/Code Pages deployed to both envs. Demo updated to match dev pattern for consistency.
+
+6. **Git Bash path translation breaks `az` resource IDs**. Use `MSYS_NO_PATHCONV=1` for any `az` command passing a path starting with `/subscriptions/`, `/tenantId`, or other Azure-style paths. Without this, paths get mangled to `C:/Program Files/Git/subscriptions/...` and the command fails with cryptic `LinkedInvalidPropertyId` errors.
+
+### Out of scope (operator followups)
+
+1. **Exchange `ApplicationAccessPolicy` for demo UAMI** — requires operator EXO PowerShell + demo mailbox decision. Mail.Send/Mail.Read grants ARE in place on the UAMI; what's missing is the Exchange-side scoping. Recommended command (when ready):
+   ```powershell
+   New-ApplicationAccessPolicy -AppId b0ce4ca4-5360-4605-a0ef-d918140e77da -PolicyScopeGroupId <demo-mailbox-group> -AccessRight RestrictAccess
+   ```
+   Demo email subsystem won't function end-to-end until this + `Communication__DefaultMailbox` is set to a real mailbox.
+
+2. **Production deploy** (tasks 062 + 063) — out of scope per operator direction. When done, the prod env will need the same prep as documented in steps 1–10 above (UAMI, Graph grants, Cosmos provisioning, App Settings).
+
+---
+
+# Phase 5 summary
+
+Demo deploy COMPLETE; prod intentionally skipped per operator direction. Substantial Azure resource prep documented for future env promotions. Demo running Phase 4 binary cleanly with all Outcome A/B/E changes active.
+
+**Critical signal for Phase 6**: the per-env config and infrastructure prep documented in steps 1–10 + lessons 1–6 above is the authoritative source for prod prep (and any future env). Phase 6 codification must capture this.

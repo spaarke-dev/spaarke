@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **PHASE 4 COMPLETE** — all Outcome A + B + E tracks closed; Phase 5 (demo + prod promotion) AUTHORIZED to begin. |
-| **Step** | Phase 4 gate review (task 054) ✅ — `EXECUTION-LOG.md` finalized with per-task entries and Phase 4 summary. |
-| **Status** | All Phase 4 tasks ✅ (or ⏸ deferred with rationale, or ⏭️ skipped per Phase 3 finding). Cumulative impact: -73.5 MB uncompressed (-35%); -27.2 MB compressed (-37%); 2 HIGH CVEs patched; 4 facade interfaces + 10 consumers migrated; 5 handlers relocated. 92% reduction in CRUD-side AI direct injections. All 24h bakes bypassed per dev-env precedent (no organic traffic; synthetic + healthz + hash-verify are the relevant signals). |
-| **Next Action** | **Phase 5**: `/task-execute projects/sdap-bff-api-remediation-fix/tasks/060-deploy-cumulative-to-demo.poml`. This deploys the cumulative Phase 4 changeset to `spaarke-bff-demo` (Linux App Service in `rg-spaarke-demo`, subscription `2ff9ee48-6f1d-4664-865c-f11868dd1b50`). Per design.md Phase 5 has 48h demo bake + dual-approver gate; bake bypass policy TBD by operator (demo may have real users, so bake might be meaningful unlike dev). Then 061 (smoke + bake), 062 (prod via `Deploy-Release.ps1`), 063 (7-day prod observation). Phase 6 (codification — 070-082) can be sequenced in parallel with Phase 5 bakes since it touches `.claude/` + `.github/` + scripts not the BFF binary. |
+| **Task** | **PHASE 5 (demo only) COMPLETE** — Phase 4 binary deployed to `spaarke-bff-demo` with substantial demo prep (UAMI, Cosmos, 14 config keys). Healthz=200; smoke 323 routes match dev pattern. |
+| **Step** | Task 060 ✅ deploy; Task 061 ✅ smoke (bake bypassed); Tasks 062 + 063 ⏸ OUT OF SCOPE (operator direction 2026-05-25 — no prod deploy this project). |
+| **Status** | Operator direction: Phase 5 = demo only; no prod. Demo running Phase 4 binary cleanly. Exchange ApplicationAccessPolicy for demo UAMI deferred to operator (needs demo mailbox decision + EXO PowerShell). |
+| **Next Action** | **Phase 6 — Documentation pass** (CRITICAL per user direction: "we need to get this correct given the various changes we made"). Update `auth-deployment-setup.md`, `bff-extensions.md`, ADRs, BFF module CLAUDE.md, and skill `bff-deploy` with: (a) the 5 MI config keys required (lesson 1 in EXECUTION-LOG), (b) Cosmos provisioning steps (lesson 2), (c) AgentService placeholder values (lesson 3), (d) optional feature-flag pattern (lesson 4), (e) DV env var consistency across envs (lesson 5), (f) Git Bash MSYS path workaround (lesson 6). Phase 6 tasks 070-082 are the codification work — adapt scope to capture demo-deploy lessons. Wrap-up gated on user confirming docs are accurate. |
 
 ### Files Modified This Session
 

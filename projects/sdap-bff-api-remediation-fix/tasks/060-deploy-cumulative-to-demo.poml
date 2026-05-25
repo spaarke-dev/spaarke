@@ -1,7 +1,7 @@
 <task id="060" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Deploy cumulative changeset to `spaarke-demo`</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <assigned>Project owner + owner (per NFR-08 revised)</assigned>
     <tags>bff-api, deploy, promote, phase-5</tags>
