@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: **Phase 3 READY** (Phase 0/1/2 + task 019 Linux migration + task 023 DI-singleton auth refactor all done; commit `7fb1776f`)
+- **Phase**: **Phase 4 BLOCKED on 48h gate + G4 agreement** (Phase 0/1/2/3 + task 019 + task 023 done; BASELINE.md committed 2026-05-25; old Windows dev decommissioned)
 - **Last Updated**: 2026-05-25
-- **Current Task**: none — task 023 COMPLETE; user-verified document upload + AI summary works end-to-end on new Linux dev `spaarke-bff-dev`
-- **Next Action**: (1) decommission old Windows dev `spe-api-dev-67e2xz` + `spe-plan-dev-67e2xz`; (2) Phase 3 baseline tasks 030-038 — Group E parallel (030/031/032/034/035/036/038) + 033 (48h App Insights calendar gate) + 037 (commit BASELINE.md, gates Phase 4). See `current-task.md` Action 1+2 for exact commands.
+- **Current Task**: none — Phase 3 closed (8 of 9 tasks done; task 033 calendar gate runs to 2026-05-27 UTC); awaiting operator G4 facade adoption agreement with Insights Engine owner before Phase 4 task 046
+- **Next Action**: WAIT for (a) 48h App Insights window closure (2026-05-27 UTC) → capture per `baseline/app-insights-baseline-start.md`, then (b) G4 agreement. When both clear, resume with `/task-execute projects/sdap-bff-api-remediation-fix/tasks/040-publish-linux-x64.poml`. See [`current-task.md`](current-task.md) Action 1/2/4 for full sequence.
 
 ---
 

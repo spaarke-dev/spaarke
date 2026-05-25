@@ -1,0 +1,62 @@
+# =============================================================
+# Phase 3 Baseline — Task 035: Publish + Zip Metrics
+# =============================================================
+# Captured: 2026-05-25
+# Command:  dotnet publish src/server/api/Sprk.Bff.Api/ -c Release -o publish
+#           + Compress-Archive publish/* -DestinationPath publish.zip
+# Target:   src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (Release config)
+# Result:   SUCCESS (publish_exit=0)
+#
+# Metrics:
+#   uncompressed_mb = 212.5   (target after Outcome A: <=150 MB)
+#   file_count      = 287     (target after Outcome A: <=240)
+#   dll_count       = 216
+#   zip_mb          = 72.9    (target after Outcome A: <=60 MB; CI ceiling = baseline + 10% = 80.2 MB)
+#
+# Drift vs Phase 1 inventory (captured 2026-05-24, commit 385957a3):
+#   uncompressed:  212.5 MB now vs 212 MB then    -> +0.5 MB  (negligible)
+#   file_count:    287 now vs 287 then            -> 0        (identical)
+#   zip:           72.9 MB now vs 75.2 MB then    -> -2.3 MB  (likely
+#                  Compress-Archive level variance; same csproj, no RID change)
+#
+# Out-of-scope deltas Phase 4 will produce:
+#   Task 040 (--runtime linux-x64): est -54 to -67 MB native-binary savings
+#   Task 041 (exclude *.js.map):    est -X MB (4 files in wwwroot/playbook-builder)
+#   Task 042 (Cosmos ServiceInterop dedup): no-op (Phase 1 confirmed not present)
+#
+# Task 023 DI-singleton refactor introduced ZERO size change.
+# =============================================================
+
+[035 publish metrics]
+  Determining projects to restore...
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj : warning NU1903: Package 'Microsoft.Kiota.Abstractions' 1.21.2 has a known high severity vulnerability, https://github.com/advisories/GHSA-7j59-v9qr-6fq9
+  All projects are up-to-date for restore.
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj : warning NU1903: Package 'Microsoft.Kiota.Abstractions' 1.21.2 has a known high severity vulnerability, https://github.com/advisories/GHSA-7j59-v9qr-6fq9
+  Spaarke.Dataverse -> c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\shared\Spaarke.Dataverse\bin\Release\net8.0\Spaarke.Dataverse.dll
+  Spaarke.Core -> c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\shared\Spaarke.Core\bin\Release\net8.0\Spaarke.Core.dll
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Agent\AgentConfigurationService.cs(100,29): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Agent\PlaybookInvocationService.cs(88,61): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Agent\AgentEndpoints.cs(274,47): warning CS8601: Possible null reference assignment. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Agent\AgentEndpoints.cs(297,43): warning CS8601: Possible null reference assignment. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Agent\PlaybookInvocationService.cs(284,50): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Agent\PlaybookInvocationService.cs(353,50): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Endpoints\RegistrationEndpoints.cs(458,22): warning CS0618: 'DemoProvisioningOptions.Environments' is obsolete: 'Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.' [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Endpoints\RegistrationEndpoints.cs(460,34): warning CS0618: 'DemoProvisioningOptions.Environments' is obsolete: 'Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.' [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Endpoints\RegistrationEndpoints.cs(460,85): warning CS0618: 'DemoProvisioningOptions.DefaultEnvironment' is obsolete: 'Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.' [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Endpoints\RegistrationEndpoints.cs(461,24): warning CS0618: 'DemoProvisioningOptions.Environments' is obsolete: 'Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.' [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Ai\ChatEndpoints.cs(1153,42): warning CS8604: Possible null reference argument for parameter 'messages' in 'IReadOnlyList<ChatMessage> ChatEndpoints.BuildAiHistory(IReadOnlyList<ChatMessage> messages)'. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Api\Ai\ChatEndpoints.cs(1671,40): warning CS1998: This async method lacks 'await' operators and will run synchronously. Consider using the 'await' operator to await non-blocking API calls, or 'await Task.Run(...)' to do CPU-bound work on a background thread. [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Services\Registration\DemoExpirationService.cs(347,16): warning CS0618: 'DemoProvisioningOptions.Environments' is obsolete: 'Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.' [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Services\Registration\DemoExpirationService.cs(347,68): warning CS0618: 'DemoProvisioningOptions.DefaultEnvironment' is obsolete: 'Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.' [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Services\Registration\DemoExpirationService.cs(348,16): warning CS0618: 'DemoProvisioningOptions.Environments' is obsolete: 'Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.' [c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj]
+  Sprk.Bff.Api -> c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\bin\Release\net8.0\Sprk.Bff.Api.dll
+  Sprk.Bff.Api -> c:\code_files\spaarke-wt-sdap-bff-api-remediation-fix\src\server\api\Sprk.Bff.Api\publish\
+
+=== METRICS ===
+uncompressed_bytes=222835388
+uncompressed_mb=212.5
+file_count=287
+dll_count=216
+zip_bytes=76432100
+zip_mb=72.9
+publish_exit=0

@@ -65,15 +65,15 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 030 | Test suite baseline | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 031 | Build warning count baseline | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 032 | Endpoint smoke-test baseline | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 033 | App Insights 48h baseline metrics export | 🔲 | No (48h calendar gate) | STANDARD | 022 |
-| 034 | Deployed file SHA-256s via Kudu VFS | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 035 | Current publish + zip metrics | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 036 | Reflection-load probe baseline | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 038 | DI registration count baseline (ADR-010 measurable binding) | 🔲 | Yes (Group E) | STANDARD | 022 |
-| 037 | Archive extraction-assessment + commit BASELINE.md | 🔲 | No | STANDARD | 030–036, 038 |
+| 030 | Test suite baseline | ✅ (BUILD FAILED documented) | Yes (Group E) | STANDARD | 022 |
+| 031 | Build warning count baseline (17 warnings) | ✅ | Yes (Group E) | STANDARD | 022 |
+| 032 | Endpoint smoke-test baseline (323 routes; 1 candidate 404) | ✅ | Yes (Group E) | STANDARD | 022 |
+| 033 | App Insights 48h baseline metrics export | 🔄 (calendar gate started 2026-05-25; capture at T+48h = 2026-05-27) | No (48h calendar gate) | STANDARD | 022 |
+| 034 | Deployed file SHA-256s via Kudu VFS (10 files) | ✅ | Yes (Group E) | STANDARD | 022 |
+| 035 | Current publish + zip metrics (212.5 MB / 287 files / 72.9 MB zip) | ✅ | Yes (Group E) | STANDARD | 022 |
+| 036 | Reflection-load probe baseline | ✅ | Yes (Group E) | STANDARD | 022 |
+| 038 | DI registration count baseline (265 total) | ✅ | Yes (Group E) | STANDARD | 022 |
+| 037 | Archive extraction-assessment + commit BASELINE.md | ✅ (Phase 4 gate — task 040 still blocked by 033 calendar gate + G4 facade agreement) | No | STANDARD | 030–036, 038 |
 
 ---
 
