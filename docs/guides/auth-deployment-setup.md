@@ -47,9 +47,9 @@ The following must already exist before starting this checklist. See [`ENVIRONME
 | Azure subscription with Contributor access | — | For App Service + Key Vault management |
 | Azure AD tenant GUID | `{tenant-guid}` | The customer's home tenant |
 | BFF Azure AD app registration | App ID `{bff-app-id}` | One client secret in Key Vault (still required for OBO; MI replaces the rest) |
-| App Service (BFF API) | `https://spe-api-{env}.azurewebsites.net` | **Must have a system-assigned managed identity enabled** |
-| App Service managed identity (MI) | Service principal `{mi-sp-object-id}` | Auto-created when MI is enabled — record its Object ID |
-| Key Vault | `{kv-name}.vault.azure.net` | App Service MI must have **Key Vault Secrets User** role at the vault scope |
+| App Service (BFF API) | `https://spaarke-bff-{env}.azurewebsites.net` (Linux .NET 8) | **Must have a user-assigned managed identity (UAMI) attached** (e.g., `mi-bff-api-{env}`); see canonical Bicep at `infrastructure/bicep/modules/app-service.bicep` |
+| App Service managed identity (UAMI) | `clientId: {uami-client-id}`, `principalId: {uami-principal-id}` | Set `Graph__ManagedIdentity__ClientId` AND `ManagedIdentity__ClientId` App Settings to the UAMI's clientId; `DefaultAzureCredential` uses these to target the UAMI. The UAMI's principalId is what gets registered in Dataverse Application User (§6) and granted Graph app roles (§5) and Exchange ApplicationAccessPolicy (§7). |
+| Key Vault | `{kv-name}.vault.azure.net` | UAMI principal must have **Key Vault Secrets User** role at the vault scope (RBAC mode) |
 | Dataverse environment | `https://{dataverse-org}.crm.dynamics.com` | The customer's Dataverse org |
 | Dataverse solution import complete | `SpaarkeCore` + `SpaarkeFeatures` | Provides the `sprk_*` environment variable definitions |
 | Tooling | Azure CLI ≥ 2.55, PAC CLI ≥ 1.46, PowerShell 7 | For all CLI commands below |
@@ -60,8 +60,13 @@ The following must already exist before starting this checklist. See [`ENVIRONME
 # Tenant GUID
 az account show --query tenantId -o tsv
 
-# BFF managed identity service principal object ID
-az webapp identity show --name spe-api-{env} --resource-group {rg} --query principalId -o tsv
+# UAMI clientId + principalId (the UAMI is a separate Azure resource; create it before attaching to the App Service)
+az identity show --name mi-bff-api-{env} --resource-group {uami-rg} \
+  --query "{clientId:clientId, principalId:principalId}" -o json
+
+# Verify UAMI is attached to the App Service
+az webapp identity show --name spaarke-bff-{env} --resource-group {rg} \
+  --query "{type:type, uami:userAssignedIdentities}" -o json
 
 # Microsoft Graph service principal object ID (constant per tenant — needed for permissions in §5)
 az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv
