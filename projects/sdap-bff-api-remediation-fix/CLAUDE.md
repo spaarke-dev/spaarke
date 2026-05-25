@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: **Phase 3 READY** (Phase 2 complete + CANDIDATES.md gate signed 2026-05-24)
-- **Last Updated**: 2026-05-24
-- **Current Task**: Phase 2 complete (tasks 020/021/022 all ✅); CANDIDATES.md committed at project root
-- **Next Action**: Dispatch Phase 3 baseline tasks (030-038) on the NEW Linux dev `spaarke-bff-dev`. Group E parallel: 030, 031, 032, 034, 035, 036, 038. Task 033 (48h App Insights baseline) sequential calendar gate. Task 037 (commit BASELINE.md) waits on all.
+- **Phase**: **Phase 3 READY** (Phase 0/1/2 + task 019 Linux migration + task 023 DI-singleton auth refactor all done; commit `7fb1776f`)
+- **Last Updated**: 2026-05-25
+- **Current Task**: none — task 023 COMPLETE; user-verified document upload + AI summary works end-to-end on new Linux dev `spaarke-bff-dev`
+- **Next Action**: (1) decommission old Windows dev `spe-api-dev-67e2xz` + `spe-plan-dev-67e2xz`; (2) Phase 3 baseline tasks 030-038 — Group E parallel (030/031/032/034/035/036/038) + 033 (48h App Insights calendar gate) + 037 (commit BASELINE.md, gates Phase 4). See `current-task.md` Action 1+2 for exact commands.
 
 ---
 
