@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -16,12 +17,16 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// <remarks>
 /// Follows the same pattern as MatterPreFillService but uses a project-specific playbook
 /// and returns ProjectPreFillResponse with project field names.
+///
+/// Per refined ADR-013 (2026-05-20, task 046), AI playbook execution flows through the
+/// <see cref="IWorkspacePrefillAi"/> public facade — no direct injection of
+/// AI-internal orchestration types.
 /// </remarks>
 public class ProjectPreFillService
 {
     private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
-    private readonly IPlaybookOrchestrationService _playbookService;
+    private readonly IWorkspacePrefillAi _prefillAi;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ProjectPreFillService> _logger;
 
@@ -55,13 +60,13 @@ public class ProjectPreFillService
     public ProjectPreFillService(
         SpeFileStore speFileStore,
         ITextExtractor textExtractor,
-        IPlaybookOrchestrationService playbookService,
+        IWorkspacePrefillAi prefillAi,
         IConfiguration configuration,
         ILogger<ProjectPreFillService> logger)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
-        _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
+        _prefillAi = prefillAi ?? throw new ArgumentNullException(nameof(prefillAi));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -279,7 +284,7 @@ public class ProjectPreFillService
             string? preFillJson = null;
             double confidence = 0;
 
-            await foreach (var evt in _playbookService.ExecuteAsync(request, httpContext, timeoutCts.Token))
+            await foreach (var evt in _prefillAi.ExecutePreFillPlaybookAsync(request, httpContext, timeoutCts.Token))
             {
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
                 {

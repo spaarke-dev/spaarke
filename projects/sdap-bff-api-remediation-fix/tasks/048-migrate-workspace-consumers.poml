@@ -1,7 +1,7 @@
 <task id="048" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Migrate Workspace consumers to facade (FR-E2 part 2)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, ai-boundary, facade, migration, outcome-e, phase-4</tags>

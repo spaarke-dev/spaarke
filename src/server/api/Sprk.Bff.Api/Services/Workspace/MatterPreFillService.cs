@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -16,8 +17,11 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// </summary>
 /// <remarks>
 /// Follows ADR-007: File uploads routed through SpeFileStore facade — no direct SPE access.
-/// Follows ADR-013: AI analysis via IPlaybookOrchestrationService — no hardcoded prompts or
-/// direct IOpenAiClient calls. Extraction prompts are configured as playbook Skills in Dataverse.
+/// Follows refined ADR-013 (2026-05-20, task 046): AI analysis via the
+/// <see cref="IWorkspacePrefillAi"/> public facade — no direct injection of
+/// AI-internal orchestration or completion-client types. Extraction prompts
+/// remain configured as playbook Skills in Dataverse (the facade wraps the same
+/// underlying orchestrator; only the injected type changes).
 ///
 /// File storage lifecycle:
 /// Files uploaded here are stored under a per-request staging prefix (ai-prefill/{requestId}/...).
@@ -28,7 +32,7 @@ public class MatterPreFillService
 {
     private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
-    private readonly IPlaybookOrchestrationService _playbookService;
+    private readonly IWorkspacePrefillAi _prefillAi;
     private readonly IConfiguration _configuration;
     private readonly ILogger<MatterPreFillService> _logger;
 
@@ -63,13 +67,13 @@ public class MatterPreFillService
     public MatterPreFillService(
         SpeFileStore speFileStore,
         ITextExtractor textExtractor,
-        IPlaybookOrchestrationService playbookService,
+        IWorkspacePrefillAi prefillAi,
         IConfiguration configuration,
         ILogger<MatterPreFillService> logger)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
-        _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
+        _prefillAi = prefillAi ?? throw new ArgumentNullException(nameof(prefillAi));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -317,7 +321,7 @@ public class MatterPreFillService
             string? preFillJson = null;
             double confidence = 0;
 
-            await foreach (var evt in _playbookService.ExecuteAsync(request, httpContext, timeoutCts.Token))
+            await foreach (var evt in _prefillAi.ExecutePreFillPlaybookAsync(request, httpContext, timeoutCts.Token))
             {
                 // Look for the completed node output that contains pre-fill data
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
