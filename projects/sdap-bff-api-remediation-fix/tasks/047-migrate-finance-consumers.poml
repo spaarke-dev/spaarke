@@ -1,7 +1,7 @@
 <task id="047" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Migrate Finance consumers to facade (FR-E2 part 1)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, ai-boundary, facade, migration, outcome-e, phase-4</tags>

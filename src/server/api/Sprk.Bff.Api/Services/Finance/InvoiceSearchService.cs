@@ -3,7 +3,7 @@ using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
-using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -38,7 +38,7 @@ public interface IInvoiceSearchService
 public class InvoiceSearchService : IInvoiceSearchService
 {
     private readonly SearchIndexClient _searchIndexClient;
-    private readonly IOpenAiClient _openAiClient;
+    private readonly IInvoiceAi _invoiceAi;
     private readonly ILogger<InvoiceSearchService> _logger;
 
     // Index name (MVP: single index, production: per-tenant)
@@ -55,11 +55,11 @@ public class InvoiceSearchService : IInvoiceSearchService
 
     public InvoiceSearchService(
         SearchIndexClient searchIndexClient,
-        IOpenAiClient openAiClient,
+        IInvoiceAi invoiceAi,
         ILogger<InvoiceSearchService> logger)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
-        _openAiClient = openAiClient ?? throw new ArgumentNullException(nameof(openAiClient));
+        _invoiceAi = invoiceAi ?? throw new ArgumentNullException(nameof(invoiceAi));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -88,7 +88,7 @@ public class InvoiceSearchService : IInvoiceSearchService
             ReadOnlyMemory<float> queryEmbedding;
             try
             {
-                queryEmbedding = await _openAiClient.GenerateEmbeddingAsync(
+                queryEmbedding = await _invoiceAi.GenerateEmbeddingAsync(
                     query,
                     model: "text-embedding-3-large",
                     dimensions: 3072,
