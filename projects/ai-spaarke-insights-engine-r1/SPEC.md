@@ -40,7 +40,7 @@ Track A delivers (1)–(8) without dependency on the Phase C auth work. Track B 
 | D-A6 | `CosmosNoSqlInsightGraph` implementation — adjacency-list document model; vertex + edge upsert/get/delete; `FindMattersInvolvingPartyAsync`, `FindConnectedEntitiesAsync` named traversals; per-tenant partition key | Substrate |
 | D-A7 | `LiveFactResolverService` in `Sprk.Bff.Api/Services/Insights/Facts/` — direct Dataverse queries via existing `IDataverseService`. Initial Facts: `matterDuration`, `totalSpend`, `status`, `daysSinceLastActivity`, `documentCount`. 5-minute Redis cache | Domain logic |
 | D-A8 | `InsightsResolverService` skeleton in `Sprk.Bff.Api/Services/Insights/` — orchestration: question router, signal fetcher composing `IInsightGraph` + `LiveFactResolverService` + AI Search, provenance assembler, per-question TTL cache, `accessibleMatterSet` enforcement at every query | Domain logic |
-| D-A9 | `Insights Agent` shell in `Sprk.Bff.Api/Services/Insights/Agent/` — extends existing `IChatClient` + tool framework. Tool interfaces: `IFindComparableMattersTool`, `IGetMatterFactsTool`, `IAssessEvidenceSufficiencyTool`. Stub implementations that return mock data | Domain logic |
+| D-A9 | `Insights Agent` shell in **`Sprk.Bff.Api/Services/Ai/Insights/`** (parallel to existing `Services/Ai/Chat/`) — extends existing `IChatClient` + tool framework. Tool interfaces: `IFindComparableMattersTool`, `IGetMatterFactsTool`, `IAssessEvidenceSufficiencyTool` in `Services/Ai/Insights/Tools/`. Stub implementations that return mock data. **Exposed to D-A8 Resolver via `Services/Ai/PublicContracts/IInsightsAi` facade — see §3.5.** | AI-internal (Zone A) |
 | D-A10 | `predict-matter-cost` Inference question definition — question catalog entry, evidence-sufficiency rule (`comparableMatters.min: 12`), insufficient-evidence response shape, registered with the Insights Agent | Domain logic |
 | D-A11 | `POST /api/insights/ask` Minimal API endpoint in `Sprk.Bff.Api/Api/Insights/InsightEndpoints.cs` — accepts `InsightRequest`, returns `InsightResponse`. Endpoint filter for resource auth per ADR-008. Rate limiting per ADR-016. ProblemDetails errors per ADR-019 | API |
 | D-A12 | Closure-extraction JPS playbook DESIGN document (not implementation) in `projects/ai-spaarke-insights-engine-r1/closure-extraction-playbook-design.md` — what it emits, version handling, target indexes | Design |
@@ -89,7 +89,84 @@ Phase 1 ships the Precedent layer **architecture + scaffold** (D-A26, D-A27). Ph
 
 Phase 1.5 calibration of thresholds (CONFIRM_THRESHOLD, decay rate, drift threshold) is intentionally deferred — see DEF-08 in `decisions.md`.
 
-### 3.4 Explicitly NOT in scope — Phase 2+
+### 3.5 Spaarke BFF AI Facade — architectural boundary compliance (binding)
+
+This project lives inside `Sprk.Bff.Api/` and shares its codebase with parallel work in [`projects/sdap-bff-api-remediation-fix/`](../sdap-bff-api-remediation-fix/) (BFF remediation). That project's **Outcome E** introduces a facade at `Sprk.Bff.Api/Services/Ai/PublicContracts/` to enforce a clean separation between AI internals and domain code. The Insights Engine project MUST comply with this boundary from day one — getting it wrong now creates 27+ new direct couplings that the remediation project's CI gate (FR-C6, lands in `sdap-bff-api-remediation-fix` Phase 6 task 082) will reject.
+
+#### 3.5.1 The two zones
+
+`Sprk.Bff.Api/Services/` has two zones with different rules:
+
+**Zone A — AI-internal** (anything under `Services/Ai/`)
+- Knows about LLM clients, prompts, embedding models, playbook engines, tool framework, retrieval pipelines
+- May freely import `IOpenAiClient`, `IPlaybookService`, `IChatClient`, `UseFunctionInvocation`, `Microsoft.Extensions.AI.*`, `Microsoft.SemanticKernel.*`, `OpenAI.*`, `Azure.AI.*`, etc.
+- Free to depend on other Zone A code
+
+**Zone B — Domain / CRUD** (everything else — `Services/Insights/`, `Services/Workspace/`, `Services/Finance/`, `Services/Jobs/` outside `Services/Ai/Jobs/`, `Services/Dataverse/`, `Services/Communication/`, `Api/`, `Endpoints/`, `Filters/`, `Models/`)
+- Must NOT import AI internals listed above
+- May ONLY consume AI via interfaces under `Services/Ai/PublicContracts/`
+
+#### 3.5.2 Insights Engine deliverable placement
+
+| Deliverable | Original placement | Required placement | Zone |
+|---|---|---|---|
+| D-A4 `InsightArtifact` envelope POCOs | `Models/Insights/` | unchanged | B (POCOs only — no AI imports) |
+| D-A5/A6 `IInsightGraph` + `CosmosNoSqlInsightGraph` | `Services/Insights/Graph/` | unchanged | B |
+| D-A7 `LiveFactResolverService` | `Services/Insights/Facts/` | unchanged | B |
+| D-A8 `InsightsResolverService` | `Services/Insights/` | unchanged — but MUST call AI only via `IInsightsAi` facade (no direct `IChatClient`, `IOpenAiClient`, `IPlaybookService`, or `InsightsAgent` injection) | B |
+| **D-A9 Insights Agent + tools** | ~~`Services/Insights/Agent/`~~ | **`Services/Ai/Insights/`** (mirrors `Services/Ai/Chat/`) | **A (moved)** |
+| D-A11 `POST /api/insights/ask` | `Api/Insights/InsightEndpoints.cs` | unchanged — calls `InsightsResolverService` | B |
+| D-A22 `GroundingVerifier` | `Services/Ai/CitationVerification/` | unchanged | A (correctly placed) |
+| D-A25 `Smacl1Sanitizer` | `Services/Ai/IngestSanitization/` | unchanged | A (correctly placed) |
+| D-A26 `IPrecedentBoard` + `DataversePrecedentBoard` | `Services/Insights/Precedents/` | unchanged — Dataverse access, no AI imports | B |
+
+The D-A9 move matches the existing convention for the SprkChat system: `Services/Ai/Chat/SprkChatAgent.cs` is the AI-internal agent; CRUD callers route to it through endpoint+facade. Insights follows the same pattern.
+
+#### 3.5.3 The IInsightsAi facade contract
+
+A new interface `Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs` exposes the Insights Agent's capabilities to Zone B. Small, focused, named after the domain need — NOT after the AI mechanism:
+
+```csharp
+public interface IInsightsAi
+{
+    Task<InsightsAgentResult> AnswerQuestionAsync(
+        InsightsAgentRequest request,
+        CancellationToken ct);
+}
+```
+
+Implementation in `Services/Ai/Insights/InsightsAgent.cs` (Zone A) wires `IChatClient`, registers tools, invokes function-calling. `InsightsResolverService` (Zone B) injects `IInsightsAi` and never sees `IChatClient` directly.
+
+If the facade is missing a method the Resolver needs, add ONE method to `IInsightsAi` — do NOT widen the facade with raw `IChatClient` access.
+
+#### 3.5.4 Forbidden imports in Zone B
+
+In `Services/Insights/**` (other than D-A22/A25 Zone A primitives), `Api/Insights/**`, `Models/Insights/**`, the following imports are FORBIDDEN:
+
+- `Microsoft.Extensions.AI.*` (incl. `IChatClient`, `UseFunctionInvocation`)
+- `Microsoft.SemanticKernel.*`
+- `OpenAI.*`, `Azure.AI.OpenAI.*`
+- `Sprk.Bff.Api.Services.Ai.IOpenAiClient`
+- `Sprk.Bff.Api.Services.Ai.IPlaybookService`
+- `Sprk.Bff.Api.Services.Ai.Chat.*` (any Chat agent/tool/factory)
+- `Sprk.Bff.Api.Services.Ai.Insights.*` (Insights Agent itself — only the facade interface is allowed)
+- Direct construction of `KernelBuilder`, `OpenAIClient`, etc.
+
+Allowed AI-related imports in Zone B:
+- `Sprk.Bff.Api.Services.Ai.PublicContracts.*` (the facade interfaces)
+- `Sprk.Bff.Api.Models.Ai.*` (POCO request/response shapes)
+
+#### 3.5.5 Verification
+
+A grep-based verification gate (FR-C6 from `sdap-bff-api-remediation-fix` Phase 6 task 082) will block PRs that violate the boundary. Until that lands, Phase 1 Track A acceptance includes a manual grep check (see §5.1.1 below).
+
+Reference pattern: see `Services/Ai/Chat/` (existing SprkChat agent) for the canonical Zone A placement + tool organization that Insights should mirror.
+
+#### 3.5.6 Why this matters
+
+AI internals — model selection, prompt templates, tool wiring, embedding strategy — change frequently. Without the facade, every Insights Engine deliverable in Zone B becomes coupled to those internals, and every AI-team refactor breaks domain code. With the facade, the AI team can swap providers, rewire tools, and tune prompts without touching `InsightsResolverService` or any other Zone B code. This is the same architectural concern that drove `sdap-bff-api-remediation-fix` Outcome E to migrate 59 existing CRUD→AI couplings; the goal is to NOT recreate the problem with new Insights Engine code.
+
+### 3.6 Explicitly NOT in scope — Phase 2+
 
 - Additional Insight indexes (`insight-sessions` enrichment, etc.)
 - Additional graph entities (Person, Firm, Judge, Issue) — Phase 1 only models Matter + Party + INVOLVED_PARTY edge + Precedent vertex
@@ -110,7 +187,7 @@ Per [decisions.md](decisions.md), Phase 1 commits to:
 - **Taxonomy**: **four-tier** Fact / Observation / Precedent / Inference per D-03 and D-46. Precedent layer architecture + scaffold lands in Phase 1 (D-A26, D-A27); lifecycle automation lands in Phase 1.5.
 - **Substrate**: Azure AI Search (existing service; new indexes `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions`, **`insight-precedents`**) + Cosmos NoSQL adjacency-list (new account; vertices include `Precedent`) + Live Dataverse Facts + `sprk_precedent` Dataverse entity
 - **Embedding**: `text-embedding-3-large` (3072 dim)
-- **Synthesis**: custom Insights Agent in `Sprk.Bff.Api`, reusing existing `IChatClient` + UseFunctionInvocation + tool framework
+- **Synthesis**: custom Insights Agent in `Sprk.Bff.Api/Services/Ai/Insights/` (Zone A, mirrors `Services/Ai/Chat/`) reusing existing `IChatClient` + UseFunctionInvocation + tool framework. Exposed to Zone B (the `InsightsResolverService`) via `Services/Ai/PublicContracts/IInsightsAi` facade per §3.5.
 - **LAVERN-derived enforcement primitives** (turn the honesty contract from principle to mechanism):
   - `ISanitizer` (D-A25) — strips prompt-injection vectors before any LLM step
   - `GroundingVerifier` (D-A22) — mechanical post-Agent citation check
@@ -146,6 +223,24 @@ Full diagrams and rationale: [design.md](design.md). LAVERN pattern adoption rat
 - [ ] All ADR compliance verified via `/adr-check` skill (no new violations)
 - [ ] Zero new SAS keys, zero new `ClientSecretCredential` usages (per D-24, D-27)
 
+### 5.1.1 §3.5 AI facade boundary acceptance (binding)
+
+- [ ] D-A9 Insights Agent + tools land at `Services/Ai/Insights/` and `Services/Ai/Insights/Tools/` (NOT `Services/Insights/Agent/`)
+- [ ] `Services/Ai/PublicContracts/IInsightsAi.cs` interface created and registered in DI
+- [ ] D-A8 `InsightsResolverService` injects `IInsightsAi` only — verified by grep: zero hits for `IChatClient`, `IOpenAiClient`, `IPlaybookService`, `IChatAgent`, `Microsoft.Extensions.AI`, `Microsoft.SemanticKernel`, `OpenAI`, `Azure.AI.OpenAI`, or `Sprk.Bff.Api.Services.Ai.Chat`, `Sprk.Bff.Api.Services.Ai.Insights` in:
+  - `Services/Insights/**/*.cs` (except D-A22/A25 which are explicitly Zone A primitives — those live at `Services/Ai/CitationVerification/` and `Services/Ai/IngestSanitization/`)
+  - `Api/Insights/**/*.cs`
+  - `Models/Insights/**/*.cs`
+  Suggested verification command:
+  ```bash
+  grep -rE "IChatClient|IOpenAiClient|IPlaybookService|Microsoft\.Extensions\.AI|Microsoft\.SemanticKernel|using OpenAI|Azure\.AI\.OpenAI|Services\.Ai\.Chat|Services\.Ai\.Insights[^.P]" \
+    src/server/api/Sprk.Bff.Api/Services/Insights/ \
+    src/server/api/Sprk.Bff.Api/Api/Insights/ \
+    src/server/api/Sprk.Bff.Api/Models/Insights/
+  # Expect: zero matches (or only `Services.Ai.PublicContracts` references)
+  ```
+- [ ] Insights Engine Phase 1 PR(s) reference §3.5 in description as compliance check; future post-Phase-1 PRs touching `Services/Insights/` or `Api/Insights/` MUST pass the same grep before merge (interim manual check until `sdap-bff-api-remediation-fix` Phase 6 task 082 lands the FR-C6 CI gate)
+
 ### Track B acceptance (when unblocked)
 
 - [ ] Dataverse webhook fires the Intake Function on `sprk_matter` create/update
@@ -167,6 +262,7 @@ Full diagrams and rationale: [design.md](design.md). LAVERN pattern adoption rat
 | DEP-4 | Resolution of O-01 (decisions.md): JPS or specialized format for closure-extraction playbook | Architecture | Open | D-A12 (playbook design doc), D-B5 (Phase 2 impl) |
 | DEP-5 | LAVERN ADRs **10.1** (Precedent Board), **10.6** (Sanitization + Citation Verification Standard) ratified jointly with `ai-advanced-capabilities-development` project. ADRs proposed in `projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md` §10. | Both projects (joint) | Proposed; not yet ratified | D-A22, D-A25, D-A26 design freeze |
 | DEP-6 | Coordinate `IGateResolver` interface design (LAVERN ADR **10.3**) — built by Action Engine MVP; Insights consumes for Phase 2+ write-back paths. Tracked in `coordination-assessment-with-insights-engine.md` §4.6 (new). | Action Engine team | Pending Action Engine pipeline | No Phase 1 implementation; Phase 2+ consumer only |
+| DEP-7 | **AI facade boundary compliance per §3.5** — Insights Engine MUST place D-A9 Insights Agent under `Services/Ai/Insights/` (NOT `Services/Insights/Agent/`) and consume it via `Services/Ai/PublicContracts/IInsightsAi` facade. Coordinates with `projects/sdap-bff-api-remediation-fix/` Outcome E which establishes the same boundary for the existing 59 CRUD→AI couplings, and with FR-C6 CI gate that lands in that project's Phase 6 task 082 to make the boundary mechanically enforced. | sdap-bff-api-remediation-fix project (Outcome E task 046 creates the facade scaffold; Phase 6 task 082 adds CI gate) | Outcome E task 046 ETA: post-Phase-3 baseline closure | D-A9 placement decision (resolved per §3.5); D-A8 Resolver imports (must use facade); Phase 1 Track A acceptance gate (§5.1.1) |
 
 ### 6.2 External (Azure / Microsoft)
 
@@ -215,6 +311,7 @@ Tasks within a wave can be parallel; waves are sequential.
 - [lavern-pattern-assessment.md](lavern-pattern-assessment.md) — LAVERN pattern-by-pattern analysis + decision basis for D-A22 through D-A27
 
 ### 9.1a Related Spaarke projects
+- [`projects/sdap-bff-api-remediation-fix/`](../sdap-bff-api-remediation-fix/) — **AI facade source-of-truth (§3.5, DEP-7)**. Outcome E task 046 creates `Services/Ai/PublicContracts/`; tasks 047–050 migrate 59 existing CRUD→AI couplings through it; Phase 6 task 082 lands the FR-C6 CI gate that mechanically enforces the boundary. Insights Engine consumes the facade scaffold and must not reintroduce direct couplings.
 - [`projects/ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md`](../ai-advanced-capabilities-development/LAVERN-ANALYSIS-AND-PLAN.md) — source of the 12 patterns + 6 proposed ADRs
 - [`projects/ai-advanced-capabilities-development/ADVANCED-AI-USE-CASE-PATTERNS.md`](../ai-advanced-capabilities-development/ADVANCED-AI-USE-CASE-PATTERNS.md) — the six user-interaction modes that consume the Engine
 - [`projects/ai-spaarke-action-engine-r1/action-engine-overview.md`](../ai-spaarke-action-engine-r1/action-engine-overview.md) — sister project; consumer of Insights' signals + Precedents
