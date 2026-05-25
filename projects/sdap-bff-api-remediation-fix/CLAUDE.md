@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: **Phase 2 IN PROGRESS** (task 020 candidates-safe.md drafted; tasks 021/022 next)
+- **Phase**: **Phase 3 READY** (Phase 2 complete + CANDIDATES.md gate signed 2026-05-24)
 - **Last Updated**: 2026-05-24
-- **Current Task**: Phase 1 complete + task 019 Linux dev migration done; Finding 1 RESOLVED; task 020 SAFE candidates drafted
-- **Next Action**: Complete tasks 021 (MEDIUM candidates) + 022 (HIGH/REJECT + commit CANDIDATES.md)
+- **Current Task**: Phase 2 complete (tasks 020/021/022 all ✅); CANDIDATES.md committed at project root
+- **Next Action**: Dispatch Phase 3 baseline tasks (030-038) on the NEW Linux dev `spaarke-bff-dev`. Group E parallel: 030, 031, 032, 034, 035, 036, 038. Task 033 (48h App Insights baseline) sequential calendar gate. Task 037 (commit BASELINE.md) waits on all.
 
 ---
 

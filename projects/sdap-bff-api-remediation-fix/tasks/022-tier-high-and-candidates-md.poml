@@ -1,9 +1,12 @@
 <task id="022" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Tier HIGH + REJECT list + commit CANDIDATES.md</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~10 min (aggregate of 020 + 021 outputs)</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, risk-categorization, phase-2, gate</tags>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>

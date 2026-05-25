@@ -1,9 +1,12 @@
 <task id="021" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Tier MEDIUM candidates (csproj edit, vuln patches same-major)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>~15 min (made tractable by Phase 1 dual-probe outputs + Phase 0 Decisions C.1, E)</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, risk-categorization, security, phase-2</tags>
     <parallel-group>D</parallel-group>
     <parallel-safe>true</parallel-safe>

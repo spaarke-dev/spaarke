@@ -54,9 +54,9 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 020 | Tier SAFE candidates | 🔲 | Yes (Group D) | STANDARD | 018 |
-| 021 | Tier MEDIUM candidates | 🔲 | Yes (Group D) | STANDARD | 018 |
-| 022 | Tier HIGH + REJECT list + commit CANDIDATES.md | 🔲 | No | STANDARD | 020, 021 |
+| 020 | Tier SAFE candidates (3 candidates; FR-A3 already no-op) | ✅ | Yes (Group D) | STANDARD | 018 |
+| 021 | Tier MEDIUM candidates (1 candidate; IdentityModel bump for SCC.Xml HIGH ×2) | ✅ | Yes (Group D) | STANDARD | 018 |
+| 022 | Tier HIGH + REJECT (0 HIGH, 15 REJECT) + commit CANDIDATES.md | ✅ | No | STANDARD | 020, 021 |
 
 ---
 

@@ -1,9 +1,12 @@
 <task id="020" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Tier SAFE candidates (publish-time config; no source change)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~15 min</actual-effort>
     <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
     <tags>bff-api, risk-categorization, phase-2</tags>
     <parallel-group>D</parallel-group>
     <parallel-safe>true</parallel-safe>
