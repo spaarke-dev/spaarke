@@ -1,7 +1,7 @@
 <task id="043" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Vuln patch: `Microsoft.Kiota.Abstractions` NU1903 HIGH</title>
-    <status>not-started</status>
+    <status>deferred</status>
     <estimated-effort>2 hours active + 24-48h bake</estimated-effort>
     <assigned>AI agent (developer); owner sign-off via NFR-08 revised model</assigned>
     <tags>bff-api, security, outcome-b, phase-4, deploy</tags>

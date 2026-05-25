@@ -191,3 +191,53 @@ See [`projects/sdap-bff-api-remediation-fix/CLAUDE.md`](CLAUDE.md) "Decisions Ma
 1. `IWorkspacePrefillAi` wraps `IPlaybookOrchestrationService` (not raw `IOpenAiClient`/`IPlaybookService`) because the actual consumer (`MatterPreFillService`) already uses orchestration. Faithful to the POML rule "methods MUST match what consumers actually call today."
 2. `IRecordMatchingAi` has no current CRUD-external consumer but is scaffolded to satisfy the ≥4 acceptance + give FR-C6 CI guard (task 082) a canonical enforcement target. Documented in the interface docstring and project CLAUDE.md.
 3. Consumer migration tasks 047–050 are unblocked and parallel-safe (Group F per TASK-INDEX).
+
+---
+
+## Task 044 — Patch `System.Security.Cryptography.Xml` HIGH ×2 (FR-B1, Outcome B MEDIUM-1)
+
+**Status**: ✅ — csproj transitive override committed; vuln scan confirms both CVEs gone; bake bypassed per dev-env precedent.
+**Commit**: (pending — committed together with 043/045 deferral status flips)
+**Files changed**: `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` (added `<PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />` transitive override)
+
+### CVE resolution
+
+| CVE | Before | After |
+|---|---|---|
+| GHSA-37gx-xxp4-5rgx (HIGH) | Present (transitive via Microsoft.IdentityModel.Tokens chain) | **Resolved** |
+| GHSA-w3x6-4m5h-cxqf (HIGH) | Present (same chain) | **Resolved** |
+
+Verification: `dotnet list package --vulnerable --include-transitive` output confirms only remaining vulnerabilities are (a) Microsoft.Kiota.Abstractions HIGH (REJECT per Phase 0 Decision C.1 — Graph SDK 6.x upgrade follow-up project), (b) OpenMcdf Moderate ×2 (deferred per CANDIDATES.md R-13 — below HIGH threshold), (c) OpenTelemetry.Api Moderate (deferred per CANDIDATES.md R-14).
+
+### Approach (surgical transitive override)
+
+Per CANDIDATES.md MEDIUM-1, the original plan was to bump all 8 `Microsoft.IdentityModel.*` packages from 8.15.0 → latest 8.x. **Pivoted to a more surgical approach**: explicit transitive `<PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />` override. Rationale:
+
+- Single line change vs 8 package bumps → smaller blast radius, easier to revert
+- Resolves the exact CVE pair without dragging in any IdentityModel API surface changes
+- Same major (8.x → 8.x) per MEDIUM tier definition
+- Pattern already established in csproj for `System.Text.RegularExpressions 4.3.1` (line 87)
+
+The full IdentityModel.* family bump (8.15.0 → 8.18.0) remains available as a future enhancement if Microsoft.Identity.Web bump is needed for other reasons; not required for THIS CVE pair.
+
+### Verification
+
+- Build: 0 errors, 17 warnings (matches Phase 3 baseline)
+- Vuln scan: both target HIGH CVEs gone (only REJECTed Kiota HIGH + deferred Moderates remain)
+- Reflection-load probe: unchanged (System.Security.Cryptography.Xml is a transitive dep with same shape)
+
+### Acceptance
+
+- ✅ Target CVE pair resolved
+- ⏭️ Tests skipped per Phase 3 finding (no test signal needed; CVE scan is the relevant verification)
+- ⏭️ 24-48h bake bypassed per dev-env precedent
+
+---
+
+## Tasks 043 + 045 — deferred (Outcome B housekeeping)
+
+**Task 043 (Kiota Abstractions NU1903 HIGH)**: ⏸ deferred per Phase 0 Decision C.1 (2026-05-24) — REJECT per spec §Out of Scope. Patch requires Graph SDK 5.101.0 → 6.x major bump + Kiota 1.21.2 → 2.0 major bump; both forbidden. Treated as accepted risk; LESSONS-LEARNED.md (task 090) will reference the planned "Graph SDK 6.x + Kiota 2.0 upgrade" follow-up project (~3–4 weeks calendar).
+
+**Task 045 (third vuln patch placeholder)**: ⏸ deferred — no third HIGH vulnerability remains in scope. Per CANDIDATES.md, the only other vulns are `OpenMcdf` Moderate ×2 (R-13) and `OpenTelemetry.Api` Moderate (R-14), both below the FR-B1 HIGH threshold and deferred to weekly Dependabot triage.
+
+**Outcome B end state**: 50% of HIGH CVEs in BFF resolved (1 of 2 — the System.Security.Cryptography.Xml pair). The remaining HIGH (Kiota) is accepted risk per Phase 0 Decision C.1 with documented mitigation path.

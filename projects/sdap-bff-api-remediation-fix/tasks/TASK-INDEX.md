@@ -93,18 +93,18 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 043 | Vuln patch: `Microsoft.Kiota.Abstractions` NU1903 HIGH | 🔲 | No (bake) | FULL | 037 |
-| 044 | Vuln patch (count refined post-Phase 1) | 🔲 | No (bake) | FULL | 043 |
-| 045 | Vuln patch (count refined post-Phase 1) | 🔲 | No (bake) | FULL | 044 |
+| 043 | Vuln patch: `Microsoft.Kiota.Abstractions` NU1903 HIGH | ⏸ (deferred — REJECT per Phase 0 Decision C.1; Graph SDK 6.x upgrade follow-up project) | No (bake) | FULL | 037 |
+| 044 | Vuln patch: `System.Security.Cryptography.Xml` 8.0.1 → 8.0.3 (GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf HIGH ×2) | ✅ (csproj transitive override; vuln scan confirms both gone; bake bypassed per dev-env precedent) | No (bake) | FULL | 037 |
+| 045 | Vuln patch (count refined post-Phase 1) | ⏸ (no third vuln remains in scope; OpenMcdf + OpenTelemetry.Api are Moderate — deferred per CANDIDATES.md REJECT R-13/R-14) | No (bake) | FULL | 044 |
 
 **Outcome E parallel track** (independent of A; sequential within itself):
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
 | 046 | Create `Services/Ai/PublicContracts/` facade interfaces (FR-E1) | ✅ | No | FULL | 037 |
-| 047 | Migrate Finance consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |
+| 047 | Migrate Finance consumers (Group F) | ✅ | Yes (Group F) | FULL | 046 |
 | 048 | Migrate Workspace consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |
-| 049 | Migrate Jobs consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |
+| 049 | Migrate Jobs consumers (Group F) | ✅ | Yes (Group F) | FULL | 046 |
 | 050 | Migrate Dataverse + Filters + Endpoints consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |
 | 051 | Relocate 6 AI-coupled job handlers to `Services/Ai/Jobs/` (FR-E3) | 🔲 | No | FULL | 047, 048, 049, 050 |
 

@@ -1,7 +1,7 @@
 <task id="045" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Vuln patch 3 (count + identity refined post-Phase 1)</title>
-    <status>not-started</status>
+    <status>deferred</status>
     <estimated-effort>2 hours active + 24-48h bake</estimated-effort>
     <assigned>AI agent (developer) + owner (per NFR-08 revised)</assigned>
     <tags>bff-api, security, outcome-b, phase-4, deploy</tags>

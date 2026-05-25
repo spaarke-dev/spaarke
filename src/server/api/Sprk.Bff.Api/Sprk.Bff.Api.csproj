@@ -88,6 +88,10 @@
 
     <!-- Security: Override vulnerable transitive dependency -->
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- FR-B1 (task 044): patch System.Security.Cryptography.Xml transitive 8.0.1 -> 8.0.3 to fix
+         GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf (both HIGH). Pulled in transitively via
+         Microsoft.IdentityModel.Tokens (JWT validation stack); same-major bump per Phase 2 MEDIUM-1. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
 
     <!-- Document Generation -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.4.1" />
