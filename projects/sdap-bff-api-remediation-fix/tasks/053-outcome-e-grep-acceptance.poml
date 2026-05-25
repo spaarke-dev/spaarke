@@ -1,7 +1,7 @@
 <task id="053" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Outcome E grep acceptance (FR-E2 revised 2026-05-24 — production-scope only)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>15 minutes</estimated-effort>
     <assigned>AI agent</assigned>
     <tags>bff-api, outcome-e, acceptance, phase-4</tags>

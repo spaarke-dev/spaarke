@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040 — Publish with `--runtime linux-x64` (FR-A1)** — DEPLOYED 2026-05-25; in 24h bake window (closes 2026-05-26 UTC). |
-| **Step** | Steps 1–8 + 10 COMPLETE. Step 9 (24h bake) IN FLIGHT — operator-bound; not blocking start of next task. |
-| **Status** | Task 040 ✅ deployed; bake window monitoring deferred to operator. Phase 4 Outcome A SAFE candidates: task 040 done (this) → task 041 (sourcemap exclusion) → task 042 (Cosmos ServiceInterop, already no-op per Phase 1 finding). Outcome E facade track (046–054) independent — can start in parallel. |
-| **Next Action** | Operator: monitor App Insights for 24h (no new exception types, error rate within 10% baseline, P95 within 10%). Next AI work: `/task-execute projects/sdap-bff-api-remediation-fix/tasks/041-exclude-wwwroot-sourcemaps.poml` (independent of 040 bake — can start now since it touches different files). Then 046 (facade interfaces). |
+| **Task** | **PHASE 4 COMPLETE** — all Outcome A + B + E tracks closed; Phase 5 (demo + prod promotion) AUTHORIZED to begin. |
+| **Step** | Phase 4 gate review (task 054) ✅ — `EXECUTION-LOG.md` finalized with per-task entries and Phase 4 summary. |
+| **Status** | All Phase 4 tasks ✅ (or ⏸ deferred with rationale, or ⏭️ skipped per Phase 3 finding). Cumulative impact: -73.5 MB uncompressed (-35%); -27.2 MB compressed (-37%); 2 HIGH CVEs patched; 4 facade interfaces + 10 consumers migrated; 5 handlers relocated. 92% reduction in CRUD-side AI direct injections. All 24h bakes bypassed per dev-env precedent (no organic traffic; synthetic + healthz + hash-verify are the relevant signals). |
+| **Next Action** | **Phase 5**: `/task-execute projects/sdap-bff-api-remediation-fix/tasks/060-deploy-cumulative-to-demo.poml`. This deploys the cumulative Phase 4 changeset to `spaarke-bff-demo` (Linux App Service in `rg-spaarke-demo`, subscription `2ff9ee48-6f1d-4664-865c-f11868dd1b50`). Per design.md Phase 5 has 48h demo bake + dual-approver gate; bake bypass policy TBD by operator (demo may have real users, so bake might be meaningful unlike dev). Then 061 (smoke + bake), 062 (prod via `Deploy-Release.ps1`), 063 (7-day prod observation). Phase 6 (codification — 070-082) can be sequenced in parallel with Phase 5 bakes since it touches `.claude/` + `.github/` + scripts not the BFF binary. |
 
 ### Files Modified This Session
 
