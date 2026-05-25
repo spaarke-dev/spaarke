@@ -8,6 +8,9 @@
     <RootNamespace>Sprk.Bff.Api</RootNamespace>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <UserSecretsId>cbc576fa-6ea6-485a-bb2a-d96130f21f20</UserSecretsId>
+    <!-- FR-A1: framework-dependent linux-x64 publish (App Service is Linux). Trims multi-platform native RIDs. -->
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
