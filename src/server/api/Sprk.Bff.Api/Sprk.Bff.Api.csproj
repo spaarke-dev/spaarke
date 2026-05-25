@@ -116,4 +116,9 @@
     <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
+  <!-- FR-A2: exclude JS sourcemaps from publish (keep in source tree for dev debugging) -->
+  <ItemGroup>
+    <Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
 </Project>
