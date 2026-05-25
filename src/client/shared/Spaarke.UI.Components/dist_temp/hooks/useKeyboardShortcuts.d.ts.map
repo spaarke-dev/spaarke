@@ -1,1 +1,0 @@
-{"version":3,"file":"useKeyboardShortcuts.d.ts","sourceRoot":"","sources":["../../src/hooks/useKeyboardShortcuts.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,QAAQ,EAAE,eAAe,EAAE,MAAM,uBAAuB,CAAC;AAGlE,MAAM,WAAW,2BAA2B;IAC1C,QAAQ,EAAE,QAAQ,EAAE,CAAC;IACrB,OAAO,EAAE,eAAe,CAAC;IACzB,OAAO,CAAC,EAAE,OAAO,CAAC;CACnB;AAED;;GAEG;AACH,wBAAgB,oBAAoB,CAAC,OAAO,EAAE,2BAA2B,GAAG,IAAI,CA+C/E"}

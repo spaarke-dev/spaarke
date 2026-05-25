@@ -574,7 +574,7 @@ export class WorkAssignmentService {
       cc,
       subject,
       body,
-      bodyFormat: 'Text',
+      bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} (2026-05-25)
       associations: [{ entityType: 'sprk_workassignment', entityId: workAssignmentId, entityName: workAssignmentName }],
     });
   }

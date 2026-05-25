@@ -325,7 +325,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
           to: [emailAddress],
           subject: payload.subject,
           body: payload.body,
-          bodyFormat: 'Text',
+          bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} — 'Text' caused 400 (2026-05-25)
           associations: [{ entityType: 'sprk_document', entityId: documentId }],
         }),
       }
