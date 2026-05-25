@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke" constructor="EmailProcessingMonitor" version="1.1.1" display-name-key="EmailProcessingMonitor" description-key="Admin monitoring control (virtual PCF, platform-library React/Fluent, auth init via useEffect) v1.1.1" control-type="virtual">
+  <control namespace="Spaarke" constructor="EmailProcessingMonitor" version="1.1.2" display-name-key="EmailProcessingMonitor" description-key="Admin monitoring control (virtual PCF, platform-library React/Fluent, auth init via useEffect, env-var URL resolution) v1.1.2" control-type="virtual">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
 
-    <!-- BFF API URL -->
-    <property name="bffApiUrl" display-name-key="BFF API URL" description-key="URL of the BFF API" of-type="SingleLine.Text" usage="input" required="true" default-value="https://spe-api-dev-67e2xz.azurewebsites.net" />
+    <!-- bffApiUrl property removed in v1.1.2 (task 024 / EmailProcessingMonitor pass).
+         The PCF now resolves the BFF base URL from the Dataverse environment variable
+         sprk_BffApiBaseUrl at init time (via getApiBaseUrl in pcf/shared/utils/environmentVariables.ts).
+         Single source of truth across all Spaarke clients. -->
 
     <!-- Azure AD App Registration IDs -->
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD Tenant ID" of-type="SingleLine.Text" usage="input" required="true" />

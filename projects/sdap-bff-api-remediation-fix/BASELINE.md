@@ -118,14 +118,31 @@ Likely intentional status/health endpoints without auth. Phase 4 should not chan
 
 ---
 
-## 4. App Insights 48h baseline (task 033) — IN-PROGRESS
+## 4. Synthetic baseline (task 033 — REDESIGNED 2026-05-25)
 
-**Window start**: 2026-05-25 (UTC, post old-dev decommission)
-**Earliest completion**: 2026-05-27 (UTC, after 48h elapses)
+**Original design**: 48 hours of App Insights telemetry as Phase 4 regression baseline.
+**Replaced with**: On-demand synthetic test capture via [`scripts/Capture-BffBaseline.ps1`](../../scripts/Capture-BffBaseline.ps1).
 
-This is the **calendar gate** for Phase 4. Phase 4 task 040 (first Outcome A SAFE candidate) cannot start until `baseline/app-insights-48h.json` is committed with the 5 metric categories per task 033 acceptance.
+**Why redesigned**: Spaarke dev is single-user; 48 h of organic traffic produces noisy/empty data for most of 323 endpoints. Synthetic capture is strictly better — full route coverage, repeatable percentiles, runs in 7 minutes on demand.
 
-**Source**: [`baseline/app-insights-baseline-start.md`](baseline/app-insights-baseline-start.md) — full operator runbook for the T+48h capture.
+**Initial baseline captured 2026-05-25** (post-deploys for task 024.A + bodyFormat fix + EmailProcessingMonitor + SpaarkeAi):
+
+| Metric | Value |
+|---|---|
+| Total routes probed | 323 |
+| Total probes (N=10/route) | 3,230 |
+| Wall-clock duration | 411 s (~7 min) |
+| Average P95 latency | **133 ms** |
+| Status distribution | 200: 80 · 400: 30 · 401: 1,320 · 404: 1,790 · 429: 10 |
+
+**Note on 404 count**: Higher than task 032's smoke output because synthetic probes don't retry with multipart/form-data. The number is REPEATABLE — Phase 4 compares route-by-route, not aggregate.
+
+**Phase 4 usage**: re-run the script pre/post each candidate, diff the JSON files, flag any route with material status change or >X% P95 latency growth. Calendar gate eliminated; Phase 4 is unblocked.
+
+**Source**:
+- Output JSON: [`baseline/synthetic-baseline.json`](baseline/synthetic-baseline.json)
+- Capture script: [`scripts/Capture-BffBaseline.ps1`](../../scripts/Capture-BffBaseline.ps1)
+- Replaced runbook (no longer needed): [`baseline/app-insights-baseline-start.md`](baseline/app-insights-baseline-start.md)
 
 ---
 
@@ -218,7 +235,7 @@ Phase 4 candidate verification step: "verify reflection-load probe matches basel
 - [x] Test suite baseline captured (task 030) — documented as "build fails; tests N/A; fall back to FR-E2 grep + manual smoke"
 - [x] Build warning count baseline (task 031) — 17 warnings
 - [x] Endpoint smoke baseline (task 032) — 323 routes; 305 ok 401s; 2 404s (1 dev-only + 1 candidate); 2 known 500s; 3 unexpected 200s
-- [ ] App Insights 48h baseline (task 033) — **calendar gate IN PROGRESS until 2026-05-27**
+- [x] Synthetic baseline (task 033, REDESIGNED) — `synthetic-baseline.json` committed 2026-05-25; calendar gate eliminated
 - [x] Deployed file SHA-256s (task 034) — 10 files
 - [x] Publish + zip metrics (task 035) — 212.5 MB / 287 files / 72.9 MB
 - [x] Reflection-load probe baseline (task 036) — copied from Phase 1

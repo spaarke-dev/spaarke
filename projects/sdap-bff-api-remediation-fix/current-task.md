@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-05-25 (task 024.A SpeDocumentViewer done + bodyFormat 'Text'→'PlainText' fix across LegalWorkspace+SemanticSearchControl + UAMI Mail.Send grant + Exchange policy)
+> **Last Updated**: 2026-05-25 (Phase 3 UNBLOCKED: synthetic baseline replaces 48h gate; EmailProcessingMonitor + SpaarkeAi deployed; 5 more Graph roles granted; 17 stale URLs cleaned)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | task 024 (URL source-of-truth refactor) — IN PROGRESS. Sub-step A (SpeDocumentViewer) ✅ DONE this session. Sub-steps B/C/D pending. |
-| **Step** | 024.A complete (2026-05-25). User verified Document + SPE preview works on dev with v1.0.27. Multiple other BFF calls also smoke-tested as working. Solution zip artifact: `src/client/pcf/SpeDocumentViewer/solution/bin/SpaarkeSpeDocumentViewer_v1.0.27.zip` |
-| **Status** | **Phase 4 still BLOCKED on two gates** (48h App Insights window 2026-05-27 + G4 facade adoption agreement). Task 024 remains in flight (sub-steps B/C/D), but does NOT block Phase 4 — it's parallel-track cleanup work surfaced during Phase 3 baseline. |
-| **Next Action** | (1) Phase 3 gate watch: 48h App Insights window closes 2026-05-27 UTC — capture metrics per `baseline/app-insights-baseline-start.md`, then unblock Phase 4. (2) Task 024.B: audit + refactor remaining PCFs (EmailProcessingMonitor, UniversalQuickCreate, UniversalDatasetGrid, SemanticSearchControl, RelatedDocumentCount, DocumentRelationshipViewer, AssociationResolver, ScopeConfigEditor) per the same pattern used for SpeDocumentViewer. (3) Task 024.C: audit Code Pages. (4) Task 024.D: update build-time `.env.development` files. (5) Task 024 final acceptance grep + commit. |
+| **Task** | task 024 (URL source-of-truth refactor) — substantially complete. All known broken surfaces fixed + deployed. Office Add-ins source patched, build deferred. |
+| **Step** | Sweep done this session: 3 parallel audits (PCFs / Code Pages / Auth-r2 Graph roles) → 3 PCF deploys (SpeDocumentViewer 1.0.27, SemanticSearchControl 1.1.43, EmailProcessingMonitor 1.1.2) + 2 Code Page deploys (LegalWorkspace SPA, SpaarkeAi SPA) + 6 UAMI Graph role grants + Exchange ApplicationAccessPolicy + 17 stale-URL source files cleaned + synthetic baseline (replaces 48h calendar gate). |
+| **Status** | **Phase 4 UNBLOCKED.** Task 033 redesigned: 48h calendar gate replaced by `scripts/Capture-BffBaseline.ps1` (on-demand synthetic test → `baseline/synthetic-baseline.json`). Phase 4 task 040 can start once operator confirms G4 facade adoption agreement with Insights Engine owner (last residual). |
+| **Next Action** | (1) Operator: confirm G4 facade adoption agreement (UQ-04 residual) before Phase 4 task 046. (2) Start Phase 4 via `/task-execute projects/sdap-bff-api-remediation-fix/tasks/040-publish-linux-x64.poml`. (3) Optional followups: CopilotAgent rebuild + Teams Admin Center upload; Office Add-ins rebuild + deploy via SWA when next exercised; Auth-r2 `Mail.ReadWrite` grant + dead-grant cleanup on BFF app reg. |
 
 ### Files Modified This Session
 
@@ -126,7 +126,16 @@ Resume with `/task-execute projects/sdap-bff-api-remediation-fix/tasks/040-publi
   1. **Mail.Send (Application) granted to UAMI** via `az rest POST /v1.0/servicePrincipals/{uami-objId}/appRoleAssignments` (role id `b633e1c5-b582-4048-a93e-9f11b44c7e96`, Graph SP objId `ba630d35-...`). Grant returned 200 + verified via re-query. Done by Claude.
   2. **Exchange ApplicationAccessPolicy** created by operator via EXO PowerShell `New-ApplicationAccessPolicy -AppId 5967251e-... -PolicyScopeGroupId spaarke-central-email@spaarke.com -AccessRight RestrictAccess`. ScopeIdentity = "Spaarke Email Access20260310215505". `Test-ApplicationAccessPolicy` returned `Granted` for both `mailbox-central@spaarke.com` and `demo@demo.spaarke.com`.
   3. Awaiting Exchange propagation (up to 30 min) before live Graph calls honor the policy. User retest pending.
-  **Identified Auth-r2 gap (broader scope)**: UAMI `mi-bff-api-dev` is missing all Graph application permissions that the BFF API app reg has (Mail.Send was the first to surface). A complete Auth-r2 follow-on should grant the full role parity (Mail.Read for inbound polling, MailboxSettings.Read, etc.) to UAMI + create Exchange policies as needed. Out of scope for task 024; should be tracked as a separate Auth-r2 cleanup project.
+
+- **2026-05-25** (final sweep: parallel audits + automated baseline + 5 more Graph grants + 2 more deploys): User directive: "do all open items in parallel where possible" + "is the 48h gate even meaningful for dev?". Three parallel audit agents dispatched (PCF / Code Page / Auth-r2 Graph role parity). Main session built `scripts/Capture-BffBaseline.ps1` — replaces 48h calendar gate with on-demand synthetic test (3,230 probes across 323 routes in 7 min; output `baseline/synthetic-baseline.json`). Captures status distribution + P50/P95/P99 latency per route. **Phase 4 task 033 redesigned + marked ✅; calendar gate eliminated.**
+
+  Audit-A (PCFs): only EmailProcessingMonitor needed fix → refactored same as SpeDocumentViewer, bumped 1.1.1 → 1.1.2 in 5 manifest locations, npm install + ajv@8 dep added (build issue), `npm run build:prod` (403 KB), packed + imported v1.1.2 to SPAARKE DEV 1 via `pac solution import`. Done.
+
+  Audit-B (Code Pages + solutions + scripts + .env.dev): critical fixes for SpaarkeAi (main.tsx hardcoded fallback) + CopilotAgent (manifest valid-domains + env.dev.json + openapi.yaml) + Office Add-ins (4 source files) + 3 deploy scripts + 7 .env.development files. All 17 files cleaned via `sed -i.bak 's/spe-api-dev-67e2xz/spaarke-bff-dev/g'`. SpaarkeAi rebuilt (`vite build`) + redeployed via `Deploy-SpaarkeAi.ps1` (3360 KB). CopilotAgent + Office Add-ins source patched; rebuild+deploy deferred to next session (require operator Teams Admin Center upload / SWA env vars respectively).
+
+  Audit-C (Auth-r2 Graph role parity): UAMI was missing 5 Graph roles vs BFF app reg (`FileStorageContainer.Selected`, `Mail.Read`, `FileStorageContainerTypeReg.Selected`, `User.ReadWrite.All`, `Group.ReadWrite.All`). All 5 granted in parallel via `az rest POST /v1.0/servicePrincipals/{uami-objId}/appRoleAssignments`. **3 dead grants flagged for cleanup on BFF app reg** (`Files.ReadWrite.All`, `Directory.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All` — last is security-sensitive). **1 pre-existing bug surfaced**: `Mail.ReadWrite` needed by `IncomingCommunicationProcessor.cs:680-682` (MarkAsRead PATCH) but missing on BOTH BFF app reg AND UAMI — separate Auth-r2 followup.
+
+  Deferred to followup project (Auth-r2 cleanup): grant `Mail.ReadWrite`, remove 3 dead grants from BFF app reg, verify SPE container-type permission grants UAMI clientId.
 
 ---
 

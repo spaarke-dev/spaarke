@@ -163,7 +163,7 @@ export default defineConfig({
       // When VITE_BFF_API_URL is empty, bffApiCall uses relative /api/... paths
       // which hit this proxy. Vite forwards server-to-server — no CORS needed.
       "/api": {
-        target: "https://spe-api-dev-67e2xz.azurewebsites.net",
+        target: "https://spaarke-bff-dev.azurewebsites.net",
         changeOrigin: true,
         secure: true,
       },

@@ -14,14 +14,16 @@
     "refreshTypes": "pcf-scripts refreshTypes"
   },
   "dependencies": {
-    "@azure/msal-browser": "^4.26.2"
+    "@azure/msal-browser": "^4.26.2",
+    "ajv": "^8.20.0",
+    "ajv-keywords": "^5.1.0"
   },
   "devDependencies": {
-    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
-    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@eslint/js": "^9.25.1",
     "@fluentui/react-components": "^9.56.0",
     "@microsoft/eslint-plugin-power-apps": "^0.2.51",
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
     "@types/node": "^18.19.86",
     "@types/powerapps-component-framework": "^1.3.16",
     "@types/react": "^16.14.0",

@@ -84,7 +84,7 @@ $CpmProps     = Join-Path $RepoRoot "Directory.Packages.props"
 $SolutionName     = "SpaarkeLegalWorkspace"
 $CustomPageName   = "sprk_LegalOperationsWorkspace"
 $ControlName      = "sprk_Spaarke.Controls.LegalWorkspace"
-$BffBaseUrl       = "https://spe-api-dev-67e2xz.azurewebsites.net"
+$BffBaseUrl       = "https://spaarke-bff-dev.azurewebsites.net"
 
 # ---- Banner ------------------------------------------------------------------
 
