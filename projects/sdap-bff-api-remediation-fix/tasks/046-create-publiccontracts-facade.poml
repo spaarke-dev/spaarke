@@ -1,7 +1,7 @@
 <task id="046" project="sdap-bff-api-remediation-fix">
   <metadata>
     <title>Create `Services/Ai/PublicContracts/` facade interfaces (FR-E1)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 day</estimated-effort>
     <assigned>AI agent (developer)</assigned>
     <tags>bff-api, ai-boundary, facade, outcome-e, phase-4</tags>

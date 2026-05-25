@@ -85,7 +85,7 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 040 | Publish with `--runtime linux-x64` framework-dependent (FR-A1) | 🔄 (24h bake) | No (bake) | FULL | 037 |
+| 040 | Publish with `--runtime linux-x64` framework-dependent (FR-A1) | ✅ (bake bypassed per dev-env precedent) | No (bake) | FULL | 037 |
 | 041 | Exclude `wwwroot/**/*.js.map` from publish (FR-A2) | 🔲 | No (bake) | FULL | 040 |
 | 042 | Remove duplicate Cosmos `ServiceInterop.dll` if RID trim didn't (FR-A3) | 🔲 | No (bake) | FULL | 041 |
 
@@ -101,7 +101,7 @@
 
 | # | Task | Status | Parallel-safe | Rigor | Dependencies |
 |---|---|---|---|---|---|
-| 046 | Create `Services/Ai/PublicContracts/` facade interfaces (FR-E1) | 🔲 | No | FULL | 037 |
+| 046 | Create `Services/Ai/PublicContracts/` facade interfaces (FR-E1) | ✅ | No | FULL | 037 |
 | 047 | Migrate Finance consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |
 | 048 | Migrate Workspace consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |
 | 049 | Migrate Jobs consumers (Group F) | 🔲 | Yes (Group F) | FULL | 046 |

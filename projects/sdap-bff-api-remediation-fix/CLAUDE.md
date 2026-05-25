@@ -191,6 +191,19 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 - **2026-05-24**: **`feature/production-environment-setup-r2` branch abandoned (housekeeping).** Encountered the branch during master-sync audit (1 stranded commit from 2026-04-24: docs consolidation of ENVIRONMENT-DEPLOYMENT-GUIDE + PRODUCTION-DEPLOYMENT-GUIDE → SPAARKE-DEPLOYMENT-GUIDE). Project itself was completed 2026-03-20; this was a post-completion docs cleanup that was never finished. Test merge revealed 4 conflicts including 2 modify/delete on the source guides (master updated them in past 4 weeks via R2 docs refactoring + auth-doc-drift). Effort to integrate: ~70 min of careful porting. Decision: abandon (delete branch + worktree). If consolidation still wanted, redo fresh against current master state. Not blocking this BFF project (docs-only). Remote branch deleted; worktree tracking pruned 2026-05-24.
 
+- **2026-05-25** (task 046 — Phase 4 Outcome E facade introduced): `Services/Ai/PublicContracts/` facade created with **4 small focused interfaces** per UQ-07 default. Zero consumer migration in this commit (tasks 047–050 will migrate). Build verified passing (0 errors, 17 warnings — matches Phase 3 baseline exactly). Consumer-grep count unchanged (148 occurrences in original consumer files; +14 in new `PublicContracts/` dir which is facade-internal not consumer). Final interface list + methods:
+
+  | Interface | Methods (wrapped internal type) | Current/anticipated consumers (Phase 1 inventory) |
+  |---|---|---|
+  | `IBriefingAi` | `GenerateNarrativeAsync(prompt, ct)` → `IOpenAiClient.GetCompletionAsync` | `Services/Workspace/BriefingService.cs`, `Api/Workspace/WorkspaceMatterEndpoints.cs` (matter-summary SSE) |
+  | `IInvoiceAi` | `GetPlaybookByNameAsync(name, ct)` → `IPlaybookService.GetByNameAsync`; `GetStructuredCompletionAsync<T>(messages, schema, schemaName, deployment, ct)` → `IOpenAiClient.GetStructuredCompletionAsync<T>`; `GenerateEmbeddingAsync(text, model, dims, ct)` → `IOpenAiClient.GenerateEmbeddingAsync` | `Services/Finance/InvoiceAnalysisService.cs`, `Services/Finance/InvoiceSearchService.cs`, `Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs` |
+  | `IWorkspacePrefillAi` | `ExecutePreFillPlaybookAsync(request, httpContext, ct)` → `IPlaybookOrchestrationService.ExecuteAsync` | `Services/Workspace/MatterPreFillService.cs` (already uses orchestration, not raw `IOpenAiClient` — facade preserves the existing internal type) |
+  | `IRecordMatchingAi` | `SearchAsync(request, ct)` → `IRecordSearchService.SearchAsync` | No CRUD-external consumer today; scaffolded ahead of future migration so the FR-C6 CI guard (task 082) has the canonical target to enforce |
+
+  **DI registrations** (+4 scoped, matches expected Outcome E delta from plan.md): added in new `AddPublicContractsFacade(services)` method inside [`Infrastructure/DI/AnalysisServicesModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs), gated by the same `documentIntelligenceEnabled && analysisEnabled` flags as the wrapped internal types. Scoped lifetime uniformly (constrained by `IPlaybookService` typed HttpClient + scoped `IPlaybookOrchestrationService`). No existing registrations removed.
+
+  **Placement Justification per `.claude/constraints/bff-extensions.md`**: (a) Belongs IN-BFF — facade is purely internal-to-BFF type indirection, no boundary change. (b) Cited ADRs: ADR-007 (canonical facade pattern), ADR-010 (DI minimalism — +4 within +4/+8 expected delta), ADR-013 refined (FR-E1 requirement). (c) Zero publish-size impact — pure C# code, no new packages. (d) No new direct CRUD→AI dependency added (the whole point of the task). (e) Feature-module DI via dedicated `AddPublicContractsFacade` method, not flat `Program.cs` registrations.
+
 ---
 
 ### Phase 1 Inventory Findings (tasks 010–018 — completed 2026-05-24)
