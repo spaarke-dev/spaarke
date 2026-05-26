@@ -121,7 +121,7 @@ All four "BFF" answers → BFF. Three or four "Separate" answers + concrete just
 | [ADR-014](ADR-014-ai-caching.md) | AI-specific caching |
 | [ADR-015](ADR-015-ai-data-governance.md) | Data governance |
 | [ADR-016](ADR-016-ai-rate-limits.md) | Rate limits |
-| ADR-029 (forthcoming, BFF publish hygiene) | Codifies publish-debt prevention; does NOT bind extraction policy — that's this ADR |
+| [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF publish hygiene — codifies publish-debt prevention (linux-x64 framework-dependent, sourcemap exclusion, transitive CVE override pattern, size baseline). Does NOT bind extraction policy — that's this ADR. |
 
 ---
 

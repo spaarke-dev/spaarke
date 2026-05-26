@@ -199,7 +199,7 @@ An explicit transitive override patches CVEs (GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m
 
 - [`.claude/constraints/azure-deployment.md`](../../.claude/constraints/azure-deployment.md) — binding rules for BFF publishing (publish location, baseline size, stdout logging)
 - [`projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md`](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) Phase 4 Outcome A — full evidence (smoke probes, deploy logs, reflection-load delta)
-- ADR-029 (forthcoming) — BFF Publish Hygiene
+- [ADR-029](../adr/ADR-029-bff-publish-hygiene.md) — BFF Publish Hygiene (Accepted 2026-05-26)
 
 ---
 
