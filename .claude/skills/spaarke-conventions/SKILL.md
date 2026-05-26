@@ -1,6 +1,6 @@
 ---
 description: Apply Spaarke coding standards from CLAUDE.md - naming, structure, file organization, and technology patterns
-tags: [conventions, standards, naming, code-style, patterns]
+tags: [conventions, standards, naming, code-style, patterns, fluent-ui, fluent-v9]
 techStack: [csharp, typescript, aspnet-core, react]
 appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx"]
 alwaysApply: true
@@ -21,7 +21,9 @@ Enforces Spaarke-specific coding conventions when generating or reviewing code. 
 
 ## Always-Apply Rules
 
-These conventions apply automatically to ALL code generation and review:
+These conventions apply automatically to ALL code generation and review.
+
+> **For Fluent UI v9 work specifically** (any `.tsx` under `Spaarke.UI.Components/`, `code-pages/`, `external-spa/`, `office-addins/`, or `pcf/**/components/`): also invoke `fluent-v9-component` skill — it loads the curated patterns (component authoring / theming / portal-gotcha / React-version boundaries) that complement these naming + structure rules.
 
 ### File Naming
 
