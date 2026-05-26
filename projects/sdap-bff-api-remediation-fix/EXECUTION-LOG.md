@@ -748,6 +748,30 @@ Then register a Plugin Step on the relevant entity (Email or sprk_communication)
 
 If push-notification webhooks from Microsoft Graph are desired (faster than the 5-min polling backup), the BFF's `GraphSubscriptionService` provisions them at runtime. No additional operator step required; this happens when the BFF first invokes the subscription creation flow.
 
+#### Part A executed 2026-05-25 by operator — VERIFIED Granted
+
+Both policies created successfully:
+
+| Policy | AppId | ScopeIdentity |
+|---|---|---|
+| Demo BFF app reg | `da03fe1a-4b1d-4297-a4ce-4b83cae498a9` | `Spaarke Email Access20260310215505` (existing group, reused from dev policies) |
+| Demo MI UAMI | `b0ce4ca4-5360-4605-a0ef-d918140e77da` | same |
+
+`Test-ApplicationAccessPolicy` verification (4 of 4 returned `AccessCheckResult: Granted`):
+
+| Mailbox | AppId | Result |
+|---|---|---|
+| `testuser1@spaarke.com` | demo MI `b0ce4ca4-...` | ✅ Granted |
+| `testuser1@spaarke.com` | demo BFF app reg `da03fe1a-...` | ✅ Granted |
+| `ralph.schroeder@spaarke.com` | demo MI `b0ce4ca4-...` | ✅ Granted |
+| `ralph.schroeder@spaarke.com` | demo BFF app reg `da03fe1a-...` | ✅ Granted |
+
+Mailbox object IDs:
+- testuser1: `bcde7809-9b31-4744-933c-766a600199f6`
+- ralph.schroeder: `c74ac1af-ff3b-46fb-83e7-3063616e959c`
+
+**Note**: Microsoft documents up to 30 min between `New-ApplicationAccessPolicy` succeeding and live Graph mailbox calls respecting it. `Test-ApplicationAccessPolicy` returns instantly; first BFF Mail.Send / Mail.Read may take ~15-30 min before working end-to-end.
+
 #### End-state when operator completes Parts A + B
 
 - `/api/communications/send` will succeed for `testuser1@spaarke.com` and `ralph.schroeder@spaarke.com` (provided either is the from-mailbox)
