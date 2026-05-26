@@ -186,8 +186,12 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 | App Registration (DV) | 120 | `Spaarke Dataverse S2S - {Env}` | `Spaarke Dataverse S2S - Demo` | `Spaarke Dataverse S2S - Production` |
 | App Registration (UI) | 120 | `Spaarke UI - {Env}` | `Spaarke UI - Demo` | `Spaarke UI - Production` |
 | API Scope URI | N/A | `api://{appId}/user_impersonation` | Use Application ID GUID | Use Application ID GUID |
+| Managed Identity (User-Assigned) | 128 | `mi-{purpose}-{env}` | `mi-bff-api-demo` | `mi-bff-api-prod` |
+| Cosmos DB account (Serverless, SQL API) | 44 | `spaarke-cosmos-{purpose}-{env}` | `spaarke-cosmos-demo-ai` | `spaarke-cosmos-prod-ai` |
 
 **API Scope URI**: Always use the Application ID GUID, not a friendly name. This avoids coupling scope URIs to human-readable names.
+
+**Managed Identity + Cosmos DB**: User-Assigned Managed Identities (UAMI) follow `mi-{purpose}-{env}` (e.g., `mi-bff-api-dev`, `mi-bff-api-demo`). Cosmos DB accounts use Serverless + SQL API; the database is named `spaarke-ai` with 5 containers (`sessions`, `prompts`, `audit`, `memory`, `feedback`) partitioned on `/tenantId`. See [`projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md`](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) Phase 5 task 060 (demo prep) for the canonical step-by-step provisioning of a new environment, including Graph app-role grants, Cosmos data-plane RBAC, and the full App Settings configuration block.
 
 ---
 

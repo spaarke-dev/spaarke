@@ -82,8 +82,9 @@ The `Sprk.Bff.Api` deploy package grew from ~65 MB to 75.19 MB (compressed) and 
 - **FR-C1**: CI step in `.github/workflows/sdap-ci.yml` that runs `dotnet publish --runtime linux-x64` and fails if non-Linux native runtimes are present in output. **Acceptance**: workflow step exists, has test that fails when a `win-x64/` folder is intentionally injected.
 - **FR-C2**: CI step that fails if any `*.js.map` files exist in `publish/wwwroot/`. **Acceptance**: workflow step exists, validated by test injection.
 - **FR-C3**: CI step that runs `dotnet list package --vulnerable --include-transitive` and fails on HIGH-severity findings. **Acceptance**: workflow fails on HIGH; passes on MEDIUM/LOW; reports counts.
-- **FR-C4**: PR labels `[allow-size-growth]` and `[allow-vuln]` provide explicit-acknowledgment escape hatches for FR-C1/C2/C3 + FR-C5. PR body MUST contain justification when label used. **Acceptance**: workflow honors labels; PR template includes justification field.
+- **FR-C4**: PR labels `[allow-size-growth]`, `[allow-vuln]`, and `[allow-direct-ai-inject]` provide explicit-acknowledgment escape hatches for FR-C1/C2/C3/C5/C6. PR body MUST contain justification when label used. **Acceptance**: workflow honors labels; PR template includes justification field.
 - **FR-C5**: `Deploy-BffApi.ps1` hard-fails (not warn-only) if publish zip exceeds documented ceiling (default: baseline + 10%) unless `-AllowOversize` flag is passed. **Acceptance**: script exits non-zero on oversize without flag; passes with flag.
+- **FR-C6**: CI step in `.github/workflows/sdap-ci.yml` fails any PR that introduces direct injection of AI-internal types (`IOpenAiClient`, `IPlaybookService`, plus the facade-internal services `IBriefingService`, `IInvoiceService`, `IRecordMatchingService`, `IWorkspacePrefillService`) anywhere in `src/server/api/Sprk.Bff.Api/` outside the `Services/Ai/` namespace. Mechanism: literal grep with `--exclude-dir=Services/Ai`. **Acceptance**: workflow step exists; synthetic-PR injection (e.g., `IOpenAiClient` in a Finance file) fails CI; `[allow-direct-ai-inject]` label + body justification permits override. This converts Outcome E from a one-time refactor into a permanent architectural boundary; without it, the facade decays as new code drifts back to direct injection.
 
 #### Outcome D — Codified Prevention
 
@@ -99,8 +100,8 @@ The `Sprk.Bff.Api` deploy package grew from ~65 MB to 75.19 MB (compressed) and 
 #### Outcome E — Internal AI Hygiene
 
 - **FR-E1**: Create `Services/Ai/PublicContracts/` namespace with focused facade interfaces (small interfaces grouped by consumer concern per design §11 Q7 default: e.g., `IBriefingAi`, `IInvoiceAi`, `IRecordMatchingAi`, `IWorkspacePrefillAi`). **Acceptance**: namespace exists with at least one interface per current consumer (Finance, Workspace, Jobs handlers, Dataverse, Filters); implementation classes wire to existing `IOpenAiClient`/`IPlaybookService` internally.
-- **FR-E2**: Migrate all 20 inbound CRUD→AI direct dependencies to consume facade interfaces instead of `IOpenAiClient`, `IPlaybookService`, or other AI-internal types directly. **Acceptance**: `grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/Services/{Finance,Workspace,Jobs,Dataverse}/` returns zero matches outside of `Services/Ai/`; `grep -r "Sprk.Bff.Api.Services.Ai\." src/server/api/Sprk.Bff.Api/Services/{Finance,Workspace,Dataverse}/` returns only `PublicContracts` references.
-- **FR-E3**: Relocate 6 AI-coupled job handlers from `Services/Jobs/Handlers/` to `Services/Ai/Jobs/`: `AppOnlyDocumentAnalysisJobHandler`, `EmailAnalysisJobHandler`, `AttachmentClassificationJobHandler`, `RagIndexingJobHandler`, `InvoiceExtractionJobHandler`, `ProfileSummaryJobHandler`. JobType string registration unchanged (dispatch by string). **Acceptance**: files at new paths; old paths absent; `JobProcessingModule` registration succeeds; integration tests pass.
+- **FR-E2**: Migrate all inbound CRUD→AI direct dependencies (preliminary count "20" from initial design; **actual count and per-folder distribution defer to Phase 1 inventory output per PF-3**) to consume facade interfaces instead of `IOpenAiClient`, `IPlaybookService`, or other AI-internal types directly. **Acceptance (production-scope only)**: `grep -rn "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/ --include='*.cs' --exclude-dir=Services/Ai --exclude-dir=bin --exclude-dir=obj` returns zero matches. **Test code is explicitly out of scope** (tests legitimately mock AI internals; `tests/unit/Sprk.Bff.Api.Tests/` is excluded). **DI registration modules are special-cased**: `Infrastructure/DI/AiModule.cs` may still reference AI internals — that's where the facade is wired to its underlying implementations; the boundary IS those modules.
+- **FR-E3**: Relocate AI-coupled job handlers from `Services/Jobs/Handlers/` to `Services/Ai/Jobs/`. **Authoritative handler list defers to Phase 1 inventory (task 015 reflection probe + task 014 static usage map; Phase 0 task 007 confirms scope) per the "AI-coupled rule"**: a handler is AI-coupled if its compiled assembly references the `Sprk.Bff.Api.Services.Ai.*` namespace AND it is not CRUD-coupled (does not require `Spaarke.Dataverse` / `Microsoft.Xrm.Sdk`). Preliminary list from initial design (6 handlers: AppOnlyDocumentAnalysisJobHandler, EmailAnalysisJobHandler, AttachmentClassificationJobHandler, RagIndexingJobHandler, InvoiceExtractionJobHandler, ProfileSummaryJobHandler) is non-binding — senior review 2026-05-24 surfaced that 2 of these may be CRUD-coupled and 3 others (BulkRagIndexing, DocumentProcessing, InvoiceIndexing) may belong in the list. Phase 1 inventory is the source of truth. JobType string registration unchanged (dispatch by string). **Acceptance**: files at new paths per inventory-derived list; old paths absent for those moved; `JobProcessingModule` registration succeeds; integration tests pass.
 - **FR-E4**: All existing tests pass with no behavior change. **Acceptance**: `dotnet test tests/unit/Sprk.Bff.Api.Tests/` pass count + duration within ±5% of Phase 3 baseline.
 - **FR-E5**: Refined ADR-013 (2026-05-20) referenced from `src/server/api/Sprk.Bff.Api/CLAUDE.md` AI Boundary section; facade pattern documented with code example. **Acceptance**: section exists with `[ADR-013]` link and an example showing wrong-vs-correct injection.
 
@@ -112,8 +113,8 @@ The `Sprk.Bff.Api` deploy package grew from ~65 MB to 75.19 MB (compressed) and 
 - **NFR-04**: Each Phase 4 candidate: error rate within 10% of baseline. **Verify**: App Insights metrics query.
 - **NFR-05**: Each Phase 4 candidate: dependency call success rate (Graph, Dataverse, Service Bus, Cosmos, Redis) unchanged. **Verify**: App Insights dependency telemetry.
 - **NFR-06**: Rollback executable via `git revert` + `Deploy-BffApi.ps1` within 10 minutes of decision (decision may take the full bake window if regression is gradual). **Verify**: rehearsal in Phase 0 if process is unfamiliar.
-- **NFR-07**: All Phase 1–4 work targets dev (`spe-api-dev-67e2xz`) only. Demo/prod touch only in Phase 5 with explicit owner + ops authorization. **Verify**: deploy logs show no demo/prod hits in Phase 1–4 commits.
-- **NFR-08**: Dual approval required for MEDIUM/HIGH tier candidates (Phase 4) and all promotions to prod (Phase 5). **Verify**: PR/promotion notes record both approvers.
+- **NFR-07**: All Phase 1–4 work targets dev (`spe-api-dev-67e2xz`) only. Demo/prod touch only in Phase 5 with explicit owner authorization (+ ops authorization for prod). **Verify**: deploy logs show no demo/prod hits in Phase 1–4 commits.
+- **NFR-08** (revised 2026-05-24): **Owner sign-off + AI-directed verification model.** MEDIUM/HIGH tier candidates (Phase 4) and Phase 5 promotions require: (a) owner approval, (b) successful AI-directed verification via `task-execute` skill's mandatory `adr-check` + `code-review` gates at Step 9.5 (FULL rigor), (c) passing CI guards (FR-C1–C6). The "dual approver" enterprise pattern is explicitly NOT used — verification rigor comes from AI-directed checks layered with owner judgment, not from a second human reviewer. **Verify**: PR/promotion notes record owner ACK + adr-check pass + code-review pass + CI green.
 - **NFR-09**: Build warning count must NOT exceed Phase 3 baseline for any Phase 4 change. (csproj sets `TreatWarningsAsErrors=false`; tightening is a separate project — this NFR just guards against regression.) **Verify**: `dotnet build` warning count comparison.
 - **NFR-10**: Reflection-load probe (Phase 1 deliverable) results match between baseline and post-change for any MEDIUM/HIGH candidate. **Verify**: assembly list diff.
 - **NFR-11**: No `<PublishTrimmed>`, `<PublishAot>`, .NET version bump, Graph SDK / Kiota version change, or pre-release package version change in any Phase 4 commit. **Verify**: csproj diff review during code review.
@@ -199,11 +200,12 @@ The `Sprk.Bff.Api` deploy package grew from ~65 MB to 75.19 MB (compressed) and 
 ### Outcome E — Internal AI Hygiene
 
 - [ ] **SC-22**: `Services/Ai/PublicContracts/` facade namespace created. **Verify**: directory + at least 4 interfaces present.
-- [ ] **SC-23**: All 20 inbound CRUD→AI direct dependencies migrated. **Verify**: grep returns zero direct `IOpenAiClient`/`IPlaybookService` injections outside `Services/Ai/`.
-- [ ] **SC-24**: 6 AI-coupled job handlers relocated to `Services/Ai/Jobs/`. **Verify**: directory listing + JobType dispatch tests.
-- [ ] **SC-25**: All tests pass; no behavioral regression. **Verify**: `dotnet test` pass count + duration matches baseline.
+- [ ] **SC-23**: All inbound CRUD→AI direct dependencies (per Phase 1 inventory) migrated to facade. **Verify**: production-scope grep (per FR-E2 acceptance) returns zero outside `Services/Ai/` and `Infrastructure/DI/`.
+- [ ] **SC-24**: AI-coupled job handlers (per Phase 1 inventory + AI-coupled rule) relocated to `Services/Ai/Jobs/`. **Verify**: directory listing + JobType dispatch tests.
+- [ ] **SC-25**: All tests pass; no behavioral regression. **Verify**: `dotnet test` pass count + duration matches baseline ±5%.
 - [ ] **SC-26**: `src/server/api/Sprk.Bff.Api/CLAUDE.md` documents facade pattern + ADR-013 boundary. **Verify**: sections present.
 - [ ] **SC-27**: Refined ADR-013 referenced from BFF CLAUDE.md and `.claude/constraints/bff-extensions.md`. **Verify**: links present.
+- [ ] **SC-28**: FR-C6 CI gate live; synthetic-PR injection of `IOpenAiClient` in a CRUD file fails CI. **Verify**: `.github/workflows/sdap-ci.yml` contains the gate; test-injection PR fails as expected; `[allow-direct-ai-inject]` label + justification permits override.
 
 ---
 
@@ -212,9 +214,9 @@ The `Sprk.Bff.Api` deploy package grew from ~65 MB to 75.19 MB (compressed) and 
 ### Prerequisites
 
 - Owner sign-off on [`design.md`](design.md) §3 Resolved Decisions
-- Owner sign-off on §11 Open Questions (esp. dual approver designation, prod process determination)
-- Coordination with `sdap-bff-api-and-performance-enhancement-r1` owner if active (no in-flight BFF deploy during Phase 4)
-- Coordination with `ai-spaarke-insights-engine-r1` owner — capture baseline (Phase 3) fully BEFORE Engine integration starts, or fully AFTER stable
+- Owner sign-off on §Unresolved Questions (esp. prod process determination per UQ-02; remaining UQs)
+- Coordination with **ALL active BFF-touching projects** (Phase 0 task 004 enumerates and triages: `sdap-bff-api-and-performance-enhancement-r1`, `auth-sso-and-email-wizard-2026-05`, `sdap-file-upload-document-r2`, `self-service-registration`, plus any others surfaced) — no in-flight BFF deploy during Phase 3 baseline + Phase 4 bake windows
+- Coordination with `ai-spaarke-insights-engine-r1` owner — capture baseline (Phase 3) fully BEFORE Engine integration starts, or fully AFTER stable; produce written agreement that Insights Engine PRs merged after Phase 4 task 046 (facade creation) MUST use `Services/Ai/PublicContracts/` facade
 
 ### External Dependencies
 
@@ -243,7 +245,7 @@ The `Sprk.Bff.Api` deploy package grew from ~65 MB to 75.19 MB (compressed) and 
 
 *Proceeding with these assumptions (owner has not yet explicitly confirmed):*
 
-- **Dual approver**: Auth team lead is the default candidate given BFF's auth surface. If owner confirms otherwise, design §10 updates accordingly. Affects Phase 4 MEDIUM/HIGH approval and Phase 5 prod promotion.
+- **Approval model** (revised 2026-05-24): **Owner sign-off + AI-directed verification.** Per NFR-08, the dual-approver enterprise pattern is explicitly NOT used. Verification rigor comes from `task-execute` skill's mandatory `adr-check` + `code-review` gates (Step 9.5 at FULL rigor) plus CI guards (FR-C1–C6) plus owner judgment. Rationale: single project owner + AI-directed coding procedures provide effective check-and-balance without the friction of a second human approver. Applies to Phase 4 MEDIUM/HIGH AND Phase 5 prod promotion.
 - **Prod deploy process**: assumed undefined → this project scopes to dev+demo unless owner identifies an existing canonical process in Phase 0. Affects whether Phase 5 stays in-project or becomes a follow-up.
 - **CI guard size ceiling**: baseline + 10% (e.g., if baseline is 58 MB, ceiling is 64 MB). Tighter if owner prefers.
 - **Facade interface granularity**: small focused interfaces grouped by consumer concern (`IBriefingAi`, `IInvoiceAi`, etc.) — not one large `IBffAiPublicContracts`. Easier testing, lower coupling, simpler deprecation.
@@ -254,7 +256,7 @@ The `Sprk.Bff.Api` deploy package grew from ~65 MB to 75.19 MB (compressed) and 
 
 *Phase 0 resolution items per [`design.md`](design.md) §11; do not block design approval but must close before Phase 1:*
 
-- [ ] **UQ-01**: Who is the dual approver? **Blocks**: Phase 4 MEDIUM/HIGH approvals (Phase 4 cannot start otherwise).
+- [x] **UQ-01** (RESOLVED 2026-05-24): ~~Who is the dual approver?~~ **Resolution**: Operator-only model adopted. Per revised NFR-08, the dual-approver enterprise pattern is not used; verification rigor comes from AI-directed checks (`adr-check` + `code-review` at task-execute Step 9.5) + CI guards + owner judgment. Phase 0 task 002 documents this decision rather than designating a second human approver.
 - [ ] **UQ-02**: Does a canonical prod deploy process exist? **Blocks**: Phase 5 scope determination (Phase 5 cannot start otherwise; project may scope to dev+demo only).
 - [ ] **UQ-03**: Is `sdap-bff-api-and-performance-enhancement-r1` deploying in next 6 weeks? **Blocks**: Phase 4 scheduling.
 - [ ] **UQ-04**: When does Insights Engine Phase 1 integration land in `Sprk.Bff.Api`? **Blocks**: Phase 3 baseline timing (capture before OR after, never mid).

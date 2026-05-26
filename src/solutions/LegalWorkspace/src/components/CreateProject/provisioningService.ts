@@ -78,7 +78,7 @@ export type ProvisioningStepKey = (typeof PROVISIONING_STEPS)[number]['key'];
 export async function provisionSecureProject(
   request: IProvisionProjectRequest
 ): Promise<IProvisionProjectResult> {
-  const url = `${getBffBaseUrl()}/v1/external-access/provision-project`;
+  const url = `${getBffBaseUrl()}/api/v1/external-access/provision-project`;
 
   try {
     const response = await authenticatedFetch(url, {

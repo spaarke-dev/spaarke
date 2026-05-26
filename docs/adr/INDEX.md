@@ -37,6 +37,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-023](ADR-023-choice-dialog-pattern.md) | Choice Dialog Pattern | Frontend | Accepted |
 | [ADR-026](ADR-026-full-page-custom-page-standard.md) | Full-Page Custom Page Standard | Frontend | Accepted |
 | [ADR-027](ADR-027-subscription-isolation-and-dataverse-solution-management.md) | Subscription Isolation & Dataverse Solution Management | Operations | Proposed |
+| [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF Publish Hygiene (framework-dependent linux-x64, sourcemap exclusion, transitive CVE overrides, size baseline) | Backend / Operations | Accepted |
 
 ## ADRs by Domain
 
@@ -59,6 +60,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-010](ADR-010-di-minimalism.md) | Lean DI registrations |
 | [ADR-017](ADR-017-async-job-status-and-persistence.md) | Job status persistence |
 | [ADR-019](ADR-019-api-errors-and-problemdetails.md) | ProblemDetails for errors |
+| [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF publish hygiene: framework-dependent linux-x64, sourcemap exclusion, surgical transitive CVE overrides, size baseline ratchet |
 
 ### AI Features
 

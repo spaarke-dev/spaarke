@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// </summary>
 /// <remarks>
 /// Per ADR-013: Extends BFF API with AI analysis capability.
-/// Per ADR-014: Prompts are loaded from Dataverse via IPlaybookService, not hardcoded.
+/// Per ADR-014: Prompts are loaded from Dataverse via the IInvoiceAi facade, not hardcoded.
 /// Per ADR-015: NEVER log document content, extracted text, or prompts. Only IDs, sizes, timings.
 /// </remarks>
 public interface IInvoiceAnalysisService

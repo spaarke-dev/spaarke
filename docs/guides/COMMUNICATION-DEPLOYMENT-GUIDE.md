@@ -238,6 +238,39 @@ az webapp config appsettings list \
   --output table
 ```
 
+### Full email subsystem settings (Phase 5 discovered)
+
+The Phase 5 demo cutover (sdap-bff-api-remediation-fix project) discovered that the BFF requires 17 settings across two option classes (`Communication` and `EmailProcessing`) to start cleanly. Missing any setting validated by `[Required]` data annotation produces `OptionsValidationException` at startup → 503 on `/healthz`.
+
+#### Communication module (9 settings)
+
+| Setting | Example / Notes |
+|---|---|
+| `Communication__DefaultMailbox` | e.g., `testuser1@spaarke.com` |
+| `Communication__ArchiveContainerId` | Key Vault reference to SPE container ID |
+| `Communication__WebhookSigningKey` | Key Vault reference to `communication-webhook-signing-key` |
+| `Communication__WebhookClientState` | Random GUID for Graph subscription validation |
+| `Communication__WebhookNotificationUrl` | e.g., `https://{app}.azurewebsites.net/api/communications/incoming-webhook` |
+| `Communication__ApprovedSenders__0__Email` | e.g., `testuser1@spaarke.com` |
+| `Communication__ApprovedSenders__0__DisplayName` | e.g., `Test User 1` |
+| `Communication__ApprovedSenders__0__IsDefault` | e.g., `true` |
+| `Communication__ApprovedSenders__1__*` (and `__2__`, ...) | Per additional sender; minimum 1 required by `[Required]` |
+
+#### EmailProcessing module (8 settings)
+
+| Setting | Example / Notes |
+|---|---|
+| `EmailProcessing__Enabled` | boolean |
+| `EmailProcessing__EnableWebhook` | boolean |
+| `EmailProcessing__EnablePolling` | boolean |
+| `EmailProcessing__PollingIntervalMinutes` | e.g., `5` |
+| `EmailProcessing__AutoEnqueueAi` | boolean; recommend `false` initially |
+| `EmailProcessing__AutoIndexToRag` | boolean; recommend `false` initially — opt-in |
+| `EmailProcessing__DefaultContainerId` | Key Vault reference to SPE container ID — typically same as `Communication__ArchiveContainerId` |
+| `EmailProcessing__WebhookSigningKey` | Key Vault reference to `Email-WebhookSigningKey` |
+
+> All 17 settings were discovered during Phase 5 demo cutover (sdap-bff-api-remediation-fix project, EXECUTION-LOG §Phase 5 step 10). The Communication module's `WebhookSigningKey` is `[Required]` by data annotation — startup fails without it even if email subsystem won't be actively exercised. The recommended approach when email isn't yet activated is to provide a generated 48-byte base64 HMAC key (still required) but leave `EmailProcessing__Enabled=false`.
+
 ---
 
 ## Step 4: Deploy Dataverse Solution and Web Resources

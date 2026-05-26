@@ -1,5 +1,5 @@
 using Azure.AI.OpenAI;
-using Azure.Identity;
+using Azure.Core;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
@@ -89,24 +89,30 @@ public static class AiModule
         var azureOpenAiChatModel = configuration["AzureOpenAI:ChatModelName"];
         if (!string.IsNullOrEmpty(azureOpenAiEndpoint) && !string.IsNullOrEmpty(azureOpenAiChatModel))
         {
-            var innerClient = new AzureOpenAIClient(
-                    new Uri(azureOpenAiEndpoint), new DefaultAzureCredential())
-                .GetChatClient(azureOpenAiChatModel)
-                .AsIChatClient();
+            // Local helper that constructs the inner IChatClient using the DI-injected
+            // TokenCredential (UAMI-pinned via ManagedIdentityCredentialFactory).
+            static IChatClient BuildInnerClient(IServiceProvider sp, string endpoint, string model)
+            {
+                var credential = sp.GetRequiredService<TokenCredential>();
+                return new AzureOpenAIClient(new Uri(endpoint), credential)
+                    .GetChatClient(model)
+                    .AsIChatClient();
+            }
 
             // Register the raw (pre-function-invocation) client under a keyed name.
             // Used by SprkChatAgentFactory for compound intent detection (task 071):
             // the factory uses this client to inspect what tools the LLM wants to call
             // BEFORE function invocation executes them, enabling plan_preview gating.
             // Key: "raw" — resolved via IServiceProvider.GetKeyedService<IChatClient>("raw").
-            services.AddKeyedSingleton<IChatClient>("raw", innerClient);
+            services.AddKeyedSingleton<IChatClient>("raw", (sp, _) =>
+                BuildInnerClient(sp, azureOpenAiEndpoint, azureOpenAiChatModel));
 
             // UseFunctionInvocation enables automatic tool-call execution:
             // when the LLM requests a tool call, the pipeline executes the AIFunction,
             // feeds the result back into the conversation, and continues until the LLM
             // produces a text response.  Without this, tool calls go unexecuted and
             // the streaming response contains only FunctionCallContent (no text tokens).
-            services.AddChatClient(innerClient)
+            services.AddChatClient(sp => BuildInnerClient(sp, azureOpenAiEndpoint, azureOpenAiChatModel))
                 .UseFunctionInvocation();
         }
 

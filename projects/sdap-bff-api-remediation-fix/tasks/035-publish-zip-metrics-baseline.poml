@@ -1,0 +1,58 @@
+<task id="035" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Current publish + zip metrics + file count</title>
+    <status>not-started</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, baseline, publish, phase-3</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only publish output measurement</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Capture current `Deploy-BffApi.ps1` output: zip size, uncompressed size, file count.
+    Anchor for Phase 4 size-delta tracking.
+  </prompt>
+
+  <role>Publish-artifact analyst.</role>
+
+  <goal>File `baseline/publish-metrics.txt` with: zip MB, uncompressed MB, entry count, baseline drift (vs 60 MB / 240 entries).</goal>
+
+  <inputs><file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file></inputs>
+
+  <constraints>
+    <constraint source=".claude/constraints/azure-deployment.md">Baseline ~60 MB / ~240 entries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/publish-metrics.txt</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Phase 1 captured these as task 017 outputs; Phase 3 re-captures to ensure no drift between Phase 1 inventory and Phase 4 starting point.</background>
+    <dependencies><dependency task="022" status="not-started">Phase 2 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Run `Deploy-BffApi.ps1 -DryRun` or examine publish output without deploying</step>
+    <step order="2">Capture zip size + uncompressed size + entry count</step>
+    <step order="3">Compute drift vs 60 MB / 240 entries baseline</step>
+    <step order="4">Write baseline/publish-metrics.txt</step>
+    <step order="5">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="powershell">Deploy-BffApi.ps1</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/baseline/publish-metrics.txt</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zip + uncompressed + count captured</criterion>
+    <criterion testable="true">Drift vs baseline documented</criterion>
+  </acceptance-criteria>
+</task>

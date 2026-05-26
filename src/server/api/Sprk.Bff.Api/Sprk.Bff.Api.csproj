@@ -8,6 +8,9 @@
     <RootNamespace>Sprk.Bff.Api</RootNamespace>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <UserSecretsId>cbc576fa-6ea6-485a-bb2a-d96130f21f20</UserSecretsId>
+    <!-- FR-A1: framework-dependent linux-x64 publish (App Service is Linux). Trims multi-platform native RIDs. -->
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
@@ -85,6 +88,10 @@
 
     <!-- Security: Override vulnerable transitive dependency -->
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- FR-B1 (task 044): patch System.Security.Cryptography.Xml transitive 8.0.1 -> 8.0.3 to fix
+         GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf (both HIGH). Pulled in transitively via
+         Microsoft.IdentityModel.Tokens (JWT validation stack); same-major bump per Phase 2 MEDIUM-1. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
 
     <!-- Document Generation -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.4.1" />
@@ -111,6 +118,11 @@
   <!-- Exclude template config from publish - all config comes from Azure App Settings -->
   <ItemGroup>
     <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- FR-A2: exclude JS sourcemaps from publish (keep in source tree for dev debugging) -->
+  <ItemGroup>
+    <Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
 </Project>

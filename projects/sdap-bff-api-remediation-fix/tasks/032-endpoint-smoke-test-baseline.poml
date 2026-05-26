@@ -1,0 +1,59 @@
+<task id="032" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Endpoint smoke-test baseline — full route table</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, baseline, smoke-test, phase-3</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only HTTP probes against dev environment</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Run a full endpoint smoke-test pass against `spe-api-dev-67e2xz`. Source list: docs/guides/auth-deployment-setup.md §9 + the BFF's full route table (~120 endpoints). For each endpoint capture HTTP status + response shape. Establishes Phase 3 baseline for Phase 4 per-candidate regression check.
+  </prompt>
+
+  <role>API test engineer.</role>
+
+  <goal>File `baseline/endpoints-smoke.json` with one row per endpoint: method | path | status | response shape signature.</goal>
+
+  <inputs>
+    <file purpose="guide">docs/guides/auth-deployment-setup.md</file>
+    <file purpose="program">src/server/api/Sprk.Bff.Api/Program.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md NFR-07">Dev only (`spe-api-dev-67e2xz`); never demo/prod in Phase 1–4</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>~120 endpoints per CLAUDE.md; smoke pass identifies the canonical-shape signature per endpoint.</background>
+    <dependencies><dependency task="022" status="not-started">Phase 2 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Enumerate endpoints from Program.cs + auth-deployment-setup.md §9</step>
+    <step order="2">For each: HTTP probe against `spe-api-dev-67e2xz` with appropriate auth</step>
+    <step order="3">Record method/path/status/response-shape to baseline/endpoints-smoke.json</step>
+    <step order="4">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="powershell">Test-SdapBffApi.ps1 if applicable</tool><tool name="curl">HTTP probes</tool></tools>
+
+  <outputs><output type="report">projects/sdap-bff-api-remediation-fix/baseline/endpoints-smoke.json</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every endpoint in the route table has a baseline row</criterion>
+    <criterion testable="true">Response shape signatures are deterministic (no timestamps in signature)</criterion>
+  </acceptance-criteria>
+</task>

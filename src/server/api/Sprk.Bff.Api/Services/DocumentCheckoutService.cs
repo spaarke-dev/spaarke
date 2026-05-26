@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -41,19 +40,19 @@ public class DocumentCheckoutService
         HttpClient httpClient,
         SpeFileStore speFileStore,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<DocumentCheckoutService> logger)
     {
         _httpClient = httpClient;
         _speFileStore = speFileStore;
         _logger = logger;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? configuration["Dataverse:EnvironmentUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl or Dataverse:EnvironmentUrl configuration is required");
 
         _dataverseApiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_dataverseApiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

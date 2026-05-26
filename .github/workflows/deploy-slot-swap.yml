@@ -123,8 +123,8 @@ jobs:
 
           case "$ENV" in
             dev)
-              APP_NAME="spe-api-dev-67e2xz"
-              RG="spe-infrastructure-westus2"
+              APP_NAME="spaarke-bff-dev"
+              RG="rg-spaarke-dev"
               ;;
             staging)
               APP_NAME="${{ secrets.STAGING_APP_NAME }}"

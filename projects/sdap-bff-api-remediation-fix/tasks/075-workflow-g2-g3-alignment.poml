@@ -1,0 +1,68 @@
+<task id="075" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Workflow alignment: G-2 health-check 120s + G-3 actions/* versions (FR-D5, FR-D6)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ci-cd, codification, outcome-d, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential workflow edits</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Update `.github/workflows/deploy-bff-api.yml` to:
+    - FR-D5: Health-check window = 24 retries × 5s = 120s (match Deploy-BffApi.ps1 defaults; resolves FAILURE-MODES G-2)
+    - FR-D6: Every `actions/*@vN` reference is a valid version; `actionlint` clean
+  </prompt>
+
+  <role>CI/CD engineer + GitHub Actions registry familiarity.</role>
+
+  <goal>Workflow YAML shows 120s health-check window; `actionlint` (or GitHub action linter equivalent) returns no "unknown reference" errors.</goal>
+
+  <inputs>
+    <file purpose="workflow">.github/workflows/deploy-bff-api.yml</file>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="ci-inventory">projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md</file>
+    <file purpose="failure-modes">.claude/FAILURE-MODES.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-D5">120s health-check window (24 × 5s)</constraint>
+    <constraint source="spec.md FR-D6">actionlint clean</constraint>
+    <constraint source=".claude/FAILURE-MODES.md G-2, G-3">Existing gotchas to address</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.github/workflows/deploy-bff-api.yml</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>G-2 surfaced during 2026-05-14 deploy work (Linux cold-start); G-3 has been open across 5 workflows. This task closes both for deploy-bff-api.yml.</background>
+    <dependencies><dependency task="054" status="not-started">Phase 4 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Open `.github/workflows/deploy-bff-api.yml`; locate health-check loop</step>
+    <step order="2">Set retries to 24 with 5s interval (or equivalent expression that totals 120s)</step>
+    <step order="3">List every `uses: action@vN`; verify each against GitHub Marketplace registry</step>
+    <step order="4">Fix any invalid versions (e.g., `actions/upload-artifact@v6` if v6 doesn't exist — use latest valid major)</step>
+    <step order="5">Run `actionlint .github/workflows/deploy-bff-api.yml` (if installed locally) OR rely on GitHub-side linter post-PR</step>
+    <step order="6">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool><tool name="actionlint">workflow lint (optional)</tool></tools>
+
+  <outputs><output type="code">.github/workflows/deploy-bff-api.yml</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Health-check window = 24 × 5s = 120s</criterion>
+    <criterion testable="true">actionlint returns no "unknown reference" errors</criterion>
+  </acceptance-criteria>
+</task>

@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -26,19 +25,17 @@ public abstract class DataverseHttpServiceBase
     protected DataverseHttpServiceBase(
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger logger)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        // Local dev: AzureCliCredential leg of the chain picks up `az login`.
-        // Production: App Service managed identity is used; requires MI to be configured as Dataverse Application User.
-        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

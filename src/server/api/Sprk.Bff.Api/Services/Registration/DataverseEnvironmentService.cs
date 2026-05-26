@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
@@ -25,9 +24,11 @@ public class DataverseEnvironmentService : IDisposable
 
     public DataverseEnvironmentService(
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<DataverseEnvironmentService> logger)
     {
         _logger = logger;
+        _credential = credential;
 
         // Target the admin Dataverse environment (same as RegistrationDataverseService reads from config)
         var dataverseUrl = configuration["DATAVERSE_URL"]
@@ -35,9 +36,6 @@ public class DataverseEnvironmentService : IDisposable
                 "DataverseEnvironmentService requires DATAVERSE_URL configuration.");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
-
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        _credential = new DefaultAzureCredential();
         _logger.LogInformation("DataverseEnvironmentService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         _httpClient = new HttpClient

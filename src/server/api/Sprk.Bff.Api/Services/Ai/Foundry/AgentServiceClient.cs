@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Azure.AI.Projects;
-using Azure.Identity;
+using Azure.Core;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Telemetry;
@@ -49,6 +49,9 @@ public sealed class AgentServiceClient : IDisposable
     // ── Redis cache (ADR-009) ─────────────────────────────────────────────────
     private readonly IDistributedCache _cache;
 
+    // ── Managed Identity credential (UAMI-pinned via DI singleton) ────────────
+    private readonly TokenCredential _credential;
+
     // ── Logging (ADR-015: IDs, timing, status only — never content) ───────────
     private readonly ILogger<AgentServiceClient> _logger;
 
@@ -66,10 +69,12 @@ public sealed class AgentServiceClient : IDisposable
     public AgentServiceClient(
         IOptions<AgentServiceOptions> options,
         IDistributedCache cache,
+        TokenCredential credential,
         ILogger<AgentServiceClient> logger)
     {
         _options = options.Value;
         _cache = cache;
+        _credential = credential;
         _logger = logger;
 
         // SemaphoreSlim: initialCount = maxCount = MaxConcurrency (ADR-016).
@@ -388,6 +393,6 @@ public sealed class AgentServiceClient : IDisposable
             "Initialising AgentsClient: endpoint={Endpoint}",
             _options.Endpoint);
 
-        return new AgentsClient(_options.Endpoint.ToString(), new DefaultAzureCredential());
+        return new AgentsClient(_options.Endpoint.ToString(), _credential);
     }
 }

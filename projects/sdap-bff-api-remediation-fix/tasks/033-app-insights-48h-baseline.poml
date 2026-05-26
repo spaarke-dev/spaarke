@@ -1,0 +1,103 @@
+<task id="033" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Synthetic BFF baseline (replaces 48h App Insights calendar gate)</title>
+    <status>complete</status>
+    <estimated-effort>10 minutes per run</estimated-effort>
+    <assigned>AI agent (automated)</assigned>
+    <tags>bff-api, baseline, synthetic-test, phase-3</tags>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only HTTP probes; no infra changes</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    REDESIGNED 2026-05-25: Original task required 48 hours of organic App Insights
+    telemetry to establish a Phase 4 regression baseline. That design assumed
+    meaningful multi-user traffic. Spaarke dev (`spaarke-bff-dev`) is a single-user
+    environment; 48 hours of "real" traffic produces noisy/empty data for most of
+    the 323 BFF endpoints. Calendar gate replaced with on-demand synthetic test
+    capture via `scripts/Capture-BffBaseline.ps1`.
+
+    The synthetic baseline:
+    - Hits all 323 endpoints (from `baseline/endpoints-smoke.json`) with N
+      unauthenticated probes each.
+    - Captures HTTP status code + latency per probe.
+    - Computes P50/P95/P99 latency + status distribution per route.
+    - Outputs JSON in `baseline/synthetic-baseline.json`.
+    - Repeatable: run anytime in ~7 min for 3,230 probes (N=10).
+
+    Phase 4 uses this for regression detection: re-run pre/post each candidate;
+    diff the JSON files; flag any route with material status change or >X% P95
+    latency growth.
+  </prompt>
+
+  <role>Performance baseline engineer (now automated).</role>
+
+  <goal>
+    File `baseline/synthetic-baseline.json` containing per-route status
+    distribution + latency percentiles, plus aggregate metrics across all 323
+    routes. Repeatable on demand via `scripts/Capture-BffBaseline.ps1`.
+  </goal>
+
+  <inputs>
+    <file purpose="route-inventory">projects/sdap-bff-api-remediation-fix/baseline/endpoints-smoke.json</file>
+    <file purpose="capture-script">scripts/Capture-BffBaseline.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md NFR-07">Dev only (`spaarke-bff-dev`); never demo/prod in Phase 1-4</constraint>
+    <constraint source="user-2026-05-25">Prefer automated baselines over calendar gates for dev envs (memory: prefer-automated-baselines-over-calendar-gates)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Capture-BffBaseline.ps1</file>
+      <file>projects/sdap-bff-api-remediation-fix/baseline/endpoints-smoke.json</file>
+      <file>projects/sdap-bff-api-remediation-fix/baseline/synthetic-baseline.json</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The original 48h calendar gate (created 2026-05-20) was the slowest Phase 3
+      task and the long pole blocking Phase 4. It also produced low-fidelity data
+      for a single-user dev: most endpoints would have 0 organic samples.
+
+      The synthetic baseline is strictly better for this context: full route
+      coverage, repeatable percentiles from N samples, runs on demand.
+      App Insights remains available for ad-hoc troubleshooting but is no longer
+      a gate.
+
+      Probes are UNAUTHENTICATED. For protected routes this measures pre-auth
+      pipeline latency (TLS + routing + auth middleware returning 401). For open
+      routes (/healthz, /ping, /status) it measures end-to-end. For deeper
+      Phase 4 candidates that change downstream Graph/Dataverse call paths,
+      augment with focused authenticated probes.
+    </background>
+    <dependencies>
+      <dependency task="032" status="complete">endpoints-smoke.json (route inventory used as input)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`scripts/Capture-BffBaseline.ps1` exists (created 2026-05-25). Repeatable on demand.</step>
+    <step order="2">First baseline captured 2026-05-25: 3,230 probes in 411s, average P95 latency 133 ms across 323 routes.</step>
+    <step order="3">Output committed at `baseline/synthetic-baseline.json` (replaces planned `app-insights-48h.json`).</step>
+    <step order="4">For each Phase 4 candidate, re-run the script and diff vs this baseline.</step>
+  </steps>
+
+  <tools><tool name="powershell">Capture-BffBaseline.ps1</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/baseline/synthetic-baseline.json</output>
+    <output type="script">scripts/Capture-BffBaseline.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">synthetic-baseline.json exists with non-zero aggregate.average_p95_latency_ms</criterion>
+    <criterion testable="true">Status distribution covers expected codes (200 for open routes, 401 for protected, others documented)</criterion>
+    <criterion testable="true">Script is re-runnable on demand (no calendar wait)</criterion>
+    <criterion testable="true">Per-route latency + status data sufficient for ±5% Phase 4 regression detection</criterion>
+  </acceptance-criteria>
+</task>

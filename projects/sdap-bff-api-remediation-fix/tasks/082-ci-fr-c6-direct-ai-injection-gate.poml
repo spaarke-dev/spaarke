@@ -1,0 +1,112 @@
+<task id="082" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>CI gate: fail direct CRUD→AI dependency injection (FR-C6)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <started></started>
+    <completed></completed>
+    <tags>bff-api, ci-cd, ai-boundary, codification, outcome-c, outcome-e, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential codification; depends on task 074 (PR-label escape hatches) for `[allow-direct-ai-inject]` infrastructure</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Implement FR-C6 — a CI gate that fails any PR introducing direct injection of AI-internal types outside the `Services/Ai/` namespace. Without this gate, Outcome E's facade migration decays over months as new code naturally drifts back to direct `IOpenAiClient` / `IPlaybookService` injection (path of least resistance).
+
+    This is the **single highest-value addition** from senior review (M5 / item #17). Owner-confirmed binding 2026-05-24. Converts Outcome E from a one-time refactor into a permanent architectural boundary enforced by CI on every PR.
+  </prompt>
+
+  <role>CI/CD engineer + ai-boundary aware.</role>
+
+  <goal>
+    Workflow step exists in `.github/workflows/sdap-ci.yml` that:
+    (a) greps `src/server/api/Sprk.Bff.Api/` (excluding `Services/Ai/`, `bin/`, `obj/`, `*.Tests/`) for any usage of `IOpenAiClient`, `IPlaybookService`, `IBriefingService`, `IInvoiceService`, `IRecordMatchingService`, `IWorkspacePrefillService`
+    (b) fails CI with a clear actionable error if any match is found
+    (c) honors `[allow-direct-ai-inject]` PR label with required body justification (via task 074's PR-label gating infrastructure)
+    (d) is validated by a synthetic-PR injection test (inject `IOpenAiClient` in a Finance file → expect CI red)
+  </goal>
+
+  <inputs>
+    <file purpose="workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="pr-template">.github/pull_request_template.md (updated by task 074)</file>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (created by task 046)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-C6">Literal grep; no regex evasion considered; `--exclude-dir=Services/Ai` is the boundary marker</constraint>
+    <constraint source="spec.md FR-C4">Escape hatch `[allow-direct-ai-inject]` requires PR-body Justification section</constraint>
+    <constraint source="spec.md SC-28">Synthetic-PR test fails CI as expected</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Mechanical enforcement of the AI boundary; complements (does not replace) human governance</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Outcome E migrates today's 59 files / 148 occurrences of direct `IOpenAiClient` / `IPlaybookService` injection through the new `Services/Ai/PublicContracts/` facade. Without FR-C6, the next developer adding (say) a new Finance feature can grab `IOpenAiClient` directly — same antipattern, same multiplication. Over 6 months across 2-3 incoming BFF-touching projects (Action Engine, Insights Engine, third TBD), the boundary erodes.
+
+      FR-C6 is the mechanical enforcement layer atop the human governance in `.claude/constraints/bff-extensions.md` and refined ADR-013. Two layers; neither alone is sufficient.
+
+      The escape hatch `[allow-direct-ai-inject]` is for legitimate exceptions (e.g., a facade-internal helper that needs the raw client). Like other escape hatches in FR-C4, it requires a Justification section in the PR body so the override is intentional and audited.
+    </background>
+    <dependencies>
+      <dependency task="054" status="not-started">Phase 4 gate (Outcome E migration complete; otherwise FR-C6 would block the project's own PR)</dependency>
+      <dependency task="046" status="not-started">Facade exists (otherwise the gate has no alternative path to recommend)</dependency>
+      <dependency task="074" status="not-started">PR-label escape-hatch infrastructure (`[allow-direct-ai-inject]` plumbing piggybacks on the same `if: contains(...labels...)` pattern as `[allow-size-growth]` and `[allow-vuln]`)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Verify task 074 has landed the `[allow-direct-ai-inject]` label support and PR template Justification section</step>
+    <step order="2">Add CI step to `.github/workflows/sdap-ci.yml` (after existing FR-C1/C2/C3 guards):
+      ```yaml
+      - name: FR-C6 — Block direct CRUD→AI dependency injection
+        if: "!contains(github.event.pull_request.labels.*.name, 'allow-direct-ai-inject')"
+        run: |
+          matches=$(grep -rn -E "I(OpenAiClient|PlaybookService|BriefingService|InvoiceService|RecordMatchingService|WorkspacePrefillService)\b" \
+            src/server/api/Sprk.Bff.Api/ \
+            --include='*.cs' \
+            --exclude-dir=Services/Ai \
+            --exclude-dir=bin --exclude-dir=obj || true)
+          if [ -n "$matches" ]; then
+            echo "::error::FR-C6 violation — direct AI-internal type injection detected outside Services/Ai/. Use Services/Ai/PublicContracts/ facades. Apply [allow-direct-ai-inject] label with PR body justification if legitimate exception."
+            echo "$matches"
+            exit 1
+          fi
+      ```
+    </step>
+    <step order="3">Validate label-honoring justification: add a separate validator step (or extend task 074's validator) that fails if `[allow-direct-ai-inject]` is present but PR body lacks "## Justification" section</step>
+    <step order="4">Synthetic test PR: inject `IOpenAiClient` field in `src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAnalysisService.cs` (test branch only). Confirm CI fails with FR-C6 error. Delete test branch.</step>
+    <step order="5">Synthetic escape-hatch test: same injection but with `[allow-direct-ai-inject]` label + justification. Confirm CI passes.</step>
+    <step order="6">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="git">commit</tool>
+    <tool name="gh">verify CI on synthetic test PRs</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/sdap-ci.yml (new FR-C6 step + justification validator)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workflow step exists and runs on every PR</criterion>
+    <criterion testable="true">Synthetic PR injecting `IOpenAiClient` in a non-`Services/Ai/` file: CI fails with clear error</criterion>
+    <criterion testable="true">Same PR with `[allow-direct-ai-inject]` label + body justification: CI passes</criterion>
+    <criterion testable="true">Same PR with `[allow-direct-ai-inject]` label but NO justification: CI fails on justification validator</criterion>
+    <criterion testable="true">Error message references `Services/Ai/PublicContracts/` as the correct path</criterion>
+    <criterion testable="true">SC-28 evidenced: synthetic-test outcomes documented in PR / EXECUTION-LOG.md</criterion>
+  </acceptance-criteria>
+</task>

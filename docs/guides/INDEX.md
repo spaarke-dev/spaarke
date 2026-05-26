@@ -33,6 +33,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | [CONFIGURATION-MATRIX.md](CONFIGURATION-MATRIX.md) | Complete reference of all BFF API configuration settings: sections, defaults, locations, Key Vault secrets | 2026-04-05 | 2026-04-05 | New |
 | [SECRET-ROTATION-PROCEDURES.md](SECRET-ROTATION-PROCEDURES.md) | Key Vault secret rotation procedures | 2026-04-05 | — | — |
 | [auth-deployment-setup.md](auth-deployment-setup.md) | **Spaarke Auth v2 (ADR-028) operator runbook** — new-environment setup: Dataverse env vars + App Service settings + Azure AD MI permissions + Dataverse Application User + Exchange ApplicationAccessPolicy (§7) + verification smoke tests | 2026-05-19 | 2026-05-19 | Production |
+| [MI-CONFIGURATION-PATTERNS.md](MI-CONFIGURATION-PATTERNS.md) | **BFF per-env promotion runbook** — consolidated 6-pattern checklist from Phase 5 demo cutover (5 MI clientId keys, mandatory Cosmos, AgentService placeholders, opt-out flags, Dataverse Application User, Exchange ApplicationAccessPolicy ×2) | 2026-05-25 | 2026-05-25 | New |
 | [SPAARKE-SELF-SERVICE-USER-REGISTRATION.md](SPAARKE-SELF-SERVICE-USER-REGISTRATION.md) | Self-service user registration system setup | 2026-04-04 | — | Phase 1 |
 | [DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md](DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md) | M365 Declarative Agent build and deployment | 2026-03-26 | — | Validated |
 

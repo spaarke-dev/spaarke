@@ -1,0 +1,60 @@
+<task id="079" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>`.claude/skills/bff-deploy/SKILL.md` Publish Hygiene + next-review-date stamp (FR-D3)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>AI agent (developer) — main session only</assigned>
+    <tags>bff-api, skills, codification, outcome-d, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>.claude/ paths require main-session-only</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Update `.claude/skills/bff-deploy/SKILL.md` with a Publish Hygiene section + next-review-date stamp (baseline+90 days). Cite ADR-029.
+  </prompt>
+
+  <role>Skill maintainer + main session.</role>
+  <goal>SKILL.md contains "Publish Hygiene" section; parseable next-review-date present.</goal>
+
+  <inputs>
+    <file purpose="skill">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="adr">.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-D3">Section + parseable next-review-date stamp</constraint>
+    <constraint source="root CLAUDE.md §3">Main-session-only for .claude/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Skill update ensures every BFF deploy session loads the publish hygiene policy.</background>
+    <dependencies><dependency task="076" status="not-started">ADR-029 concise exists</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read SKILL.md; identify insertion point near deployment guidance</step>
+    <step order="2">Add Publish Hygiene section summarizing FR-A1/A2 + cite ADR-029</step>
+    <step order="3">Add `next-review-date: YYYY-MM-DD` (baseline+90 days)</step>
+    <step order="4">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool></tools>
+
+  <outputs><output type="docs">.claude/skills/bff-deploy/SKILL.md</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Publish Hygiene" section exists</criterion>
+    <criterion testable="true">Next-review-date is a parseable YYYY-MM-DD</criterion>
+    <criterion testable="true">Cites ADR-029</criterion>
+  </acceptance-criteria>
+</task>

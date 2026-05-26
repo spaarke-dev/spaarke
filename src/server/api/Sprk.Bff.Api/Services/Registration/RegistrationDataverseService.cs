@@ -4,7 +4,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 
@@ -40,11 +39,13 @@ public class RegistrationDataverseService : IDisposable
         IConfiguration configuration,
         IOptions<DemoProvisioningOptions> options,
         TrackingIdGenerator trackingIdGenerator,
+        TokenCredential credential,
         ILogger<RegistrationDataverseService> logger)
     {
         _logger = logger;
         _options = options.Value;
         _trackingIdGenerator = trackingIdGenerator;
+        _credential = credential;
 
         // Admin Dataverse URL: prefer DATAVERSE_URL config, fall back to legacy Environments config
         var dataverseUrl = configuration["DATAVERSE_URL"];
@@ -64,11 +65,6 @@ public class RegistrationDataverseService : IDisposable
         }
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
-
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        // App Service MI must be configured as a Dataverse Application User in EACH target environment
-        // (admin Dataverse + every demo provisioning Dataverse referenced by GetAccessTokenForUrlAsync).
-        _credential = new DefaultAzureCredential();
         _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         _httpClient = new HttpClient

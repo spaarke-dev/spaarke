@@ -39,7 +39,7 @@ jobs:
           ADDIN_CLIENT_ID: c1258e2d-1688-49d2-ac99-a7485ebd9995
           TENANT_ID: a221a95e-6abc-4434-aecc-e48338a1b2f2
           BFF_API_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
-          BFF_API_BASE_URL: https://spe-api-dev-67e2xz.azurewebsites.net
+          BFF_API_BASE_URL: https://spaarke-bff-dev.azurewebsites.net
 
       - name: Deploy to Azure Static Web App
         uses: Azure/static-web-apps-deploy@v1

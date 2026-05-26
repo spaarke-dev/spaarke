@@ -1,0 +1,121 @@
+<task id="008" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Phase 0 gate review — all checkboxes resolved</title>
+    <status>completed</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <actual-effort>~5 minutes (verification of prerequisites; all dependencies completed in this session)</actual-effort>
+    <assigned>Project owner</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>coordination, governance, phase-0, gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate task; sequential after 002–007 + 009 complete</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Conduct the Phase 0 gate review. Verify every Phase 0 checklist item in design.md §6 is
+    closed, every open question (UQ-01…UQ-07) has a documented answer, and the project is
+    cleared to enter Phase 1. Without this gate Phase 1 cannot start.
+  </prompt>
+
+  <role>Project owner (operator-only model per NFR-08 revised 2026-05-24).</role>
+
+  <goal>
+    All Phase 0 checklist items confirmed complete; UQ-01 RESOLVED (operator-only); UQ-02..UQ-07 each has a documented answer in CLAUDE.md → Decisions Made section; senior-review M3 (active BFF projects enumeration via expanded task 004) complete; G5 rollback drill (task 009) wall-clock recorded; Phase 1 is authorized to begin.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="ai-spec">projects/sdap-bff-api-remediation-fix/spec.md</file>
+    <file purpose="project-claude">projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    <file purpose="task-index">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 0">All 9 boxes must be checked before Phase 1 starts</constraint>
+    <constraint source="project">No Phase 1 work proceeds without this gate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the formal authorization point. Without this gate, Phase 1 inventory work cannot
+      begin. The gate verifies that the project has operator-only approval model documented,
+      sibling-coordination (expanded scope per M3), baseline-window scheduling, prod-process
+      decision, and a verified rollback capability (NFR-06 wall-clock confirmed via task 009).
+    </background>
+    <dependencies>
+      <dependency task="002" status="not-started">Operator-only model documented (UQ-01 resolved)</dependency>
+      <dependency task="003" status="not-started">Prod deploy process determined (UQ-02)</dependency>
+      <dependency task="004" status="not-started">All active BFF-touching projects enumerated + coordinated (M3 expanded scope)</dependency>
+      <dependency task="005" status="not-started">Insights Engine baseline window + facade adoption agreement (UQ-04 + G4)</dependency>
+      <dependency task="006" status="not-started">CI ceiling confirmed (UQ-05)</dependency>
+      <dependency task="007" status="not-started">Outcome E scope + facade + G1 handler reconciliation (UQ-06, UQ-07, G1)</dependency>
+      <dependency task="009" status="not-started">Rollback drill wall-clock recorded (G5 / NFR-06 verification)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Verify tasks 001–007 + 009 all show ✅ in TASK-INDEX.md</step>
+    <step order="2">Verify each UQ-01…UQ-07 has a corresponding Decisions Made entry in CLAUDE.md (UQ-01 marked RESOLVED — operator-only)</step>
+    <step order="3">Verify design.md §6 Phase 0 — all items checked</step>
+    <step order="4">Verify Phase 5 scope decision (tasks 062, 063 status: 🔲 in-scope OR ⏸ deferred)</step>
+    <step order="5">Verify rollback drill (task 009) wall-clock ≤ 10 min OR mitigation documented (NFR-06)</step>
+    <step order="6">Verify expanded BFF-touching project enumeration (task 004 / M3) present in CLAUDE.md</step>
+    <step order="7">Verify Insights Engine facade adoption agreement (task 005 / G4) recorded</step>
+    <step order="8">Owner records gate approval (PR comment or commit) — operator-only model per NFR-08 revised</step>
+    <step order="9">Update CLAUDE.md → Project Status from "Phase 0 pending" to "Phase 1 ready"</step>
+    <step order="10">Update TASK-INDEX.md status of task 008 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">Phase 0 gate approval commit</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Project Status update)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Gate approval comment or commit with owner record (operator-only model)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tasks 001–007 + 009 all ✅ in TASK-INDEX.md</criterion>
+    <criterion testable="true">CLAUDE.md → Decisions Made has entries for UQ-01 (RESOLVED) through UQ-07 + M3 enumeration + G4 facade agreement + G5 rollback drill</criterion>
+    <criterion testable="true">design.md §6 Phase 0 — all boxes checked</criterion>
+    <criterion testable="true">CLAUDE.md → Project Status updated to "Phase 1 ready"</criterion>
+    <criterion testable="true">Owner gate ACK recorded (operator-only model)</criterion>
+    <criterion testable="true">NFR-06 rollback wall-clock ≤ 10 min OR mitigation plan documented</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Phase 0 gate verified. All 9 Phase 0 checklist items (design.md §6) closed. All 7 open questions
+      (UQ-01..UQ-07) have documented answers in CLAUDE.md Decisions Made. Senior-review items applied
+      (M3 expanded BFF coordination scope, G4 Insights Engine facade agreement flagged, G5 rollback
+      drill executed with NFR-06 PASS). Operator-only gate ACK recorded via this commit. Project
+      cleared for Phase 1.
+    </completion-summary>
+    <gate-verification>
+      <item ok="true">Tasks 001-007 + 009 status ✅ in TASK-INDEX.md (verified)</item>
+      <item ok="true">UQ-01 RESOLVED (operator-only); UQ-02 YES (prod process exists); UQ-03 enumerated (all 24 worktrees 0-ahead); UQ-04 pre-integration; UQ-05 baseline+10%; UQ-06 inventory-only; UQ-07 small focused interfaces</item>
+      <item ok="true">design.md §6 Phase 0 items 1, 2, 3, 4, 5, 6 (N/A via override), 7 (pre-resolved), 8, 9 all ☑</item>
+      <item ok="true">Tasks 062, 063 status changed ⏸ → 🔲 (UQ-02 YES = in scope)</item>
+      <item ok="true">CLAUDE.md Project Status: "Phase 1 READY"</item>
+      <item ok="true">G4 Insights Engine facade adoption agreement: PENDING WRITTEN AGREEMENT (operator followup before Phase 4 task 046)</item>
+      <item ok="true">G5 rollback drill: NFR-06 PASS at 2m 23s (target &lt; 10 min); silent file-lock encountered and auto-recovered; documented in baseline/rollback-drill.md</item>
+    </gate-verification>
+    <residual-operator-action-items>
+      Two items NOT blocking Phase 0 but tracked:
+      1. **Weekly BFF-touching monitoring** (task 004 followup) — `git log master..&lt;branch&gt; -- src/server/api/Sprk.Bff.Api/` weekly during Phase 3-4 to surface new entrants
+      2. **G4 written facade agreement** (task 005 followup) — contact Insights Engine project owner BEFORE Phase 4 task 046 (facade creation) to confirm any Engine PR merged after task 046 uses Services/Ai/PublicContracts/ facade rather than direct injection
+    </residual-operator-action-items>
+    <phase-1-authorization>Phase 1 is AUTHORIZED to begin. Dispatch Phase 1 Group B + C parallel tasks: 010, 011, 012, 013, 014, 016, 017 (Group B/C); 015 sequential; 018 waits on 010-017.</phase-1-authorization>
+  </notes>
+</task>

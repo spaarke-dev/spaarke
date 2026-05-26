@@ -1,0 +1,65 @@
+<task id="077" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>ADR-029 (full) at `docs/adr/` + INDEX update (FR-D1 part 2)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, adr, codification, outcome-d, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after concise version</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Create `docs/adr/ADR-029-bff-publish-hygiene.md` (full version with rationale, alternatives, evidence base). References the concise version in `.claude/adr/`. Update `docs/adr/INDEX.md` if it exists.
+  </prompt>
+
+  <role>ADR author.</role>
+
+  <goal>`docs/adr/ADR-029-bff-publish-hygiene.md` exists with full rationale; `docs/adr/INDEX.md` (if present) updated.</goal>
+
+  <inputs>
+    <file purpose="concise-adr">.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    <file purpose="full-adr-pattern">docs/adr/</file>
+    <file purpose="evidence">docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="docs/adr/">Full-version format includes rationale + alternatives</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-027-subscription-isolation-managed-solutions.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Full ADR captures the rationale + alternatives considered. Concise version (.claude/adr/) is the agent-loadable summary; full version (docs/adr/) is the human-readable record.</background>
+    <dependencies><dependency task="076" status="not-started">Concise ADR-029</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Author `docs/adr/ADR-029-bff-publish-hygiene.md` with full structure (Context, Decision, Alternatives Considered, Consequences, Evidence, Review cadence)</step>
+    <step order="2">Cite this project's design.md, BASELINE.md, EXECUTION-LOG.md as evidence</step>
+    <step order="3">Update `docs/adr/INDEX.md` if present</step>
+    <step order="4">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool></tools>
+
+  <outputs>
+    <output type="docs">docs/adr/ADR-029-bff-publish-hygiene.md</output>
+    <output type="docs">docs/adr/INDEX.md (if present)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Full ADR-029 file present</criterion>
+    <criterion testable="true">Cross-references concise version in .claude/adr/</criterion>
+    <criterion testable="true">Evidence section cites project assets</criterion>
+  </acceptance-criteria>
+</task>

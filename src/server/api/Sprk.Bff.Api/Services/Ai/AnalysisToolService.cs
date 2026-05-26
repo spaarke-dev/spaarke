@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Azure.Core;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -12,8 +13,9 @@ public class AnalysisToolService : DataverseHttpServiceBase
     public AnalysisToolService(
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<AnalysisToolService> logger)
-        : base(httpClient, configuration, logger)
+        : base(httpClient, configuration, credential, logger)
     {
     }
 

@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 
 namespace Sprk.Bff.Api.Services.Ai.Capabilities;
 
@@ -67,18 +66,18 @@ public sealed class DataverseCapabilityManifestLoader : ICapabilityManifestLoade
     public DataverseCapabilityManifestLoader(
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<DataverseCapabilityManifestLoader> logger)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         // IMPORTANT: BaseAddress must end with trailing slash so relative URLs append correctly.
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
-        // AUTHV2-042: Migrated from ClientSecretCredential to DefaultAzureCredential (managed identity).
-        _credential = new DefaultAzureCredential();
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

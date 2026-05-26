@@ -1,0 +1,71 @@
+<task id="037" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Archive extraction-assessment + commit BASELINE.md</title>
+    <status>not-started</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, baseline, phase-3, gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates 030-036 outputs; Phase 4 gate</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Copy `docs/assessments/bff-ai-extraction-assessment-2026-05-20.md` to `baseline/extraction-assessment-archive.md` (snapshot reference). Aggregate all Phase 3 outputs into master `BASELINE.md`. Owner sign-off required — Phase 4 cannot start otherwise.
+  </prompt>
+
+  <role>Phase 3 lead.</role>
+  <goal>File `projects/sdap-bff-api-remediation-fix/BASELINE.md` linking all Phase 3 outputs; owner sign-off recorded.</goal>
+
+  <inputs>
+    <file purpose="assessment">docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    <file purpose="baseline-folder">projects/sdap-bff-api-remediation-fix/baseline/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 3">Gate: all artifacts committed before any Phase 4 change</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>BASELINE.md is the authoritative Phase 3 artifact; Phase 4 references it for every regression check.</background>
+    <dependencies>
+      <dependency task="030" status="not-started">tests.txt</dependency>
+      <dependency task="031" status="not-started">build-warnings.txt</dependency>
+      <dependency task="032" status="not-started">endpoints-smoke.json</dependency>
+      <dependency task="033" status="not-started">app-insights-48h.json</dependency>
+      <dependency task="034" status="not-started">deployed-sha256.txt</dependency>
+      <dependency task="035" status="not-started">publish-metrics.txt</dependency>
+      <dependency task="036" status="not-started">reflection-probe-baseline.txt</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">`cp docs/assessments/bff-ai-extraction-assessment-2026-05-20.md projects/sdap-bff-api-remediation-fix/baseline/extraction-assessment-archive.md`</step>
+    <step order="2">Aggregate 7 Phase 3 outputs into `BASELINE.md` at project root with summaries + links</step>
+    <step order="3">Owner reviews BASELINE.md; sign-off (PR comment / commit)</step>
+    <step order="4">Update CLAUDE.md → Project Status to "Phase 4 ready"</step>
+    <step order="5">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">Commit BASELINE.md</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/BASELINE.md</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/baseline/extraction-assessment-archive.md</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BASELINE.md links 7 Phase 3 outputs</criterion>
+    <criterion testable="true">extraction-assessment-archive.md present</criterion>
+    <criterion testable="true">Owner sign-off recorded</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,76 @@
+<task id="053" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Outcome E grep acceptance (FR-E2 revised 2026-05-24 — production-scope only)</title>
+    <status>completed</status>
+    <estimated-effort>15 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>bff-api, outcome-e, acceptance, phase-4</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential acceptance check after migration verification</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Run the FR-E2 acceptance grep with **production-scope-only** logic (clarified per senior review G2 / item #2, 2026-05-24). Confirm zero direct `IOpenAiClient` / `IPlaybookService` references in production code OUTSIDE the explicitly-allowed boundaries:
+
+    - **EXCLUDED from grep (legitimate references)**:
+      - `Services/Ai/` (the AI internals; the boundary IS this directory)
+      - `Infrastructure/DI/AiModule.cs` and related DI registration modules (the facade is wired to internals here — that's where the boundary IS)
+      - `tests/unit/Sprk.Bff.Api.Tests/` (test code legitimately mocks AI internals; that's how unit tests work)
+      - `bin/`, `obj/` (build artifacts)
+
+    - **INCLUDED in grep (must return 0 matches)**:
+      - All production code in `src/server/api/Sprk.Bff.Api/` not listed above
+  </prompt>
+
+  <role>.NET acceptance verifier.</role>
+  <goal>Production-scope grep returns 0; test code untouched; DI module special-case acknowledged; results captured in EXECUTION-LOG.md.</goal>
+
+  <inputs>
+    <file purpose="src">src/server/api/Sprk.Bff.Api/</file>
+    <file purpose="spec">projects/sdap-bff-api-remediation-fix/spec.md (FR-E2 revised)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-E2 revised">Production scope: `grep -rn "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/ --include='*.cs' --exclude-dir=Services/Ai --exclude-dir=bin --exclude-dir=obj` returns 0. Test code excluded. DI module special-cased.</constraint>
+    <constraint source="senior review G2 (2026-05-24)">Test code is LEGITIMATELY out of scope; over-migration would break unit tests</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Original FR-E2 acceptance grep listed only `Services/{Finance,Workspace,Jobs,Dataverse}/` and would have missed `Api/Endpoints/`, `Api/Filters/`, `Infrastructure/DI/`. Senior review G2 surfaced that the broader scope is needed AND test code must be explicitly excluded (tests mock AI internals — that's correct). The DI module is a special-case: the facade is wired to its underlying `IOpenAiClient`/`IPlaybookService` implementations there; that's where the boundary IS, not a violation.
+
+      Outputs of this task feed task 054 (Phase 4 gate review) which verifies Outcome E acceptance.
+    </background>
+    <dependencies><dependency task="052" status="not-started">Test verification stable</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">**Primary grep (production-scope, must return 0)**: `grep -rn -E "I(OpenAiClient|PlaybookService)\b" src/server/api/Sprk.Bff.Api/ --include='*.cs' --exclude-dir=Services/Ai --exclude-dir=bin --exclude-dir=obj`</step>
+    <step order="2">**DI module verification (informational)**: confirm `Infrastructure/DI/AiModule.cs` (or whichever module registers the facade implementations) still references the internal types — that's expected; the facade is wired there</step>
+    <step order="3">**Test scope confirmation (informational)**: `grep -rn -E "I(OpenAiClient|PlaybookService)\b" tests/unit/Sprk.Bff.Api.Tests/ --include='*.cs'` — non-zero is fine; tests mock these</step>
+    <step order="4">**Facade reference verification**: `grep -rn "Sprk.Bff.Api.Services.Ai.PublicContracts" src/server/api/Sprk.Bff.Api/` — should show consumer-side adoption (non-zero matches in Finance, Workspace, Jobs, Dataverse, Filters, Endpoints)</step>
+    <step order="5">Capture all grep outputs in EXECUTION-LOG.md with clear labeling (primary vs informational)</step>
+    <step order="6">If primary grep returns non-zero: identify the consumer; either migrate or document justification (e.g., "internal AI helper that legitimately needs raw client — file is being relocated to Services/Ai/ in next commit")</step>
+    <step order="7">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">grep</tool></tools>
+
+  <outputs><output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md (acceptance grep results, primary + informational)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Primary grep (production scope, exclude Services/Ai + bin + obj) returns 0 OR documented justified exceptions</criterion>
+    <criterion testable="true">DI module reference confirmed as expected (informational)</criterion>
+    <criterion testable="true">Test code grep result captured (informational — non-zero is expected)</criterion>
+    <criterion testable="true">PublicContracts facade adoption verified in consumer folders (non-zero matches)</criterion>
+  </acceptance-criteria>
+</task>

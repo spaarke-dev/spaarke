@@ -3,16 +3,19 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
 /// <summary>
 /// Generates AI summaries for Legal Operations Workspace feed items and to-do items.
 /// Fetches the referenced entity from Dataverse and delegates to the AI Playbook
-/// platform (IPlaybookOrchestrationService) for analysis.
+/// platform (via the <see cref="IWorkspacePrefillAi"/> public facade) for analysis.
 /// </summary>
 /// <remarks>
-/// Follows ADR-013: Uses PlaybookService (AI Playbook platform) — NOT direct OpenAI calls.
+/// Follows refined ADR-013 (2026-05-20, task 046): AI playbook execution flows through
+/// the <see cref="IWorkspacePrefillAi"/> public facade — no direct injection of
+/// AI-internal orchestration or completion-client types into CRUD code.
 /// Follows ADR-010: Concrete registration, no unnecessary interface seam.
 ///
 /// The service maps an entity type and entity ID to an <see cref="AiSummaryResponse"/>
@@ -28,7 +31,7 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// </remarks>
 public class WorkspaceAiService
 {
-    private readonly IPlaybookOrchestrationService _playbookService;
+    private readonly IWorkspacePrefillAi _prefillAi;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<WorkspaceAiService> _logger;
@@ -53,13 +56,13 @@ public class WorkspaceAiService
     /// Initializes a new instance of <see cref="WorkspaceAiService"/>.
     /// </summary>
     public WorkspaceAiService(
-        IPlaybookOrchestrationService playbookService,
+        IWorkspacePrefillAi prefillAi,
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
         ILogger<WorkspaceAiService> logger,
         IConfiguration configuration)
     {
-        _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
+        _prefillAi = prefillAi ?? throw new ArgumentNullException(nameof(prefillAi));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -327,7 +330,7 @@ public class WorkspaceAiService
 
         try
         {
-            await foreach (var evt in _playbookService.ExecuteAsync(playbookRequest, httpContext, timeoutCts.Token))
+            await foreach (var evt in _prefillAi.ExecutePreFillPlaybookAsync(playbookRequest, httpContext, timeoutCts.Token))
             {
                 if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
                 {

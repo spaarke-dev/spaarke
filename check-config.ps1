@@ -1,4 +1,4 @@
-$settings = az webapp config appsettings list --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2 --output json | ConvertFrom-Json
+$settings = az webapp config appsettings list --name spaarke-bff-dev --resource-group rg-spaarke-dev --output json | ConvertFrom-Json
 
 Write-Host "=== Redis Configuration ===" -ForegroundColor Cyan
 $redisSettings = $settings | Where-Object { $_.name -match 'Redis' }

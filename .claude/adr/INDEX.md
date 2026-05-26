@@ -36,6 +36,7 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-026 | Code Page Build Standard | Vite + `vite-plugin-singlefile` + React 19 for all Code Pages | Accepted (Revised 2026-03-19) |
 | ADR-027 | Subscription Isolation & Dataverse Solution Mgmt | Managed solutions for prod; env-separated subscriptions | Accepted |
 | ADR-028 | Spaarke Auth Architecture (v2) | Function-based contract; managed identity for outbound; named API key schemes; HMAC webhooks; audit middleware | Accepted (2026-05-19) |
+| ADR-029 | BFF Publish Hygiene | Framework-dependent linux-x64, sourcemap exclusion, transitive CVE override pattern, size baseline ratchet | Accepted (2026-05-26) |
 
 ---
 

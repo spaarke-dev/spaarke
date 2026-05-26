@@ -1,0 +1,108 @@
+<task id="018" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>CI workflow inventory + G-3 version sanity + commit INVENTORY.md</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
+    <assigned>AI agent</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>bff-api, inventory, ci-cd, phase-1, gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates outputs from 010-017; INVENTORY.md commit gates Phase 2</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Enumerate steps in `.github/workflows/sdap-ci.yml` AND `.github/workflows/deploy-bff-api.yml`.
+    Identify where new CI guards from Phase 6 will plug in (FR-C1, FR-C2, FR-C3, FR-D5, FR-D6).
+    List every `uses: action@vN` in `deploy-bff-api.yml` and flag any that may be invalid
+    versions (per FAILURE-MODES.md G-3). Finally, aggregate all Phase 1 inventory outputs into
+    the master `INVENTORY.md` file at the project root. This task's completion gates Phase 2.
+  </prompt>
+
+  <role>CI/CD engineer + Phase 1 lead.</role>
+
+  <goal>
+    File `projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md` — the master inventory
+    document linking to all 14+ Phase 1 outputs and including the CI workflow inventory inline.
+    This file is reviewed and signed off by the project owner; without sign-off Phase 2 cannot
+    start (per design §6 Phase 1 Gate).
+  </goal>
+
+  <inputs>
+    <file purpose="ci">.github/workflows/sdap-ci.yml</file>
+    <file purpose="ci">.github/workflows/deploy-bff-api.yml</file>
+    <file purpose="failure-modes">.claude/FAILURE-MODES.md</file>
+    <file purpose="inventory-folder">projects/sdap-bff-api-remediation-fix/inventory/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 1">Gate: INVENTORY.md reviewed by owner before Phase 2 starts</constraint>
+    <constraint source=".claude/FAILURE-MODES.md G-3">GitHub Actions versions must be valid registry versions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>.github/workflows/deploy-bff-api.yml</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      CI workflow inventory is the input for Phase 6 CI guard tasks (071–075). G-3 version sanity
+      is a pre-check for Phase 6 task 075. INVENTORY.md is the authoritative artifact of Phase 1.
+    </background>
+    <dependencies>
+      <dependency task="010" status="not-started">packages-direct/transitive</dependency>
+      <dependency task="011" status="not-started">vulnerable + outdated</dependency>
+      <dependency task="012" status="not-started">prereleases</dependency>
+      <dependency task="013" status="not-started">project-references</dependency>
+      <dependency task="014" status="not-started">static usage map</dependency>
+      <dependency task="015" status="not-started">reflection probe</dependency>
+      <dependency task="016" status="not-started">native + wwwroot + size category</dependency>
+      <dependency task="017" status="not-started">runtime + deploy SHAs + metrics</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read `.github/workflows/sdap-ci.yml` and `deploy-bff-api.yml`; enumerate steps</step>
+    <step order="2">List every `uses: action@vN` in deploy-bff-api.yml; flag any that may be invalid</step>
+    <step order="3">Write `inventory/ci-workflow-inventory.md` with step structure + G-3 findings</step>
+    <step order="4">Aggregate all 14 Phase 1 outputs into `inventory/INVENTORY.md` with links + summary</step>
+    <step order="5">Owner reviews INVENTORY.md; signs off (PR comment or commit)</step>
+    <step order="6">Update TASK-INDEX.md status of 018 from 🔲 to ✅</step>
+    <step order="7">Update CLAUDE.md → Project Status to "Phase 2 ready"</step>
+  </steps>
+
+  <tools><tool name="git">Commit INVENTORY.md</tool></tools>
+
+  <outputs>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/ci-workflow-inventory.md</output>
+    <output type="report">projects/sdap-bff-api-remediation-fix/inventory/INVENTORY.md</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ci-workflow-inventory.md enumerates every step in both workflows</criterion>
+    <criterion testable="true">G-3 version sanity: every `uses: action@vN` checked against registry; suspect entries flagged</criterion>
+    <criterion testable="true">INVENTORY.md links to all 14 Phase 1 outputs</criterion>
+    <criterion testable="true">Owner sign-off recorded</criterion>
+    <criterion testable="true">CLAUDE.md Project Status updated to "Phase 2 ready"</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Both workflows inventoried (sdap-ci.yml: 26 steps; deploy-bff-api.yml: 30 steps). Phase 6 plug-in
+      points identified for FR-C1–C6 + FR-D5. G-3 action version sanity: 6 actions flagged for marketplace
+      verification (checkout@v6, download-artifact@v7, github-script@v8, upload-artifact@v6, trivy@master
+      anti-pattern, etc.). Master INVENTORY.md links all 15 Phase 1 outputs + records 6 critical findings.
+      Operator sign-off recorded via Phase 1 completion commit.
+    </completion-summary>
+    <phase-2-authorization>Phase 2 is AUTHORIZED to begin. 6 critical findings flagged for Phase 2 candidate categorization (esp. dev/prod OS mismatch which affects FR-A1).</phase-2-authorization>
+  </notes>
+</task>

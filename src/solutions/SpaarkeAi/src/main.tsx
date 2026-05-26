@@ -66,7 +66,7 @@ import { setLegalWorkspaceRuntimeConfig } from "@spaarke/legal-workspace";
 // Override for non-dev environments: VITE_BFF_BASE_URL=<url> npm run build
 // ---------------------------------------------------------------------------
 const FALLBACK_BFF_BASE_URL: string =
-  import.meta.env.VITE_BFF_BASE_URL ?? "https://spe-api-dev-67e2xz.azurewebsites.net";
+  import.meta.env.VITE_BFF_BASE_URL ?? "https://spaarke-bff-dev.azurewebsites.net";
 
 // ---------------------------------------------------------------------------
 // Client config response shape from GET /api/config/client

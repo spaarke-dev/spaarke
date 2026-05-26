@@ -1,0 +1,50 @@
+<task id="072" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>CI: fail on `*.js.map` in publish (FR-C2)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ci-cd, codification, outcome-c, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential codification</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add CI step in `sdap-ci.yml` that fails if any `*.map` files exist in `publish/wwwroot/`. Codifies FR-A2 policy.
+  </prompt>
+
+  <role>CI/CD engineer.</role>
+  <goal>Workflow step exists; test PR with intentionally added `.map` file fails CI.</goal>
+
+  <inputs><file purpose="workflow">.github/workflows/sdap-ci.yml</file></inputs>
+  <constraints><constraint source="spec.md FR-C2">Fails on any *.js.map in publish/wwwroot/</constraint></constraints>
+
+  <knowledge>
+    <files>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Codifies the sourcemap exclusion from task 041.</background>
+    <dependencies><dependency task="054" status="not-started">Phase 4 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Add workflow step: `find publish-test/wwwroot -name "*.map" | wc -l` — fail if non-zero</step>
+    <step order="2">Test by injecting a `.map` file; verify CI fails</step>
+    <step order="3">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool></tools>
+
+  <outputs><output type="code">.github/workflows/sdap-ci.yml (new step)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workflow step exists</criterion>
+    <criterion testable="true">Synthetic PR with `.map` fails CI</criterion>
+  </acceptance-criteria>
+</task>

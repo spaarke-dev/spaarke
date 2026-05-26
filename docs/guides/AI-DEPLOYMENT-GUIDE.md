@@ -131,6 +131,41 @@ node --version
 npm --version
 ```
 
+### Cosmos DB (mandatory for BFF AI startup)
+
+Since Phase 5 (sdap-bff-api-remediation-fix project), the BFF requires a Cosmos DB account at startup. `AiPersistenceModule.cs:56` throws `InvalidOperationException` if `CosmosPersistence__Endpoint` is null → BFF fails to start.
+
+#### Required infrastructure per environment
+
+1. **Cosmos DB account** (Serverless SKU recommended for non-prod):
+   ```bash
+   # One-time per subscription: register provider
+   az provider register --namespace Microsoft.DocumentDB --wait
+   # Create account
+   az cosmosdb create --name spaarke-cosmos-{env}-ai --resource-group {rg} \
+     --locations regionName={region} failoverPriority=0 isZoneRedundant=False \
+     --capabilities EnableServerless --default-consistency-level Session
+   ```
+
+2. **Database**: `spaarke-ai`
+
+3. **5 containers** (all `/tenantId` partition key): `sessions`, `prompts`, `audit`, `memory`, `feedback`. **On Git Bash on Windows**, use `MSYS_NO_PATHCONV=1` to avoid path mangling:
+   ```bash
+   for CONTAINER in sessions prompts audit memory feedback; do
+     MSYS_NO_PATHCONV=1 az cosmosdb sql container create \
+       --account-name spaarke-cosmos-{env}-ai --database-name spaarke-ai \
+       --resource-group {rg} --name $CONTAINER --partition-key-path "/tenantId"
+   done
+   ```
+
+4. **BFF MI data-plane RBAC**: grant Cosmos DB Built-in Data Contributor (role definition `00000000-0000-0000-0000-000000000002`) to the BFF MI principal.
+
+5. **App Settings**:
+   - `CosmosPersistence__Endpoint=https://spaarke-cosmos-{env}-ai.documents.azure.com:443/`
+   - `CosmosPersistence__DatabaseName=spaarke-ai`
+
+Reference: `auth-deployment-setup.md` §3.5 Cosmos provisioning sequence for full per-env walkthrough.
+
 ---
 
 ## Phase 1: Azure Infrastructure (R1)

@@ -1,0 +1,62 @@
+<task id="063" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>7-day prod observation + LESSONS-LEARNED entries (CONDITIONAL on UQ-02)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour active + 7 days calendar</estimated-effort>
+    <assigned>AI agent + ops team + waiting period</assigned>
+    <tags>bff-api, observation, prod, phase-5, calendar-gate</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>7-day calendar gate</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    7-day prod observation window. Monitor App Insights for any drift. Document any surprises, gotchas, or future-quarterly-review prompts in LESSONS-LEARNED.md as they surface.
+  </prompt>
+
+  <role>Operations + analyst.</role>
+  <goal>7-day prod observation completes with no regression; LESSONS-LEARNED.md populated.</goal>
+
+  <inputs>
+    <file purpose="baseline">projects/sdap-bff-api-remediation-fix/baseline/app-insights-48h.json</file>
+    <file purpose="lessons">projects/sdap-bff-api-remediation-fix/LESSONS-LEARNED.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §6 Phase 5">7-day prod observation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/baseline/app-insights-48h.json</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>If UQ-02 = no, this task is ⏸ deferred along with task 062.</background>
+    <dependencies><dependency task="062" status="not-started">Prod deploy succeeded</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Verify UQ-02 = YES; if no, mark ⏸ deferred</step>
+    <step order="2">Trigger 7-day observation window</step>
+    <step order="3">Daily App Insights review; capture deltas in EXECUTION-LOG.md</step>
+    <step order="4">Surface any surprises in LESSONS-LEARNED.md as they happen</step>
+    <step order="5">After 7 days: final summary entry in LESSONS-LEARNED.md; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="az">App Insights queries</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/LESSONS-LEARNED.md (entries during observation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">7-day window completed</criterion>
+    <criterion testable="true">No regression beyond 10% bands</criterion>
+    <criterion testable="true">LESSONS-LEARNED.md has at least 1 entry from this window</criterion>
+  </acceptance-criteria>
+</task>

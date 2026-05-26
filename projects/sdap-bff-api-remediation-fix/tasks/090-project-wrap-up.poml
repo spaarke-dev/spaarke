@@ -1,0 +1,109 @@
+<task id="090" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Project wrap-up — README→Complete, plan→✅, LESSONS-LEARNED.md, code-review, adr-check, repo-cleanup</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <assigned>Project owner + AI agent</assigned>
+    <tags>wrap-up, lessons-learned, code-review, adr-check, repo-cleanup</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; sequential</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Finalize the project. Update README.md status to Complete with graduation criteria ✅; update plan.md milestones ✅; finalize LESSONS-LEARNED.md (FR-D8 / SC-21) with surprises, gotchas, and prompts for the next quarterly review; run `/code-review` on all changed source code (Phase 4 + Phase 6); run `/adr-check` on the changes; run `/repo-cleanup projects/sdap-bff-api-remediation-fix` to archive ephemeral notes and verify structure.
+  </prompt>
+
+  <role>Project owner + wrap-up facilitator.</role>
+
+  <goal>
+    - README.md status = Complete; all graduation criteria checkboxes ✅
+    - plan.md milestones all ✅
+    - LESSONS-LEARNED.md committed at `projects/sdap-bff-api-remediation-fix/LESSONS-LEARNED.md`
+    - code-review skill output: no unresolved findings (or all findings documented)
+    - adr-check skill output: no ADR violations
+    - repo-cleanup output: project structure validated; ephemeral files archived
+    - TASK-INDEX.md shows all tasks ✅ (or ⏸ deferred with rationale)
+  </goal>
+
+  <inputs>
+    <file purpose="readme">projects/sdap-bff-api-remediation-fix/README.md</file>
+    <file purpose="plan">projects/sdap-bff-api-remediation-fix/plan.md</file>
+    <file purpose="claude">projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    <file purpose="task-index">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md</file>
+    <file purpose="execution-log">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-D8">LESSONS-LEARNED.md committed</constraint>
+    <constraint source="spec.md SC-21">LESSONS-LEARNED.md exists in project folder</constraint>
+    <constraint source="root CLAUDE.md §7">Reset current-task.md status to "none" for project completion</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/BASELINE.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Wrap-up consolidates artifacts for the next quarterly review. LESSONS-LEARNED.md is the most
+      important output — captures what surprised us, what was harder/easier than expected, and
+      prompts that future contributors should consider when next bloat audit comes around.
+    </background>
+    <dependencies>
+      <dependency task="081" status="not-started">BFF CLAUDE.md updated (last Phase 6 task)</dependency>
+      <dependency task="063" status="not-started">If UQ-02 = yes: prod observation; else this dep is ⏸ deferred</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Aggregate observations from EXECUTION-LOG.md + BASELINE.md into LESSONS-LEARNED.md sections: (a) Surprises (what didn't match assumption), (b) Gotchas (what tripped us up), (c) Future risks (what we worry about), (d) Quarterly review prompts (specific things to check at next review)</step>
+    <step order="2">Document the PF-3 scope drift (spec said 20 CRUD→AI deps; reality was 59 files) as a Surprise</step>
+    <step order="3">Document the `Services/Ai/Handlers/` vs `Services/Ai/Jobs/` distinction as a Gotcha for future contributors</step>
+    <step order="4">Document the NU1903 HIGH on Kiota Abstractions found at pre-flight as evidence Outcome B was necessary</step>
+    <step order="5">Update README.md → Status: Complete; mark all graduation criteria checkboxes ✅</step>
+    <step order="6">Update plan.md → mark all milestones ✅</step>
+    <step order="7">Update current-task.md → status: "none", next-action: "Project complete; quarterly review in 90 days per task 079 next-review-date stamp"</step>
+    <step order="8">Invoke `/code-review` skill on Phase 4 + Phase 6 changes</step>
+    <step order="9">Invoke `/adr-check` skill on the project's commits</step>
+    <step order="10">Invoke `/repo-cleanup projects/sdap-bff-api-remediation-fix`</step>
+    <step order="11">Update TASK-INDEX.md → task 090 ✅; verify all other tasks are ✅ or ⏸</step>
+    <step order="12">Final commit (project closure)</step>
+  </steps>
+
+  <tools>
+    <tool name="git">commit + final push</tool>
+    <tool name="code-review">via /code-review skill</tool>
+    <tool name="adr-check">via /adr-check skill</tool>
+    <tool name="repo-cleanup">via /repo-cleanup skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/LESSONS-LEARNED.md</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/README.md (status: Complete)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/plan.md (milestones ✅)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/current-task.md (status: none)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (final state)</output>
+    <output type="report">Code review + ADR check + repo cleanup outputs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LESSONS-LEARNED.md exists with ≥4 sections (Surprises, Gotchas, Future risks, Quarterly review prompts)</criterion>
+    <criterion testable="true">README.md status = Complete; graduation criteria all ✅</criterion>
+    <criterion testable="true">plan.md milestones all ✅</criterion>
+    <criterion testable="true">current-task.md reset to "none" with quarterly-review next action</criterion>
+    <criterion testable="true">code-review output: no unresolved findings</criterion>
+    <criterion testable="true">adr-check output: no violations</criterion>
+    <criterion testable="true">repo-cleanup output: structure validated, ephemeral files archived</criterion>
+    <criterion testable="true">All 56 tasks in TASK-INDEX.md ✅ or ⏸ with rationale</criterion>
+  </acceptance-criteria>
+</task>

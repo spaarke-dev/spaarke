@@ -1,0 +1,97 @@
+# =============================================================
+# Phase 3 Baseline — Task 038: DI Registration Count
+# =============================================================
+# Captured: 2026-05-25
+# Source:   src/server/api/Sprk.Bff.Api/Infrastructure/DI/*.cs + Program.cs
+# Method:   grep -E "\.Add(Singleton|Scoped|Transient|HostedService)\b"
+
+## Total: 265 DI registrations
+##   Infrastructure/DI/ modules:  262 (across 24 *Module.cs files)
+##   Program.cs (direct registrations): 3
+
+## Per-lifetime breakdown (modules only)
+
+| Lifetime          | Count |
+|-------------------|-------|
+| AddSingleton      | 126   |
+| AddScoped         | 117   |
+| AddTransient      |   1   |
+| AddHostedService  |  18   |
+| **Total**         | 262   |
+
+## Per-module breakdown (Infrastructure/DI/*.cs)
+
+| Module                          | Total | Singleton | Scoped | Transient | Hosted |
+|---------------------------------|-------|-----------|--------|-----------|--------|
+| AnalysisServicesModule.cs       |   61  |    33     |   27   |     0     |   1    |
+| FinanceModule.cs                |   22  |     1     |   21   |     0     |   0    |
+| AiModule.cs                     |   18  |     9     |    8   |     0     |   1    |
+| AiSafetyModule.cs               |   14  |     8     |    6   |     0     |   0    |
+| CommunicationModule.cs          |   14  |     9     |    1   |     0     |   4    |
+| AiCapabilitiesModule.cs         |   13  |     9     |    2   |     0     |   2    |
+| GraphModule.cs                  |   13  |    12     |    0   |     1     |   0    |
+| JobProcessingModule.cs          |   13  |     2     |    6   |     0     |   5    |
+| AgentModule.cs                  |   11  |     8     |    3   |     0     |   0    |
+| DocumentsModule.cs              |   10  |     3     |    7   |     0     |   0    |
+| RegistrationModule.cs           |    9  |     8     |    0   |     0     |   1    |
+| SpeAdminModule.cs               |    9  |     6     |    1   |     0     |   2    |
+| WorkspaceModule.cs              |    9  |     2     |    6   |     0     |   1    |
+| AiPersistenceModule.cs          |    8  |     2     |    6   |     0     |   0    |
+| EmailServicesModule.cs          |    8  |     4     |    4   |     0     |   0    |
+| OfficeModule.cs                 |    8  |     2     |    6   |     0     |   0    |
+| SpaarkeCore.cs                  |    7  |     0     |    7   |     0     |   0    |
+| WorkersModule.cs                |    4  |     1     |    3   |     0     |   0    |
+| AiChatModule.cs                 |    3  |     2     |    1   |     0     |   0    |
+| ConfigurationModule.cs          |    3  |     2     |    0   |     0     |   1    |
+| TelemetryModule.cs              |    2  |     2     |    0   |     0     |   0    |
+| AuthorizationModule.cs          |    1  |     0     |    1   |     0     |   0    |
+| CacheModule.cs                  |    1  |     1     |    0   |     0     |   0    |
+| ExternalAccessModule.cs         |    1  |     0     |    1   |     0     |   0    |
+
+## Program.cs (3 direct registrations)
+
+  L23  AddSingleton<Azure.Core.TokenCredential>(...)   <-- ADDED by task 023
+  L28  AddScoped<IDocumentStorageResolver,DocumentStorageResolver>()
+  L37  AddScoped<ScorecardCalculatorService>()
+
+## ADR-010 gap
+
+  Target:  <=15 non-framework registrations
+  Actual:  265
+  Gap:     +250 (1666% over target)
+
+  Out of scope for this project per spec.md "Out of Scope"; a separate
+  architectural project is required to address ADR-010 systematically.
+  This task makes the gap MEASURABLE so Phase 4 can verify "no worsen".
+
+## Phase 4 expected Outcome E delta
+
+  Task 046 (create PublicContracts facade):
+    +4 to +8 (4 facade interfaces + implementations; could collapse
+    into a single PublicContractsModule with 1 collective Add call)
+
+  Tasks 047-050 (migrate ~59 consumers to facade):
+    +/- 0 registrations  (consumer-side INJECTIONS change, but the
+    underlying registrations in AnalysisServicesModule stay put;
+    Outcome E reduces direct dependency count, not registration count)
+
+  Task 051 (relocate AI-coupled job handlers):
+    +/- 0 registrations  (namespace change only; JobType string
+    dispatch by name in JobProcessingModule unchanged)
+
+  Net expected: +4 to +8 registrations (265 -> 269 to 273)
+  ABSOLUTE CEILING for task 054 (Phase 4 gate): 273
+  If Phase 4 exceeds 273, investigate before continuing.
+
+## Notes
+
+- AnalysisServicesModule (61 regs / 23% of all modules) is the largest;
+  Outcome E facade additions should consider whether to extend this
+  module or introduce a sibling PublicContractsModule.
+- FinanceModule has 21 scoped + 1 singleton = 22 — heaviest scoped
+  footprint. Investigate during Phase 4 task 047 design.
+- Task 023 DI-singleton TokenCredential refactor added exactly 1
+  registration (Program.cs L23) and refactored 19 service constructors
+  to consume it. Net DI registration delta from task 023: +1.
+
+# =============================================================

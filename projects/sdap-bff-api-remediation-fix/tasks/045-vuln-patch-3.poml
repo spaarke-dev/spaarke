@@ -1,0 +1,61 @@
+<task id="045" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Vuln patch 3 (count + identity refined post-Phase 1)</title>
+    <status>deferred</status>
+    <estimated-effort>2 hours active + 24-48h bake</estimated-effort>
+    <assigned>AI agent (developer) + owner (per NFR-08 revised)</assigned>
+    <tags>bff-api, security, outcome-b, phase-4, deploy</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Vuln patches sequential</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Placeholder task for the third vuln patch. Specific package + version determined by Phase 1. Treat as MEDIUM tier; owner (per NFR-08 revised); 24-48h bake. May be marked deferred if fewer than 3 vulns identified.
+  </prompt>
+
+  <role>Security-aware .NET developer.</role>
+  <goal>Third HIGH CVE resolved (or task marked deferred). Tests pass; bake passes.</goal>
+
+  <inputs>
+    <file purpose="vulnerable">projects/sdap-bff-api-remediation-fix/inventory/vulnerable.txt</file>
+    <file purpose="candidates">projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §3">Owner sign-off + AI-directed verification (NFR-08 revised)</constraint>
+    <constraint source="spec.md §Out of Scope">No Graph SDK / Kiota individual bumps; no pre-release bumps</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/inventory/vulnerable.txt</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Exact scope determined by Phase 1. Task exists as placeholder to be filled or deferred.</background>
+    <dependencies><dependency task="044" status="not-started">Second vuln patch stable</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Verify if remaining HIGH CVE exists in CANDIDATES.md</step>
+    <step order="2">If not: mark ⏸ deferred</step>
+    <step order="3">Else: same procedure as 043 / 044 — owner (per NFR-08 revised), single commit, build+test, deploy, bake</step>
+    <step order="4">Log to EXECUTION-LOG.md; mark ✅</step>
+  </steps>
+
+  <tools><tool name="dotnet">build, test, vuln scan</tool><tool name="powershell">Deploy-BffApi.ps1</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (if vuln exists)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Target CVE resolved OR deferred with rationale</criterion>
+    <criterion testable="true">If applied: tests pass ±5% baseline; bake passes</criterion>
+  </acceptance-criteria>
+</task>

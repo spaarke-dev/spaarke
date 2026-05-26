@@ -6,6 +6,7 @@ using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -14,13 +15,14 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// Job handler for invoice indexing into Azure AI Search.
 /// Indexes invoices with embeddings for semantic search and filtering.
 ///
-/// Follows ADR-013: AI via BFF API (not separate service).
+/// Follows ADR-013 (refined 2026-05-20): AI consumed through
+/// <see cref="IInvoiceAi"/> facade per FR-E2 part 3 (task 049).
 /// Follows ADR-015: No content logging (IDs only).
 /// </summary>
 public class InvoiceIndexingJobHandler : IJobHandler
 {
     private readonly SearchIndexClient _searchIndexClient;
-    private readonly IOpenAiClient _openAiClient;
+    private readonly IInvoiceAi _invoiceAi;
     private readonly IDocumentDataverseService _documentService;
     private readonly TextExtractorService _textExtractorService;
     private readonly FinanceTelemetry _telemetry;
@@ -39,14 +41,14 @@ public class InvoiceIndexingJobHandler : IJobHandler
 
     public InvoiceIndexingJobHandler(
         SearchIndexClient searchIndexClient,
-        IOpenAiClient openAiClient,
+        IInvoiceAi invoiceAi,
         IDocumentDataverseService documentService,
         TextExtractorService textExtractorService,
         FinanceTelemetry telemetry,
         ILogger<InvoiceIndexingJobHandler> logger)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
-        _openAiClient = openAiClient ?? throw new ArgumentNullException(nameof(openAiClient));
+        _invoiceAi = invoiceAi ?? throw new ArgumentNullException(nameof(invoiceAi));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
@@ -117,7 +119,7 @@ public class InvoiceIndexingJobHandler : IJobHandler
             {
                 try
                 {
-                    embedding = await _openAiClient.GenerateEmbeddingAsync(
+                    embedding = await _invoiceAi.GenerateEmbeddingAsync(
                         documentText,
                         model: "text-embedding-3-large",
                         dimensions: 3072,

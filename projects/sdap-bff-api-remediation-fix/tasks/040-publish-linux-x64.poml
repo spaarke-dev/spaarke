@@ -1,0 +1,104 @@
+<task id="040" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Publish with `--runtime linux-x64` framework-dependent (FR-A1)</title>
+    <status>completed</status>
+    <estimated-effort>1 hour active + 24h bake</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, publish, size-reduction, outcome-a, phase-4, deploy</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential by 24h bake window</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Configure `Sprk.Bff.Api.csproj` and/or `Deploy-BffApi.ps1` to publish with `--runtime linux-x64`
+    (framework-dependent — NOT self-contained). Pre-flight verified: csproj currently has NO
+    `<RuntimeIdentifier>` set, so this is a clean addition. Single-change deploy + 24h dev bake;
+    revert on any anomaly.
+
+    Expected savings: ~25–30 MB uncompressed, ~10 MB compressed (multi-platform native runtimes
+    trimmed).
+  </prompt>
+
+  <role>.NET publish + Azure App Service deploy engineer.</role>
+
+  <goal>
+    Dev deploy succeeds with `publish/runtimes/` containing ONLY `linux-x64/` (or no native runtime
+    folders if framework-dependent removes them). All Phase 3 baselines reproduce. 24h bake passes.
+  </goal>
+
+  <inputs>
+    <file purpose="csproj">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="baseline">projects/sdap-bff-api-remediation-fix/BASELINE.md</file>
+    <file purpose="candidates">projects/sdap-bff-api-remediation-fix/CANDIDATES.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-A1">Framework-dependent linux-x64; NOT self-contained</constraint>
+    <constraint source="spec.md §Out of Scope">NO `<PublishTrimmed>`, NO `<PublishAot>`</constraint>
+    <constraint source=".claude/constraints/azure-deployment.md">Publish to `deploy/api-publish/`</constraint>
+    <constraint source="design.md §5">Reflection-safe; reflection-load probe must match baseline</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF additions governance applies</constraint>
+    <constraint source="NFR-09">No new warnings vs Phase 3 baseline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>projects/sdap-bff-api-remediation-fix/BASELINE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Azure App Service is unambiguously Linux per task 017 inventory. Multi-platform RIDs are pure
+      waste. Framework-dependent (not self-contained) keeps the .NET runtime from being bundled
+      (App Service provides it), keeping size minimal.
+    </background>
+    <dependencies><dependency task="037" status="not-started">Phase 3 BASELINE.md complete</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Decide csproj `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` OR `Deploy-BffApi.ps1 --runtime linux-x64` flag (csproj preferred per `.claude/constraints/azure-deployment.md`)</step>
+    <step order="2">Single git commit on feature branch with ONLY this change</step>
+    <step order="3">`dotnet build` — clean compile; warning count ≤ Phase 3 baseline (NFR-09)</step>
+    <step order="4">`dotnet test tests/unit/Sprk.Bff.Api.Tests/` — same pass count as Phase 3 (any failure = abort)</step>
+    <step order="5">`dotnet publish` and inspect output: `runtimes/` contains only `linux-x64/` (or empty); zero win-x64/osx-*/musl-*/arm64 entries</step>
+    <step order="6">Verify reflection-load probe matches baseline (task 015 instrumentation re-applied temporarily) — diff against `baseline/reflection-probe-baseline.txt`</step>
+    <step order="7">`Deploy-BffApi.ps1 -Environment dev` to `spe-api-dev-67e2xz` ONLY</step>
+    <step order="8">Re-run endpoints smoke test pass — match Phase 3 baseline</step>
+    <step order="9">**Bake 24–48h**. App Insights: zero new exception types, error rate within 10% baseline, P95 latency within 10%, dep success unchanged</step>
+    <step order="10">If stable: log to `EXECUTION-LOG.md` with size delta; mark task ✅</step>
+    <step order="11">If any anomaly: `git revert` + redeploy + investigate</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+    <tool name="az">App Insights queries during bake</tool>
+    <tool name="git">single commit + revert if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (RuntimeIdentifier added)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md (entry with size delta + bake result)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`publish/runtimes/` contains only `linux-x64/` OR no native runtime folders</criterion>
+    <criterion testable="true">Zero win-x64/osx-x64/osx-arm64/linux-musl-x64/linux-arm64 subdirs</criterion>
+    <criterion testable="true">Test pass count matches Phase 3 baseline ±5%</criterion>
+    <criterion testable="true">Build warning count ≤ Phase 3 baseline</criterion>
+    <criterion testable="true">24h dev bake: zero new exception types in App Insights</criterion>
+    <criterion testable="true">P95 latency within 10% per endpoint vs baseline</criterion>
+    <criterion testable="true">Reflection-load probe matches baseline (or diff accounted for)</criterion>
+    <criterion testable="true">Size delta documented in EXECUTION-LOG.md</criterion>
+  </acceptance-criteria>
+</task>

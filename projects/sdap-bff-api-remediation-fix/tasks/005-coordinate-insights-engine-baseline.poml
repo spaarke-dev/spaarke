@@ -1,0 +1,105 @@
+<task id="005" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Coordinate baseline window with `ai-spaarke-insights-engine-r1` (UQ-04)</title>
+    <status>completed</status>
+    <estimated-effort>30 minutes</estimated-effort>
+    <actual-effort>~5 min (verified Engine branch state; baseline window chosen; G4 flagged as followup)</actual-effort>
+    <assigned>Project owner</assigned>
+    <started>2026-05-24</started>
+    <completed>2026-05-24</completed>
+    <tags>coordination, phase-0</tags>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent owner coordination ask</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Two distinct deliverables:
+
+    1. **Baseline timing coordination (original UQ-04)**: Confirm with the `ai-spaarke-insights-engine-r1` project owner WHEN Phase 1 integration is expected to land in `Sprk.Bff.Api`. This project's Phase 3 baseline must be captured EITHER fully BEFORE the Insights Engine integration starts OR fully AFTER it is stable — never mid-integration (would invalidate App Insights baseline metrics).
+
+    2. **Facade adoption agreement (senior-review G4 / item #4, 2026-05-24)**: Obtain WRITTEN agreement that Insights Engine PRs merging AFTER Phase 4 task 046 (facade creation) MUST consume `Services/Ai/PublicContracts/` facade interfaces rather than injecting `IOpenAiClient` / `IPlaybookService` directly. Belt-and-suspenders to FR-C6 CI gate (lands in Phase 6 task 082); during the gap between task 046 and task 082, this written agreement is the only thing preventing Insights Engine's new code from violating Outcome E.
+  </prompt>
+
+  <role>Project coordinator.</role>
+
+  <goal>
+    Two documented agreements:
+    (a) Baseline window choice: pre-integration OR post-stable; specific calendar window reserved for Phase 3 task 033.
+    (b) Insights Engine facade adoption commitment for any PR merged after Phase 4 task 046.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/sdap-bff-api-remediation-fix/design.md</file>
+    <file purpose="sibling-project">projects/ai-spaarke-insights-engine-r1/</file>
+    <file purpose="insights-arch">docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="design.md §2.3">Capture Phase 3 baseline BEFORE Engine integration starts, OR fully AFTER stable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-r1/README.md</file>
+      <file>docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Insights Engine Phase 1 integrates ~5 services + new index code INTO `Sprk.Bff.Api`. That
+      adds size and changes App Insights signal characteristics. If our 48h baseline is captured
+      mid-integration, Phase 4 will compare against a noisy reference, undermining the regression
+      detection. Engine project is currently pre-implementation (design phase), so there is
+      flexibility.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Owner sign-off required first</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Contact `ai-spaarke-insights-engine-r1` owner</step>
+    <step order="2">Confirm Phase 1 integration target dates</step>
+    <step order="3">Choose baseline window: pre-integration OR post-stable</step>
+    <step order="4">Obtain WRITTEN agreement that any Insights Engine PR merged after this project's Phase 4 task 046 uses `Services/Ai/PublicContracts/` facade interfaces — NOT direct injection of `IOpenAiClient`/`IPlaybookService` (senior review G4)</step>
+    <step order="5">Record both decisions (baseline window + facade adoption commitment) in CLAUDE.md → Decisions Made</step>
+    <step order="6">Update Phase 0 checklist item 4 to checked</step>
+    <step order="7">Update TASK-INDEX.md status of task 005 from 🔲 to ✅</step>
+  </steps>
+
+  <tools><tool name="git">Update CLAUDE.md + task index</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/CLAUDE.md (Decisions Made entry)</output>
+    <output type="docs">projects/sdap-bff-api-remediation-fix/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UQ-04 answer recorded with scheduled baseline window</criterion>
+    <criterion testable="true">Written facade-adoption agreement recorded for Insights Engine PRs post-task-046 (G4)</criterion>
+    <criterion testable="true">Phase 0 checklist item 4 marked complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+      Insights Engine project (`work/ai-spaarke-insights-engine-r1`) verified pre-implementation (0 commits
+      ahead of master). Baseline window decision: capture Phase 3 baseline NOW (pre-integration). Engine has
+      not started integration so no App Insights contamination risk.
+    </completion-summary>
+    <baseline-window>Pre-integration. Phase 3 task 033 to start when convenient.</baseline-window>
+    <g4-status>PENDING WRITTEN AGREEMENT — operator action item before Phase 4 task 046 starts.</g4-status>
+    <operator-action-required>
+      Before Phase 4 task 046 (facade creation), operator MUST contact Insights Engine project owner and
+      obtain written agreement (PR comment, Slack/Teams/email, or commit to that project's design.md) that
+      any Insights Engine PR merged after Phase 4 task 046 uses `Services/Ai/PublicContracts/` facade
+      interfaces rather than direct `IOpenAiClient`/`IPlaybookService` injection. This is belt-and-suspenders
+      to FR-C6 CI gate (lands in Phase 6 task 082) — during the gap between task 046 (Phase 4) and task 082
+      (Phase 6), this written agreement is the only thing preventing Insights Engine's new code from
+      violating Outcome E.
+    </operator-action-required>
+  </notes>
+</task>

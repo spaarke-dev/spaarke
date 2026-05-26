@@ -248,6 +248,8 @@ await authenticatedFetch('/ai/chat/sessions');
 
 **Important**: `sprk_BffApiBaseUrl` is stored WITH `/api` for historical reasons. All code MUST strip it before use.
 
+> ⚠️ **Cross-environment consistency**: The `sprk_BffApiBaseUrl` env var must use the **same** format across all envs (dev, demo, prod). `normalizeUrl()` in `@spaarke/auth` strips a trailing `/api` if present, so the value is functionally equivalent whether stored as `https://host.azurewebsites.net` or `https://host.azurewebsites.net/api`. **However**: PCF controls and Code Pages deployed to multiple environments must all behave the same — inconsistent formats cause confusing operator handoffs. **Recommendation**: store host-only (no `/api`) for clarity. Phase 5 of the `sdap-bff-api-remediation-fix` project ([EXECUTION-LOG.md](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) §Task 060 step 9) aligned demo with dev's `/api`-suffixed value to match the operator-visible setting, even though runtime behavior is identical.
+
 ---
 
 ## Checklist: Adding a New BFF API Integration
@@ -260,6 +262,7 @@ await authenticatedFetch('/ai/chat/sessions');
 - [ ] Handle `AuthError` with code `'auth_exhausted'` gracefully in UI
 - [ ] Handle `ApiError` with ProblemDetails for user-friendly error messages
 - [ ] For tenant ID: use `getAuthProvider().getTenantId()` — it reads the JWT `tid` claim from any token source
+- [ ] **Verify `sprk_BffApiBaseUrl` value matches dev's format** (currently `/api`-suffixed) across all target Dataverse environments for operator consistency
 
 ---
 

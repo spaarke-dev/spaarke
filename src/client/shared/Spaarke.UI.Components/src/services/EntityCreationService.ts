@@ -74,7 +74,7 @@ export interface ISendEmailInput {
   cc?: string | string[];
   subject: string;
   body: string;
-  bodyFormat?: 'HTML' | 'Text';
+  bodyFormat?: 'HTML' | 'PlainText'; // matches server enum BodyFormat (Sprk.Bff.Api.Services.Communication.Models.BodyFormat); 'Text' was an incorrect alias and is rejected by the BFF (2026-05-25)
   associations?: Array<{
     entityType: string;
     entityId: string;

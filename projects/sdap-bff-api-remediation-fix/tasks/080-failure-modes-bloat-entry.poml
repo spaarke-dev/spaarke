@@ -1,0 +1,59 @@
+<task id="080" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>`.claude/FAILURE-MODES.md` new entry — bloat root cause + process-debt pattern (FR-D4)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>AI agent (developer) — main session only</assigned>
+    <tags>bff-api, failure-modes, codification, outcome-d, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>.claude/ paths require main-session-only</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add new entry to `.claude/FAILURE-MODES.md` documenting (a) the bloat root cause + fix from this project, and (b) the "many-projects-each-adding-without-considering-overall-quality" process-failure pattern that root CLAUDE.md §10 binds against. Date the entry 2026-05-20+.
+  </prompt>
+
+  <role>Failure-mode catalog maintainer + main session.</role>
+  <goal>New entry (e.g., AP-2 or G-4) exists in FAILURE-MODES.md with both the technical root cause and the process pattern.</goal>
+
+  <inputs>
+    <file purpose="failure-modes">.claude/FAILURE-MODES.md</file>
+    <file purpose="design">projects/sdap-bff-api-remediation-fix/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-D4">Entry documents (a) bloat root cause + fix, (b) process-failure pattern</constraint>
+    <constraint source="root CLAUDE.md §3">Main-session-only for .claude/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/design.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>FAILURE-MODES.md has 3 existing entries (AP-1, G-2, G-3). This adds a new entry (next ID per convention) capturing what this project taught.</background>
+    <dependencies><dependency task="054" status="not-started">Phase 4 gate</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read FAILURE-MODES.md; identify next ID (likely AP-2 or G-4)</step>
+    <step order="2">Author entry: technical root cause (RID waste + sourcemaps + duplicates + no CI gate) + fix summary + process pattern (multiple projects adding to BFF without holistic considering of size + security + boundaries) + reference to root CLAUDE.md §10 binding constraint</step>
+    <step order="3">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool></tools>
+
+  <outputs><output type="docs">.claude/FAILURE-MODES.md (new entry)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">New entry present with date 2026-05-20+</criterion>
+    <criterion testable="true">Both technical root cause + process pattern documented</criterion>
+    <criterion testable="true">References root CLAUDE.md §10 + bff-extensions.md</criterion>
+  </acceptance-criteria>
+</task>

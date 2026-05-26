@@ -12,6 +12,10 @@ Keep dependency injection **minimal and concrete**. Register concretes unless a 
 
 **Rationale**: Excessive interfaces and registrations hurt readability and invite drift. ~15 non-framework DI lines keeps composition obvious for developers and AI agents.
 
+### Phase 5 baseline (2026-05-26)
+
+The `sdap-bff-api-remediation-fix` project measured **265 DI registrations** at Phase 3 baseline (task 038) — far above the "≤15 non-framework lines" principle. Phase 4 Outcome E added **4 facade registrations** via `AddPublicContractsFacade` (within the expected +4/+8 delta per `plan.md`). The +N elevation is a known violation accepted by the project; the principle of "feature-module extensions" (one module = one `Add*()` call from `Program.cs`) is preserved. See `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 3 + Phase 4 entries for evidence. Reducing the 265 baseline back toward the principle is OUT OF SCOPE for this project — flagged as a separate architectural follow-up.
+
 ---
 
 ## Constraints

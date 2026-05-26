@@ -1,0 +1,61 @@
+<task id="070" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Deploy-BffApi.ps1 hard-fail size guard + `-AllowOversize` escape (FR-C5)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ci-cd, codification, outcome-c, outcome-d, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential codification</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Update `scripts/Deploy-BffApi.ps1` so it FAILS (not warns) if the publish zip exceeds the documented ceiling (numeric value from task 006 / UQ-05; default: baseline + 10%). Add `-AllowOversize` flag for explicit-acknowledgment override. Currently the script only warns at >100 MB.
+  </prompt>
+
+  <role>PowerShell developer + deploy engineer.</role>
+  <goal>Script exits non-zero on oversize unless `-AllowOversize`. Integration test: synthetic oversized zip fails the script (per SC-11).</goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/Deploy-BffApi.ps1</file>
+    <file purpose="claude">projects/sdap-bff-api-remediation-fix/CLAUDE.md (UQ-05 ceiling value)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md FR-C5">Hard-fail by default; `-AllowOversize` escape</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Current threshold (warn at >100 MB) is too generous. Hard-fail with explicit escape per FR-C5 forces operators to consciously accept growth.</background>
+    <dependencies><dependency task="054" status="not-started">Phase 4 gate</dependency><dependency task="006" status="not-started">UQ-05 ceiling decided</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read CLAUDE.md to get the numeric ceiling value from UQ-05</step>
+    <step order="2">Update Deploy-BffApi.ps1: replace warn-at-100MB block with hard-fail logic + `-AllowOversize` flag</step>
+    <step order="3">Add inline doc comment explaining the rationale + reference to ADR-029 (to be created in task 076)</step>
+    <step order="4">Synthetic test: create an oversized zip, run script, verify non-zero exit; run with `-AllowOversize`, verify pass</step>
+    <step order="5">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="powershell">Deploy-BffApi.ps1 + script integration test</tool></tools>
+
+  <outputs><output type="code">scripts/Deploy-BffApi.ps1</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script exits non-zero when zip exceeds ceiling without `-AllowOversize`</criterion>
+    <criterion testable="true">Script passes when `-AllowOversize` is provided</criterion>
+    <criterion testable="true">Numeric ceiling matches CLAUDE.md UQ-05 entry</criterion>
+  </acceptance-criteria>
+</task>

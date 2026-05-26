@@ -23,7 +23,7 @@ const AUTH_CONFIG = {
   clientId: process.env.ADDIN_CLIENT_ID || 'c1258e2d-1688-49d2-ac99-a7485ebd9995',
   tenantId: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
   bffApiClientId: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
-  bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net',
+  bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net',
   redirectUri: 'brk-multihub://localhost', // NAA broker redirect
   fallbackRedirectUri: '', // https://{addin-domain}/taskpane.html - set for production
 };

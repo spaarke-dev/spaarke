@@ -7,7 +7,7 @@ info:
     to provide Spaarke AI capabilities through the Copilot side pane.
   version: 1.0.0
 servers:
-  - url: https://spe-api-dev-67e2xz.azurewebsites.net
+  - url: https://spaarke-bff-dev.azurewebsites.net
     description: Development environment
 
 paths:

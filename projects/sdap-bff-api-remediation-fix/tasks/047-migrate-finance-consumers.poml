@@ -1,0 +1,73 @@
+<task id="047" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>Migrate Finance consumers to facade (FR-E2 part 1)</title>
+    <status>completed</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <assigned>AI agent (developer)</assigned>
+    <tags>bff-api, ai-boundary, facade, migration, outcome-e, phase-4</tags>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent consumer module (Finance) — no shared files with 048/049/050</parallel-reason>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <!-- Merge strategy: this commit is part of the squashed atomic Outcome E PR (tasks 046–051) per plan.md Process Rules. See task 046 prompt for full context. -->
+  <prompt>
+    Migrate the 3 Finance consumers (InvoiceAnalysisService, InvoiceSearchService, IInvoiceAnalysisService — confirmed at pipeline pre-flight) to consume `Services/Ai/PublicContracts/IInvoiceAi` instead of `IOpenAiClient` / `IPlaybookService` directly. Behavior preservation verified by existing tests.
+  </prompt>
+
+  <role>Senior .NET developer with refactoring discipline.</role>
+
+  <goal>`grep -r "IOpenAiClient\|IPlaybookService" src/server/api/Sprk.Bff.Api/Services/Finance/` returns 0. Existing tests pass within ±5% baseline. Behavior preserved.</goal>
+
+  <inputs>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs</file>
+    <file purpose="finance">src/server/api/Sprk.Bff.Api/Services/Finance/</file>
+    <file purpose="tests">tests/unit/Sprk.Bff.Api.Tests/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013 refined">External CRUD consumers MUST use facade</constraint>
+    <constraint source="spec.md FR-E2">Zero direct IOpenAiClient/IPlaybookService in Services/Finance/</constraint>
+    <constraint source="spec.md FR-E4">Tests pass within ±5% Phase 3 baseline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>3 Finance consumer files confirmed at pre-flight. IInvoiceAi facade interface must already exist (task 046 prerequisite).</background>
+    <dependencies><dependency task="046" status="not-started">Facade interfaces exist</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">List all 3 Finance consumer files</step>
+    <step order="2">For each: replace constructor parameter `IOpenAiClient`/`IPlaybookService` with `IInvoiceAi`</step>
+    <step order="3">Replace call sites with facade method invocations</step>
+    <step order="4">Verify DI registration still resolves (facade implementation registered in 046)</step>
+    <step order="5">build + test — pass count ±5% Phase 3 baseline</step>
+    <step order="6">Acceptance grep: zero direct refs in Services/Finance/</step>
+    <step order="7">Single commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="git">single commit per Finance module</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/*.cs (3 files migrated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep returns 0 in Services/Finance/</criterion>
+    <criterion testable="true">Test pass count ±5% baseline</criterion>
+    <criterion testable="true">No behavioral change (validated by tests)</criterion>
+  </acceptance-criteria>
+</task>

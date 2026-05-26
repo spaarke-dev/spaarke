@@ -6,10 +6,10 @@
     "dev": {
       "displayName": "Development",
       "dataverseUrl": "https://spaarkedev1.crm.dynamics.com",
-      "bffApiUrl": "https://spe-api-dev-67e2xz.azurewebsites.net",
-      "appServiceName": "spe-api-dev-67e2xz",
+      "bffApiUrl": "https://spaarke-bff-dev.azurewebsites.net",
+      "appServiceName": "spaarke-bff-dev",
       "appServiceSlot": "staging",
-      "resourceGroup": "spe-infrastructure-westus2",
+      "resourceGroup": "rg-spaarke-dev",
       "keyVaultName": "spaarke-spekvcert",
       "location": "westus2",
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
@@ -36,8 +36,8 @@
         "docIntelName": "spaarke-docintel-dev"
       },
       "dataverseRegion": "unitedstates",
-      "isLegacyNaming": true,
-      "$comment_legacy": "Dev environment uses pre-v3 naming (spe-* prefix). New environments use spaarke-* naming."
+      "isLegacyNaming": false,
+      "$comment_migration": "Dev migrated 2026-05-24 from Windows spe-api-dev-67e2xz to Linux spaarke-bff-dev (canonical naming). Old env scheduled for decommission after stability period. See projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md."
     },
 
     "demo": {

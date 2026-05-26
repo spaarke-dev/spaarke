@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Azure.Identity;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -26,6 +25,7 @@ public class ExternalDataService
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    private readonly TokenCredential _credential;
     private readonly ILogger<ExternalDataService> _logger;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -107,10 +107,12 @@ public class ExternalDataService
     public ExternalDataService(
         HttpClient httpClient,
         IConfiguration configuration,
+        TokenCredential credential,
         ILogger<ExternalDataService> logger)
     {
         _httpClient = httpClient;
         _configuration = configuration;
+        _credential = credential;
         _logger = logger;
     }
 
@@ -409,16 +411,8 @@ public class ExternalDataService
             var dataverseUrl = _configuration["Dataverse:ServiceUrl"]
                 ?? throw new InvalidOperationException("Dataverse:ServiceUrl is required");
 
-            var managedIdentityClientId = _configuration["ManagedIdentity:ClientId"]
-                ?? throw new InvalidOperationException("ManagedIdentity:ClientId is required");
-
-            var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-            {
-                ManagedIdentityClientId = managedIdentityClientId
-            });
-
             var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
-            _currentToken = await credential.GetTokenAsync(new TokenRequestContext([scope]), ct);
+            _currentToken = await _credential.GetTokenAsync(new TokenRequestContext([scope]), ct);
 
             _logger.LogDebug("[EXT-DATA] Acquired new Dataverse token, expires {ExpiresOn}", _currentToken.Value.ExpiresOn);
             return _currentToken.Value.Token;

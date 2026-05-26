@@ -1,0 +1,4866 @@
+{
+  "baseline_captured_at": "2026-05-25T18:40:58.4096529Z",
+  "wall_clock_seconds": 415.0,
+  "target_url": "https://spaarke-bff-dev.azurewebsites.net",
+  "aggregate": {
+    "average_p95_latency_ms": 136.0,
+    "status_distribution": {
+      "404": 1790,
+      "200": 80,
+      "429": 10,
+      "401": 1320,
+      "400": 30
+    }
+  },
+  "total_probes": 3230.0,
+  "captured_by": "Capture-BffBaseline.ps1",
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/admin/builder-scopes/import",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 383,
+        "p99": 383,
+        "min": 92,
+        "p50": 94,
+        "max": 383
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/builder-scopes/import-json",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 93,
+        "max": 99
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/builder-scopes/status",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 112,
+        "p99": 112,
+        "min": 91,
+        "p50": 92,
+        "max": 112
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/email-processing/stats",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 91,
+        "p50": 93,
+        "max": 101
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/knowledge/index-reference/{knowledgeSourceId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/knowledge/index-reference/{knowledgeSourceId}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/knowledge/index-references",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/record-matching/status",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/record-matching/sync",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 92,
+        "max": 99
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/record-matching/sync-incremental",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 93,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/message",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/playbooks",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/playbooks/status/{jobId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/run-playbook",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/create",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/execute",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/analysis/{analysisId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 98,
+        "p99": 98,
+        "min": 90,
+        "p50": 92,
+        "max": 98
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/continue",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/export",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/resume",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/analysis/{analysisId:guid}/save",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/capabilities/refresh",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 102,
+        "p99": 102,
+        "min": 91,
+        "p50": 91,
+        "max": 102
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/context-mappings",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/context-mappings/analysis/{analysisId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 148,
+        "p99": 148,
+        "min": 91,
+        "p50": 91,
+        "max": 148
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/chat/context-mappings/cache",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/context-mappings/standalone",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/export/word",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/playbooks",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/chat/sessions/{sessionId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/commands",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/documents",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/history",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/messages",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/plan/approve",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat/sessions/{sessionId}/refine",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/restore",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/chat/sessions/{sessionId}/tabs",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/daily-briefing/narrate",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/daily-briefing/summarize",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/document-intelligence/associate-record",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 90,
+        "p50": 91,
+        "max": 101
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/document-intelligence/match-records",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 100,
+        "p99": 100,
+        "min": 91,
+        "p50": 91,
+        "max": 100
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/feedback",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/feedback/capability/{id}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/feedback/playbook/{id}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/handlers",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/handlers/{handlerId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/knowledge/indexes/health",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/knowledge/indexes/reindex/{documentId}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/knowledge/indexes/{indexName}/documents",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/knowledge/indexes/{indexName}/documents/{documentId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/knowledge/test-search",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/model-deployments",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/model-deployments/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/agentic",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/clarification-response",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 98,
+        "p99": 98,
+        "min": 90,
+        "p50": 91,
+        "max": 98
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/classify-intent",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 110,
+        "p99": 110,
+        "min": 90,
+        "p50": 91,
+        "max": 110
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/generate-clarification",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/generate-plan",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 91,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/process",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/test-execution",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/test-execution/production",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbook-builder/test-execution/quick",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/by-name/{name}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/public",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/runs/{runId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/runs/{runId:guid}/cancel",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/runs/{runId:guid}/detail",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/runs/{runId:guid}/stream",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 91,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/templates",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/canvas",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/canvas",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 100,
+        "p99": 100,
+        "min": 91,
+        "p50": 92,
+        "max": 100
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/clone",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/execute",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/nodes",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/nodes",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/reorder",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 130,
+        "p99": 130,
+        "min": 90,
+        "p50": 92,
+        "max": 130
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/playbooks/{id:guid}/nodes/{nodeId:guid}/scopes",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/runs",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/share",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 173,
+        "p99": 173,
+        "min": 90,
+        "p50": 91,
+        "max": 173
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/playbooks/{id:guid}/sharing",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/unshare",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{id:guid}/validate",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/playbooks/{playbookId:guid}/index",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/prompts",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/prompts",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/prompts/{id}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/prompts/{id}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/ai/prompts/{id}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/prompts/{id}/render",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 90,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/admin/bulk-index",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 102,
+        "p99": 102,
+        "min": 90,
+        "p50": 92,
+        "max": 102
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/rag/admin/bulk-index/{jobId}/status",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 111,
+        "p99": 111,
+        "min": 91,
+        "p50": 92,
+        "max": 111
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/embedding",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/enqueue-indexing",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/index",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/index-file",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/index/batch",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/search",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/rag/send-to-index",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/rag/source/{sourceDocumentId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ai/rag/{documentId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/actions",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/knowledge",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/skills",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/scopes/tools",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 102,
+        "p99": 102,
+        "min": 90,
+        "p50": 91,
+        "max": 102
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/search",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 91,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/search/count",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/search/records",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/tools/handlers",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/visualization/related-from-content",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/visualization/related/{documentId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/accounts/{id:guid}/verify",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/incoming-webhook",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/send",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/communications/send-bulk",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/communications/{id:guid}/status",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/client",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/containers",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/containers",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/containers/{containerId}/drive",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/containers/{containerId}/files/{*path}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/containers/{containerId}/upload",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/permissions/batch",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/analyze",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/checkin",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/checkout",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId:guid}/checkout-status",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/{documentId:guid}/discard",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/content",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/download",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/office",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/open-links",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/permissions",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/preview",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/preview-url",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/{documentId}/view-url",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/drives/{driveId}/children",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/drives/{driveId}/items/{itemId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/drives/{driveId}/items/{itemId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/drives/{driveId}/items/{itemId}/content",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/drives/{driveId}/upload",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoice-review/confirm",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/invoice-review/reject",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/finance/invoices/search",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 91,
+        "p99": 91,
+        "min": 90,
+        "p50": 91,
+        "max": 91
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/matters/{matterId:guid}/recalculate",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/finance/matters/{matterId:guid}/summary",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 90,
+        "p50": 91,
+        "max": 97
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/finance/projects/{projectId:guid}/recalculate",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 126,
+        "p99": 126,
+        "min": 92,
+        "p50": 100,
+        "max": 126
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/matters/{matterId:guid}/recalculate-grades",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 91,
+        "p50": 94,
+        "max": 101
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/capabilities",
+      "status_distribution": {
+        "400": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 98,
+        "p99": 98,
+        "min": 91,
+        "p50": 92,
+        "max": 98
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/navmap/{childEntity}/{relationship}/lookup",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 100,
+        "p99": 100,
+        "min": 89,
+        "p50": 90,
+        "max": 100
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/navmap/{entityLogicalName}/entityset",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 88,
+        "p50": 90,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/navmap/{parentEntity}/{relationship}/collection",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 109,
+        "p99": 109,
+        "min": 88,
+        "p50": 90,
+        "max": 109
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/obo/containers/{id}/children",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 122,
+        "p99": 122,
+        "min": 89,
+        "p50": 91,
+        "max": 122
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/obo/containers/{id}/files/{*path}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 436,
+        "p99": 436,
+        "min": 195,
+        "p50": 229,
+        "max": 436
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/obo/drives/{driveId}/items/{itemId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 89,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/obo/drives/{driveId}/items/{itemId}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 140,
+        "p99": 140,
+        "min": 89,
+        "p50": 90,
+        "max": 140
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/obo/drives/{driveId}/items/{itemId}/content",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 119,
+        "p99": 119,
+        "min": 89,
+        "p50": 91,
+        "max": 119
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/obo/drives/{driveId}/upload-session",
+      "status_distribution": {
+        "400": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 6002,
+        "p99": 6002,
+        "min": 929,
+        "p50": 6000,
+        "max": 6002
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/obo/upload-session/chunk",
+      "status_distribution": {
+        "400": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 6031,
+        "p99": 6031,
+        "min": 5967,
+        "p50": 5999,
+        "max": 6031
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/health",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 89,
+        "p50": 90,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/jobs/{jobId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/jobs/{jobId:guid}/stream",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/quickcreate/{entityType}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/recent",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/save",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/save-debug",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 104,
+        "p99": 104,
+        "min": 91,
+        "p50": 92,
+        "max": 104
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/search/documents",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/office/search/entities",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/share/attach",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 90,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/office/share/links",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 105,
+        "p99": 105,
+        "min": 90,
+        "p50": 92,
+        "max": 105
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/recalculate-grades",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/registration/demo-request",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 104,
+        "p99": 104,
+        "min": 91,
+        "p50": 92,
+        "max": 104
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/registration/requests/{id:guid}/approve",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/registration/requests/{id:guid}/reject",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/embed-token",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reporting/export",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/reports",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/reporting/reports",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 91,
+        "max": 99
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/reporting/reports/{reportId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/reports/{reportId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/reporting/reports/{reportId:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/reporting/status",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/resilience/circuits",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 92,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/resilience/circuits/{serviceName}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 92,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/resilience/health",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/audit",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 100,
+        "p99": 100,
+        "min": 91,
+        "p50": 92,
+        "max": 100
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/bulk/delete",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/bulk/permissions",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 91,
+        "max": 99
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/bulk/{operationId}/status",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/businessunits",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/configs",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 105,
+        "p99": 105,
+        "min": 91,
+        "p50": 92,
+        "max": 105
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/configs",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/configs/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 91,
+        "p50": 92,
+        "max": 101
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/configs/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 103,
+        "p99": 103,
+        "min": 91,
+        "p50": 92,
+        "max": 103
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/configs/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 90,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/spe/containers/{containerId}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/activate",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 103,
+        "p99": 103,
+        "min": 91,
+        "p50": 93,
+        "max": 103
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}/columns",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/columns",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 102,
+        "p99": 102,
+        "min": 91,
+        "p50": 91,
+        "max": 102
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containers/{containerId}/columns/{columnId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/spe/containers/{containerId}/columns/{columnId}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 105,
+        "p99": 105,
+        "min": 91,
+        "p50": 92,
+        "max": 105
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}/customproperties",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/containers/{containerId}/customproperties",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/lock",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{containerId}/permissions",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/permissions",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containers/{containerId}/permissions/{permissionId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/spe/containers/{containerId}/permissions/{permissionId}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 98,
+        "p99": 98,
+        "min": 91,
+        "p50": 92,
+        "max": 98
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{containerId}/unlock",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 91,
+        "p50": 92,
+        "max": 101
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{id}/folders",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 103,
+        "p99": 103,
+        "min": 91,
+        "p50": 92,
+        "max": 103
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{id}/items/upload",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containers/{id}/items/{itemId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/content",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/preview",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containers/{id}/items/{itemId}/share",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/thumbnails",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containers/{id}/items/{itemId}/versions",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 120,
+        "p99": 120,
+        "min": 91,
+        "p50": 94,
+        "max": 120
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containertypes",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 91,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes/{typeId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes/{typeId}/consumers",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containertypes/{typeId}/consumers",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/containertypes/{typeId}/consumers/{appId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 98,
+        "p99": 98,
+        "min": 91,
+        "p50": 92,
+        "max": 98
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/containertypes/{typeId}/consumers/{appId}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 104,
+        "p99": 104,
+        "min": 90,
+        "p50": 92,
+        "max": 104
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/containertypes/{typeId}/permissions",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 91,
+        "p50": 92,
+        "max": 101
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/containertypes/{typeId}/register",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/containertypes/{typeId}/settings",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/dashboard/metrics",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 91,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/dashboard/refresh",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/environments",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/environments",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/environments/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 92,
+        "max": 99
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/environments/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/spe/environments/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/recyclebin",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/spe/recyclebin/{containerId}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 103,
+        "p99": 103,
+        "min": 91,
+        "p50": 92,
+        "max": 103
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/recyclebin/{containerId}/restore",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 98,
+        "p99": 98,
+        "min": 91,
+        "p50": 92,
+        "max": 98
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/search/containers",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 103,
+        "p99": 103,
+        "min": 91,
+        "p50": 91,
+        "max": 103
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/spe/search/items",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/security/alerts",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 105,
+        "p99": 105,
+        "min": 91,
+        "p50": 91,
+        "max": 105
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/spe/security/score",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/upload-session/chunk",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 102,
+        "p99": 102,
+        "min": 91,
+        "p50": 92,
+        "max": 102
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/containers/{containerId}/documents",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/documents",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/documents/{id}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents/{id}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/documents/{id}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/documents/{id}/download",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 104,
+        "p99": 104,
+        "min": 91,
+        "p50": 92,
+        "max": 104
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/admin/dlq",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 94,
+        "max": 99
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emails/admin/dlq/redrive",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/admin/dlq/{sequenceNumber:long}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 102,
+        "p99": 102,
+        "min": 90,
+        "p50": 91,
+        "max": 102
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emails/webhook-trigger",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 93,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/{emailId:guid}/association-preview",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 106,
+        "p99": 106,
+        "min": 91,
+        "p50": 92,
+        "max": 106
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emails/{emailId:guid}/document-status",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 98,
+        "p99": 98,
+        "min": 90,
+        "p50": 92,
+        "max": 98
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emails/{emailId:guid}/save-as-document",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/events",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/events",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 103,
+        "p99": 103,
+        "min": 90,
+        "p50": 91,
+        "max": 103
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/events/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 91,
+        "max": 99
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/events/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 91,
+        "p50": 92,
+        "max": 101
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/events/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/events/{id:guid}/cancel",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 100,
+        "p99": 100,
+        "min": 90,
+        "p50": 92,
+        "max": 100
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/events/{id:guid}/complete",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/events/{id:guid}/logs",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/close-project",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/grant",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/invite",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/provision-project",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 103,
+        "p99": 103,
+        "min": 91,
+        "p50": 92,
+        "max": 103
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external-access/revoke",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 90,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/external/events/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/me",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 91,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/contacts",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/documents",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 90,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/events",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 91,
+        "max": 95
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/external/projects/{id:guid}/events",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 90,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/external/projects/{id:guid}/organizations",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 92,
+        "max": 99
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/field-mappings/profiles",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity}",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/field-mappings/push",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/field-mappings/validate",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-assignments",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 108,
+        "p99": 108,
+        "min": 91,
+        "p50": 91,
+        "max": 108
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/ai/summary",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 104,
+        "p99": 104,
+        "min": 91,
+        "p50": 91,
+        "max": 104
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/briefing",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 104,
+        "p99": 104,
+        "min": 90,
+        "p50": 92,
+        "max": 104
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/calculate-scores",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/events/{id:guid}/scores",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 102,
+        "p99": 102,
+        "min": 91,
+        "p50": 92,
+        "max": 102
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/files/extract-text",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/files/summarize",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/health",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/layouts",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 94,
+        "p99": 94,
+        "min": 91,
+        "p50": 92,
+        "max": 94
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/layouts",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 101,
+        "p99": 101,
+        "min": 91,
+        "p50": 93,
+        "max": 101
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/layouts/default",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspace/layouts/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 91,
+        "max": 99
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/layouts/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 100,
+        "p99": 100,
+        "min": 90,
+        "p50": 91,
+        "max": 100
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspace/layouts/{id:guid}",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/matters/ai-summary",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 91,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/matters/pre-fill",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 91,
+        "p50": 91,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/portfolio",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 92,
+        "p99": 92,
+        "min": 91,
+        "p50": 92,
+        "max": 92
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/projects/pre-fill",
+      "status_distribution": {
+        "404": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 92,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sections",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 97,
+        "p99": 97,
+        "min": 90,
+        "p50": 92,
+        "max": 97
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/templates",
+      "status_distribution": {
+        "401": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 90,
+        "p50": 91,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 90,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/healthz/dataverse",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 96,
+        "p99": 96,
+        "min": 91,
+        "p50": 92,
+        "max": 96
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/healthz/dataverse/crud",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 427,
+        "p99": 427,
+        "min": 183,
+        "p50": 186,
+        "max": 427
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/healthz/dataverse/doc/{id}",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 99,
+        "p99": 99,
+        "min": 91,
+        "p50": 93,
+        "max": 99
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/ping",
+      "status_distribution": {
+        "200": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 93,
+        "p99": 93,
+        "min": 91,
+        "p50": 91,
+        "max": 93
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/status",
+      "status_distribution": {
+        "429": 10
+      },
+      "sample_count": 10,
+      "latency_ms": {
+        "p95": 95,
+        "p99": 95,
+        "min": 91,
+        "p50": 92,
+        "max": 95
+      }
+    }
+  ],
+  "total_routes": 323,
+  "samples_per_route": 10
+}

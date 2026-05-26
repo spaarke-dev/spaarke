@@ -1,0 +1,56 @@
+<task id="078" project="sdap-bff-api-remediation-fix">
+  <metadata>
+    <title>`.claude/constraints/azure-deployment.md` Publish Hygiene subsection (FR-D2)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <assigned>AI agent (developer) — main session only</assigned>
+    <tags>bff-api, constraints, codification, outcome-d, phase-6</tags>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>.claude/ paths require main-session-only</parallel-reason>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Add "Publish Hygiene" subsection to `.claude/constraints/azure-deployment.md` codifying FR-A1 (linux-x64 only), FR-A2 (no sourcemaps), FR-C1/C2/C3 (CI gates), FR-C5 (deploy script hard-fail). Cite ADR-029.
+  </prompt>
+
+  <role>Constraint author + main session.</role>
+  <goal>File contains new "Publish Hygiene" section citing ADR-029.</goal>
+
+  <inputs><file purpose="constraint">.claude/constraints/azure-deployment.md</file><file purpose="adr">.claude/adr/ADR-029-bff-publish-hygiene.md</file></inputs>
+  <constraints>
+    <constraint source="spec.md FR-D2">Subsection codifies FR-A1, FR-A2, FR-C1/C2/C3, FR-C5</constraint>
+    <constraint source="root CLAUDE.md §3">Main-session-only for .claude/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/sdap-bff-api-remediation-fix/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>Codifies publish hygiene as a binding constraint loadable by tag-mapped tasks touching the BFF.</background>
+    <dependencies><dependency task="076" status="not-started">ADR-029 concise exists</dependency></dependencies>
+  </context>
+
+  <steps>
+    <step order="1">Read existing azure-deployment.md to identify the right insertion point</step>
+    <step order="2">Add "Publish Hygiene" subsection with: linux-x64 only, no sourcemaps, vuln scan in CI, hard-fail size guard with [allow-size-growth] escape</step>
+    <step order="3">Cite ADR-029 inline</step>
+    <step order="4">Commit; update TASK-INDEX.md</step>
+  </steps>
+
+  <tools><tool name="git">commit</tool></tools>
+
+  <outputs><output type="docs">.claude/constraints/azure-deployment.md (Publish Hygiene section)</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Publish Hygiene" section exists</criterion>
+    <criterion testable="true">Codifies FR-A1, FR-A2, FR-C1/C2/C3, FR-C5</criterion>
+    <criterion testable="true">Cites ADR-029</criterion>
+  </acceptance-criteria>
+</task>

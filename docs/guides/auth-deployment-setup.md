@@ -47,9 +47,9 @@ The following must already exist before starting this checklist. See [`ENVIRONME
 | Azure subscription with Contributor access | — | For App Service + Key Vault management |
 | Azure AD tenant GUID | `{tenant-guid}` | The customer's home tenant |
 | BFF Azure AD app registration | App ID `{bff-app-id}` | One client secret in Key Vault (still required for OBO; MI replaces the rest) |
-| App Service (BFF API) | `https://spe-api-{env}.azurewebsites.net` | **Must have a system-assigned managed identity enabled** |
-| App Service managed identity (MI) | Service principal `{mi-sp-object-id}` | Auto-created when MI is enabled — record its Object ID |
-| Key Vault | `{kv-name}.vault.azure.net` | App Service MI must have **Key Vault Secrets User** role at the vault scope |
+| App Service (BFF API) | `https://spaarke-bff-{env}.azurewebsites.net` (Linux .NET 8) | **Must have a user-assigned managed identity (UAMI) attached** (e.g., `mi-bff-api-{env}`); see canonical Bicep at `infrastructure/bicep/modules/app-service.bicep` |
+| App Service managed identity (UAMI) | `clientId: {uami-client-id}`, `principalId: {uami-principal-id}` | Set `Graph__ManagedIdentity__ClientId` AND `ManagedIdentity__ClientId` App Settings to the UAMI's clientId; `DefaultAzureCredential` uses these to target the UAMI. The UAMI's principalId is what gets registered in Dataverse Application User (§6) and granted Graph app roles (§5) and Exchange ApplicationAccessPolicy (§7). |
+| Key Vault | `{kv-name}.vault.azure.net` | UAMI principal must have **Key Vault Secrets User** role at the vault scope (RBAC mode) |
 | Dataverse environment | `https://{dataverse-org}.crm.dynamics.com` | The customer's Dataverse org |
 | Dataverse solution import complete | `SpaarkeCore` + `SpaarkeFeatures` | Provides the `sprk_*` environment variable definitions |
 | Tooling | Azure CLI ≥ 2.55, PAC CLI ≥ 1.46, PowerShell 7 | For all CLI commands below |
@@ -60,8 +60,13 @@ The following must already exist before starting this checklist. See [`ENVIRONME
 # Tenant GUID
 az account show --query tenantId -o tsv
 
-# BFF managed identity service principal object ID
-az webapp identity show --name spe-api-{env} --resource-group {rg} --query principalId -o tsv
+# UAMI clientId + principalId (the UAMI is a separate Azure resource; create it before attaching to the App Service)
+az identity show --name mi-bff-api-{env} --resource-group {uami-rg} \
+  --query "{clientId:clientId, principalId:principalId}" -o json
+
+# Verify UAMI is attached to the App Service
+az webapp identity show --name spaarke-bff-{env} --resource-group {rg} \
+  --query "{type:type, uami:userAssignedIdentities}" -o json
 
 # Microsoft Graph service principal object ID (constant per tenant — needed for permissions in §5)
 az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv
@@ -88,9 +93,15 @@ Or set via PAC CLI / Web API (script-friendly).
 
 ---
 
-## 3. App Service configuration (server side — 8 settings)
+## 3. App Service configuration (server side — auth settings + feature-module config)
 
 Set on the BFF App Service via *Configuration → Application settings* in the portal, or via the CLI block below. **Restart the App Service once** after all changes are applied (single restart cycle keeps downtime to one window).
+
+> ⚠️ **The 8 auth settings below are NECESSARY BUT NOT SUFFICIENT for the BFF to start.** Phase 5 of `sdap-bff-api-remediation-fix` (2026-05-25) discovered ~25 additional feature-module settings the BFF requires at startup (or validates via `[Required]` data annotations). Missing any of them produces `OptionsValidationException` at startup → 503 on `/healthz`.
+>
+> **For the full required-settings inventory (including MI ClientId variants, Cosmos persistence, AgentService placeholders, Communication, EmailProcessing, and feature-flag=false settings for unused modules), see [§3.5](#35-complete-app-settings-checklist-discovered-via-phase-5-demo-prep-2026-05-25) below.**
+
+### 3.1 Core auth settings (minimum 8 — necessary but not sufficient)
 
 | App Setting | Required value | Notes |
 |---|---|---|
@@ -104,6 +115,140 @@ Set on the BFF App Service via *Configuration → Application settings* in the p
 | `AzureAd__ClientSecret` | Key Vault reference: `@Microsoft.KeyVault(SecretUri=https://{kv-name}.vault.azure.net/secrets/BFF-API-ClientSecret/)` | Still required for OBO (OAuth spec mandates middle-tier confidential credential). Other server flows (Graph app-only, Dataverse, Cosmos, AI) now use MI and don't read this. |
 
 **Plus the standard template tokens** (substituted by the deployment script from `appsettings.template.json`): `Dataverse__ServiceUrl`, `ConnectionStrings__ServiceBus`, `ConnectionStrings__Redis`, `ApplicationInsights__ConnectionString`, `AzureOpenAI__Endpoint`, and other infrastructure connection settings. See [`appsettings.template.json`](../../src/server/api/Sprk.Bff.Api/appsettings.template.json) — every `#{TOKEN}#` placeholder must be substituted at deploy time.
+
+### 3.5 Complete App Settings checklist (discovered via Phase 5 demo prep, 2026-05-25)
+
+The Phase 5 deploy to `spaarke-bff-demo` surfaced ~25 settings beyond the §3.1 auth core that are required for the BFF to start cleanly. Each missing setting produced a distinct `OptionsValidationException` requiring a separate startup-retry cycle. The full inventory below is the authoritative pre-deploy checklist for any new env.
+
+> Evidence base: [`projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md`](../../projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md) Phase 5 section. Per-env values pulled from `spaarke-bff-dev` settings.
+
+#### MI identity disambiguation (5 settings)
+
+When `Graph__ManagedIdentity__Enabled=true`, the BFF code looks up the UAMI's clientId through **multiple keys** to support different `DefaultAzureCredential` paths + custom options validators. **Set all 5 to the same UAMI clientId.**
+
+**Why 5 keys**: The BFF binds multiple independent option classes (`GraphOptions`, `ManagedIdentityOptions`) plus picks up DefaultAzureCredential's env-var conventions (`AZURE_CLIENT_ID`) plus a custom `UAMI_CLIENT_ID` used in script context. All must reference the same UAMI clientId to ensure consistent identity across all auth flows. Missing any one produces `OptionsValidationException` for that option class at startup.
+
+```bash
+UAMI_CLIENT_ID={uami-client-id}   # e.g. for demo: b0ce4ca4-5360-4605-a0ef-d918140e77da
+
+az webapp config appsettings set --resource-group $RG --name $APP --settings \
+  "Graph__ManagedIdentity__Enabled=true" \
+  "Graph__ManagedIdentity__ClientId=$UAMI_CLIENT_ID" \
+  "ManagedIdentity__ClientId=$UAMI_CLIENT_ID" \
+  "AZURE_CLIENT_ID=$UAMI_CLIENT_ID" \
+  "UAMI_CLIENT_ID=$UAMI_CLIENT_ID"
+```
+
+Failure mode if missing: `OptionsValidationException: 'Graph:ManagedIdentity:ClientId' is required when ManagedIdentity is enabled` at startup.
+
+#### Cosmos DB persistence (2 settings + infrastructure)
+
+The BFF requires Cosmos DB for AI session state, audit logs, prompt library, memory, and feedback (per `Services/Ai/Persistence/`). The Cosmos account must exist with a `spaarke-ai` database and 5 containers (`sessions`, `prompts`, `audit`, `memory`, `feedback`), all with `/tenantId` partition key. The UAMI must be granted Cosmos DB Built-in Data Contributor RBAC. **The DocumentDB resource provider must be registered on the subscription before provisioning.**
+
+See "Cosmos provisioning sequence" snippet at the end of this section.
+
+```bash
+az webapp config appsettings set --resource-group $RG --name $APP --settings \
+  "CosmosPersistence__Endpoint=https://{cosmos-account}.documents.azure.com:443/" \
+  "CosmosPersistence__DatabaseName=spaarke-ai"
+```
+
+Failure mode if missing: `InvalidOperationException: CosmosPersistence:Endpoint is not configured` at startup, `AiPersistenceModule.cs:56`.
+
+#### AgentService configuration (4 settings; placeholders OK if not actively using Agent Framework)
+
+The BFF validates `AgentServiceOptions` at startup even if Agent Framework isn't actively used. Use placeholder values for envs that don't yet have a real Azure AI Project + agent.
+
+```bash
+az webapp config appsettings set --resource-group $RG --name $APP --settings \
+  "AgentService__Endpoint=https://placeholder.services.ai.azure.com" \
+  "AgentService__AgentId=placeholder-agent-id" \
+  "AgentService__ThreadCacheExpiryMinutes=60" \
+  "AgentService__MaxConcurrency=2" \
+  "AgentServiceOptions__Enabled=true" \
+  "AgentServiceOptions__Endpoint=https://placeholder.services.ai.azure.com" \
+  "AgentServiceOptions__AgentId=placeholder-agent-id" \
+  "Analysis__AgentService__Enabled=false" \
+  "Analysis__AgentService__Endpoint=https://placeholder.services.ai.azure.com" \
+  "Analysis__AgentService__ThreadCacheExpiryMinutes=60" \
+  "Analysis__AgentService__AgentId=placeholder-agent-id" \
+  "Analysis__AgentService__MaxConcurrency=2"
+```
+
+Failure mode if missing: `OptionsValidationException: DataAnnotation validation failed for 'AgentServiceOptions' members: 'Endpoint' with the error: 'The Endpoint field is required.'` at startup.
+
+#### Optional feature flags (4 settings; `=false` for envs not using each feature)
+
+Several optional features need explicit `=false` even when unused — otherwise their options-binding validation fires.
+
+```bash
+az webapp config appsettings set --resource-group $RG --name $APP --settings \
+  "BingGrounding__Enabled=false" \
+  "Analysis__BingGrounding__Enabled=false" \
+  "CodeInterpreter__Enabled=false" \
+  "Analysis__CodeInterpreter__Enabled=false" \
+  "RecordSync__Enabled=false"
+```
+
+#### Email subsystem (Communication + EmailProcessing modules)
+
+Even when email isn't being actively exercised, the Communication module's options validator requires `WebhookSigningKey` (data-annotation `[Required]`). For envs that don't yet have an Exchange ApplicationAccessPolicy created (§7), set `EmailProcessing__Enabled=false` to skip the polling service initialization but still pass options validation. **All 4 webhook-related EmailProcessing settings can be `=false` initially, then flipped on once §7 is in place.**
+
+For full email setup (enabling actual sending + receiving), see the Phase 5 EXECUTION-LOG operator runbook for the canonical sequence (HMAC key generation → KV storage → App Settings → §7 EXO PowerShell → Dataverse Service Endpoint).
+
+```bash
+# Minimum to pass startup validation (email actually disabled)
+az webapp config appsettings set --resource-group $RG --name $APP --settings \
+  "Communication__WebhookSigningKey=@Microsoft.KeyVault(SecretUri=https://$KV.vault.azure.net/secrets/communication-webhook-signing-key/)" \
+  "Communication__WebhookClientState={random-guid-or-token}" \
+  "Communication__WebhookNotificationUrl=https://$APP.azurewebsites.net/api/communications/incoming-webhook" \
+  "Communication__ApprovedSenders__0__Email={env-default-mailbox}" \
+  "Communication__ApprovedSenders__0__DisplayName={display-name}" \
+  "Communication__ApprovedSenders__0__IsDefault=true" \
+  "Communication__DefaultMailbox={env-default-mailbox}" \
+  "Communication__ArchiveContainerId=@Microsoft.KeyVault(SecretUri=https://$KV.vault.azure.net/secrets/SPE-DefaultContainerId/)" \
+  "EmailProcessing__Enabled=false" \
+  "EmailProcessing__EnableWebhook=false" \
+  "EmailProcessing__EnablePolling=false" \
+  "EmailProcessing__WebhookSigningKey=@Microsoft.KeyVault(SecretUri=https://$KV.vault.azure.net/secrets/Email-WebhookSigningKey/)"
+```
+
+#### Cosmos provisioning sequence (one-time per env)
+
+> **One-time per subscription**: if this is the first Cosmos deployment in the subscription, run `az provider register --namespace Microsoft.DocumentDB --wait` first and wait for `Registered` state before proceeding (~30s-5min). Subsequent envs in the same subscription skip this. Phase 5 demo deploy hit this — subscription `2ff9ee48-...` had never used Cosmos before.
+
+```bash
+# 1. Register DocumentDB provider on the subscription (one-time)
+az provider register --namespace Microsoft.DocumentDB --wait
+
+# 2. Create Cosmos account (Serverless recommended for non-prod)
+az cosmosdb create --name {cosmos-account} --resource-group $RG \
+  --locations regionName={region} failoverPriority=0 isZoneRedundant=False \
+  --capabilities EnableServerless --default-consistency-level Session
+
+# 3. Create database
+az cosmosdb sql database create --account-name {cosmos-account} \
+  --resource-group $RG --name spaarke-ai
+
+# 4. Create 5 containers (/tenantId partition key)
+#    NOTE: on Git Bash on Windows, use MSYS_NO_PATHCONV=1 to avoid path mangling
+for CONTAINER in sessions prompts audit memory feedback; do
+  MSYS_NO_PATHCONV=1 az cosmosdb sql container create \
+    --account-name {cosmos-account} --database-name spaarke-ai \
+    --resource-group $RG --name $CONTAINER \
+    --partition-key-path "/tenantId"
+done
+
+# 5. Grant UAMI Cosmos Data Contributor (data-plane RBAC)
+COSMOS_ID=$(MSYS_NO_PATHCONV=1 az cosmosdb show --name {cosmos-account} \
+  --resource-group $RG --query id -o tsv)
+MSYS_NO_PATHCONV=1 az cosmosdb sql role assignment create \
+  --account-name {cosmos-account} --resource-group $RG \
+  --scope "$COSMOS_ID" --principal-id {uami-principal-id} \
+  --role-definition-id "00000000-0000-0000-0000-000000000002"
+```
+
+> **Git Bash / MSYS path translation**: when running `az` from Git Bash on Windows, paths starting with `/subscriptions/...` or `/tenantId` get mangled to `C:/Program Files/Git/...`. **Always prefix with `MSYS_NO_PATHCONV=1`** for `az` commands passing Azure resource IDs or POSIX-style paths. PowerShell + WSL don't have this issue.
 
 ### CLI block (single restart)
 
@@ -253,6 +398,16 @@ The MI's service principal must be registered as a **Dataverse Application User*
 
 **If the BFF needs to call multiple Dataverse environments** (e.g., a `spaarke-demo` sister env), repeat this step in each environment. Skipping environments → BFF calls return `401 Unauthorized` against the unregistered env.
 
+### Troubleshooting: silent 403 cascade
+
+**Symptom**: BFF client features fail with HTTP 500 errors referencing AI playbooks, document operations, or related Dataverse queries. Browser console shows `Failed to resolve playbook: HTTP 500` or similar.
+
+**Root cause**: BFF Dataverse Web API calls return 403 Forbidden because the MI is NOT registered as a Dataverse Application User on the target env. Dataverse responds with `0x80072560 - "The user is not a member of the organization."` BFF wraps as 500 to the client.
+
+**Verify**: `az rest --method GET --url "https://{env}.crm.dynamics.com/api/data/v9.2/systemusers?$filter=applicationid eq {MI-clientId}&$select=systemuserid,fullname" --resource https://{env}.crm.dynamics.com`. If empty result, the App User wasn't created.
+
+**Fix**: complete §6 steps for the failing env. Phase 5 demo cutover hit this — Application User was missed in initial MI prep; symptom was Document Upload wizard 500 errors. Fix took ~5 min once root cause identified.
+
 ---
 
 ## 7. Exchange Online — ApplicationAccessPolicy for mailbox access
@@ -298,8 +453,12 @@ The recommended pattern: maintain a **mail-enabled security group** (suggested n
 # One-time install
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
 
-# Connect as Exchange admin (device code flow recommended for MFA accounts)
-Connect-ExchangeOnline -UserPrincipalName admin@{customer-tenant} -ShowProgress $true
+# Connect (sign in with any Exchange Administrator account in the browser)
+Connect-ExchangeOnline -ShowProgress $true
+# WARNING: do NOT pass -UserPrincipalName unless you'll sign in with that exact
+# account in the browser. Mismatch fails with "Admin account chosen for
+# authentication is different from the one provided as parameter". Omitting it
+# accepts whatever account you sign in with — simpler and avoids that error.
 ```
 
 ### Step 7b — Create the scope group (if it doesn't exist)

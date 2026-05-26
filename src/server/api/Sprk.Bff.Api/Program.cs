@@ -15,6 +15,15 @@ builder.Services.AddApplicationInsightsTelemetry();
 // Core module (AuthorizationService, RequestCache)
 builder.Services.AddSpaarkeCore();
 
+// Managed identity credential — singleton, pinned to the UAMI ClientId from
+// Graph:ManagedIdentity:ClientId (or ManagedIdentity:ClientId) when configured. All services that
+// need to authenticate outbound to Dataverse / Cosmos / OpenAI / AI Foundry inject this via
+// constructor instead of constructing their own DefaultAzureCredential. See
+// ManagedIdentityCredentialFactory + ADR-028 + the 2026-05-24 multi-identity-ambiguity fix.
+builder.Services.AddSingleton<Azure.Core.TokenCredential>(sp =>
+    Sprk.Bff.Api.Infrastructure.Auth.ManagedIdentityCredentialFactory.Create(
+        sp.GetRequiredService<IConfiguration>()));
+
 // Data Access Layer - Document storage resolution
 builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.IDocumentStorageResolver, Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver>();
 
